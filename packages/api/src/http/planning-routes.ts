@@ -1,4 +1,4 @@
-import { LimitOverridesSchema, SPEC_TYPES } from "@afk/shared";
+import { LimitOverridesSchema, SPEC_STATES, SPEC_TYPES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import {
@@ -139,7 +139,7 @@ const confirmRoute = createRoute({
     200: reply(
       "Confirmed; the spec is running and the tickets that can start are queued",
       z.object({
-        state: z.string(),
+        state: z.enum(SPEC_STATES),
         integrationBranches: z.array(
           z.object({ repoId: Id, branch: z.string() }),
         ),

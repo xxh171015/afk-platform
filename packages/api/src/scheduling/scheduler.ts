@@ -10,7 +10,7 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
-import { ticketJobKey } from "../jobs/idempotency.ts";
+import { ticketJobKey, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import { enqueueJob } from "../jobs/queue.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
@@ -38,6 +38,11 @@ export type ConfirmResult =
     }
   | { status: "no-spec" }
   | { status: "not-confirmable"; message: string };
+
+// Scheduling passes and ticket completions of one spec take this lock, so they never interleave.
+async function lockSpec(client: pg.PoolClient, specId: number): Promise<void> {
+  await client.query("SELECT 1 FROM specs WHERE id = $1 FOR UPDATE", [specId]);
+}
 
 async function inTransaction<T>(
   pool: pg.Pool,
@@ -112,9 +117,7 @@ export async function scheduleSpec(
   specId: number,
 ): Promise<ScheduleResult> {
   return inTransaction(pool, async (client) => {
-    await client.query("SELECT 1 FROM specs WHERE id = $1 FOR UPDATE", [
-      specId,
-    ]);
+    await lockSpec(client, specId);
     return schedulePass(client, specId);
   });
 }
@@ -139,15 +142,16 @@ async function schedulePass(
   const row = spec.rows[0];
   if (row?.state !== "running") return none;
 
+  // Concurrency is counted across the project's specs, so passes of different specs must not interleave
+  // either. Always spec first, then project: the same order everywhere, so no deadlock.
   const project = await client.query(
-    "SELECT limits, max_concurrency FROM projects WHERE id = $1",
+    "SELECT limits, max_concurrency FROM projects WHERE id = $1 FOR UPDATE",
     [row.project_id],
   );
+  const { limits: stored, max_concurrency: maxConcurrency } = project.rows[0];
   const limits = resolveLimits({
-    ...(project.rows[0].max_concurrency
-      ? { projectConcurrency: project.rows[0].max_concurrency }
-      : {}),
-    ...project.rows[0].limits,
+    ...(maxConcurrency ? { projectConcurrency: maxConcurrency } : {}),
+    ...stored,
   });
 
   if ((await agentSecondsUsed(client, specId)) >= limits.specAgentSeconds) {
@@ -176,14 +180,21 @@ async function schedulePass(
   );
   const incoming = new Map<number, IncomingEdge[]>();
   for (const edge of edges.rows) {
-    const blocker = byId.get(edge.from_ticket_id) as TicketRow;
+    const blocker = byId.get(edge.from_ticket_id);
     const list = incoming.get(edge.to_ticket_id) ?? [];
-    list.push({
-      kind: edge.kind,
-      scope: "same-spec",
-      blockerState: blocker.state,
-      ...(blocker.contract_sha ? { contractSha: blocker.contract_sha } : {}),
-    });
+    // Imports reject edges to other specs in M1; if one ever exists, it blocks rather than crashes the pass.
+    list.push(
+      blocker
+        ? {
+            kind: edge.kind,
+            scope: "same-spec",
+            blockerState: blocker.state,
+            ...(blocker.contract_sha
+              ? { contractSha: blocker.contract_sha }
+              : {}),
+          }
+        : { kind: edge.kind, scope: "cross-spec", satisfied: false },
+    );
     incoming.set(edge.to_ticket_id, list);
   }
 
@@ -253,12 +264,11 @@ async function nextSequence(
   ticket: TicketRow,
   stage: string,
 ): Promise<number> {
-  const prefix = ticketJobKey({
+  const prefix = ticketJobKeyPrefix({
     ticketId: ticket.id,
     contentVersion: ticket.content_version,
     stage,
-    sequence: 1,
-  }).replace(/1$/, "");
+  });
   const { rows } = await client.query<{ n: string }>(
     "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
     [`${prefix}%`],
@@ -313,9 +323,7 @@ export async function completeTicket(
     }>("SELECT spec_id, state, type FROM tickets WHERE id = $1", [ticketId]);
     const ticket = found.rows[0];
     if (!ticket) return { status: "no-ticket" };
-    await client.query("SELECT 1 FROM specs WHERE id = $1 FOR UPDATE", [
-      ticket.spec_id,
-    ]);
+    await lockSpec(client, ticket.spec_id);
     const current = await client.query<{ state: TicketState }>(
       "SELECT state FROM tickets WHERE id = $1",
       [ticketId],

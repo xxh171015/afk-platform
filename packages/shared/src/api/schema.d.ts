@@ -321,7 +321,18 @@ export interface paths {
           };
           content: {
             "application/json": {
-              state: string;
+              /** @enum {string} */
+              state:
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled";
               integrationBranches: {
                 repoId: number;
                 branch: string;

@@ -26,5 +26,12 @@ export function ticketJobKey(parts: TicketJobKeyParts): string {
       `stage must be non-empty and contain no ":", got ${JSON.stringify(stage)}`,
     );
   }
-  return `${formatDisplayId("ticket", parts.ticketId)}:${contentVersion}:${stage}:${sequence}`;
+  return `${ticketJobKeyPrefix(parts)}${sequence}`;
+}
+
+// Everything of the key before the sequence: all attempts of one stage of one ticket version share it.
+export function ticketJobKeyPrefix(
+  parts: Omit<TicketJobKeyParts, "sequence">,
+): string {
+  return `${formatDisplayId("ticket", parts.ticketId)}:${parts.contentVersion}:${parts.stage}:`;
 }

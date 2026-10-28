@@ -333,6 +333,47 @@ describe("concurrency limits", () => {
     expect((await post(`/specs/${specId}/confirm`)).body.enqueued).toEqual([]);
   });
 
+  it("keeps two specs of one project within the project limit when they schedule at once", async () => {
+    const { projectId } = await draftSpec(independent(2));
+    const other = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "other",
+      title: "Other",
+    });
+    await post(`/specs/${other.body.id}/tickets/import`, {
+      tickets: independent(2),
+    });
+    await db.pool.query("UPDATE specs SET state = 'running'");
+    await Promise.all([
+      scheduleSpec(db.pool, 1),
+      scheduleSpec(db.pool, other.body.id),
+    ]);
+    const queued = await db.pool.query(
+      "SELECT count(*) FROM tickets WHERE state = 'queued'",
+    );
+    expect(Number(queued.rows[0].count)).toBe(2);
+  });
+
+  it("does not stall on an edge from another spec; the ticket just stays blocked", async () => {
+    const { projectId, specId } = await draftSpec([ticket("a")]);
+    const other = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "other",
+      title: "Other",
+    });
+    await post(`/specs/${other.body.id}/tickets/import`, {
+      tickets: [ticket("x")],
+    });
+    await db.pool.query(
+      "INSERT INTO edges (from_ticket_id, to_ticket_id, kind) VALUES (2, 1, 'blocks')",
+    );
+    const confirmed = await post(`/specs/${specId}/confirm`);
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.enqueued).toEqual([]);
+  });
+
   it("honours the project's own limits", async () => {
     const { specId } = await draftSpec(independent(3), {
       repoConcurrency: 1,

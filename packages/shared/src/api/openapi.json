@@ -492,7 +492,19 @@
                   "type": "object",
                   "properties": {
                     "state": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "planned",
+                        "running",
+                        "finalizing",
+                        "awaiting-review",
+                        "partially-merged",
+                        "reworking",
+                        "merged",
+                        "paused",
+                        "cancelled"
+                      ]
                     },
                     "integrationBranches": {
                       "type": "array",

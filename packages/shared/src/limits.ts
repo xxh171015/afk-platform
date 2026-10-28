@@ -15,15 +15,12 @@ export type Limits = { -readonly [K in keyof typeof DEFAULT_LIMITS]: number };
 
 const Positive = z.number().int().min(1).max(2_147_483_647);
 
-export const LimitOverridesSchema = z.strictObject({
-  workerSlots: Positive.optional(),
-  projectConcurrency: Positive.optional(),
-  repoConcurrency: Positive.optional(),
-  runIdleSeconds: Positive.optional(),
-  runWallclockSeconds: Positive.optional(),
-  ticketWallclockSeconds: Positive.optional(),
-  specAgentSeconds: Positive.optional(),
-});
+// Built from the defaults, so a new limit is added in one place.
+export const LimitOverridesSchema = z.strictObject(
+  Object.fromEntries(
+    Object.keys(DEFAULT_LIMITS).map((name) => [name, Positive.optional()]),
+  ) as { [K in keyof Limits]: z.ZodOptional<typeof Positive> },
+);
 export type LimitOverrides = z.infer<typeof LimitOverridesSchema>;
 
 // Stored overrides that no longer parse (a limit renamed later) fall back to the defaults rather than stopping the scheduler.
