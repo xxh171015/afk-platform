@@ -10,7 +10,8 @@
     "test": "vitest run",
     "lint": "biome check .",
     "check": "pnpm typecheck && pnpm test && pnpm lint",
-    "db:temp": "scripts/pg-temp.sh"
+    "db:temp": "scripts/pg-temp.sh",
+    "db:migrate": "pnpm --filter @afk/api db:migrate"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

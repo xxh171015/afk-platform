@@ -30,6 +30,17 @@ scripts/pg-temp.sh stop
 
 Override the location and port with `PGTEMP_DIR` and `PGTEMP_PORT`.
 
+## Database migrations
+
+Tables are defined in `packages/api/src/db/schema.ts` (Drizzle); the generated SQL lives in `packages/api/drizzle/` and is committed.
+
+```sh
+pnpm --filter @afk/api db:generate   # after editing schema.ts: writes a new migration file
+pnpm db:migrate                      # applies pending migrations to $DATABASE_URL (safe to re-run)
+```
+
+The API never migrates on its own: `assertMigrated()` makes it refuse to start while migrations are pending.
+
 ## Run the checks
 
 ```sh
