@@ -1,11 +1,13 @@
 version: 1
-setup: pnpm install --frozen-lockfile && scripts/pg-temp.sh start
+# The worker runs each command as `timeout <seconds> <run>`, so anything that is not a
+# single executable (`&&`, `eval`) must be wrapped in `bash -c`.
+setup: bash -c 'pnpm install --frozen-lockfile && scripts/pg-temp.sh start'
 commands:
   - name: typecheck
     run: pnpm typecheck
     timeoutSeconds: 300
   - name: test
-    run: eval "$(scripts/pg-temp.sh start)" && pnpm test
+    run: bash -c 'eval "$(scripts/pg-temp.sh start)" && pnpm test'
     timeoutSeconds: 600
     junit: reports/junit.xml
   - name: lint

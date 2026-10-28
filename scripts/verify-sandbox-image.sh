@@ -218,7 +218,7 @@ command -v docker >/dev/null 2>&1 || { warn "docker not found: install Docker De
 docker info >/dev/null 2>&1 || { warn "Docker is installed but not running: start Docker Desktop, then re-run"; exit 1; }
 [[ -f "$DOCKERFILE" ]] || { warn "missing $DOCKERFILE: are you on the branch that has it?"; exit 1; }
 AGENT_UID="$(id -u)"; AGENT_GID="$(id -g)"
-say "Commit under test: $(git -C "$REPO_ROOT" rev-parse --short HEAD) ($(git -C "$REPO_ROOT" branch --show-current))"
+say "Commit under test: $(git -C "$REPO_ROOT" rev-parse --short HEAD) ($(git -C "$REPO_ROOT" branch --show-current || true))"
 say "Image tag: $IMAGE   host uid:gid = $AGENT_UID:$AGENT_GID   arch: $(uname -m)"
 if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
   warn "Uncommitted changes are NOT tested: the gate run uses a clean clone of HEAD."
@@ -247,13 +247,18 @@ pause
 # ── 3 ──────────────────────────────────────────────────────────────────────
 stage "Check what is inside the image"
 say "Confirms the pinned Cursor CLI and the PostgreSQL server are really there."
-CURSOR_CLI_VERSION="$(docker run --rm --entrypoint agent "$IMAGE" --version | tr -d '\r' | tail -n1)"
-say "Cursor CLI: $CURSOR_CLI_VERSION"
-PG_VERSION="$(docker run --rm --entrypoint bash "$IMAGE" -c 'ls -d /usr/lib/postgresql/*/bin | head -1 && "$(ls -d /usr/lib/postgresql/*/bin | head -1)/postgres" --version')"
-say "PostgreSQL: $(printf '%s' "$PG_VERSION" | tail -n1)"
-docker run --rm --entrypoint bash "$IMAGE" -c 'pnpm --version && node --version' | sed 's/^/  /'
+PINNED_CURSOR="$(sed -n 's/^ARG CURSOR_CLI_VERSION=//p' "$DOCKERFILE")"
+CURSOR_CLI_VERSION="$(docker run --rm --entrypoint agent "$IMAGE" --version | tr -d '\r' | tail -n1)" \
+  || { warn "agent --version failed inside the image"; exit 1; }
+say "Cursor CLI: $CURSOR_CLI_VERSION   (pinned in Dockerfile: $PINNED_CURSOR)"
+[[ "$CURSOR_CLI_VERSION" == *"$PINNED_CURSOR"* ]] || warn "Reported version does not contain the pinned one: check by eye."
+POSTGRES_VERSION="$(docker run --rm --entrypoint bash "$IMAGE" -c 'ls /usr/lib/postgresql/*/bin/postgres | head -1 | xargs -I{} {} --version')" \
+  || { warn "no PostgreSQL server binary under /usr/lib/postgresql"; exit 1; }
+say "PostgreSQL: $POSTGRES_VERSION"
+note "compose.yaml runs postgres:16 for local dev; the image installs Debian's version. Note any mismatch in the issue."
+docker run --rm --entrypoint bash "$IMAGE" -c 'echo "pnpm $(pnpm --version), node $(node --version)"' | sed 's/^/  /'
 write_env CURSOR_CLI_VERSION "$CURSOR_CLI_VERSION"
-write_env POSTGRES_VERSION "$(printf '%s' "$PG_VERSION" | tail -n1)"
+write_env POSTGRES_VERSION "$POSTGRES_VERSION"
 pause
 
 # ── 4 ──────────────────────────────────────────────────────────────────────
@@ -261,15 +266,18 @@ stage "Run the gate in a fresh container"
 say "Clones HEAD into a temp dir, mounts it, and runs setup and every command from"
 say ".sandcastle/gates.yaml, first failure stops. Needs network for pnpm install."
 WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 git clone --quiet "$REPO_ROOT" "$WORK/repo"
-note "Clone: $WORK/repo"
+note "Clone: $WORK/repo (removed when the wizard exits)"
+# Same shape as the M0 prototype's execInFreshSandbox: each step is `timeout <seconds> <run>`.
 # gates.yaml is read inside the container so this stays in sync with the real file.
 GATE_SCRIPT='set -euo pipefail
 cd /home/agent/workspace
-setup="$(sed -n "s/^setup: //p" .sandcastle/gates.yaml)"
-echo "== setup: $setup"; bash -c "$setup"
-sed -n "s/^    run: //p" .sandcastle/gates.yaml | while IFS= read -r cmd; do
-  echo "== gate: $cmd"; bash -c "$cmd"
+awk '"'"'/^setup: /{sub(/^setup: /,""); print "600\t" $0}
+     /^    run: /{sub(/^    run: /,""); r=$0}
+     /^    timeoutSeconds: /{sub(/^    timeoutSeconds: /,""); print $0 "\t" r}'"'"' .sandcastle/gates.yaml |
+while IFS=$'"'"'\t'"'"' read -r secs cmd; do
+  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"
 done'
 gate_start=$(date +%s)
 if docker run --rm -v "$WORK/repo:/home/agent/workspace" --entrypoint bash "$IMAGE" -c "$GATE_SCRIPT"; then
@@ -290,11 +298,11 @@ if [[ ! -r "$JUNIT" ]]; then
   warn "No readable $JUNIT: the gate passed but JUnit did not reach the host."
   exit 1
 fi
-TESTS="$(grep -o 'tests="[0-9]*"' "$JUNIT" | head -n1 | tr -dc '0-9')"
+TESTS="$(grep -o 'tests="[0-9]*"' "$JUNIT" | head -n1 | tr -dc '0-9' || true)"
+[[ -n "$TESTS" ]] || { warn "JUnit has no tests= attribute: open $JUNIT and check it."; TESTS=unknown; }
 say "JUnit found: $JUNIT (tests=$TESTS)"
 write_env JUNIT_TESTS "$TESTS"
 write_env JUNIT_READABLE_ON_HOST yes
-rm -rf "$WORK"
 say "Paste the contents of $ENV_FILE into issue #20, then close it if you are happy."
 
 finish
