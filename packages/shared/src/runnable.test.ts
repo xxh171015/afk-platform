@@ -8,7 +8,7 @@ const roomToSpare = [
 describe("isRunnable: ticket state and same-spec edges", () => {
   it("a pending ticket with no incoming edges and room to spare can start", () => {
     expect(
-      isRunnable({ state: "pending", edges: [], capacity: roomToSpare }),
+      isRunnable({ state: "pending", edges: [], limits: roomToSpare }),
     ).toEqual({
       runnable: true,
     });
@@ -22,7 +22,7 @@ describe("isRunnable: ticket state and same-spec edges", () => {
     "blocked",
     "cancelled",
   ] as const)("a %s ticket cannot be started again", (state) => {
-    const result = isRunnable({ state, edges: [], capacity: roomToSpare });
+    const result = isRunnable({ state, edges: [], limits: roomToSpare });
     expect(result.runnable).toBe(false);
   });
 
@@ -31,7 +31,7 @@ describe("isRunnable: ticket state and same-spec edges", () => {
       { kind: "blocks", scope: "same-spec", blockerState: "done" },
     ] as const;
     expect(
-      isRunnable({ state: "pending", edges, capacity: roomToSpare }).runnable,
+      isRunnable({ state: "pending", edges, limits: roomToSpare }).runnable,
     ).toBe(true);
   });
 
@@ -49,7 +49,7 @@ describe("isRunnable: ticket state and same-spec edges", () => {
         { kind: "blocks", scope: "same-spec", blockerState },
       ] as const;
       expect(
-        isRunnable({ state: "pending", edges, capacity: roomToSpare }).runnable,
+        isRunnable({ state: "pending", edges, limits: roomToSpare }).runnable,
       ).toBe(false);
     },
   );
@@ -67,11 +67,11 @@ describe("isRunnable: ticket state and same-spec edges", () => {
       { kind: "contract", scope: "same-spec", blockerState: "done" },
     ] as const;
     expect(
-      isRunnable({ state: "pending", edges: withSha, capacity: roomToSpare })
+      isRunnable({ state: "pending", edges: withSha, limits: roomToSpare })
         .runnable,
     ).toBe(true);
     expect(
-      isRunnable({ state: "pending", edges: withoutSha, capacity: roomToSpare })
+      isRunnable({ state: "pending", edges: withoutSha, limits: roomToSpare })
         .runnable,
     ).toBe(false);
   });
@@ -82,12 +82,22 @@ describe("isRunnable: ticket state and same-spec edges", () => {
       { kind: "blocks", scope: "same-spec", blockerState: "running" },
     ] as const;
     expect(
-      isRunnable({ state: "pending", edges, capacity: roomToSpare }).runnable,
+      isRunnable({ state: "pending", edges, limits: roomToSpare }).runnable,
     ).toBe(false);
   });
 });
 
 describe("isRunnable: cross-spec edges", () => {
+  it.each(["blocks", "contract"] as const)(
+    "a cross-spec %s edge needs no contract SHA, only the caller's satisfied fact",
+    (kind) => {
+      const edges = [{ kind, scope: "cross-spec", satisfied: true }] as const;
+      expect(
+        isRunnable({ state: "pending", edges, limits: roomToSpare }).runnable,
+      ).toBe(true);
+    },
+  );
+
   it("is satisfied only when the caller says the blocker's PR is in main and in our integration branch", () => {
     const ready = [
       { kind: "blocks", scope: "cross-spec", satisfied: true },
@@ -96,11 +106,11 @@ describe("isRunnable: cross-spec edges", () => {
       { kind: "blocks", scope: "cross-spec", satisfied: false },
     ] as const;
     expect(
-      isRunnable({ state: "pending", edges: ready, capacity: roomToSpare })
+      isRunnable({ state: "pending", edges: ready, limits: roomToSpare })
         .runnable,
     ).toBe(true);
     expect(
-      isRunnable({ state: "pending", edges: notYet, capacity: roomToSpare })
+      isRunnable({ state: "pending", edges: notYet, limits: roomToSpare })
         .runnable,
     ).toBe(false);
   });
@@ -114,7 +124,7 @@ describe("isRunnable: concurrency and budget limits", () => {
         { scope, resource: "concurrency", used: 2, max: 3 },
       ] as const;
       expect(
-        isRunnable({ state: "pending", edges: [], capacity }).runnable,
+        isRunnable({ state: "pending", edges: [], limits: capacity }).runnable,
       ).toBe(true);
     },
   );
@@ -125,7 +135,9 @@ describe("isRunnable: concurrency and budget limits", () => {
       const capacity = [
         { scope, resource: "concurrency", used: 3, max: 3 },
       ] as const;
-      expect(isRunnable({ state: "pending", edges: [], capacity })).toEqual({
+      expect(
+        isRunnable({ state: "pending", edges: [], limits: capacity }),
+      ).toEqual({
         runnable: false,
         reasons: [{ type: "no-capacity", capacity: capacity[0] }],
       });
@@ -137,9 +149,9 @@ describe("isRunnable: concurrency and budget limits", () => {
       { scope: "project", resource: "concurrency", used: 0, max: 3 },
       { scope: "project", resource: "budget", used: 100, max: 100 },
     ] as const;
-    expect(isRunnable({ state: "pending", edges: [], capacity }).runnable).toBe(
-      false,
-    );
+    expect(
+      isRunnable({ state: "pending", edges: [], limits: capacity }).runnable,
+    ).toBe(false);
   });
 
   it("reports every reason, not just the first", () => {
@@ -149,7 +161,7 @@ describe("isRunnable: concurrency and budget limits", () => {
     const edges = [
       { kind: "blocks", scope: "same-spec", blockerState: "running" },
     ] as const;
-    const result = isRunnable({ state: "pending", edges, capacity });
+    const result = isRunnable({ state: "pending", edges, limits: capacity });
     expect(
       result.runnable === false && result.reasons.map((r) => r.type),
     ).toEqual(["edge-unsatisfied", "no-capacity"]);

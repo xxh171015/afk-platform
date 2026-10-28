@@ -5,7 +5,7 @@ export type IncomingEdge =
       kind: "blocks" | "contract";
       scope: "same-spec";
       blockerState: TicketState;
-      contractSha?: string | null;
+      contractSha?: string;
     }
   // The caller checks git: the blocker's PR is merged into main and our
   // integration branch already contains that commit (docs/design.md「依赖边什么时候算满足」).
@@ -30,13 +30,13 @@ export type Runnability =
 export interface RunnableInput {
   state: TicketState;
   edges: readonly IncomingEdge[];
-  capacity: readonly Capacity[];
+  limits: readonly Capacity[];
 }
 
 function edgeSatisfied(edge: IncomingEdge): boolean {
   if (edge.scope === "cross-spec") return edge.satisfied;
   if (edge.blockerState !== "done") return false;
-  return edge.kind === "blocks" || Boolean(edge.contractSha);
+  return edge.kind === "blocks" || edge.contractSha !== undefined;
 }
 
 export function isRunnable(input: RunnableInput): Runnability {
@@ -46,9 +46,9 @@ export function isRunnable(input: RunnableInput): Runnability {
   for (const edge of input.edges) {
     if (!edgeSatisfied(edge)) reasons.push({ type: "edge-unsatisfied", edge });
   }
-  for (const capacity of input.capacity) {
-    if (capacity.used >= capacity.max)
-      reasons.push({ type: "no-capacity", capacity });
+  for (const limit of input.limits) {
+    if (limit.used >= limit.max)
+      reasons.push({ type: "no-capacity", capacity: limit });
   }
   return reasons.length === 0
     ? { runnable: true }
