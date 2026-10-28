@@ -698,6 +698,7 @@ export interface paths {
                 defaultBranch: string;
               };
               integrationBranch: string | null;
+              protectedPaths: string[];
               allowedProtectedPaths: string[];
               contract: {
                 sha: string;

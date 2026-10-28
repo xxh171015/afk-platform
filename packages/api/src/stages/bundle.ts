@@ -31,6 +31,8 @@ export interface Bundle {
   };
   repo: { id: number; role: string; url: string; defaultBranch: string };
   integrationBranch: string | null;
+  // The project's protected path globs, and the subset of changes to them this ticket may make.
+  protectedPaths: string[];
   allowedProtectedPaths: string[];
   contract: { sha: string; path: string; repoId: number } | null;
 }
@@ -49,7 +51,7 @@ export async function buildBundle(
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
             s.integration_branches,
             r.id AS repo_id, r.role, r.url, r.default_branch,
-            p.contract_path
+            p.contract_path, p.protected_paths
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
@@ -106,6 +108,7 @@ export async function buildBundle(
       defaultBranch: row.default_branch,
     },
     integrationBranch,
+    protectedPaths: row.protected_paths,
     allowedProtectedPaths: row.allowed_protected_paths,
     contract:
       pointer && contractPath

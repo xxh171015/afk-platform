@@ -575,13 +575,16 @@ describe("the bundle", () => {
   }
 
   it("carries the ticket, spec, repo, integration branch and the protected paths approved at import", async () => {
-    await runningSpec([
-      ticket("a", {
-        protected_paths_ok: ["openapi/openapi.yaml"],
-        body: "do the thing",
-        acceptance: ["one", "two"],
-      }),
-    ]);
+    await runningSpec(
+      [
+        ticket("a", {
+          protected_paths_ok: ["openapi/openapi.yaml"],
+          body: "do the thing",
+          acceptance: ["one", "two"],
+        }),
+      ],
+      { protectedPaths: ["openapi/**", ".github/**"] },
+    );
     const job = (await worker.claim()).body.job as Claimed;
     const reply = await bundle(job);
     expect(reply.status).toBe(200);
@@ -608,6 +611,7 @@ describe("the bundle", () => {
       },
       repo: { role: "backend", url: "git@x:backend", defaultBranch: "main" },
       integrationBranch: "spec/order-export",
+      protectedPaths: ["openapi/**", ".github/**"],
       allowedProtectedPaths: ["openapi/openapi.yaml"],
       contract: null,
     });

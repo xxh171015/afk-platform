@@ -1,4 +1,4 @@
-export type { ApiClient, components, paths } from "./api/client.ts";
+export type { ApiClient, Bundle, components, paths } from "./api/client.ts";
 export { createApiClient } from "./api/client.ts";
 export { createPool } from "./db.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";

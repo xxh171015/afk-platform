@@ -1098,6 +1098,12 @@
                     "integrationBranch": {
                       "type": ["string", "null"]
                     },
+                    "protectedPaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "allowedProtectedPaths": {
                       "type": "array",
                       "items": {
@@ -1126,6 +1132,7 @@
                     "spec",
                     "repo",
                     "integrationBranch",
+                    "protectedPaths",
                     "allowedProtectedPaths",
                     "contract"
                   ]

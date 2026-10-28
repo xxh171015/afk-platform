@@ -136,6 +136,7 @@ const Bundle = z.object({
     defaultBranch: z.string(),
   }),
   integrationBranch: z.string().nullable(),
+  protectedPaths: z.array(z.string()),
   allowedProtectedPaths: z.array(z.string()),
   contract: z
     .object({ sha: z.string(), path: z.string(), repoId: z.number().int() })

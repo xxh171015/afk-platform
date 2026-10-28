@@ -8,3 +8,7 @@ export function createApiClient(baseUrl: string) {
   return createClient<paths>({ baseUrl });
 }
 export type ApiClient = ReturnType<typeof createApiClient>;
+
+// What GET /worker/jobs/{id}/bundle returns: everything a worker renders into /context.
+export type Bundle =
+  paths["/worker/jobs/{id}/bundle"]["get"]["responses"][200]["content"]["application/json"];
