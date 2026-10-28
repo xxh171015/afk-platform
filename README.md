@@ -39,7 +39,9 @@ pnpm --filter @afk/api db:generate   # after editing schema.ts: writes a new mig
 pnpm db:migrate                      # applies pending migrations to $DATABASE_URL (safe to re-run)
 ```
 
-The API never migrates on its own: `assertMigrated()` makes it refuse to start while migrations are pending.
+The API never migrates on its own. `assertMigrated()` (`packages/api/src/db/migrate.ts`) is the startup guard: the API entry point must call it so the server refuses to start while migrations are pending. It is not wired in yet because the API server does not exist.
+
+Columns with a closed vocabulary (ticket and spec states and types, blocked reasons, edge kinds) are CHECK-constrained from the constants in `@afk/shared`, so the database and the zod schemas cannot drift apart. `drizzle.config.ts` has no database credentials: it only serves `db:generate`; use `pnpm db:migrate` to apply.
 
 ## Run the checks
 

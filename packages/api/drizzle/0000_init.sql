@@ -4,6 +4,7 @@ CREATE TABLE "edges" (
 	"to_ticket_id" integer NOT NULL,
 	"kind" text NOT NULL,
 	CONSTRAINT "edges_from_to_kind_unique" UNIQUE("from_ticket_id","to_ticket_id","kind"),
+	CONSTRAINT "edges_kind_check" CHECK ("edges"."kind" in ('blocks', 'contract')),
 	CONSTRAINT "edges_no_self_dependency" CHECK ("edges"."from_ticket_id" <> "edges"."to_ticket_id")
 );
 --> statement-breakpoint
@@ -103,7 +104,9 @@ CREATE TABLE "specs" (
 	"state" text DEFAULT 'draft' NOT NULL,
 	"source_spec_id" integer,
 	"integration_branches" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "specs_type_check" CHECK ("specs"."type" in ('feature', 'bug', 'improvement')),
+	CONSTRAINT "specs_state_check" CHECK ("specs"."state" in ('draft', 'planned', 'running', 'finalizing', 'awaiting-review', 'partially-merged', 'reworking', 'merged', 'paused', 'cancelled'))
 );
 --> statement-breakpoint
 CREATE TABLE "tickets" (
@@ -120,7 +123,10 @@ CREATE TABLE "tickets" (
 	"blocked_reason" text,
 	"content_version" integer DEFAULT 1 NOT NULL,
 	"contract_sha" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "tickets_type_check" CHECK ("tickets"."type" in ('contract', 'implementation', 'integration', 'fix', 'system')),
+	CONSTRAINT "tickets_state_check" CHECK ("tickets"."state" in ('pending', 'queued', 'running', 'merging', 'done', 'blocked', 'cancelled')),
+	CONSTRAINT "tickets_blocked_reason_check" CHECK (("tickets"."state" = 'blocked') = ("tickets"."blocked_reason" is not null) and ("tickets"."blocked_reason" is null or "tickets"."blocked_reason" in ('gate-failed', 'post-merge-gate-failed', 'merge-conflict', 'protected-path-changed', 'no-commits', 'agent-gave-up', 'contract-change-needed', 'invalid-output', 'timeout', 'integration-loop-exceeded', 'upstream-cancelled')))
 );
 --> statement-breakpoint
 ALTER TABLE "edges" ADD CONSTRAINT "edges_from_ticket_id_tickets_id_fk" FOREIGN KEY ("from_ticket_id") REFERENCES "public"."tickets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -135,4 +141,15 @@ ALTER TABLE "runs" ADD CONSTRAINT "runs_job_id_jobs_id_fk" FOREIGN KEY ("job_id"
 ALTER TABLE "specs" ADD CONSTRAINT "specs_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "specs" ADD CONSTRAINT "specs_source_spec_id_specs_id_fk" FOREIGN KEY ("source_spec_id") REFERENCES "public"."specs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_spec_id_specs_id_fk" FOREIGN KEY ("spec_id") REFERENCES "public"."specs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tickets" ADD CONSTRAINT "tickets_repo_id_repos_id_fk" FOREIGN KEY ("repo_id") REFERENCES "public"."repos"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "tickets" ADD CONSTRAINT "tickets_repo_id_repos_id_fk" FOREIGN KEY ("repo_id") REFERENCES "public"."repos"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "edges_to_ticket_idx" ON "edges" USING btree ("to_ticket_id");--> statement-breakpoint
+CREATE INDEX "findings_run_idx" ON "findings" USING btree ("run_id");--> statement-breakpoint
+CREATE INDEX "jobs_state_lease_idx" ON "jobs" USING btree ("state","lease_expires_at");--> statement-breakpoint
+CREATE INDEX "jobs_lock_key_idx" ON "jobs" USING btree ("lock_key");--> statement-breakpoint
+CREATE INDEX "repos_project_idx" ON "repos" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX "runs_ticket_idx" ON "runs" USING btree ("ticket_id");--> statement-breakpoint
+CREATE INDEX "runs_job_idx" ON "runs" USING btree ("job_id");--> statement-breakpoint
+CREATE INDEX "runs_spec_idx" ON "runs" USING btree ("spec_id");--> statement-breakpoint
+CREATE INDEX "specs_project_idx" ON "specs" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX "tickets_spec_state_idx" ON "tickets" USING btree ("spec_id","state");--> statement-breakpoint
+CREATE INDEX "tickets_repo_idx" ON "tickets" USING btree ("repo_id");

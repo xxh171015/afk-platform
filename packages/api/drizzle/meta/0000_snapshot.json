@@ -1,5 +1,5 @@
 {
-  "id": "09629f14-8853-4121-8c3d-7de28cdc941d",
+  "id": "45f5e8d1-ff04-4c8a-8856-a4ebd369c365",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -33,7 +33,23 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "edges_to_ticket_idx": {
+          "name": "edges_to_ticket_idx",
+          "columns": [
+            {
+              "expression": "to_ticket_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "edges_from_ticket_id_tickets_id_fk": {
           "name": "edges_from_ticket_id_tickets_id_fk",
@@ -64,6 +80,10 @@
       },
       "policies": {},
       "checkConstraints": {
+        "edges_kind_check": {
+          "name": "edges_kind_check",
+          "value": "\"edges\".\"kind\" in ('blocks', 'contract')"
+        },
         "edges_no_self_dependency": {
           "name": "edges_no_self_dependency",
           "value": "\"edges\".\"from_ticket_id\" <> \"edges\".\"to_ticket_id\""
@@ -114,7 +134,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "findings_run_idx": {
+          "name": "findings_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "findings_run_id_runs_id_fk": {
           "name": "findings_run_id_runs_id_fk",
@@ -293,7 +329,44 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "jobs_state_lease_idx": {
+          "name": "jobs_state_lease_idx",
+          "columns": [
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lease_expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_lock_key_idx": {
+          "name": "jobs_lock_key_idx",
+          "columns": [
+            {
+              "expression": "lock_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
@@ -425,7 +498,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "repos_project_idx": {
+          "name": "repos_project_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "repos_project_id_projects_id_fk": {
           "name": "repos_project_id_projects_id_fk",
@@ -594,7 +683,53 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "runs_ticket_idx": {
+          "name": "runs_ticket_idx",
+          "columns": [
+            {
+              "expression": "ticket_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_job_idx": {
+          "name": "runs_job_idx",
+          "columns": [
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_spec_idx": {
+          "name": "runs_spec_idx",
+          "columns": [
+            {
+              "expression": "spec_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "runs_spec_id_specs_id_fk": {
           "name": "runs_spec_id_specs_id_fk",
@@ -708,7 +843,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "specs_project_idx": {
+          "name": "specs_project_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "specs_project_id_projects_id_fk": {
           "name": "specs_project_id_projects_id_fk",
@@ -732,7 +883,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "specs_type_check": {
+          "name": "specs_type_check",
+          "value": "\"specs\".\"type\" in ('feature', 'bug', 'improvement')"
+        },
+        "specs_state_check": {
+          "name": "specs_state_check",
+          "value": "\"specs\".\"state\" in ('draft', 'planned', 'running', 'finalizing', 'awaiting-review', 'partially-merged', 'reworking', 'merged', 'paused', 'cancelled')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.tickets": {
@@ -831,7 +991,44 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "tickets_spec_state_idx": {
+          "name": "tickets_spec_state_idx",
+          "columns": [
+            {
+              "expression": "spec_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tickets_repo_idx": {
+          "name": "tickets_repo_idx",
+          "columns": [
+            {
+              "expression": "repo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "tickets_spec_id_specs_id_fk": {
           "name": "tickets_spec_id_specs_id_fk",
@@ -855,7 +1052,20 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "tickets_type_check": {
+          "name": "tickets_type_check",
+          "value": "\"tickets\".\"type\" in ('contract', 'implementation', 'integration', 'fix', 'system')"
+        },
+        "tickets_state_check": {
+          "name": "tickets_state_check",
+          "value": "\"tickets\".\"state\" in ('pending', 'queued', 'running', 'merging', 'done', 'blocked', 'cancelled')"
+        },
+        "tickets_blocked_reason_check": {
+          "name": "tickets_blocked_reason_check",
+          "value": "(\"tickets\".\"state\" = 'blocked') = (\"tickets\".\"blocked_reason\" is not null) and (\"tickets\".\"blocked_reason\" is null or \"tickets\".\"blocked_reason\" in ('gate-failed', 'post-merge-gate-failed', 'merge-conflict', 'protected-path-changed', 'no-commits', 'agent-gave-up', 'contract-change-needed', 'invalid-output', 'timeout', 'integration-loop-exceeded', 'upstream-cancelled'))"
+        }
+      },
       "isRLSEnabled": false
     }
   },

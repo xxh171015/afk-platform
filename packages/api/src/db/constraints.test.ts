@@ -166,3 +166,69 @@ describe("foreign keys", () => {
     ).toBe("ok");
   });
 });
+
+describe("closed vocabularies (mirrors @afk/shared)", () => {
+  async function ticketWith(
+    columns: string,
+    value: string,
+    extra = "",
+  ): Promise<string> {
+    const { specId, repoId } = await seed();
+    return outcome(
+      `INSERT INTO tickets (spec_id, repo_id, type, title, ${columns}) VALUES ($1, $2, 'implementation', 't', ${value})${extra}`,
+      [specId, repoId],
+    );
+  }
+
+  it("a ticket's state must be one of the seven ticket states", async () => {
+    expect(await ticketWith("state", "'queued'")).toBe("ok");
+    expect(await ticketWith("state", "'paused'")).toBe(CHECK_VIOLATION);
+  });
+
+  it("a ticket's type must be a known type", async () => {
+    const { specId, repoId } = await seed();
+    const sql =
+      "INSERT INTO tickets (spec_id, repo_id, type, title) VALUES ($1, $2, $3, 't')";
+    expect(await outcome(sql, [specId, repoId, "contract"])).toBe("ok");
+    expect(await outcome(sql, [specId, repoId, "chore"])).toBe(CHECK_VIOLATION);
+  });
+
+  it("a blocked ticket must carry a known reason, and only a blocked ticket may", async () => {
+    expect(
+      await ticketWith("state, blocked_reason", "'blocked', 'gate-failed'"),
+    ).toBe("ok");
+    expect(await ticketWith("state", "'blocked'")).toBe(CHECK_VIOLATION);
+    expect(await ticketWith("state, blocked_reason", "'blocked', 'oops'")).toBe(
+      CHECK_VIOLATION,
+    );
+    expect(
+      await ticketWith("state, blocked_reason", "'pending', 'gate-failed'"),
+    ).toBe(CHECK_VIOLATION);
+  });
+
+  it("a spec's type and state must be known values", async () => {
+    const { projectId } = await seed();
+    const sql =
+      "INSERT INTO specs (project_id, type, slug, title, state) VALUES ($1, $2, 's', 't', $3)";
+    expect(await outcome(sql, [projectId, "bug", "partially-merged"])).toBe(
+      "ok",
+    );
+    expect(await outcome(sql, [projectId, "epic", "draft"])).toBe(
+      CHECK_VIOLATION,
+    );
+    expect(await outcome(sql, [projectId, "feature", "blocked"])).toBe(
+      CHECK_VIOLATION,
+    );
+  });
+
+  it("an edge's kind must be blocks or contract", async () => {
+    const { ticket } = await seed();
+    const [a, b] = [await ticket(), await ticket()];
+    expect(
+      await outcome(
+        "INSERT INTO edges (from_ticket_id, to_ticket_id, kind) VALUES ($1, $2, 'relates')",
+        [a, b],
+      ),
+    ).toBe(CHECK_VIOLATION);
+  });
+});
