@@ -252,8 +252,8 @@ CURSOR_CLI_VERSION="$(docker run --rm --entrypoint agent "$IMAGE" --version | tr
   || { warn "agent --version failed inside the image"; exit 1; }
 say "Cursor CLI: $CURSOR_CLI_VERSION   (pinned in Dockerfile: $PINNED_CURSOR)"
 [[ "$CURSOR_CLI_VERSION" == *"$PINNED_CURSOR"* ]] || warn "Reported version does not contain the pinned one: check by eye."
-POSTGRES_VERSION="$(docker run --rm --entrypoint bash "$IMAGE" -c 'ls /usr/lib/postgresql/*/bin/postgres | head -1 | xargs -I{} {} --version')" \
-  || { warn "no PostgreSQL server binary under /usr/lib/postgresql"; exit 1; }
+POSTGRES_VERSION="$(docker run --rm --entrypoint bash "$IMAGE" -c 'bin=$(ls /usr/lib/postgresql/*/bin/postgres | head -1) && "$bin" --version')" \
+  || { warn "could not run a PostgreSQL server binary from /usr/lib/postgresql/*/bin (see error above)"; exit 1; }
 say "PostgreSQL: $POSTGRES_VERSION"
 note "compose.yaml runs postgres:16 for local dev; the image installs Debian's version. Note any mismatch in the issue."
 docker run --rm --entrypoint bash "$IMAGE" -c 'echo "pnpm $(pnpm --version), node $(node --version)"' | sed 's/^/  /'
