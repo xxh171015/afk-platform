@@ -141,6 +141,46 @@ describe("plat", () => {
     ).toBe(3);
   });
 
+  it("confirms the split and says what was queued", async () => {
+    await register();
+    files["tickets.yaml"] = TICKETS_YAML;
+    await plat("tickets", "import", "S-1", "tickets.yaml");
+    const confirmed = await plat("spec", "confirm", "S-1");
+    expect(confirmed.code).toBe(0);
+    expect(confirmed.stdout).toContain("S-1 is running");
+    expect(confirmed.stdout).toContain("queued T-1");
+    expect(confirmed.stdout).toContain("spec/order-export");
+    const again = await plat("spec", "confirm", "S-1");
+    expect(again.code).toBe(1);
+    expect(again.stderr).toMatch(/not allowed in running/);
+    expect((await plat("spec", "confirm", "T-1")).stderr).toMatch(
+      /not a spec id/,
+    );
+  });
+
+  it("passes --limit overrides to the project", async () => {
+    await plat(
+      "project",
+      "create",
+      "tuned",
+      "--limit",
+      "repoConcurrency=3",
+      "--limit",
+      "specAgentSeconds=60",
+    );
+    const row = await db.pool.query("SELECT limits FROM projects");
+    expect(row.rows[0].limits).toEqual({
+      repoConcurrency: 3,
+      specAgentSeconds: 60,
+    });
+    expect(
+      (await plat("project", "create", "bad", "--limit", "oops")).stderr,
+    ).toMatch(/name=positive integer/);
+    expect(
+      (await plat("project", "create", "bad", "--limit", "nope=1")).code,
+    ).toBe(1);
+  });
+
   it("prints one JSON document with --json", async () => {
     await register();
     files["tickets.yaml"] = TICKETS_YAML;

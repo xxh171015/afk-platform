@@ -31,6 +31,15 @@ export interface paths {
             maxConcurrency?: number;
             budgetLimit?: number;
             mergePolicy?: string;
+            limits?: {
+              workerSlots?: number;
+              projectConcurrency?: number;
+              repoConcurrency?: number;
+              runIdleSeconds?: number;
+              runWallclockSeconds?: number;
+              ticketWallclockSeconds?: number;
+              specAgentSeconds?: number;
+            };
           };
         };
       };
@@ -274,6 +283,76 @@ export interface paths {
           content: {
             "application/json": {
               errors: string[];
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{specId}/confirm": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          specId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Confirmed; the spec is running and the tickets that can start are queued */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              state: string;
+              integrationBranches: {
+                repoId: number;
+                branch: string;
+              }[];
+              enqueued: {
+                ticketId: number;
+                displayId: string;
+                jobId: number;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not a draft, or has no tickets */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
             };
           };
         };

@@ -33,8 +33,11 @@ export interface NewJob {
 const COLUMNS = `id, type, payload, state, lease_owner AS "leaseOwner", lease_expires_at AS "leaseExpiresAt",
   attempt, idempotency_key AS "idempotencyKey", lock_key AS "lockKey", required_capabilities AS "requiredCapabilities", result, error`;
 
+// Either a pool or a client inside a transaction.
+export type Queryable = Pick<pg.Pool, "query">;
+
 export async function enqueueJob(
-  pool: pg.Pool,
+  pool: Queryable,
   job: NewJob,
 ): Promise<{ job: Job; created: boolean }> {
   const inserted = await pool.query<Job>(

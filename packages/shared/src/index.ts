@@ -5,6 +5,12 @@ export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
+export type { LimitOverrides, Limits } from "./limits.ts";
+export {
+  DEFAULT_LIMITS,
+  LimitOverridesSchema,
+  resolveLimits,
+} from "./limits.ts";
 export type {
   Capacity,
   IncomingEdge,

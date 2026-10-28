@@ -73,6 +73,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--max-concurrency <n>", "tickets running at once", toInt)
     .option("--budget-limit <n>", "", toInt)
     .option("--merge-policy <policy>")
+    .option(
+      "--limit <name=value>",
+      "override a concurrency or budget default, e.g. repoConcurrency=3 (repeatable)",
+      collect,
+    )
     .action(async (name: string, options) => {
       const { data, response, error } = await api().POST("/projects", {
         body: {
@@ -84,6 +89,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           maxConcurrency: options.maxConcurrency,
           budgetLimit: options.budgetLimit,
           mergePolicy: options.mergePolicy,
+          limits: parseLimits(options.limit),
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -115,9 +121,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `repo ${data.id} ${data.role}`);
     });
 
-  program
-    .command("spec")
-    .description("specs")
+  const spec = program.command("spec").description("specs");
+  spec
     .command("create")
     .description("create a spec; prints its S-<n> id")
     .requiredOption("--project <id>", "project id", toInt)
@@ -141,16 +146,35 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, data.displayId);
     });
 
+  spec
+    .command("confirm <spec>")
+    .description(
+      "confirm the split: the spec runs and ready tickets are queued",
+    )
+    .action(async (id: string) => {
+      const specId = specIdOf(id);
+      const { data, response, error } = await api().POST(
+        "/specs/{specId}/confirm",
+        { params: { path: { specId } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      const lines = [
+        `${id} is ${data.state}`,
+        ...data.integrationBranches.map(
+          (b) => `  repo ${b.repoId}: ${b.branch}`,
+        ),
+        ...data.enqueued.map((t) => `  queued ${t.displayId}`),
+      ];
+      print(data, lines.join("\n"));
+    });
+
   program
     .command("tickets")
     .description("tickets")
     .command("import <spec> <file>")
     .description("import a whole tickets.yaml into a spec, or nothing at all")
     .action(async (spec: string, file: string) => {
-      const parsed = parseDisplayId(spec);
-      if (parsed?.kind !== "spec") {
-        throw new Failure(`${spec} is not a spec id like S-12`);
-      }
+      const specId = specIdOf(spec);
       let document: unknown;
       try {
         document = parseYaml(await io.readFile(file));
@@ -167,7 +191,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const { data, response, error } = await api().POST(
         "/specs/{specId}/tickets/import",
         {
-          params: { path: { specId: parsed.id } },
+          params: { path: { specId } },
           body: document as Record<string, unknown>,
         },
       );
@@ -198,6 +222,30 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     );
     return 1;
   }
+}
+
+function specIdOf(text: string): number {
+  const parsed = parseDisplayId(text);
+  if (parsed?.kind !== "spec") {
+    throw new Failure(`${text} is not a spec id like S-12`);
+  }
+  return parsed.id;
+}
+
+// --limit name=value, validated by the API against the known limit names.
+function parseLimits(
+  pairs: string[] | undefined,
+): Record<string, number> | undefined {
+  if (!pairs) return undefined;
+  const limits: Record<string, number> = {};
+  for (const pair of pairs) {
+    const [name, value] = pair.split("=");
+    if (!name || !/^[1-9][0-9]*$/.test(value ?? "")) {
+      throw new Failure(`--limit ${pair}: expected name=positive integer`);
+    }
+    limits[name] = Number(value);
+  }
+  return limits;
 }
 
 function failureFrom(response: Response, body: unknown): Failure {

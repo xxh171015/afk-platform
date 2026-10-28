@@ -42,6 +42,8 @@ export const projects = pgTable("projects", {
   maxConcurrency: integer("max_concurrency"),
   budgetLimit: integer("budget_limit"),
   mergePolicy: text("merge_policy"),
+  // Overrides of DEFAULT_LIMITS in @afk/shared; anything not listed uses the default.
+  limits: jsonb("limits").notNull().default({}),
   createdAt: createdAt(),
 });
 

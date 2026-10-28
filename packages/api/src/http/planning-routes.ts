@@ -1,4 +1,4 @@
-import { SPEC_TYPES } from "@afk/shared";
+import { LimitOverridesSchema, SPEC_TYPES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import {
@@ -7,6 +7,7 @@ import {
   createSpec,
   importTickets,
 } from "../planning/planning.ts";
+import { confirmSpec } from "../scheduling/scheduler.ts";
 
 // Ids are Postgres integers: anything larger is a bad request, not a database error.
 const INT4_MAX = 2_147_483_647;
@@ -36,6 +37,7 @@ const projectRoute = createRoute({
           maxConcurrency: Id.optional(),
           budgetLimit: Id.optional(),
           mergePolicy: Text.optional(),
+          limits: LimitOverridesSchema.optional(),
         }),
       ),
     },
@@ -127,6 +129,30 @@ const importRoute = createRoute({
   },
 });
 
+const confirmRoute = createRoute({
+  method: "post",
+  path: "/specs/{specId}/confirm",
+  request: {
+    params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+  },
+  responses: {
+    200: reply(
+      "Confirmed; the spec is running and the tickets that can start are queued",
+      z.object({
+        state: z.string(),
+        integrationBranches: z.array(
+          z.object({ repoId: Id, branch: z.string() }),
+        ),
+        enqueued: z.array(
+          z.object({ ticketId: Id, displayId: z.string(), jobId: Id }),
+        ),
+      }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not a draft, or has no tickets", ErrorReply),
+  },
+});
+
 export function registerPlanningRoutes(
   app: OpenAPIHono,
   context: AppContext,
@@ -183,5 +209,23 @@ export function registerPlanningRoutes(
           200,
         );
     }
+  });
+
+  app.openapi(confirmRoute, async (c) => {
+    const { specId } = c.req.valid("param");
+    const result = await confirmSpec(pool, specId);
+    if (result.status === "no-spec")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "not-confirmable") {
+      return c.json({ error: result.message }, 409);
+    }
+    return c.json(
+      {
+        state: result.state,
+        integrationBranches: result.integrationBranches,
+        enqueued: result.enqueued,
+      },
+      200,
+    );
   });
 }

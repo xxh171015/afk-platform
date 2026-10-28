@@ -1,6 +1,7 @@
 import {
   formatDisplayId,
   type ImportWarning,
+  type LimitOverrides,
   planImport,
   type SPEC_TYPES,
 } from "@afk/shared";
@@ -22,6 +23,7 @@ export interface NewProject {
   maxConcurrency?: number;
   budgetLimit?: number;
   mergePolicy?: string;
+  limits?: LimitOverrides;
 }
 
 export async function createProject(
@@ -29,8 +31,8 @@ export async function createProject(
   project: NewProject,
 ): Promise<{ id: number; name: string }> {
   const { rows } = await pool.query(
-    `INSERT INTO projects (name, default_agent, default_model, contract_path, protected_paths, max_concurrency, budget_limit, merge_policy)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, name`,
+    `INSERT INTO projects (name, default_agent, default_model, contract_path, protected_paths, max_concurrency, budget_limit, merge_policy, limits)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name`,
     [
       project.name,
       project.defaultAgent ?? null,
@@ -40,6 +42,7 @@ export async function createProject(
       project.maxConcurrency ?? null,
       project.budgetLimit ?? null,
       project.mergePolicy ?? null,
+      JSON.stringify(project.limits ?? {}),
     ],
   );
   return rows[0];
