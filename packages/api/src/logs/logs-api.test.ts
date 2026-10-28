@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -284,6 +284,42 @@ describe("fencing", () => {
 });
 
 describe("the log store", () => {
+  it("does not hand out half a character that is still being written at the end of the file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "afk-store-"));
+    try {
+      const store = new LogStore(dir);
+      await store.append(1, 1, "ab");
+      // the first two bytes of "世" (e4 b8 96), as a partial write would leave them
+      await appendFile(
+        join(dir, "run-1", "attempt-1.log"),
+        Buffer.from([0xe4, 0xb8]),
+      );
+      const early = await store.read(1, 1, 0, 100);
+      expect(early).toMatchObject({ text: "ab", nextOffset: 2 });
+      await appendFile(
+        join(dir, "run-1", "attempt-1.log"),
+        Buffer.from([0x96]),
+      );
+      expect((await store.read(1, 1, early.nextOffset, 100)).text).toBe("世");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the size limit under concurrent appends", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "afk-store-"));
+    try {
+      const store = new LogStore(dir, 10);
+      const results = await Promise.all(
+        Array.from({ length: 6 }, () => store.append(1, 1, "1234")),
+      );
+      expect(results.filter((r) => r.status === "ok")).toHaveLength(2);
+      expect(await store.size(1, 1)).toBe(8);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses an append that would take a run attempt past its size limit", async () => {
     const dir = await mkdtemp(join(tmpdir(), "afk-store-"));
     try {

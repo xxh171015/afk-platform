@@ -357,13 +357,22 @@ export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
       );
     }
   }
-  // A re-claim after a lease ran out finds the Run already there and leaves it be.
+  await startRun(pool, ticketId, job.id, stage);
+}
+
+// A re-claim after a lease ran out finds the Run already there and leaves it be.
+async function startRun(
+  pool: pg.Pool,
+  ticketId: number,
+  jobId: number,
+  stage: Stage,
+): Promise<void> {
   await pool.query(
     `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, started_at)
      SELECT t.spec_id, t.repo_id, t.id, t.content_version, $2, $3,
        (SELECT count(*) FROM runs r WHERE r.ticket_id = t.id AND r.stage = $3) + 1, now()
      FROM tickets t WHERE t.id = $1
      ON CONFLICT (job_id) DO NOTHING`,
-    [ticketId, job.id, stage],
+    [ticketId, jobId, stage],
   );
 }

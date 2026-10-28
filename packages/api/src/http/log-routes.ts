@@ -2,10 +2,9 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { checkHolder } from "../jobs/queue.ts";
 import { MAX_CHUNK_BYTES } from "../logs/log-store.ts";
+import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
-const INT4_MAX = 2_147_483_647;
 const RunId = z.coerce.number().int().min(1).max(INT4_MAX);
-const ErrorReply = z.object({ error: z.string() });
 const DEFAULT_READ_BYTES = 256 * 1024;
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 
@@ -20,7 +19,12 @@ const appendRoute = createRoute({
           schema: z.object({
             workerId: z.string().min(1).max(200),
             attempt: z.number().int().min(1).max(INT4_MAX),
-            chunk: z.string().max(MAX_CHUNK_BYTES),
+            chunk: z
+              .string()
+              .max(MAX_CHUNK_BYTES)
+              .refine((text) => Buffer.byteLength(text) <= MAX_CHUNK_BYTES, {
+                message: "a chunk is at most 1 MiB",
+              }),
           }),
         },
       },
@@ -130,7 +134,7 @@ export function registerLogRoutes(app: OpenAPIHono, context: AppContext): void {
       [id],
     );
     if (!run.rows[0]) return c.json({ error: "no such run" }, 404);
-    // Default to the newest attempt that wrote anything, else the job's current one.
+    // Default to the job's current attempt, so a new attempt that has not written yet does not show the old log.
     const attempt =
       requested ??
       (await logs.latestAttempt(id)) ??

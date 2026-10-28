@@ -8,12 +8,10 @@ import {
   importTickets,
 } from "../planning/planning.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
+import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
-// Ids are Postgres integers: anything larger is a bad request, not a database error.
-const INT4_MAX = 2_147_483_647;
 const Id = z.number().int().min(1).max(INT4_MAX);
 const Text = z.string().min(1).max(500);
-const ErrorReply = z.object({ error: z.string() });
 const json = <T extends z.ZodType>(schema: T) => ({
   "application/json": { schema },
 });

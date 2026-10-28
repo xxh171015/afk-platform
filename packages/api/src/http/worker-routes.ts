@@ -12,6 +12,7 @@ import {
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { markClaimed, recordStageResult } from "../stages/results.ts";
+import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const ClaimedJob = z.object({
   id: z.number().int(),
@@ -50,13 +51,10 @@ const claimRoute = createRoute({
   },
 });
 
-// Ids and attempts are Postgres integers: anything larger is a bad request, not a database error.
-const INT4_MAX = 2_147_483_647;
 const HolderBody = z.object({
   workerId: z.string().min(1).max(200),
   attempt: z.number().int().min(1).max(INT4_MAX),
 });
-const ErrorReply = z.object({ error: z.string() });
 
 function holderRoute<Extra extends z.ZodRawShape, Reply extends z.ZodType>(
   name: string,

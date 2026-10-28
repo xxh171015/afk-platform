@@ -12,6 +12,9 @@ export const MAX_CHUNK_BYTES = 1024 * 1024;
 export const defaultLogDir = (env: NodeJS.ProcessEnv = process.env) =>
   env.AFK_LOG_DIR ?? join(homedir(), ".afk", "logs");
 
+const isNotFound = (error: unknown) =>
+  (error as { code?: string }).code === "ENOENT";
+
 export interface LogSlice {
   text: string;
   offset: number; // where this slice starts, in bytes
@@ -26,6 +29,8 @@ export type AppendResult =
 export class LogStore {
   private readonly dir: string;
   private readonly maxBytes: number;
+  // Appends to one file run one after another, so the size check and the write cannot interleave.
+  private readonly pending = new Map<string, Promise<unknown>>();
 
   constructor(dir: string, maxBytes = MAX_LOG_BYTES) {
     this.dir = dir;
@@ -37,6 +42,24 @@ export class LogStore {
   }
 
   async append(
+    runId: number,
+    attempt: number,
+    chunk: string,
+  ): Promise<AppendResult> {
+    const key = this.file(runId, attempt);
+    const turn = (this.pending.get(key) ?? Promise.resolve()).then(() =>
+      this.appendNow(runId, attempt, chunk),
+    );
+    const settled = turn.catch(() => undefined);
+    this.pending.set(key, settled);
+    try {
+      return await turn;
+    } finally {
+      if (this.pending.get(key) === settled) this.pending.delete(key);
+    }
+  }
+
+  private async appendNow(
     runId: number,
     attempt: number,
     chunk: string,
@@ -53,7 +76,7 @@ export class LogStore {
     try {
       return (await stat(this.file(runId, attempt))).size;
     } catch (error) {
-      if ((error as { code?: string }).code === "ENOENT") return 0;
+      if (isNotFound(error)) return 0;
       throw error;
     }
   }
@@ -64,7 +87,7 @@ export class LogStore {
     try {
       names = await readdir(join(this.dir, `run-${runId}`));
     } catch (error) {
-      if ((error as { code?: string }).code === "ENOENT") return undefined;
+      if (isNotFound(error)) return undefined;
       throw error;
     }
     const attempts = names
@@ -90,12 +113,19 @@ export class LogStore {
       const buffer = Buffer.alloc(wanted);
       const { bytesRead } = await handle.read(buffer, 0, wanted, offset);
       let end = bytesRead;
-      // Back off over a partial multi-byte character at the cut, unless the file itself ends there.
-      if (offset + end < size) {
-        while (end > 0 && ((buffer[end - 1] as number) & 0xc0) === 0x80) end--;
-        if (end > 0 && ((buffer[end - 1] as number) & 0xc0) === 0xc0) end--;
-        if (end === 0) end = bytesRead; // a limit smaller than one character: return the raw bytes
+      // Back off over a partial multi-byte character at the cut. This also holds at the end of the file: an
+      // append that is still being written may have put down only the first bytes of a character.
+      const cut = end;
+      let lead = end - 1;
+      while (lead >= 0 && ((buffer[lead] as number) & 0xc0) === 0x80) lead--;
+      if (lead >= 0) {
+        const first = buffer[lead] as number;
+        const length =
+          first >= 0xf0 ? 4 : first >= 0xe0 ? 3 : first >= 0xc0 ? 2 : 1;
+        if (end - lead < length) end = lead;
       }
+      // A limit smaller than one character: hand out the raw bytes rather than never advancing.
+      if (end === 0 && offset + cut < size) end = cut;
       return {
         text: buffer.subarray(0, end).toString("utf8"),
         offset,
