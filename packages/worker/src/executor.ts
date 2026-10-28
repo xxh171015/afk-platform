@@ -123,6 +123,7 @@ function ensureIntegrationBranch(
     repoDir: mainDir,
     source: `refs/heads/${branch}`,
     target: `refs/heads/${branch}`,
+    expectedOld: "", // it must not exist on the remote yet
   });
   if (!pushed.ok)
     throw new InfrastructureError(

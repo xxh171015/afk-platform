@@ -22,10 +22,18 @@ afterEach(() => {
   rmSync(remoteRoot, { recursive: true, force: true });
 });
 
+// A new integration branch is pushed with a lease that says it must not exist yet.
 const push = (
   target: string,
   over: Partial<Parameters<typeof pushRef>[0]> = {},
-) => pushRef({ repoDir: local.dir, source: "HEAD", target, ...over });
+) =>
+  pushRef({
+    repoDir: local.dir,
+    source: "HEAD",
+    target,
+    ...(target.startsWith("refs/heads/spec/") ? { expectedOld: "" } : {}),
+    ...over,
+  });
 const remoteHas = (ref: string) =>
   git(remote, ["rev-parse", "--verify", "--quiet", ref]).code === 0;
 
@@ -59,6 +67,40 @@ describe("the push exit", () => {
     const before = gitOut(remote, ["for-each-ref"]);
     expect(() => push(target)).toThrow(RangeError);
     expect(gitOut(remote, ["for-each-ref"])).toBe(before);
+  });
+
+  it("refuses to move an integration branch without saying where it is expected to be", () => {
+    expect(() =>
+      pushRef({
+        repoDir: local.dir,
+        source: "HEAD",
+        target: "refs/heads/spec/s",
+      }),
+    ).toThrow(/without the SHA/);
+    expect(remoteHas("refs/heads/spec/s")).toBe(false);
+  });
+
+  it('a lease of "" means the branch must not exist yet', () => {
+    expect(push("refs/heads/spec/s")).toEqual({ ok: true });
+    local.commit({ "x.txt": "x\n" }, "second");
+    expect(push("refs/heads/spec/s").ok).toBe(false); // it exists now
+  });
+
+  it("refuses to move an integration branch without saying where it is expected to be", () => {
+    expect(() =>
+      pushRef({
+        repoDir: local.dir,
+        source: "HEAD",
+        target: "refs/heads/spec/s",
+      }),
+    ).toThrow(/without the SHA/);
+    expect(remoteHas("refs/heads/spec/s")).toBe(false);
+  });
+
+  it('a lease of "" means the branch must not exist yet', () => {
+    expect(push("refs/heads/spec/s")).toEqual({ ok: true });
+    local.commit({ "x.txt": "x\n" }, "second");
+    expect(push("refs/heads/spec/s").ok).toBe(false); // it exists now
   });
 
   it("never deletes: an empty source is refused", () => {

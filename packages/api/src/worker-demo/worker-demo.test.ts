@@ -485,6 +485,26 @@ describe("the merge stage", () => {
     expect(jobs.rows[0].attempt).toBe(2);
   });
 
+  it("pushes nothing when the lease is gone at the pre-push check", async () => {
+    await confirmedSpec([ticket("a")]);
+    const real = workerFor();
+    const losing = { ...real, prePush: async () => "lost" as const };
+    await runWorker({
+      api: losing,
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    // the agent branch was never published either: the very first pre-push (before the implement push) said lost
+    expect(
+      git(origin, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
+    ).not.toBe(0);
+    expect(gitOut(origin, ["rev-parse", "spec/order-export"])).toBe(
+      gitOut(origin, ["rev-parse", "main"]),
+    );
+    expect(await stateOf()).toEqual(["1:running"]);
+  });
+
   it("does not overwrite an integration branch that moved while the candidate was being gated", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps();

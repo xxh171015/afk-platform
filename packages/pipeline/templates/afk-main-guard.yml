@@ -29,10 +29,23 @@ jobs:
           case "$ACTOR$PUSHER" in
             *"[bot]"*) problems="${problems}- pushed by a bot account (actor: $ACTOR, pusher: $PUSHER)"$'\n' ;;
           esac
-          merged=$(gh api "repos/$REPO/commits/$SHA/pulls" \
-            | jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
+          # The link between a commit and its pull request can take a moment to show up after the push.
+          merged=0
+          for attempt in 1 2 3 4; do
+            if pulls=$(gh api "repos/$REPO/commits/$SHA/pulls"); then
+              merged=$(echo "$pulls" | jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
+              [ "$merged" -gt 0 ] && break
+            else
+              api_failed=1
+            fi
+            sleep "${RETRY_DELAY:-5}"
+          done
           if [ "$merged" -eq 0 ]; then
-            problems="${problems}- no merged pull request is associated with this commit"$'\n'
+            if [ "${api_failed:-0}" -eq 1 ] && [ -z "${pulls:-}" ]; then
+              problems="${problems}- GitHub could not be asked which pull request this commit belongs to"$'\n'
+            else
+              problems="${problems}- no merged pull request is associated with this commit"$'\n'
+            fi
           fi
           if [ -n "$problems" ]; then
             gh issue create --repo "$REPO" \
