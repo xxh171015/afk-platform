@@ -42,3 +42,13 @@ Single steps: `pnpm typecheck`, `pnpm test`, `pnpm lint`. Tests write JUnit XML 
 ## Gate config
 
 `.sandcastle/gates.yaml` lists `setup`, `typecheck`, `test` (with JUnit path) and `lint`, in the M0 draft format from design.md.
+
+## Sandbox image
+
+`.sandcastle/Dockerfile` is the agent sandbox image: the pilot repo's Sandcastle template (Cursor CLI version pinned) plus the PostgreSQL server and pnpm, so the gate's `setup` can start a throwaway Postgres with `scripts/pg-temp.sh`. The sandbox has no Docker, so the image has to be built and checked on a machine that does:
+
+```sh
+scripts/verify-sandbox-image.sh   # build, time it, run the gate in a fresh container, read JUnit on the host
+```
+
+It tests the committed HEAD and writes the results (build time, image size, Cursor CLI and PostgreSQL versions, gate result) to `reports/sandbox-image.env`.
