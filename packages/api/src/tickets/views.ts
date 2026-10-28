@@ -151,7 +151,7 @@ export async function ticketView(pool: pg.Pool, ticketId: number) {
     [ticketId],
   );
   const runs = await pool.query(
-    `SELECT id, stage, attempt, result, duration_ms, started_at, finished_at, head_sha FROM runs
+    `SELECT id, stage, attempt, result, duration_ms, started_at, finished_at, head_sha, agent, model, skills_sha, cursor_cli_version FROM runs
      WHERE ticket_id = $1 ORDER BY id`,
     [ticketId],
   );
@@ -203,6 +203,10 @@ export async function ticketView(pool: pg.Pool, ticketId: number) {
       attempt: r.attempt as number,
       result: (r.result as string | null) ?? null,
       durationMs: (r.duration_ms as number | null) ?? null,
+      agent: (r.agent as string | null) ?? null,
+      model: (r.model as string | null) ?? null,
+      skillsSha: (r.skills_sha as string | null) ?? null,
+      cursorCliVersion: (r.cursor_cli_version as string | null) ?? null,
       startedAt: r.started_at ? (r.started_at as Date).toISOString() : null,
       finishedAt: r.finished_at ? (r.finished_at as Date).toISOString() : null,
     })),

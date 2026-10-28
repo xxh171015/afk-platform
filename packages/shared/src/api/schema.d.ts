@@ -1109,6 +1109,10 @@ export interface paths {
                 attempt: number;
                 result: string | null;
                 durationMs: number | null;
+                agent: string | null;
+                model: string | null;
+                skillsSha: string | null;
+                cursorCliVersion: string | null;
                 startedAt: string | null;
                 finishedAt: string | null;
               }[];

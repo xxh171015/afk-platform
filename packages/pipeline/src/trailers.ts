@@ -62,6 +62,7 @@ export function stampTrailers(request: StampRequest): StampResult {
   if (commits.length === 0) return { rewritten: 0 };
 
   const mapped = new Map<string, string>();
+  let rewrittenCount = 0;
   for (const commit of commits) {
     const info = gitOrThrow(repoDir, [
       "show",
@@ -98,10 +99,19 @@ export function stampTrailers(request: StampRequest): StampResult {
         rewritten: 0,
         error: `interpret-trailers failed: ${stamped.out.slice(0, 400)}`,
       };
-    const parentArgs = parents
-      .split(" ")
-      .filter(Boolean)
-      .flatMap((parent) => ["-p", mapped.get(parent) ?? parent]);
+    const parentIds = parents.split(" ").filter(Boolean);
+    const newParents = parentIds.map((parent) => mapped.get(parent) ?? parent);
+    // Already carrying the trailers, on parents that stay as they are: nothing to rewrite, and the commit keeps
+    // its identity (so stamping a branch twice changes nothing, not even a hash).
+    const unchanged =
+      stamped.stdout.trimEnd() === message.trimEnd() &&
+      newParents.every((parent, index) => parent === parentIds[index]);
+    if (unchanged) {
+      mapped.set(commit, commit);
+      continue;
+    }
+    rewrittenCount += 1;
+    const parentArgs = newParents.flatMap((parent) => ["-p", parent]);
     const created = git(
       repoDir,
       ["commit-tree", tree, ...parentArgs, "-F", "-"],
@@ -116,6 +126,8 @@ export function stampTrailers(request: StampRequest): StampResult {
     mapped.set(commit, created.stdout.trim());
   }
 
+  if (mapped.get(tip) === tip) return { rewritten: 0 };
+
   // Move the branch only if nobody moved it meanwhile.
   const moved = git(repoDir, [
     "update-ref",
@@ -128,5 +140,5 @@ export function stampTrailers(request: StampRequest): StampResult {
       rewritten: 0,
       error: `update-ref failed: ${moved.out.slice(0, 400)}`,
     };
-  return { rewritten: commits.length };
+  return { rewritten: rewrittenCount };
 }

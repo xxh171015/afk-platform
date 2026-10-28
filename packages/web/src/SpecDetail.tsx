@@ -19,6 +19,7 @@ import { layoutGraph, STATE_COLORS } from "./graph.ts";
 // the button that confirms the split so that the platform starts working on it.
 
 interface TicketNodeData extends Record<string, unknown> {
+  id: number;
   displayId: string;
   title: string;
   state: TicketState;
@@ -35,7 +36,10 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
       style={{ background: colors.fill, borderColor: colors.border }}
     >
       <Handle type="target" position={Position.Left} />
-      <strong>{data.displayId}</strong> {data.title}
+      <a href={`#/tickets/${data.id}`}>
+        <strong>{data.displayId}</strong>
+      </a>{" "}
+      {data.title}
       <div className="ticket-node-state">
         {data.state}
         {data.blockedReason ? ` (${data.blockedReason})` : ""}
@@ -88,6 +92,7 @@ function DependencyGraph({
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
       data: {
+        id: ticket.id,
         displayId: ticket.displayId,
         title: ticket.title,
         state: ticket.state,
@@ -216,7 +221,8 @@ export function SpecDetail({ specId }: { specId: number }) {
             <span className={`badge ticket-${ticket.state}`}>
               {ticket.state}
             </span>{" "}
-            {ticket.displayId} {ticket.title}
+            <a href={`#/tickets/${ticket.id}`}>{ticket.displayId}</a>{" "}
+            {ticket.title}
             {ticket.blockedReason ? ` — ${ticket.blockedReason}` : ""}
           </li>
         ))}

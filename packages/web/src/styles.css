@@ -170,3 +170,48 @@ ul.finalizations {
     width: 100px;
   }
 }
+
+table.runs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+table.runs th,
+table.runs td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+table.runs tr.picked {
+  background: #f1f8ff;
+}
+button.link {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+pre.run-log {
+  background: #1e1e1e;
+  color: #e6e6e6;
+  padding: 12px;
+  border-radius: 6px;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+.brief {
+  border-left: 4px solid #fa5252;
+  background: #fff5f5;
+  padding: 8px 12px;
+  margin: 12px 0;
+}
+.brief pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+}

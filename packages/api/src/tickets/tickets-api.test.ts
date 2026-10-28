@@ -558,7 +558,15 @@ describe("what a person sees", () => {
     await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
     await stage("implement", {
       outcome: "done",
-      run: { headSha: "abc", branch: "agent/T-1" },
+      run: {
+        headSha: "abc",
+        branch: "agent/T-1",
+        agent: "cursor",
+        model: "auto",
+        skillsSha: "5beb35b",
+        cursorCliVersion: "1.2.3",
+        durationMs: 146000,
+      },
     });
     await stage("gate", {
       outcome: "passed",
@@ -591,6 +599,14 @@ describe("what a person sees", () => {
     expect(
       view.body.runs.map((r: Json) => `${r.displayId}:${r.stage}:${r.result}`),
     ).toEqual(["R-1:implement:done", "R-2:gate:passed", "R-3:review:pass"]);
+    expect(view.body.runs[0]).toMatchObject({
+      agent: "cursor",
+      model: "auto",
+      skillsSha: "5beb35b",
+      cursorCliVersion: "1.2.3",
+      durationMs: 146000,
+    });
+    expect(view.body.runs[1]).toMatchObject({ model: null, skillsSha: null }); // a gate run has no model
     expect(view.body.findings).toEqual([
       {
         id: 1,

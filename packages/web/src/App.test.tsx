@@ -85,6 +85,47 @@ describe("the app", () => {
     );
   });
 
+  it("shows a ticket's page for #/tickets/<id>", async () => {
+    window.location.hash = "#/tickets/9";
+    const base = server();
+    const withTicket = fakeServer({
+      "GET /tickets/9": () => ({
+        json: {
+          ticket: {
+            id: 9,
+            displayId: "T-9",
+            specId: 3,
+            specDisplayId: "S-3",
+            title: "Only ticket",
+            type: "implementation",
+            state: "done",
+            blockedReason: null,
+            repo: "backend",
+            brief: null,
+            body: "",
+            acceptanceCriteria: ["works"],
+            modules: [],
+            allowedProtectedPaths: [],
+            contentVersion: 1,
+            contractSha: null,
+            fixCounts: {},
+            reviewed: false,
+          },
+          upstream: [],
+          downstream: [],
+          runs: [],
+          findings: [],
+          gateResults: [],
+        },
+      }),
+    });
+    void base;
+    renderWithApp(<App />, withTicket);
+    expect(
+      (await screen.findByRole("heading", { level: 2 })).textContent,
+    ).toContain("T-9 Only ticket");
+  });
+
   it("falls back to the list for an address it does not know", async () => {
     window.location.hash = "#/specs/not-a-number";
     renderWithApp(<App />, server());

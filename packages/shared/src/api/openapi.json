@@ -1855,6 +1855,18 @@
                           "durationMs": {
                             "type": ["integer", "null"]
                           },
+                          "agent": {
+                            "type": ["string", "null"]
+                          },
+                          "model": {
+                            "type": ["string", "null"]
+                          },
+                          "skillsSha": {
+                            "type": ["string", "null"]
+                          },
+                          "cursorCliVersion": {
+                            "type": ["string", "null"]
+                          },
                           "startedAt": {
                             "type": ["string", "null"]
                           },
@@ -1869,6 +1881,10 @@
                           "attempt",
                           "result",
                           "durationMs",
+                          "agent",
+                          "model",
+                          "skillsSha",
+                          "cursorCliVersion",
                           "startedAt",
                           "finishedAt"
                         ]

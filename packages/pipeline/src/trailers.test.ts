@@ -98,7 +98,7 @@ describe("stampTrailers", () => {
     const base = agentBranch();
     stamp(base);
     const once = gitOut(repo.dir, ["rev-parse", "agent/T-123"]);
-    stamp(base);
+    expect(stamp(base)).toEqual({ rewritten: 0 });
     expect(body("agent/T-123").match(/^Spec: S-12$/gm)).toHaveLength(1);
     expect(gitOut(repo.dir, ["rev-parse", "agent/T-123"])).toBe(once); // nothing changed, nothing rewritten
   });

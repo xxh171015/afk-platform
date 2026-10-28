@@ -103,7 +103,13 @@ describe("the spec page", () => {
         }),
       }),
     );
-    expect(await screen.findByText(/T-1 Ticket 1 — gate-failed/)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        (_, element) =>
+          element?.tagName === "LI" &&
+          /T-1 Ticket 1 — gate-failed/.test(element.textContent ?? ""),
+      ),
+    ).toBeTruthy();
   });
 
   it("shows the warnings the import left", async () => {
@@ -133,6 +139,26 @@ describe("the spec page", () => {
       fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
     );
     expect(await screen.findByText("No warnings.")).toBeTruthy();
+  });
+
+  it("links every ticket to its own page, from the graph and from the list", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "done"), ticket(2, "pending")],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    await screen.findByTestId("node-T-2");
+    const links = screen.getAllByRole("link", { name: "T-2" });
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "#/tickets/2",
+      "#/tickets/2",
+    ]);
   });
 
   it("shows the title, the state, and why a spec was paused", async () => {

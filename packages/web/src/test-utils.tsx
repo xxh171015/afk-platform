@@ -20,7 +20,10 @@ export interface Reply {
   status?: number;
   json: unknown;
 }
-export type Handler = (request: { body: unknown }) => Reply | Promise<Reply>;
+export type Handler = (request: {
+  body: unknown;
+  url: URL;
+}) => Reply | Promise<Reply>;
 
 // A stand-in for the platform API: `routes` maps "METHOD /path" to what it answers. Every call is recorded.
 export function fakeServer(routes: Record<string, Handler>) {
@@ -36,7 +39,10 @@ export function fakeServer(routes: Record<string, Handler>) {
     if (!handler)
       return Response.json({ error: `no route ${key}` }, { status: 404 });
     const text = request.method === "GET" ? "" : await request.text();
-    const reply = await handler({ body: text ? JSON.parse(text) : undefined });
+    const reply = await handler({
+      body: text ? JSON.parse(text) : undefined,
+      url: new URL(request.url),
+    });
     return Response.json(reply.json, { status: reply.status ?? 200 });
   };
   return { calls, client: createApiClient("http://api.test", fetch) };
