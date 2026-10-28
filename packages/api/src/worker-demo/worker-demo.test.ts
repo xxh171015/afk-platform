@@ -431,6 +431,109 @@ describe("failures of the worker's own", () => {
   });
 });
 
+describe("the merge stage", () => {
+  it("recognises a merge it already did when the result never reached the API", async () => {
+    await confirmedSpec([ticket("a")]);
+    const real = workerFor();
+    // the API is unreachable exactly when the merge result is handed in
+    const unreachable = {
+      ...real,
+      complete: async (
+        job: Parameters<typeof real.complete>[0],
+        body: unknown,
+      ) => {
+        if ((body as { stage: string }).stage === "merge")
+          throw new Error("connection reset");
+        return real.complete(job, body);
+      },
+    };
+    await runWorker({
+      api: unreachable,
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:merging"]);
+    const mergesAfterFirst = gitOut(origin, [
+      "rev-list",
+      "--count",
+      "--merges",
+      "main..spec/order-export",
+    ]);
+    expect(mergesAfterFirst).toBe("1"); // it did push
+
+    clock.advanceSeconds(121); // the lease of the merge job runs out, another attempt takes it
+    await runWorker({
+      api: workerFor("w2"),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    // merged once, not twice
+    expect(
+      gitOut(origin, [
+        "rev-list",
+        "--count",
+        "--merges",
+        "main..spec/order-export",
+      ]),
+    ).toBe("1");
+    const jobs = await db.pool.query(
+      "SELECT attempt FROM jobs WHERE type = 'merge'",
+    );
+    expect(jobs.rows[0].attempt).toBe(2);
+  });
+
+  it("does not overwrite an integration branch that moved while the candidate was being gated", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps();
+    const intruder = join(home, "intruder");
+    const gateSandbox = executor.makeGateSandbox;
+    executor.makeGateSandbox = (slotDir) => {
+      const inner = gateSandbox(slotDir);
+      return {
+        open: async (ref) => {
+          if (ref.startsWith("gate/")) {
+            // somebody else pushes to the integration branch while the candidate is under test
+            git(home, ["clone", "--quiet", origin, intruder]);
+            git(intruder, ["checkout", "--quiet", "spec/order-export"]);
+            git(intruder, [
+              "-c",
+              "user.name=X",
+              "-c",
+              "user.email=x@y",
+              "commit",
+              "--quiet",
+              "--allow-empty",
+              "-m",
+              "intruder",
+            ]);
+            git(intruder, ["push", "--quiet", "origin", "spec/order-export"]);
+          }
+          return inner.open(ref);
+        },
+      };
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    // the push was refused by the lease: the intruder's commit is still the tip, our merge is not there
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%s", "spec/order-export"]),
+    ).toBe("intruder");
+    const merge = await db.pool.query(
+      "SELECT state, error FROM jobs WHERE type = 'merge'",
+    );
+    expect(merge.rows[0].state).toBe("failed");
+    expect(merge.rows[0].error).toContain("could not advance");
+    expect(await stateOf()).toEqual(["1:merging"]); // not done: nothing reached the integration branch
+  });
+});
+
 describe("trouble reaching the API, or no room to work", () => {
   const claimed = async (api2 = workerFor()) => {
     await confirmedSpec([ticket("a")]);

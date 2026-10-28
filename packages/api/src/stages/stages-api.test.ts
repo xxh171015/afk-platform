@@ -476,6 +476,88 @@ describe("what is recorded", () => {
   });
 });
 
+describe("merge jobs of one integration branch", () => {
+  it("run one at a time, first in first out, and the others wait for the lease", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    const second = new FakeWorker(api.url, "w2", []);
+    const reachMerges = async () => {
+      // drive both tickets up to their merge stage; hold the first merge job that shows up
+      const held: Claimed[] = [];
+      for (let i = 0; i < 30 && held.length === 0; i++) {
+        const job = (await worker.claim()).body.job as Claimed | null;
+        if (!job) break;
+        if (job.payload.stage === "merge") {
+          held.push(job);
+          break;
+        }
+        const success: Record<string, Record<string, unknown>> = {
+          implement: IMPLEMENT_DONE,
+          gate: GATE_PASSED,
+          review: REVIEW_PASS,
+        };
+        await worker.complete(job.id, job.attempt, {
+          stage: job.payload.stage,
+          ...success[job.payload.stage],
+        });
+      }
+      return held[0] as Claimed;
+    };
+    const firstMerge = await reachMerges();
+    expect(firstMerge.lockKey).toMatch(/^integration:\d+:spec\/order-export$/);
+
+    // the other ticket gets to its merge stage while the first merge still holds the lock
+    for (let i = 0; i < 10; i++) {
+      const job = (await second.claim()).body.job as Claimed | null;
+      if (!job) break;
+      const success: Record<string, Record<string, unknown>> = {
+        implement: IMPLEMENT_DONE,
+        gate: GATE_PASSED,
+        review: REVIEW_PASS,
+      };
+      await second.complete(job.id, job.attempt, {
+        stage: job.payload.stage,
+        ...success[job.payload.stage],
+      });
+    }
+    const queued = await db.pool.query(
+      "SELECT id, lock_key FROM jobs WHERE type = 'merge' AND state = 'queued'",
+    );
+    expect(queued.rows).toHaveLength(1);
+    expect(queued.rows[0].lock_key).toBe(firstMerge.lockKey);
+
+    // nobody can take it while the first merge is out ...
+    expect((await second.claim()).body.job).toBeNull();
+    // ... and when it is done, the next one is next in line
+    await worker.complete(firstMerge.id, firstMerge.attempt, {
+      stage: "merge",
+      ...MERGED,
+    });
+    const next = (await second.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("merge");
+    expect(next.id).toBe(queued.rows[0].id);
+  });
+
+  it("let a fix run without the lock, and queue a new merge after it", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    const merge = await stage("merge", { outcome: "conflict" });
+    expect(merge.lockKey).not.toBeNull();
+    const fix = (await worker.claim()).body.job as Claimed;
+    expect(fix.payload.stage).toBe("merge-fix");
+    expect(fix.lockKey).toBeNull(); // the lock is not held while an agent works
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "merge-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    const again = (await worker.claim()).body.job as Claimed;
+    expect(again.payload.stage).toBe("merge");
+    expect(again.lockKey).toBe(merge.lockKey);
+  });
+});
+
 describe("a worker that is faster than the claim bookkeeping", () => {
   it("an implement result for a ticket still marked queued is handled as if it were running", async () => {
     await runningSpec([ticket("a")]);

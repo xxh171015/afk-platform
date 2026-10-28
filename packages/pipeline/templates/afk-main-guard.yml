@@ -1,0 +1,43 @@
+# Detection only: the platform never pushes to main or merges a PR (docs/specs/m1-platform.md「推送出口与检测」),
+# and this workflow tells you if anything else did. Copy it to .github/workflows/ of every repo the platform
+# works on. It cannot prevent a push (a free personal account has no branch protection); it makes one visible.
+name: afk-main-guard
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that this commit came in through a merged pull request, pushed by a person
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          PUSHER: ${{ github.event.pusher.name }}
+        run: |
+          set -euo pipefail
+          problems=""
+          case "$ACTOR$PUSHER" in
+            *"[bot]"*) problems="${problems}- pushed by a bot account (actor: $ACTOR, pusher: $PUSHER)"$'\n' ;;
+          esac
+          merged=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            | jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
+          if [ "$merged" -eq 0 ]; then
+            problems="${problems}- no merged pull request is associated with this commit"$'\n'
+          fi
+          if [ -n "$problems" ]; then
+            gh issue create --repo "$REPO" \
+              --title "Direct push to main: ${SHA:0:7}" \
+              --body "Commit $SHA reached main without the expected pull request:"$'\n\n'"$problems"
+            echo "::error::$SHA reached main without a merged pull request, or was pushed by a bot"
+            exit 1
+          fi
