@@ -23,14 +23,22 @@ export class RepoStore {
       mkdirSync(dirname(dir), { recursive: true });
       gitOrThrow(this.root, ["clone", "--quiet", "--bare", url, dir]);
     }
-    // '+' for the branches origin owns; none for ticket branches, which can hold work origin has not seen yet
-    git(dir, [
+    // '+' for the branches origin owns; a failure here means the default branch or the integration branch is
+    // stale, so it is an error, not something to carry on with.
+    gitOrThrow(dir, [
       "fetch",
       "--quiet",
       "--no-tags",
       "origin",
       `+refs/heads/${defaultBranch}:refs/heads/${defaultBranch}`,
       "+refs/heads/spec/*:refs/heads/spec/*",
+    ]);
+    // Ticket branches only move forward and can hold work origin has not seen: a refused update is fine.
+    git(dir, [
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      "origin",
       "refs/heads/agent/*:refs/heads/agent/*",
     ]);
     return dir;

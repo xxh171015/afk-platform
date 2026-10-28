@@ -137,6 +137,35 @@ describe("command lines", () => {
   });
 });
 
+describe("losing the job mid-gate", () => {
+  it("starts no further command once aborted", async () => {
+    const configSha = repoWithGate([
+      { name: "first", run: "touch first.done" },
+      { name: "second", run: "touch second.done" },
+    ]);
+    const controller = new AbortController();
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const opened = sandbox.open.bind(sandbox);
+    sandbox.open = async (ref) => {
+      const session = await opened(ref);
+      const exec = session.exec.bind(session);
+      // the lease is lost while the first command runs
+      session.exec = async (command) => {
+        const result = await exec(command);
+        controller.abort();
+        return result;
+      };
+      return session;
+    };
+    const outcome = await gate({
+      sandbox,
+      configSha,
+      signal: controller.signal,
+    });
+    expect(outcome.steps.map((s) => s.name)).toEqual(["first"]);
+  });
+});
+
 describe("a failing gate", () => {
   it("stops at the first failure: later commands do not run", async () => {
     const configSha = repoWithGate([

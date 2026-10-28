@@ -87,6 +87,8 @@ export interface RunGateInput {
   configSha: string; // where the gate configuration is read from
   baseline?: TestCounts; // counts of the last passing gate on the integration branch
   cache?: GateCache;
+  // Aborted when the job is lost: no further command is started (one already running cannot be interrupted).
+  signal?: AbortSignal;
 }
 
 export async function runGate(input: RunGateInput): Promise<GateOutcome> {
@@ -119,6 +121,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
   let junit: string | undefined;
   try {
     for (const step of steps) {
+      if (input.signal?.aborted) break;
       const started = Date.now();
       // sandbox.exec has no timeout of its own: the command is wrapped
       const result = await session.exec(

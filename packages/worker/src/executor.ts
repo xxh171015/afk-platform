@@ -12,6 +12,7 @@ import {
   type GateSandbox,
   git,
   gitOrThrow,
+  hasRef,
   ImplementOutputSchema,
   isAncestor,
   mergeCandidate,
@@ -54,12 +55,20 @@ export interface StageContext {
 
 // A problem with the worker's own environment, not with the ticket: the job fails and is dispatched again.
 export class InfrastructureError extends Error {}
+// Nothing to run on right now: every slot is taken. The job is left alone and comes back when its lease runs out.
+export class NoFreeSlotError extends Error {}
 // The lease is gone; whatever was done must not be reported.
 export class JobLostError extends Error {}
 
 export type StageOutcomeBody = Record<string, unknown> & {
   stage: string;
   outcome: string;
+};
+
+// The Run is created when the job is claimed, so a bundle without one means the API and the worker disagree.
+const runIdOf = (bundle: Bundle): string => {
+  if (!bundle.run) throw new InfrastructureError("the bundle has no run");
+  return bundle.run.displayId;
 };
 
 const agentRef = (bundle: Bundle) => `agent/${bundle.ticket.displayId}`;
@@ -89,13 +98,14 @@ export async function executeStage(
     repo: bundle.repo.role,
     ref: agentRef(bundle),
   });
-  if (!slot) throw new InfrastructureError("no free slot");
+  if (!slot) throw new NoFreeSlotError("no free slot");
   let body: StageOutcomeBody | undefined;
   try {
     body = await runStage(deps, context, mainDir, slot);
     return body;
   } finally {
-    await slot.release(body && isSuccess(body) ? "success" : "failure");
+    // Any stage that ran to an answer leaves a clean slot, whatever the answer; a clone is kept only when the stage broke.
+    await slot.release(body ? "success" : "failure");
   }
 }
 
@@ -165,8 +175,7 @@ async function runStage(
 }
 
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
-const exists = (dir: string, ref: string) =>
-  git(dir, ["rev-parse", "--verify", "--quiet", ref]).code === 0;
+const exists = hasRef;
 
 function renderFor(
   context: StageContext,
@@ -180,7 +189,7 @@ function renderFor(
     dir,
     bundle,
     run: {
-      runId: bundle.run?.displayId ?? "R-0",
+      runId: runIdOf(bundle),
       baseSha,
       branch: agentRef(bundle),
     },
@@ -269,11 +278,18 @@ async function agentChange(
       ids: {
         spec: bundle.spec.displayId,
         ticket: bundle.ticket.displayId,
-        run: bundle.run?.displayId ?? "R-0",
+        run: runIdOf(bundle),
       },
     });
     if (stamped.error)
       throw new InfrastructureError(`stamping failed: ${stamped.error}`);
+    // Still the holder? (This also renews the lease.) A worker that lost its lease must not publish anything.
+    if (
+      context.signal.aborted ||
+      (await deps.api.prePush(context.job)) === "lost"
+    ) {
+      throw new JobLostError("the lease was lost before the push");
+    }
     const pushed = deps.push({
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
@@ -328,6 +344,10 @@ async function review(
     if (verdict.kind === "infrastructure-failure")
       throw new InfrastructureError(verdict.error);
     log(`review: ${verdict.outcome}`);
+    if (run.commits.length > 0)
+      log(
+        `review: WARNING the review made ${run.commits.length} commit(s); it should only read`,
+      );
     return {
       stage: "review",
       outcome: verdict.outcome,
@@ -400,6 +420,7 @@ async function gate(
   const outcome = await runGate({
     repoDir: mainDir,
     sandbox: deps.makeGateSandbox(slot.dir),
+    signal: context.signal,
     ref: agent,
     commitSha: tip(mainDir, agent),
     configSha: tip(mainDir, integration),
@@ -474,6 +495,7 @@ async function merge(
     const outcome = await runGate({
       repoDir: mainDir,
       sandbox: deps.makeGateSandbox(slot.dir),
+      signal: context.signal,
       ref: gateBranch,
       commitSha: candidate.candidate,
       configSha: oldTip,

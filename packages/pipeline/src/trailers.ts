@@ -59,7 +59,7 @@ export function stampTrailers(request: StampRequest): StampResult {
   const commits = listing.stdout.split("\n").filter(Boolean);
   if (commits.length === 0) return { rewritten: 0 };
 
-  const rewritten = new Map<string, string>();
+  const mapped = new Map<string, string>();
   for (const commit of commits) {
     const info = gitOrThrow(repoDir, [
       "show",
@@ -100,7 +100,7 @@ export function stampTrailers(request: StampRequest): StampResult {
     const parentArgs = parents
       .split(" ")
       .filter(Boolean)
-      .flatMap((parent) => ["-p", rewritten.get(parent) ?? parent]);
+      .flatMap((parent) => ["-p", mapped.get(parent) ?? parent]);
     const created = git(
       repoDir,
       ["commit-tree", tree, ...parentArgs, "-F", "-"],
@@ -112,14 +112,14 @@ export function stampTrailers(request: StampRequest): StampResult {
         rewritten: 0,
         error: `commit-tree failed: ${created.out.slice(0, 400)}`,
       };
-    rewritten.set(commit, created.stdout.trim());
+    mapped.set(commit, created.stdout.trim());
   }
 
   // Move the branch only if nobody moved it meanwhile.
   const moved = git(repoDir, [
     "update-ref",
     `refs/heads/${branch}`,
-    rewritten.get(tip) as string,
+    mapped.get(tip) as string,
     tip,
   ]);
   if (moved.code !== 0)

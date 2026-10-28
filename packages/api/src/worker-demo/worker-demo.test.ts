@@ -334,6 +334,13 @@ describe("a whole spec with a fake agent", () => {
       heartbeatMs: 50,
     });
     expect(await stateOf()).toEqual(["1:blocked/agent-gave-up", "2:pending"]);
+    // the stage ran to an answer, so the slot is clean again even though the ticket is blocked
+    const fs = await import("node:fs");
+    for (const index of fs.readdirSync(join(home, "slots"))) {
+      expect(fs.readdirSync(join(home, "slots", index))).not.toContain(
+        "backend",
+      );
+    }
   });
 
   it("blocks a ticket that touches an unapproved protected path, before any gate runs", async () => {
@@ -421,6 +428,122 @@ describe("failures of the worker's own", () => {
     expect(
       (await import("node:fs")).readdirSync(join(home, "slots", "0")),
     ).toContain("backend");
+  });
+});
+
+describe("trouble reaching the API, or no room to work", () => {
+  const claimed = async (api2 = workerFor()) => {
+    await confirmedSpec([ticket("a")]);
+    return {
+      api2,
+      job: (await api2.claim([])) as NonNullable<
+        Awaited<ReturnType<typeof api2.claim>>
+      >,
+    };
+  };
+
+  it("leaves the job alone, not failed, when every slot is taken", async () => {
+    const { api2, job } = await claimed();
+    const executor = deps();
+    executor.slots = new SlotManager({
+      root: join(home, "full-slots"),
+      count: 0,
+      mainCloneFor: () => seed.dir,
+      salvageDir: join(home, "salvage"),
+      isHeld: async () => true,
+    });
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("abandoned");
+    const stored = await db.pool.query("SELECT state FROM jobs WHERE id = $1", [
+      job.id,
+    ]);
+    expect(stored.rows[0].state).toBe("running"); // the lease will run out and the job comes back
+  });
+
+  it("retries handing in the result when the API hiccups, and does not throw the facts away", async () => {
+    const { api2, job } = await claimed();
+    let tries = 0;
+    const flaky = {
+      ...api2,
+      complete: async (j: typeof job, body: unknown) => {
+        tries += 1;
+        if (tries < 3) throw new Error("the API answered 503");
+        return api2.complete(j, body);
+      },
+    };
+    expect(
+      await processJob({ api: flaky, executor: deps(), heartbeatMs: 50 }, job),
+    ).toBe("completed");
+    expect(tries).toBe(3);
+    expect((await stateOf())[0]).toBe("1:running");
+  });
+
+  it("gives the job up without failing it when the result cannot be handed in at all", async () => {
+    const { api2, job } = await claimed();
+    let failCalled = false;
+    const down = {
+      ...api2,
+      complete: async () => {
+        throw new Error("connection refused");
+      },
+      fail: async () => {
+        failCalled = true;
+        return "held" as const;
+      },
+    };
+    expect(
+      await processJob({ api: down, executor: deps(), heartbeatMs: 50 }, job),
+    ).toBe("abandoned");
+    expect(failCalled).toBe(false);
+  });
+
+  it("stops working when the heartbeat keeps failing", async () => {
+    const { api2, job } = await claimed();
+    let sawAbort = false;
+    const flaky = {
+      ...api2,
+      heartbeat: async () => {
+        throw new Error("network down");
+      },
+    };
+    const executor = deps({
+      script: async (ctx) => {
+        if (ctx.stage !== "implement") return undefined;
+        await new Promise<void>((resolve) =>
+          ctx.signal?.addEventListener("abort", () => resolve()),
+        );
+        sawAbort = true;
+        return { output: DONE };
+      },
+    });
+    expect(
+      await processJob({ api: flaky, executor, heartbeatMs: 20 }, job),
+    ).toBe("abandoned");
+    expect(sawAbort).toBe(true);
+  });
+
+  it("uploads the log while the stage is still running", async () => {
+    const { api2, job } = await claimed();
+    let seenWhileRunning = "";
+    const executor = deps({
+      script: async (ctx) => {
+        if (ctx.stage !== "implement") return undefined;
+        await new Promise((resolve) => setTimeout(resolve, 300)); // long enough for a flush
+        const runId = (
+          await db.pool.query("SELECT id FROM runs WHERE job_id = $1", [job.id])
+        ).rows[0].id;
+        seenWhileRunning = (
+          await fetch(`${api.url}/runs/${runId}/logs`).then((r) => r.json())
+        ).text;
+        return undefined;
+      },
+    });
+    await processJob(
+      { api: api2, executor, heartbeatMs: 50, logFlushMs: 40 },
+      job,
+    );
+    expect(seenWhileRunning).toContain("implement: running the agent");
   });
 });
 

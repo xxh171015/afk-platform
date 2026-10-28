@@ -4,7 +4,10 @@ import { exec } from "@afk/pipeline";
 // ticket branches (agent/*) and integration branches (spec/*). The platform never pushes main and has no code
 // that merges a PR (docs/specs/m1-platform.md「推送出口与检测」).
 
-const ALLOWED = /^refs\/heads\/(agent|spec)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+// refs/heads/agent/<name> or refs/heads/spec/<name>, where the name has no empty parts, no "..", does not end
+// in "/" or ".lock" (git refuses those anyway, but this exit does not rely on that).
+const ALLOWED =
+  /^refs\/heads\/(agent|spec)\/[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 
 export interface PushRequest {
   repoDir: string;
@@ -24,7 +27,26 @@ export function pushRef(
   request: PushRequest,
   options: PushOptions = {},
 ): PushResult {
-  if (!ALLOWED.test(request.target) || request.target.includes("..")) {
+  // An empty source would delete the remote branch: this exit never deletes.
+  if (
+    !request.source ||
+    request.source.startsWith("-") ||
+    request.source.includes(":")
+  ) {
+    throw new RangeError(
+      `refusing to push from ${JSON.stringify(request.source)}`,
+    );
+  }
+  if (request.remote !== undefined && request.remote !== "origin") {
+    throw new RangeError(
+      `refusing to push to remote ${request.remote}: only origin`,
+    );
+  }
+  if (
+    !ALLOWED.test(request.target) ||
+    request.target.includes("..") ||
+    request.target.endsWith(".lock")
+  ) {
     throw new RangeError(
       `refusing to push ${request.target}: only refs/heads/agent/* and refs/heads/spec/*`,
     );

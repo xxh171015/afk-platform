@@ -135,7 +135,7 @@ Spec 和 Ticket 的状态机照 design.md：Spec 的 draft → planned → runni
 
 - `merge` 是独立的阶段作业，带 `lock_key`。冲突或候选门禁失败时它结束、锁随租约释放，merge-fix 作为不带键的 agent 作业去跑，再排一个新的 `merge` 作业。
 - 推送集成分支前先调 `pre-push`（校验仍是当前持有者并续期），推送用 `--force-with-lease`，另有"agent 分支 head 已是集成分支祖先就当作已合并"的幂等检查。
-- 补 trailer 用临时 worktree 做 `rebase --exec`；Cursor 自带的 `Co-authored-by` trailer 保留，追溯只认 `Spec` / `Ticket` / `Run`。
+- 补 trailer 用 plumbing 逐个重写本次新增的 commits（同一棵树、同一作者、parent 映射到新 commit，不 rebase、不需要 worktree），所以 merge-fix 产生的 merge commit 和里面的冲突解决原样保留，从集成分支并进来的 commits 不动；Cursor 自带的 `Co-authored-by` trailer 保留，追溯只认 `Spec` / `Ticket` / `Run`。
 - review 只审查不改代码；它的 `suggestions` 记成 Finding（处理结果"进验收包"）。
 - 收尾 `finalize`：全部票 done 后对集成分支跑一次整体 review 和一次修复（`final-review`、`final-fix`，各一次），修复后过门禁，然后 `open-pr`。
 

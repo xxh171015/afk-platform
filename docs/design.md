@@ -567,7 +567,7 @@ sequenceDiagram
 | 推送 | 集成分支用 `--force-with-lease=spec/<slug>:<预期旧 SHA>`，被拒绝就重新 fetch 后重来。agent 分支在每个 agent 运行后由 worker 推送，用于备份和展示 |
 | 票分支 | `agent/<ticket-id>` 从集成分支切出（Sandcastle 的 `baseBranch`）。分支名固定，重试时从这个分支重新建 worktree，之前的 commits 不丢（分支是连续性的单位，不是 worktree） |
 | 候选门禁 | 在临时分支 `gate/<ticket-id>` 上起沙箱跑，跑完删除 |
-| commit trailer | 每次 agent 运行后，worker 给本次新增的 commits 补上 `Spec: S-12`、`Ticket: T-123`、`Run: R-456`（`git rebase --exec 'git commit --amend --no-edit --trailer …'`）。分支此时还没推送、只有 worker 在用，改写是安全的。Link 记改写后的 SHA，不记 Sandcastle 返回的原始 SHA |
+| commit trailer | 每次 agent 运行后，worker 给本次新增的 commits 补上 `Spec: S-12`、`Ticket: T-123`、`Run: R-456`（M1 实现改用 plumbing：对 `before..分支` 中不属于集成分支的 commits 逐个 `commit-tree` 重写，保留树、作者和 merge 结构；最初的 M0 做法是 `git rebase --exec 'git commit --amend --no-edit --trailer …'`，但 `--rebase-merges` 重建 merge 时会丢掉冲突解决）。分支此时还没推送、只有 worker 在用，改写是安全的。Link 记改写后的 SHA，不记 Sandcastle 返回的原始 SHA |
 | 清理 | 任务结束时按“槽位”一行处理槽位和 worktree；票 done 后分支保留；spec merged 或 cancelled 后删除远端和本地的 `spec/*`、`agent/*` |
 | 凭据 | git token 只在 worker 进程里，沙箱里的仓库没有可用的推送凭据 |
 

@@ -68,11 +68,8 @@ export function createWorkerApi(
         },
       });
       if (data) return data;
-      return holding(response.status) === "lost"
-        ? "lost"
-        : (() => {
-            throw new Error(`bundle failed: HTTP ${response.status}`);
-          })();
+      if (holding(response.status) === "lost") return "lost";
+      throw new Error(`bundle failed: HTTP ${response.status}`);
     },
     async complete(job, result) {
       const { params, body } = call(job);
