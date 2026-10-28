@@ -2,6 +2,20 @@ export { createPool } from "./db.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specTransition } from "./spec-state.ts";
 export type {
+  FixAttempt,
+  FixCounts,
+  FixKind,
+  RetryMode,
+  RetryPlan,
+} from "./ticket-fixes.ts";
+export {
+  FIX_KINDS,
+  MAX_AGENT_RUNS,
+  noFixes,
+  retryPlan,
+  tryFix,
+} from "./ticket-fixes.ts";
+export type {
   BlockedReason,
   TicketEvent,
   TicketState,
