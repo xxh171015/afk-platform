@@ -162,11 +162,15 @@ async function runStage(
   let replaced: string | undefined;
   if (bundle.job.stage === "implement" && bundle.ticket.restart) {
     const ref = `refs/heads/${agentRef(bundle)}`;
-    if (hasRef(mainDir, ref)) {
-      replaced = tip(mainDir, ref);
-      gitOrThrow(mainDir, ["update-ref", "-d", ref]);
+    // The lease is on what origin has, which the main clone may not have fetched.
+    const onOrigin = git(mainDir, ["ls-remote", "origin", ref])
+      .stdout.split("\t")[0]
+      ?.trim();
+    replaced =
+      onOrigin || (hasRef(mainDir, ref) ? tip(mainDir, ref) : undefined);
+    if (hasRef(mainDir, ref)) gitOrThrow(mainDir, ["update-ref", "-d", ref]);
+    if (replaced)
       context.log(`restart: dropped ${agentRef(bundle)} (was ${replaced})`);
-    }
   }
   bringBranches(slot, mainDir, [integration, agentRef(bundle)]);
   switch (bundle.job.stage) {

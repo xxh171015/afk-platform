@@ -1,6 +1,8 @@
 import {
   formatDisplayId,
   retryPlan,
+  type SpecState,
+  specTransition,
   type TicketState,
   ticketTransition,
 } from "@afk/shared";
@@ -65,6 +67,19 @@ export async function retryTicket(
     if (!ticket) return { status: "no-ticket" };
     const next = ticketTransition(ticket.state, { type: "retry" });
     if (!next.ok) return refused(next.reason);
+    if (ticket.blocked_reason === "upstream-cancelled") {
+      // Back to pending it would wait for a ticket that is gone, for ever.
+      const gone = await client.query<{ id: number }>(
+        `SELECT u.id FROM edges e JOIN tickets u ON u.id = e.from_ticket_id
+         WHERE e.to_ticket_id = $1 AND u.state = 'cancelled'`,
+        [ticketId],
+      );
+      if (gone.rows.length > 0) {
+        return refused(
+          `${formatDisplayId("ticket", ticketId)} waits for ${gone.rows.map((r) => formatDisplayId("ticket", r.id)).join(", ")}, which was cancelled: cancel this ticket too, or import a replacement`,
+        );
+      }
+    }
     const plan = retryPlan(mode === "continue" ? "resume" : "restart");
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, restart = $3
@@ -212,6 +227,14 @@ export async function cancelTicket(
           type: "block",
           reason: "upstream-cancelled",
         });
+        if (
+          !next.ok &&
+          state !== "blocked" &&
+          state !== "cancelled" &&
+          state !== "done"
+        ) {
+          outcome.skipped.push(display); // already under way: not ours to stop
+        }
         if (next.ok) {
           await client.query(
             "UPDATE tickets SET state = 'blocked', blocked_reason = 'upstream-cancelled' WHERE id = $1",
@@ -223,5 +246,37 @@ export async function cancelTicket(
     }
     await schedulePass(client, ticket.spec_id);
     return { status: "ok", ...outcome };
+  });
+}
+
+// A spec the platform paused (its agent time ran out) goes on after a person says how much more it may use.
+export async function resumeSpec(
+  pool: pg.Pool,
+  specId: number,
+  extraSeconds: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return inTransaction(pool, async (client) => {
+    const spec = await client.query<{ state: SpecState }>(
+      "SELECT state FROM specs WHERE id = $1",
+      [specId],
+    );
+    if (!spec.rows[0]) return { status: "no-ticket" };
+    await lockSpec(client, specId);
+    const current = await client.query<{ state: SpecState }>(
+      "SELECT state FROM specs WHERE id = $1",
+      [specId],
+    );
+    const next = specTransition(current.rows[0]?.state as SpecState, "resume");
+    if (!next.ok) return refused(next.reason);
+    await client.query(
+      "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
+      [specId, next.state, extraSeconds],
+    );
+    await schedulePass(client, specId);
+    const after = await client.query<{ state: SpecState }>(
+      "SELECT state FROM specs WHERE id = $1",
+      [specId],
+    );
+    return { status: "ok", state: after.rows[0]?.state as SpecState };
   });
 }

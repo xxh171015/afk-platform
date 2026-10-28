@@ -224,6 +224,23 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, specText(data));
     });
 
+  spec
+    .command("resume <spec>")
+    .description("let a paused spec go on, with more agent time")
+    .option(
+      "--extra-hours <n>",
+      "agent hours to add to the spec's budget (default 1)",
+      toInt,
+    )
+    .action(async (id: string, options) => {
+      const { data, response, error } = await api().POST("/specs/{id}/resume", {
+        params: { path: { id: specIdOf(id) } },
+        body: { extraSeconds: (options.extraHours ?? 1) * 3600 },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+
   const ticketCommands = program.command("ticket").description("tickets");
   ticketCommands
     .command("view <ticket>")

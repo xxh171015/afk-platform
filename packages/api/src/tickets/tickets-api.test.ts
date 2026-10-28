@@ -315,9 +315,38 @@ describe("cancel", () => {
     expect(
       (await call("POST", "/tickets/2/cancel", { cascade: false })).body,
     ).toMatchObject({ cancelled: ["T-2"], blocked: ["T-3"] });
+    // ticket 3 would wait for ticket 2, which is gone: a retry cannot help it
+    const retry = await call("POST", "/tickets/3/retry", { mode: "continue" });
+    expect(retry.status).toBe(409);
+    expect(retry.body.error).toMatch(/T-2, which was cancelled/);
+  });
+
+  it("says which downstream tickets it left alone when they are already under way", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await stage("implement", GAVE_UP);
+    await db.pool.query("UPDATE tickets SET state = 'running' WHERE id = 2"); // cannot normally happen: a stand-in
+    const result = await call("POST", "/tickets/1/cancel", { cascade: false });
+    expect(result.body).toEqual({
+      cancelled: ["T-1"],
+      blocked: [],
+      skipped: ["T-2"],
+    });
+  });
+
+  it("a ticket blocked by a cancelled upstream has no brief: no run is to blame", async () => {
+    await runningSpec(chain());
+    await stage("implement", GAVE_UP);
+    await call("POST", "/tickets/1/cancel", { cascade: false });
+    const view = await call("GET", "/tickets/2");
+    expect(view.body.ticket).toMatchObject({
+      state: "blocked",
+      blockedReason: "upstream-cancelled",
+      brief: null,
+    });
+    const queue = await call("GET", "/blocked");
     expect(
-      (await call("POST", "/tickets/3/retry", { mode: "continue" })).body.state,
-    ).toBe("pending"); // waits for a ticket that is gone
+      queue.body.tickets.find((t: Json) => t.displayId === "T-2").brief,
+    ).toBeNull();
   });
 
   it("a pending ticket can be cancelled before it ever started", async () => {
@@ -362,6 +391,66 @@ describe("cancel", () => {
       blocked: [],
       skipped: ["T-2"],
     });
+  });
+});
+
+describe("resuming a paused spec", () => {
+  async function pausedSpec() {
+    const specId = await runningSpec([ticket("a"), ticket("b")]);
+    await stage("implement", GAVE_UP);
+    await stage("implement", GAVE_UP);
+    await db.pool.query(
+      "INSERT INTO runs (spec_id, repo_id, stage, duration_ms) VALUES ($1, 1, 'implement', $2)",
+      [specId, 12 * 3600 * 1000],
+    );
+    await call("POST", "/tickets/2/retry", { mode: "continue" }); // the scheduler pauses the spec
+    expect((await db.pool.query("SELECT state FROM specs")).rows[0].state).toBe(
+      "paused",
+    );
+    return specId;
+  }
+
+  it("goes on with the extra agent time it was given, and the waiting ticket starts", async () => {
+    const specId = await pausedSpec();
+    const result = await call("POST", `/specs/${specId}/resume`, {
+      extraSeconds: 3600,
+    });
+    expect(result).toMatchObject({ status: 200, body: { state: "running" } });
+    const spec = await db.pool.query(
+      "SELECT state, pause_reason, budget_extra_seconds FROM specs",
+    );
+    expect(spec.rows[0]).toEqual({
+      state: "running",
+      pause_reason: null,
+      budget_extra_seconds: 3600,
+    });
+    expect((await states())[1]).toBe("2:queued"); // the retried ticket was waiting for exactly this
+    expect((await call("GET", "/blocked")).body.specs).toEqual([]);
+  });
+
+  it("pauses again straight away when the extra time is not enough", async () => {
+    const specId = await pausedSpec();
+    await db.pool.query("UPDATE runs SET duration_ms = $1", [13 * 3600 * 1000]); // an hour over, plus
+    // the extra hour does not cover what was used over the limit
+    const result = await call("POST", `/specs/${specId}/resume`, {
+      extraSeconds: 60,
+    });
+    expect(result.body.state).toBe("paused");
+  });
+
+  it("only a paused spec can be resumed", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    expect(
+      (await call("POST", `/specs/${specId}/resume`, { extraSeconds: 60 }))
+        .status,
+    ).toBe(409);
+    expect(
+      (await call("POST", "/specs/99/resume", { extraSeconds: 60 })).status,
+    ).toBe(404);
+    expect(
+      (await call("POST", `/specs/${specId}/resume`, { extraSeconds: 0 }))
+        .status,
+    ).toBe(400);
   });
 });
 

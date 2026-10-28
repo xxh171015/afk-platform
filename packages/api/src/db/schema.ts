@@ -88,6 +88,8 @@ export const specs = pgTable(
     importWarnings: jsonb("import_warnings").notNull().default([]),
     // Why the platform paused the spec, shown in the blocked queue.
     pauseReason: text("pause_reason"),
+    // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
+    budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [

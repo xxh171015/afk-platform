@@ -4,6 +4,7 @@ import type { AppContext } from "../app.ts";
 import {
   approveProtected,
   cancelTicket,
+  resumeSpec,
   retryTicket,
 } from "../tickets/actions.ts";
 import { blockedQueue, specView, ticketView } from "../tickets/views.ts";
@@ -215,6 +216,33 @@ const cancelRoute = createRoute({
   },
 });
 
+const resumeRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/resume",
+  request: {
+    params: z.object({ id: PathId }),
+    body: {
+      content: json(
+        z.object({
+          extraSeconds: z
+            .number()
+            .int()
+            .min(1)
+            .max(7 * 24 * 3600),
+        }),
+      ),
+    },
+  },
+  responses: {
+    200: reply(
+      "Running again, with the extra agent time",
+      z.object({ state: z.enum(SPEC_STATES) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not paused", ErrorReply),
+  },
+});
+
 export function registerTicketRoutes(
   app: OpenAPIHono,
   context: AppContext,
@@ -273,5 +301,18 @@ export function registerTicketRoutes(
       },
       200,
     );
+  });
+
+  app.openapi(resumeRoute, async (c) => {
+    const result = await resumeSpec(
+      pool,
+      c.req.valid("param").id,
+      c.req.valid("json").extraSeconds,
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
   });
 }

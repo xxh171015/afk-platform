@@ -137,8 +137,12 @@ export async function schedulePass(
   specId: number,
 ): Promise<ScheduleResult> {
   const none: ScheduleResult = { enqueued: [], paused: false };
-  const spec = await client.query<{ state: SpecState; project_id: number }>(
-    "SELECT state, project_id FROM specs WHERE id = $1",
+  const spec = await client.query<{
+    state: SpecState;
+    project_id: number;
+    budget_extra_seconds: number;
+  }>(
+    "SELECT state, project_id, budget_extra_seconds FROM specs WHERE id = $1",
     [specId],
   );
   const row = spec.rows[0];
@@ -156,7 +160,10 @@ export async function schedulePass(
     ...stored,
   });
 
-  if ((await agentSecondsUsed(client, specId)) >= limits.specAgentSeconds) {
+  if (
+    (await agentSecondsUsed(client, specId)) >=
+    limits.specAgentSeconds + row.budget_extra_seconds
+  ) {
     const paused = specTransition(row.state, "pause");
     if (!paused.ok) throw new Error(paused.reason);
     await client.query(

@@ -70,7 +70,11 @@ async function summaries(
       state: row.state as TicketState,
       blockedReason: (row.blocked_reason as string | null) ?? null,
       repo: row.role as string,
-      brief: row.state === "blocked" ? await briefFor(pool, row.id) : null,
+      // an upstream cancel is not the fault of any run, so there is no brief to show
+      brief:
+        row.state === "blocked" && row.blocked_reason !== "upstream-cancelled"
+          ? await briefFor(pool, row.id)
+          : null,
     })),
   );
 }

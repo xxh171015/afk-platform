@@ -338,6 +338,30 @@ describe("plat", () => {
     ).toMatch(/not allowed in queued/);
   });
 
+  it("resumes a paused spec with more agent time", async () => {
+    await blockedContract();
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached'",
+    );
+    expect((await plat("blocked")).stdout).toContain(
+      "S-1  paused  Order export: the agent time limit",
+    );
+    expect((await plat("spec", "show", "S-1")).stdout).toContain(
+      "paused: the agent time limit",
+    );
+    const resumed = await plat("spec", "resume", "S-1", "--extra-hours", "2");
+    expect(resumed).toEqual({
+      code: 0,
+      stdout: "S-1 is running\n",
+      stderr: "",
+    });
+    const extra = await db.pool.query("SELECT budget_extra_seconds FROM specs");
+    expect(extra.rows[0].budget_extra_seconds).toBe(7200);
+    expect((await plat("spec", "resume", "S-1")).stderr).toMatch(
+      /not allowed in running/,
+    );
+  });
+
   it("cancels with and without cascade", async () => {
     await blockedContract();
     const plain = await plat("ticket", "cancel", "T-1");
