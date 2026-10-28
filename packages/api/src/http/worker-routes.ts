@@ -121,6 +121,7 @@ const Bundle = z.object({
     contentVersion: z.number().int(),
     fixCounts: z.record(z.string(), z.number().int()),
     reviewed: z.boolean(),
+    restart: z.boolean(),
   }),
   spec: z.object({
     id: z.number().int(),

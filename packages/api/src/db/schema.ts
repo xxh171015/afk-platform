@@ -86,6 +86,8 @@ export const specs = pgTable(
     integrationBranches: jsonb("integration_branches").notNull().default([]),
     // Warnings from the last tickets import (module overlap), shown when the plan is confirmed.
     importWarnings: jsonb("import_warnings").notNull().default([]),
+    // Why the platform paused the spec, shown in the blocked queue.
+    pauseReason: text("pause_reason"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -126,6 +128,8 @@ export const tickets = pgTable(
       .notNull()
       .default({ "gate-fix": 0, "review-fix": 0, "merge-fix": 0 }),
     reviewed: boolean("reviewed").notNull().default(false),
+    // Set by a restart-retry: the next implement run starts from the integration branch, not from the old branch.
+    restart: boolean("restart").notNull().default(false),
     contractSha: text("contract_sha"),
     createdAt: createdAt(),
   },

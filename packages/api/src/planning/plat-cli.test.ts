@@ -246,6 +246,115 @@ describe("plat", () => {
     );
   });
 
+  // T-1 (the contract ticket) is claimed and its agent gives up: blocked, with a brief.
+  async function blockedContract() {
+    await register();
+    files["tickets.yaml"] = TICKETS_YAML;
+    await plat("tickets", "import", "S-1", "tickets.yaml");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    await worker.complete(job?.id as number, job?.attempt as number, {
+      stage: "implement",
+      outcome: "agent-gave-up",
+      run: {
+        output: {
+          status: "cannot-proceed",
+          blockedReason: "agent-gave-up",
+          detail: "needs a decision",
+        },
+      },
+    });
+    return worker;
+  }
+
+  it("lists what waits for a person, with the brief and where to read the log", async () => {
+    await blockedContract();
+    const text = await plat("blocked");
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "T-1  S-1  blocked (agent-gave-up)  Define the export endpoint",
+    );
+    expect(text.stdout).toContain(
+      "implement ended agent-gave-up in R-1: needs a decision",
+    );
+    expect(text.stdout).toContain("plat run logs R-1");
+    const json = JSON.parse((await plat("--json", "blocked")).stdout);
+    expect(json.tickets[0]).toMatchObject({
+      displayId: "T-1",
+      blockedReason: "agent-gave-up",
+      brief: { stage: "implement" },
+    });
+    expect(json.specs).toEqual([]);
+  });
+
+  it("says so when nothing waits", async () => {
+    await register();
+    expect((await plat("blocked")).stdout).toBe("nothing is waiting for you\n");
+  });
+
+  it("shows a ticket and a spec", async () => {
+    await blockedContract();
+    const ticket = await plat("ticket", "view", "T-1");
+    expect(ticket.stdout).toContain(
+      "T-1  blocked (agent-gave-up)  Define the export endpoint",
+    );
+    expect(ticket.stdout).toContain("openapi.yaml has GET /orders/export");
+    expect(ticket.stdout).toContain("R-1  implement #1  agent-gave-up");
+    expect(ticket.stdout).toContain("blocks:");
+    expect(
+      JSON.parse((await plat("--json", "ticket", "view", "T-1")).stdout).ticket
+        .displayId,
+    ).toBe("T-1");
+
+    const spec = await plat("spec", "show", "S-1");
+    expect(spec.stdout).toContain("S-1  running  Order export");
+    expect(spec.stdout).toContain("T-1  blocked (agent-gave-up)");
+    expect(spec.stdout).toContain("T-1 -> T-2 (blocks)");
+    expect(spec.stdout).toContain("warning");
+    expect((await plat("ticket", "view", "S-1")).stderr).toMatch(
+      /not a ticket id/,
+    );
+    expect((await plat("ticket", "view", "T-99")).stderr).toMatch(
+      /no such ticket/,
+    );
+    expect((await plat("spec", "show", "S-99")).stderr).toMatch(/no such spec/);
+  });
+
+  it("retries, cancels and approves, and refuses what does not apply", async () => {
+    await blockedContract();
+    expect((await plat("ticket", "approve-protected", "T-1")).stderr).toMatch(
+      /protected-path-changed/,
+    );
+    expect(
+      (await plat("ticket", "retry", "T-1", "--mode", "sometimes")).stderr,
+    ).toMatch(/--mode must be/);
+    expect((await plat("ticket", "retry", "T-1")).code).toBe(1); // --mode is required
+
+    const retried = await plat("ticket", "retry", "T-1", "--mode", "restart");
+    expect(retried).toEqual({ code: 0, stdout: "T-1 is queued\n", stderr: "" });
+    expect(
+      (await plat("ticket", "retry", "T-1", "--mode", "continue")).stderr,
+    ).toMatch(/not allowed in queued/);
+  });
+
+  it("cancels with and without cascade", async () => {
+    await blockedContract();
+    const plain = await plat("ticket", "cancel", "T-1");
+    expect(plain.stdout).toContain("cancelled: T-1");
+    expect(plain.stdout).toContain(
+      "blocked (upstream-cancelled): T-2, T-3, T-4",
+    );
+    // the ones it blocked can be cancelled in turn
+    const next = JSON.parse(
+      (await plat("--json", "ticket", "cancel", "T-2", "--cascade")).stdout,
+    );
+    expect(next).toEqual({ cancelled: ["T-2"], blocked: [], skipped: [] });
+    expect((await plat("ticket", "cancel", "T-2")).stderr).toMatch(
+      /only a pending or blocked ticket/,
+    );
+  });
+
   it("prints one JSON document with --json", async () => {
     await register();
     files["tickets.yaml"] = TICKETS_YAML;

@@ -161,6 +161,11 @@ export async function recordStageResult(
   const valid =
     parsed.success && parsed.data.stage === stage ? parsed.data : undefined;
   await writeFacts(client, ticket, job, stage, valid, result);
+  // The restart (if one was asked for) has been carried out by this implement run, whatever came of it.
+  if (stage === "implement")
+    await client.query("UPDATE tickets SET restart = false WHERE id = $1", [
+      ticket.id,
+    ]);
 
   if (ticket.state === "queued") {
     await client.query("UPDATE tickets SET state = 'running' WHERE id = $1", [

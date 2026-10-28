@@ -157,13 +157,24 @@ async function runStage(
 ): Promise<StageOutcomeBody> {
   const { bundle } = context;
   const integration = bundle.integrationBranch as string;
+  // A restart-retry: the old ticket branch goes, and the implement run starts again from the integration branch.
+  // What origin still has under that name is replaced at the push, under a lease on the tip it had.
+  let replaced: string | undefined;
+  if (bundle.job.stage === "implement" && bundle.ticket.restart) {
+    const ref = `refs/heads/${agentRef(bundle)}`;
+    if (hasRef(mainDir, ref)) {
+      replaced = tip(mainDir, ref);
+      gitOrThrow(mainDir, ["update-ref", "-d", ref]);
+      context.log(`restart: dropped ${agentRef(bundle)} (was ${replaced})`);
+    }
+  }
   bringBranches(slot, mainDir, [integration, agentRef(bundle)]);
   switch (bundle.job.stage) {
     case "implement":
     case "gate-fix":
     case "review-fix":
     case "merge-fix":
-      return agentChange(deps, context, mainDir, slot);
+      return agentChange(deps, context, mainDir, slot, replaced);
     case "review":
       return review(deps, context, mainDir, slot);
     case "gate":
@@ -215,6 +226,7 @@ async function agentChange(
   context: StageContext,
   mainDir: string,
   slot: Slot,
+  replaced?: string, // the tip of the ticket branch that a restart threw away
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const stage = bundle.job.stage as
@@ -295,6 +307,7 @@ async function agentChange(
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
       target: `refs/heads/${agent}`,
+      ...(replaced ? { expectedOld: replaced } : {}),
     });
     if (!pushed.ok)
       throw new InfrastructureError(`push failed: ${pushed.error}`);

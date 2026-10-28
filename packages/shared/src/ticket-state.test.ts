@@ -39,6 +39,25 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     });
   });
 
+  it("approving protected path changes sends a blocked ticket on to running, and only a blocked one", () => {
+    expect(ticketTransition("blocked", { type: "approve-protected" })).toEqual({
+      ok: true,
+      state: "running",
+    });
+    for (const from of [
+      "pending",
+      "queued",
+      "running",
+      "merging",
+      "done",
+      "cancelled",
+    ] as const) {
+      expect(ticketTransition(from, { type: "approve-protected" }).ok).toBe(
+        false,
+      );
+    }
+  });
+
   it("a person retrying sends blocked back to pending", () => {
     expect(ticketTransition("blocked", { type: "retry" })).toEqual({
       ok: true,

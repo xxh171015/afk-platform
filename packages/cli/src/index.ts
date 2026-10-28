@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { type ApiClient, createApiClient, parseDisplayId } from "@afk/shared";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { parse as parseYaml } from "yaml";
+import { blockedText, specText, ticketText } from "./format.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
@@ -210,6 +211,109 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, lines.join("\n"));
     });
 
+  spec
+    .command("show <spec>")
+    .description(
+      "a spec with its tickets, blocked briefs, dependency edges and import warnings",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().GET("/specs/{id}", {
+        params: { path: { id: specIdOf(id) } },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, specText(data));
+    });
+
+  const ticketCommands = program.command("ticket").description("tickets");
+  ticketCommands
+    .command("view <ticket>")
+    .description(
+      "a ticket with its runs, findings and, when blocked, its brief",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().GET("/tickets/{id}", {
+        params: { path: { id: ticketIdOf(id) } },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, ticketText(data));
+    });
+  ticketCommands
+    .command("retry <ticket>")
+    .description("try a blocked ticket again")
+    .requiredOption(
+      "--mode <mode>",
+      "continue (keep the branch) or restart (start from the integration branch)",
+    )
+    .action(async (id: string, options) => {
+      if (options.mode !== "continue" && options.mode !== "restart") {
+        throw new Failure("--mode must be continue or restart");
+      }
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/retry",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+          body: { mode: options.mode },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+  ticketCommands
+    .command("approve-protected <ticket>")
+    .description(
+      "accept the protected path changes of a ticket blocked by protected-path-changed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/approve-protected",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `approved: ${data.approved.join(", ")}; ${id} goes on from the gate`,
+      );
+    });
+  ticketCommands
+    .command("cancel <ticket>")
+    .description(
+      "cancel a pending or blocked ticket; the tickets behind it go to blocked unless --cascade",
+    )
+    .option("--cascade", "cancel everything downstream too")
+    .action(async (id: string, options) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/cancel",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+          body: { cascade: Boolean(options.cascade) },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      const lines = [
+        `cancelled: ${data.cancelled.join(", ")}`,
+        ...(data.blocked.length
+          ? [`blocked (upstream-cancelled): ${data.blocked.join(", ")}`]
+          : []),
+        ...(data.skipped.length
+          ? [`left alone, already under way: ${data.skipped.join(", ")}`]
+          : []),
+      ];
+      print(data, lines.join("\n"));
+    });
+
+  program
+    .command("blocked")
+    .description(
+      "everything waiting for you: blocked tickets with their briefs, and paused specs",
+    )
+    .action(async () => {
+      const { data, response, error } = await api().GET("/blocked");
+      if (!data) throw failureFrom(response, error);
+      print(data, blockedText(data));
+    });
+
   program
     .command("run")
     .description("runs")
@@ -270,6 +374,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     );
     return 1;
   }
+}
+
+function ticketIdOf(text: string): number {
+  const parsed = parseDisplayId(text);
+  if (parsed?.kind !== "ticket") {
+    throw new Failure(`${text} is not a ticket id like T-123`);
+  }
+  return parsed.id;
 }
 
 function specIdOf(text: string): number {

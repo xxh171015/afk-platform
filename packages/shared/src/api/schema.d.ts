@@ -686,6 +686,7 @@ export interface paths {
                   [key: string]: number;
                 };
                 reviewed: boolean;
+                restart: boolean;
               };
               spec: {
                 id: number;
@@ -949,6 +950,533 @@ export interface paths {
     };
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The ticket, its runs, findings and gate results */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              ticket: {
+                id: number;
+                displayId: string;
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                type: string;
+                /** @enum {string} */
+                state:
+                  | "pending"
+                  | "queued"
+                  | "running"
+                  | "merging"
+                  | "done"
+                  | "blocked"
+                  | "cancelled";
+                blockedReason: string | null;
+                repo: string;
+                brief: {
+                  run: {
+                    id: number;
+                    displayId: string;
+                  };
+                  stage: string;
+                  result: string | null;
+                  output?: unknown;
+                  logPath: string;
+                } | null;
+                body: string;
+                acceptanceCriteria: string[];
+                modules: string[];
+                allowedProtectedPaths: string[];
+                contentVersion: number;
+                contractSha: string | null;
+                fixCounts: {
+                  [key: string]: number;
+                };
+                reviewed: boolean;
+              };
+              upstream: {
+                id: number;
+                displayId: string;
+                kind: string;
+                /** @enum {string} */
+                state:
+                  | "pending"
+                  | "queued"
+                  | "running"
+                  | "merging"
+                  | "done"
+                  | "blocked"
+                  | "cancelled";
+              }[];
+              downstream: {
+                id: number;
+                displayId: string;
+                kind: string;
+                /** @enum {string} */
+                state:
+                  | "pending"
+                  | "queued"
+                  | "running"
+                  | "merging"
+                  | "done"
+                  | "blocked"
+                  | "cancelled";
+              }[];
+              runs: {
+                id: number;
+                displayId: string;
+                stage: string;
+                attempt: number;
+                result: string | null;
+                durationMs: number | null;
+                startedAt: string | null;
+                finishedAt: string | null;
+              }[];
+              findings: {
+                id: number;
+                runId: number;
+                kind: string;
+                body: string;
+                resolution: string;
+              }[];
+              gateResults: {
+                commitSha: string;
+                configSha: string;
+                commandResults: unknown[];
+                testsTotal: number | null;
+                testsSkipped: number | null;
+              }[];
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The spec with its tickets and dependency edges */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              spec: {
+                id: number;
+                displayId: string;
+                slug: string;
+                title: string;
+                type: string;
+                body: string;
+                /** @enum {string} */
+                state:
+                  | "draft"
+                  | "planned"
+                  | "running"
+                  | "finalizing"
+                  | "awaiting-review"
+                  | "partially-merged"
+                  | "reworking"
+                  | "merged"
+                  | "paused"
+                  | "cancelled";
+                pauseReason: string | null;
+                integrationBranches: {
+                  repoId: number;
+                  branch: string;
+                }[];
+                warnings: unknown[];
+              };
+              tickets: {
+                id: number;
+                displayId: string;
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                type: string;
+                /** @enum {string} */
+                state:
+                  | "pending"
+                  | "queued"
+                  | "running"
+                  | "merging"
+                  | "done"
+                  | "blocked"
+                  | "cancelled";
+                blockedReason: string | null;
+                repo: string;
+                brief: {
+                  run: {
+                    id: number;
+                    displayId: string;
+                  };
+                  stage: string;
+                  result: string | null;
+                  output?: unknown;
+                  logPath: string;
+                } | null;
+              }[];
+              edges: {
+                from: string;
+                to: string;
+                kind: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/blocked": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Blocked tickets and paused specs, everything waiting for a person */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              tickets: {
+                id: number;
+                displayId: string;
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                type: string;
+                /** @enum {string} */
+                state:
+                  | "pending"
+                  | "queued"
+                  | "running"
+                  | "merging"
+                  | "done"
+                  | "blocked"
+                  | "cancelled";
+                blockedReason: string | null;
+                repo: string;
+                brief: {
+                  run: {
+                    id: number;
+                    displayId: string;
+                  };
+                  stage: string;
+                  result: string | null;
+                  output?: unknown;
+                  logPath: string;
+                } | null;
+              }[];
+              specs: {
+                id: number;
+                displayId: string;
+                title: string;
+                reason: string;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            /** @enum {string} */
+            mode: "continue" | "restart";
+          };
+        };
+      };
+      responses: {
+        /** @description Back to pending (or already queued again) */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "pending"
+                | "queued"
+                | "running"
+                | "merging"
+                | "done"
+                | "blocked"
+                | "cancelled";
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The ticket is not blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/approve-protected": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the ticket goes on from the gate */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              approved: string[];
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The ticket is not blocked by protected-path-changed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            /** @default false */
+            cascade?: boolean;
+          };
+        };
+      };
+      responses: {
+        /** @description Cancelled */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              cancelled: string[];
+              blocked: string[];
+              skipped: string[];
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Only a pending or blocked ticket can be cancelled */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;

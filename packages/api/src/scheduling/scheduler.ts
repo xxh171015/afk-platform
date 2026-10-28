@@ -159,10 +159,10 @@ export async function schedulePass(
   if ((await agentSecondsUsed(client, specId)) >= limits.specAgentSeconds) {
     const paused = specTransition(row.state, "pause");
     if (!paused.ok) throw new Error(paused.reason);
-    await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
-      specId,
-      paused.state,
-    ]);
+    await client.query(
+      "UPDATE specs SET state = $2, pause_reason = $3 WHERE id = $1",
+      [specId, paused.state, "the agent time limit of the spec was reached"],
+    );
     return { enqueued: [], paused: true };
   }
 

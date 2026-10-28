@@ -2,6 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import type pg from "pg";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
+import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
 import { defaultLogDir, LogStore } from "./logs/log-store.ts";
 
@@ -33,5 +34,6 @@ export function createApp(options: AppOptions): OpenAPIHono {
   registerPlanningRoutes(app, context);
   registerWorkerRoutes(app, context);
   registerLogRoutes(app, context);
+  registerTicketRoutes(app, context);
   return app;
 }

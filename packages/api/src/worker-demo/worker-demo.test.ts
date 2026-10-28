@@ -431,6 +431,147 @@ describe("failures of the worker's own", () => {
   });
 });
 
+describe("a person's decisions about a blocked ticket", () => {
+  const work = (over?: Parameters<typeof deps>[0]) =>
+    runWorker({
+      api: workerFor(),
+      executor: deps(over),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+
+  it("restart starts the ticket again from the integration branch and replaces the old branch", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementations = 0;
+    const script: Script = (ctx): FakeAgentStep | undefined => {
+      if (ctx.stage === "implement") {
+        implementations += 1;
+        return implementations === 1
+          ? {
+              files: { BROKEN: "x\n", "OLD.txt": "old\n" },
+              message: "old work",
+              output: DONE,
+            }
+          : {
+              files: { "src/new.ts": "export {};\n" },
+              message: "new work",
+              output: DONE,
+            };
+      }
+      if (ctx.stage === "gate-fix")
+        return {
+          files: { "STILL.txt": "s\n" },
+          message: "a fix that fixes nothing",
+          output: DONE,
+        };
+      return undefined;
+    };
+    await work({ script });
+    expect(await stateOf()).toEqual(["1:blocked/gate-failed"]);
+    expect(gitOut(origin, ["log", "--format=%s", "main..agent/T-1"])).toContain(
+      "old work",
+    );
+
+    expect((await post("/tickets/1/retry", { mode: "restart" })).status).toBe(
+      200,
+    );
+    await work({ script });
+    expect(await stateOf()).toEqual(["1:done"]);
+    // the branch on origin is the new attempt only: the old commits are not in it, and not in the integration branch
+    expect(gitOut(origin, ["log", "--format=%s", "main..agent/T-1"])).toBe(
+      "new work",
+    );
+    for (const gone of ["OLD.txt", "STILL.txt", "BROKEN"]) {
+      expect(
+        git(origin, ["cat-file", "-e", `spec/order-export:${gone}`]).code,
+      ).not.toBe(0);
+    }
+    expect(gitOut(origin, ["show", "spec/order-export:src/new.ts"])).toBe(
+      "export {};",
+    );
+  });
+
+  it("continue keeps the branch, so the agent carries on from its earlier commits", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementations = 0;
+    const script: Script = (ctx): FakeAgentStep | undefined => {
+      if (ctx.stage === "implement") {
+        implementations += 1;
+        if (implementations === 1) {
+          return {
+            files: { "src/part1.ts": "1\n" },
+            message: "part one",
+            output: {
+              status: "cannot-proceed",
+              blockedReason: "agent-gave-up",
+              detail: "stuck",
+            },
+          };
+        }
+        // the second run finds the first run's commit in its branch? it was never published, so it starts clean
+        return {
+          files: { "src/part2.ts": "2\n" },
+          message: "part two",
+          output: DONE,
+        };
+      }
+      return undefined;
+    };
+    await work({ script });
+    expect(await stateOf()).toEqual(["1:blocked/agent-gave-up"]);
+    expect((await post("/tickets/1/retry", { mode: "continue" })).status).toBe(
+      200,
+    );
+    await work({ script });
+    expect(await stateOf()).toEqual(["1:done"]);
+  });
+
+  it("approving protected paths lets the same work through the gate and on to done", async () => {
+    await confirmedSpec([ticket("a")]);
+    const script: Script = (ctx) =>
+      ctx.stage === "implement"
+        ? { files: { ".github/workflows/ci.yml": "on: push\n" }, output: DONE }
+        : undefined;
+    await work({ script });
+    expect(await stateOf()).toEqual(["1:blocked/protected-path-changed"]);
+
+    expect((await post("/tickets/1/approve-protected")).status).toBe(200);
+    await work({ script });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(
+      gitOut(origin, ["show", "spec/order-export:.github/workflows/ci.yml"]),
+    ).toBe("on: push");
+    // the agent was not asked again: one implement run
+    const stages = await db.pool.query(
+      "SELECT stage FROM runs WHERE stage = 'implement'",
+    );
+    expect(stages.rows).toHaveLength(1);
+  });
+
+  it("cancelling a blocked ticket leaves the ones behind it blocked until a person decides", async () => {
+    await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await work({
+      script: (ctx) =>
+        ctx.stage === "implement"
+          ? {
+              output: {
+                status: "cannot-proceed",
+                blockedReason: "agent-gave-up",
+                detail: "no",
+              },
+            }
+          : undefined,
+    });
+    expect((await post("/tickets/1/cancel", { cascade: false })).status).toBe(
+      200,
+    );
+    expect(await stateOf()).toEqual([
+      "1:cancelled",
+      "2:blocked/upstream-cancelled",
+    ]);
+  });
+});
+
 describe("the merge stage", () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);

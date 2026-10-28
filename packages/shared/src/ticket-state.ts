@@ -32,6 +32,8 @@ export type TicketEvent =
   | { type: "merge-fix-needed" }
   | { type: "block"; reason: BlockedReason }
   | { type: "retry" }
+  // A person accepts the protected path changes of a blocked ticket: it goes on from the gate.
+  | { type: "approve-protected" }
   | { type: "cancel" };
 
 type PlainState = Exclude<TicketState, "blocked">;
@@ -47,7 +49,11 @@ const TRANSITIONS: Partial<
   pending: { enqueue: "queued", cancel: "cancelled" },
   queued: { claim: "running" },
   running: { "checks-passed": "merging" },
-  blocked: { retry: "pending", cancel: "cancelled" },
+  blocked: {
+    retry: "pending",
+    "approve-protected": "running",
+    cancel: "cancelled",
+  },
   merging: { "merge-succeeded": "done", "merge-fix-needed": "running" },
 };
 

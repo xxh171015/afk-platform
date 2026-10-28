@@ -20,6 +20,7 @@ export function bundleFor(
       contentVersion: 1,
       fixCounts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
       reviewed: false,
+      restart: false,
     },
     spec: {
       id: 12,

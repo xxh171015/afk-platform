@@ -22,6 +22,8 @@ export interface Bundle {
     contentVersion: number;
     fixCounts: Record<string, number>;
     reviewed: boolean;
+    // A restart-retry: the implement run starts from the integration branch, not from the old ticket branch.
+    restart: boolean;
   };
   spec: {
     id: number;
@@ -52,7 +54,7 @@ export async function buildBundle(
 
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.title, t.body, t.acceptance_criteria, t.modules, t.state, t.content_version,
-            t.fix_counts, t.reviewed, t.allowed_protected_paths,
+            t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths,
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
             s.integration_branches,
             r.id AS repo_id, r.role, r.url, r.default_branch,
@@ -120,6 +122,7 @@ export async function buildBundle(
       contentVersion: row.content_version,
       fixCounts: row.fix_counts,
       reviewed: row.reviewed,
+      restart: row.restart,
     },
     spec: {
       id: row.spec_id,

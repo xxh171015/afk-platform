@@ -1042,6 +1042,9 @@
                         },
                         "reviewed": {
                           "type": "boolean"
+                        },
+                        "restart": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -1055,7 +1058,8 @@
                         "state",
                         "contentVersion",
                         "fixCounts",
-                        "reviewed"
+                        "reviewed",
+                        "restart"
                       ]
                     },
                     "spec": {
@@ -1479,6 +1483,949 @@
           },
           "404": {
             "description": "No such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ticket, its runs, findings and gate results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ticket": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "specId": {
+                          "type": "integer"
+                        },
+                        "specDisplayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "queued",
+                            "running",
+                            "merging",
+                            "done",
+                            "blocked",
+                            "cancelled"
+                          ]
+                        },
+                        "blockedReason": {
+                          "type": ["string", "null"]
+                        },
+                        "repo": {
+                          "type": "string"
+                        },
+                        "brief": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "run": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "displayId"]
+                            },
+                            "stage": {
+                              "type": "string"
+                            },
+                            "result": {
+                              "type": ["string", "null"]
+                            },
+                            "output": {},
+                            "logPath": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["run", "stage", "result", "logPath"]
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "acceptanceCriteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "modules": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowedProtectedPaths": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "contentVersion": {
+                          "type": "integer"
+                        },
+                        "contractSha": {
+                          "type": ["string", "null"]
+                        },
+                        "fixCounts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer"
+                          }
+                        },
+                        "reviewed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "specId",
+                        "specDisplayId",
+                        "title",
+                        "type",
+                        "state",
+                        "blockedReason",
+                        "repo",
+                        "brief",
+                        "body",
+                        "acceptanceCriteria",
+                        "modules",
+                        "allowedProtectedPaths",
+                        "contentVersion",
+                        "contractSha",
+                        "fixCounts",
+                        "reviewed"
+                      ]
+                    },
+                    "upstream": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          }
+                        },
+                        "required": ["id", "displayId", "kind", "state"]
+                      }
+                    },
+                    "downstream": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          }
+                        },
+                        "required": ["id", "displayId", "kind", "state"]
+                      }
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "attempt": {
+                            "type": "integer"
+                          },
+                          "result": {
+                            "type": ["string", "null"]
+                          },
+                          "durationMs": {
+                            "type": ["integer", "null"]
+                          },
+                          "startedAt": {
+                            "type": ["string", "null"]
+                          },
+                          "finishedAt": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "stage",
+                          "attempt",
+                          "result",
+                          "durationMs",
+                          "startedAt",
+                          "finishedAt"
+                        ]
+                      }
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "runId": {
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "resolution": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "runId",
+                          "kind",
+                          "body",
+                          "resolution"
+                        ]
+                      }
+                    },
+                    "gateResults": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "commitSha": {
+                            "type": "string"
+                          },
+                          "configSha": {
+                            "type": "string"
+                          },
+                          "commandResults": {
+                            "type": "array",
+                            "items": {}
+                          },
+                          "testsTotal": {
+                            "type": ["integer", "null"]
+                          },
+                          "testsSkipped": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "commitSha",
+                          "configSha",
+                          "commandResults",
+                          "testsTotal",
+                          "testsSkipped"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "ticket",
+                    "upstream",
+                    "downstream",
+                    "runs",
+                    "findings",
+                    "gateResults"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spec with its tickets and dependency edges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "planned",
+                            "running",
+                            "finalizing",
+                            "awaiting-review",
+                            "partially-merged",
+                            "reworking",
+                            "merged",
+                            "paused",
+                            "cancelled"
+                          ]
+                        },
+                        "pauseReason": {
+                          "type": ["string", "null"]
+                        },
+                        "integrationBranches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoId": {
+                                "type": "integer"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["repoId", "branch"]
+                          }
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {}
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "slug",
+                        "title",
+                        "type",
+                        "body",
+                        "state",
+                        "pauseReason",
+                        "integrationBranches",
+                        "warnings"
+                      ]
+                    },
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "type",
+                          "state",
+                          "blockedReason",
+                          "repo",
+                          "brief"
+                        ]
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["from", "to", "kind"]
+                      }
+                    }
+                  },
+                  "required": ["spec", "tickets", "edges"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/blocked": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Blocked tickets and paused specs, everything waiting for a person",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "type",
+                          "state",
+                          "blockedReason",
+                          "repo",
+                          "brief"
+                        ]
+                      }
+                    },
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "displayId", "title", "reason"]
+                      }
+                    }
+                  },
+                  "required": ["tickets", "specs"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": ["continue", "restart"]
+                  }
+                },
+                "required": ["mode"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Back to pending (or already queued again)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "queued",
+                        "running",
+                        "merging",
+                        "done",
+                        "blocked",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is not blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/approve-protected": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved; the ticket goes on from the gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approved": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["approved"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is not blocked by protected-path-changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cascade": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cancelled": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "blocked": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["cancelled", "blocked", "skipped"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Only a pending or blocked ticket can be cancelled",
             "content": {
               "application/json": {
                 "schema": {
