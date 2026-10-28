@@ -2,6 +2,20 @@
 // docs/specs/m1-platform.md「数据模型」.
 const PREFIXES = { spec: "S", ticket: "T", run: "R" } as const;
 export type DisplayIdKind = keyof typeof PREFIXES;
+export interface DisplayId {
+  kind: DisplayIdKind;
+  id: number;
+}
+
+const KIND_BY_PREFIX = new Map<string, DisplayIdKind>(
+  (Object.keys(PREFIXES) as DisplayIdKind[]).map((kind) => [
+    PREFIXES[kind],
+    kind,
+  ]),
+);
+const CANONICAL = new RegExp(
+  `^([${Object.values(PREFIXES).join("")}])-([1-9][0-9]*)$`,
+);
 
 export function formatDisplayId(kind: DisplayIdKind, id: number): string {
   if (!Number.isInteger(id) || id < 1) {
@@ -10,17 +24,11 @@ export function formatDisplayId(kind: DisplayIdKind, id: number): string {
   return `${PREFIXES[kind]}-${id}`;
 }
 
-const KIND_BY_PREFIX = Object.fromEntries(
-  Object.entries(PREFIXES).map(([kind, prefix]) => [prefix, kind]),
-) as Record<string, DisplayIdKind>;
-
 // Only the canonical spelling is accepted: upper-case prefix, no leading zeros, nothing around it.
-export function parseDisplayId(
-  text: string,
-): { kind: DisplayIdKind; id: number } | undefined {
-  const match = /^([A-Z])-([1-9][0-9]*)$/.exec(text);
-  const kind = match?.[1] ? KIND_BY_PREFIX[match[1]] : undefined;
-  if (!match || !kind) return undefined;
+export function parseDisplayId(text: string): DisplayId | undefined {
+  const match = CANONICAL.exec(text);
+  if (!match) return undefined;
+  const kind = KIND_BY_PREFIX.get(match[1] as string);
   const id = Number(match[2]);
-  return Number.isSafeInteger(id) ? { kind, id } : undefined;
+  return kind && Number.isSafeInteger(id) ? { kind, id } : undefined;
 }

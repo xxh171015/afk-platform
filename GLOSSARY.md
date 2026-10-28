@@ -24,6 +24,14 @@ _Avoid_: 任务、issue、子票
 两张 Ticket 之间的依赖，类型是 blocks 或 contract。
 _Avoid_: 依赖关系、blocked_by
 
+**Serial ID（序号）**：
+库里的自增主键，Spec、Ticket、Run 等实体各有一个，只在库内部用。
+_Avoid_: 编号（容易和显示编号混）
+
+**Display ID（显示编号）**：
+给人看和写进 commit trailer 的编号：前缀加序号，Spec 是 `S-12`，Ticket 是 `T-123`，Run 是 `R-456`。不存库，由 Serial ID 现算。
+_Avoid_: 票号、工单号
+
 **Contract（契约）**：
 写在主仓库里的前后端接口描述。
 _Avoid_: 接口文档、API 定义

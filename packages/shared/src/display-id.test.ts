@@ -39,15 +39,17 @@ describe("parseDisplayId", () => {
     "T-1 ",
     "T-1-2",
     "S-12abc",
+    "T-9007199254740993", // beyond Number.MAX_SAFE_INTEGER, would lose precision
   ])("does not read %j as a display id", (text) => {
     expect(parseDisplayId(text)).toBeUndefined();
   });
 
   it("reads back whatever formatDisplayId produced", () => {
     for (const kind of ["spec", "ticket", "run"] as const) {
-      expect(parseDisplayId(formatDisplayId(kind, 9007))).toEqual({
+      const largest = Number.MAX_SAFE_INTEGER;
+      expect(parseDisplayId(formatDisplayId(kind, largest))).toEqual({
         kind,
-        id: 9007,
+        id: largest,
       });
     }
   });
