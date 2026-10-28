@@ -56,9 +56,10 @@ export function renderWithApp(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
   });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={server.client}>{ui}</ApiProvider>
     </QueryClientProvider>,
   );
+  return { ...rendered, queryClient };
 }

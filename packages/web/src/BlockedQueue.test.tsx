@@ -216,6 +216,137 @@ describe("retrying", () => {
   });
 });
 
+describe("while an action is under way", () => {
+  it("keeps the buttons disabled until the refreshed list arrives, so a second click cannot hit a ticket that has moved on", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reads = 0;
+    let moved = false;
+    const fake = fakeServer({
+      "GET /blocked": async () => {
+        reads += 1;
+        if (moved) await gate; // the refresh after the action is slow
+        return {
+          json: moved
+            ? queue()
+            : queue({ tickets: [ticket(1, "gate-failed")] }),
+        };
+      },
+      "POST /tickets/1/retry": () => {
+        moved = true;
+        return { json: { state: "queued" } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+    );
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2)); // the refresh has started
+    for (const name of [
+      "Retry, keep the work",
+      "Retry from scratch",
+      "Cancel…",
+    ]) {
+      expect(
+        (card("T-1").getByRole("button", { name }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+    }
+    release();
+    await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
+  });
+
+  it("shows the message of the latest failure, not an older one", async () => {
+    const { fake } = server(queue({ tickets: [ticket(1, "gate-failed")] }), {
+      "POST /tickets/1/retry": () => ({
+        status: 409,
+        json: { error: "the retry was refused" },
+      }),
+      "POST /tickets/1/cancel": () => ({
+        status: 409,
+        json: { error: "the cancel was refused" },
+      }),
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+    );
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "the retry was refused",
+    );
+    fireEvent.click(card("T-1").getByRole("button", { name: "Cancel…" }));
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Cancel T-1 for good" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe(
+        "the cancel was refused",
+      ),
+    );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("clears the cascade box when you back out of a cancel", async () => {
+    const { fake } = server(queue({ tickets: [ticket(3, "agent-gave-up")] }));
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-3");
+    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
+    fireEvent.click(card("T-3").getByRole("checkbox"));
+    fireEvent.click(card("T-3").getByRole("button", { name: "Keep it" }));
+    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
+    expect(
+      (card("T-3").getByRole("checkbox") as HTMLInputElement).checked,
+    ).toBe(false);
+  });
+});
+
+describe("when a refresh fails", () => {
+  it("keeps showing the queue it has, instead of wiping the page", async () => {
+    let failing = false;
+    const fake = fakeServer({
+      "GET /blocked": () =>
+        failing
+          ? { status: 500, json: { error: "database is down" } }
+          : { json: queue({ tickets: [ticket(1, "gate-failed")] }) },
+    });
+    const { queryClient } = renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.click(card("T-1").getByRole("button", { name: "Cancel…" }));
+
+    failing = true;
+    const reads = fake.calls.length;
+    await queryClient.refetchQueries({ queryKey: ["blocked"] }); // the next poll
+    expect(fake.calls.length).toBeGreaterThan(reads);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["blocked"])?.status).toBe("error"),
+    );
+    expect(screen.getByTestId("blocked-T-1")).toBeTruthy();
+    expect(
+      card("T-1").getByRole("button", { name: "Cancel T-1 for good" }),
+    ).toBeTruthy(); // the open confirm is still there
+    expect(screen.queryByText(/Could not load the queue/)).toBeNull();
+  });
+});
+
+describe("a ticket that waits for a cancelled one", () => {
+  it("says why there is no retry", async () => {
+    const { fake } = server(
+      queue({ tickets: [ticket(5, "upstream-cancelled", { brief: null })] }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-5");
+    expect(
+      card("T-5").getByText(
+        /was cancelled, so trying again would only wait for ever/,
+      ),
+    ).toBeTruthy();
+  });
+});
+
 describe("approving protected paths", () => {
   it("asks the API and takes the ticket off the list", async () => {
     const { fake } = server(
@@ -319,6 +450,34 @@ describe("paused specs and stopped overall reviews", () => {
     fireEvent.click(spec.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
     expect(resumed).toEqual({ extraSeconds: 9000 });
+  });
+
+  it("lets the hours field be emptied and typed again, and only accepts what the API accepts", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({ json: queue({ specs: [paused] }) }),
+      }),
+    );
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    const field = spec.getByLabelText(
+      "extra agent hours for S-1",
+    ) as HTMLInputElement;
+    const resume = spec.getByRole("button", {
+      name: "Resume",
+    }) as HTMLButtonElement;
+    const ok = (value: string) => {
+      fireEvent.change(field, { target: { value } });
+      return !resume.disabled;
+    };
+    expect(ok("")).toBe(false); // emptied, not snapped back to 0
+    expect(field.value).toBe("");
+    expect(ok("2")).toBe(true);
+    expect(ok("0.0001")).toBe(false); // rounds to no seconds at all
+    expect(ok("0.01")).toBe(true); // 36 seconds
+    expect(ok("-1")).toBe(false);
+    expect(ok("168")).toBe(true);
+    expect(ok("169")).toBe(false); // more than the API takes
   });
 
   it("will not resume with no hours", async () => {

@@ -13,10 +13,13 @@ import { describeError, useApi } from "./api.tsx";
 
 export const BLOCKED_KEY = ["blocked"] as const;
 
+// Resolves when the lists have been fetched again, so a button stays disabled until the card is gone.
 function refreshAll(queryClient: QueryClient) {
-  for (const key of [BLOCKED_KEY, ["specs"], ["spec"], ["ticket"]]) {
-    void queryClient.invalidateQueries({ queryKey: key });
-  }
+  return Promise.all(
+    [BLOCKED_KEY, ["specs"], ["spec"], ["ticket"]].map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey }),
+    ),
+  );
 }
 
 type Queue = NonNullable<ReturnType<typeof useBlocked>["data"]>;
@@ -35,12 +38,10 @@ export function useBlocked() {
 }
 
 // One action button with its own busy state and error: the reason it failed shows next to it.
-function useAction<Args extends unknown[]>(
-  run: (...args: Args) => Promise<unknown>,
-) {
+function useAction<Action>(run: (action: Action) => Promise<unknown>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (args: Args) => run(...args),
+    mutationFn: run,
     onSuccess: () => refreshAll(queryClient),
   });
 }
@@ -81,33 +82,36 @@ function Problem({ error }: { error: unknown }) {
   ) : null;
 }
 
+type TicketAction =
+  | { kind: "retry"; mode: "continue" | "restart" }
+  | { kind: "approve" }
+  | { kind: "cancel"; cascade: boolean };
+
 function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
   const api = useApi();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cascade, setCascade] = useState(false);
   const id = ticket.id;
 
-  const retry = useAction(async (mode: "continue" | "restart") => {
-    const { data, error } = await api.POST("/tickets/{id}/retry", {
-      params: { path: { id } },
-      body: { mode },
-    });
+  // One mutation for the card: only one action at a time, and the message shown is that of the latest one.
+  const act = useAction(async (action: TicketAction) => {
+    const { data, error } =
+      action.kind === "retry"
+        ? await api.POST("/tickets/{id}/retry", {
+            params: { path: { id } },
+            body: { mode: action.mode },
+          })
+        : action.kind === "approve"
+          ? await api.POST("/tickets/{id}/approve-protected", {
+              params: { path: { id } },
+            })
+          : await api.POST("/tickets/{id}/cancel", {
+              params: { path: { id } },
+              body: { cascade: action.cascade },
+            });
     if (!data) throw new Error(describeError(error));
   });
-  const approve = useAction(async () => {
-    const { data, error } = await api.POST("/tickets/{id}/approve-protected", {
-      params: { path: { id } },
-    });
-    if (!data) throw new Error(describeError(error));
-  });
-  const cancel = useAction(async () => {
-    const { data, error } = await api.POST("/tickets/{id}/cancel", {
-      params: { path: { id } },
-      body: { cascade },
-    });
-    if (!data) throw new Error(describeError(error));
-  });
-  const busy = retry.isPending || approve.isPending || cancel.isPending;
+  const busy = act.isPending;
   // retrying cannot help a ticket that waits for one that was cancelled
   const canRetry = ticket.blockedReason !== "upstream-cancelled";
 
@@ -124,6 +128,12 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
         <span className="badge ticket-blocked">{ticket.blockedReason}</span>
       </p>
       <Brief brief={ticket.brief} />
+      {canRetry ? null : (
+        <p className="note">
+          A ticket it waited for was cancelled, so trying again would only wait
+          for ever. Cancel this one too, or import a replacement.
+        </p>
+      )}
 
       <div className="actions">
         {canRetry ? (
@@ -131,14 +141,14 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
             <button
               type="button"
               disabled={busy}
-              onClick={() => retry.mutate(["continue"])}
+              onClick={() => act.mutate({ kind: "retry", mode: "continue" })}
             >
               Retry, keep the work
             </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() => retry.mutate(["restart"])}
+              onClick={() => act.mutate({ kind: "retry", mode: "restart" })}
             >
               Retry from scratch
             </button>
@@ -148,7 +158,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
           <button
             type="button"
             disabled={busy}
-            onClick={() => approve.mutate([])}
+            onClick={() => act.mutate({ kind: "approve" })}
           >
             Approve protected paths
           </button>
@@ -167,14 +177,17 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
               type="button"
               className="danger"
               disabled={busy}
-              onClick={() => cancel.mutate([])}
+              onClick={() => act.mutate({ kind: "cancel", cascade })}
             >
               Cancel {ticket.displayId} for good
             </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() => setConfirmCancel(false)}
+              onClick={() => {
+                setConfirmCancel(false);
+                setCascade(false);
+              }}
             >
               Keep it
             </button>
@@ -189,18 +202,27 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
           </button>
         )}
       </div>
-      <Problem error={retry.error ?? approve.error ?? cancel.error} />
+      <Problem error={act.error} />
     </li>
   );
 }
 
+const MAX_EXTRA_HOURS = 168; // what the API accepts: seven days
+
 function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
   const api = useApi();
-  const [hours, setHours] = useState(1);
-  const resume = useAction(async () => {
+  // kept as typed, so the field can be emptied and retyped
+  const [hours, setHours] = useState("1");
+  const seconds = Math.round(Number(hours) * 3600);
+  const valid =
+    hours.trim() !== "" &&
+    Number.isFinite(seconds) &&
+    seconds >= 1 &&
+    Number(hours) <= MAX_EXTRA_HOURS;
+  const resume = useAction(async (extraSeconds: number) => {
     const { data, error } = await api.POST("/specs/{id}/resume", {
       params: { path: { id: spec.id } },
-      body: { extraSeconds: Math.round(hours * 3600) },
+      body: { extraSeconds },
     });
     if (!data) throw new Error(describeError(error));
   });
@@ -217,18 +239,19 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
           Add{" "}
           <input
             type="number"
-            min={0.1}
+            min={0}
+            max={MAX_EXTRA_HOURS}
             step={0.5}
             value={hours}
             aria-label={`extra agent hours for ${spec.displayId}`}
-            onChange={(event) => setHours(Number(event.target.value))}
+            onChange={(event) => setHours(event.target.value)}
           />{" "}
           agent hours
         </label>
         <button
           type="button"
-          disabled={resume.isPending || !(hours > 0)}
-          onClick={() => resume.mutate([])}
+          disabled={resume.isPending || !valid}
+          onClick={() => resume.mutate(seconds)}
         >
           Resume
         </button>
@@ -268,7 +291,7 @@ function BlockedFinalization({
         <button
           type="button"
           disabled={retry.isPending}
-          onClick={() => retry.mutate([])}
+          onClick={() => retry.mutate()}
         >
           Run {item.step} again
         </button>
@@ -291,13 +314,17 @@ export function BlockedQueue() {
   const queue = useBlocked();
   if (queue.isPending)
     return <p className="note">Loading what is waiting for you…</p>;
-  if (queue.isError)
+  // one failed poll must not wipe a page that is being worked on: the error only replaces it when there is
+  // nothing to show
+  if (queue.isError && !queue.data)
     return (
       <p className="error" role="alert">
         Could not load the queue: {queue.error.message}
       </p>
     );
-  const { tickets, finalizations, specs } = queue.data;
+  const { tickets, finalizations, specs } = queue.data as NonNullable<
+    typeof queue.data
+  >;
   if (tickets.length + finalizations.length + specs.length === 0) {
     return <p className="note">Nothing is waiting for you.</p>;
   }
@@ -306,7 +333,10 @@ export function BlockedQueue() {
       {tickets.length > 0 ? (
         <Section title="Blocked tickets">
           {tickets.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} />
+            <TicketCard
+              key={`${ticket.id}-${ticket.blockedReason}`}
+              ticket={ticket}
+            />
           ))}
         </Section>
       ) : null}
