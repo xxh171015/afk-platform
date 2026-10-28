@@ -56,7 +56,7 @@ const FindingFacts = z.object({
   resolution: z.enum(FINDING_RESOLUTIONS).optional(),
 });
 
-const commonFields = {
+export const commonFields = {
   run: RunFacts.optional(),
   gate: GateFacts.optional(),
   findings: z.array(FindingFacts).max(200).default([]),
@@ -160,7 +160,19 @@ export async function recordStageResult(
   const parsed = StageResultSchema.safeParse(result);
   const valid =
     parsed.success && parsed.data.stage === stage ? parsed.data : undefined;
-  await writeFacts(client, ticket, job, stage, valid, result);
+  await writeFacts(
+    client,
+    {
+      spec_id: ticket.spec_id,
+      repo_id: ticket.repo_id,
+      ticket_id: ticket.id,
+      content_version: ticket.content_version,
+    },
+    job,
+    stage,
+    valid,
+    result,
+  );
   // The restart (if one was asked for) has been carried out by this implement run, whatever came of it.
   if (stage === "implement")
     await client.query("UPDATE tickets SET restart = false WHERE id = $1", [
@@ -186,18 +198,31 @@ export async function recordStageResult(
   return { status: "applied", decision };
 }
 
-async function writeFacts(
+// Who a Run belongs to: a ticket's stage, or (ticket_id null) a stage of the spec's finalization.
+export interface RunOwner {
+  spec_id: number;
+  repo_id: number;
+  ticket_id: number | null;
+  content_version: number | null;
+}
+
+export type ResultFacts = Pick<
+  StageResult,
+  "outcome" | "run" | "gate" | "findings"
+>;
+
+export async function writeFacts(
   client: pg.PoolClient,
-  ticket: TicketRow,
+  owner: RunOwner,
   job: StageJob,
-  stage: Stage,
-  result: StageResult | undefined,
+  stage: string,
+  result: ResultFacts | undefined,
   raw: unknown,
 ): Promise<void> {
   const run = result?.run;
   const tries = await client.query<{ n: string }>(
-    "SELECT count(*) AS n FROM runs WHERE ticket_id = $1 AND stage = $2",
-    [ticket.id, stage],
+    "SELECT count(*) AS n FROM runs WHERE spec_id = $1 AND ticket_id IS NOT DISTINCT FROM $2 AND stage = $3",
+    [owner.spec_id, owner.ticket_id, stage],
   );
   const facts = [
     run?.agent ?? null,
@@ -235,10 +260,10 @@ async function writeFacts(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE($23, now()))
        RETURNING id`,
       [
-        ticket.spec_id,
-        ticket.repo_id,
-        ticket.id,
-        ticket.content_version,
+        owner.spec_id,
+        owner.repo_id,
+        owner.ticket_id,
+        owner.content_version,
         job.id,
         stage,
         Number(tries.rows[0]?.n) + 1,
@@ -258,7 +283,7 @@ async function writeFacts(
          command_results = EXCLUDED.command_results, tests_total = EXCLUDED.tests_total,
          tests_skipped = EXCLUDED.tests_skipped, log_url = EXCLUDED.log_url`,
       [
-        ticket.repo_id,
+        owner.repo_id,
         gate.commitSha,
         gate.configSha,
         JSON.stringify(gate.commandResults),
@@ -268,12 +293,16 @@ async function writeFacts(
       ],
     );
   }
-  if (stage === "review-fix" && result?.outcome === "done") {
+  if (
+    owner.ticket_id !== null &&
+    stage === "review-fix" &&
+    result?.outcome === "done"
+  ) {
     // The review's must-fix findings were handled by this fix; suggestions keep going to the acceptance pack.
     await client.query(
       `UPDATE findings SET resolution = 'fixed' WHERE resolution = 'unhandled'
        AND run_id IN (SELECT id FROM runs WHERE ticket_id = $1 AND stage = 'review')`,
-      [ticket.id],
+      [owner.ticket_id],
     );
   }
   for (const finding of result?.findings ?? []) {

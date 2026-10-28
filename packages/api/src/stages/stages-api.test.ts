@@ -128,6 +128,9 @@ describe("the happy path", () => {
       state: "done",
       blocked_reason: null,
     });
+    // the only ticket is done, so the spec's overall review is next: no more ticket stages
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("final-review");
     await noJobsLeft();
   });
 
@@ -796,7 +799,7 @@ describe("the bundle", () => {
     const job = (await worker.claim()).body.job as Claimed;
     const reply = await bundle(job);
     expect(reply.body.job.stage).toBe("gate-fix");
-    expect(reply.body.ticket.fixCounts["gate-fix"]).toBe(1);
+    expect(reply.body.ticket?.fixCounts["gate-fix"]).toBe(1);
   });
 
   it("refuses anyone who does not hold the job at its current attempt", async () => {

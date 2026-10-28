@@ -147,7 +147,8 @@ function deps(over: { script?: Script; concurrency?: number } = {}) {
       new FakeAgentRunner(slotDir, async (ctx) => {
         const custom = await over.script?.(ctx);
         if (custom) return custom;
-        if (ctx.stage === "review") return { output: PASS };
+        if (ctx.stage === "review" || ctx.stage === "final-review")
+          return { output: PASS };
         return {
           files: {
             [`src/${ctx.branch.replace("/", "-")}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,
@@ -188,8 +189,8 @@ describe("a whole spec with a fake agent", () => {
     });
 
     expect(await stateOf()).toEqual(["1:done", "2:done"]);
-    // implement, gate, review, merge: four jobs per ticket
-    expect(run.jobs).toBe(8);
+    // implement, gate, review, merge: four jobs per ticket, then the overall review
+    expect(run.jobs).toBe(9);
 
     // the integration branch on "GitHub" has both tickets' work, and main was never touched
     expect(
@@ -241,6 +242,7 @@ describe("a whole spec with a fake agent", () => {
       ["gate", "passed"],
       ["review", "pass"],
       ["merge", "merged"],
+      ["final-review", "pass"],
     ]);
     expect(runs.rows.every((r) => r.finished_at !== null)).toBe(true);
     const gates = await db.pool.query(
@@ -256,7 +258,9 @@ describe("a whole spec with a fake agent", () => {
     const findings = await db.pool.query(
       "SELECT kind, resolution FROM findings",
     );
+    // the ticket's review and the overall review each left a suggestion for the acceptance pack
     expect(findings.rows).toEqual([
+      { kind: "suggestion", resolution: "acceptance-pack" },
       { kind: "suggestion", resolution: "acceptance-pack" },
     ]);
   });
@@ -310,6 +314,7 @@ describe("a whole spec with a fake agent", () => {
       "gate:passed",
       "review:pass",
       "merge:merged",
+      "final-review:pass",
     ]);
   });
 
@@ -569,6 +574,258 @@ describe("a person's decisions about a blocked ticket", () => {
       "1:cancelled",
       "2:blocked/upstream-cancelled",
     ]);
+  });
+});
+
+describe("the overall review of the integration branch", () => {
+  const work = (over?: Parameters<typeof deps>[0]) =>
+    runWorker({
+      api: workerFor(),
+      executor: deps(over),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+  const finalization = async () =>
+    (
+      await db.pool.query(
+        "SELECT step, state, blocked_reason FROM finalizations",
+      )
+    ).rows;
+  const FIX = {
+    verdict: "fix",
+    mustFix: [
+      {
+        file: "src/a.ts",
+        line: 1,
+        problem: "a and b name the same thing differently",
+      },
+    ],
+    suggestions: [],
+    uncertainties: [],
+  };
+
+  it("reviews the whole spec's diff with every ticket's aim in front of it, and passes", async () => {
+    await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    let seen: {
+      runJson?: { baseSha: string; stage: string; ticket: unknown };
+      tickets?: string;
+      spec?: string;
+      diff?: string;
+    } = {};
+    await work({
+      script: (ctx) => {
+        if (ctx.stage !== "final-review") return undefined;
+        seen = {
+          runJson: JSON.parse(ctx.context("run.json") as string),
+          tickets: ctx.context("tickets.md"),
+          spec: ctx.context("spec.md"),
+          diff: gitOut(ctx.dir, [
+            "diff",
+            "--name-only",
+            `${JSON.parse(ctx.context("run.json") as string).baseSha}..HEAD`,
+          ]),
+        };
+        return { output: PASS };
+      },
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    expect(await finalization()).toEqual([
+      { step: "final-review", state: "done", blocked_reason: null },
+    ]);
+    expect(seen.runJson).toMatchObject({
+      stage: "final-review",
+      ticket: null,
+      baseSha: gitOut(origin, ["rev-parse", "main"]),
+    });
+    expect(seen.tickets).toContain("T-1 Ticket a");
+    expect(seen.tickets).toContain("T-2 Ticket b");
+    expect(seen.tickets).toContain("- it works");
+    expect(seen.spec).toContain("S-1 Order export");
+    // the review sees the work of both tickets together
+    expect(seen.diff?.split("\n").sort()).toEqual([
+      "src/agent-T-1.ts",
+      "src/agent-T-2.ts",
+    ]);
+    // a passing review changes nothing on the integration branch
+    expect(
+      gitOut(origin, [
+        "log",
+        "--format=%s",
+        "--first-parent",
+        "main..spec/order-export",
+      ]).split("\n"),
+    ).toHaveLength(2);
+  });
+
+  it("makes the one fix the review asks for, merges it through the gate, and stamps it with the spec only", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")]);
+    let fixSaw: { review?: unknown; tickets?: string } = {};
+    await work({
+      script: (ctx) => {
+        if (ctx.stage === "final-review") return { output: FIX };
+        if (ctx.stage === "final-fix") {
+          fixSaw = {
+            review: JSON.parse(ctx.context("review.json") as string),
+            tickets: ctx.context("tickets.md"),
+          };
+          return {
+            files: { "src/shared-name.ts": "export const name = 1;\n" },
+            message: "unify the name",
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    expect(await finalization()).toEqual([
+      { step: "final-merge", state: "done", blocked_reason: null },
+    ]);
+    expect(fixSaw.review).toMatchObject({ verdict: "fix" });
+    expect(fixSaw.tickets).toContain("T-2 Ticket b");
+    // the fix is on the integration branch, merged as a candidate that passed the gate
+    expect(
+      gitOut(origin, ["show", "spec/order-export:src/shared-name.ts"]),
+    ).toBe("export const name = 1;");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%s", "spec/order-export"]),
+    ).toBe("Merge agent/S-1-final into spec/order-export");
+    const trailers = gitOut(origin, [
+      "log",
+      "-1",
+      "--format=%B",
+      "agent/S-1-final",
+    ]);
+    expect(trailers).toContain("Spec: S-1");
+    expect(trailers).not.toContain("Ticket:");
+    expect(trailers).toMatch(/Run: R-\d+/);
+    // each ran once: the gate ran on the merge candidate, review and fix once each
+    const stages = await db.pool.query(
+      "SELECT stage FROM runs WHERE ticket_id IS NULL ORDER BY id",
+    );
+    expect(stages.rows.map((r) => r.stage)).toEqual([
+      "final-review",
+      "final-fix",
+      "final-merge",
+    ]);
+    // the fix and no ticket's slot is left behind
+    const fs = await import("node:fs");
+    for (const index of fs.readdirSync(join(home, "slots"))) {
+      expect(fs.readdirSync(join(home, "slots", index))).not.toContain(
+        "backend",
+      );
+    }
+  });
+
+  it("blocks the spec's finalization when the fix does not pass the gate, and leaves the branch alone", async () => {
+    await confirmedSpec([ticket("a")]);
+    await work({
+      script: (ctx) => {
+        if (ctx.stage === "final-review") return { output: FIX };
+        if (ctx.stage === "final-fix")
+          return {
+            files: { BROKEN: "x\n" },
+            message: "a fix that breaks the build",
+            output: DONE,
+          };
+        return undefined;
+      },
+    });
+    const before = gitOut(origin, [
+      "log",
+      "--format=%s",
+      "--first-parent",
+      "main..spec/order-export",
+    ]);
+    expect(await finalization()).toEqual([
+      {
+        step: "final-merge",
+        state: "blocked",
+        blocked_reason: "post-merge-gate-failed",
+      },
+    ]);
+    expect(
+      git(origin, ["cat-file", "-e", "spec/order-export:BROKEN"]).code,
+    ).not.toBe(0);
+    expect(before.split("\n")).toHaveLength(1);
+    const queue = await fetch(`${api.url}/blocked`).then((r) => r.json());
+    expect(queue.finalizations[0]).toMatchObject({
+      step: "final-merge",
+      blockedReason: "post-merge-gate-failed",
+      brief: { stage: "final-merge", result: "gate-failed" },
+    });
+    expect(queue.finalizations[0].brief.output.failureLog).toContain(
+      "test failed",
+    );
+  });
+
+  it("a fix that changes a protected path is refused before the gate", async () => {
+    await confirmedSpec([ticket("a")]);
+    await work({
+      script: (ctx) => {
+        if (ctx.stage === "final-review") return { output: FIX };
+        if (ctx.stage === "final-fix")
+          return {
+            files: { ".github/workflows/ci.yml": "on: push\n" },
+            output: DONE,
+          };
+        return undefined;
+      },
+    });
+    expect(await finalization()).toEqual([
+      {
+        step: "final-merge",
+        state: "blocked",
+        blocked_reason: "post-merge-gate-failed",
+      },
+    ]);
+    const queue = await fetch(`${api.url}/blocked`).then((r) => r.json());
+    expect(queue.finalizations[0].brief.output.failureLog).toContain(
+      ".github/workflows/ci.yml",
+    );
+    // only the ticket's own two gates (its branch, and its merge candidate): the fix never reached a gate
+    expect(
+      Number(
+        (await db.pool.query("SELECT count(*) FROM gate_results")).rows[0]
+          .count,
+      ),
+    ).toBe(2);
+  });
+
+  it("an agent that cannot make the fix blocks it with its reason, and a retry of the blocked step can finish it", async () => {
+    await confirmedSpec([ticket("a")]);
+    let tries = 0;
+    const script: Script = (ctx) => {
+      if (ctx.stage === "final-review") return { output: FIX };
+      if (ctx.stage === "final-fix") {
+        tries += 1;
+        return tries === 1
+          ? {
+              output: {
+                status: "cannot-proceed",
+                blockedReason: "agent-gave-up",
+                detail: "unclear which name wins",
+              },
+            }
+          : {
+              files: { "src/fix.ts": "export {};\n" },
+              message: "the fix",
+              output: DONE,
+            };
+      }
+      return undefined;
+    };
+    await work({ script });
+    expect(await finalization()).toEqual([
+      { step: "final-fix", state: "blocked", blocked_reason: "agent-gave-up" },
+    ]);
+    expect((await post("/specs/1/final/retry")).status).toBe(200);
+    await work({ script });
+    expect(await finalization()).toEqual([
+      { step: "final-merge", state: "done", blocked_reason: null },
+    ]);
+    expect(gitOut(origin, ["show", "spec/order-export:src/fix.ts"])).toBe(
+      "export {};",
+    );
   });
 });
 

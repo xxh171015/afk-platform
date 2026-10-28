@@ -1,6 +1,11 @@
-import { STAGES, type Stage } from "@afk/shared";
+import { FINAL_STEPS, type FinalStep, STAGES, type Stage } from "@afk/shared";
 import type pg from "pg";
-import { ticketJobKey, ticketJobKeyPrefix } from "./idempotency.ts";
+import {
+  finalJobKey,
+  finalJobKeyPrefix,
+  ticketJobKey,
+  ticketJobKeyPrefix,
+} from "./idempotency.ts";
 import { enqueueJob, type Job } from "./queue.ts";
 
 export interface StageTicket {
@@ -68,6 +73,63 @@ export async function enqueueStageJob(
       ticketId: ticket.id,
       contentVersion: ticket.contentVersion,
       stage,
+      sequence: Number(earlier.rows[0]?.n) + 1,
+    }),
+    ...(lockKey ? { lockKey } : {}),
+  });
+  return job;
+}
+
+// ---- the spec-level steps of a finalization (final-review, final-fix, final-merge) ----
+
+export function readFinalPayload(
+  payload: Record<string, unknown>,
+): { specId: number; repoId: number; step: FinalStep } | undefined {
+  const { specId, repoId, stage, final } = payload;
+  if (
+    final !== true ||
+    typeof specId !== "number" ||
+    typeof repoId !== "number"
+  )
+    return undefined;
+  if (
+    typeof stage !== "string" ||
+    !(FINAL_STEPS as readonly string[]).includes(stage)
+  )
+    return undefined;
+  return { specId, repoId, step: stage as FinalStep };
+}
+
+// final-review and final-fix are agent runs; final-merge puts the fix on the integration branch, so it holds the
+// same lock a ticket's merge does.
+export async function enqueueFinalJob(
+  client: pg.PoolClient,
+  target: { specId: number; repoId: number },
+  step: FinalStep,
+): Promise<Job> {
+  const keyParts = { ...target, step };
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${finalJobKeyPrefix(keyParts)}%`],
+  );
+  let lockKey: string | undefined;
+  if (step === "final-merge") {
+    const { rows } = await client.query<{ slug: string }>(
+      "SELECT slug FROM specs WHERE id = $1",
+      [target.specId],
+    );
+    lockKey = `integration:${target.repoId}:spec/${rows[0]?.slug}`;
+  }
+  const { job } = await enqueueJob(client, {
+    type: step === "final-merge" ? "merge" : "agent-run",
+    payload: {
+      stage: step,
+      specId: target.specId,
+      repoId: target.repoId,
+      final: true,
+    },
+    idempotencyKey: finalJobKey({
+      ...keyParts,
       sequence: Number(earlier.rows[0]?.n) + 1,
     }),
     ...(lockKey ? { lockKey } : {}),

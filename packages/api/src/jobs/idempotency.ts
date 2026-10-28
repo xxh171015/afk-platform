@@ -35,3 +35,30 @@ export function ticketJobKeyPrefix(
 ): string {
   return `${formatDisplayId("ticket", parts.ticketId)}:${parts.contentVersion}:${parts.stage}:`;
 }
+
+export interface FinalJobKeyParts {
+  specId: number;
+  repoId: number;
+  step: string;
+}
+
+// The same for the spec-level steps of a finalization: one key per (spec, repo, step, sequence).
+export function finalJobKeyPrefix(parts: FinalJobKeyParts): string {
+  if (parts.step === "" || parts.step.includes(":")) {
+    throw new RangeError(
+      `step must be non-empty and contain no ":", got ${JSON.stringify(parts.step)}`,
+    );
+  }
+  return `${formatDisplayId("spec", parts.specId)}:repo-${parts.repoId}:${parts.step}:`;
+}
+
+export function finalJobKey(
+  parts: FinalJobKeyParts & { sequence: number },
+): string {
+  if (!Number.isInteger(parts.sequence) || parts.sequence < 1) {
+    throw new RangeError(
+      `sequence must be a positive integer, got ${parts.sequence}`,
+    );
+  }
+  return `${finalJobKeyPrefix(parts)}${parts.sequence}`;
+}

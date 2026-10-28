@@ -64,6 +64,13 @@
       "when": 1793205152811,
       "tag": "0008_spec_budget_extra",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793207940905,
+      "tag": "0009_finalizations",
+      "breakpoints": true
     }
   ]
 }

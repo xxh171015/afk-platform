@@ -52,16 +52,39 @@ interface TicketLike {
 const stateOf = (t: Pick<TicketLike, "state" | "blockedReason">) =>
   t.blockedReason ? `${t.state} (${t.blockedReason})` : t.state;
 
+interface FinalizationLike {
+  specDisplayId: string;
+  repo: string;
+  step: string;
+  state: string;
+  blockedReason: string | null;
+  brief: BriefLike | null;
+}
+
+const finalState = (f: FinalizationLike) =>
+  `${f.step} ${f.state}${f.blockedReason ? ` (${f.blockedReason})` : ""}`;
+
 export function blockedText(queue: {
   tickets: TicketLike[];
+  finalizations: FinalizationLike[];
   specs: { displayId: string; title: string; reason: string }[];
 }): string {
-  if (queue.tickets.length === 0 && queue.specs.length === 0)
+  if (
+    queue.tickets.length === 0 &&
+    queue.finalizations.length === 0 &&
+    queue.specs.length === 0
+  ) {
     return "nothing is waiting for you";
+  }
   return [
     ...queue.tickets.flatMap((t) => [
       `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}  ${t.title}`,
       ...briefLines(t.brief, "    "),
+    ]),
+    ...queue.finalizations.flatMap((f) => [
+      `${f.specDisplayId}  overall review of ${f.repo}: ${finalState(f)}`,
+      ...briefLines(f.brief, "    "),
+      `    then: plat spec retry-final ${f.specDisplayId}`,
     ]),
     ...queue.specs.map(
       (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,
@@ -134,6 +157,7 @@ export function specText(view: {
     warnings: unknown[];
   };
   tickets: TicketLike[];
+  finalizations: FinalizationLike[];
   edges: { from: string; to: string; kind: string }[];
 }): string {
   return [
@@ -144,6 +168,15 @@ export function specText(view: {
       `  ${t.displayId}  ${stateOf(t)}  ${t.title}`,
       ...briefLines(t.brief, "      "),
     ]),
+    ...(view.finalizations.length
+      ? [
+          "overall review:",
+          ...view.finalizations.flatMap((f) => [
+            `  ${f.repo}: ${finalState(f)}`,
+            ...briefLines(f.brief, "    "),
+          ]),
+        ]
+      : []),
     ...(view.edges.length
       ? [
           "edges:",

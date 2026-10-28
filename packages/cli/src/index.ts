@@ -225,6 +225,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("retry-final <spec>")
+    .description("run the blocked step of a spec's overall review again")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/final/retry",
+        {
+          params: { path: { id: specIdOf(id) } },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: running again: ${data.retried.join(", ")}`);
+    });
+
+  spec
     .command("resume <spec>")
     .description("let a paused spec go on, with more agent time")
     .option(

@@ -1,0 +1,170 @@
+import {
+  advanceFinalization,
+  type BlockedReason,
+  type FinalDecision,
+  type FinalReport,
+  type FinalStep,
+  formatDisplayId,
+  type SpecState,
+} from "@afk/shared";
+import type pg from "pg";
+import { z } from "zod";
+import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
+import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
+import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
+import type { ActionResult } from "../tickets/actions.ts";
+
+// The facts a worker hands back for a finalization step (the same Run, GateResult and Finding parts as for a
+// ticket stage), with the step's own list of outcomes.
+const AGENT_FAILURES = [
+  "invalid-output",
+  "timeout",
+  "no-commits",
+  "agent-gave-up",
+  "contract-change-needed",
+] as const;
+
+export const FinalResultSchema = z.discriminatedUnion("stage", [
+  z.object({
+    stage: z.literal("final-review"),
+    outcome: z.enum(["pass", "fix", "invalid-output", "timeout"]),
+    ...commonFields,
+  }),
+  z.object({
+    stage: z.literal("final-fix"),
+    outcome: z.enum(["done", ...AGENT_FAILURES]),
+    ...commonFields,
+  }),
+  z.object({
+    stage: z.literal("final-merge"),
+    outcome: z.enum(["merged", "conflict", "gate-failed"]),
+    headSha: z.string().min(1).optional(),
+    ...commonFields,
+  }),
+]);
+
+export type RecordFinalResult =
+  | { status: "not-final" }
+  | { status: "ignored"; reason: string }
+  | { status: "applied"; decision: FinalDecision };
+
+export async function recordFinalResult(
+  client: pg.PoolClient,
+  job: StageJob,
+  result: unknown,
+): Promise<RecordFinalResult> {
+  const read = readFinalPayload(job.payload);
+  if (!read) return { status: "not-final" };
+  await lockSpec(client, read.specId);
+  const found = await client.query<{
+    id: number;
+    step: FinalStep;
+    state: string;
+  }>(
+    "SELECT id, step, state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+    [read.specId, read.repoId],
+  );
+  const fin = found.rows[0];
+  if (fin?.state !== "active" || fin.step !== read.step) {
+    return {
+      status: "ignored",
+      reason: `${read.step} result while the finalization is ${fin?.state ?? "missing"} at ${fin?.step}`,
+    };
+  }
+
+  const parsed = FinalResultSchema.safeParse(result);
+  const valid =
+    parsed.success && parsed.data.stage === read.step ? parsed.data : undefined;
+  await writeFacts(
+    client,
+    {
+      spec_id: read.specId,
+      repo_id: read.repoId,
+      ticket_id: null,
+      content_version: null,
+    },
+    job,
+    read.step,
+    valid,
+    result,
+  );
+  const decision: FinalDecision = valid
+    ? advanceFinalization({
+        step: valid.stage,
+        outcome: valid.outcome,
+      } as FinalReport)
+    : { type: "block", reason: "invalid-output" };
+
+  if (decision.type === "enqueue") {
+    await client.query("UPDATE finalizations SET step = $2 WHERE id = $1", [
+      fin.id,
+      decision.step,
+    ]);
+    await enqueueFinalJob(client, read, decision.step);
+  } else if (decision.type === "done") {
+    await client.query(
+      "UPDATE finalizations SET state = 'done' WHERE id = $1",
+      [fin.id],
+    );
+  } else {
+    await client.query(
+      "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+      [fin.id, decision.reason satisfies BlockedReason],
+    );
+  }
+  return { status: "applied", decision };
+}
+
+// A worker claiming a final job starts its Run, as for a ticket stage.
+export async function markFinalClaimed(
+  pool: pg.Pool,
+  job: StageJob,
+): Promise<void> {
+  const read = readFinalPayload(job.payload);
+  if (!read) return;
+  await pool.query(
+    `INSERT INTO runs (spec_id, repo_id, job_id, stage, attempt, started_at)
+     VALUES ($1, $2, $3, $4,
+       (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = $4) + 1, now())
+     ON CONFLICT (job_id) DO NOTHING`,
+    [read.specId, read.repoId, job.id, read.step],
+  );
+}
+
+// A person has looked at a blocked finalization (resolved a conflict, fixed the gate's cause) and wants the step
+// that failed to run again.
+export async function retryFinalization(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ retried: string[] }>> {
+  return inTransaction(pool, async (client) => {
+    const spec = await client.query<{ state: SpecState }>(
+      "SELECT state FROM specs WHERE id = $1",
+      [specId],
+    );
+    if (!spec.rows[0]) return { status: "no-ticket" };
+    await lockSpec(client, specId);
+    const blocked = await client.query<{
+      id: number;
+      repo_id: number;
+      step: FinalStep;
+    }>(
+      "SELECT id, repo_id, step FROM finalizations WHERE spec_id = $1 AND state = 'blocked' ORDER BY id",
+      [specId],
+    );
+    if (blocked.rows.length === 0) {
+      return {
+        status: "refused",
+        message: `${formatDisplayId("spec", specId)} has no blocked finalization`,
+      };
+    }
+    for (const row of blocked.rows) {
+      await client.query(
+        "UPDATE finalizations SET state = 'active', blocked_reason = NULL WHERE id = $1",
+        [row.id],
+      );
+      await enqueueFinalJob(client, { specId, repoId: row.repo_id }, row.step);
+    }
+    return { status: "ok", retried: blocked.rows.map((r) => r.step) };
+  });
+}

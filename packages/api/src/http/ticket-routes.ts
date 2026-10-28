@@ -1,6 +1,7 @@
 import { SPEC_STATES, TICKET_STATES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
+import { retryFinalization } from "../finalize/finalize.ts";
 import {
   approveProtected,
   cancelTicket,
@@ -40,6 +41,16 @@ const TicketSummary = z.object({
   state: z.enum(TICKET_STATES),
   blockedReason: z.string().nullable(),
   repo: z.string(),
+  brief: Brief,
+});
+
+const Finalization = z.object({
+  specId: Id,
+  specDisplayId: z.string(),
+  repo: z.string(),
+  step: z.string(),
+  state: z.string(),
+  blockedReason: z.string().nullable(),
   brief: Brief,
 });
 
@@ -129,6 +140,7 @@ const specRoute = createRoute({
           warnings: z.array(z.unknown()),
         }),
         tickets: z.array(TicketSummary),
+        finalizations: z.array(Finalization),
         edges: z.array(
           z.object({ from: z.string(), to: z.string(), kind: z.string() }),
         ),
@@ -146,6 +158,7 @@ const blockedRoute = createRoute({
       "Blocked tickets and paused specs, everything waiting for a person",
       z.object({
         tickets: z.array(TicketSummary),
+        finalizations: z.array(Finalization),
         specs: z.array(
           z.object({
             id: Id,
@@ -243,6 +256,20 @@ const resumeRoute = createRoute({
   },
 });
 
+const retryFinalRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/final/retry",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The blocked steps of the overall review are queued again",
+      z.object({ retried: z.array(z.string()) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("Nothing is blocked", ErrorReply),
+  },
+});
+
 export function registerTicketRoutes(
   app: OpenAPIHono,
   context: AppContext,
@@ -314,5 +341,14 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(retryFinalRoute, async (c) => {
+    const result = await retryFinalization(pool, c.req.valid("param").id);
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ retried: result.retried }, 200);
   });
 }

@@ -1,6 +1,7 @@
 import {
   BLOCKED_REASONS,
   EDGE_KINDS,
+  FINAL_STEPS,
   FINDING_RESOLUTIONS,
   JOB_STATES,
   SPEC_STATES,
@@ -201,6 +202,37 @@ export const jobs = pgTable(
     index("jobs_state_lease_idx").on(t.state, t.leaseExpiresAt),
     index("jobs_lock_key_idx").on(t.lockKey),
     check("jobs_state_check", oneOf(t.state, JOB_STATES)),
+  ],
+);
+
+// The overall review of one repo's integration branch once all tickets of the spec are done.
+export const finalizations = pgTable(
+  "finalizations",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id),
+    // the step whose job is out (or that failed, when blocked); done when the branch is settled
+    step: text("step").notNull().default("final-review"),
+    state: text("state").notNull().default("active"),
+    blockedReason: text("blocked_reason"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("finalizations_spec_repo_unique").on(t.specId, t.repoId),
+    check("finalizations_step_check", oneOf(t.step, FINAL_STEPS)),
+    check(
+      "finalizations_state_check",
+      oneOf(t.state, ["active", "blocked", "done"]),
+    ),
+    check(
+      "finalizations_blocked_reason_check",
+      sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
+    ),
   ],
 );
 

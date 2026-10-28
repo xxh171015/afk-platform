@@ -999,7 +999,7 @@
                       "required": ["id", "displayId"]
                     },
                     "ticket": {
-                      "type": "object",
+                      "type": ["object", "null"],
                       "properties": {
                         "id": {
                           "type": "integer"
@@ -1061,6 +1061,27 @@
                         "reviewed",
                         "restart"
                       ]
+                    },
+                    "specTickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "acceptanceCriteria": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": ["displayId", "title", "acceptanceCriteria"]
+                      }
                     },
                     "spec": {
                       "type": "object",
@@ -1150,6 +1171,7 @@
                     "job",
                     "run",
                     "ticket",
+                    "specTickets",
                     "spec",
                     "repo",
                     "integrationBranch",
@@ -2020,6 +2042,69 @@
                         ]
                       }
                     },
+                    "finalizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "step": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "step",
+                          "state",
+                          "blockedReason",
+                          "brief"
+                        ]
+                      }
+                    },
                     "edges": {
                       "type": "array",
                       "items": {
@@ -2039,7 +2124,7 @@
                       }
                     }
                   },
-                  "required": ["spec", "tickets", "edges"]
+                  "required": ["spec", "tickets", "finalizations", "edges"]
                 }
               }
             }
@@ -2157,6 +2242,69 @@
                         ]
                       }
                     },
+                    "finalizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "step": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "step",
+                          "state",
+                          "blockedReason",
+                          "brief"
+                        ]
+                      }
+                    },
                     "specs": {
                       "type": "array",
                       "items": {
@@ -2179,7 +2327,7 @@
                       }
                     }
                   },
-                  "required": ["tickets", "specs"]
+                  "required": ["tickets", "finalizations", "specs"]
                 }
               }
             }
@@ -2521,6 +2669,75 @@
           },
           "409": {
             "description": "The spec is not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/final/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The blocked steps of the overall review are queued again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "retried": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["retried"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing is blocked",
             "content": {
               "application/json": {
                 "schema": {

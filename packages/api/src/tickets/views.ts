@@ -36,6 +36,62 @@ async function briefFor(
   };
 }
 
+// The Run of a finalization step that went wrong, as a brief.
+async function finalBrief(
+  pool: pg.Pool,
+  specId: number,
+): Promise<Brief | null> {
+  const { rows } = await pool.query(
+    `SELECT id, stage, result, output FROM runs
+     WHERE spec_id = $1 AND ticket_id IS NULL AND result IS NOT NULL AND NOT (result = ANY($2))
+     ORDER BY id DESC LIMIT 1`,
+    [specId, GOOD_RESULTS],
+  );
+  const run = rows[0];
+  if (!run) return null;
+  return {
+    run: { id: run.id, displayId: formatDisplayId("run", run.id) },
+    stage: run.stage,
+    result: run.result,
+    output: run.output,
+    logPath: `/runs/${run.id}/logs`,
+  };
+}
+
+export interface FinalizationSummary {
+  specId: number;
+  specDisplayId: string;
+  repo: string;
+  step: string;
+  state: string;
+  blockedReason: string | null;
+  brief: Brief | null;
+}
+
+async function finalizations(
+  pool: pg.Pool,
+  where: string,
+  params: unknown[],
+): Promise<FinalizationSummary[]> {
+  const { rows } = await pool.query(
+    `SELECT f.spec_id, f.step, f.state, f.blocked_reason, r.role FROM finalizations f JOIN repos r ON r.id = f.repo_id
+     WHERE ${where} ORDER BY f.id`,
+    params,
+  );
+  return Promise.all(
+    rows.map(async (row) => ({
+      specId: row.spec_id as number,
+      specDisplayId: formatDisplayId("spec", row.spec_id),
+      repo: row.role as string,
+      step: row.step as string,
+      state: row.state as string,
+      blockedReason: (row.blocked_reason as string | null) ?? null,
+      brief:
+        row.state === "blocked" ? await finalBrief(pool, row.spec_id) : null,
+    })),
+  );
+}
+
 export interface TicketSummary {
   id: number;
   displayId: string;
@@ -197,6 +253,7 @@ export async function specView(pool: pg.Pool, specId: number) {
       warnings: row.import_warnings as unknown[],
     },
     tickets,
+    finalizations: await finalizations(pool, "f.spec_id = $1", [specId]),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
@@ -213,6 +270,7 @@ export async function blockedQueue(pool: pg.Pool) {
   );
   return {
     tickets,
+    finalizations: await finalizations(pool, "f.state = 'blocked'", []),
     specs: specs.rows.map((s) => ({
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),

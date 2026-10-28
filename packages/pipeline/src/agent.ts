@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AGENT_FAILURES, Stage } from "@afk/shared";
+import type { AGENT_FAILURES, FinalStep, Stage } from "@afk/shared";
 import { z } from "zod";
 
 // The seam to the agent runner. Sandcastle sits behind `AgentRunner` (#29); everything else in the pipeline,
@@ -48,7 +48,7 @@ export const ReviewOutputSchema = z
 export type ReviewOutput = z.infer<typeof ReviewOutputSchema>;
 
 export interface AgentRunOptions<Schema extends z.ZodType> {
-  stage: Stage;
+  stage: Stage | FinalStep;
   branch: string; // the ticket's branch, created from baseBranch when it does not exist
   baseBranch: string;
   promptFile: string;
@@ -155,13 +155,26 @@ export const PROMPTS = {
   implement: join(PROMPT_DIR, "implement.md"),
   fix: join(PROMPT_DIR, "fix.md"),
   review: join(PROMPT_DIR, "review.md"),
+  finalReview: join(PROMPT_DIR, "final-review.md"),
+  finalFix: join(PROMPT_DIR, "final-fix.md"),
 } as const;
 
 // Only the stages that run an agent have a prompt; the three fixes share one.
 export function promptFor(
-  stage: "implement" | "review" | "gate-fix" | "review-fix" | "merge-fix",
+  stage:
+    | "implement"
+    | "review"
+    | "gate-fix"
+    | "review-fix"
+    | "merge-fix"
+    | "final-review"
+    | "final-fix",
 ): string {
   switch (stage) {
+    case "final-review":
+      return PROMPTS.finalReview;
+    case "final-fix":
+      return PROMPTS.finalFix;
     case "implement":
       return PROMPTS.implement;
     case "review":

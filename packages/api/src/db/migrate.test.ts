@@ -13,6 +13,7 @@ import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 
 const ENTITY_TABLES = [
   "edges",
+  "finalizations",
   "findings",
   "gate_results",
   "jobs",
@@ -37,7 +38,7 @@ async function tables(): Promise<string[]> {
 }
 
 describe("migrate", () => {
-  it("creates the nine entity tables on an empty database", async () => {
+  it("creates the entity tables on an empty database", async () => {
     await migrate(db.pool);
     expect(await tables()).toEqual(ENTITY_TABLES);
   });

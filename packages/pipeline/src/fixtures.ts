@@ -22,6 +22,7 @@ export function bundleFor(
       reviewed: false,
       restart: false,
     },
+    specTickets: [],
     spec: {
       id: 12,
       displayId: "S-12",

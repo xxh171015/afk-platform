@@ -1,5 +1,6 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
+import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import {
   checkBeforePush,
   checkHolder,
@@ -109,20 +110,29 @@ const Bundle = z.object({
     attempt: z.number().int(),
   }),
   run: z.object({ id: z.number().int(), displayId: z.string() }).nullable(),
-  ticket: z.object({
-    id: z.number().int(),
-    displayId: z.string(),
-    type: z.string(),
-    title: z.string(),
-    body: z.string(),
-    acceptanceCriteria: z.array(z.string()),
-    modules: z.array(z.string()),
-    state: z.string(),
-    contentVersion: z.number().int(),
-    fixCounts: z.record(z.string(), z.number().int()),
-    reviewed: z.boolean(),
-    restart: z.boolean(),
-  }),
+  ticket: z
+    .object({
+      id: z.number().int(),
+      displayId: z.string(),
+      type: z.string(),
+      title: z.string(),
+      body: z.string(),
+      acceptanceCriteria: z.array(z.string()),
+      modules: z.array(z.string()),
+      state: z.string(),
+      contentVersion: z.number().int(),
+      fixCounts: z.record(z.string(), z.number().int()),
+      reviewed: z.boolean(),
+      restart: z.boolean(),
+    })
+    .nullable(),
+  specTickets: z.array(
+    z.object({
+      displayId: z.string(),
+      title: z.string(),
+      acceptanceCriteria: z.array(z.string()),
+    }),
+  ),
   spec: z.object({
     id: z.number().int(),
     displayId: z.string(),
@@ -202,6 +212,7 @@ export function registerWorkerRoutes(
     });
     if (!job) return c.json({ job: null }, 200);
     await markClaimed(context.pool, job);
+    await markFinalClaimed(context.pool, job);
     return c.json(
       {
         job: {
@@ -275,7 +286,10 @@ export function registerWorkerRoutes(
           "SELECT id, payload FROM jobs WHERE id = $1",
           [id],
         );
-        await recordStageResult(client, job.rows[0], result);
+        const recorded = await recordStageResult(client, job.rows[0], result);
+        // not a ticket stage: it may be a step of a finalization
+        if (recorded.status === "no-ticket")
+          await recordFinalResult(client, job.rows[0], result);
       }
       return finished;
     });

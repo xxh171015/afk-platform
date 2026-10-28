@@ -23,6 +23,7 @@ export interface ContextInput {
 
 function ticketMarkdown(bundle: Bundle): string {
   const { ticket } = bundle;
+  if (!ticket) return "";
   return [
     `# ${ticket.displayId} ${ticket.title}`,
     "",
@@ -38,18 +39,30 @@ function ticketMarkdown(bundle: Bundle): string {
   ].join("\n");
 }
 
+function specTicketsMarkdown(bundle: Bundle): string {
+  return [
+    `# Tickets of ${bundle.spec.displayId}`,
+    "",
+    ...bundle.specTickets.flatMap((t) => [
+      `## ${t.displayId} ${t.title}`,
+      ...t.acceptanceCriteria.map((c) => `- ${c}`),
+      "",
+    ]),
+  ].join("\n");
+}
+
 function runJson(input: ContextInput) {
   const { bundle, run } = input;
   return {
     stage: bundle.job.stage,
     runId: run.runId,
-    ticket: bundle.ticket.displayId,
+    ticket: bundle.ticket?.displayId ?? null,
     spec: bundle.spec.displayId,
     baseSha: run.baseSha,
     branch: run.branch,
     integrationBranch: bundle.integrationBranch,
     allowedProtectedPaths: bundle.allowedProtectedPaths,
-    fixCounts: bundle.ticket.fixCounts,
+    fixCounts: bundle.ticket?.fixCounts ?? null,
     contract: bundle.contract
       ? { sha: bundle.contract.sha, file: contractFile(bundle.contract.path) }
       : null,
@@ -66,7 +79,12 @@ const contractFile = (path: string) =>
 export function renderContext(input: ContextInput): void {
   const { dir, bundle } = input;
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "ticket.md"), ticketMarkdown(bundle));
+  if (bundle.ticket) {
+    writeFileSync(join(dir, "ticket.md"), ticketMarkdown(bundle));
+  } else {
+    // a finalization has no ticket of its own: it is given what all the tickets set out to do
+    writeFileSync(join(dir, "tickets.md"), specTicketsMarkdown(bundle));
+  }
   writeFileSync(
     join(dir, "spec.md"),
     `# ${bundle.spec.displayId} ${bundle.spec.title}\n\n${bundle.spec.body}\n`,

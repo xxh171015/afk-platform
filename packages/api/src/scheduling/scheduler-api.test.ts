@@ -214,7 +214,9 @@ describe("scheduling along the dependency chain", () => {
     ]);
     order.push(await workUntilMerged(worker));
     expect(order).toEqual([1, 2, 3, 4]);
-    expect(await step(worker)).toBeUndefined();
+    // the spec is finished, so what is left is its overall review
+    const final = (await worker.claim()).body.job;
+    expect(final?.payload).toMatchObject({ stage: "final-review" });
   });
 
   it("does not free the ticket behind a blocks edge until the blocker is done", async () => {

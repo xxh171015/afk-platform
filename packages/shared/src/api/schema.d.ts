@@ -687,7 +687,12 @@ export interface paths {
                 };
                 reviewed: boolean;
                 restart: boolean;
-              };
+              } | null;
+              specTickets: {
+                displayId: string;
+                title: string;
+                acceptanceCriteria: string[];
+              }[];
               spec: {
                 id: number;
                 displayId: string;
@@ -1176,6 +1181,24 @@ export interface paths {
                   logPath: string;
                 } | null;
               }[];
+              finalizations: {
+                specId: number;
+                specDisplayId: string;
+                repo: string;
+                step: string;
+                state: string;
+                blockedReason: string | null;
+                brief: {
+                  run: {
+                    id: number;
+                    displayId: string;
+                  };
+                  stage: string;
+                  result: string | null;
+                  output?: unknown;
+                  logPath: string;
+                } | null;
+              }[];
               edges: {
                 from: string;
                 to: string;
@@ -1246,6 +1269,24 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                brief: {
+                  run: {
+                    id: number;
+                    displayId: string;
+                  };
+                  stage: string;
+                  result: string | null;
+                  output?: unknown;
+                  logPath: string;
+                } | null;
+              }[];
+              finalizations: {
+                specId: number;
+                specDisplayId: string;
+                repo: string;
+                step: string;
+                state: string;
+                blockedReason: string | null;
                 brief: {
                   run: {
                     id: number;
@@ -1543,6 +1584,67 @@ export interface paths {
           };
         };
         /** @description The spec is not paused */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/final/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The blocked steps of the overall review are queued again */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              retried: string[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Nothing is blocked */
         409: {
           headers: {
             [name: string]: unknown;

@@ -71,7 +71,10 @@ const runIdOf = (bundle: Bundle): string => {
   return bundle.run.displayId;
 };
 
-const agentRef = (bundle: Bundle) => `agent/${bundle.ticket.displayId}`;
+// The branch a stage works on: a ticket's own, or the one the overall fix of a spec is made on.
+const subjectLabel = (bundle: Bundle) =>
+  bundle.ticket?.displayId ?? `${bundle.spec.displayId}-final`;
+const agentRef = (bundle: Bundle) => `agent/${subjectLabel(bundle)}`;
 const successful = new Set(["done", "passed", "pass", "merged"]);
 export const isSuccess = (body: StageOutcomeBody) =>
   successful.has(body.outcome);
@@ -160,7 +163,7 @@ async function runStage(
   // A restart-retry: the old ticket branch goes, and the implement run starts again from the integration branch.
   // What origin still has under that name is replaced at the push, under a lease on the tip it had.
   let replaced: string | undefined;
-  if (bundle.job.stage === "implement" && bundle.ticket.restart) {
+  if (bundle.job.stage === "implement" && bundle.ticket?.restart) {
     const ref = `refs/heads/${agentRef(bundle)}`;
     // The lease is on what origin has, which the main clone may not have fetched.
     const onOrigin = git(mainDir, ["ls-remote", "origin", ref])
@@ -179,11 +182,15 @@ async function runStage(
     case "review-fix":
     case "merge-fix":
       return agentChange(deps, context, mainDir, slot, replaced);
+    case "final-fix":
+      return agentChange(deps, context, mainDir, slot);
     case "review":
+    case "final-review":
       return review(deps, context, mainDir, slot);
     case "gate":
       return gate(deps, context, mainDir, slot);
     case "merge":
+    case "final-merge":
       return merge(deps, context, mainDir, slot);
     default:
       throw new InfrastructureError(`unknown stage ${bundle.job.stage}`);
@@ -237,7 +244,8 @@ async function agentChange(
     | "implement"
     | "gate-fix"
     | "review-fix"
-    | "merge-fix";
+    | "merge-fix"
+    | "final-fix";
   const agent = agentRef(bundle);
   const integration = bundle.integrationBranch as string;
   const baseSha = branchBase(mainDir, integration, agent);
@@ -294,7 +302,7 @@ async function agentChange(
       exclude: integration,
       ids: {
         spec: bundle.spec.displayId,
-        ticket: bundle.ticket.displayId,
+        ...(bundle.ticket ? { ticket: bundle.ticket.displayId } : {}),
         run: runIdOf(bundle),
       },
     });
@@ -337,19 +345,25 @@ async function review(
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const agent = agentRef(bundle);
-  const baseSha = branchBase(
-    mainDir,
-    bundle.integrationBranch as string,
-    agent,
-  );
+  const stage = bundle.job.stage as "review" | "final-review";
+  // A ticket is reviewed against where its branch left the integration branch; a whole spec against where the
+  // integration branch left the default branch.
+  const baseSha =
+    stage === "final-review"
+      ? gitOrThrow(mainDir, [
+          "merge-base",
+          bundle.repo.defaultBranch,
+          bundle.integrationBranch as string,
+        ])
+      : branchBase(mainDir, bundle.integrationBranch as string, agent);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(context, mainDir, baseSha, tmp);
     const run = await deps.makeAgentRunner(slot.dir).run({
-      stage: "review",
+      stage,
       branch: agent,
       baseBranch: bundle.integrationBranch as string,
-      promptFile: promptFor("review"),
+      promptFile: promptFor(stage),
       ctxDir,
       schema: ReviewOutputSchema,
       idleSeconds: deps.idleSeconds,
@@ -361,13 +375,13 @@ async function review(
     const verdict = classifyReviewRun(run);
     if (verdict.kind === "infrastructure-failure")
       throw new InfrastructureError(verdict.error);
-    log(`review: ${verdict.outcome}`);
+    log(`${stage}: ${verdict.outcome}`);
     if (run.commits.length > 0)
       log(
         `review: WARNING the review made ${run.commits.length} commit(s); it should only read`,
       );
     return {
-      stage: "review",
+      stage,
       outcome: verdict.outcome,
       run: {
         branch: agent,
@@ -470,29 +484,52 @@ async function merge(
   const agent = agentRef(bundle);
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
-  const gateBranch = `gate/${bundle.ticket.displayId}`;
+  const stage = bundle.job.stage as "merge" | "final-merge";
+  const gateBranch = `gate/${subjectLabel(bundle)}`;
 
   // Already merged (a previous attempt got as far as the push): say so instead of merging twice.
   if (isAncestor(mainDir, agent, integration)) {
     log(`merge: ${agent} is already part of ${integration}`);
     return {
-      stage: "merge",
+      stage,
       outcome: "merged",
       headSha: tip(mainDir, integration),
     };
   }
 
   const oldTip = tip(mainDir, integration);
+  if (!bundle.ticket) {
+    // The overall fix has no gate of its own before this point, so the protected paths are checked here.
+    const touched = checkProtectedPaths({
+      changed: changedFiles(mainDir, oldTip, agent),
+      protectedPaths: bundle.protectedPaths,
+      approved: [],
+    });
+    if (touched.unapproved.length > 0) {
+      log(
+        `${stage}: the fix changes protected paths: ${touched.unapproved.join(", ")}`,
+      );
+      return {
+        stage,
+        outcome: "gate-failed",
+        run: {
+          output: {
+            failureLog: `# the overall fix changed protected paths\n\n${touched.unapproved.map((f) => `- ${f}`).join("\n")}\n`,
+          },
+        },
+      };
+    }
+  }
   const candidate = mergeCandidate(
     mainDir,
     integration,
     agent,
-    `Merge ${agent} into ${integration}\n\nTicket: ${bundle.ticket.displayId}`,
+    `Merge ${agent} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`,
   );
   if (candidate.conflict) {
     log(`merge: conflict in ${candidate.files.join(", ")}`);
     return {
-      stage: "merge",
+      stage,
       outcome: "conflict",
       run: {
         output: {
@@ -524,7 +561,7 @@ async function merge(
     logGate(log, outcome);
     if (!outcome.pass) {
       return {
-        stage: "merge",
+        stage,
         outcome: "gate-failed",
         run: {
           output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
@@ -548,7 +585,7 @@ async function merge(
     gitOrThrow(mainDir, ["update-ref", integrationRef, candidate.candidate]);
     log(`merge: ${integration} is now ${candidate.candidate}`);
     return {
-      stage: "merge",
+      stage,
       outcome: "merged",
       headSha: candidate.candidate,
       gate: gateFacts(outcome),

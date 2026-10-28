@@ -497,6 +497,7 @@ describe("what a person sees", () => {
     await runningSpec([ticket("a")]);
     expect((await call("GET", "/blocked")).body).toEqual({
       tickets: [],
+      finalizations: [],
       specs: [],
     });
   });

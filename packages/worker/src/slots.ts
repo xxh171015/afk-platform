@@ -51,7 +51,8 @@ export interface Slot {
   release(outcome: "success" | "failure"): Promise<void>;
 }
 
-const TICKET_REF = /^agent\/T-([1-9][0-9]*)$/;
+// A ticket's branch, or the one the overall fix of a spec is made on.
+const TICKET_REF = /^agent\/(T-[1-9][0-9]*|S-[1-9][0-9]*-final)$/;
 // A lock file another process is still writing is not a zombie; give it a moment.
 const LOCK_WRITE_GRACE_MS = 5_000;
 
@@ -330,7 +331,7 @@ export function retrieveResult(input: {
   // the platform's own local branches for this ticket are expected; the default branch and remotes are plumbing
   const expected = new Set([
     wanted,
-    `refs/heads/gate/T-${match[1]}`,
+    `refs/heads/gate/${match[1]}`,
     "refs/heads/main",
   ]);
   const refs = safeGit(input.slotClone, ["for-each-ref", "--format=%(refname)"])

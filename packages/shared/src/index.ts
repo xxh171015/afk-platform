@@ -3,6 +3,8 @@ export { createApiClient } from "./api/client.ts";
 export { createPool } from "./db.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
+export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
+export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS } from "./findings.ts";
 export type { JobState } from "./job-state.ts";

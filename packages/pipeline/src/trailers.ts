@@ -5,7 +5,7 @@ import { exec, git, gitOrThrow } from "./exec.ts";
 
 export interface TrailerIds {
   spec: string; // S-12
-  ticket: string; // T-123
+  ticket?: string; // T-123; the overall fix of a spec belongs to no ticket
   run: string; // R-456
 }
 
@@ -37,8 +37,10 @@ export function stampTrailers(request: StampRequest): StampResult {
   const { repoDir, branch, before, ids } = request;
   // The ids end up in a commit message: only our own id formats may pass.
   for (const key of ["spec", "ticket", "run"] as const) {
-    if (!ID[key].test(ids[key])) {
-      throw new RangeError(`not a ${key} id: ${JSON.stringify(ids[key])}`);
+    const id = ids[key];
+    if (id === undefined && key === "ticket") continue;
+    if (id === undefined || !ID[key].test(id)) {
+      throw new RangeError(`not a ${key} id: ${JSON.stringify(id)}`);
     }
   }
   const tip = gitOrThrow(repoDir, ["rev-parse", branch]);
@@ -85,8 +87,7 @@ export function stampTrailers(request: StampRequest): StampResult {
         "addIfDifferent",
         "--trailer",
         `Spec: ${ids.spec}`,
-        "--trailer",
-        `Ticket: ${ids.ticket}`,
+        ...(ids.ticket ? ["--trailer", `Ticket: ${ids.ticket}`] : []),
         "--trailer",
         `Run: ${ids.run}`,
       ],

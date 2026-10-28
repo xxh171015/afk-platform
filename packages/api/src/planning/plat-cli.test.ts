@@ -362,6 +362,37 @@ describe("plat", () => {
     );
   });
 
+  it("shows a blocked overall review and runs its blocked step again", async () => {
+    await blockedContract();
+    await db.pool.query(
+      "UPDATE tickets SET state = 'done', blocked_reason = NULL",
+    );
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id, step, state, blocked_reason) VALUES (1, 1, 'final-merge', 'blocked', 'merge-conflict')",
+    );
+    await db.pool.query(
+      "INSERT INTO runs (spec_id, repo_id, stage, result, output) VALUES (1, 1, 'final-merge', 'conflict', '{\"failureLog\": \"# merge conflict\"}')",
+    );
+    const blocked = await plat("blocked");
+    expect(blocked.stdout).toContain(
+      "S-1  overall review of backend: final-merge blocked (merge-conflict)",
+    );
+    expect(blocked.stdout).toContain("then: plat spec retry-final S-1");
+    expect((await plat("spec", "show", "S-1")).stdout).toContain(
+      "overall review:",
+    );
+    const retried = await plat("spec", "retry-final", "S-1");
+    expect(retried).toEqual({
+      code: 0,
+      stdout: "S-1: running again: final-merge\n",
+      stderr: "",
+    });
+    expect((await plat("spec", "retry-final", "S-1")).stderr).toMatch(
+      /no blocked finalization/,
+    );
+  });
+
   it("cancels with and without cascade", async () => {
     await blockedContract();
     const plain = await plat("ticket", "cancel", "T-1");
