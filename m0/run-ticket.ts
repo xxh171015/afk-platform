@@ -18,7 +18,10 @@ import {
 // ---------- 参数 ----------
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
-const opt = (n: string) => args[args.indexOf(`--${n}`) + 1];
+const opt = (n: string) => {
+  const i = args.indexOf(`--${n}`);
+  return i === -1 ? undefined : args[i + 1];
+};
 const ticketKey = opt("ticket") ?? "T-001";
 const SABOTAGE = flag("sabotage"); // implement 之后故意提交一个 tsc 错误，用来走 gate-fix
 const APPROVE_PROTECTED = flag("approve-protected");
