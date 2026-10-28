@@ -23,7 +23,11 @@ export interface SandcastleConfig {
   cursorApiKey: string;
   logDir: string; // where the raw logs of this task go
   onRawLine?: (line: string) => void; // Cursor's event lines, for uploading to the API
+  onNote?: (line: string) => void; // things worth a line in the run log
 }
+
+// The abort reason of the wall-clock limit; classifyAgentError recognises it again.
+const WALL_CLOCK_REASON = "wall-clock";
 
 export const SKILLS_SANDBOX_PATH = "/home/agent/.cursor/skills";
 export const CONTEXT_SANDBOX_PATH = "/context";
@@ -76,7 +80,9 @@ export function classifyAgentError(error: unknown): {
       commits: error.commits.map((c) => c.sha),
     };
   }
-  const timedOut = /Idle|wall-clock|timeout/i.test(name + message);
+  const timedOut = new RegExp(`Idle|${WALL_CLOCK_REASON}|timeout`, "i").test(
+    name + message,
+  );
   return { message, errorKind: timedOut ? "timeout" : "other", commits: [] };
 }
 
@@ -94,7 +100,7 @@ export class SandcastleAgentRunner implements AgentRunner {
     mkdirSync(config.logDir, { recursive: true });
     const abort = new AbortController();
     const timer = setTimeout(
-      () => abort.abort(new Error("wall-clock")),
+      () => abort.abort(new Error(WALL_CLOCK_REASON)),
       options.wallClockMs,
     );
     const started = Date.now();
@@ -173,7 +179,13 @@ export class SandcastleGateSandbox implements GateSandbox {
         return existsSync(full) ? readFileSync(full, "utf8") : undefined;
       },
       close: async () => {
-        await sandbox.close();
+        const closed = await sandbox.close();
+        // uncommitted changes in the gate's worktree are kept by Sandcastle, not discarded
+        if (closed.preservedWorktreePath) {
+          this.config.onNote?.(
+            `${ref}: the sandbox worktree kept uncommitted changes at ${closed.preservedWorktreePath}`,
+          );
+        }
       },
     };
   }

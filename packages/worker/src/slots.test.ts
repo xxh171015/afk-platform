@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -297,10 +298,65 @@ describe("zombie slots", () => {
     expect(results.filter(Boolean)).toHaveLength(1);
   });
 
-  it("a half-written lock file counts as a zombie, not as a crash", async () => {
+  it("a lock file that is still being written is busy; a stale garbage one is a zombie", async () => {
     mkdirSync(join(root, "0"), { recursive: true });
-    writeFileSync(join(root, "0", "lock"), '{"jobId": 1, "att');
+    const lock = join(root, "0", "lock");
+    writeFileSync(lock, '{"jobId": 1, "att');
+    expect(await manager(1).acquire(task(2))).toBeUndefined(); // written a moment ago
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
     expect(await acquire(manager(1), task(2))).toBeDefined();
+  });
+
+  it("assumes the lock is held when the API cannot be asked", async () => {
+    await abandoned();
+    const m = manager(1, {
+      isHeld: async () => {
+        throw new Error("API down");
+      },
+    });
+    expect(await m.acquire(task(2))).toBeUndefined();
+    expect(logs.some((line) => /could not ask/.test(line))).toBe(true);
+  });
+
+  it("keeps the clone when the commits cannot be taken back, so no work is lost", async () => {
+    await abandoned({ commit: true, pid: deadPid() });
+    // main already has a diverged agent/T-1, so the fetch is refused
+    git(main.dir, ["branch", "agent/T-1", "HEAD"]);
+    main.commit({ "other.txt": "x\n" }, "main moved");
+    git(main.dir, ["checkout", "--quiet", "agent/T-1"]);
+    main.commit({ "diverged.txt": "y\n" }, "diverged");
+    git(main.dir, ["checkout", "--quiet", "main"]);
+    await acquire(manager(1), task(2));
+    const kept = readdirSync(salvageDir).filter((n) => n.startsWith("clone-"));
+    expect(kept).toEqual(["clone-job-1-attempt-1"]);
+    expect(existsSync(join(salvageDir, kept[0] as string, "done.ts"))).toBe(
+      true,
+    );
+  });
+
+  it("does not wedge on a torn last.json: it keeps what it finds and goes on", async () => {
+    const slot = await abandoned({ pid: deadPid() });
+    writeFileSync(join(root, "0", "last.json"), '{"jobId":');
+    const next = await acquire(manager(1), task(2));
+    expect(next).toBeDefined();
+    expect(
+      readdirSync(salvageDir).some((n) => n.startsWith("clone-0-backend")),
+    ).toBe(true);
+    expect(existsSync(slot.dir)).toBe(true); // the new clone is in the same place
+  });
+
+  it("a losing reclaimer never touches the winner's fresh clone", async () => {
+    await abandoned({ commit: true, pid: deadPid() });
+    held.add("2:1");
+    held.add("3:1");
+    const [one, two] = await Promise.all([
+      manager(1).acquire(task(2)),
+      manager(1).acquire(task(3)),
+    ]);
+    const winner = (one ?? two) as Slot;
+    expect(existsSync(join(winner.dir, "src/a.ts"))).toBe(true);
+    expect(gitOut(winner.dir, ["status", "--porcelain"])).toBe("");
   });
 });
 
@@ -366,6 +422,26 @@ describe("taking the result back", () => {
     ]);
     expect(log.join("\n")).toContain("refs/heads/agent/T-2");
     expect(log.join("\n")).toContain("refs/heads/spec/s");
+  });
+
+  it("also reports tags, and does not follow them along with the branch", () => {
+    const slotClone = slotWithBranches(["agent/T-1"]);
+    git(slotClone, ["tag", "v1", "HEAD"]);
+    const result = retrieveResult({
+      slotClone,
+      mainClone: main.dir,
+      ref: "agent/T-1",
+    });
+    expect(result.extraRefs).toEqual(["refs/tags/v1"]);
+    expect(gitOut(main.dir, ["tag"])).toBe("");
+  });
+
+  it("does not call this ticket's gate branch or the default branch extra", () => {
+    const slotClone = slotWithBranches(["agent/T-1", "gate/T-1"]);
+    expect(
+      retrieveResult({ slotClone, mainClone: main.dir, ref: "agent/T-1" })
+        .extraRefs,
+    ).toEqual([]);
   });
 
   it("checks objects while fetching", () => {
