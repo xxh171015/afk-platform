@@ -37,13 +37,13 @@ const TRANSITIONS: Partial<
   paused: { resume: "running" },
 };
 
-const TERMINAL = new Set<SpecState>(["merged", "cancelled"]);
+const TERMINAL_STATES = new Set<SpecState>(["merged", "cancelled"]);
 
 export function specTransition(
   from: SpecState,
   event: SpecEvent,
 ): SpecTransition {
-  if (event === "cancel" && !TERMINAL.has(from))
+  if (event === "cancel" && !TERMINAL_STATES.has(from))
     return { ok: true, state: "cancelled" };
   const state = TRANSITIONS[from]?.[event];
   if (!state)

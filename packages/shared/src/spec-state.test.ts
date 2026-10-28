@@ -32,6 +32,8 @@ describe("specTransition: pause, resume, cancel", () => {
     "finalizing",
     "awaiting-review",
     "paused",
+    "partially-merged",
+    "reworking",
   ] as const)("cancels from %s", (from) => {
     expect(specTransition(from, "cancel")).toEqual({
       ok: true,
