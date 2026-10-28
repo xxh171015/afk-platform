@@ -6,6 +6,7 @@ import { describeError, useApi } from "./api.tsx";
 // grouped as specs and tickets; choosing one goes to its page.
 
 export const SEARCH_DEBOUNCE_MS = 250;
+const MAX_QUERY_LENGTH = 200; // what the API accepts
 
 export function SearchBox({
   debounceMs = SEARCH_DEBOUNCE_MS,
@@ -38,6 +39,15 @@ export function SearchBox({
     },
   });
 
+  // Enter opens the first result: the first spec, else the first ticket
+  const firstSpec = results.data?.specs[0];
+  const firstTicket = results.data?.tickets[0];
+  const firstResult = firstSpec
+    ? `#/specs/${firstSpec.id}`
+    : firstTicket
+      ? `#/tickets/${firstTicket.id}`
+      : undefined;
+
   const close = () => {
     setTyped("");
     setAsked("");
@@ -51,8 +61,13 @@ export function SearchBox({
         placeholder="Search specs and tickets"
         aria-label="Search specs and tickets"
         onChange={(event) => setTyped(event.target.value)}
+        maxLength={MAX_QUERY_LENGTH}
         onKeyDown={(event) => {
           if (event.key === "Escape") close();
+          if (event.key === "Enter" && firstResult) {
+            window.location.hash = firstResult;
+            close();
+          }
         }}
       />
       {asked !== "" ? (

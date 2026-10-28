@@ -149,6 +149,39 @@ describe("the search box", () => {
     );
   });
 
+  it("opens the first result on Enter, the spec before the tickets", async () => {
+    const { fake } = searching();
+    renderWithApp(<SearchBox debounceMs={10} />, fake);
+    type("refund");
+    await screen.findByRole("link", { name: "S-2 Refund bug" });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    expect(window.location.hash).toBe("#/specs/2");
+    await waitFor(() =>
+      expect(screen.queryByTestId("search-results")).toBeNull(),
+    );
+    window.location.hash = "";
+  });
+
+  it("opens the first ticket on Enter when no spec matched, and does nothing before there are results", async () => {
+    const { fake } = searching({ specs: [], tickets: [result.tickets[0]] });
+    renderWithApp(<SearchBox debounceMs={10} />, fake);
+    type("rounding");
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" }); // nothing has come back yet
+    expect(window.location.hash).toBe("");
+    await screen.findByRole("link", { name: /T-7/ });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    expect(window.location.hash).toBe("#/tickets/7");
+    window.location.hash = "";
+  });
+
+  it("cannot take more text than the API accepts", () => {
+    const { fake } = searching();
+    renderWithApp(<SearchBox debounceMs={10} />, fake);
+    expect((screen.getByRole("searchbox") as HTMLInputElement).maxLength).toBe(
+      200,
+    );
+  });
+
   it("closes on Escape and when the box is emptied", async () => {
     const { fake } = searching();
     renderWithApp(<SearchBox debounceMs={10} />, fake);
