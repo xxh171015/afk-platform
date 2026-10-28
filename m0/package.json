@@ -5,7 +5,8 @@
   "description": "PROTOTYPE: AFK 平台 M0 第一天四项验证（一次性脚本）",
   "scripts": {
     "check": "tsc --noEmit",
-    "day-one": "node day-one.ts"
+    "day-one": "node day-one.ts",
+    "ticket": "node run-ticket.ts"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "0.12.0",
