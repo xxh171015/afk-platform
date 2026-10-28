@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BlockedQueue, useBlocked } from "./BlockedQueue.tsx";
+import { SearchBox } from "./SearchBox.tsx";
 import { SpecDetail } from "./SpecDetail.tsx";
 import { SpecList } from "./SpecList.tsx";
 import { TicketDetail } from "./TicketDetail.tsx";
@@ -33,6 +34,7 @@ export function App() {
         <h1>
           <a href="#/">AFK platform</a>
         </h1>
+        <SearchBox />
         <nav>
           <a href="#/">Specs</a>{" "}
           <a href="#/blocked">

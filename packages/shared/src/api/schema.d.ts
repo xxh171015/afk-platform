@@ -1281,6 +1281,79 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          q: string;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Specs and tickets whose number, title or body contains the text, ignoring case */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              specs: {
+                id: number;
+                displayId: string;
+                title: string;
+                /** @enum {string} */
+                state:
+                  | "draft"
+                  | "planned"
+                  | "running"
+                  | "finalizing"
+                  | "awaiting-review"
+                  | "partially-merged"
+                  | "reworking"
+                  | "merged"
+                  | "paused"
+                  | "cancelled";
+                matched: ("id" | "title" | "body")[];
+              }[];
+              tickets: {
+                id: number;
+                displayId: string;
+                title: string;
+                /** @enum {string} */
+                state:
+                  | "pending"
+                  | "queued"
+                  | "running"
+                  | "merging"
+                  | "done"
+                  | "blocked"
+                  | "cancelled";
+                specId: number;
+                specDisplayId: string;
+                matched: ("id" | "title" | "body")[];
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/blocked": {
     parameters: {
       query?: never;

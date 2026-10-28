@@ -308,6 +308,61 @@ export async function specList(pool: pg.Pool) {
   }));
 }
 
+const SEARCH_LIMIT = 50;
+
+// `%` and `_` in what a person typed are text to look for, not wildcards.
+const escapeLike = (text: string) =>
+  text.replace(/[\\%_]/g, (char) => `\\${char}`);
+
+export type MatchedIn = "id" | "title" | "body";
+
+// Case-insensitive substring search over spec and ticket numbers (S-12, T-5), titles and bodies: ILIKE, no search
+// engine. Results are grouped by kind, newest first, and say where the text was found.
+export async function search(pool: pg.Pool, text: string) {
+  const pattern = `%${escapeLike(text)}%`;
+  const specs = await pool.query(
+    `SELECT id, title, state,
+            ('S-' || id) ILIKE $1 AS in_id, title ILIKE $1 AS in_title, body ILIKE $1 AS in_body
+     FROM specs WHERE ('S-' || id) ILIKE $1 OR title ILIKE $1 OR body ILIKE $1
+     ORDER BY id DESC LIMIT $2`,
+    [pattern, SEARCH_LIMIT],
+  );
+  const tickets = await pool.query(
+    `SELECT t.id, t.title, t.state, t.spec_id,
+            ('T-' || t.id) ILIKE $1 AS in_id, t.title ILIKE $1 AS in_title, t.body ILIKE $1 AS in_body
+     FROM tickets t WHERE ('T-' || t.id) ILIKE $1 OR t.title ILIKE $1 OR t.body ILIKE $1
+     ORDER BY t.id DESC LIMIT $2`,
+    [pattern, SEARCH_LIMIT],
+  );
+  const where = (row: {
+    in_id: boolean;
+    in_title: boolean;
+    in_body: boolean;
+  }): MatchedIn[] => [
+    ...(row.in_id ? (["id"] as const) : []),
+    ...(row.in_title ? (["title"] as const) : []),
+    ...(row.in_body ? (["body"] as const) : []),
+  ];
+  return {
+    specs: specs.rows.map((row) => ({
+      id: row.id as number,
+      displayId: formatDisplayId("spec", row.id),
+      title: row.title as string,
+      state: row.state as SpecState,
+      matched: where(row),
+    })),
+    tickets: tickets.rows.map((row) => ({
+      id: row.id as number,
+      displayId: formatDisplayId("ticket", row.id),
+      title: row.title as string,
+      state: row.state as TicketState,
+      specId: row.spec_id as number,
+      specDisplayId: formatDisplayId("spec", row.spec_id),
+      matched: where(row),
+    })),
+  };
+}
+
 // Everything waiting for a person: tickets that are blocked and specs that the platform paused.
 export async function blockedQueue(pool: pg.Pool) {
   const tickets = await summaries(pool, "t.state = 'blocked'", []);

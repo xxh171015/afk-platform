@@ -2267,6 +2267,134 @@
         }
       }
     },
+    "/search": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Specs and tickets whose number, title or body contains the text, ignoring case",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "planned",
+                              "running",
+                              "finalizing",
+                              "awaiting-review",
+                              "partially-merged",
+                              "reworking",
+                              "merged",
+                              "paused",
+                              "cancelled"
+                            ]
+                          },
+                          "matched": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["id", "title", "body"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "title",
+                          "state",
+                          "matched"
+                        ]
+                      }
+                    },
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "matched": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["id", "title", "body"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "title",
+                          "state",
+                          "specId",
+                          "specDisplayId",
+                          "matched"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["specs", "tickets"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/blocked": {
       "get": {
         "responses": {

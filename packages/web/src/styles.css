@@ -261,3 +261,39 @@ ul.blocked-list {
 .actions input[type="number"] {
   width: 5em;
 }
+
+.search {
+  position: relative;
+  margin-bottom: 8px;
+}
+.search input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.search-results {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  max-height: 60vh;
+  overflow: auto;
+}
+.search-results h4 {
+  margin: 8px 0 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.search-results ul {
+  margin: 0;
+  padding-left: 16px;
+}

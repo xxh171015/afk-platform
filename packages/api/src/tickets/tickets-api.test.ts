@@ -668,3 +668,116 @@ describe("what a person sees", () => {
     });
   });
 });
+
+describe("search", () => {
+  async function twoSpecs() {
+    await runningSpec([
+      ticket("export", {
+        title: "Export orders as CSV",
+        body: "Customers want a Spreadsheet download.",
+      }),
+      ticket("pay", { title: "Payment retries" }),
+    ]);
+    const created = await call("POST", "/projects", { name: "other" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:b",
+      role: "backend",
+    });
+    const second = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "bug",
+      slug: "refund",
+      title: "Refund bug",
+      body: "Refunds over 100% are rejected.",
+    });
+    await call("POST", `/specs/${second.body.id}/tickets/import`, {
+      tickets: [ticket("refund", { title: "Fix the refund_total rounding" })],
+    });
+  }
+  const find = async (q: string) =>
+    (await call("GET", `/search?q=${encodeURIComponent(q)}`)).body as Json;
+  const names = (list: Json[]) => list.map((x) => x.displayId);
+
+  it("finds a spec or a ticket by its number, ignoring case", async () => {
+    await twoSpecs();
+    expect(names((await find("S-2")).specs)).toEqual(["S-2"]);
+    expect(names((await find("s-1")).specs)).toEqual(["S-1"]);
+    expect(names((await find("t-3")).tickets)).toEqual(["T-3"]);
+    expect((await find("T-3")).tickets[0].matched).toEqual(["id"]);
+  });
+
+  it("finds by title, ignoring case, in the middle of a word", async () => {
+    await twoSpecs();
+    const result = await find("ORDERS as csv");
+    expect(names(result.tickets)).toEqual(["T-1"]);
+    expect(result.tickets[0]).toMatchObject({
+      title: "Export orders as CSV",
+      specDisplayId: "S-1",
+      matched: ["title"],
+    });
+    expect(names((await find("rfund bug")).specs)).toEqual([]); // a substring, not a fuzzy match
+    expect(names((await find("ref")).specs)).toEqual(["S-2"]);
+  });
+
+  it("finds by body, and says where the text was found", async () => {
+    await twoSpecs();
+    const result = await find("spreadsheet");
+    expect(names(result.tickets)).toEqual(["T-1"]);
+    expect(result.tickets[0].matched).toEqual(["body"]);
+    expect(names((await find("rejected")).specs)).toEqual(["S-2"]);
+  });
+
+  it("groups specs and tickets, newest first", async () => {
+    await twoSpecs();
+    const result = await find("refund");
+    expect(names(result.specs)).toEqual(["S-2"]);
+    expect(names(result.tickets)).toEqual(["T-3"]);
+    const both = await find("e"); // matches nearly everything
+    expect(names(both.tickets)).toEqual(
+      [...names(both.tickets)].sort(
+        (a, b) => Number(b.slice(2)) - Number(a.slice(2)),
+      ),
+    );
+  });
+
+  it("takes % and _ and backslash as the characters they are, not as wildcards", async () => {
+    await twoSpecs();
+    expect(names((await find("100%")).specs)).toEqual(["S-2"]);
+    expect(names((await find("%")).specs)).toEqual(["S-2"]); // only the body that has a percent sign
+    expect(names((await find("refund_total")).tickets)).toEqual(["T-3"]);
+    expect((await find("refund_total")).tickets).toHaveLength(1);
+    expect(names((await find("refund-total")).tickets)).toEqual([]); // _ is not "any character"
+    expect(names((await find("\\")).tickets)).toEqual([]);
+  });
+
+  it("returns empty lists for no match", async () => {
+    await twoSpecs();
+    expect(await find("zzz-no-such-thing")).toEqual({ specs: [], tickets: [] });
+  });
+
+  it("refuses an empty search and an enormous one", async () => {
+    expect((await call("GET", "/search?q=")).status).toBe(400);
+    expect((await call("GET", "/search?q=%20%20")).status).toBe(400);
+    expect((await call("GET", "/search")).status).toBe(400);
+    expect((await call("GET", `/search?q=${"a".repeat(201)}`)).status).toBe(
+      400,
+    );
+  });
+
+  it("caps the number of results per kind", async () => {
+    const created = await call("POST", "/projects", { name: "many" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:b",
+      role: "backend",
+    });
+    for (let i = 0; i < 55; i++) {
+      await db.pool.query(
+        "INSERT INTO specs (project_id, type, slug, title) VALUES ($1, 'feature', $2, 'Needle')",
+        [created.body.id, `s${i}`],
+      );
+    }
+    const result = await find("needle");
+    expect(result.specs).toHaveLength(50);
+    expect(result.specs[0].displayId).toBe("S-55"); // the newest
+  });
+});

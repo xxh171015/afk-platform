@@ -10,6 +10,7 @@ import {
 } from "../tickets/actions.ts";
 import {
   blockedQueue,
+  search,
   specList,
   specView,
   ticketView,
@@ -191,6 +192,43 @@ const specsRoute = createRoute({
   },
 });
 
+const searchRoute = createRoute({
+  method: "get",
+  path: "/search",
+  request: {
+    query: z.object({
+      q: z.string().trim().min(1).max(200),
+    }),
+  },
+  responses: {
+    200: reply(
+      "Specs and tickets whose number, title or body contains the text, ignoring case",
+      z.object({
+        specs: z.array(
+          z.object({
+            id: Id,
+            displayId: z.string(),
+            title: z.string(),
+            state: z.enum(SPEC_STATES),
+            matched: z.array(z.enum(["id", "title", "body"])),
+          }),
+        ),
+        tickets: z.array(
+          z.object({
+            id: Id,
+            displayId: z.string(),
+            title: z.string(),
+            state: z.enum(TICKET_STATES),
+            specId: Id,
+            specDisplayId: z.string(),
+            matched: z.array(z.enum(["id", "title", "body"])),
+          }),
+        ),
+      }),
+    ),
+  },
+});
+
 const blockedRoute = createRoute({
   method: "get",
   path: "/blocked",
@@ -329,6 +367,10 @@ export function registerTicketRoutes(
 
   app.openapi(specsRoute, async (c) =>
     c.json({ specs: await specList(pool) }, 200),
+  );
+
+  app.openapi(searchRoute, async (c) =>
+    c.json(await search(pool, c.req.valid("query").q), 200),
   );
 
   app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));

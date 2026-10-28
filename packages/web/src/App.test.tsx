@@ -179,6 +179,22 @@ describe("the app", () => {
     ).toBeTruthy();
   });
 
+  it("has the search box at the top of every page", async () => {
+    window.location.hash = "#/specs/3";
+    renderWithApp(<App />, server());
+    expect(
+      await screen.findByRole("searchbox", {
+        name: "Search specs and tickets",
+      }),
+    ).toBeTruthy();
+    window.location.hash = "#/blocked";
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "Search specs and tickets" }),
+      ).toBeTruthy(),
+    );
+  });
+
   it("falls back to the list for an address it does not know", async () => {
     window.location.hash = "#/specs/not-a-number";
     renderWithApp(<App />, server());
