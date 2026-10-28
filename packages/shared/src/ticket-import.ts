@@ -1,17 +1,13 @@
 import { z } from "zod";
+import { formatDisplayId } from "./display-id.ts";
 import type { EdgeKind } from "./schemas.ts";
 
 // The tickets.yaml that to-tickets produces (docs/design.md「导入格式」). Keys are snake_case as in the file.
-export const IMPORT_TICKET_TYPES = [
-  "contract",
-  "implementation",
-  "integration",
-] as const;
-
-const ImportTicketSchema = z.object({
+// A planner may write only contract, implementation and integration tickets; the platform makes fix and system ones.
+const ImportTicketSchema = z.strictObject({
   key: z.string().min(1),
   repo: z.string().min(1),
-  type: z.enum(IMPORT_TICKET_TYPES),
+  type: z.enum(["contract", "implementation", "integration"]),
   title: z.string().min(1),
   body: z.string().default(""),
   modules: z.array(z.string().min(1)).min(1),
@@ -21,7 +17,7 @@ const ImportTicketSchema = z.object({
   contract: z.string().min(1).optional(),
 });
 
-export const ImportFileSchema = z.object({
+export const ImportFileSchema = z.strictObject({
   spec: z.string().optional(),
   tickets: z.array(ImportTicketSchema).min(1).max(500),
   external_blocked_by: z.array(z.string()).default([]),
@@ -31,7 +27,7 @@ export type ImportFile = z.infer<typeof ImportFileSchema>;
 export interface PlannedTicket {
   key: string;
   repoId: number;
-  type: (typeof IMPORT_TICKET_TYPES)[number];
+  type: "contract" | "implementation" | "integration";
   title: string;
   body: string;
   acceptanceCriteria: string[];
@@ -67,6 +63,7 @@ export type ImportPlan =
 export function planImport(
   input: unknown,
   repoIdsByRole: ReadonlyMap<string, number>,
+  specId: number,
 ): ImportPlan {
   const parsed = ImportFileSchema.safeParse(input);
   if (!parsed.success) {
@@ -78,6 +75,14 @@ export function planImport(
   const file = parsed.data;
   const errors: string[] = [];
 
+  if (
+    file.spec !== undefined &&
+    file.spec !== formatDisplayId("spec", specId)
+  ) {
+    errors.push(
+      `spec: the file names ${file.spec}, but it is being imported into ${formatDisplayId("spec", specId)}`,
+    );
+  }
   if (file.external_blocked_by.length > 0) {
     errors.push(
       `external_blocked_by must be empty in M1, got ${file.external_blocked_by.join(", ")}`,
@@ -98,12 +103,9 @@ export function planImport(
         `ticket ${ticket.key}: repo ${ticket.repo} does not belong to the project`,
       );
     }
-    const upstreams: [string, EdgeKind][] = [
-      ...ticket.blocked_by.map((key): [string, EdgeKind] => [key, "blocks"]),
-      ...(ticket.contract
-        ? [[ticket.contract, "contract"] as [string, EdgeKind]]
-        : []),
-    ];
+    const upstreams: [string, EdgeKind][] = [];
+    for (const key of ticket.blocked_by) upstreams.push([key, "blocks"]);
+    if (ticket.contract) upstreams.push([ticket.contract, "contract"]);
     for (const [upstream, kind] of upstreams) {
       const source = byKey.get(upstream);
       if (!source) {

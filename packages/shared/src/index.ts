@@ -47,7 +47,6 @@ export type {
 } from "./ticket-import.ts";
 export {
   globsOverlap,
-  IMPORT_TICKET_TYPES,
   ImportFileSchema,
   planImport,
 } from "./ticket-import.ts";

@@ -20,7 +20,7 @@ const file = (...tickets: Record<string, unknown>[]): unknown => ({
   tickets,
 });
 
-const plan = (input: unknown) => planImport(input, repos);
+const plan = (input: unknown) => planImport(input, repos, 12);
 const errorsOf = (input: unknown) => {
   const result = plan(input);
   if (result.ok) throw new Error("expected the import to be rejected");
@@ -72,6 +72,21 @@ describe("rejections", () => {
   it("rejects a file that is not the import shape, naming the field", () => {
     expect(errorsOf({ tickets: "nope" })[0]).toMatch(/tickets/);
     expect(errorsOf(null)[0]).toMatch(/./);
+  });
+
+  it("rejects a file that names another spec, together with other problems", () => {
+    const errors = errorsOf({
+      spec: "S-13",
+      tickets: [ticket("a", { repo: "mobile" })],
+    });
+    expect(errors).toHaveLength(2);
+    expect(errors.join("\n")).toMatch(/S-13.*S-12/);
+  });
+
+  it("rejects a misspelt field instead of silently dropping it", () => {
+    const errors = errorsOf(file(ticket("a", { blocked_bye: ["b"] })));
+    expect(errors).toEqual([expect.stringMatching(/ticket a.*blocked_bye/)]);
+    expect(errorsOf({ tickets: [ticket("a")], extra: 1 })[0]).toMatch(/extra/);
   });
 
   it("rejects an empty ticket list", () => {

@@ -86,7 +86,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           mergePolicy: options.mergePolicy,
         },
       });
-      if (!data) throw failure(response, error);
+      if (!data) throw failureFrom(response, error);
       print(data, `project ${data.id} ${data.name}`);
     });
 
@@ -111,7 +111,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           },
         },
       );
-      if (!data) throw failure(response, error);
+      if (!data) throw failureFrom(response, error);
       print(data, `repo ${data.id} ${data.role}`);
     });
 
@@ -137,7 +137,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           body,
         },
       });
-      if (!data) throw failure(response, error);
+      if (!data) throw failureFrom(response, error);
       print(data, data.displayId);
     });
 
@@ -171,7 +171,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           body: document as Record<string, unknown>,
         },
       );
-      if (!data) throw failure(response, error);
+      if (!data) throw failureFrom(response, error);
       const lines = [
         `imported ${data.tickets.length} tickets into ${spec}`,
         ...data.tickets.map((t) => `  ${t.displayId}  ${t.key}`),
@@ -200,7 +200,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   }
 }
 
-function failure(response: Response, body: unknown): Failure {
+function failureFrom(response: Response, body: unknown): Failure {
   const text = describe(body) ?? `HTTP ${response.status}`;
   return new Failure(text, body);
 }
@@ -224,9 +224,9 @@ function describe(body: unknown): string | undefined {
   return undefined;
 }
 
-function report(failure: Failure, asJson: boolean, io: Io): void {
-  if (asJson) io.stdout(`${JSON.stringify(failure.body)}\n`);
-  else io.stderr(`error: ${failure.message}\n`);
+function report(problem: Failure, asJson: boolean, io: Io): void {
+  if (asJson) io.stdout(`${JSON.stringify(problem.body)}\n`);
+  else io.stderr(`error: ${problem.message}\n`);
 }
 
 function slugify(title: string): string {

@@ -1,7 +1,6 @@
 import {
   formatDisplayId,
   type ImportWarning,
-  parseDisplayId,
   planImport,
   type SPEC_TYPES,
 } from "@afk/shared";
@@ -168,20 +167,8 @@ export async function importTickets(
     const plan = planImport(
       input,
       new Map(repos.rows.map((row) => [row.role as string, row.id as number])),
+      specId,
     );
-    const named = (input as { spec?: unknown } | null)?.spec;
-    if (plan.ok && named !== undefined) {
-      const parsed =
-        typeof named === "string" ? parseDisplayId(named) : undefined;
-      if (parsed?.kind !== "spec" || parsed.id !== specId) {
-        return await rollback(client, {
-          status: "invalid",
-          errors: [
-            `spec: the file names ${String(named)}, but it is being imported into ${formatDisplayId("spec", specId)}`,
-          ],
-        });
-      }
-    }
     if (!plan.ok) {
       return await rollback(client, { status: "invalid", errors: plan.errors });
     }
