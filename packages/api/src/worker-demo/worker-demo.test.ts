@@ -36,12 +36,14 @@ let home: string;
 let origin: string; // bare repo standing in for GitHub
 let seed: TestRepo;
 
-const JUNIT =
-  '<testsuites tests="3"><testsuite name="a" tests="3" skipped="0"/></testsuites>';
+// The test command counts tests from a file in the repo (3 unless the work says otherwise) and fails on BROKEN.
+const COUNT_TESTS =
+  "test ! -f BROKEN && mkdir -p reports && n=$(cat tests.count 2>/dev/null || echo 3) && " +
+  `printf '<testsuites tests="%s"><testsuite name="a" tests="%s" skipped="0"/></testsuites>' "$n" "$n" > reports/junit.xml`;
 const GATES = [
   "commands:",
   "  - name: test",
-  `    run: "test ! -f BROKEN && mkdir -p reports && echo ${Buffer.from(JUNIT).toString("base64")} | base64 -d > reports/junit.xml"`,
+  `    run: ${JSON.stringify(COUNT_TESTS)}`,
   "    timeoutSeconds: 30",
   "    junit: reports/junit.xml",
   "",
@@ -829,6 +831,60 @@ describe("the overall review of the integration branch", () => {
   });
 });
 
+describe("the test count guard", () => {
+  const work = (over?: Parameters<typeof deps>[0]) =>
+    runWorker({
+      api: workerFor(),
+      executor: deps(over),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+
+  it("measures each gate against what the last merge measured: fewer tests than before is a failed gate", async () => {
+    await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await work({
+      script: (ctx) => {
+        if (ctx.stage === "implement" && ctx.branch === "agent/T-2") {
+          return {
+            files: { "tests.count": "2\n" },
+            message: "delete a test",
+            output: DONE,
+          }; // 3 before, 2 now
+        }
+        if (ctx.stage === "gate-fix")
+          return {
+            files: { "tests.count": "3\n" },
+            message: "put the test back",
+            output: DONE,
+          };
+        return undefined;
+      },
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    const gates = await db.pool.query(
+      "SELECT result, output FROM runs WHERE ticket_id = 2 AND stage = 'gate' ORDER BY id",
+    );
+    expect(gates.rows.map((r) => r.result)).toEqual(["failed", "passed"]);
+    expect(gates.rows[0].output.reasons).toEqual([
+      "fewer tests than the baseline: 2 < 3",
+    ]);
+    expect(gates.rows[0].output.failureLog).toContain(
+      "fewer tests than the baseline",
+    );
+  });
+
+  it("does not hold the first ticket of a spec to anything: there is nothing to compare with yet", async () => {
+    await confirmedSpec([ticket("a")]);
+    await work({
+      script: (ctx) =>
+        ctx.stage === "implement"
+          ? { files: { "tests.count": "1\n" }, output: DONE }
+          : undefined,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+  });
+});
+
 describe("the merge stage", () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);
@@ -903,17 +959,18 @@ describe("the merge stage", () => {
     expect(await stateOf()).toEqual(["1:running"]);
   });
 
-  it("does not overwrite an integration branch that moved while the candidate was being gated", async () => {
-    await confirmedSpec([ticket("a")]);
-    const executor = deps();
+  // somebody else pushes to the integration branch while a candidate is under test, `times` times
+  function withIntruder(executor: ReturnType<typeof deps>, times: number) {
     const intruder = join(home, "intruder");
+    let pushed = 0;
     const gateSandbox = executor.makeGateSandbox;
     executor.makeGateSandbox = (slotDir) => {
       const inner = gateSandbox(slotDir);
       return {
         open: async (ref) => {
-          if (ref.startsWith("gate/")) {
-            // somebody else pushes to the integration branch while the candidate is under test
+          if (ref.startsWith("gate/") && pushed < times) {
+            pushed += 1;
+            rmSync(intruder, { recursive: true, force: true });
             git(home, ["clone", "--quiet", origin, intruder]);
             git(intruder, ["checkout", "--quiet", "spec/order-export"]);
             git(intruder, [
@@ -925,7 +982,7 @@ describe("the merge stage", () => {
               "--quiet",
               "--allow-empty",
               "-m",
-              "intruder",
+              `intruder ${pushed}`,
             ]);
             git(intruder, ["push", "--quiet", "origin", "spec/order-export"]);
           }
@@ -933,22 +990,73 @@ describe("the merge stage", () => {
         },
       };
     };
+    return () => pushed;
+  }
+
+  it("fetches and merges again when the integration branch moved while the candidate was being gated", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps();
+    const intrusions = withIntruder(executor, 1);
     await runWorker({
       api: workerFor(),
       executor,
       stopWhenIdle: true,
       heartbeatMs: 20,
     });
-    // the push was refused by the lease: the intruder's commit is still the tip, our merge is not there
+    expect(intrusions()).toBe(1);
+    // nothing was overwritten: the intruder's commit is under our merge, and the ticket is done
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(
+      gitOut(origin, [
+        "log",
+        "--format=%s",
+        "--first-parent",
+        "main..spec/order-export",
+      ]).split("\n"),
+    ).toEqual(["Merge agent/T-1 into spec/order-export", "intruder 1"]);
+    // one merge job did it all, and the candidate that was pushed was gated on the new tip
+    const merges = await db.pool.query(
+      "SELECT state, attempt FROM jobs WHERE type = 'merge'",
+    );
+    expect(merges.rows).toEqual([{ state: "done", attempt: 1 }]);
+    expect(
+      Number(
+        (await db.pool.query("SELECT count(*) FROM gate_results")).rows[0]
+          .count,
+      ),
+    ).toBe(2); // the branch, and the candidate that was pushed
+  });
+
+  it("gives up, without overwriting anything, if the branch keeps moving", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps();
+    withIntruder(executor, 99);
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    // three tries per merge job, and the job itself is tried three times: then the ticket is blocked for a person
+    const merges = await db.pool.query(
+      "SELECT state, error FROM jobs WHERE type = 'merge' ORDER BY id",
+    );
+    expect(merges.rows.map((r) => r.state)).toEqual([
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    expect(merges.rows[0].error).toContain("kept moving");
+    // nothing of ours reached the branch: the last thing on it is the intruder's
     expect(
       gitOut(origin, ["log", "-1", "--format=%s", "spec/order-export"]),
-    ).toBe("intruder");
-    const merge = await db.pool.query(
-      "SELECT state, error FROM jobs WHERE type = 'merge'",
-    );
-    expect(merge.rows[0].state).toBe("failed");
-    expect(merge.rows[0].error).toContain("could not advance");
-    expect(await stateOf()).toEqual(["1:merging"]); // not done: nothing reached the integration branch
+    ).toBe("intruder 9");
+    expect(
+      gitOut(origin, ["log", "--format=%s", "spec/order-export"]).includes(
+        "Merge agent/T-1",
+      ),
+    ).toBe(false);
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
   });
 });
 

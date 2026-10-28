@@ -275,10 +275,14 @@ describe("scheduling along the dependency chain", () => {
     await post(`/specs/${specId}/confirm`);
     const worker = new FakeWorker(api.url, "w1", []);
     const claimed = (await worker.claim()).body.job;
-    await worker.fail(claimed?.id as number, claimed?.attempt as number);
-    // what a human retry (#32) does to the ticket
-    await db.pool.query("UPDATE tickets SET state = 'pending' WHERE id = 1");
-    expect((await scheduleSpec(db.pool, specId)).enqueued).toHaveLength(1);
+    await worker.complete(claimed?.id as number, claimed?.attempt as number, {
+      stage: "implement",
+      outcome: "agent-gave-up",
+    });
+    // a person retries it: back to pending, and the scheduler queues it again
+    expect((await post("/tickets/1/retry", { mode: "continue" })).status).toBe(
+      200,
+    );
     expect((await jobPayloads()).map((j) => j.idempotency_key)).toEqual([
       "T-1:1:implement:1",
       "T-1:1:implement:2",
@@ -468,6 +472,38 @@ describe("the spec's agent time budget", () => {
       enqueued: [],
       paused: false,
     });
+  });
+
+  it("counts a run that is still going, but never more than the longest a run may take", async () => {
+    const { specId } = await draftSpec([ticket("a")], {
+      specAgentSeconds: 90 * 60,
+    });
+    // started nine hours ago and never finished: counts one hour (the cap of a run), not nine
+    await db.pool.query(
+      "INSERT INTO runs (spec_id, repo_id, stage, started_at) VALUES ($1, 1, 'implement', now() - interval '9 hours')",
+      [specId],
+    );
+    expect((await post(`/specs/${specId}/confirm`)).body.state).toBe("running"); // 1 h of 1.5 h
+    // a second run that has been going for 45 minutes: 1 h + 45 min is past the hour and a half
+    await db.pool.query(
+      "INSERT INTO runs (spec_id, repo_id, stage, started_at) VALUES ($1, 1, 'implement', now() - interval '45 minutes')",
+      [specId],
+    );
+    expect(await scheduleSpec(db.pool, specId)).toEqual({
+      enqueued: [],
+      paused: true,
+    });
+  });
+
+  it("does not count a run twice once it has finished", async () => {
+    const { specId } = await draftSpec([ticket("a")], {
+      specAgentSeconds: 2 * 3600,
+    });
+    await db.pool.query(
+      "INSERT INTO runs (spec_id, repo_id, stage, started_at, finished_at, duration_ms) VALUES ($1, 1, 'implement', now() - interval '5 hours', now() - interval '4 hours', 60000)",
+      [specId],
+    );
+    expect((await post(`/specs/${specId}/confirm`)).body.state).toBe("running"); // one minute used, not five hours
   });
 
   it("honours a project override of the budget", async () => {

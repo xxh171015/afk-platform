@@ -23,34 +23,60 @@ jobs:
           SHA: ${{ github.sha }}
           ACTOR: ${{ github.actor }}
           PUSHER: ${{ github.event.pusher.name }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           problems=""
           case "$ACTOR$PUSHER" in
             *"[bot]"*) problems="${problems}- pushed by a bot account (actor: $ACTOR, pusher: $PUSHER)"$'\n' ;;
           esac
-          # The link between a commit and its pull request can take a moment to show up after the push.
-          merged=0
-          for attempt in 1 2 3 4; do
-            if pulls=$(gh api "repos/$REPO/commits/$SHA/pulls"); then
-              merged=$(echo "$pulls" | jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
-              [ "$merged" -gt 0 ] && break
-            else
-              api_failed=1
-            fi
-            sleep "${RETRY_DELAY:-5}"
-          done
-          if [ "$merged" -eq 0 ]; then
-            if [ "${api_failed:-0}" -eq 1 ] && [ -z "${pulls:-}" ]; then
-              problems="${problems}- GitHub could not be asked which pull request this commit belongs to"$'\n'
-            else
-              problems="${problems}- no merged pull request is associated with this commit"$'\n'
-            fi
+
+          # Every commit this push brought in, not only the newest one (the tip alone for a new branch or when the
+          # range cannot be had).
+          commits="$SHA"
+          if [ -n "${BEFORE:-}" ] && [ -n "${BEFORE//0/}" ]; then
+            range=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" | jq -r '.commits[].sha' || true)
+            if [ -n "$range" ]; then commits="$range"; fi
           fi
+
+          # The link between a commit and its pull request can take a moment to show up after the push.
+          check_commit() {
+            local sha=$1 pulls="" merged api_failed=0
+            for attempt in 1 2 3 4; do
+              if pulls=$(gh api "repos/$REPO/commits/$sha/pulls"); then
+                merged=$(echo "$pulls" | jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
+                if [ "$merged" -gt 0 ]; then echo ok; return; fi
+              else
+                api_failed=1
+                pulls=""
+              fi
+              sleep "${RETRY_DELAY:-5}"
+            done
+            if [ "$api_failed" -eq 1 ] && [ -z "$pulls" ]; then echo unknown; else echo none; fi
+          }
+          without=""
+          unknown=""
+          for sha in $commits; do
+            case "$(check_commit "$sha")" in
+              none) without="$without ${sha:0:7}" ;;
+              unknown) unknown="$unknown ${sha:0:7}" ;;
+            esac
+          done
+          if [ -n "$without" ]; then
+            problems="${problems}- no merged pull request is associated with:${without}"$'\n'
+          fi
+          if [ -n "$unknown" ]; then
+            problems="${problems}- GitHub could not be asked which pull request these commits belong to:${unknown}"$'\n'
+          fi
+
           if [ -n "$problems" ]; then
-            gh issue create --repo "$REPO" \
-              --title "Direct push to main: ${SHA:0:7}" \
-              --body "Commit $SHA reached main without the expected pull request:"$'\n\n'"$problems"
+            title="Direct push to main: ${SHA:0:7}"
+            # a re-run of the same push does not open the issue again
+            existing=$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number | jq length)
+            if [ "$existing" -eq 0 ]; then
+              gh issue create --repo "$REPO" --title "$title" \
+                --body "Commit $SHA reached main without the expected pull request:"$'\n\n'"$problems"
+            fi
             echo "::error::$SHA reached main without a merged pull request, or was pushed by a bot"
             exit 1
           fi

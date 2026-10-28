@@ -456,6 +456,7 @@ async function gate(
     ref: agent,
     commitSha: tip(mainDir, agent),
     configSha: tip(mainDir, integration),
+    ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
     cache: deps.gateCache,
   });
   if (context.signal.aborted)
@@ -474,12 +475,42 @@ async function gate(
   };
 }
 
+const MAX_MERGE_ATTEMPTS = 3;
+
+// If the integration branch moved while the candidate was being gated, the push is refused by its lease. The
+// answer is not to fail but to fetch and begin again: a new candidate on the new tip, gated again.
 async function merge(
   deps: ExecutorDeps,
   context: StageContext,
   mainDir: string,
   slot: Slot,
 ): Promise<StageOutcomeBody> {
+  const { bundle } = context;
+  for (let attempt = 1; ; attempt++) {
+    const outcome = await mergeOnce(deps, context, mainDir, slot);
+    if (!("integrationMoved" in outcome)) return outcome;
+    if (attempt === MAX_MERGE_ATTEMPTS) {
+      throw new InfrastructureError(
+        `could not advance ${bundle.integrationBranch}: it kept moving (${outcome.integrationMoved})`,
+      );
+    }
+    context.log(
+      `${bundle.job.stage}: the integration branch moved, fetching and trying again (${outcome.integrationMoved})`,
+    );
+    deps.repos.ensure(
+      bundle.repo.role,
+      bundle.repo.url,
+      bundle.repo.defaultBranch,
+    );
+  }
+}
+
+async function mergeOnce(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+): Promise<StageOutcomeBody | { integrationMoved: string }> {
   const { bundle, log, job } = context;
   const agent = agentRef(bundle);
   const integration = bundle.integrationBranch as string;
@@ -554,6 +585,7 @@ async function merge(
       ref: gateBranch,
       commitSha: candidate.candidate,
       configSha: oldTip,
+      ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
       cache: deps.gateCache,
     });
     if (context.signal.aborted)
@@ -578,16 +610,15 @@ async function merge(
       target: integrationRef,
       expectedOld: oldTip,
     });
-    if (!pushed.ok)
-      throw new InfrastructureError(
-        `could not advance ${integration}: ${pushed.error}`,
-      );
+    if (!pushed.ok) return { integrationMoved: pushed.error };
     gitOrThrow(mainDir, ["update-ref", integrationRef, candidate.candidate]);
     log(`merge: ${integration} is now ${candidate.candidate}`);
     return {
       stage,
       outcome: "merged",
       headSha: candidate.candidate,
+      // recorded on the Run, so the next gate can be measured against what this merge measured
+      run: { headSha: candidate.candidate },
       gate: gateFacts(outcome),
     };
   } finally {

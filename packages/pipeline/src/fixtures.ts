@@ -43,6 +43,7 @@ export function bundleFor(
     contract: null,
     failureLog: null,
     review: null,
+    gateBaseline: null,
     ...rest,
   };
 }

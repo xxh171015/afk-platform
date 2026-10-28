@@ -28,6 +28,8 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     ["running", "integration-loop-exceeded"],
     ["merging", "invalid-output"],
     ["merging", "timeout"],
+    ["running", "job-failed"],
+    ["merging", "job-failed"],
     ["merging", "merge-conflict"],
     ["merging", "post-merge-gate-failed"],
     ["pending", "upstream-cancelled"],

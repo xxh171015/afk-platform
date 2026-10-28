@@ -71,6 +71,13 @@
       "when": 1793207940905,
       "tag": "0009_finalizations",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793213974813,
+      "tag": "0010_job_failed_reason",
+      "breakpoints": true
     }
   ]
 }

@@ -49,6 +49,27 @@ export interface Bundle {
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
   review: unknown;
+  // What the last merge into the integration branch measured: a gate may not find fewer tests or more skipped ones
+  // than this. Null before the spec has merged anything.
+  gateBaseline: { tests: number; skipped: number } | null;
+}
+
+async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
+  const { rows } = await pool.query<{
+    tests_total: number;
+    tests_skipped: number | null;
+  }>(
+    `SELECT g.tests_total, g.tests_skipped FROM runs r
+     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge') AND r.result = 'merged'
+       AND g.tests_total IS NOT NULL
+     ORDER BY r.id DESC LIMIT 1`,
+    [specId, repoId],
+  );
+  const row = rows[0];
+  return row
+    ? { tests: row.tests_total, skipped: row.tests_skipped ?? 0 }
+    : null;
 }
 
 export async function buildBundle(
@@ -161,6 +182,7 @@ export async function buildBundle(
         : null,
     failureLog: failed.rows[0]?.log ?? null,
     review: reviewed.rows[0]?.output ?? null,
+    gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
   };
 }
 
@@ -237,5 +259,6 @@ async function buildFinalBundle(
     contract: null,
     failureLog: failed.rows[0]?.log ?? null,
     review: review.rows[0]?.output ?? null,
+    gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
   };
 }

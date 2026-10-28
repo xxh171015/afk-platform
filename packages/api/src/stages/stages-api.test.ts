@@ -561,6 +561,54 @@ describe("merge jobs of one integration branch", () => {
   });
 });
 
+describe("the gate baseline in the bundle", () => {
+  const baselineOf = async (job: Claimed) =>
+    (
+      (await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      ).then((r) => r.json())) as { gateBaseline: unknown }
+    ).gateBaseline;
+
+  it("is none before anything has merged, and then what the last merge measured", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    const first = (await worker.claim()).body.job as Claimed;
+    expect(await baselineOf(first)).toBeNull();
+    await worker.complete(first.id, first.attempt, {
+      stage: "implement",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", {
+      outcome: "merged",
+      headSha: "tip-1",
+      run: { headSha: "tip-1" },
+      gate: {
+        commitSha: "tip-1",
+        configSha: "cfg",
+        commandResults: [],
+        testsTotal: 5,
+        testsSkipped: 1,
+      },
+    });
+    const second = (await worker.claim()).body.job as Claimed;
+    expect(second.payload.ticketId).toBe(2);
+    expect(await baselineOf(second)).toEqual({ tests: 5, skipped: 1 });
+  });
+
+  it("is the newest merge's, not an older one's", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, head_sha) VALUES (1, 1, 'merge', 'merged', 'old'), (1, 1, 'merge', 'merged', 'new')`,
+    );
+    await db.pool.query(
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, tests_total, tests_skipped) VALUES (1, 'old', 'c', 9, 0), (1, 'new', 'c', 4, 2)`,
+    );
+    const job = (await worker.claim()).body.job as Claimed;
+    expect(await baselineOf(job)).toEqual({ tests: 4, skipped: 2 });
+  });
+});
+
 describe("a worker that is faster than the claim bookkeeping", () => {
   it("an implement result for a ticket still marked queued is handled as if it were running", async () => {
     await runningSpec([ticket("a")]);

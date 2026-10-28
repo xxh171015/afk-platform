@@ -113,7 +113,7 @@ interface TicketRow {
 }
 
 // The state a ticket is in while each stage's job is out.
-const EXPECTED_STATE: Record<Stage, TicketState> = {
+export const EXPECTED_STATE: Record<Stage, TicketState> = {
   implement: "running",
   gate: "running",
   review: "running",

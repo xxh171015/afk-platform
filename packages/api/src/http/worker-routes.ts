@@ -12,6 +12,7 @@ import {
 } from "../jobs/queue.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
+import { recordJobFailure } from "../stages/failures.ts";
 import { markClaimed, recordStageResult } from "../stages/results.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
@@ -155,6 +156,9 @@ const Bundle = z.object({
     .nullable(),
   failureLog: z.string().nullable(),
   review: z.unknown(),
+  gateBaseline: z
+    .object({ tests: z.number().int(), skipped: z.number().int() })
+    .nullable(),
 });
 
 const bundleRoute = createRoute({
@@ -325,11 +329,22 @@ export function registerWorkerRoutes(
   app.openapi(failRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { workerId, attempt, error } = c.req.valid("json");
-    const outcome = await failJob(
-      context.pool,
-      { jobId: id, workerId, attempt, now: context.clock() },
-      error,
-    );
+    // the job failing and what that means for its ticket happen together or not at all
+    const outcome = await inTransaction(context.pool, async (client) => {
+      const failed = await failJob(
+        client,
+        { jobId: id, workerId, attempt, now: context.clock() },
+        error,
+      );
+      if (failed.status === "ok") {
+        const job = await client.query(
+          "SELECT id, payload FROM jobs WHERE id = $1",
+          [id],
+        );
+        await recordJobFailure(client, job.rows[0], error);
+      }
+      return failed;
+    });
     if (outcome.status !== "ok") {
       const { body, status } = refusal(outcome);
       return c.json(body, status);

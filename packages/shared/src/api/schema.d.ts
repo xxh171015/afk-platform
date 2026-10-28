@@ -766,6 +766,10 @@ export interface paths {
               } | null;
               failureLog: string | null;
               review?: unknown;
+              gateBaseline: {
+                tests: number;
+                skipped: number;
+              } | null;
             };
           };
         };

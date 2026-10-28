@@ -21,6 +21,8 @@ export const BLOCKED_REASONS = [
   "timeout",
   "integration-loop-exceeded",
   "upstream-cancelled",
+  // the worker could not carry out a stage, three times over: its environment is at fault, not the ticket
+  "job-failed",
 ] as const;
 export type BlockedReason = (typeof BLOCKED_REASONS)[number];
 
@@ -74,6 +76,7 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "post-merge-gate-failed": FROM_MERGING,
   "integration-loop-exceeded": FROM_RUNNING,
   "upstream-cancelled": ["pending"],
+  "job-failed": [...FROM_RUNNING, ...FROM_MERGING],
 };
 
 export function ticketTransition(

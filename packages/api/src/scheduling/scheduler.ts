@@ -164,7 +164,7 @@ export async function schedulePass(
   });
 
   if (
-    (await agentSecondsUsed(client, specId)) >=
+    (await agentSecondsUsed(client, specId, limits.runWallclockSeconds)) >=
     limits.specAgentSeconds + row.budget_extra_seconds
   ) {
     const paused = specTransition(row.state, "pause");
@@ -278,13 +278,18 @@ async function concurrencyInUse(client: pg.PoolClient, projectId: number) {
   };
 }
 
+// Finished runs count what they took; a run still going counts the time since it started, but never more than a
+// run is allowed to take (so one whose worker died does not eat the budget for ever).
 async function agentSecondsUsed(
   client: pg.PoolClient,
   specId: number,
+  runWallclockSeconds: number,
 ): Promise<number> {
   const { rows } = await client.query<{ ms: string }>(
-    "SELECT COALESCE(sum(duration_ms), 0) AS ms FROM runs WHERE spec_id = $1",
-    [specId],
+    `SELECT COALESCE(sum(COALESCE(duration_ms,
+              LEAST(extract(epoch FROM (now() - started_at)) * 1000, $2::float8))), 0) AS ms
+     FROM runs WHERE spec_id = $1 AND (duration_ms IS NOT NULL OR (started_at IS NOT NULL AND finished_at IS NULL))`,
+    [specId, runWallclockSeconds * 1000],
   );
   return Number(rows[0]?.ms) / 1000;
 }

@@ -1268,7 +1268,19 @@
                     "failureLog": {
                       "type": ["string", "null"]
                     },
-                    "review": {}
+                    "review": {},
+                    "gateBaseline": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "tests": {
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["tests", "skipped"]
+                    }
                   },
                   "required": [
                     "job",
@@ -1281,7 +1293,8 @@
                     "protectedPaths",
                     "allowedProtectedPaths",
                     "contract",
-                    "failureLog"
+                    "failureLog",
+                    "gateBaseline"
                   ]
                 }
               }
