@@ -1,4 +1,5 @@
 import {
+  AGENT_FAILURES,
   advanceFinalization,
   type BlockedReason,
   type FinalDecision,
@@ -14,16 +15,10 @@ import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
 import type { ActionResult } from "../tickets/actions.ts";
 
+const refused = (message: string) => ({ status: "refused", message }) as const;
+
 // The facts a worker hands back for a finalization step (the same Run, GateResult and Finding parts as for a
 // ticket stage), with the step's own list of outcomes.
-const AGENT_FAILURES = [
-  "invalid-output",
-  "timeout",
-  "no-commits",
-  "agent-gave-up",
-  "contract-change-needed",
-] as const;
-
 export const FinalResultSchema = z.discriminatedUnion("stage", [
   z.object({
     stage: z.literal("final-review"),
@@ -56,6 +51,17 @@ export async function recordFinalResult(
   const read = readFinalPayload(job.payload);
   if (!read) return { status: "not-final" };
   await lockSpec(client, read.specId);
+  const specState = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [read.specId],
+  );
+  if (specState.rows[0]?.state !== "finalizing") {
+    // cancelled or otherwise taken out of the flow while the step was out: its result changes nothing
+    return {
+      status: "ignored",
+      reason: `${read.step} result for a spec that is ${specState.rows[0]?.state}`,
+    };
+  }
   const found = await client.query<{
     id: number;
     step: FinalStep;
@@ -131,6 +137,8 @@ export async function markFinalClaimed(
   );
 }
 
+// Note that retrying a final-fix that failed runs the fix again: a person has decided to, so "once" holds for the
+// automatic flow, not for a human's retry.
 // A person has looked at a blocked finalization (resolved a conflict, fixed the gate's cause) and wants the step
 // that failed to run again.
 export async function retryFinalization(
@@ -138,12 +146,20 @@ export async function retryFinalization(
   specId: number,
 ): Promise<ActionResult<{ retried: string[] }>> {
   return inTransaction(pool, async (client) => {
+    const exists = await client.query("SELECT 1 FROM specs WHERE id = $1", [
+      specId,
+    ]);
+    if (exists.rowCount === 0) return { status: "no-ticket" };
+    await lockSpec(client, specId);
     const spec = await client.query<{ state: SpecState }>(
       "SELECT state FROM specs WHERE id = $1",
       [specId],
     );
-    if (!spec.rows[0]) return { status: "no-ticket" };
-    await lockSpec(client, specId);
+    if (spec.rows[0]?.state !== "finalizing") {
+      return refused(
+        `${formatDisplayId("spec", specId)} is ${spec.rows[0]?.state}, not finalizing`,
+      );
+    }
     const blocked = await client.query<{
       id: number;
       repo_id: number;

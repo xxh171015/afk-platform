@@ -1,3 +1,4 @@
+import type { AGENT_FAILURES } from "./stage-flow.ts";
 import type { BlockedReason } from "./ticket-state.ts";
 
 // After every ticket of a spec is done, each repo's integration branch gets one overall review and, if the
@@ -11,14 +12,6 @@ export const FINAL_STEPS = [
   "final-merge",
 ] as const;
 export type FinalStep = (typeof FINAL_STEPS)[number];
-
-const AGENT_FAILURES = [
-  "invalid-output",
-  "timeout",
-  "no-commits",
-  "agent-gave-up",
-  "contract-change-needed",
-] as const;
 
 export type FinalReport =
   | {

@@ -422,8 +422,39 @@ describe("when it goes wrong", () => {
     expect(await claim()).toBeNull();
   });
 
+  it("a result that arrives after the spec was cancelled changes nothing", async () => {
+    await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    const review = (await claim()) as Claimed;
+    await db.pool.query("UPDATE specs SET state = 'cancelled'");
+    expect(
+      (
+        await worker.complete(review.id, review.attempt, {
+          stage: "final-review",
+          ...REVIEW_FIX,
+        })
+      ).status,
+    ).toBe(200);
+    expect((await fin())[0]).toMatchObject({
+      step: "final-review",
+      state: "active",
+    });
+    expect(await jobs()).toHaveLength(1); // no fix was queued
+  });
+
+  it("a blocked step is not retried on a spec that is no longer finalizing", async () => {
+    await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await step("final-review", { outcome: "timeout" });
+    await db.pool.query("UPDATE specs SET state = 'cancelled'");
+    const retry = await call("POST", "/specs/1/final/retry");
+    expect(retry.status).toBe(409);
+    expect(retry.body.error).toMatch(/cancelled, not finalizing/);
+  });
+
   it("there is nothing to retry when nothing is blocked", async () => {
     await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
     expect((await call("POST", "/specs/1/final/retry")).status).toBe(409);
     expect((await call("POST", "/specs/99/final/retry")).status).toBe(404);
   });
