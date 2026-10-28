@@ -1,6 +1,7 @@
 import {
   BLOCKED_REASONS,
   EDGE_KINDS,
+  FINDING_RESOLUTIONS,
   JOB_STATES,
   SPEC_STATES,
   SPEC_TYPES,
@@ -10,6 +11,7 @@ import {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  boolean,
   check,
   index,
   integer,
@@ -119,6 +121,11 @@ export const tickets = pgTable(
     state: text("state").notNull().default("pending"),
     blockedReason: text("blocked_reason"),
     contentVersion: integer("content_version").notNull().default(1),
+    // Pipeline progress (shared Progress): each fix kind is spent at most once, review runs once.
+    fixCounts: jsonb("fix_counts")
+      .notNull()
+      .default({ "gate-fix": 0, "review-fix": 0, "merge-fix": 0 }),
+    reviewed: boolean("reviewed").notNull().default(false),
     contractSha: text("contract_sha"),
     createdAt: createdAt(),
   },
@@ -242,7 +249,13 @@ export const findings = pgTable(
     resolution: text("resolution").notNull().default("unhandled"),
     createdAt: createdAt(),
   },
-  (t) => [index("findings_run_idx").on(t.runId)],
+  (t) => [
+    index("findings_run_idx").on(t.runId),
+    check(
+      "findings_resolution_check",
+      oneOf(t.resolution, FINDING_RESOLUTIONS),
+    ),
+  ],
 );
 
 export const gateResults = pgTable(

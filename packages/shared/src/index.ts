@@ -3,6 +3,8 @@ export { createApiClient } from "./api/client.ts";
 export { createPool } from "./db.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
+export type { FindingResolution } from "./findings.ts";
+export { FINDING_RESOLUTIONS } from "./findings.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
 export type { LimitOverrides, Limits } from "./limits.ts";
@@ -30,6 +32,18 @@ export {
 } from "./schemas.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specTransition } from "./spec-state.ts";
+export type {
+  Progress,
+  Stage,
+  StageDecision,
+  StageReport,
+} from "./stage-flow.ts";
+export {
+  AGENT_FAILURES,
+  AGENT_STAGES,
+  advanceStage,
+  STAGES,
+} from "./stage-flow.ts";
 export type {
   FixAttempt,
   FixCounts,

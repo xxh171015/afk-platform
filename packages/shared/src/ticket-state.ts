@@ -61,8 +61,9 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "no-commits": FROM_RUNNING,
   "agent-gave-up": FROM_RUNNING,
   "contract-change-needed": FROM_RUNNING,
-  "invalid-output": FROM_RUNNING,
-  timeout: FROM_RUNNING,
+  // the merge stage reports its facts too, and can hand back garbage or run out of time
+  "invalid-output": [...FROM_RUNNING, ...FROM_MERGING],
+  timeout: [...FROM_RUNNING, ...FROM_MERGING],
   "merge-conflict": FROM_MERGING,
   "post-merge-gate-failed": FROM_MERGING,
   "integration-loop-exceeded": FROM_RUNNING,

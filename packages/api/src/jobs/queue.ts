@@ -130,7 +130,7 @@ export interface HolderCall {
 const HOLDS_LEASE = `id = $1 AND state = 'running' AND lease_owner = $2 AND attempt = $3 AND lease_expires_at > $4`;
 
 async function classify(
-  pool: pg.Pool,
+  pool: Queryable,
   jobId: number,
 ): Promise<"stale" | "not-found"> {
   const { rowCount } = await pool.query("SELECT 1 FROM jobs WHERE id = $1", [
@@ -159,7 +159,7 @@ export async function heartbeat(
 export const checkBeforePush = heartbeat;
 
 async function finish(
-  pool: pg.Pool,
+  pool: Queryable,
   call: HolderCall,
   state: "done" | "failed",
   result: unknown,
@@ -183,7 +183,24 @@ async function finish(
 
 // A complete or fail that arrives twice (the first reply was lost) gets a 409 the second time: the job is already
 // finished and the lease is gone, so the fencing check cannot tell it from a stale holder.
-export const completeJob = (pool: pg.Pool, call: HolderCall, result: unknown) =>
-  finish(pool, call, "done", result, null);
-export const failJob = (pool: pg.Pool, call: HolderCall, error: string) =>
+export const completeJob = (
+  pool: Queryable,
+  call: HolderCall,
+  result: unknown,
+) => finish(pool, call, "done", result, null);
+export const failJob = (pool: Queryable, call: HolderCall, error: string) =>
   finish(pool, call, "failed", null, error);
+
+// A read-only version of the fencing check, for calls that must not renew the lease.
+export async function checkHolder(
+  pool: Queryable,
+  call: HolderCall,
+): Promise<HolderOutcome> {
+  const { rowCount } = await pool.query(
+    `SELECT 1 FROM jobs WHERE ${HOLDS_LEASE}`,
+    [call.jobId, call.workerId, call.attempt, call.now],
+  );
+  return rowCount
+    ? { status: "ok" }
+    : { status: await classify(pool, call.jobId) };
+}

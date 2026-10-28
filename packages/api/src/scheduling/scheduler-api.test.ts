@@ -87,18 +87,37 @@ const ticketStates = async () =>
     (r) => `${r.id}:${r.state}`,
   );
 
-// The worker claims the next job, "does" the work and hands the result back. Moving the ticket to
-// merging stands in for the stage handling of #26.
-async function workOn(worker: FakeWorker, contractSha?: string) {
+// The fake worker claims the next job and hands back a successful result for its stage.
+const SUCCESS = {
+  implement: { outcome: "done" },
+  gate: { outcome: "passed" },
+  review: { outcome: "pass" },
+  merge: { outcome: "merged", headSha: "integration-head" },
+} as const;
+
+async function step(worker: FakeWorker) {
   const claimed = (await worker.claim()).body.job;
   if (!claimed) return undefined;
-  const ticketId = (claimed.payload as { ticketId: number }).ticketId;
-  expect((await worker.complete(claimed.id, claimed.attempt)).status).toBe(200);
-  await db.pool.query("UPDATE tickets SET state = 'merging' WHERE id = $1", [
-    ticketId,
-  ]);
-  const result = await completeTicket(db.pool, ticketId, { contractSha });
-  return { ticketId, result };
+  const { ticketId, stage } = claimed.payload as {
+    ticketId: number;
+    stage: keyof typeof SUCCESS;
+  };
+  const reply = await worker.complete(claimed.id, claimed.attempt, {
+    stage,
+    ...SUCCESS[stage],
+  });
+  expect(reply.status).toBe(200);
+  return { ticketId, stage };
+}
+
+// Works jobs until a ticket has been merged, and says which one.
+async function workUntilMerged(worker: FakeWorker) {
+  for (let i = 0; i < 20; i++) {
+    const done = await step(worker);
+    if (!done) return undefined;
+    if (done.stage === "merge") return done.ticketId;
+  }
+  throw new Error("no ticket was merged");
 }
 
 describe("confirming the split", () => {
@@ -168,43 +187,34 @@ describe("scheduling along the dependency chain", () => {
     await post(`/specs/${specId}/confirm`);
     const worker = new FakeWorker(api.url, "w1", []);
 
-    // Nothing but the contract ticket is claimable.
-    const first = await workOn(worker, "sha-contract");
-    expect(first?.ticketId).toBe(1);
-    expect(first?.result).toMatchObject({
-      status: "ok",
-      schedule: { enqueued: [{ ticketId: 2 }, { ticketId: 3 }] },
-    });
+    // Only the contract ticket is claimable; its stages run implement -> gate -> review -> merge.
+    expect(await workUntilMerged(worker)).toBe(1);
     expect(await ticketStates()).toEqual([
       "1:done",
       "2:queued",
       "3:queued",
       "4:pending",
     ]);
-
-    // The contract SHA is what frees the contract edge.
+    // The integration branch head recorded at the merge is the contract SHA that frees the contract edge.
     const sha = await db.pool.query(
       "SELECT contract_sha FROM tickets WHERE id = 1",
     );
-    expect(sha.rows[0].contract_sha).toBe("sha-contract");
+    expect(sha.rows[0].contract_sha).toBe("integration-head");
 
-    const order = [first?.ticketId];
-    for (const expected of [2, 3]) {
-      const done = await workOn(worker);
-      expect(done?.ticketId).toBe(expected);
-      order.push(done?.ticketId);
-    }
+    const order = [
+      1,
+      await workUntilMerged(worker),
+      await workUntilMerged(worker),
+    ];
     expect(await ticketStates()).toEqual([
       "1:done",
       "2:done",
       "3:done",
       "4:queued",
     ]);
-    const last = await workOn(worker);
-    expect(last?.ticketId).toBe(4);
-    order.push(last?.ticketId);
+    order.push(await workUntilMerged(worker));
     expect(order).toEqual([1, 2, 3, 4]);
-    expect(await workOn(worker)).toBeUndefined();
+    expect(await step(worker)).toBeUndefined();
   });
 
   it("does not free the ticket behind a blocks edge until the blocker is done", async () => {
@@ -294,10 +304,10 @@ describe("concurrency limits", () => {
     expect(await ticketStates()).toEqual(["1:queued", "2:queued", "3:pending"]);
 
     const worker = new FakeWorker(api.url, "w1", []);
-    const done = await workOn(worker);
-    expect(done?.result).toMatchObject({
-      schedule: { enqueued: [{ ticketId: 3 }] },
-    });
+    const merged = await workUntilMerged(worker);
+    const states = await ticketStates();
+    expect(states).toContain(`${merged}:done`);
+    expect(states[2]).toBe("3:queued");
   });
 
   it("allows two per project across repos by default", async () => {

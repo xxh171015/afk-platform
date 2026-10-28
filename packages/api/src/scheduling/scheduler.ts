@@ -10,8 +10,7 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
-import { ticketJobKey, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
-import { enqueueJob } from "../jobs/queue.ts";
+import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
 // docs/specs/m1-platform.md「并发与预算默认值」). The scheduler is the only thing that moves a ticket from
@@ -40,11 +39,14 @@ export type ConfirmResult =
   | { status: "not-confirmable"; message: string };
 
 // Scheduling passes and ticket completions of one spec take this lock, so they never interleave.
-async function lockSpec(client: pg.PoolClient, specId: number): Promise<void> {
+export async function lockSpec(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
   await client.query("SELECT 1 FROM specs WHERE id = $1 FOR UPDATE", [specId]);
 }
 
-async function inTransaction<T>(
+export async function inTransaction<T>(
   pool: pg.Pool,
   work: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {
@@ -130,7 +132,7 @@ interface TicketRow {
   contract_sha: string | null;
 }
 
-async function schedulePass(
+export async function schedulePass(
   client: pg.PoolClient,
   specId: number,
 ): Promise<ScheduleResult> {
@@ -231,22 +233,16 @@ async function schedulePass(
       ticket.id,
       queued.state,
     ]);
-    const { job } = await enqueueJob(client, {
-      type: "agent-run",
-      payload: {
-        stage: "implement",
-        ticketId: ticket.id,
+    const job = await enqueueStageJob(
+      client,
+      {
+        id: ticket.id,
         specId,
         repoId: ticket.repo_id,
         contentVersion: ticket.content_version,
       },
-      idempotencyKey: ticketJobKey({
-        ticketId: ticket.id,
-        contentVersion: ticket.content_version,
-        stage: "implement",
-        sequence: await nextSequence(client, ticket, "implement"),
-      }),
-    });
+      "implement",
+    );
     usage.project += 1;
     usage.repos.set(ticket.repo_id, repoUsed + 1);
     enqueued.push({
@@ -256,24 +252,6 @@ async function schedulePass(
     });
   }
   return { enqueued, paused: false };
-}
-
-// A retry queues the same stage again; the sequence number keeps its key distinct from the earlier attempts.
-async function nextSequence(
-  client: pg.PoolClient,
-  ticket: TicketRow,
-  stage: string,
-): Promise<number> {
-  const prefix = ticketJobKeyPrefix({
-    ticketId: ticket.id,
-    contentVersion: ticket.content_version,
-    stage,
-  });
-  const { rows } = await client.query<{ n: string }>(
-    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
-    [`${prefix}%`],
-  );
-  return Number(rows[0]?.n) + 1;
 }
 
 // A queued or running ticket holds an agent run, whatever spec it belongs to.
@@ -316,36 +294,36 @@ export async function completeTicket(
   options: { contractSha?: string } = {},
 ): Promise<CompleteTicketResult> {
   return inTransaction(pool, async (client) => {
-    const found = await client.query<{
-      spec_id: number;
-      state: TicketState;
-      type: string;
-    }>("SELECT spec_id, state, type FROM tickets WHERE id = $1", [ticketId]);
-    const ticket = found.rows[0];
-    if (!ticket) return { status: "no-ticket" };
-    await lockSpec(client, ticket.spec_id);
-    const current = await client.query<{ state: TicketState }>(
-      "SELECT state FROM tickets WHERE id = $1",
+    const found = await client.query<{ spec_id: number }>(
+      "SELECT spec_id FROM tickets WHERE id = $1",
       [ticketId],
     );
-    const done = ticketTransition(current.rows[0]?.state ?? ticket.state, {
-      type: "merge-succeeded",
-    });
-    if (!done.ok) return { status: "not-mergeable", message: done.reason };
-    if (ticket.type === "contract" && !options.contractSha) {
-      return { status: "missing-contract-sha" };
-    }
-    await client.query(
-      "UPDATE tickets SET state = $2, contract_sha = $3 WHERE id = $1",
-      [
-        ticketId,
-        done.state,
-        ticket.type === "contract" ? (options.contractSha as string) : null,
-      ],
-    );
-    return {
-      status: "ok",
-      schedule: await schedulePass(client, ticket.spec_id),
-    };
+    if (!found.rows[0]) return { status: "no-ticket" };
+    await lockSpec(client, found.rows[0].spec_id);
+    return finishTicket(client, ticketId, options.contractSha);
   });
+}
+
+// The caller holds the spec lock.
+export async function finishTicket(
+  client: pg.PoolClient,
+  ticketId: number,
+  contractSha?: string,
+): Promise<CompleteTicketResult> {
+  const found = await client.query<{
+    spec_id: number;
+    state: TicketState;
+    type: string;
+  }>("SELECT spec_id, state, type FROM tickets WHERE id = $1", [ticketId]);
+  const ticket = found.rows[0];
+  if (!ticket) return { status: "no-ticket" };
+  const done = ticketTransition(ticket.state, { type: "merge-succeeded" });
+  if (!done.ok) return { status: "not-mergeable", message: done.reason };
+  const isContract = ticket.type === "contract";
+  if (isContract && !contractSha) return { status: "missing-contract-sha" };
+  await client.query(
+    "UPDATE tickets SET state = $2, contract_sha = $3 WHERE id = $1",
+    [ticketId, done.state, isContract ? (contractSha as string) : null],
+  );
+  return { status: "ok", schedule: await schedulePass(client, ticket.spec_id) };
 }

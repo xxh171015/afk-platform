@@ -635,6 +635,110 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/jobs/{id}/bundle": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What the worker renders into /context for this job */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              job: {
+                id: number;
+                stage: string;
+                attempt: number;
+              };
+              ticket: {
+                id: number;
+                displayId: string;
+                type: string;
+                title: string;
+                body: string;
+                acceptanceCriteria: string[];
+                modules: string[];
+                state: string;
+                contentVersion: number;
+                fixCounts: {
+                  [key: string]: number;
+                };
+                reviewed: boolean;
+              };
+              spec: {
+                id: number;
+                displayId: string;
+                slug: string;
+                title: string;
+                body: string;
+                type: string;
+              };
+              repo: {
+                id: number;
+                role: string;
+                url: string;
+                defaultBranch: string;
+              };
+              integrationBranch: string | null;
+              allowedProtectedPaths: string[];
+              contract: {
+                sha: string;
+                path: string;
+                repoId: number;
+              } | null;
+            };
+          };
+        };
+        /** @description No such job, or the job has no ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/{id}/fail": {
     parameters: {
       query?: never;

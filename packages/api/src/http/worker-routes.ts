@@ -2,12 +2,16 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import {
   checkBeforePush,
+  checkHolder,
   claimJob,
   completeJob,
   failJob,
   type HolderOutcome,
   heartbeat,
 } from "../jobs/queue.ts";
+import { inTransaction } from "../scheduling/scheduler.ts";
+import { buildBundle } from "../stages/bundle.ts";
+import { markClaimed, recordStageResult } from "../stages/results.ts";
 
 const ClaimedJob = z.object({
   id: z.number().int(),
@@ -100,6 +104,72 @@ const completeRoute = holderRoute(
   { result: z.unknown() },
   z.object({ ok: z.literal(true) }),
 );
+const Bundle = z.object({
+  job: z.object({
+    id: z.number().int(),
+    stage: z.string(),
+    attempt: z.number().int(),
+  }),
+  ticket: z.object({
+    id: z.number().int(),
+    displayId: z.string(),
+    type: z.string(),
+    title: z.string(),
+    body: z.string(),
+    acceptanceCriteria: z.array(z.string()),
+    modules: z.array(z.string()),
+    state: z.string(),
+    contentVersion: z.number().int(),
+    fixCounts: z.record(z.string(), z.number().int()),
+    reviewed: z.boolean(),
+  }),
+  spec: z.object({
+    id: z.number().int(),
+    displayId: z.string(),
+    slug: z.string(),
+    title: z.string(),
+    body: z.string(),
+    type: z.string(),
+  }),
+  repo: z.object({
+    id: z.number().int(),
+    role: z.string(),
+    url: z.string(),
+    defaultBranch: z.string(),
+  }),
+  integrationBranch: z.string().nullable(),
+  allowedProtectedPaths: z.array(z.string()),
+  contract: z
+    .object({ sha: z.string(), path: z.string(), repoId: z.number().int() })
+    .nullable(),
+});
+
+const bundleRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/bundle",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description: "What the worker renders into /context for this job",
+      content: { "application/json": { schema: Bundle } },
+    },
+    404: {
+      description: "No such job, or the job has no ticket",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const failRoute = holderRoute(
   "fail",
   { error: z.string() },
@@ -128,6 +198,7 @@ export function registerWorkerRoutes(
       leaseSeconds: context.leaseSeconds,
     });
     if (!job) return c.json({ job: null }, 200);
+    await markClaimed(context.pool, job);
     return c.json(
       {
         job: {
@@ -189,16 +260,49 @@ export function registerWorkerRoutes(
   app.openapi(completeRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { workerId, attempt, result } = c.req.valid("json");
-    const outcome = await completeJob(
-      context.pool,
-      { jobId: id, workerId, attempt, now: context.clock() },
-      result,
-    );
+    // The job finishing and the ticket moving on happen together or not at all.
+    const outcome = await inTransaction(context.pool, async (client) => {
+      const finished = await completeJob(
+        client,
+        { jobId: id, workerId, attempt, now: context.clock() },
+        result,
+      );
+      if (finished.status === "ok") {
+        const job = await client.query(
+          "SELECT id, payload FROM jobs WHERE id = $1",
+          [id],
+        );
+        await recordStageResult(client, job.rows[0], result);
+      }
+      return finished;
+    });
     if (outcome.status !== "ok") {
       const { body, status } = refusal(outcome);
       return c.json(body, status);
     }
     return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(bundleRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query(
+      "SELECT id, attempt, payload FROM jobs WHERE id = $1",
+      [id],
+    );
+    const bundle = await buildBundle(context.pool, job.rows[0]);
+    if (!bundle) return c.json({ error: "this job has no ticket" }, 404);
+    return c.json(bundle, 200);
   });
 
   app.openapi(failRoute, async (c) => {
