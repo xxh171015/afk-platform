@@ -170,6 +170,8 @@ export const jobs = pgTable(
       .array()
       .notNull()
       .default([]),
+    result: jsonb("result"),
+    error: text("error"),
     createdAt: createdAt(),
   },
   (t) => [

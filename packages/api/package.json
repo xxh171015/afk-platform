@@ -12,8 +12,12 @@
   },
   "dependencies": {
     "@afk/shared": "workspace:*",
+    "@hono/node-server": "^2.1.5",
+    "@hono/zod-openapi": "^1.6.3",
     "drizzle-orm": "^0.45.4",
-    "pg": "^8.23.1"
+    "hono": "^4.13.14",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",

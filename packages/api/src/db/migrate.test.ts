@@ -74,21 +74,21 @@ describe("assertMigrated", () => {
     try {
       cpSync(MIGRATIONS_FOLDER, folder, { recursive: true });
       writeFileSync(
-        join(folder, "0001_extra.sql"),
+        join(folder, "9999_extra.sql"),
         "CREATE TABLE extra_table (id integer);\n",
       );
       const journalPath = join(folder, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries.push({
-        idx: 1,
+        idx: journal.entries.length,
         version: "7",
         when: journal.entries.at(-1).when + 1000,
-        tag: "0001_extra",
+        tag: "9999_extra",
         breakpoints: true,
       });
       writeFileSync(journalPath, JSON.stringify(journal));
       await expect(assertMigrated(db.pool, folder)).rejects.toThrow(
-        /0001_extra/,
+        /9999_extra/,
       );
     } finally {
       rmSync(folder, { recursive: true, force: true });
