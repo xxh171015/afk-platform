@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { BlockedQueue, useBlocked } from "./BlockedQueue.tsx";
 import { SpecDetail } from "./SpecDetail.tsx";
 import { SpecList } from "./SpecList.tsx";
 import { TicketDetail } from "./TicketDetail.tsx";
 
-// Three views, picked by the part of the address after the "#": the list, one spec, one ticket.
+// The views, picked by the part of the address after the "#": the list, one spec, one ticket, and the queue of
+// what waits for a person.
 
 function currentHash(): string {
   return window.location.hash.replace(/^#/, "") || "/";
@@ -17,6 +19,12 @@ export function App() {
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
 
+  const queue = useBlocked();
+  const waiting = queue.data
+    ? queue.data.tickets.length +
+      queue.data.finalizations.length +
+      queue.data.specs.length
+    : 0;
   const spec = /^\/specs\/([1-9][0-9]*)$/.exec(path);
   const ticket = /^\/tickets\/([1-9][0-9]*)$/.exec(path);
   return (
@@ -25,8 +33,16 @@ export function App() {
         <h1>
           <a href="#/">AFK platform</a>
         </h1>
+        <nav>
+          <a href="#/">Specs</a>{" "}
+          <a href="#/blocked">
+            Waiting for you{waiting > 0 ? ` (${waiting})` : ""}
+          </a>
+        </nav>
       </header>
-      {spec ? (
+      {path === "/blocked" ? (
+        <BlockedQueue />
+      ) : spec ? (
         <SpecDetail specId={Number(spec[1])} />
       ) : ticket ? (
         <TicketDetail ticketId={Number(ticket[1])} />

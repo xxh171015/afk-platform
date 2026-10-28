@@ -215,3 +215,49 @@ pre.run-log {
   white-space: pre-wrap;
   font-size: 0.8rem;
 }
+
+nav {
+  margin: -8px 0 16px;
+  display: flex;
+  gap: 16px;
+}
+ul.blocked-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.blocked-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 16px 12px;
+}
+.blocked-card h3 {
+  margin: 12px 0 4px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.actions button {
+  font: inherit;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+}
+.actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.actions button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.actions input[type="number"] {
+  width: 5em;
+}

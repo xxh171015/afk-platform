@@ -126,6 +126,59 @@ describe("the app", () => {
     ).toContain("T-9 Only ticket");
   });
 
+  it("shows the queue of what waits for you at #/blocked, and counts it in the menu", async () => {
+    window.location.hash = "#/blocked";
+    const fake = fakeServer({
+      "GET /blocked": () => ({
+        json: {
+          tickets: [
+            {
+              id: 1,
+              displayId: "T-1",
+              specId: 3,
+              specDisplayId: "S-3",
+              title: "Stuck",
+              type: "implementation",
+              state: "blocked",
+              blockedReason: "agent-gave-up",
+              repo: "backend",
+              brief: null,
+            },
+          ],
+          finalizations: [],
+          specs: [
+            { id: 3, displayId: "S-3", title: "Third", reason: "paused" },
+          ],
+        },
+      }),
+    });
+    renderWithApp(<App />, fake);
+    expect(await screen.findByTestId("blocked-T-1")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: "Waiting for you (2)" })
+        .getAttribute("href"),
+    ).toBe("#/blocked");
+    expect(
+      screen.getByRole("link", { name: "Specs" }).getAttribute("href"),
+    ).toBe("#/");
+  });
+
+  it("does not show a count in the menu when nothing waits", async () => {
+    renderWithApp(
+      <App />,
+      fakeServer({
+        "GET /specs": () => ({ json: { specs: [] } }),
+        "GET /blocked": () => ({
+          json: { tickets: [], finalizations: [], specs: [] },
+        }),
+      }),
+    );
+    expect(
+      await screen.findByRole("link", { name: "Waiting for you" }),
+    ).toBeTruthy();
+  });
+
   it("falls back to the list for an address it does not know", async () => {
     window.location.hash = "#/specs/not-a-number";
     renderWithApp(<App />, server());
