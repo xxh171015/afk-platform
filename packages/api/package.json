@@ -1,0 +1,14 @@
+{
+  "name": "@afk/api",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@afk/shared": "workspace:*"
+  }
+}

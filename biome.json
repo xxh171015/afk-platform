@@ -1,0 +1,13 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
+  "files": {
+    "includes": [
+      "packages/**",
+      "scripts/**",
+      "*.json",
+      "*.ts",
+      "!**/node_modules"
+    ]
+  },
+  "formatter": { "indentStyle": "space", "indentWidth": 2 }
+}

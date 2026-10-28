@@ -1,0 +1,13 @@
+version: 1
+setup: scripts/pg-temp.sh start && pnpm install --frozen-lockfile
+commands:
+  - name: typecheck
+    run: pnpm typecheck
+    timeoutSeconds: 300
+  - name: test
+    run: pnpm test
+    timeoutSeconds: 600
+    junit: reports/junit.xml
+  - name: lint
+    run: pnpm lint
+    timeoutSeconds: 120
