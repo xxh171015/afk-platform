@@ -53,9 +53,8 @@ const TRANSITIONS: Partial<
 
 const FROM_RUNNING: TicketState[] = ["running"];
 const FROM_MERGING: TicketState[] = ["merging"];
-const FROM_ACTIVE: TicketState[] = ["running", "merging"];
 
-// Which states each reason can be raised from (design.md「单票执行流水线」「blocked 处理」).
+// Which states each reason can be raised from (docs/design.md「单票执行流水线」「blocked 处理」).
 const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "gate-failed": FROM_RUNNING,
   "protected-path-changed": FROM_RUNNING,
@@ -63,10 +62,10 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "agent-gave-up": FROM_RUNNING,
   "contract-change-needed": FROM_RUNNING,
   "invalid-output": FROM_RUNNING,
-  timeout: FROM_ACTIVE,
+  timeout: FROM_RUNNING,
   "merge-conflict": FROM_MERGING,
   "post-merge-gate-failed": FROM_MERGING,
-  "integration-loop-exceeded": FROM_ACTIVE,
+  "integration-loop-exceeded": FROM_RUNNING,
   "upstream-cancelled": ["pending"],
 };
 

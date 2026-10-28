@@ -25,6 +25,7 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     ["running", "contract-change-needed"],
     ["running", "invalid-output"],
     ["running", "timeout"],
+    ["running", "integration-loop-exceeded"],
     ["merging", "merge-conflict"],
     ["merging", "post-merge-gate-failed"],
     ["pending", "upstream-cancelled"],
@@ -72,6 +73,9 @@ describe("ticketTransition: illegal moves", () => {
     ["running", { type: "block", reason: "merge-conflict" }],
     ["merging", { type: "block", reason: "no-commits" }],
     ["pending", { type: "block", reason: "gate-failed" }],
+    ["merging", { type: "block", reason: "timeout" }],
+    ["merging", { type: "block", reason: "integration-loop-exceeded" }],
+    ["running", { type: "block", reason: "post-merge-gate-failed" }],
     ["running", { type: "block", reason: "upstream-cancelled" }],
   ] as const)("%s rejects %j", (from, event) => {
     expect(ticketTransition(from, event).ok).toBe(false);
