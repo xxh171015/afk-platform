@@ -7,6 +7,14 @@ export type {
   RunnableInput,
 } from "./runnable.ts";
 export { isRunnable } from "./runnable.ts";
+export type { Edge, Spec, Ticket } from "./schemas.ts";
+export {
+  EdgeSchema,
+  SPEC_TYPES,
+  SpecSchema,
+  TICKET_TYPES,
+  TicketSchema,
+} from "./schemas.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specTransition } from "./spec-state.ts";
 export type {
