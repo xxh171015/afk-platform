@@ -32,10 +32,8 @@ export function RunLog({
     queryKey: ["log", runId, position.attempt, position.offset],
     queryFn: async () => {
       const { data, error } = await api.GET("/runs/{id}/logs", {
-        params: {
-          path: { id: runId },
-          query: { offset: position.offset, attempt: position.attempt },
-        },
+        // no attempt: the API answers for the job's current one, which is how a retry shows up here
+        params: { path: { id: runId }, query: { offset: position.offset } },
       });
       if (!data) throw new Error(describeError(error));
       return data;

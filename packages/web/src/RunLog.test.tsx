@@ -6,32 +6,42 @@ import { fakeServer, renderWithApp } from "./test-utils.tsx";
 
 afterEach(cleanup);
 
-// A run whose log grows: the server answers for whatever has been written so far.
+// A run whose log grows. Like the real API it keeps one log per attempt, answers for the newest attempt unless
+// one is asked for, and reads from the offset within that attempt's log.
 function growingLog(initial = "") {
   const state = {
-    text: initial,
-    finished: false,
+    logs: { 1: initial } as Record<number, string>,
     attempt: 1,
+    finished: false,
     asked: [] as { offset: number; attempt: string | null }[],
   };
   const server = fakeServer({
     "GET /runs/5/logs": ({ url }) => {
       const offset = Number(url.searchParams.get("offset") ?? 0);
-      state.asked.push({ offset, attempt: url.searchParams.get("attempt") });
-      const text = state.text.slice(offset);
+      const asked = url.searchParams.get("attempt");
+      state.asked.push({ offset, attempt: asked });
+      const attempt = asked ? Number(asked) : state.attempt;
+      const whole = state.logs[attempt] ?? "";
+      const text = whole.slice(offset);
       return {
         json: {
-          attempt: state.attempt,
+          attempt,
           offset,
           nextOffset: offset + text.length,
-          size: state.text.length,
+          size: whole.length,
           text,
           finished: state.finished,
         },
       };
     },
   });
-  return { state, server };
+  return {
+    state,
+    server,
+    write: (more: string) => {
+      state.logs[state.attempt] = (state.logs[state.attempt] ?? "") + more;
+    },
+  };
 }
 const log = () => screen.getByTestId("run-log").textContent;
 
@@ -43,11 +53,11 @@ describe("the log of a run", () => {
   });
 
   it("picks up what is written later, asking from where it stopped (within a few polls)", async () => {
-    const { state, server } = growingLog("first line\n");
+    const { state, server, write } = growingLog("first line\n");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
     await waitFor(() => expect(log()).toBe("first line\n"));
 
-    state.text += "second line\n";
+    write("second line\n");
     await waitFor(() => expect(log()).toBe("first line\nsecond line\n"));
     // it did not read the first line again
     expect(state.asked.some((q) => q.offset === "first line\n".length)).toBe(
@@ -60,12 +70,12 @@ describe("the log of a run", () => {
   });
 
   it("keeps polling while the run is going, even before anything is written", async () => {
-    const { state, server } = growingLog("");
+    const { state, server, write } = growingLog("");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
     await screen.findByText("Nothing logged yet.");
     const before = state.asked.length;
     await waitFor(() => expect(state.asked.length).toBeGreaterThan(before + 1));
-    state.text = "now there is something\n";
+    write("now there is something\n");
     await waitFor(() => expect(log()).toBe("now there is something\n"));
   });
 
@@ -81,13 +91,15 @@ describe("the log of a run", () => {
   });
 
   it("starts the text over when the job moved to a new attempt", async () => {
-    const { state, server } = growingLog("old attempt\n");
+    const { state, server, write } = growingLog("old attempt\n");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
     await waitFor(() => expect(log()).toBe("old attempt\n"));
 
-    state.attempt = 2;
-    state.text = "new attempt\n";
+    state.attempt = 2; // the job was handed to another worker; its log is a new file
+    write("new attempt\n");
     await waitFor(() => expect(log()).toBe("new attempt\n"));
+    // and the page never pinned the old attempt, which would have kept it on the first log for ever
+    expect(state.asked.every((q) => q.attempt === null)).toBe(true);
   });
 
   it("says it is loading, and says what went wrong", async () => {
