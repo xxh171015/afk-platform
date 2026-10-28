@@ -198,7 +198,13 @@ async function writeFacts(
     `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
        cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage, result,
        output, log_url, started_at, finished_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE($23, now()))
+     ON CONFLICT (job_id) DO UPDATE SET agent = EXCLUDED.agent, model = EXCLUDED.model, skills_sha = EXCLUDED.skills_sha,
+       cursor_cli_version = EXCLUDED.cursor_cli_version, branch = EXCLUDED.branch, base_sha = EXCLUDED.base_sha,
+       head_sha = EXCLUDED.head_sha, commits = EXCLUDED.commits, duration_ms = EXCLUDED.duration_ms,
+       duration_api_ms = EXCLUDED.duration_api_ms, token_usage = EXCLUDED.token_usage, result = EXCLUDED.result,
+       output = EXCLUDED.output, log_url = EXCLUDED.log_url,
+       started_at = COALESCE(EXCLUDED.started_at, runs.started_at), finished_at = EXCLUDED.finished_at
      RETURNING id`,
     [
       ticket.spec_id,
@@ -336,15 +342,28 @@ async function blockTicket(
   await schedulePass(client, ticket.spec_id);
 }
 
-// A worker claiming a ticket's implement job moves the ticket from queued to running.
+// A worker claiming a ticket stage job starts its Run (so there is something to attach logs to while the stage
+// is still going), and for the first stage moves the ticket from queued to running.
 export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
   const read = readStagePayload(job.payload);
-  if (read?.stage !== "implement") return;
-  const { ticketId } = read;
-  const next = ticketTransition("queued", { type: "claim" });
-  if (!next.ok || next.state === "blocked") return;
+  if (!read) return;
+  const { ticketId, stage } = read;
+  if (stage === "implement") {
+    const next = ticketTransition("queued", { type: "claim" });
+    if (next.ok && next.state !== "blocked") {
+      await pool.query(
+        "UPDATE tickets SET state = $2 WHERE id = $1 AND state = 'queued'",
+        [ticketId, next.state],
+      );
+    }
+  }
+  // A re-claim after a lease ran out finds the Run already there and leaves it be.
   await pool.query(
-    "UPDATE tickets SET state = $2 WHERE id = $1 AND state = 'queued'",
-    [ticketId, next.state],
+    `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, started_at)
+     SELECT t.spec_id, t.repo_id, t.id, t.content_version, $2, $3,
+       (SELECT count(*) FROM runs r WHERE r.ticket_id = t.id AND r.stage = $3) + 1, now()
+     FROM tickets t WHERE t.id = $1
+     ON CONFLICT (job_id) DO NOTHING`,
+    [ticketId, job.id, stage],
   );
 }

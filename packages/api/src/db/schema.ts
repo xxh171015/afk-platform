@@ -232,7 +232,8 @@ export const runs = pgTable(
   },
   (t) => [
     index("runs_ticket_idx").on(t.ticketId),
-    index("runs_job_idx").on(t.jobId),
+    // One Run per job: it starts when the job is claimed and is filled in when the result arrives.
+    unique("runs_job_unique").on(t.jobId),
     index("runs_spec_idx").on(t.specId),
   ],
 );

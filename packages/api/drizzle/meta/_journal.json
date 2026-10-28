@@ -43,6 +43,13 @@
       "when": 1793198971894,
       "tag": "0005_stage_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793199772399,
+      "tag": "0006_run_per_job",
+      "breakpoints": true
     }
   ]
 }

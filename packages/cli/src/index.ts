@@ -28,6 +28,12 @@ const toInt = (value: string): number => {
   }
   return Number(value);
 };
+const toOffset = (value: string): number => {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new InvalidArgumentError("must be a non-negative integer");
+  }
+  return Number(value);
+};
 const collect = (value: string, previous: string[] = []) => [
   ...previous,
   value,
@@ -202,6 +208,48 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ...data.warnings.map((w) => `warning: ${w.message}`),
       ];
       print(data, lines.join("\n"));
+    });
+
+  program
+    .command("run")
+    .description("runs")
+    .command("logs <run>")
+    .description("print the log of a run, e.g. R-5")
+    .option(
+      "--attempt <n>",
+      "an earlier attempt of the job (default: the latest)",
+      toInt,
+    )
+    .option("--from <offset>", "start at this byte offset", toOffset)
+    .action(async (run: string, options) => {
+      const parsed = parseDisplayId(run);
+      if (parsed?.kind !== "run") {
+        throw new Failure(`${run} is not a run id like R-5`);
+      }
+      let offset: number = options.from ?? 0;
+      let attempt: number | undefined = options.attempt;
+      let text = "";
+      let last: { size: number; finished: boolean } | undefined;
+      // Pages until the end of what has been written so far.
+      for (;;) {
+        const { data, response, error } = await api().GET("/runs/{id}/logs", {
+          params: { path: { id: parsed.id }, query: { offset, attempt } },
+        });
+        if (!data) throw failureFrom(response, error);
+        attempt = data.attempt;
+        text += data.text;
+        last = data;
+        if (data.nextOffset >= data.size || data.nextOffset === offset) break;
+        offset = data.nextOffset;
+      }
+      if (json()) {
+        print(
+          { run, attempt, size: last.size, finished: last.finished, text },
+          "",
+        );
+      } else {
+        io.stdout(text);
+      }
     });
 
   try {

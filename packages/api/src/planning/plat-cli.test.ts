@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type Io, run } from "@afk/cli";
@@ -6,23 +9,26 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { listen, type RunningApi } from "../test/fake-worker.ts";
+import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
 
 // The plat commands against the real HTTP API and a real Postgres.
 
 let db: TestDatabase;
 let api: RunningApi;
 let files: Record<string, string>;
+let logDir: string;
 
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
+  api = await listen(createApp({ pool: db.pool, logDir }));
   files = {};
 });
 afterEach(async () => {
   await api.close();
   await db.drop();
+  await rm(logDir, { recursive: true, force: true });
 });
 
 async function plat(...args: string[]) {
@@ -179,6 +185,65 @@ describe("plat", () => {
     expect(
       (await plat("project", "create", "bad", "--limit", "nope=1")).code,
     ).toBe(1);
+  });
+
+  it("prints a run's log, all of it or from an offset, as text or JSON", async () => {
+    await register();
+    files["tickets.yaml"] = TICKETS_YAML;
+    await plat("tickets", "import", "S-1", "tickets.yaml");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    const runId = (
+      await db.pool.query("SELECT id FROM runs WHERE job_id = $1", [job?.id])
+    ).rows[0].id;
+    for (const chunk of ["line one\n", "línea dos\n", "line three\n"]) {
+      await fetch(`${api.url}/worker/runs/${runId}/logs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workerId: "w1", attempt: job?.attempt, chunk }),
+      });
+    }
+    const text = await plat("run", "logs", `R-${runId}`);
+    expect(text).toEqual({
+      code: 0,
+      stdout: "line one\nlínea dos\nline three\n",
+      stderr: "",
+    });
+
+    const fromOffset = await plat("run", "logs", `R-${runId}`, "--from", "9");
+    expect(fromOffset.stdout).toBe("línea dos\nline three\n");
+
+    const asJson = JSON.parse(
+      (await plat("--json", "run", "logs", `R-${runId}`)).stdout,
+    );
+    expect(asJson).toMatchObject({
+      run: `R-${runId}`,
+      attempt: 1,
+      finished: false,
+      text: "line one\nlínea dos\nline three\n",
+    });
+
+    // a log longer than one page is read to the end
+    const big = "x".repeat(600 * 1024);
+    await fetch(`${api.url}/worker/runs/${runId}/logs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workerId: "w1",
+        attempt: job?.attempt,
+        chunk: big,
+      }),
+    });
+    expect((await plat("run", "logs", `R-${runId}`)).stdout.length).toBe(
+      "line one\nlínea dos\nline three\n".length + big.length,
+    );
+
+    expect((await plat("run", "logs", "R-999")).stderr).toMatch(/no such run/);
+    expect((await plat("run", "logs", "T-1")).stderr).toMatch(/not a run id/);
+    expect((await plat("run", "logs", `R-${runId}`, "--from", "-1")).code).toBe(
+      1,
+    );
   });
 
   it("prints one JSON document with --json", async () => {
