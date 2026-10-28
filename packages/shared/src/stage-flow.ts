@@ -72,7 +72,7 @@ const block = (reason: BlockedReason): StageDecision => ({
 });
 
 // Spends one fix of the kind, or reports that it is used up.
-function withFix(progress: Progress, kind: FixKind): Progress | undefined {
+function spendFix(progress: Progress, kind: FixKind): Progress | undefined {
   const attempt = tryFix(progress.fixCounts, kind);
   return attempt.ok ? { ...progress, fixCounts: attempt.counts } : undefined;
 }
@@ -102,7 +102,7 @@ export function advanceStage(
           ? toMerge(progress)
           : enqueue("review", progress);
       }
-      const spent = withFix(progress, "gate-fix");
+      const spent = spendFix(progress, "gate-fix");
       return spent ? enqueue("gate-fix", spent) : block("gate-failed");
     }
 
@@ -113,13 +113,13 @@ export function advanceStage(
       const done = { ...progress, reviewed: true };
       if (report.outcome === "pass") return toMerge(done);
       // Review runs once, so review-fix is never spent yet; if it were, merging is all that is left.
-      const spent = withFix(done, "review-fix");
+      const spent = spendFix(done, "review-fix");
       return spent ? enqueue("review-fix", spent) : toMerge(done);
     }
 
     case "merge": {
       if (report.outcome === "merged") return { type: "done" };
-      const spent = withFix(progress, "merge-fix");
+      const spent = spendFix(progress, "merge-fix");
       if (spent) {
         return enqueue("merge-fix", spent, { type: "merge-fix-needed" });
       }

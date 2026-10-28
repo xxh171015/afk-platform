@@ -1,5 +1,6 @@
 import { formatDisplayId, type TicketState } from "@afk/shared";
 import type pg from "pg";
+import { readStagePayload } from "../jobs/stage-jobs.ts";
 
 // Everything a worker needs to render /context for a stage job (docs/design.md「Agent 与 skills 对接」).
 // The contract travels as a pointer, a SHA and a path in the repo that holds it: the worker reads the file
@@ -38,12 +39,9 @@ export async function buildBundle(
   pool: pg.Pool,
   job: { id: number; attempt: number; payload: Record<string, unknown> },
 ): Promise<Bundle | undefined> {
-  const { ticketId, stage } = job.payload as {
-    ticketId?: unknown;
-    stage?: unknown;
-  };
-  if (typeof ticketId !== "number" || typeof stage !== "string")
-    return undefined;
+  const read = readStagePayload(job.payload);
+  if (!read) return undefined;
+  const { ticketId, stage } = read;
 
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.title, t.body, t.acceptance_criteria, t.modules, t.state, t.content_version,

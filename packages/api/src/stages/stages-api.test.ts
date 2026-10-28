@@ -149,7 +149,7 @@ describe("the happy path", () => {
       { type: "agent-run", lock_key: null, idempotency_key: "T-1:1:review:1" },
       {
         type: "merge",
-        lock_key: "integration:backend:spec/order-export",
+        lock_key: "integration:1:spec/order-export",
         idempotency_key: "T-1:1:merge:1",
       },
     ]);
@@ -310,6 +310,8 @@ describe("fix limits", () => {
       reviewed: true,
     });
     await stage("review-fix", IMPLEMENT_DONE);
+    const handled = await db.pool.query("SELECT resolution FROM findings");
+    expect(handled.rows).toEqual([{ resolution: "fixed" }]);
     await stage("gate", GATE_PASSED); // no second review: next is the merge
     expect((await ticketRow()).state).toBe("merging");
     await stage("merge", MERGED);
@@ -471,6 +473,20 @@ describe("what is recorded", () => {
     ]);
     expect(spec.rows[0].state).toBe("paused");
     expect((await ticketRow(2)).state).toBe("pending");
+  });
+});
+
+describe("a worker that is faster than the claim bookkeeping", () => {
+  it("an implement result for a ticket still marked queued is handled as if it were running", async () => {
+    await runningSpec([ticket("a")]);
+    const claimed = (await worker.claim()).body.job as Claimed;
+    await db.pool.query("UPDATE tickets SET state = 'queued'"); // as if the claim never marked it
+    await worker.complete(claimed.id, claimed.attempt, {
+      stage: "implement",
+      outcome: "done",
+    });
+    expect((await ticketRow()).state).toBe("running");
+    await stage("gate", GATE_PASSED);
   });
 });
 

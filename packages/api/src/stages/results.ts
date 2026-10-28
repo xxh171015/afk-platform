@@ -13,7 +13,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
-import { enqueueStageJob } from "../jobs/stage-jobs.ts";
+import { enqueueStageJob, readStagePayload } from "../jobs/stage-jobs.ts";
 import {
   finishTicket,
   lockSpec,
@@ -56,7 +56,7 @@ const FindingFacts = z.object({
   resolution: z.enum(FINDING_RESOLUTIONS).optional(),
 });
 
-const common = {
+const commonFields = {
   run: RunFacts.optional(),
   gate: GateFacts.optional(),
   findings: z.array(FindingFacts).max(200).default([]),
@@ -66,24 +66,24 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
   z.object({
     stage: z.enum(AGENT_STAGES),
     outcome: z.enum(["done", ...AGENT_FAILURES]),
-    ...common,
+    ...commonFields,
   }),
   z.object({
     stage: z.literal("gate"),
     outcome: z.enum(["passed", "failed", "protected-path-changed"]),
-    ...common,
+    ...commonFields,
   }),
   z.object({
     stage: z.literal("review"),
     outcome: z.enum(["pass", "fix", "invalid-output", "timeout"]),
-    ...common,
+    ...commonFields,
   }),
   z.object({
     stage: z.literal("merge"),
     outcome: z.enum(["merged", "conflict", "gate-failed"]),
     // the integration branch head after the advance; a contract ticket's contract SHA
     headSha: z.string().min(1).optional(),
-    ...common,
+    ...commonFields,
   }),
 ]);
 export type StageResult = z.infer<typeof StageResultSchema>;
@@ -123,24 +123,14 @@ const EXPECTED_STATE: Record<Stage, TicketState> = {
   merge: "merging",
 };
 
-const STAGE_VALUES = new Set<string>(Object.keys(EXPECTED_STATE));
-
 export async function recordStageResult(
   client: pg.PoolClient,
   job: StageJob,
   result: unknown,
 ): Promise<RecordResult> {
-  const { ticketId, stage } = job.payload as {
-    ticketId?: unknown;
-    stage?: unknown;
-  };
-  if (
-    typeof ticketId !== "number" ||
-    typeof stage !== "string" ||
-    !STAGE_VALUES.has(stage)
-  ) {
-    return { status: "no-ticket" };
-  }
+  const read = readStagePayload(job.payload);
+  if (!read) return { status: "no-ticket" };
+  const { ticketId, stage } = read;
   const found = await client.query<{ spec_id: number }>(
     "SELECT spec_id FROM tickets WHERE id = $1",
     [ticketId],
@@ -155,10 +145,12 @@ export async function recordStageResult(
       [ticketId],
     )
   ).rows[0] as TicketRow;
-  const expected = EXPECTED_STATE[stage as Stage];
-  const contentVersion = (job.payload as { contentVersion?: unknown })
-    .contentVersion;
-  if (ticket.state !== expected || contentVersion !== ticket.content_version) {
+  // A worker that claimed the implement job may reach us before the claim marked the ticket running.
+  const expected = EXPECTED_STATE[stage];
+  const stateFits =
+    ticket.state === expected ||
+    (stage === "implement" && ticket.state === "queued");
+  if (!stateFits || read.contentVersion !== ticket.content_version) {
     return {
       status: "ignored",
       reason: `${stage} result for a ticket that is ${ticket.state} at version ${ticket.content_version}`,
@@ -168,7 +160,14 @@ export async function recordStageResult(
   const parsed = StageResultSchema.safeParse(result);
   const valid =
     parsed.success && parsed.data.stage === stage ? parsed.data : undefined;
-  await writeFacts(client, ticket, job, stage as Stage, valid, result);
+  await writeFacts(client, ticket, job, stage, valid, result);
+
+  if (ticket.state === "queued") {
+    await client.query("UPDATE tickets SET state = 'running' WHERE id = $1", [
+      ticket.id,
+    ]);
+    ticket.state = "running";
+  }
 
   const progress: Progress = {
     fixCounts: ticket.fix_counts,
@@ -178,7 +177,7 @@ export async function recordStageResult(
     ? advanceStage(valid as StageReport, progress)
     : { type: "block", reason: "invalid-output" };
 
-  await apply(client, ticket, decision, valid);
+  await applyDecision(client, ticket, decision, valid);
   return { status: "applied", decision };
 }
 
@@ -250,6 +249,14 @@ async function writeFacts(
       ],
     );
   }
+  if (stage === "review-fix" && result?.outcome === "done") {
+    // The review's must-fix findings were handled by this fix; suggestions keep going to the acceptance pack.
+    await client.query(
+      `UPDATE findings SET resolution = 'fixed' WHERE resolution = 'unhandled'
+       AND run_id IN (SELECT id FROM runs WHERE ticket_id = $1 AND stage = 'review')`,
+      [ticket.id],
+    );
+  }
   for (const finding of result?.findings ?? []) {
     // A review's suggestions do not trigger a fix; they travel to the acceptance pack.
     const resolution =
@@ -262,7 +269,7 @@ async function writeFacts(
   }
 }
 
-async function apply(
+async function applyDecision(
   client: pg.PoolClient,
   ticket: TicketRow,
   decision: StageDecision,
@@ -274,14 +281,14 @@ async function apply(
     if (finished.status === "missing-contract-sha") {
       // A contract ticket merged without saying where the integration branch is now: nothing downstream
       // could use it, so the result counts as unusable.
-      await block(client, ticket, "invalid-output");
+      await blockTicket(client, ticket, "invalid-output");
     } else if (finished.status !== "ok") {
       throw new Error(`cannot finish ticket ${ticket.id}: ${finished.status}`);
     }
     return;
   }
   if (decision.type === "block") {
-    await block(client, ticket, decision.reason);
+    await blockTicket(client, ticket, decision.reason);
     return;
   }
   let state = ticket.state;
@@ -312,7 +319,7 @@ async function apply(
   );
 }
 
-async function block(
+async function blockTicket(
   client: pg.PoolClient,
   ticket: TicketRow,
   reason: BlockedReason,
@@ -331,11 +338,9 @@ async function block(
 
 // A worker claiming a ticket's implement job moves the ticket from queued to running.
 export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
-  const { ticketId, stage } = job.payload as {
-    ticketId?: unknown;
-    stage?: unknown;
-  };
-  if (typeof ticketId !== "number" || stage !== "implement") return;
+  const read = readStagePayload(job.payload);
+  if (read?.stage !== "implement") return;
+  const { ticketId } = read;
   const next = ticketTransition("queued", { type: "claim" });
   if (!next.ok || next.state === "blocked") return;
   await pool.query(
