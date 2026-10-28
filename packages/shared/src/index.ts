@@ -1,4 +1,12 @@
 export { createPool } from "./db.ts";
+export type {
+  Capacity,
+  IncomingEdge,
+  NotRunnableReason,
+  Runnability,
+  RunnableInput,
+} from "./runnable.ts";
+export { isRunnable } from "./runnable.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specTransition } from "./spec-state.ts";
 export type {
