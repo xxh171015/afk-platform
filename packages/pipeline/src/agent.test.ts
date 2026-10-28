@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Stage } from "@afk/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -263,7 +264,7 @@ describe("the prompts", () => {
   it("picks the prompt by stage: one for implement, one for review, one for the three fixes", () => {
     expect(promptFor("implement")).toBe(PROMPTS.implement);
     expect(promptFor("review")).toBe(PROMPTS.review);
-    for (const stage of ["gate-fix", "review-fix", "merge-fix"])
+    for (const stage of ["gate-fix", "review-fix", "merge-fix"] as const)
       expect(promptFor(stage)).toBe(PROMPTS.fix);
   });
 });
@@ -273,7 +274,7 @@ describe("a fake agent run, end to end", () => {
     ctxDir: string,
     schema: Schema,
   ) => ({
-    stage: "implement",
+    stage: "implement" as Stage,
     branch: "agent/T-123",
     baseBranch: "main",
     promptFile: PROMPTS.implement,
@@ -363,7 +364,7 @@ describe("a fake agent run, end to end", () => {
     await runner.run(options(context(), ImplementOutputSchema));
     const fix = await runner.run({
       ...options(context("gate-fix"), ImplementOutputSchema),
-      stage: "gate-fix",
+      stage: "gate-fix" as const,
     });
     expect(fix.commits).toHaveLength(1);
     expect(gitOut(repo.dir, ["rev-list", "--count", "main..agent/T-123"])).toBe(
@@ -385,7 +386,7 @@ describe("a fake agent run, end to end", () => {
     }));
     const run = await runner.run({
       ...options(context("review"), ReviewOutputSchema),
-      stage: "review",
+      stage: "review" as const,
     });
     expect(run.commits).toEqual([]);
     expect(classifyReviewRun(run)).toMatchObject({ outcome: "pass" });

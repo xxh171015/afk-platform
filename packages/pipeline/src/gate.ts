@@ -59,6 +59,9 @@ export interface GateOutcome {
   junit?: string;
 }
 
+// `timeout N cmd` only times the first word, so the whole command line goes to a shell as one argument.
+const shellQuote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+
 export function readGateConfig(repoDir: string, configSha: string): GateConfig {
   const text = gitOrThrow(repoDir, [
     "show",
@@ -87,7 +90,11 @@ export interface RunGateInput {
 }
 
 export async function runGate(input: RunGateInput): Promise<GateOutcome> {
-  const cached = input.cache?.get(input.commitSha, input.configSha);
+  const cached = input.cache?.get(
+    input.commitSha,
+    input.configSha,
+    input.baseline,
+  );
   if (cached) return cached;
 
   const config = readGateConfig(input.repoDir, input.configSha);
@@ -115,7 +122,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
       const started = Date.now();
       // sandbox.exec has no timeout of its own: the command is wrapped
       const result = await session.exec(
-        `timeout ${step.timeoutSeconds} ${step.run}`,
+        `timeout ${step.timeoutSeconds} sh -c ${shellQuote(step.run)}`,
       );
       outcomes.push({
         name: step.name,
@@ -167,7 +174,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
     stepLogs,
     ...(junit === undefined ? {} : { junit }),
   };
-  input.cache?.remember(outcome);
+  input.cache?.remember(outcome, input.baseline);
   return outcome;
 }
 
@@ -187,14 +194,27 @@ function failureLog(
 // Results by commit: the same commit under the same configuration is not gated twice (a re-run after a worker
 // restart, or a candidate that equals a branch already gated). Only passing results are reused.
 export class GateCache {
-  private readonly byCommit = new Map<string, GateOutcome>();
+  private readonly results = new Map<string, GateOutcome>();
 
-  get(commitSha: string, configSha: string): GateOutcome | undefined {
-    const found = this.byCommit.get(commitSha);
-    return found?.configSha === configSha ? found : undefined;
+  // A pass is only reusable against the same baseline: counts that were enough then may not be now.
+  private key(commitSha: string, configSha: string, baseline?: TestCounts) {
+    return JSON.stringify([commitSha, configSha, baseline ?? null]);
   }
 
-  remember(outcome: GateOutcome): void {
-    if (outcome.pass) this.byCommit.set(outcome.commitSha, outcome);
+  get(
+    commitSha: string,
+    configSha: string,
+    baseline?: TestCounts,
+  ): GateOutcome | undefined {
+    return this.results.get(this.key(commitSha, configSha, baseline));
+  }
+
+  remember(outcome: GateOutcome, baseline?: TestCounts): void {
+    if (outcome.pass) {
+      this.results.set(
+        this.key(outcome.commitSha, outcome.configSha, baseline),
+        outcome,
+      );
+    }
   }
 }

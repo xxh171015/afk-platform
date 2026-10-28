@@ -57,13 +57,19 @@ export function checkProtectedPaths(input: {
   return { changed: [...input.changed], touched, unapproved };
 }
 
-// What `branch` changed since it left `base` (the three-dot diff: the branch's own changes only).
+// What `branch` changed since it left `base` (the three-dot diff: the branch's own changes only). Renames are
+// reported as a delete and an add, so moving a file out of a protected directory still names the old path.
 export function changedFiles(
   repoDir: string,
   base: string,
   branch: string,
 ): string[] {
-  return gitOut(repoDir, ["diff", "--name-only", `${base}...${branch}`])
+  return gitOut(repoDir, [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    `${base}...${branch}`,
+  ])
     .split("\n")
     .filter(Boolean);
 }

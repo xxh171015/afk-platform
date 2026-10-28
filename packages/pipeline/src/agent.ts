@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AGENT_FAILURES } from "@afk/shared";
+import type { AGENT_FAILURES, Stage } from "@afk/shared";
 import { z } from "zod";
 
 // The seam to the agent runner. Sandcastle sits behind `AgentRunner` (#29); everything else in the pipeline,
@@ -48,7 +48,7 @@ export const ReviewOutputSchema = z
 export type ReviewOutput = z.infer<typeof ReviewOutputSchema>;
 
 export interface AgentRunOptions<Schema extends z.ZodType> {
-  stage: string;
+  stage: Stage;
   branch: string; // the ticket's branch, created from baseBranch when it does not exist
   baseBranch: string;
   promptFile: string;
@@ -130,13 +130,16 @@ export function classifyReviewRun(
 // The review's findings as the API records them: must-fix problems, and suggestions that go to the acceptance pack.
 export function reviewFindings(
   output: ReviewOutput,
-): { kind: string; body: string }[] {
+): { kind: "must-fix" | "suggestion"; body: string }[] {
   return [
     ...output.mustFix.map((item) => ({
-      kind: "must-fix",
+      kind: "must-fix" as const,
       body: `${item.file}${item.line === undefined ? "" : `:${item.line}`} ${item.problem}`,
     })),
-    ...output.suggestions.map((body) => ({ kind: "suggestion", body })),
+    ...output.suggestions.map((body) => ({
+      kind: "suggestion" as const,
+      body,
+    })),
   ];
 }
 
@@ -152,9 +155,18 @@ export const PROMPTS = {
   review: join(PROMPT_DIR, "review.md"),
 } as const;
 
-export const promptFor = (stage: string): string =>
-  stage === "implement"
-    ? PROMPTS.implement
-    : stage === "review"
-      ? PROMPTS.review
-      : PROMPTS.fix;
+// Only the stages that run an agent have a prompt; the three fixes share one.
+export function promptFor(
+  stage: "implement" | "review" | "gate-fix" | "review-fix" | "merge-fix",
+): string {
+  switch (stage) {
+    case "implement":
+      return PROMPTS.implement;
+    case "review":
+      return PROMPTS.review;
+    case "gate-fix":
+    case "review-fix":
+    case "merge-fix":
+      return PROMPTS.fix;
+  }
+}

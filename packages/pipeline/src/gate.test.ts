@@ -106,6 +106,37 @@ describe("a passing gate", () => {
   });
 });
 
+describe("command lines", () => {
+  it("runs a whole command line under the timeout: &&, cd and environment prefixes work", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "compound",
+        run: "mkdir sub && cd sub && FOO=bar sh -c 'test \"$FOO\" = bar'",
+      },
+      { name: "test", run: writeJunit(1) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.steps.map((s) => s.exitCode)).toEqual([0, 0]);
+    expect(outcome.pass).toBe(true);
+  });
+
+  it("times out the second command of a compound line too", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml":
+        "commands:\n  - { name: slow, run: 'true && sleep 5', timeoutSeconds: 1 }\n",
+    });
+    const configSha = gitOut(repo.dir, ["rev-parse", "main"]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.steps[0]?.exitCode).toBe(124);
+  });
+});
+
 describe("a failing gate", () => {
   it("stops at the first failure: later commands do not run", async () => {
     const configSha = repoWithGate([
@@ -261,6 +292,27 @@ describe("caching by commit", () => {
     const second = await gate({ sandbox, configSha, cache });
     expect(second).toBe(first);
     expect(sandbox.opened).toHaveLength(1);
+  });
+
+  it("does not reuse a pass against a different baseline", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(8) }]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const cache = new GateCache();
+    const first = await gate({
+      sandbox,
+      configSha,
+      cache,
+      baseline: { tests: 5, skipped: 0 },
+    });
+    expect(first.pass).toBe(true);
+    const second = await gate({
+      sandbox,
+      configSha,
+      cache,
+      baseline: { tests: 9, skipped: 0 },
+    });
+    expect(second.pass).toBe(false); // the integration branch gained tests since
+    expect(sandbox.opened).toHaveLength(2);
   });
 
   it("gates again when the configuration differs, and never reuses a failure", async () => {

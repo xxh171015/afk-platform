@@ -1,4 +1,4 @@
-import { git, gitOrThrow } from "./exec.ts";
+import { AUTHOR, git, gitOrThrow } from "./exec.ts";
 
 export type MergeCandidate =
   | { conflict: false; candidate: string; tree: string }
@@ -32,16 +32,20 @@ export function mergeCandidate(
     throw new Error(`git merge-tree failed: ${merged.out.slice(0, 400)}`);
   }
   const tree = merged.stdout.trim().split("\n")[0] as string;
-  const candidate = gitOrThrow(repoDir, [
-    "commit-tree",
-    tree,
-    "-p",
-    gitOrThrow(repoDir, ["rev-parse", integrationRef]),
-    "-p",
-    gitOrThrow(repoDir, ["rev-parse", agentRef]),
-    "-m",
-    message,
-  ]);
+  const candidate = gitOrThrow(
+    repoDir,
+    [
+      "commit-tree",
+      tree,
+      "-p",
+      gitOrThrow(repoDir, ["rev-parse", integrationRef]),
+      "-p",
+      gitOrThrow(repoDir, ["rev-parse", agentRef]),
+      "-m",
+      message,
+    ],
+    AUTHOR,
+  );
   return { conflict: false, candidate, tree };
 }
 

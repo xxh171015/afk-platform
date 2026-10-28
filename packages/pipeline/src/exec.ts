@@ -41,6 +41,13 @@ export function exec(
 }
 
 // The platform's own commits and rewrites are made by this identity.
+// A commit made out of thin air (a merge candidate) has no author of its own; a clean worker may have no
+// user.name configured, so it gets the platform's identity.
+export const AUTHOR = {
+  GIT_AUTHOR_NAME: "afk-worker",
+  GIT_AUTHOR_EMAIL: "afk-worker@users.noreply.github.com",
+};
+
 const COMMITTER = {
   GIT_COMMITTER_NAME: "afk-worker",
   GIT_COMMITTER_EMAIL: "afk-worker@users.noreply.github.com",
@@ -55,8 +62,12 @@ export const git = (
 export const gitOut = (cwd: string, args: string[]) =>
   git(cwd, args).stdout.trim();
 
-export const gitOrThrow = (cwd: string, args: string[]): string => {
-  const result = git(cwd, args);
+export const gitOrThrow = (
+  cwd: string,
+  args: string[],
+  env: Record<string, string> = {},
+): string => {
+  const result = git(cwd, args, env);
   if (result.code !== 0) {
     throw new Error(
       `git ${args.join(" ")} failed: ${result.out.slice(0, 400)}`,

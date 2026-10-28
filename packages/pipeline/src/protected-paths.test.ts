@@ -82,6 +82,25 @@ describe("checkProtectedPaths", () => {
 });
 
 describe("changedFiles", () => {
+  it("names the old path of a file moved out of a protected directory", () => {
+    repo = makeRepo({ "openapi/openapi.yaml": "v: 1\n", "src/a.ts": "a\n" });
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-1"]);
+    git(repo.dir, ["mv", "openapi/openapi.yaml", "src/openapi.yaml"]);
+    git(repo.dir, ["commit", "--quiet", "-m", "move the contract"]);
+    const changed = changedFiles(repo.dir, "main", "agent/T-1");
+    expect(changed.sort()).toEqual([
+      "openapi/openapi.yaml",
+      "src/openapi.yaml",
+    ]);
+    expect(
+      checkProtectedPaths({
+        changed,
+        protectedPaths: ["openapi/**"],
+        approved: [],
+      }).unapproved,
+    ).toEqual(["openapi/openapi.yaml"]);
+  });
+
   let repo: TestRepo;
   afterEach(() => repo.cleanup());
 

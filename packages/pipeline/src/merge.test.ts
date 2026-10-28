@@ -49,6 +49,18 @@ describe("mergeCandidate", () => {
     ).toBe("candidate for T-1");
   });
 
+  it("gives the candidate an author even when git has no identity configured", () => {
+    diverged({ "agent.txt": "a\n" }, { "other.txt": "o\n" });
+    git(repo.dir, ["config", "--unset", "user.name"]);
+    git(repo.dir, ["config", "--unset", "user.email"]);
+    const result = mergeCandidate(repo.dir, "spec/s", "agent/T-1", "m");
+    expect(result.conflict).toBe(false);
+    if (result.conflict) return;
+    expect(
+      gitOut(repo.dir, ["log", "-1", "--format=%an <%ae>", result.candidate]),
+    ).toBe("afk-worker <afk-worker@users.noreply.github.com>");
+  });
+
   it("moves no branch and checks nothing out", () => {
     diverged({ "agent.txt": "a\n" }, { "other.txt": "o\n" });
     const refsBefore = gitOut(repo.dir, ["for-each-ref"]);
