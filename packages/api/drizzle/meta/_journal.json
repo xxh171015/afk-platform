@@ -15,6 +15,13 @@
       "when": 1793196185910,
       "tag": "0001_job_result",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793196855181,
+      "tag": "0002_job_state_and_attempt",
+      "breakpoints": true
     }
   ]
 }

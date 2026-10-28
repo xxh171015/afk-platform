@@ -26,8 +26,8 @@ const claimRoute = createRoute({
       content: {
         "application/json": {
           schema: z.object({
-            workerId: z.string().min(1),
-            capabilities: z.array(z.string()),
+            workerId: z.string().min(1).max(200),
+            capabilities: z.array(z.string().max(200)).max(100),
           }),
         },
       },
@@ -46,9 +46,11 @@ const claimRoute = createRoute({
   },
 });
 
+// Ids and attempts are Postgres integers: anything larger is a bad request, not a database error.
+const INT4_MAX = 2_147_483_647;
 const HolderBody = z.object({
-  workerId: z.string().min(1),
-  attempt: z.number().int(),
+  workerId: z.string().min(1).max(200),
+  attempt: z.number().int().min(1).max(INT4_MAX),
 });
 const ErrorReply = z.object({ error: z.string() });
 
@@ -61,7 +63,7 @@ function holderRoute<Extra extends z.ZodRawShape, Reply extends z.ZodType>(
     method: "post",
     path: `/worker/jobs/{id}/${name}`,
     request: {
-      params: z.object({ id: z.coerce.number().int() }),
+      params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
       body: {
         content: { "application/json": { schema: HolderBody.extend(extra) } },
       },
@@ -131,10 +133,10 @@ export function registerWorkerRoutes(
         job: {
           id: job.id,
           type: job.type,
-          payload: job.payload as Record<string, unknown>,
+          payload: job.payload,
           attempt: job.attempt,
           lockKey: job.lockKey,
-          leaseExpiresAt: (job.leaseExpiresAt as Date).toISOString(),
+          leaseExpiresAt: job.leaseExpiresAt.toISOString(),
         },
       },
       200,
@@ -169,12 +171,19 @@ export function registerWorkerRoutes(
       workerId,
       attempt,
       now: context.clock(),
+      leaseSeconds: context.leaseSeconds,
     });
     if (outcome.status !== "ok") {
       const { body, status } = refusal(outcome);
       return c.json(body, status);
     }
-    return c.json({ ok: true as const }, 200);
+    return c.json(
+      {
+        ok: true as const,
+        leaseExpiresAt: outcome.leaseExpiresAt.toISOString(),
+      },
+      200,
+    );
   });
 
   app.openapi(completeRoute, async (c) => {

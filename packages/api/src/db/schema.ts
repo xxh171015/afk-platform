@@ -1,6 +1,7 @@
 import {
   BLOCKED_REASONS,
   EDGE_KINDS,
+  JOB_STATES,
   SPEC_STATES,
   SPEC_TYPES,
   TICKET_STATES,
@@ -161,7 +162,7 @@ export const jobs = pgTable(
     state: text("state").notNull().default("queued"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
-    attempt: integer("attempt").notNull().default(0), // fencing token
+    attempt: integer("attempt").notNull().default(1), // fencing token; the first lease is attempt 1
     // One unique key per job. For ticket jobs the queue builds it from (ticket, content version, stage, sequence);
     // the format for jobs without a ticket (finalize, open-pr, host-sync) is the queue's to define (#23).
     idempotencyKey: text("idempotency_key").notNull().unique(),
@@ -177,6 +178,7 @@ export const jobs = pgTable(
   (t) => [
     index("jobs_state_lease_idx").on(t.state, t.leaseExpiresAt),
     index("jobs_lock_key_idx").on(t.lockKey),
+    check("jobs_state_check", oneOf(t.state, JOB_STATES)),
   ],
 );
 

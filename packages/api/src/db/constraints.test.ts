@@ -231,4 +231,11 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
       ),
     ).toBe(CHECK_VIOLATION);
   });
+
+  it("a job's state must be one of the four job states", async () => {
+    const sql =
+      "INSERT INTO jobs (type, idempotency_key, state) VALUES ('agent-run', $1, $2)";
+    expect(await outcome(sql, ["a", "running"])).toBe("ok");
+    expect(await outcome(sql, ["b", "weird"])).toBe(CHECK_VIOLATION);
+  });
 });

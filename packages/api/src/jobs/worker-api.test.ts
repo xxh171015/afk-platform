@@ -49,7 +49,7 @@ describe("claiming", () => {
       id: job.id,
       type: "agent-run",
       payload: { stage: "implement" },
-      attempt: 0,
+      attempt: 1,
       leaseExpiresAt: "2026-01-01T00:02:00.000Z",
     });
   });
@@ -81,9 +81,16 @@ describe("working a claimed job", () => {
     });
   });
 
-  it("the holder can check before pushing", async () => {
+  it("checking before a push renews the lease from the moment it arrives", async () => {
     const { holder, job } = await claimed();
-    expect((await holder.prePush(job.id, job.attempt)).status).toBe(200);
+    clock.advanceSeconds(100);
+    const reply = await holder.prePush(job.id, job.attempt);
+    expect(reply).toEqual({
+      status: 200,
+      body: { ok: true, leaseExpiresAt: "2026-01-01T00:03:40.000Z" },
+    });
+    clock.advanceSeconds(100); // 200 s after the claim: past the original lease, inside the renewed one
+    expect((await worker("w2").claim()).body.job).toBeNull();
   });
 
   it("completing stores the result and the job is not handed out again", async () => {
@@ -134,7 +141,7 @@ describe("working a claimed job", () => {
   });
 
   it("an unknown job is a 404, not a server error", async () => {
-    expect((await worker().heartbeat(99999, 0)).status).toBe(404);
+    expect((await worker().heartbeat(99999, 1)).status).toBe(404);
   });
 });
 
@@ -176,7 +183,7 @@ describe("leases that run out", () => {
 
   it("each further expiry bumps the attempt again", async () => {
     await enqueue("a");
-    let attempt = -1;
+    let attempt = 0;
     for (let round = 0; round < 3; round++) {
       const job = (await worker(`w${round}`).claim()).body.job as ClaimedJob;
       expect(job.attempt).toBe(attempt + 1);
@@ -387,5 +394,33 @@ describe("claiming at the same moment", () => {
     );
     expect(all).toHaveLength(12);
     expect(new Set(all.map((job) => job.id)).size).toBe(12);
+  });
+});
+
+describe("bad input", () => {
+  it("numbers that do not fit the database are a 400, not a server error", async () => {
+    const w = worker();
+    expect((await w.heartbeat(1, 2 ** 40)).status).toBe(400);
+    expect((await w.heartbeat(2 ** 40, 1)).status).toBe(400);
+    expect((await w.heartbeat(1, -1)).status).toBe(400);
+    expect((await w.heartbeat(0, 1)).status).toBe(400);
+  });
+});
+
+describe("a lease that ran out while workers race for the key", () => {
+  it("is retaken by exactly one worker and the key stays exclusive", async () => {
+    const KEY = "integration:repo-1:spec/x";
+    const older = await enqueue("a", { lockKey: KEY });
+    await enqueue("b", { lockKey: KEY });
+    await worker("lost").claim();
+    clock.advanceSeconds(121);
+    const replies = await Promise.all(
+      Array.from({ length: 20 }, (_, n) => worker(`w${n}`).claim()),
+    );
+    const got = replies.flatMap((reply) =>
+      reply.body.job ? [reply.body.job] : [],
+    );
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({ id: older.job.id, attempt: 2 });
   });
 });

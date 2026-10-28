@@ -43,6 +43,10 @@ The API never migrates on its own. `assertMigrated()` (`packages/api/src/db/migr
 
 Columns with a closed vocabulary (ticket and spec states and types, blocked reasons, edge kinds) are CHECK-constrained from the constants in `@afk/shared`, so the database and the zod schemas cannot drift apart. `drizzle.config.ts` has no database credentials: it only serves `db:generate`; use `pnpm db:migrate` to apply.
 
+## Job queue and worker API
+
+Jobs live in the `jobs` table; `packages/api/src/jobs/queue.ts` holds the queue and `packages/api/src/http/worker-routes.ts` the worker-facing HTTP routes (`POST /worker/jobs/claim`, then `/{id}/heartbeat`, `/pre-push`, `/complete`, `/fail`). A claim takes a 2-minute lease (`FOR UPDATE SKIP LOCKED`); workers heartbeat every 30 seconds. Every call after the claim carries `(workerId, attempt)` and is refused with 409 unless it is the current lease holder; a lease that runs out puts the job back with `attempt + 1`. The first attempt is 1. Jobs are enqueued in-process with `enqueueJob`, keyed by `ticketJobKey(...)`; the same key returns the existing job. The routes have no authentication yet.
+
 ## Run the checks
 
 ```sh

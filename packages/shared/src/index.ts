@@ -1,6 +1,8 @@
 export { createPool } from "./db.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
+export type { JobState } from "./job-state.ts";
+export { JOB_STATES } from "./job-state.ts";
 export type {
   Capacity,
   IncomingEdge,

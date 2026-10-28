@@ -1,3 +1,4 @@
+import type { JobState } from "@afk/shared";
 import type pg from "pg";
 
 // The job queue lives on the `jobs` table (docs/specs/m1-platform.md「作业队列」).
@@ -6,8 +7,8 @@ import type pg from "pg";
 export interface Job {
   id: number;
   type: string;
-  payload: unknown;
-  state: string;
+  payload: Record<string, unknown>;
+  state: JobState;
   leaseOwner: string | null;
   leaseExpiresAt: Date | null;
   attempt: number; // fencing token: bumped each time an expired lease is taken back
@@ -18,9 +19,12 @@ export interface Job {
   error: string | null;
 }
 
+// A job a worker holds: the lease fields are always set while it is running.
+export type LeasedJob = Job & { leaseOwner: string; leaseExpiresAt: Date };
+
 export interface NewJob {
   type: string;
-  payload?: unknown;
+  payload?: Record<string, unknown>;
   idempotencyKey: string;
   lockKey?: string;
   requiredCapabilities?: string[];
@@ -64,11 +68,12 @@ export interface ClaimRequest {
 export async function claimJob(
   pool: pg.Pool,
   request: ClaimRequest,
-): Promise<Job | null> {
+): Promise<LeasedJob | null> {
   const leaseExpiresAt = new Date(
     request.now.getTime() + request.leaseSeconds * 1000,
   );
   const client = await pool.connect();
+  let broken: Error | undefined; // a connection whose ROLLBACK failed must not go back to the pool
   try {
     await client.query("BEGIN");
     // A lease that ran out puts the job back in the queue; the bumped attempt shuts the old holder out.
@@ -92,12 +97,16 @@ export async function claimJob(
       [request.workerId, leaseExpiresAt, request.capabilities, request.now],
     );
     await client.query("COMMIT");
-    return rows[0] ?? null;
+    return (rows[0] as LeasedJob | undefined) ?? null;
   } catch (error) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      broken = rollbackError as Error;
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(broken);
   }
 }
 
@@ -142,17 +151,9 @@ export async function heartbeat(
   return { status: await classify(pool, call.jobId) };
 }
 
-export async function checkBeforePush(
-  pool: pg.Pool,
-  call: HolderCall,
-): Promise<HolderOutcome> {
-  const { rowCount } = await pool.query(
-    `SELECT 1 FROM jobs WHERE ${HOLDS_LEASE}`,
-    [call.jobId, call.workerId, call.attempt, call.now],
-  );
-  if (rowCount) return { status: "ok" };
-  return { status: await classify(pool, call.jobId) };
-}
+// Before pushing the integration branch the worker re-checks it still holds the job, and that check renews
+// the lease too (docs/design.md「作业与恢复」: 校验 (作业号, attempt) 仍是当前持有者并续期).
+export const checkBeforePush = heartbeat;
 
 async function finish(
   pool: pg.Pool,
@@ -169,7 +170,7 @@ async function finish(
       call.attempt,
       call.now,
       state,
-      result === undefined ? null : JSON.stringify(result),
+      result == null ? null : JSON.stringify(result),
       error,
     ],
   );
@@ -177,6 +178,8 @@ async function finish(
   return { status: await classify(pool, call.jobId) };
 }
 
+// A complete or fail that arrives twice (the first reply was lost) gets a 409 the second time: the job is already
+// finished and the lease is gone, so the fencing check cannot tell it from a stale holder.
 export const completeJob = (pool: pg.Pool, call: HolderCall, result: unknown) =>
   finish(pool, call, "done", result, null);
 export const failJob = (pool: pg.Pool, call: HolderCall, error: string) =>
