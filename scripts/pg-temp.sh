@@ -19,9 +19,10 @@ case "${1:-}" in
       [ "$(id -u)" = 0 ] && chown postgres "$dir"
       as_pg "$bin/initdb" -D "$dir/data" -U afk --auth=trust --locale=C.UTF-8 >/dev/null
     fi
-    as_pg "$bin/pg_ctl" -D "$dir/data" -o "-p $port -k $dir -c listen_addresses=127.0.0.1" \
-      -l "$dir/log" -w start >/dev/null || true
-    as_pg "$bin/pg_isready" -h 127.0.0.1 -p "$port" >/dev/null
+    if ! as_pg "$bin/pg_isready" -h 127.0.0.1 -p "$port" >/dev/null; then
+      as_pg "$bin/pg_ctl" -D "$dir/data" -o "-p $port -k $dir -c listen_addresses=127.0.0.1" \
+        -l "$dir/log" -w start >/dev/null
+    fi
     as_pg "$bin/psql" -h 127.0.0.1 -p "$port" -U afk -d postgres -tAc \
       "SELECT 1 FROM pg_database WHERE datname='afk'" | grep -q 1 \
       || as_pg "$bin/createdb" -h 127.0.0.1 -p "$port" -U afk afk

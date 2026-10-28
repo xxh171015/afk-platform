@@ -10,7 +10,7 @@ describe("createPool", () => {
     expect(rows).toEqual([{ one: 1 }]);
   });
 
-  it("commits a write made in a transaction and can read it back", async () => {
+  it("reads back a write made inside a transaction", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
