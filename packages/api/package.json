@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "db:migrate": "node src/db/migrate-cli.ts",
     "db:generate": "drizzle-kit generate",
-    "openapi:generate": "node src/openapi-cli.ts"
+    "openapi:generate": "node src/openapi-cli.ts",
+    "start": "node src/main.ts"
   },
   "dependencies": {
     "@afk/shared": "workspace:*",

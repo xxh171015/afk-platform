@@ -323,6 +323,109 @@
             }
           }
         }
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Every spec, newest first, with the progress of its tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "planned",
+                              "running",
+                              "finalizing",
+                              "awaiting-review",
+                              "partially-merged",
+                              "reworking",
+                              "merged",
+                              "paused",
+                              "cancelled"
+                            ]
+                          },
+                          "pauseReason": {
+                            "type": ["string", "null"]
+                          },
+                          "project": {
+                            "type": "string"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "total": {
+                                "type": "integer"
+                              },
+                              "done": {
+                                "type": "integer"
+                              },
+                              "active": {
+                                "type": "integer"
+                              },
+                              "blocked": {
+                                "type": "integer"
+                              },
+                              "pending": {
+                                "type": "integer"
+                              },
+                              "cancelled": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "total",
+                              "done",
+                              "active",
+                              "blocked",
+                              "pending",
+                              "cancelled"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "slug",
+                          "title",
+                          "type",
+                          "state",
+                          "pauseReason",
+                          "project",
+                          "progress"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["specs"]
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/specs/{specId}/tickets/import": {

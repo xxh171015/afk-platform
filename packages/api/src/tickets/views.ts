@@ -262,6 +262,48 @@ export async function specView(pool: pg.Pool, specId: number) {
   };
 }
 
+export interface Progress {
+  total: number;
+  done: number;
+  active: number; // queued, running or merging
+  blocked: number;
+  pending: number;
+  cancelled: number;
+}
+
+// Every spec with how far its tickets have got, newest first: the front page.
+export async function specList(pool: pg.Pool) {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.slug, s.title, s.type, s.state, s.pause_reason, p.name AS project,
+            count(t.id) AS total,
+            count(t.id) FILTER (WHERE t.state = 'done') AS done,
+            count(t.id) FILTER (WHERE t.state IN ('queued', 'running', 'merging')) AS active,
+            count(t.id) FILTER (WHERE t.state = 'blocked') AS blocked,
+            count(t.id) FILTER (WHERE t.state = 'pending') AS pending,
+            count(t.id) FILTER (WHERE t.state = 'cancelled') AS cancelled
+     FROM specs s JOIN projects p ON p.id = s.project_id LEFT JOIN tickets t ON t.spec_id = s.id
+     GROUP BY s.id, p.name ORDER BY s.id DESC`,
+  );
+  return rows.map((row) => ({
+    id: row.id as number,
+    displayId: formatDisplayId("spec", row.id),
+    slug: row.slug as string,
+    title: row.title as string,
+    type: row.type as string,
+    state: row.state as SpecState,
+    pauseReason: (row.pause_reason as string | null) ?? null,
+    project: row.project as string,
+    progress: {
+      total: Number(row.total),
+      done: Number(row.done),
+      active: Number(row.active),
+      blocked: Number(row.blocked),
+      pending: Number(row.pending),
+      cancelled: Number(row.cancelled),
+    } satisfies Progress,
+  }));
+}
+
 // Everything waiting for a person: tickets that are blocked and specs that the platform paused.
 export async function blockedQueue(pool: pg.Pool) {
   const tickets = await summaries(pool, "t.state = 'blocked'", []);

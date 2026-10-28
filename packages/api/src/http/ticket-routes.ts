@@ -8,7 +8,12 @@ import {
   resumeSpec,
   retryTicket,
 } from "../tickets/actions.ts";
-import { blockedQueue, specView, ticketView } from "../tickets/views.ts";
+import {
+  blockedQueue,
+  specList,
+  specView,
+  ticketView,
+} from "../tickets/views.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int();
@@ -150,6 +155,38 @@ const specRoute = createRoute({
   },
 });
 
+const specsRoute = createRoute({
+  method: "get",
+  path: "/specs",
+  responses: {
+    200: reply(
+      "Every spec, newest first, with the progress of its tickets",
+      z.object({
+        specs: z.array(
+          z.object({
+            id: Id,
+            displayId: z.string(),
+            slug: z.string(),
+            title: z.string(),
+            type: z.string(),
+            state: z.enum(SPEC_STATES),
+            pauseReason: z.string().nullable(),
+            project: z.string(),
+            progress: z.object({
+              total: Id,
+              done: Id,
+              active: Id,
+              blocked: Id,
+              pending: Id,
+              cancelled: Id,
+            }),
+          }),
+        ),
+      }),
+    ),
+  },
+});
+
 const blockedRoute = createRoute({
   method: "get",
   path: "/blocked",
@@ -285,6 +322,10 @@ export function registerTicketRoutes(
     const view = await specView(pool, c.req.valid("param").id);
     return view ? c.json(view, 200) : c.json({ error: "no such spec" }, 404);
   });
+
+  app.openapi(specsRoute, async (c) =>
+    c.json({ specs: await specList(pool) }, 200),
+  );
 
   app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));
 

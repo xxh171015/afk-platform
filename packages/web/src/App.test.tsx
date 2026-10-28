@@ -1,0 +1,93 @@
+// @vitest-environment jsdom
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { App } from "./App.tsx";
+import { fakeServer, renderWithApp } from "./test-utils.tsx";
+
+afterEach(() => {
+  cleanup();
+  window.location.hash = "";
+});
+
+const server = () =>
+  fakeServer({
+    "GET /specs": () => ({
+      json: {
+        specs: [
+          {
+            id: 3,
+            displayId: "S-3",
+            slug: "s",
+            title: "Third",
+            type: "feature",
+            state: "running",
+            pauseReason: null,
+            project: "shop",
+            progress: {
+              total: 1,
+              done: 0,
+              active: 1,
+              blocked: 0,
+              pending: 0,
+              cancelled: 0,
+            },
+          },
+        ],
+      },
+    }),
+    "GET /specs/3": () => ({
+      json: {
+        spec: {
+          id: 3,
+          displayId: "S-3",
+          slug: "s",
+          title: "Third",
+          type: "feature",
+          body: "",
+          state: "running",
+          pauseReason: null,
+          integrationBranches: [],
+          warnings: [],
+        },
+        tickets: [
+          {
+            id: 9,
+            displayId: "T-9",
+            specId: 3,
+            specDisplayId: "S-3",
+            title: "Only ticket",
+            type: "implementation",
+            state: "running",
+            blockedReason: null,
+            repo: "backend",
+            brief: null,
+          },
+        ],
+        edges: [],
+        finalizations: [],
+      },
+    }),
+  });
+
+describe("the app", () => {
+  it("starts on the list of specs", async () => {
+    renderWithApp(<App />, server());
+    expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
+  });
+
+  it("shows a spec's page for #/specs/<id>, and goes back to the list", async () => {
+    window.location.hash = "#/specs/3";
+    renderWithApp(<App />, server());
+    expect(await screen.findByTestId("node-T-9")).toBeTruthy();
+    window.location.hash = "#/";
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "S-3" })).toBeTruthy(),
+    );
+  });
+
+  it("falls back to the list for an address it does not know", async () => {
+    window.location.hash = "#/specs/not-a-number";
+    renderWithApp(<App />, server());
+    expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
+  });
+});

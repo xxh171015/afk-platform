@@ -141,7 +141,56 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Every spec, newest first, with the progress of its tickets */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              specs: {
+                id: number;
+                displayId: string;
+                slug: string;
+                title: string;
+                type: string;
+                /** @enum {string} */
+                state:
+                  | "draft"
+                  | "planned"
+                  | "running"
+                  | "finalizing"
+                  | "awaiting-review"
+                  | "partially-merged"
+                  | "reworking"
+                  | "merged"
+                  | "paused"
+                  | "cancelled";
+                pauseReason: string | null;
+                project: string;
+                progress: {
+                  total: number;
+                  done: number;
+                  active: number;
+                  blocked: number;
+                  pending: number;
+                  cancelled: number;
+                };
+              }[];
+            };
+          };
+        };
+      };
+    };
     put?: never;
     post: {
       parameters: {

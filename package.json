@@ -12,7 +12,8 @@
     "check": "pnpm typecheck && pnpm test && pnpm lint",
     "db:temp": "scripts/pg-temp.sh",
     "db:migrate": "pnpm --filter @afk/api db:migrate",
-    "gen:api": "pnpm --filter @afk/api openapi:generate && pnpm --filter @afk/shared openapi:types && biome format --write packages/shared/src/api"
+    "gen:api": "pnpm --filter @afk/api openapi:generate && pnpm --filter @afk/shared openapi:types && biome format --write packages/shared/src/api",
+    "api": "pnpm --filter @afk/api start"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

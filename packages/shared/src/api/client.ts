@@ -4,8 +4,12 @@ import type { paths } from "./schema.d.ts";
 export type { components, paths } from "./schema.d.ts";
 
 // The one typed client for the platform API; the CLI and the web page both use it.
-export function createApiClient(baseUrl: string) {
-  return createClient<paths>({ baseUrl });
+// `fetch` can be replaced, which is how the page's tests talk to a fake server.
+export function createApiClient(
+  baseUrl: string,
+  fetch?: typeof globalThis.fetch,
+) {
+  return createClient<paths>({ baseUrl, ...(fetch ? { fetch } : {}) });
 }
 export type ApiClient = ReturnType<typeof createApiClient>;
 

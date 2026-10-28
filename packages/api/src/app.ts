@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { cors } from "hono/cors";
 import type pg from "pg";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
@@ -23,6 +24,8 @@ export interface AppContext {
 
 export const LEASE_SECONDS = 120;
 
+const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 export function createApp(options: AppOptions): OpenAPIHono {
   const context: AppContext = {
     pool: options.pool,
@@ -31,6 +34,11 @@ export function createApp(options: AppOptions): OpenAPIHono {
     logs: new LogStore(options.logDir ?? defaultLogDir()),
   };
   const app = new OpenAPIHono();
+  // The page runs on another port of the same machine; nothing else may call the API from a browser.
+  app.use(
+    "*",
+    cors({ origin: (origin) => (LOCAL_ORIGIN.test(origin) ? origin : null) }),
+  );
   registerPlanningRoutes(app, context);
   registerWorkerRoutes(app, context);
   registerLogRoutes(app, context);

@@ -454,6 +454,58 @@ describe("resuming a paused spec", () => {
   });
 });
 
+describe("the spec list", () => {
+  it("lists specs newest first with the progress of their tickets", async () => {
+    await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c"),
+    ]);
+    await stage("implement", GAVE_UP); // a: blocked
+    await stage("implement", DONE); // c: running
+    const created = await call("POST", "/projects", { name: "other" });
+    await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "bug",
+      slug: "second",
+      title: "Second",
+    });
+    const list = await call("GET", "/specs");
+    expect(list.status).toBe(200);
+    expect(
+      list.body.specs.map(
+        (s: Json) => `${s.displayId}:${s.state}:${s.project}`,
+      ),
+    ).toEqual(["S-2:draft:other", "S-1:running:shop"]);
+    expect(list.body.specs[0].progress).toEqual({
+      total: 0,
+      done: 0,
+      active: 0,
+      blocked: 0,
+      pending: 0,
+      cancelled: 0,
+    });
+    expect(list.body.specs[1]).toMatchObject({
+      title: "Spec",
+      slug: "s",
+      type: "feature",
+      pauseReason: null,
+    });
+    expect(list.body.specs[1].progress).toEqual({
+      total: 3,
+      done: 0,
+      active: 1,
+      blocked: 1,
+      pending: 1,
+      cancelled: 0,
+    });
+  });
+
+  it("is empty before anything exists", async () => {
+    expect((await call("GET", "/specs")).body).toEqual({ specs: [] });
+  });
+});
+
 describe("what a person sees", () => {
   it("lists blocked tickets with a brief, and paused specs with the reason", async () => {
     const specId = await runningSpec([ticket("a"), ticket("b")]);

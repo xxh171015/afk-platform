@@ -6,7 +6,8 @@
       "scripts/**",
       "*.json",
       "*.ts",
-      "!**/node_modules"
+      "!**/node_modules",
+      "!**/dist"
     ]
   },
   "formatter": { "indentStyle": "space", "indentWidth": 2 }
