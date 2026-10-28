@@ -47,5 +47,5 @@ export {
   SKILLS_SANDBOX_PATH,
   sandboxMounts,
 } from "./sandcastle.ts";
-export type { StampResult, TrailerIds } from "./trailers.ts";
+export type { StampRequest, StampResult, TrailerIds } from "./trailers.ts";
 export { stampTrailers } from "./trailers.ts";

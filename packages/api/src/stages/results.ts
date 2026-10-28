@@ -194,45 +194,53 @@ async function writeFacts(
     "SELECT count(*) AS n FROM runs WHERE ticket_id = $1 AND stage = $2",
     [ticket.id, stage],
   );
-  const inserted = await client.query<{ id: number }>(
-    `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
-       cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage, result,
-       output, log_url, started_at, finished_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE($23, now()))
-     ON CONFLICT (job_id) DO UPDATE SET agent = EXCLUDED.agent, model = EXCLUDED.model, skills_sha = EXCLUDED.skills_sha,
-       cursor_cli_version = EXCLUDED.cursor_cli_version, branch = EXCLUDED.branch, base_sha = EXCLUDED.base_sha,
-       head_sha = EXCLUDED.head_sha, commits = EXCLUDED.commits, duration_ms = EXCLUDED.duration_ms,
-       duration_api_ms = EXCLUDED.duration_api_ms, token_usage = EXCLUDED.token_usage, result = EXCLUDED.result,
-       output = EXCLUDED.output, log_url = EXCLUDED.log_url,
-       started_at = COALESCE(EXCLUDED.started_at, runs.started_at), finished_at = EXCLUDED.finished_at
-     RETURNING id`,
-    [
-      ticket.spec_id,
-      ticket.repo_id,
-      ticket.id,
-      ticket.content_version,
-      job.id,
-      stage,
-      Number(tries.rows[0]?.n) + 1,
-      run?.agent ?? null,
-      run?.model ?? null,
-      run?.skillsSha ?? null,
-      run?.cursorCliVersion ?? null,
-      run?.branch ?? null,
-      run?.baseSha ?? null,
-      run?.headSha ?? null,
-      run?.commits ?? [],
-      run?.durationMs ?? null,
-      run?.durationApiMs ?? null,
-      run?.tokenUsage === undefined ? null : JSON.stringify(run.tokenUsage),
-      result?.outcome ?? "invalid-output",
-      // what the agent said; for an unusable result, the raw payload so the problem can be seen
-      JSON.stringify(result ? (run?.output ?? null) : (raw ?? null)),
-      run?.logUrl ?? null,
-      run?.startedAt ?? null,
-      run?.finishedAt ?? null,
-    ],
+  const facts = [
+    run?.agent ?? null,
+    run?.model ?? null,
+    run?.skillsSha ?? null,
+    run?.cursorCliVersion ?? null,
+    run?.branch ?? null,
+    run?.baseSha ?? null,
+    run?.headSha ?? null,
+    run?.commits ?? [],
+    run?.durationMs ?? null,
+    run?.durationApiMs ?? null,
+    run?.tokenUsage === undefined ? null : JSON.stringify(run.tokenUsage),
+    result?.outcome ?? "invalid-output",
+    // what the agent said; for an unusable result, the raw payload so the problem can be seen
+    JSON.stringify(result ? (run?.output ?? null) : (raw ?? null)),
+    run?.logUrl ?? null,
+    run?.startedAt ?? null,
+    run?.finishedAt ?? null,
+  ];
+  // The Run was started when the job was claimed: fill it in. (An UPDATE first, because an INSERT that runs
+  // into the unique job id still uses up a serial number, and display ids should not have holes.)
+  let inserted = await client.query<{ id: number }>(
+    `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, cursor_cli_version = $5, branch = $6, base_sha = $7,
+       head_sha = $8, commits = $9, duration_ms = $10, duration_api_ms = $11, token_usage = $12, result = $13,
+       output = $14, log_url = $15, started_at = COALESCE($16, started_at), finished_at = COALESCE($17, now())
+     WHERE job_id = $1 RETURNING id`,
+    [job.id, ...facts],
   );
+  if (!inserted.rows[0]) {
+    inserted = await client.query<{ id: number }>(
+      `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
+         cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage, result,
+         output, log_url, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE($23, now()))
+       RETURNING id`,
+      [
+        ticket.spec_id,
+        ticket.repo_id,
+        ticket.id,
+        ticket.content_version,
+        job.id,
+        stage,
+        Number(tries.rows[0]?.n) + 1,
+        ...facts,
+      ],
+    );
+  }
   const runId = inserted.rows[0]?.id as number;
 
   if (result?.gate) {

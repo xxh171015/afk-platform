@@ -8,6 +8,8 @@ import { readStagePayload } from "../jobs/stage-jobs.ts";
 
 export interface Bundle {
   job: { id: number; stage: string; attempt: number };
+  // The Run this job started when it was claimed: logs attach to it and commits are stamped with it.
+  run: { id: number; displayId: string } | null;
   ticket: {
     id: number;
     displayId: string;
@@ -35,6 +37,9 @@ export interface Bundle {
   protectedPaths: string[];
   allowedProtectedPaths: string[];
   contract: { sha: string; path: string; repoId: number } | null;
+  // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
+  failureLog: string | null;
+  review: unknown;
 }
 
 export async function buildBundle(
@@ -78,8 +83,31 @@ export async function buildBundle(
   const pointer = upstream.rows[0];
   const contractPath = row.contract_path as string | null;
 
+  const run = await pool.query<{ id: number }>(
+    "SELECT id FROM runs WHERE job_id = $1",
+    [job.id],
+  );
+  // What the previous stages found, kept in the output of their Runs, so a worker needs no memory of its own.
+  // Only the most recent gate or merge counts: an old failure that was fixed since is not news.
+  const failed = await pool.query<{ log: string | null }>(
+    `SELECT output->>'failureLog' AS log FROM runs
+     WHERE id = (SELECT max(id) FROM runs WHERE ticket_id = $1 AND stage IN ('gate', 'merge') AND result IS NOT NULL)
+       AND result IN ('failed', 'gate-failed', 'conflict')`,
+    [ticketId],
+  );
+  const reviewed = await pool.query<{ output: unknown }>(
+    "SELECT output FROM runs WHERE ticket_id = $1 AND stage = 'review' AND output IS NOT NULL ORDER BY id DESC LIMIT 1",
+    [ticketId],
+  );
+
   return {
     job: { id: job.id, stage, attempt: job.attempt },
+    run: run.rows[0]
+      ? {
+          id: run.rows[0].id,
+          displayId: formatDisplayId("run", run.rows[0].id),
+        }
+      : null,
     ticket: {
       id: row.id,
       displayId: formatDisplayId("ticket", row.id),
@@ -118,5 +146,7 @@ export async function buildBundle(
             repoId: pointer.repo_id,
           }
         : null,
+    failureLog: failed.rows[0]?.log ?? null,
+    review: reviewed.rows[0]?.output ?? null,
   };
 }

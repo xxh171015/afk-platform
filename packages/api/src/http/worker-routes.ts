@@ -108,6 +108,7 @@ const Bundle = z.object({
     stage: z.string(),
     attempt: z.number().int(),
   }),
+  run: z.object({ id: z.number().int(), displayId: z.string() }).nullable(),
   ticket: z.object({
     id: z.number().int(),
     displayId: z.string(),
@@ -141,6 +142,8 @@ const Bundle = z.object({
   contract: z
     .object({ sha: z.string(), path: z.string(), repoId: z.number().int() })
     .nullable(),
+  failureLog: z.string().nullable(),
+  review: z.unknown(),
 });
 
 const bundleRoute = createRoute({

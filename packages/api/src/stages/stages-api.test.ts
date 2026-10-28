@@ -640,6 +640,73 @@ describe("the bundle", () => {
     expect(reply.body.integrationBranch).toBe("spec/order-export");
   });
 
+  it("names the Run the job started, so logs and commit trailers have somewhere to point", async () => {
+    await runningSpec([ticket("a")]);
+    const job = (await worker.claim()).body.job as Claimed;
+    const reply = await bundle(job);
+    const run = await db.pool.query("SELECT id FROM runs WHERE job_id = $1", [
+      job.id,
+    ]);
+    expect(reply.body.run).toEqual({
+      id: run.rows[0].id,
+      displayId: `R-${run.rows[0].id}`,
+    });
+  });
+
+  it("hands a gate-fix the log of the gate that failed, and a review-fix the review", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "# test failed\nboom" } },
+    });
+    const fix = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(fix)).body.failureLog).toBe("# test failed\nboom");
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "gate-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "a.ts", problem: "null" }],
+        },
+      },
+    });
+    const reviewFix = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(reviewFix)).body.review).toMatchObject({
+      verdict: "fix",
+    });
+  });
+
+  it("does not hand over a failure log that a later passing gate made obsolete", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "old failure" } },
+    });
+    await stage("gate-fix", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", {
+      outcome: "conflict",
+      run: { output: { failureLog: "conflict in a.ts" } },
+    });
+    const mergeFix = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(mergeFix)).body.failureLog).toBe("conflict in a.ts");
+    await worker.complete(mergeFix.id, mergeFix.attempt, {
+      stage: "merge-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    const merge = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(merge)).body.failureLog).toBeNull();
+  });
+
   it("shows the pipeline progress to a fix stage", async () => {
     await runningSpec([ticket("a")]);
     await stage("implement", IMPLEMENT_DONE);

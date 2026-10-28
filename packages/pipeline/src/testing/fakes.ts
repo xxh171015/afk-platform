@@ -20,6 +20,7 @@ import type { GateSandbox, SandboxSession } from "../gate.ts";
 
 export interface FakeAgentStep {
   files?: Record<string, string>; // written, then committed
+  remove?: string[]; // deleted, then committed
   message?: string; // commit message; no commit when there are no files
   output?: unknown; // the agent's structured result, validated against the stage's schema
   error?: { kind: "invalid-output" | "timeout" | "other"; message: string };
@@ -30,16 +31,19 @@ export interface FakeAgentContext {
   branch: string;
   dir: string; // the worktree the agent works in
   context: (file: string) => string | undefined; // reads /context/<file>
+  signal?: AbortSignal; // aborted when the job is lost
 }
 
 export class FakeAgentRunner implements AgentRunner {
   readonly calls: AgentRunOptions<z.ZodType>[] = [];
   private readonly repoDir: string;
-  private readonly script: (ctx: FakeAgentContext) => FakeAgentStep;
+  private readonly script: (
+    ctx: FakeAgentContext,
+  ) => FakeAgentStep | Promise<FakeAgentStep>;
 
   constructor(
     repoDir: string,
-    script: (ctx: FakeAgentContext) => FakeAgentStep,
+    script: (ctx: FakeAgentContext) => FakeAgentStep | Promise<FakeAgentStep>,
   ) {
     this.repoDir = repoDir;
     this.script = script;
@@ -68,10 +72,11 @@ export class FakeAgentRunner implements AgentRunner {
     ]);
     try {
       const before = gitOrThrow(worktree, ["rev-parse", "HEAD"]);
-      const step = this.script({
+      const step = await this.script({
         stage: options.stage,
         branch: options.branch,
         dir: worktree,
+        signal: options.signal,
         context: (file) => {
           const path = join(options.ctxDir, file);
           return existsSync(path) ? readFileSync(path, "utf8") : undefined;
@@ -81,7 +86,12 @@ export class FakeAgentRunner implements AgentRunner {
         mkdirSync(dirname(join(worktree, path)), { recursive: true });
         writeFileSync(join(worktree, path), content);
       }
-      if (step.files && Object.keys(step.files).length > 0) {
+      for (const path of step.remove ?? [])
+        rmSync(join(worktree, path), { force: true });
+      if (
+        Object.keys(step.files ?? {}).length > 0 ||
+        (step.remove?.length ?? 0) > 0
+      ) {
         gitOrThrow(worktree, ["add", "-A"]);
         git(worktree, [
           "-c",
@@ -102,6 +112,14 @@ export class FakeAgentRunner implements AgentRunner {
         .split("\n")
         .filter(Boolean);
       const durationMs = Date.now() - started;
+      if (options.signal?.aborted) {
+        return {
+          commits: [],
+          error: "aborted: the job was lost",
+          errorKind: "other",
+          durationMs,
+        };
+      }
       if (step.error) {
         return {
           commits,

@@ -1,0 +1,110 @@
+import { type ApiClient, type Bundle, createApiClient } from "@afk/shared";
+
+// The worker talks to the platform over HTTP only (docs/specs/m1-platform.md「worker 专用接口」): it has no
+// database connection and does not import the api package. Every call that concerns a job carries
+// (worker id, attempt); a 404 or 409 means the lease is gone and the work must stop.
+
+export interface ClaimedJob {
+  id: number;
+  type: string;
+  payload: Record<string, unknown>;
+  attempt: number;
+  lockKey: string | null;
+  leaseExpiresAt: string;
+}
+
+export type Holding = "held" | "lost";
+
+export interface WorkerApi {
+  claim(capabilities: string[]): Promise<ClaimedJob | null>;
+  heartbeat(job: ClaimedJob): Promise<Holding>;
+  prePush(job: ClaimedJob): Promise<Holding>;
+  bundle(job: ClaimedJob): Promise<Bundle | "lost">;
+  complete(job: ClaimedJob, result: unknown): Promise<Holding>;
+  fail(job: ClaimedJob, error: string): Promise<Holding>;
+  appendLog(runId: number, job: ClaimedJob, chunk: string): Promise<Holding>;
+}
+
+const holding = (status: number): Holding => {
+  if (status === 404 || status === 409) return "lost";
+  if (status >= 200 && status < 300) return "held";
+  throw new Error(`the API answered ${status}`);
+};
+
+export function createWorkerApi(
+  baseUrl: string,
+  workerId: string,
+  client: ApiClient = createApiClient(baseUrl),
+): WorkerApi {
+  const call = (job: ClaimedJob) => ({
+    params: { path: { id: job.id } },
+    body: { workerId, attempt: job.attempt },
+  });
+  return {
+    async claim(capabilities) {
+      const { data, response } = await client.POST("/worker/jobs/claim", {
+        body: { workerId, capabilities },
+      });
+      if (!data) throw new Error(`claim failed: HTTP ${response.status}`);
+      return data.job;
+    },
+    async heartbeat(job) {
+      return holding(
+        (await client.POST("/worker/jobs/{id}/heartbeat", call(job))).response
+          .status,
+      );
+    },
+    async prePush(job) {
+      return holding(
+        (await client.POST("/worker/jobs/{id}/pre-push", call(job))).response
+          .status,
+      );
+    },
+    async bundle(job) {
+      const { data, response } = await client.GET("/worker/jobs/{id}/bundle", {
+        params: {
+          path: { id: job.id },
+          query: { workerId, attempt: job.attempt },
+        },
+      });
+      if (data) return data;
+      return holding(response.status) === "lost"
+        ? "lost"
+        : (() => {
+            throw new Error(`bundle failed: HTTP ${response.status}`);
+          })();
+    },
+    async complete(job, result) {
+      const { params, body } = call(job);
+      return holding(
+        (
+          await client.POST("/worker/jobs/{id}/complete", {
+            params,
+            body: { ...body, result },
+          })
+        ).response.status,
+      );
+    },
+    async fail(job, error) {
+      const { params, body } = call(job);
+      return holding(
+        (
+          await client.POST("/worker/jobs/{id}/fail", {
+            params,
+            body: { ...body, error },
+          })
+        ).response.status,
+      );
+    },
+    async appendLog(runId, job, chunk) {
+      const status = (
+        await client.POST("/worker/runs/{id}/logs", {
+          params: { path: { id: runId } },
+          body: { workerId, attempt: job.attempt, chunk },
+        })
+      ).response.status;
+      if (status === 413) return "held"; // a full log is not a reason to stop working
+      return holding(status);
+    },
+  };
+}

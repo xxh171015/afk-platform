@@ -22,6 +22,8 @@
   },
   "devDependencies": {
     "@afk/cli": "workspace:*",
+    "@afk/pipeline": "workspace:*",
+    "@afk/worker": "workspace:*",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11"
   }

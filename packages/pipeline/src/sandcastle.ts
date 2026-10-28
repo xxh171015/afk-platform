@@ -28,6 +28,7 @@ export interface SandcastleConfig {
 
 // The abort reason of the wall-clock limit; classifyAgentError recognises it again.
 const WALL_CLOCK_REASON = "wall-clock";
+const JOB_LOST_REASON = "job-lost";
 
 export const SKILLS_SANDBOX_PATH = "/home/agent/.cursor/skills";
 export const CONTEXT_SANDBOX_PATH = "/context";
@@ -103,6 +104,10 @@ export class SandcastleAgentRunner implements AgentRunner {
       () => abort.abort(new Error(WALL_CLOCK_REASON)),
       options.wallClockMs,
     );
+    // a lost lease stops the run the same way the wall clock does
+    const onJobLost = () => abort.abort(new Error(JOB_LOST_REASON));
+    if (options.signal?.aborted) onJobLost();
+    options.signal?.addEventListener("abort", onJobLost, { once: true });
     const started = Date.now();
     try {
       const result = await run({
@@ -147,6 +152,7 @@ export class SandcastleAgentRunner implements AgentRunner {
       };
     } finally {
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onJobLost);
     }
   }
 }

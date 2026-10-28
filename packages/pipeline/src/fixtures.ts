@@ -7,6 +7,7 @@ export function bundleFor(
   const { stage = "implement", ...rest } = over;
   return {
     job: { id: 7, stage, attempt: 1 },
+    run: { id: 9, displayId: "R-9" },
     ticket: {
       id: 123,
       displayId: "T-123",
@@ -38,6 +39,8 @@ export function bundleFor(
     protectedPaths: ["openapi/**", ".github/"],
     allowedProtectedPaths: [],
     contract: null,
+    failureLog: null,
+    review: null,
     ...rest,
   };
 }

@@ -57,7 +57,8 @@ export const git = (
   cwd: string,
   args: string[],
   env: Record<string, string> = {},
-) => exec("git", args, { cwd, env: { ...COMMITTER, ...env } });
+  input?: string,
+) => exec("git", args, { cwd, env: { ...COMMITTER, ...env }, input });
 
 export const gitOut = (cwd: string, args: string[]) =>
   git(cwd, args).stdout.trim();

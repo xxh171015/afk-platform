@@ -668,6 +668,10 @@ export interface paths {
                 stage: string;
                 attempt: number;
               };
+              run: {
+                id: number;
+                displayId: string;
+              } | null;
               ticket: {
                 id: number;
                 displayId: string;
@@ -705,6 +709,8 @@ export interface paths {
                 path: string;
                 repoId: number;
               } | null;
+              failureLog: string | null;
+              review?: unknown;
             };
           };
         };

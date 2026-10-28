@@ -56,6 +56,8 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   schema: Schema;
   idleSeconds: number;
   wallClockMs: number;
+  // Aborted when the job is lost (the lease was taken back): the run must stop at once.
+  signal?: AbortSignal;
 }
 
 export interface AgentRunResult<Output> {

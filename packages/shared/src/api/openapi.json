@@ -986,6 +986,18 @@
                       },
                       "required": ["id", "stage", "attempt"]
                     },
+                    "run": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "displayId"]
+                    },
                     "ticket": {
                       "type": "object",
                       "properties": {
@@ -1124,17 +1136,23 @@
                         }
                       },
                       "required": ["sha", "path", "repoId"]
-                    }
+                    },
+                    "failureLog": {
+                      "type": ["string", "null"]
+                    },
+                    "review": {}
                   },
                   "required": [
                     "job",
+                    "run",
                     "ticket",
                     "spec",
                     "repo",
                     "integrationBranch",
                     "protectedPaths",
                     "allowedProtectedPaths",
-                    "contract"
+                    "contract",
+                    "failureLog"
                   ]
                 }
               }

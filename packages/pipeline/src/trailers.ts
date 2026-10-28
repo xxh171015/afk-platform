@@ -1,4 +1,4 @@
-import { git, gitOut } from "./exec.ts";
+import { exec, git, gitOrThrow } from "./exec.ts";
 
 // Traceability trailers on every commit of a ticket's branch (docs/design.md「Git 操作规范」): Spec, Ticket, Run.
 // Cursor's own Co-authored-by trailer stays; only our three count for tracing.
@@ -15,56 +15,117 @@ const ID = {
   run: /^R-[1-9][0-9]*$/,
 };
 
+export interface StampRequest {
+  repoDir: string;
+  branch: string;
+  before: string; // the branch tip before this run: commits up to here are stamped already
+  ids: TrailerIds;
+  // Commits that came in from elsewhere, such as the integration branch merged into the ticket's branch by a
+  // merge-fix, belong to someone else and keep their identity.
+  exclude?: string;
+}
+
 export interface StampResult {
   rewritten: number;
   error?: string;
 }
 
-// Adds the trailers to the commits in `before..branch`. The agent's worktree is gone by now, so the rewrite
-// happens in a temporary one (`tmpDir`), which is removed again whatever the outcome.
-export function stampTrailers(
-  repoDir: string,
-  branch: string,
-  before: string,
-  ids: TrailerIds,
-  tmpDir: string,
-): StampResult {
-  // The ids go into a shell command run by rebase --exec: only our own id formats may pass.
+// Rewrites the ticket's new commits so each carries the trailers. Done with plumbing, commit by commit: same
+// tree, same author, same message plus trailers, parents mapped to the rewritten ones. Unlike a rebase this
+// keeps merge commits and the conflict resolutions in them exactly as the agent made them.
+export function stampTrailers(request: StampRequest): StampResult {
+  const { repoDir, branch, before, ids } = request;
+  // The ids end up in a commit message: only our own id formats may pass.
   for (const key of ["spec", "ticket", "run"] as const) {
     if (!ID[key].test(ids[key])) {
       throw new RangeError(`not a ${key} id: ${JSON.stringify(ids[key])}`);
     }
   }
-  const range = `${before}..${branch}`;
-  const count = Number(gitOut(repoDir, ["rev-list", "--count", range]));
-  if (count === 0) return { rewritten: 0 };
-
-  const add = git(repoDir, ["worktree", "add", tmpDir, branch]);
-  if (add.code !== 0) {
+  const tip = gitOrThrow(repoDir, ["rev-parse", branch]);
+  const listing = git(repoDir, [
+    "rev-list",
+    "--reverse",
+    "--topo-order",
+    tip,
+    `^${before}`,
+    ...(request.exclude ? [`^${request.exclude}`] : []),
+  ]);
+  if (listing.code !== 0) {
     return {
       rewritten: 0,
-      error: `worktree add failed: ${add.out.slice(0, 400)}`,
+      error: `rev-list failed: ${listing.out.slice(0, 400)}`,
     };
   }
-  try {
-    // addIfDifferent: stamping a branch that already carries the trailers (a rerun) adds nothing.
-    const amend = `git -c trailer.ifexists=addIfDifferent commit --amend --no-edit --trailer 'Spec: ${ids.spec}' --trailer 'Ticket: ${ids.ticket}' --trailer 'Run: ${ids.run}'`;
-    const rebase = git(tmpDir, [
-      "rebase",
-      "--rebase-merges",
-      "--exec",
-      amend,
-      before,
-    ]);
-    if (rebase.code !== 0) {
-      git(tmpDir, ["rebase", "--abort"]);
+  const commits = listing.stdout.split("\n").filter(Boolean);
+  if (commits.length === 0) return { rewritten: 0 };
+
+  const rewritten = new Map<string, string>();
+  for (const commit of commits) {
+    const info = gitOrThrow(repoDir, [
+      "show",
+      "-s",
+      "--format=%an%x00%ae%x00%aI%x00%P%x00%T",
+      commit,
+    ]).split("\0");
+    const [name, email, date, parents, tree] = info as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+    const message = git(repoDir, ["show", "-s", "--format=%B", commit]).stdout;
+    const stamped = exec(
+      "git",
+      [
+        "-C",
+        repoDir,
+        "interpret-trailers",
+        "--if-exists",
+        "addIfDifferent",
+        "--trailer",
+        `Spec: ${ids.spec}`,
+        "--trailer",
+        `Ticket: ${ids.ticket}`,
+        "--trailer",
+        `Run: ${ids.run}`,
+      ],
+      { input: `${message.trimEnd()}\n` },
+    );
+    if (stamped.code !== 0)
       return {
         rewritten: 0,
-        error: `rebase failed: ${rebase.out.slice(0, 400)}`,
+        error: `interpret-trailers failed: ${stamped.out.slice(0, 400)}`,
       };
-    }
-    return { rewritten: count };
-  } finally {
-    git(repoDir, ["worktree", "remove", "--force", tmpDir]);
+    const parentArgs = parents
+      .split(" ")
+      .filter(Boolean)
+      .flatMap((parent) => ["-p", rewritten.get(parent) ?? parent]);
+    const created = git(
+      repoDir,
+      ["commit-tree", tree, ...parentArgs, "-F", "-"],
+      { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_AUTHOR_DATE: date },
+      stamped.stdout,
+    );
+    if (created.code !== 0)
+      return {
+        rewritten: 0,
+        error: `commit-tree failed: ${created.out.slice(0, 400)}`,
+      };
+    rewritten.set(commit, created.stdout.trim());
   }
+
+  // Move the branch only if nobody moved it meanwhile.
+  const moved = git(repoDir, [
+    "update-ref",
+    `refs/heads/${branch}`,
+    rewritten.get(tip) as string,
+    tip,
+  ]);
+  if (moved.code !== 0)
+    return {
+      rewritten: 0,
+      error: `update-ref failed: ${moved.out.slice(0, 400)}`,
+    };
+  return { rewritten: commits.length };
 }
