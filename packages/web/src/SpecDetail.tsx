@@ -11,6 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
 
@@ -48,10 +49,9 @@ const nodeTypes = { ticket: TicketNode };
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 64;
 
-export function SpecDetail({ specId }: { specId: number }) {
+function useSpecView(specId: number) {
   const api = useApi();
-  const queryClient = useQueryClient();
-  const view = useQuery({
+  return useQuery({
     queryKey: ["spec", specId],
     queryFn: async () => {
       const { data, error } = await api.GET("/specs/{id}", {
@@ -62,6 +62,70 @@ export function SpecDetail({ specId }: { specId: number }) {
     },
     refetchInterval: 3_000,
   });
+}
+
+type SpecView = NonNullable<ReturnType<typeof useSpecView>["data"]>;
+
+// The nodes and edges only change when the spec does, not on every poll that finds nothing new.
+function DependencyGraph({
+  tickets,
+  edges,
+}: {
+  tickets: SpecView["tickets"];
+  edges: SpecView["edges"];
+}) {
+  const { nodes, flowEdges } = useMemo(() => {
+    const positions = new Map(
+      layoutGraph(tickets, edges).map((p) => [p.id, p]),
+    );
+    const nodes: Node<TicketNodeData>[] = tickets.map((ticket) => ({
+      id: ticket.displayId,
+      type: "ticket",
+      position: {
+        x: positions.get(ticket.displayId)?.x ?? 0,
+        y: positions.get(ticket.displayId)?.y ?? 0,
+      },
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+      data: {
+        displayId: ticket.displayId,
+        title: ticket.title,
+        state: ticket.state,
+        blockedReason: ticket.blockedReason,
+      },
+    }));
+    const flowEdges: Edge[] = edges.map((edge) => ({
+      id: `${edge.from}-${edge.to}-${edge.kind}`,
+      source: edge.from,
+      target: edge.to,
+      animated: false,
+      // a contract edge is drawn dashed: it waits for a recorded contract SHA, not only for the ticket
+      style: edge.kind === "contract" ? { strokeDasharray: "6 4" } : undefined,
+      label: edge.kind === "contract" ? "contract" : undefined,
+    }));
+    return { nodes, flowEdges };
+  }, [tickets, edges]);
+  return (
+    <figure className="graph">
+      <ReactFlow
+        nodes={nodes}
+        edges={flowEdges}
+        nodeTypes={nodeTypes}
+        fitView
+        nodesDraggable={false}
+        nodesConnectable={false}
+      >
+        <Background />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </figure>
+  );
+}
+
+export function SpecDetail({ specId }: { specId: number }) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const view = useSpecView(specId);
   const confirm = useMutation({
     mutationFn: async () => {
       const { data, error } = await api.POST("/specs/{specId}/confirm", {
@@ -84,33 +148,6 @@ export function SpecDetail({ specId }: { specId: number }) {
       </p>
     );
   const { spec, tickets, edges, finalizations } = view.data;
-
-  const positions = new Map(layoutGraph(tickets, edges).map((p) => [p.id, p]));
-  const nodes: Node<TicketNodeData>[] = tickets.map((ticket) => ({
-    id: ticket.displayId,
-    type: "ticket",
-    position: {
-      x: positions.get(ticket.displayId)?.x ?? 0,
-      y: positions.get(ticket.displayId)?.y ?? 0,
-    },
-    width: NODE_WIDTH,
-    height: NODE_HEIGHT,
-    data: {
-      displayId: ticket.displayId,
-      title: ticket.title,
-      state: ticket.state,
-      blockedReason: ticket.blockedReason,
-    },
-  }));
-  const flowEdges: Edge[] = edges.map((edge) => ({
-    id: `${edge.from}-${edge.to}-${edge.kind}`,
-    source: edge.from,
-    target: edge.to,
-    animated: false,
-    // a contract edge is drawn dashed: it waits for a recorded contract SHA, not only for the ticket
-    style: edge.kind === "contract" ? { strokeDasharray: "6 4" } : undefined,
-    label: edge.kind === "contract" ? "contract" : undefined,
-  }));
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;
 
@@ -169,19 +206,7 @@ export function SpecDetail({ specId }: { specId: number }) {
       {tickets.length === 0 ? (
         <p className="note">No tickets imported.</p>
       ) : (
-        <figure className="graph">
-          <ReactFlow
-            nodes={nodes}
-            edges={flowEdges}
-            nodeTypes={nodeTypes}
-            fitView
-            nodesDraggable={false}
-            nodesConnectable={false}
-          >
-            <Background />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-        </figure>
+        <DependencyGraph tickets={tickets} edges={edges} />
       )}
 
       <h3>Tickets</h3>

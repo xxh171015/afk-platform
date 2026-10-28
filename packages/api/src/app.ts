@@ -24,6 +24,7 @@ export interface AppContext {
 
 export const LEASE_SECONDS = 120;
 
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1)(:\d+)?$/;
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 export function createApp(options: AppOptions): OpenAPIHono {
@@ -34,7 +35,23 @@ export function createApp(options: AppOptions): OpenAPIHono {
     logs: new LogStore(options.logDir ?? defaultLogDir()),
   };
   const app = new OpenAPIHono();
-  // The page runs on another port of the same machine; nothing else may call the API from a browser.
+  // The API starts agents and has no login, so it only talks to this machine. CORS alone would only stop a foreign
+  // page from reading answers: a plain cross-site POST would still be carried out. So a request that names a
+  // foreign Origin (a browser on another site) or a foreign Host (DNS rebinding) is refused outright.
+  app.use("*", async (c, next) => {
+    const origin = c.req.header("origin");
+    const host = c.req.header("host");
+    const foreignOrigin = origin !== undefined && !LOCAL_ORIGIN.test(origin);
+    const foreignHost = host !== undefined && !LOCAL_HOST.test(host);
+    if (foreignOrigin || foreignHost) {
+      return c.json(
+        { error: "this API only answers requests from this machine" },
+        403,
+      );
+    }
+    await next();
+  });
+  // The page runs on another port of the same machine and may read the answers.
   app.use(
     "*",
     cors({ origin: (origin) => (LOCAL_ORIGIN.test(origin) ? origin : null) }),

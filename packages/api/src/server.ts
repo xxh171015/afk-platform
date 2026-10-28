@@ -19,7 +19,7 @@ export async function startServer(options: {
 }): Promise<RunningServer> {
   await assertMigrated(options.pool);
   const app = createApp({ pool: options.pool, logDir: options.logDir });
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = serve(
       { fetch: app.fetch, port: options.port ?? 3000, hostname: HOST },
       (info) => {
@@ -29,5 +29,7 @@ export async function startServer(options: {
         });
       },
     );
+    // a port that is taken, or not allowed: say so instead of hanging
+    server.once("error", reject);
   });
 }

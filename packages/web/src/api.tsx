@@ -7,7 +7,7 @@ import { createContext, type ReactNode, useContext } from "react";
 const DEFAULT_API = "http://127.0.0.1:3000";
 
 export const defaultClient = (): ApiClient =>
-  createApiClient(import.meta.env?.VITE_API_URL ?? DEFAULT_API);
+  createApiClient(import.meta.env.VITE_API_URL ?? DEFAULT_API);
 
 const Context = createContext<ApiClient | undefined>(undefined);
 
