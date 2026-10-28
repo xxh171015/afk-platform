@@ -35,8 +35,10 @@ jobs:
           # range cannot be had).
           commits="$SHA"
           if [ -n "${BEFORE:-}" ] && [ -n "${BEFORE//0/}" ]; then
-            range=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" | jq -r '.commits[].sha' || true)
-            if [ -n "$range" ]; then commits="$range"; fi
+            # the compare call gives 30 commits a page unless asked for more, and stops at 250
+            range=$(gh api --paginate "repos/$REPO/compare/$BEFORE...$SHA?per_page=100" | jq -r '.commits[].sha' || true)
+            # and the newest commit is always looked at, however long the range was
+            if [ -n "$range" ]; then commits=$(printf '%s\n' $range "$SHA" | awk '!seen[$0]++'); fi
           fi
 
           # The link between a commit and its pull request can take a moment to show up after the push.

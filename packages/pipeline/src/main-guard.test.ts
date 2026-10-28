@@ -36,6 +36,7 @@ beforeEach(() => {
   writeFileSync(
     gh,
     `#!/bin/sh
+if [ "$2" = "--paginate" ]; then set -- "$1" "$3"; fi
 case "$1 $2" in
   "api repos/acme/backend/commits/"*"/pulls")
     sha=$(echo "$2" | sed 's|.*/commits/||; s|/pulls||')
@@ -207,6 +208,18 @@ describe("a push of several commits", () => {
       "no merged pull request is associated with: bbbbbbb",
     );
     expect(result.issues).not.toContain("aaaaaaa");
+  });
+
+  it("always looks at the newest commit too, even if the compare call did not list it", () => {
+    // a compare answer cut short (the first page of a long push): the tip is not among the shas it gave
+    const result = guard({
+      pulls: [mergedPr],
+      pullsOf: { [c]: [] },
+      before,
+      commits: [a, b],
+    });
+    expect(result.code).toBe(1);
+    expect(result.issues).toContain("0123456"); // the tip, which has no pull request here
   });
 
   it("looks at the newest commit only for a new branch, where there is no range", () => {

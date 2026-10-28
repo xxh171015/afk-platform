@@ -82,7 +82,8 @@ export async function retryTicket(
     }
     const plan = retryPlan(mode === "continue" ? "resume" : "restart");
     await client.query(
-      `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, restart = $3
+      `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, restart = $3,
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
        WHERE id = $1`,
       [ticketId, JSON.stringify(plan.fixCounts), plan.deleteBranch],
     );
@@ -130,7 +131,7 @@ export async function approveProtected(
       ...new Set([...ticket.allowed_protected_paths, ...approved]),
     ];
     await client.query(
-      "UPDATE tickets SET state = $2, blocked_reason = NULL, allowed_protected_paths = $3 WHERE id = $1",
+      "UPDATE tickets SET state = $2, blocked_reason = NULL, allowed_protected_paths = $3,\n         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
       [ticketId, next.state, allowed],
     );
     await enqueueStageJob(

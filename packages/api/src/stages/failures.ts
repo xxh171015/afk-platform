@@ -31,17 +31,23 @@ export type FailureOutcome =
 async function finishRun(client: pg.PoolClient, jobId: number, error: string) {
   await client.query(
     `UPDATE runs SET finished_at = COALESCE(finished_at, now()), result = 'job-failed',
+       duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
        output = jsonb_build_object('error', $2::text) WHERE job_id = $1`,
     [jobId, error],
   );
 }
 
-const failuresOf = async (client: pg.PoolClient, prefix: string) =>
+// Failures since the last time a person retried: those before it were answered by that retry.
+const failuresOf = async (
+  client: pg.PoolClient,
+  prefix: string,
+  floor: number,
+) =>
   Number(
     (
       await client.query<{ n: string }>(
-        "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1 AND state = 'failed'",
-        [`${prefix}%`],
+        "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1 AND state = 'failed' AND id > $2",
+        [`${prefix}%`, floor],
       )
     ).rows[0]?.n,
   );
@@ -76,8 +82,9 @@ async function ticketStageFailed(
       repo_id: number;
       state: TicketState;
       content_version: number;
+      job_floor: number;
     }>(
-      "SELECT spec_id, repo_id, state, content_version FROM tickets WHERE id = $1",
+      "SELECT spec_id, repo_id, state, content_version, job_floor FROM tickets WHERE id = $1",
       [read.ticketId],
     )
   ).rows[0];
@@ -94,6 +101,7 @@ async function ticketStageFailed(
       contentVersion: row.content_version,
       stage: read.stage,
     }),
+    row.job_floor,
   );
   if (failures < MAX_JOB_FAILURES) {
     await enqueueStageJob(
@@ -127,8 +135,13 @@ async function finalStepFailed(
 ): Promise<FailureOutcome> {
   await lockSpec(client, read.specId);
   const fin = (
-    await client.query<{ id: number; step: string; state: string }>(
-      "SELECT id, step, state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+    await client.query<{
+      id: number;
+      step: string;
+      state: string;
+      job_floor: number;
+    }>(
+      "SELECT id, step, state, job_floor FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
       [read.specId, read.repoId],
     )
   ).rows[0];
@@ -142,6 +155,7 @@ async function finalStepFailed(
       repoId: read.repoId,
       step: read.step,
     }),
+    fin.job_floor,
   );
   if (failures < MAX_JOB_FAILURES) {
     await enqueueFinalJob(client, read, read.step);

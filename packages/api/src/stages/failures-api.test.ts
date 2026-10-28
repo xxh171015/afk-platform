@@ -111,6 +111,11 @@ describe("a job the worker could not carry out", () => {
     expect(runs.rows[0].result).toBe("job-failed");
     expect(runs.rows[0].output).toEqual({ error: "sandbox would not start" });
     expect(runs.rows[0].finished_at).not.toBeNull();
+    // the time it ran counts towards the spec's agent time, however short it was
+    const timed = await db.pool.query(
+      "SELECT duration_ms FROM runs ORDER BY id LIMIT 1",
+    );
+    expect(timed.rows[0].duration_ms).toBeGreaterThanOrEqual(0);
     const log = await fetch(`${api.url}/runs/1/logs`).then((r) => r.json());
     expect(log.finished).toBe(true);
     // the second attempt gets a Run of its own
@@ -159,6 +164,42 @@ describe("a job the worker could not carry out", () => {
     const job = await claim();
     expect(job?.payload.stage).toBe("implement");
     expect((await keys()).at(-1)?.idempotency_key).toBe("T-1:1:implement:4");
+  });
+
+  it("gives a ticket a fresh three tries after a person has retried it, instead of blocking it at the first failure", async () => {
+    await runningSpec([ticket("a")]);
+    for (let i = 0; i < 3; i++) await failNext();
+    expect((await state()).state).toBe("blocked");
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+
+    await failNext("again"); // the fourth failure overall, the first since the retry
+    expect((await state()).state).toBe("running");
+    await failNext("and again");
+    expect((await state()).state).toBe("running");
+    await failNext("and a third time");
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+  });
+
+  it("gives a ticket approved for its protected paths a fresh start too", async () => {
+    await runningSpec([ticket("a")]);
+    const impl = (await claim()) as Claimed;
+    await worker.complete(impl.id, impl.attempt, {
+      stage: "implement",
+      outcome: "done",
+    });
+    const gate = (await claim()) as Claimed;
+    await worker.complete(gate.id, gate.attempt, {
+      stage: "gate",
+      outcome: "protected-path-changed",
+      run: { output: { unapproved: [".github/ci.yml"] } },
+    });
+    await call("POST", "/tickets/1/approve-protected");
+    await failNext();
+    await failNext();
+    expect((await state()).state).toBe("running"); // two of three
   });
 
   it("counts the failures of each stage on its own", async () => {
@@ -291,6 +332,21 @@ describe("a step of the overall review that could not be carried out", () => {
       blockedReason: "job-failed",
       brief: { result: "job-failed" },
     });
+  });
+
+  it("gets three fresh tries after a person runs it again", async () => {
+    await toFinalReview();
+    for (let i = 0; i < 3; i++) await failNext();
+    await call("POST", "/specs/1/final/retry");
+    await failNext();
+    expect(
+      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+    ).toBe("active");
+    await failNext();
+    await failNext();
+    expect(
+      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+    ).toBe("blocked");
   });
 
   it("can be run again by a person", async () => {

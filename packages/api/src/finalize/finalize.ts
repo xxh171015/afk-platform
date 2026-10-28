@@ -176,7 +176,7 @@ export async function retryFinalization(
     }
     for (const row of blocked.rows) {
       await client.query(
-        "UPDATE finalizations SET state = 'active', blocked_reason = NULL WHERE id = $1",
+        "UPDATE finalizations SET state = 'active', blocked_reason = NULL,\n           job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
         [row.id],
       );
       await enqueueFinalJob(client, { specId, repoId: row.repo_id }, row.step);

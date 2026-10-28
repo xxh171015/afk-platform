@@ -133,6 +133,8 @@ export const tickets = pgTable(
     reviewed: boolean("reviewed").notNull().default(false),
     // Set by a restart-retry: the next implement run starts from the integration branch, not from the old branch.
     restart: boolean("restart").notNull().default(false),
+    // Jobs up to this id were made before the last human retry: their failures no longer count towards blocking.
+    jobFloor: integer("job_floor").notNull().default(0),
     contractSha: text("contract_sha"),
     createdAt: createdAt(),
   },
@@ -220,6 +222,7 @@ export const finalizations = pgTable(
     step: text("step").notNull().default("final-review"),
     state: text("state").notNull().default("active"),
     blockedReason: text("blocked_reason"),
+    jobFloor: integer("job_floor").notNull().default(0), // as on tickets
     createdAt: createdAt(),
   },
   (t) => [
