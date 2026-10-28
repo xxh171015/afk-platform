@@ -1,15 +1,16 @@
+import type { EdgeKind } from "./schemas.ts";
 import type { TicketState } from "./ticket-state.ts";
 
 export type IncomingEdge =
   | {
-      kind: "blocks" | "contract";
+      kind: EdgeKind;
       scope: "same-spec";
       blockerState: TicketState;
       contractSha?: string;
     }
   // The caller checks git: the blocker's PR is merged into main and our
   // integration branch already contains that commit (docs/design.md「依赖边什么时候算满足」).
-  | { kind: "blocks" | "contract"; scope: "cross-spec"; satisfied: boolean };
+  | { kind: EdgeKind; scope: "cross-spec"; satisfied: boolean };
 
 export type Capacity = {
   scope: "global" | "project" | "repo";

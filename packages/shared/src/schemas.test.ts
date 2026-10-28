@@ -58,20 +58,26 @@ describe("TicketSchema", () => {
     ).toBe(false);
   });
 
-  it("only a done contract ticket may carry a contract SHA", () => {
-    const done = {
+  it("only a contract ticket may carry a contract SHA", () => {
+    const contract = {
       ...pendingTicket,
       type: "contract",
-      state: "done",
       contractSha: "a1b2c3d",
     };
-    expect(TicketSchema.safeParse(done).success).toBe(true);
-    expect(TicketSchema.safeParse({ ...done, state: "pending" }).success).toBe(
-      false,
-    );
+    expect(TicketSchema.safeParse(contract).success).toBe(true);
     expect(
-      TicketSchema.safeParse({ ...done, type: "implementation" }).success,
+      TicketSchema.safeParse({ ...contract, type: "implementation" }).success,
     ).toBe(false);
+  });
+
+  it("carries the protected paths a person approved for this ticket", () => {
+    const approved = [".github/workflows/ci.yml"];
+    const parsed = TicketSchema.parse({
+      ...pendingTicket,
+      allowedProtectedPaths: approved,
+    });
+    expect(parsed.allowedProtectedPaths).toEqual(approved);
+    expect(TicketSchema.parse(pendingTicket).allowedProtectedPaths).toEqual([]);
   });
 });
 
@@ -100,6 +106,7 @@ describe("SpecSchema", () => {
     id: 3,
     projectId: 1,
     type: "feature",
+    slug: "order-notes",
     title: "Order notes",
     body: "## Problem\n...",
     state: "draft",
@@ -116,13 +123,28 @@ describe("SpecSchema", () => {
     );
   });
 
-  it("a bug spec may point at the spec it came from; other types may not", () => {
+  it("a spec may point at the spec it came from", () => {
     expect(
       SpecSchema.safeParse({ ...spec, type: "bug", sourceSpecId: 2 }).success,
     ).toBe(true);
+  });
+
+  it("needs a slug, because the integration branch is spec/<slug>", () => {
+    const { slug: _slug, ...withoutSlug } = spec;
+    expect(SpecSchema.safeParse(withoutSlug).success).toBe(false);
+    expect(SpecSchema.safeParse({ ...spec, slug: "" }).success).toBe(false);
+  });
+
+  it("records one integration branch per repo involved", () => {
+    const branches = [{ repoId: 1, branch: "spec/order-notes" }];
+    const parsed = SpecSchema.parse({ ...spec, integrationBranches: branches });
+    expect(parsed.integrationBranches).toEqual(branches);
+    expect(SpecSchema.parse(spec).integrationBranches).toEqual([]);
     expect(
-      SpecSchema.safeParse({ ...spec, type: "feature", sourceSpecId: 2 })
-        .success,
+      SpecSchema.safeParse({
+        ...spec,
+        integrationBranches: [{ repoId: 1, branch: "" }],
+      }).success,
     ).toBe(false);
   });
 });

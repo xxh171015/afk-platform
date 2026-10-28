@@ -7,8 +7,9 @@ export type {
   RunnableInput,
 } from "./runnable.ts";
 export { isRunnable } from "./runnable.ts";
-export type { Edge, Spec, Ticket } from "./schemas.ts";
+export type { Edge, EdgeKind, Spec, Ticket } from "./schemas.ts";
 export {
+  EDGE_KINDS,
   EdgeSchema,
   SPEC_TYPES,
   SpecSchema,
