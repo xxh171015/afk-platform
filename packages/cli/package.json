@@ -9,6 +9,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@afk/shared": "workspace:*"
+    "@afk/shared": "workspace:*",
+    "commander": "^15.0.0",
+    "yaml": "^2.9.1"
+  },
+  "bin": {
+    "plat": "./src/bin.ts"
   }
 }

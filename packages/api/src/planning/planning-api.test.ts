@@ -1,0 +1,333 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createApp } from "../app.ts";
+import { migrate } from "../db/migrate.ts";
+import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { listen, type RunningApi } from "../test/fake-worker.ts";
+
+let db: TestDatabase;
+let api: RunningApi;
+
+beforeEach(async () => {
+  db = await createTestDatabase();
+  await migrate(db.pool);
+  api = await listen(createApp({ pool: db.pool }));
+});
+afterEach(async () => {
+  await api.close();
+  await db.drop();
+});
+
+// Just the reply fields these tests read; the real shapes are in the generated client.
+interface Reply {
+  id: number;
+  name?: string;
+  role?: string;
+  displayId?: string;
+  tickets: { key: string; id: number; displayId: string }[];
+  warnings: { type: string; tickets: string[] }[];
+  errors: string[];
+}
+
+async function post(path: string, body: unknown) {
+  const response = await fetch(`${api.url}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: (await response.json()) as Reply };
+}
+
+async function setup() {
+  const project = await post("/projects", { name: "shop" });
+  const projectId = project.body.id as number;
+  await post(`/projects/${projectId}/repos`, {
+    url: "git@github.com:acme/backend.git",
+    role: "backend",
+  });
+  await post(`/projects/${projectId}/repos`, {
+    url: "git@github.com:acme/frontend.git",
+    role: "frontend",
+    defaultBranch: "develop",
+  });
+  const spec = await post("/specs", {
+    projectId,
+    type: "feature",
+    slug: "order-export",
+    title: "Order export",
+  });
+  return { projectId, specId: spec.body.id as number };
+}
+
+const ticket = (key: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  repo: "backend",
+  type: "implementation",
+  title: `Ticket ${key}`,
+  modules: [`src/${key}/**`],
+  acceptance: ["it works"],
+  ...extra,
+});
+
+const count = async (table: string) =>
+  Number((await db.pool.query(`SELECT count(*) FROM ${table}`)).rows[0].count);
+
+describe("projects, repos and specs", () => {
+  it("creates a project with defaults and a repo with the default branch main", async () => {
+    const project = await post("/projects", {
+      name: "shop",
+      protectedPaths: ["openapi/**"],
+      maxConcurrency: 2,
+    });
+    expect(project).toMatchObject({ status: 201, body: { name: "shop" } });
+    const repo = await post(`/projects/${project.body.id}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      role: "backend",
+    });
+    expect(repo).toMatchObject({ status: 201, body: { role: "backend" } });
+    const rows = await db.pool.query(
+      "SELECT p.protected_paths, p.max_concurrency, r.default_branch FROM projects p JOIN repos r ON r.project_id = p.id",
+    );
+    expect(rows.rows[0]).toEqual({
+      protected_paths: ["openapi/**"],
+      max_concurrency: 2,
+      default_branch: "main",
+    });
+  });
+
+  it("rejects a repo for an unknown project and a second repo with the same role", async () => {
+    expect(
+      (await post("/projects/99/repos", { url: "u", role: "backend" })).status,
+    ).toBe(404);
+    const { projectId } = await setup();
+    const again = await post(`/projects/${projectId}/repos`, {
+      url: "other",
+      role: "backend",
+    });
+    expect(again.status).toBe(409);
+  });
+
+  it("creates a spec and returns its display id; a slug is unique within the project", async () => {
+    const { projectId, specId } = await setup();
+    expect(specId).toBe(1);
+    const spec = await post("/specs", {
+      projectId,
+      type: "improvement",
+      slug: "second",
+      title: "Second",
+    });
+    expect(spec).toMatchObject({ status: 201, body: { displayId: "S-2" } });
+    const dup = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "second",
+      title: "x",
+    });
+    expect(dup.status).toBe(409);
+    const orphan = await post("/specs", {
+      projectId: 99,
+      type: "feature",
+      slug: "a",
+      title: "x",
+    });
+    expect(orphan.status).toBe(404);
+  });
+
+  it("validates request bodies", async () => {
+    expect((await post("/projects", { name: "" })).status).toBe(400);
+    const { projectId } = await setup();
+    const badSlug = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "Not A Slug",
+      title: "x",
+    });
+    expect(badSlug.status).toBe(400);
+  });
+});
+
+describe("tickets import", () => {
+  const exportFile = (extra: Record<string, unknown> = {}) => ({
+    tickets: [
+      ticket("contract", {
+        type: "contract",
+        protected_paths_ok: ["openapi/openapi.yaml"],
+      }),
+      ticket("be", { blocked_by: ["contract"] }),
+      ticket("fe", { repo: "frontend", contract: "contract" }),
+    ],
+    ...extra,
+  });
+
+  it("writes every ticket and edge, returns display ids, and stores no warnings when there are none", async () => {
+    const { specId } = await setup();
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      exportFile({ spec: `S-${specId}` }),
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.tickets).toEqual([
+      { key: "contract", id: 1, displayId: "T-1" },
+      { key: "be", id: 2, displayId: "T-2" },
+      { key: "fe", id: 3, displayId: "T-3" },
+    ]);
+    expect(result.body.warnings).toEqual([]);
+    const tickets = await db.pool.query(
+      "SELECT t.type, t.state, t.allowed_protected_paths, r.role FROM tickets t JOIN repos r ON r.id = t.repo_id ORDER BY t.id",
+    );
+    expect(tickets.rows).toEqual([
+      {
+        type: "contract",
+        state: "pending",
+        allowed_protected_paths: ["openapi/openapi.yaml"],
+        role: "backend",
+      },
+      {
+        type: "implementation",
+        state: "pending",
+        allowed_protected_paths: [],
+        role: "backend",
+      },
+      {
+        type: "implementation",
+        state: "pending",
+        allowed_protected_paths: [],
+        role: "frontend",
+      },
+    ]);
+    const edges = await db.pool.query(
+      "SELECT from_ticket_id, to_ticket_id, kind FROM edges ORDER BY id",
+    );
+    expect(edges.rows).toEqual([
+      { from_ticket_id: 1, to_ticket_id: 2, kind: "blocks" },
+      { from_ticket_id: 1, to_ticket_id: 3, kind: "contract" },
+    ]);
+  });
+
+  it("saves module overlap warnings with the spec and still imports", async () => {
+    const { specId } = await setup();
+    const result = await post(`/specs/${specId}/tickets/import`, {
+      tickets: [
+        ticket("a", { modules: ["src/orders/**"] }),
+        ticket("b", { modules: ["src/orders/export.ts"] }),
+      ],
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.warnings).toHaveLength(1);
+    expect(result.body.warnings[0]).toMatchObject({
+      type: "module-overlap",
+      tickets: ["a", "b"],
+    });
+    const stored = await db.pool.query(
+      "SELECT import_warnings FROM specs WHERE id = $1",
+      [specId],
+    );
+    expect(stored.rows[0].import_warnings).toEqual(result.body.warnings);
+    expect(await count("tickets")).toBe(2);
+  });
+
+  const rejected: [string, (specId: number) => unknown, RegExp][] = [
+    [
+      "a dependency cycle",
+      () => ({
+        tickets: [
+          ticket("a", { blocked_by: ["b"] }),
+          ticket("b", { blocked_by: ["a"] }),
+        ],
+      }),
+      /cycle/,
+    ],
+    [
+      "a repo outside the project",
+      () => ({ tickets: [ticket("a", { repo: "mobile" })] }),
+      /mobile/,
+    ],
+    [
+      "a ticket without acceptance criteria",
+      () => ({ tickets: [ticket("a", { acceptance: [] })] }),
+      /acceptance/,
+    ],
+    [
+      "a ticket with no module glob",
+      () => ({ tickets: [ticket("a", { modules: [] })] }),
+      /modules/,
+    ],
+    [
+      "a contract edge from a non-contract ticket",
+      () => ({ tickets: [ticket("a"), ticket("b", { contract: "a" })] }),
+      /contract ticket/,
+    ],
+    [
+      "a non-empty external_blocked_by",
+      () => ({ tickets: [ticket("a")], external_blocked_by: ["T-9"] }),
+      /external_blocked_by/,
+    ],
+    [
+      "a file that names another spec",
+      (specId) => ({ spec: `S-${specId + 1}`, tickets: [ticket("a")] }),
+      /S-/,
+    ],
+  ];
+  it.each(rejected)(
+    "rejects the whole file for %s and writes nothing",
+    async (_name, build, message) => {
+      const { specId } = await setup();
+      const result = await post(
+        `/specs/${specId}/tickets/import`,
+        build(specId),
+      );
+      expect(result.status).toBe(422);
+      expect(result.body.errors.join("\n")).toMatch(message);
+      expect(await count("tickets")).toBe(0);
+      expect(await count("edges")).toBe(0);
+      const stored = await db.pool.query(
+        "SELECT import_warnings FROM specs WHERE id = $1",
+        [specId],
+      );
+      expect(stored.rows[0].import_warnings).toEqual([]);
+    },
+  );
+
+  it("rejects a file with one bad ticket among good ones without importing the good ones", async () => {
+    const { specId } = await setup();
+    const result = await post(`/specs/${specId}/tickets/import`, {
+      tickets: [ticket("good"), ticket("bad", { acceptance: [] })],
+    });
+    expect(result.status).toBe(422);
+    expect(await count("tickets")).toBe(0);
+  });
+
+  it("is all at once: a second import into the same spec is refused", async () => {
+    const { specId } = await setup();
+    expect(
+      (await post(`/specs/${specId}/tickets/import`, exportFile())).status,
+    ).toBe(200);
+    const again = await post(`/specs/${specId}/tickets/import`, {
+      tickets: [ticket("x")],
+    });
+    expect(again.status).toBe(409);
+    expect(await count("tickets")).toBe(3);
+  });
+
+  it("refuses a spec that is no longer a draft, and an unknown spec", async () => {
+    const { specId } = await setup();
+    await db.pool.query("UPDATE specs SET state = 'planned' WHERE id = $1", [
+      specId,
+    ]);
+    expect(
+      (await post(`/specs/${specId}/tickets/import`, exportFile())).status,
+    ).toBe(409);
+    expect((await post("/specs/999/tickets/import", exportFile())).status).toBe(
+      404,
+    );
+  });
+
+  it("lets only one of two concurrent imports win", async () => {
+    const { specId } = await setup();
+    const results = await Promise.all([
+      post(`/specs/${specId}/tickets/import`, exportFile()),
+      post(`/specs/${specId}/tickets/import`, exportFile()),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(await count("tickets")).toBe(3);
+  });
+});

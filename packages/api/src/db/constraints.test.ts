@@ -108,7 +108,7 @@ describe("foreign keys", () => {
     ],
     [
       "spec -> source spec",
-      "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES (1, 'bug', 's', 't', $1)",
+      "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES (1, 'bug', 'other', 't', $1)",
     ],
     [
       "ticket -> spec",
@@ -209,7 +209,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
   it("a spec's type and state must be known values", async () => {
     const { projectId } = await seed();
     const sql =
-      "INSERT INTO specs (project_id, type, slug, title, state) VALUES ($1, $2, 's', 't', $3)";
+      "INSERT INTO specs (project_id, type, slug, title, state) VALUES ($1, $2, md5(random()::text), 't', $3)";
     expect(await outcome(sql, [projectId, "bug", "partially-merged"])).toBe(
       "ok",
     );
@@ -219,6 +219,31 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(await outcome(sql, [projectId, "feature", "blocked"])).toBe(
       CHECK_VIOLATION,
     );
+  });
+
+  it("a repo role and a spec slug are unique within a project", async () => {
+    const { projectId } = await seed();
+    expect(
+      await outcome(
+        "INSERT INTO repos (project_id, url, role) VALUES ($1, 'other', 'primary')",
+        [projectId],
+      ),
+    ).toBe(UNIQUE_VIOLATION);
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title) VALUES ($1, 'feature', 's', 'again')",
+        [projectId],
+      ),
+    ).toBe(UNIQUE_VIOLATION);
+    const other = await db.pool.query(
+      "INSERT INTO projects (name) VALUES ('other') RETURNING id",
+    );
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title) VALUES ($1, 'feature', 's', 'again')",
+        [other.rows[0].id],
+      ),
+    ).toBe("ok");
   });
 
   it("an edge's kind must be blocks or contract", async () => {

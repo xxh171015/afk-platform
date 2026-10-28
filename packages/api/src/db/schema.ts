@@ -57,7 +57,11 @@ export const repos = pgTable(
     role: text("role").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("repos_project_idx").on(t.projectId)],
+  // role (backend, frontend) is how tickets.yaml names a repo, so it is unique within a project.
+  (t) => [
+    index("repos_project_idx").on(t.projectId),
+    unique("repos_project_role_unique").on(t.projectId, t.role),
+  ],
 );
 
 export const specs = pgTable(
@@ -76,10 +80,13 @@ export const specs = pgTable(
       (): AnyPgColumn => specs.id,
     ),
     integrationBranches: jsonb("integration_branches").notNull().default([]),
+    // Warnings from the last tickets import (module overlap), shown when the plan is confirmed.
+    importWarnings: jsonb("import_warnings").notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [
     index("specs_project_idx").on(t.projectId),
+    unique("specs_project_slug_unique").on(t.projectId, t.slug),
     check("specs_type_check", oneOf(t.type, SPEC_TYPES)),
     check("specs_state_check", oneOf(t.state, SPEC_STATES)),
   ],

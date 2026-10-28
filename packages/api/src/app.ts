@@ -1,5 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type pg from "pg";
+import { registerPlanningRoutes } from "./http/planning-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
 
 export interface AppOptions {
@@ -23,6 +24,7 @@ export function createApp(options: AppOptions): OpenAPIHono {
     leaseSeconds: options.leaseSeconds ?? LEASE_SECONDS,
   };
   const app = new OpenAPIHono();
+  registerPlanningRoutes(app, context);
   registerWorkerRoutes(app, context);
   return app;
 }

@@ -11,7 +11,8 @@
     "lint": "biome check .",
     "check": "pnpm typecheck && pnpm test && pnpm lint",
     "db:temp": "scripts/pg-temp.sh",
-    "db:migrate": "pnpm --filter @afk/api db:migrate"
+    "db:migrate": "pnpm --filter @afk/api db:migrate",
+    "gen:api": "pnpm --filter @afk/api openapi:generate && pnpm --filter @afk/shared openapi:types"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

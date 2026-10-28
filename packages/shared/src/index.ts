@@ -1,3 +1,5 @@
+export type { ApiClient, components, paths } from "./api/client.ts";
+export { createApiClient } from "./api/client.ts";
 export { createPool } from "./db.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
@@ -36,6 +38,19 @@ export {
   retryPlan,
   tryFix,
 } from "./ticket-fixes.ts";
+export type {
+  ImportFile,
+  ImportPlan,
+  ImportWarning,
+  PlannedEdge,
+  PlannedTicket,
+} from "./ticket-import.ts";
+export {
+  globsOverlap,
+  IMPORT_TICKET_TYPES,
+  ImportFileSchema,
+  planImport,
+} from "./ticket-import.ts";
 export type {
   BlockedReason,
   TicketEvent,
