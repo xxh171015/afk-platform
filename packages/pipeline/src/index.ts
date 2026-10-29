@@ -26,9 +26,17 @@ export type {
   GateSandbox,
   RunGateInput,
   SandboxSession,
+  TestCase,
+  TestCaseStatus,
   TestCounts,
 } from "./gate.ts";
-export { GateCache, junitCounts, readGateConfig, runGate } from "./gate.ts";
+export {
+  GateCache,
+  junitCases,
+  junitCounts,
+  readGateConfig,
+  runGate,
+} from "./gate.ts";
 export type { MergeCandidate } from "./merge.ts";
 export { hasRef, isAncestor, mergeCandidate } from "./merge.ts";
 export type { ProtectedPathCheck } from "./protected-paths.ts";

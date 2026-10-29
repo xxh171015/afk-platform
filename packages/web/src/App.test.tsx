@@ -65,6 +65,8 @@ const server = () =>
         ],
         edges: [],
         finalizations: [],
+        pullRequests: [],
+        acceptancePack: null,
       },
     }),
   });

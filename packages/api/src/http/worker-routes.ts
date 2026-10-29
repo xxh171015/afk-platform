@@ -353,7 +353,8 @@ export function registerWorkerRoutes(
           if (final.status === "not-final") {
             const openPr = readOpenPrPayload(job.rows[0]);
             const sync = readHostSyncPayload(job.rows[0]);
-            if (openPr) await recordOpenPr(client, openPr, result);
+            if (openPr)
+              await recordOpenPr(client, openPr, result, context.clock());
             else if (sync)
               await recordHostSync(client, sync, result, context.clock());
           }

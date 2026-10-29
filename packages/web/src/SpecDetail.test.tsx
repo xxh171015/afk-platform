@@ -30,6 +30,8 @@ const view = (
     tickets?: unknown[];
     edges?: unknown[];
     finalizations?: unknown[];
+    pullRequests?: unknown[];
+    acceptancePack?: unknown;
   } = {},
 ) => ({
   spec: {
@@ -55,6 +57,8 @@ const view = (
     { from: "T-1", to: "T-3", kind: "contract" },
   ],
   finalizations: over.finalizations ?? [],
+  pullRequests: over.pullRequests ?? [],
+  acceptancePack: over.acceptancePack ?? null,
 });
 
 const node = (id: string) => screen.getByTestId(`node-${id}`);
@@ -110,6 +114,130 @@ describe("the spec page", () => {
           /T-1 Ticket 1 — gate-failed/.test(element.textContent ?? ""),
       ),
     ).toBeTruthy();
+  });
+
+  it("shows the pull requests in merge order and the acceptance pack: what backs each criterion, findings, doubts, gates", async () => {
+    const pullRequests = [
+      {
+        order: 1,
+        repo: "backend",
+        number: 7,
+        url: "https://github.com/me/shop/pull/7",
+        state: "open",
+        draft: false,
+        ci: "success",
+        review: "approved",
+        syncError: null,
+      },
+      {
+        order: 2,
+        repo: "frontend",
+        number: 3,
+        url: "https://github.com/me/shop-web/pull/3",
+        state: "open",
+        draft: true,
+        ci: "pending",
+        review: "none",
+        syncError: "GitHub answered 502",
+      },
+    ];
+    const acceptancePack = {
+      generatedAt: "2026-10-28T10:00:00.000Z",
+      pullRequests,
+      tickets: [
+        {
+          displayId: "T-1",
+          title: "Ticket 1",
+          criteria: [
+            {
+              text: "exports orders",
+              tests: ["exports a csv"],
+              status: "verified",
+              reason: null,
+            },
+            {
+              text: "has a header",
+              tests: [],
+              status: "unverified",
+              reason: "the agent named no test",
+            },
+          ],
+        },
+      ],
+      findings: [
+        {
+          ticket: "T-1",
+          run: "R-3",
+          stage: "review",
+          kind: "suggestion",
+          body: "rename x",
+          resolution: "acceptance-pack",
+        },
+      ],
+      uncertainties: [{ source: "T-1 implement", text: "date format?" }],
+      gates: [
+        {
+          repo: "backend",
+          commitSha: "0123456789abcdef",
+          testsTotal: 3,
+          testsSkipped: 1,
+          durationMs: 4000,
+          steps: [{ name: "test", exitCode: 0, ms: 2500 }],
+        },
+      ],
+      protectedPathApprovals: [{ ticket: "T-1", paths: [".github/ci.yml"] }],
+      agentSeconds: 12,
+    };
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            pullRequests,
+            acceptancePack,
+          }),
+        }),
+      }),
+    );
+    const prs = (await screen.findAllByText(/CI /)).map((e) => e.textContent);
+    expect(prs[0]).toContain("CI success, review approved");
+    expect(prs[1]).toContain("CI pending, review none");
+    expect(
+      screen.getByText(/could not be read: GitHub answered 502/),
+    ).toBeTruthy();
+    expect(screen.getByText("backend #7").getAttribute("href")).toBe(
+      "https://github.com/me/shop/pull/7",
+    );
+    const criterion = (text: string) =>
+      screen.getByText(text, { exact: false }).closest("li") as HTMLElement;
+    expect(criterion("exports orders").getAttribute("data-status")).toBe(
+      "verified",
+    );
+    expect(criterion("has a header").getAttribute("data-status")).toBe(
+      "unverified",
+    );
+    expect(criterion("has a header").textContent).toContain(
+      "the agent named no test",
+    );
+    expect(screen.getByText(/rename x/)).toBeTruthy();
+    expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
+    expect(
+      screen.getByText(/backend @ 01234567: 3 tests, 1 skipped, 4.0 s/),
+    ).toBeTruthy();
+    expect(screen.getByText(/T-1: .github\/ci.yml/)).toBeTruthy();
+  });
+
+  it("has no pull request or pack section before there is one", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    await screen.findByText("Tickets");
+    expect(screen.queryByText("Acceptance pack")).toBeNull();
+    expect(screen.queryByText("Pull requests")).toBeNull();
   });
 
   it("shows the warnings the import left", async () => {

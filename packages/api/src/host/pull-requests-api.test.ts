@@ -1,3 +1,4 @@
+import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
@@ -38,17 +39,28 @@ async function call(method: "GET" | "POST", path: string, body?: unknown) {
   return { status: response.status, body: (await response.json()) as Json };
 }
 
-const ticket = (key: string, repo: string) => ({
+const ticket = (
+  key: string,
+  repo: string,
+  acceptance: string[] = [`${key} works`],
+  extra: Record<string, unknown> = {},
+) => ({
   key,
   repo,
   type: "implementation",
   title: `Ticket ${key}`,
   modules: [`src/${key}/**`],
-  acceptance: [`${key} works`],
+  acceptance,
+  ...extra,
 });
 
 // A spec whose tickets are all done and whose repos' overall reviews have all passed: it is time for pull requests.
-async function settledSpec(repos: string[], holdRepoId?: number) {
+type StageResults = Record<string, Record<string, unknown>>;
+async function settledSpec(
+  repos: string[],
+  holdRepoId?: number,
+  options: { tickets?: Record<string, unknown>[]; stages?: StageResults } = {},
+) {
   let held: { id: number; attempt: number } | undefined;
   const project = await call("POST", "/projects", { name: "shop" });
   for (const role of repos)
@@ -63,10 +75,10 @@ async function settledSpec(repos: string[], holdRepoId?: number) {
     title: "Export orders",
   });
   await call("POST", `/specs/${spec.body.id}/tickets/import`, {
-    tickets: repos.map((role) => ticket(role, role)),
+    tickets: options.tickets ?? repos.map((role) => ticket(role, role)),
   });
   await call("POST", `/specs/${spec.body.id}/confirm`);
-  const stages: Record<string, Record<string, unknown>> = {
+  const stages: StageResults = {
     implement: { outcome: "done" },
     gate: { outcome: "passed" },
     review: { outcome: "pass" },
@@ -76,6 +88,7 @@ async function settledSpec(repos: string[], holdRepoId?: number) {
       run: { output: { verdict: "pass", mustFix: [], suggestions: [] } },
     },
   };
+  Object.assign(stages, options.stages);
   for (let i = 0; i < 60; i++) {
     // a pull request job is the end of this: leave it queued for the test
     const waiting = await db.pool.query(
@@ -417,5 +430,223 @@ describe("following the pull requests", () => {
   it("keeps one chain of looks per project", async () => {
     await awaitingReview(["backend", "frontend"]);
     expect(await jobsOf("host-sync")).toHaveLength(1);
+  });
+});
+
+describe("the acceptance pack", () => {
+  const TESTS = [
+    { name: "exports a csv", classname: "orders", status: "passed" },
+    { name: "rejects an empty range", classname: "orders", status: "failed" },
+    { name: "keeps the order", classname: "orders", status: "skipped" },
+  ];
+  const stages: StageResults = {
+    implement: {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {
+            "exports orders": ["exports a csv"],
+            "empty range is refused": ["orders rejects an empty range"],
+            "order is kept": ["keeps the order"],
+            "has a header": ["header test that does not exist"],
+          },
+          uncertainties: ["not sure the date format is right"],
+        },
+      },
+    },
+    review: {
+      outcome: "pass",
+      run: {
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: ["rename x"],
+          uncertainties: ["the review could not run the export"],
+        },
+      },
+      findings: [{ kind: "suggestion", body: "rename x" }],
+    },
+    merge: {
+      outcome: "merged",
+      headSha: "head",
+      run: { headSha: "head", durationMs: 4000 },
+      gate: {
+        commitSha: "head",
+        configSha: "cfg",
+        commandResults: [
+          { name: "setup", exitCode: 0, ms: 1500 },
+          { name: "test", exitCode: 0, ms: 2500 },
+        ],
+        testsTotal: 3,
+        testsSkipped: 1,
+        testCases: TESTS,
+      },
+    },
+    "final-review": {
+      outcome: "pass",
+      run: {
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: ["migration order"],
+        },
+      },
+    },
+  };
+  const criteria = [
+    "exports orders",
+    "empty range is refused",
+    "order is kept",
+    "has a header",
+    "nobody named a test",
+  ];
+
+  async function packOf() {
+    await settledSpec(["backend"], undefined, {
+      tickets: [
+        ticket("a", "backend", criteria, {
+          protected_paths_ok: [".github/workflows/ci.yml"],
+        }),
+      ],
+      stages,
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    return (await call("GET", "/specs/1")).body;
+  }
+
+  it("does not exist before the pull requests are open", async () => {
+    await settledSpec(["backend"]);
+    expect((await call("GET", "/specs/1")).body.acceptancePack).toBeNull();
+  });
+
+  it("is made when the spec starts waiting for a person, and shown with the spec", async () => {
+    const view = await packOf();
+    expect(view.spec.state).toBe("awaiting-review");
+    expect(view.acceptancePack).not.toBeNull();
+    expect(view.acceptancePack.pullRequests).toEqual(view.pullRequests);
+  });
+
+  it("marks a criterion verified only when its named test is in the JUnit report and passed", async () => {
+    const { acceptancePack } = await packOf();
+    expect(acceptancePack.tickets).toHaveLength(1);
+    const byText = Object.fromEntries(
+      acceptancePack.tickets[0].criteria.map((c: Json) => [c.text, c]),
+    );
+    expect(byText["exports orders"]).toMatchObject({
+      status: "verified",
+      reason: null,
+      tests: ["exports a csv"],
+    });
+    expect(byText["empty range is refused"]).toMatchObject({
+      status: "unverified",
+      reason: "failed: orders rejects an empty range",
+    });
+    expect(byText["order is kept"]).toMatchObject({
+      status: "unverified",
+      reason: "skipped: keeps the order",
+    });
+    expect(byText["has a header"]).toMatchObject({
+      status: "unverified",
+      reason: "not in the JUnit report: header test that does not exist",
+    });
+    expect(byText["nobody named a test"]).toMatchObject({
+      status: "unverified",
+      reason: "the agent named no test",
+    });
+  });
+
+  it("carries the review's findings with what became of them, and every uncertainty", async () => {
+    const { acceptancePack } = await packOf();
+    expect(acceptancePack.findings).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "review",
+        kind: "suggestion",
+        body: "rename x",
+        resolution: "acceptance-pack",
+      },
+    ]);
+    expect(acceptancePack.uncertainties).toEqual([
+      { source: "T-1 implement", text: "not sure the date format is right" },
+      { source: "T-1 review", text: "the review could not run the export" },
+      { source: "S-1 final review", text: "migration order" },
+    ]);
+  });
+
+  it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {
+    const { acceptancePack } = await packOf();
+    expect(acceptancePack.gates).toEqual([
+      {
+        repo: "backend",
+        commitSha: "head",
+        testsTotal: 3,
+        testsSkipped: 1,
+        durationMs: 4000,
+        steps: [
+          { name: "setup", exitCode: 0, ms: 1500 },
+          { name: "test", exitCode: 0, ms: 2500 },
+        ],
+      },
+    ]);
+    expect(acceptancePack.protectedPathApprovals).toEqual([
+      { ticket: "T-1", paths: [".github/workflows/ci.yml"] },
+    ]);
+    expect(acceptancePack.agentSeconds).toBeGreaterThanOrEqual(4);
+  });
+
+  it("lists the pull requests in the order to merge them, the backend first, with today's CI and review", async () => {
+    await settledSpec(["frontend", "backend"]); // the frontend repo was added first
+    for (let n = 1; n <= 2; n++) {
+      const job = await claimOf("open-pr");
+      await worker.complete(job.id, job.attempt, opened(n));
+    }
+    const sync = await claimOf("host-sync");
+    await worker.complete(sync.id, sync.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { ci: "success" }), synced(2, { review: "approved" })],
+    });
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(
+      acceptancePack.pullRequests.map((p: Json) => [
+        p.order,
+        p.repo,
+        p.ci,
+        p.review,
+      ]),
+    ).toEqual([
+      [1, "backend", "pending", "approved"],
+      [2, "frontend", "success", "none"],
+    ]);
+  });
+
+  it("is printed by plat spec show, with the pull requests in merge order and each criterion's verdict", async () => {
+    await packOf();
+    let out = "";
+    const io: Io = {
+      stdout: (text) => {
+        out += text;
+      },
+      stderr: () => {},
+      env: { AFK_API_URL: api.url },
+      readFile: async () => "",
+    };
+    expect(await run(["spec", "show", "S-1"], io)).toBe(0);
+    expect(out).toContain("acceptance pack:");
+    expect(out).toContain("1. backend #7  open  ci none  review none");
+    expect(out).toContain("[verified] exports orders  (exports a csv)");
+    expect(out).toContain(
+      "[unverified] empty range is refused  (orders rejects an empty range)  -- failed: orders rejects an empty range",
+    );
+    expect(out).toContain("[acceptance-pack] T-1 review suggestion: rename x");
+    expect(out).toContain("T-1 implement: not sure the date format is right");
+    expect(out).toContain(
+      "backend @ head: 3 tests, 1 skipped, 4.0 s (setup 1.5 s, test 2.5 s)",
+    );
+    expect(out).toContain("T-1: .github/workflows/ci.yml");
   });
 });

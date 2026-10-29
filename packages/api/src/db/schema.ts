@@ -281,6 +281,19 @@ export const pullRequests = pgTable(
   ],
 );
 
+// The acceptance pack of a spec, made when its pull requests are all open (see acceptance/pack.ts).
+export const acceptancePacks = pgTable("acceptance_packs", {
+  id: serial("id").primaryKey(),
+  specId: integer("spec_id")
+    .notNull()
+    .unique()
+    .references(() => specs.id),
+  content: jsonb("content").notNull(),
+  generatedAt: timestamp("generated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const runs = pgTable(
   "runs",
   {
@@ -354,6 +367,8 @@ export const gateResults = pgTable(
     commandResults: jsonb("command_results").notNull().default([]),
     testsTotal: integer("tests_total"),
     testsSkipped: integer("tests_skipped"),
+    // Every case of the JUnit report ({ name, classname, status }); the acceptance pack checks criteria against it.
+    testCases: jsonb("test_cases"),
     logUrl: text("log_url"),
     createdAt: createdAt(),
   },

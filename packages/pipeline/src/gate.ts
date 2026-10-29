@@ -53,6 +53,7 @@ export interface GateOutcome {
   commitSha: string;
   configSha: string;
   counts?: TestCounts; // only when a JUnit report was read
+  testCases?: TestCase[]; // the same report, case by case
   steps: StepOutcome[];
   failureLog: string; // for gate-fix and merge-fix; empty when the gate passed
   stepLogs: Record<string, string>; // full logs per step, for the run log
@@ -77,6 +78,51 @@ export function junitCounts(xml: string): TestCounts | undefined {
     ...xml.matchAll(/<testsuite\s[^>]*\bskipped="(\d+)"/g),
   ].reduce((sum, match) => sum + Number(match[1]), 0);
   return { tests: Number(tests), skipped };
+}
+
+export type TestCaseStatus = "passed" | "failed" | "skipped";
+export interface TestCase {
+  name: string; // as the report names it; `classname` is kept apart so a criterion can name either
+  classname: string;
+  status: TestCaseStatus;
+}
+
+const MAX_TEST_CASES = 20_000;
+const unescapeXml = (text: string) =>
+  text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+
+// The test cases of a JUnit report. A case with a <failure>, <error> or <skipped> child did not pass.
+export function junitCases(xml: string): TestCase[] {
+  const cases: TestCase[] = [];
+  for (const match of xml.matchAll(
+    /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g,
+  )) {
+    const attributes = Object.fromEntries(
+      [...(match[1] ?? "").matchAll(/([\w:-]+)="([^"]*)"/g)].map((a) => [
+        a[1],
+        unescapeXml(a[2] ?? ""),
+      ]),
+    );
+    if (attributes.name === undefined) continue;
+    const body = match[2] ?? "";
+    const status: TestCaseStatus = /<(failure|error)\b/.test(body)
+      ? "failed"
+      : /<skipped\b/.test(body)
+        ? "skipped"
+        : "passed";
+    cases.push({
+      name: attributes.name,
+      classname: attributes.classname ?? "",
+      status,
+    });
+    if (cases.length >= MAX_TEST_CASES) break;
+  }
+  return cases;
 }
 
 export interface RunGateInput {
@@ -171,6 +217,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
     commitSha: input.commitSha,
     configSha: input.configSha,
     ...(counts ? { counts } : {}),
+    ...(counts && junit !== undefined ? { testCases: junitCases(junit) } : {}),
     steps: outcomes,
     failureLog:
       reasons.length > 0 ? failureLog(outcomes, stepLogs, reasons) : "",

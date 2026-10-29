@@ -1337,6 +1337,77 @@ export interface paths {
                   logPath: string;
                 } | null;
               }[];
+              pullRequests: {
+                order: number;
+                repo: string;
+                number: number;
+                url: string;
+                /** @enum {string} */
+                state: "open" | "closed" | "merged";
+                draft: boolean;
+                /** @enum {string} */
+                ci: "none" | "pending" | "success" | "failure";
+                /** @enum {string} */
+                review: "none" | "approved" | "changes-requested";
+                syncError: string | null;
+              }[];
+              acceptancePack: {
+                generatedAt: string;
+                pullRequests: {
+                  order: number;
+                  repo: string;
+                  number: number;
+                  url: string;
+                  /** @enum {string} */
+                  state: "open" | "closed" | "merged";
+                  draft: boolean;
+                  /** @enum {string} */
+                  ci: "none" | "pending" | "success" | "failure";
+                  /** @enum {string} */
+                  review: "none" | "approved" | "changes-requested";
+                  syncError: string | null;
+                }[];
+                tickets: {
+                  displayId: string;
+                  title: string;
+                  criteria: {
+                    text: string;
+                    tests: string[];
+                    /** @enum {string} */
+                    status: "verified" | "unverified";
+                    reason: string | null;
+                  }[];
+                }[];
+                findings: {
+                  ticket: string | null;
+                  run: string;
+                  stage: string;
+                  kind: string;
+                  body: string;
+                  resolution: string;
+                }[];
+                uncertainties: {
+                  source: string;
+                  text: string;
+                }[];
+                gates: {
+                  repo: string;
+                  commitSha: string;
+                  testsTotal: number | null;
+                  testsSkipped: number | null;
+                  durationMs: number;
+                  steps: {
+                    name: string;
+                    exitCode: number;
+                    ms: number;
+                  }[];
+                }[];
+                protectedPathApprovals: {
+                  ticket: string;
+                  paths: string[];
+                }[];
+                agentSeconds: number;
+              } | null;
               edges: {
                 from: string;
                 to: string;

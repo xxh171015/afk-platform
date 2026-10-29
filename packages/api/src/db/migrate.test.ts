@@ -12,6 +12,7 @@ import { assertMigrated, MIGRATIONS_FOLDER, migrate } from "./migrate.ts";
 import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 
 const ENTITY_TABLES = [
+  "acceptance_packs",
   "edges",
   "finalizations",
   "findings",

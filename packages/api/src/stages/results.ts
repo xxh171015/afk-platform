@@ -47,6 +47,16 @@ const GateFacts = z.object({
   commandResults: z.array(z.unknown()).default([]),
   testsTotal: z.number().int().min(0).optional(),
   testsSkipped: z.number().int().min(0).optional(),
+  testCases: z
+    .array(
+      z.object({
+        name: z.string(),
+        classname: z.string(),
+        status: z.enum(["passed", "failed", "skipped"]),
+      }),
+    )
+    .max(20_000)
+    .optional(),
   logUrl: z.string().optional(),
 });
 
@@ -278,11 +288,11 @@ export async function writeFacts(
     const gate = result.gate;
     // The same commit can be gated again (a rerun after a restart): the latest facts win.
     await client.query(
-      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, log_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, log_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (repo_id, commit_sha) DO UPDATE SET config_sha = EXCLUDED.config_sha,
          command_results = EXCLUDED.command_results, tests_total = EXCLUDED.tests_total,
-         tests_skipped = EXCLUDED.tests_skipped, log_url = EXCLUDED.log_url`,
+         tests_skipped = EXCLUDED.tests_skipped, test_cases = EXCLUDED.test_cases, log_url = EXCLUDED.log_url`,
       [
         owner.repo_id,
         gate.commitSha,
@@ -290,6 +300,7 @@ export async function writeFacts(
         JSON.stringify(gate.commandResults),
         gate.testsTotal ?? null,
         gate.testsSkipped ?? null,
+        gate.testCases === undefined ? null : JSON.stringify(gate.testCases),
         gate.logUrl ?? null,
       ],
     );

@@ -148,6 +148,102 @@ export function ticketText(view: {
   ].join("\n");
 }
 
+interface PackLike {
+  pullRequests: {
+    order: number;
+    repo: string;
+    number: number;
+    url: string;
+    state: string;
+    draft: boolean;
+    ci: string;
+    review: string;
+    syncError: string | null;
+  }[];
+  tickets: {
+    displayId: string;
+    title: string;
+    criteria: {
+      text: string;
+      tests: string[];
+      status: string;
+      reason: string | null;
+    }[];
+  }[];
+  findings: {
+    ticket: string | null;
+    stage: string;
+    kind: string;
+    body: string;
+    resolution: string;
+  }[];
+  uncertainties: { source: string; text: string }[];
+  gates: {
+    repo: string;
+    commitSha: string;
+    testsTotal: number | null;
+    testsSkipped: number | null;
+    durationMs: number;
+    steps: { name: string; exitCode: number; ms: number }[];
+  }[];
+  protectedPathApprovals: { ticket: string; paths: string[] }[];
+  agentSeconds: number;
+}
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+
+// What a person reads before merging: the pull requests in the order to merge them, which criteria are backed by
+// a passing test, what the reviews said and what the agents were unsure of, the gates, and approved exceptions.
+export function acceptancePackText(pack: PackLike): string {
+  const section = (title: string, lines: string[]) =>
+    lines.length ? [`  ${title}:`, ...lines] : [];
+  return [
+    "acceptance pack:",
+    ...section(
+      "pull requests (merge in this order)",
+      pack.pullRequests.map(
+        (p) =>
+          `    ${p.order}. ${p.repo} #${p.number}  ${p.state}${p.draft ? " (draft)" : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`,
+      ),
+    ),
+    ...section(
+      "acceptance criteria",
+      pack.tickets.flatMap((t) => [
+        `    ${t.displayId}  ${t.title}`,
+        ...t.criteria.map(
+          (c) =>
+            `      [${c.status === "verified" ? "verified" : "unverified"}] ${c.text}${c.tests.length ? `  (${c.tests.join(", ")})` : ""}${c.reason ? `  -- ${c.reason}` : ""}`,
+        ),
+      ]),
+    ),
+    ...section(
+      "findings",
+      pack.findings.map(
+        (f) =>
+          `    [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage} ${f.kind}: ${f.body}`,
+      ),
+    ),
+    ...section(
+      "uncertainties",
+      pack.uncertainties.map((u) => `    ${u.source}: ${u.text}`),
+    ),
+    ...section(
+      "gates",
+      pack.gates.map(
+        (g) =>
+          `    ${g.repo} @ ${g.commitSha.slice(0, 8)}: ${g.testsTotal ?? "?"} tests, ${g.testsSkipped ?? "?"} skipped, ${seconds(g.durationMs)} (${g.steps.map((s) => `${s.name} ${seconds(s.ms)}${s.exitCode === 0 ? "" : ` exit ${s.exitCode}`}`).join(", ")})`,
+      ),
+    ),
+    ...section(
+      "approved protected paths",
+      pack.protectedPathApprovals.map(
+        (a) => `    ${a.ticket}: ${a.paths.join(", ")}`,
+      ),
+    ),
+    `  agent time: ${pack.agentSeconds} s`,
+  ].join("\n");
+}
+
 export function specText(view: {
   spec: {
     displayId: string;
@@ -159,6 +255,7 @@ export function specText(view: {
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
   edges: { from: string; to: string; kind: string }[];
+  acceptancePack?: PackLike | null;
 }): string {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
@@ -177,6 +274,7 @@ export function specText(view: {
           ]),
         ]
       : []),
+    ...(view.acceptancePack ? [acceptancePackText(view.acceptancePack)] : []),
     ...(view.edges.length
       ? [
           "edges:",

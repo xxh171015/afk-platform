@@ -411,6 +411,7 @@ function gateFacts(outcome: GateOutcome) {
           testsSkipped: outcome.counts.skipped,
         }
       : {}),
+    ...(outcome.testCases ? { testCases: outcome.testCases } : {}),
   };
 }
 

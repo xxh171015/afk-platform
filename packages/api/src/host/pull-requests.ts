@@ -6,6 +6,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
+import { saveAcceptancePack } from "../acceptance/pack.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import {
   enqueueHostSync,
@@ -163,6 +164,7 @@ export async function recordOpenPr(
   client: pg.PoolClient,
   read: OpenPrPayload,
   result: unknown,
+  now: Date,
 ): Promise<RecordHostResult> {
   await lockSpec(client, read.specId);
   const spec = await client.query<{ state: SpecState }>(
@@ -210,6 +212,8 @@ export async function recordOpenPr(
     [read.specId],
   );
   if (!missing.rowCount) {
+    // the pack is ready by the time the spec says it is waiting for a person
+    await saveAcceptancePack(client, read.specId, now);
     const next = specTransition("finalizing", "pr-opened");
     if (!next.ok) throw new Error(next.reason);
     await client.query("UPDATE specs SET state = $2 WHERE id = $1", [

@@ -127,6 +127,106 @@ function DependencyGraph({
   );
 }
 
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+
+// The acceptance pack, read top to bottom before merging: the pull requests in the order to merge them, then what
+// backs each criterion, what the reviews and agents flagged, and what the gates measured.
+function AcceptancePackSection({
+  pack,
+}: {
+  pack: NonNullable<SpecView["acceptancePack"]>;
+}) {
+  return (
+    <section className="acceptance-pack">
+      <h3>Acceptance pack</h3>
+      <h4>Criteria</h4>
+      {pack.tickets.map((ticket) => (
+        <div key={ticket.displayId}>
+          <p>
+            <strong>{ticket.displayId}</strong> {ticket.title}
+          </p>
+          <ul className="criteria">
+            {ticket.criteria.map((criterion) => (
+              <li key={criterion.text} data-status={criterion.status}>
+                <span className={`badge criterion-${criterion.status}`}>
+                  {criterion.status}
+                </span>{" "}
+                {criterion.text}
+                {criterion.tests.length > 0
+                  ? ` (${criterion.tests.join(", ")})`
+                  : ""}
+                {criterion.reason ? (
+                  <span className="note"> — {criterion.reason}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+
+      <h4>Review findings</h4>
+      {pack.findings.length === 0 ? (
+        <p className="note">None.</p>
+      ) : (
+        <ul className="pack-findings">
+          {pack.findings.map((finding) => (
+            <li key={`${finding.run}-${finding.kind}-${finding.body}`}>
+              <span className="badge">{finding.resolution}</span>{" "}
+              {finding.ticket ?? "spec"} {finding.stage} {finding.kind}:{" "}
+              {finding.body}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h4>What the agents were unsure of</h4>
+      {pack.uncertainties.length === 0 ? (
+        <p className="note">Nothing.</p>
+      ) : (
+        <ul className="uncertainties">
+          {pack.uncertainties.map((u) => (
+            <li key={`${u.source}-${u.text}`}>
+              {u.source}: {u.text}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h4>Gates</h4>
+      <ul className="gates">
+        {pack.gates.map((gate) => (
+          <li key={gate.repo}>
+            {gate.repo} @ {gate.commitSha.slice(0, 8)}: {gate.testsTotal ?? "?"}{" "}
+            tests, {gate.testsSkipped ?? "?"} skipped,{" "}
+            {seconds(gate.durationMs)} (
+            {gate.steps
+              .map(
+                (step) =>
+                  `${step.name} ${seconds(step.ms)}${step.exitCode === 0 ? "" : ` exit ${step.exitCode}`}`,
+              )
+              .join(", ")}
+            )
+          </li>
+        ))}
+      </ul>
+
+      {pack.protectedPathApprovals.length > 0 ? (
+        <>
+          <h4>Approved protected paths</h4>
+          <ul className="approvals">
+            {pack.protectedPathApprovals.map((approval) => (
+              <li key={approval.ticket}>
+                {approval.ticket}: {approval.paths.join(", ")}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      <p className="note">Agent time: {pack.agentSeconds} s.</p>
+    </section>
+  );
+}
+
 export function SpecDetail({ specId }: { specId: number }) {
   const api = useApi();
   const queryClient = useQueryClient();
@@ -152,7 +252,8 @@ export function SpecDetail({ specId }: { specId: number }) {
         Could not load the spec: {view.error.message}
       </p>
     );
-  const { spec, tickets, edges, finalizations } = view.data;
+  const { spec, tickets, edges, finalizations, pullRequests, acceptancePack } =
+    view.data;
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;
 
@@ -191,6 +292,36 @@ export function SpecDetail({ specId }: { specId: number }) {
           ) : null}
         </div>
       ) : null}
+
+      {pullRequests.length > 0 ? (
+        <>
+          <h3>Pull requests</h3>
+          <p className="note">
+            Merge them in this order; the platform never merges.
+          </p>
+          <ol className="pull-requests">
+            {pullRequests.map((pr) => (
+              <li key={pr.repo}>
+                <a href={pr.url}>
+                  {pr.repo} #{pr.number}
+                </a>{" "}
+                <span className={`badge pr-${pr.state}`}>
+                  {pr.state}
+                  {pr.draft ? " (draft)" : ""}
+                </span>{" "}
+                CI {pr.ci}, review {pr.review}
+                {pr.syncError ? (
+                  <span className="error">
+                    {" "}
+                    could not be read: {pr.syncError}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : null}
+      {acceptancePack ? <AcceptancePackSection pack={acceptancePack} /> : null}
 
       <h3>Warnings from the import</h3>
       {spec.warnings.length === 0 ? (

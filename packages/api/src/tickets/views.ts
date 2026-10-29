@@ -1,5 +1,6 @@
 import { formatDisplayId, type SpecState, type TicketState } from "@afk/shared";
 import type pg from "pg";
+import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -258,6 +259,8 @@ export async function specView(pool: pg.Pool, specId: number) {
     },
     tickets,
     finalizations: await finalizations(pool, "f.spec_id = $1", [specId]),
+    pullRequests: await pullRequestRows(pool, specId),
+    acceptancePack: await readAcceptancePack(pool, specId),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),

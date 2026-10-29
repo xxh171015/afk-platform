@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { git, gitOut } from "./exec.ts";
-import { GateCache, junitCounts, readGateConfig, runGate } from "./gate.ts";
+import {
+  GateCache,
+  junitCases,
+  junitCounts,
+  readGateConfig,
+  runGate,
+} from "./gate.ts";
 import { FakeGateSandbox } from "./testing/fakes.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
@@ -62,6 +68,28 @@ describe("junitCounts", () => {
   });
   it("is undefined when the file is not a JUnit report", () => {
     expect(junitCounts("<html/>")).toBeUndefined();
+  });
+});
+
+describe("junitCases", () => {
+  it("tells passed, failed, errored and skipped cases apart, self-closed or not", () => {
+    const xml = `<testsuites tests="5"><testsuite name="orders" tests="5" skipped="1">
+      <testcase classname="orders" name="exports a csv" time="0.1"/>
+      <testcase classname="orders" name="rejects an empty range"><failure message="boom">trace</failure></testcase>
+      <testcase classname="orders" name="blows up"><error message="x"/></testcase>
+      <testcase classname="orders" name="keeps the order"><skipped/></testcase>
+      <testcase name="a &amp; b &lt;c&gt;"></testcase>
+    </testsuite></testsuites>`;
+    expect(junitCases(xml)).toEqual([
+      { name: "exports a csv", classname: "orders", status: "passed" },
+      { name: "rejects an empty range", classname: "orders", status: "failed" },
+      { name: "blows up", classname: "orders", status: "failed" },
+      { name: "keeps the order", classname: "orders", status: "skipped" },
+      { name: "a & b <c>", classname: "", status: "passed" },
+    ]);
+  });
+  it("finds nothing in a file that is not a report", () => {
+    expect(junitCases("<html/>")).toEqual([]);
   });
 });
 
