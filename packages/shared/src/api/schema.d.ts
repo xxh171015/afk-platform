@@ -26,11 +26,11 @@ export interface paths {
             name: string;
             defaultAgent?: string;
             defaultModel?: string;
+            mergePolicy?: string;
             contractPath?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
-            mergePolicy?: string;
             limits?: {
               workerSlots?: number;
               projectConcurrency?: number;
@@ -62,6 +62,74 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            contractPath?: string;
+            protectedPaths?: string[];
+            maxConcurrency?: number;
+            budgetLimit?: number;
+            limits?: {
+              workerSlots?: number;
+              projectConcurrency?: number;
+              repoConcurrency?: number;
+              runIdleSeconds?: number;
+              runWallclockSeconds?: number;
+              ticketWallclockSeconds?: number;
+              specAgentSeconds?: number;
+            };
+          };
+        };
+      };
+      responses: {
+        /** @description Updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
     trace?: never;
   };
   "/projects/{projectId}/repos": {

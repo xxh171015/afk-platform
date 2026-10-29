@@ -99,6 +99,8 @@ pnpm plat tickets import S-1 tickets.yaml
 pnpm plat spec confirm S-1     # the scheduler starts; watch it on the page or with: pnpm plat spec show S-1
 ```
 
+A project made without a contract path, or with other settings to change, is edited in place: `pnpm plat project edit 1 --contract-path backend:openapi/openapi.yaml`. Only the options given change (`--protected-path` replaces the whole list, `--limit name=value` is merged with the limits already set; `--max-concurrency` and `--budget-limit` too). Tickets already made keep what they have; bundles built afterwards use the new values. `--contract-path` must look like `role:path`, on `project create` as well.
+
 ## Run the checks
 
 ```sh

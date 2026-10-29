@@ -68,9 +68,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   const print = (value: unknown, text: string) =>
     io.stdout(json() ? `${JSON.stringify(value)}\n` : `${text}\n`);
 
-  program
-    .command("project")
-    .description("projects")
+  const projectCommands = program.command("project").description("projects");
+  projectCommands
     .command("create <name>")
     .description("register a project")
     .option("--default-agent <agent>")
@@ -78,7 +77,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--contract-path <path>", "e.g. backend:openapi/openapi.yaml")
     .option("--protected-path <glob>", "repeatable", collect)
     .option("--max-concurrency <n>", "tickets running at once", toInt)
-    .option("--budget-limit <n>", "", toInt)
+    .option("--budget-limit <n>", "budget limit", toInt)
     .option("--merge-policy <policy>")
     .option(
       "--limit <name=value>",
@@ -101,6 +100,46 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       });
       if (!data) throw failureFrom(response, error);
       print(data, `project ${data.id} ${data.name}`);
+    });
+
+  projectCommands
+    .command("edit <project>")
+    .description(
+      "change settings of an existing project; only the given ones change (tickets already made keep theirs)",
+    )
+    .option("--contract-path <path>", "e.g. backend:openapi/openapi.yaml")
+    .option(
+      "--protected-path <glob>",
+      "repeatable; replaces the whole list",
+      collect,
+    )
+    .option("--max-concurrency <n>", "tickets running at once", toInt)
+    .option("--budget-limit <n>", "budget limit", toInt)
+    .option(
+      "--limit <name=value>",
+      "override a concurrency or budget default, merged with the ones already set (repeatable)",
+      collect,
+    )
+    .action(async (id: string, options) => {
+      const body = {
+        contractPath: options.contractPath,
+        protectedPaths: options.protectedPath,
+        maxConcurrency: options.maxConcurrency,
+        budgetLimit: options.budgetLimit,
+        limits: parseLimits(options.limit),
+      };
+      if (Object.values(body).every((value) => value === undefined)) {
+        throw new Failure(
+          "nothing to change: pass --contract-path, --protected-path, --max-concurrency, --budget-limit or --limit",
+        );
+      }
+      const projectId = toInt(id);
+      const { data, response, error } = await api().PATCH(
+        "/projects/{projectId}",
+        { params: { path: { projectId } }, body },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `project ${data.id} updated`);
     });
 
   program

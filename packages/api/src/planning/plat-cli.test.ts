@@ -193,6 +193,56 @@ describe("plat", () => {
     ).toBe(1);
   });
 
+  it("edits an existing project: only the given settings change, and mistakes are reported", async () => {
+    await plat("project", "create", "shop", "--protected-path", ".github/**");
+    const edited = await plat(
+      "project",
+      "edit",
+      "1",
+      "--contract-path",
+      "backend:openapi.yaml",
+      "--max-concurrency",
+      "3",
+      "--budget-limit",
+      "50",
+      "--limit",
+      "repoConcurrency=4",
+    );
+    expect(edited).toEqual({
+      code: 0,
+      stdout: "project 1 updated\n",
+      stderr: "",
+    });
+    const row = await db.pool.query(
+      "SELECT contract_path, protected_paths, max_concurrency, budget_limit, limits FROM projects",
+    );
+    expect(row.rows[0]).toEqual({
+      contract_path: "backend:openapi.yaml",
+      protected_paths: [".github/**"],
+      max_concurrency: 3,
+      budget_limit: 50,
+      limits: { repoConcurrency: 4 },
+    });
+    await plat("project", "edit", "1", "--protected-path", "infra/**");
+    expect(
+      (await db.pool.query("SELECT protected_paths FROM projects")).rows[0],
+    ).toEqual({ protected_paths: ["infra/**"] });
+
+    expect(
+      (await plat("project", "edit", "9", "--budget-limit", "5")).stderr,
+    ).toBe("error: no such project\n");
+    expect(
+      (await plat("project", "edit", "1", "--contract-path", "openapi.yaml"))
+        .code,
+    ).toBe(1);
+    expect(
+      (await plat("project", "edit", "1", "--limit", "oops")).stderr,
+    ).toMatch(/name=positive integer/);
+    const none = await plat("project", "edit", "1");
+    expect(none.code).toBe(1);
+    expect(none.stderr).toMatch(/nothing to change/);
+  });
+
   it("prints a run's log, all of it or from an offset, as text or JSON", async () => {
     await register();
     files["tickets.yaml"] = TICKETS_YAML;

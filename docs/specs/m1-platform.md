@@ -173,7 +173,7 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 
 ### plat CLI
 
-命令（都支持 `--json`）：`project create`、`repo add`、`spec create`、`tickets import`、`spec confirm`、`spec show`、`ticket view`、`ticket retry --mode continue|restart`、`ticket approve-protected`、`ticket allow-path`、`ticket cancel [--cascade]`、`blocked`、`run logs <run>`。不做 `ticket edit`、`context`、拆票。导入格式照 design.md 的 `tickets.yaml`；校验四条加模块重叠告警；`external_blocked_by` 必须为空。`contract` 边和契约 SHA 在同仓库内实现。
+命令（都支持 `--json`）：`project create`、`project edit`、`repo add`、`spec create`、`tickets import`、`spec confirm`、`spec show`、`ticket view`、`ticket retry --mode continue|restart`、`ticket approve-protected`、`ticket allow-path`、`ticket cancel [--cascade]`、`blocked`、`run logs <run>`。不做 `ticket edit`、`context`、拆票。导入格式照 design.md 的 `tickets.yaml`；校验四条加模块重叠告警；`external_blocked_by` 必须为空。`contract` 边和契约 SHA 在同仓库内实现。
 
 ### 页面
 

@@ -48,6 +48,48 @@ export async function createProject(
   return rows[0];
 }
 
+export type ProjectEdit = Partial<
+  Pick<
+    NewProject,
+    | "contractPath"
+    | "protectedPaths"
+    | "maxConcurrency"
+    | "budgetLimit"
+    | "limits"
+  >
+>;
+
+// Only the fields that are given change. Limits are merged key by key over the stored overrides; protected paths
+// are replaced as a whole. Tickets already made keep what they have; bundles are built from the project when read.
+export async function editProject(
+  pool: pg.Pool,
+  projectId: number,
+  edit: ProjectEdit,
+): Promise<{ status: "ok" } | { status: "no-project" }> {
+  const values: unknown[] = [projectId];
+  const assignments: string[] = [];
+  const set = (column: string, value: unknown, expression = "$") => {
+    values.push(value);
+    assignments.push(
+      `${column} = ${expression.replace("$", `$${values.length}`)}`,
+    );
+  };
+  if (edit.contractPath !== undefined) set("contract_path", edit.contractPath);
+  if (edit.protectedPaths !== undefined)
+    set("protected_paths", edit.protectedPaths);
+  if (edit.maxConcurrency !== undefined)
+    set("max_concurrency", edit.maxConcurrency);
+  if (edit.budgetLimit !== undefined) set("budget_limit", edit.budgetLimit);
+  if (edit.limits !== undefined)
+    set("limits", JSON.stringify(edit.limits), "limits || $::jsonb");
+  // An empty edit still has to tell a missing project from an existing one.
+  const { rowCount } = await pool.query(
+    `UPDATE projects SET ${assignments.join(", ") || "id = id"} WHERE id = $1`,
+    values,
+  );
+  return rowCount === 0 ? { status: "no-project" } : { status: "ok" };
+}
+
 export interface NewRepo {
   projectId: number;
   url: string;
@@ -186,7 +228,7 @@ export async function importTickets(
         return await rollback(client, {
           status: "invalid",
           errors: [
-            "the tickets have a contract edge, but the project has no contract path; create the project with --contract-path <role>:<path> (e.g. backend:openapi/openapi.yaml)",
+            "the tickets have a contract edge, but the project has no contract path; set it with --contract-path <role>:<path> (e.g. backend:openapi/openapi.yaml) on plat project create, or on plat project edit for an existing project",
           ],
         });
       }

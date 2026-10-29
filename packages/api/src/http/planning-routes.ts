@@ -5,6 +5,7 @@ import {
   addRepo,
   createProject,
   createSpec,
+  editProject,
   importTickets,
 } from "../planning/planning.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
@@ -20,6 +21,21 @@ const reply = (description: string, schema: z.ZodType) => ({
   content: json(schema),
 });
 
+// "<repo role>:<path in that repo>", as the bundle's contract pointer reads it.
+const ContractPath = Text.regex(
+  /^[^:\s]+:\S.*$/,
+  "must look like role:path, e.g. backend:openapi/openapi.yaml",
+);
+
+// The settings both project create and project edit take, checked the same way.
+const projectSettings = {
+  contractPath: ContractPath.optional(),
+  protectedPaths: z.array(Text).max(200).optional(),
+  maxConcurrency: Id.optional(),
+  budgetLimit: Id.optional(),
+  limits: LimitOverridesSchema.optional(),
+};
+
 const projectRoute = createRoute({
   method: "post",
   path: "/projects",
@@ -30,17 +46,30 @@ const projectRoute = createRoute({
           name: Text,
           defaultAgent: Text.optional(),
           defaultModel: Text.optional(),
-          contractPath: Text.optional(),
-          protectedPaths: z.array(Text).max(200).optional(),
-          maxConcurrency: Id.optional(),
-          budgetLimit: Id.optional(),
           mergePolicy: Text.optional(),
-          limits: LimitOverridesSchema.optional(),
+          ...projectSettings,
         }),
       ),
     },
   },
   responses: { 201: reply("Created", z.object({ id: Id, name: z.string() })) },
+});
+
+const projectEditRoute = createRoute({
+  method: "patch",
+  path: "/projects/{projectId}",
+  request: {
+    params: z.object({
+      projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+    body: {
+      content: json(z.object(projectSettings)),
+    },
+  },
+  responses: {
+    200: reply("Updated", z.object({ id: Id })),
+    404: reply("No such project", ErrorReply),
+  },
 });
 
 const repoRoute = createRoute({
@@ -160,6 +189,15 @@ export function registerPlanningRoutes(
   app.openapi(projectRoute, async (c) => {
     const project = await createProject(pool, c.req.valid("json"));
     return c.json(project, 201);
+  });
+
+  app.openapi(projectEditRoute, async (c) => {
+    const { projectId } = c.req.valid("param");
+    const result = await editProject(pool, projectId, c.req.valid("json"));
+    if (result.status === "no-project") {
+      return c.json({ error: "no such project" }, 404);
+    }
+    return c.json({ id: projectId }, 200);
   });
 
   app.openapi(repoRoute, async (c) => {

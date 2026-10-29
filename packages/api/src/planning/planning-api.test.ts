@@ -37,6 +37,15 @@ async function post(path: string, body: unknown) {
   return { status: response.status, body: (await response.json()) as Reply };
 }
 
+async function patch(path: string, body: unknown) {
+  const response = await fetch(`${api.url}${path}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: (await response.json()) as Reply };
+}
+
 async function setup(contractPath: string | null = "backend:openapi.yaml") {
   const project = await post("/projects", {
     name: "shop",
@@ -169,6 +178,7 @@ describe("tickets import", () => {
     );
     expect(result.status).toBe(422);
     expect(result.body.errors.join("\n")).toMatch(/--contract-path/);
+    expect(result.body.errors.join("\n")).toMatch(/plat project edit/);
   });
 
   it("writes every ticket and edge, returns display ids, and stores no warnings when there are none", async () => {
@@ -342,5 +352,106 @@ describe("tickets import", () => {
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
     expect(await count("tickets")).toBe(3);
+  });
+});
+
+describe("project edit", () => {
+  const projectRow = async () =>
+    (await db.pool.query("SELECT * FROM projects WHERE id = 1")).rows[0];
+
+  it("changes only the fields that are sent", async () => {
+    await post("/projects", {
+      name: "shop",
+      contractPath: "backend:old.yaml",
+      protectedPaths: [".github/**"],
+      maxConcurrency: 2,
+      budgetLimit: 100,
+      limits: { repoConcurrency: 3 },
+    });
+    const result = await patch("/projects/1", {
+      contractPath: "backend:openapi/openapi.yaml",
+    });
+    expect(result.status).toBe(200);
+    expect(await projectRow()).toMatchObject({
+      name: "shop",
+      contract_path: "backend:openapi/openapi.yaml",
+      protected_paths: [".github/**"],
+      max_concurrency: 2,
+      budget_limit: 100,
+      limits: { repoConcurrency: 3 },
+    });
+  });
+
+  it("replaces the protected paths as a whole and merges limits over the stored ones", async () => {
+    await post("/projects", {
+      name: "shop",
+      protectedPaths: [".github/**", "openapi/**"],
+      limits: { repoConcurrency: 3, specAgentSeconds: 60 },
+    });
+    await patch("/projects/1", {
+      protectedPaths: ["infra/**"],
+      limits: { repoConcurrency: 4 },
+    });
+    expect(await projectRow()).toMatchObject({
+      protected_paths: ["infra/**"],
+      limits: { repoConcurrency: 4, specAgentSeconds: 60 },
+    });
+    await patch("/projects/1", { protectedPaths: [] });
+    expect((await projectRow()).protected_paths).toEqual([]);
+  });
+
+  it("says plainly when the project does not exist, even for an empty edit", async () => {
+    const result = await patch("/projects/99", { maxConcurrency: 2 });
+    expect(result.status).toBe(404);
+    expect(result.body).toEqual({ error: "no such project" });
+    expect((await patch("/projects/99", {})).status).toBe(404);
+  });
+
+  it("validates like project create and changes nothing when it refuses", async () => {
+    await post("/projects", { name: "shop", contractPath: "backend:a.yaml" });
+    for (const body of [
+      { contractPath: "openapi.yaml" },
+      { contractPath: ":openapi.yaml" },
+      { contractPath: "backend:" },
+      { limits: { nope: 1 } },
+      { limits: { repoConcurrency: 0 } },
+      { maxConcurrency: 0 },
+      { budgetLimit: -1 },
+      { protectedPaths: [""] },
+    ]) {
+      expect((await patch("/projects/1", body)).status).toBe(400);
+    }
+    expect((await projectRow()).contract_path).toBe("backend:a.yaml");
+    expect(
+      (await post("/projects", { name: "x", contractPath: "openapi.yaml" }))
+        .status,
+    ).toBe(400);
+  });
+
+  it("lets a project without a contract path import a contract edge once it has one", async () => {
+    const { projectId, specId } = await setup(null);
+    const file = {
+      spec: `S-${specId}`,
+      tickets: [
+        ticket("contract", {
+          type: "contract",
+          protected_paths_ok: ["openapi/openapi.yaml"],
+        }),
+        ticket("fe", { repo: "frontend", contract: "contract" }),
+      ],
+    };
+    expect((await post(`/specs/${specId}/tickets/import`, file)).status).toBe(
+      422,
+    );
+    expect(
+      (
+        await patch(`/projects/${projectId}`, {
+          contractPath: "backend:openapi/openapi.yaml",
+        })
+      ).status,
+    ).toBe(200);
+    expect((await post(`/specs/${specId}/tickets/import`, file)).status).toBe(
+      200,
+    );
   });
 });

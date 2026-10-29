@@ -777,6 +777,31 @@ describe("the bundle", () => {
     expect(reply.body.integrationBranch).toBe("spec/order-export");
   });
 
+  it("builds a bundle after a project edit from the project's new contract path", async () => {
+    await runningSpec(
+      [
+        ticket("c", { type: "contract" }),
+        ticket("fe", { repo: "frontend", contract: "c" }),
+      ],
+      { contractPath: "backend:old.yaml" },
+    );
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", { outcome: "merged", headSha: "contract-head" });
+    const edited = await fetch(`${api.url}/projects/1`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contractPath: "backend:openapi/openapi.yaml" }),
+    });
+    expect(edited.status).toBe(200);
+    const reply = await bundle((await worker.claim()).body.job as Claimed);
+    expect(reply.body.contract).toMatchObject({
+      sha: "contract-head",
+      path: "backend:openapi/openapi.yaml",
+    });
+  });
+
   it("names the Run the job started, so logs and commit trailers have somewhere to point", async () => {
     await runningSpec([ticket("a")]);
     const job = (await worker.claim()).body.job as Claimed;
