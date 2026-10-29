@@ -50,7 +50,11 @@ async function draftSpec(
   tickets: Record<string, unknown>[],
   limits?: Record<string, number>,
 ) {
-  const project = await post("/projects", { name: "shop", limits });
+  const project = await post("/projects", {
+    name: "shop",
+    contractPath: "backend:openapi.yaml",
+    limits,
+  });
   const projectId = project.body.id;
   for (const role of ["backend", "frontend"]) {
     await post(`/projects/${projectId}/repos`, { url: `git@x:${role}`, role });

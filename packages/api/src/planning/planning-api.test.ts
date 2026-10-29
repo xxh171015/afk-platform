@@ -37,8 +37,11 @@ async function post(path: string, body: unknown) {
   return { status: response.status, body: (await response.json()) as Reply };
 }
 
-async function setup() {
-  const project = await post("/projects", { name: "shop" });
+async function setup(contractPath: string | null = "backend:openapi.yaml") {
+  const project = await post("/projects", {
+    name: "shop",
+    ...(contractPath ? { contractPath } : {}),
+  });
   const projectId = project.body.id as number;
   await post(`/projects/${projectId}/repos`, {
     url: "git@github.com:acme/backend.git",
@@ -156,6 +159,16 @@ describe("tickets import", () => {
       ticket("fe", { repo: "frontend", contract: "contract" }),
     ],
     ...extra,
+  });
+
+  it("refuses a contract edge when the project has no contract path", async () => {
+    const { specId } = await setup(null);
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      exportFile({ spec: `S-${specId}` }),
+    );
+    expect(result.status).toBe(422);
+    expect(result.body.errors.join("\n")).toMatch(/--contract-path/);
   });
 
   it("writes every ticket and edge, returns display ids, and stores no warnings when there are none", async () => {

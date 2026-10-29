@@ -176,6 +176,22 @@ export async function importTickets(
       return await rollback(client, { status: "invalid", errors: plan.errors });
     }
 
+    // A contract edge hands the pinned contract to the downstream ticket, which needs a path to find it by.
+    if (plan.edges.some((edge) => edge.kind === "contract")) {
+      const project = await client.query(
+        "SELECT contract_path FROM projects WHERE id = $1",
+        [spec.rows[0].project_id],
+      );
+      if (!project.rows[0]?.contract_path) {
+        return await rollback(client, {
+          status: "invalid",
+          errors: [
+            "the tickets have a contract edge, but the project has no contract path; create the project with --contract-path <role>:<path> (e.g. backend:openapi/openapi.yaml)",
+          ],
+        });
+      }
+    }
+
     const idByKey = new Map<string, number>();
     const tickets: ImportedTicket[] = [];
     for (const ticket of plan.tickets) {

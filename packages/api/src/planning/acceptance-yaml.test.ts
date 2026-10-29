@@ -44,7 +44,17 @@ const file = fileURLToPath(
 
 describe("the M1 acceptance ticket file", () => {
   it("imports into the first spec: five tickets, and the overlap warnings the README promises", async () => {
-    expect((await plat("project", "create", "shop")).code).toBe(0);
+    expect(
+      (
+        await plat(
+          "project",
+          "create",
+          "shop",
+          "--contract-path",
+          "backend:openapi/openapi.yaml",
+        )
+      ).code,
+    ).toBe(0);
     expect(
       (
         await plat(

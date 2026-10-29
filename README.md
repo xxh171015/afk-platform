@@ -92,7 +92,7 @@ A worker that is missing any of these, or cannot reach the API, says what is wro
 **A first spec** (`pnpm plat …` talks to `$AFK_API_URL`; add `--json` for machine output)
 
 ```sh
-pnpm plat project create shop --protected-path ".github/**"
+pnpm plat project create shop --protected-path ".github/**" --contract-path backend:openapi/openapi.yaml
 pnpm plat repo add --project 1 --role backend --url https://github.com/<owner>/afk-pilot-backend.git
 pnpm plat spec create --project 1 --type feature --title "订单备注" --file spec.md
 pnpm plat tickets import S-1 tickets.yaml

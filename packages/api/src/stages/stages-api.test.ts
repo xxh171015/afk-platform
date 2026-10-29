@@ -47,7 +47,11 @@ async function runningSpec(
   tickets: Record<string, unknown>[],
   project: Record<string, unknown> = {},
 ) {
-  const created = await post("/projects", { name: "shop", ...project });
+  const created = await post("/projects", {
+    name: "shop",
+    contractPath: "backend:openapi.yaml",
+    ...project,
+  });
   for (const role of ["backend", "frontend"]) {
     await post(`/projects/${created.body.id}/repos`, {
       url: `git@x:${role}`,

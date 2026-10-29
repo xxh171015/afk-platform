@@ -90,7 +90,13 @@ external_blocked_by: []
 `;
 
 async function register() {
-  await plat("project", "create", "shop");
+  await plat(
+    "project",
+    "create",
+    "shop",
+    "--contract-path",
+    "backend:openapi.yaml",
+  );
   await plat(
     "repo",
     "add",
