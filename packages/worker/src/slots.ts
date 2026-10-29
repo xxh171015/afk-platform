@@ -25,6 +25,7 @@ export interface SlotTask {
   attempt: number;
   repo: string; // directory name of the repo, e.g. "backend"
   ref: string; // the ticket's branch, agent/T-123: the only ref that is ever taken back
+  integration?: string; // the branch it was made from, put in the slot on purpose: not an extra ref
 }
 
 export interface SlotLock extends SlotTask {
@@ -253,6 +254,7 @@ export class SlotManager {
         slotClone: clone,
         mainClone: this.options.mainCloneFor(previous.repo),
         ref: previous.ref,
+        ...(previous.integration ? { integration: previous.integration } : {}),
         log: (line) => this.log(`slot ${index}: ${line}`),
       });
       const diff = uncommittedChanges(clone);
@@ -335,6 +337,7 @@ export function retrieveResult(input: {
   slotClone: string;
   mainClone: string;
   ref: string;
+  integration?: string; // the branch the ticket was made from, which the slot has on purpose
   log?: (line: string) => void;
 }): RetrieveResult {
   const match = TICKET_REF.exec(input.ref);
@@ -345,6 +348,7 @@ export function retrieveResult(input: {
     wanted,
     `refs/heads/gate/${match[1]}`,
     "refs/heads/main",
+    ...(input.integration ? [`refs/heads/${input.integration}`] : []),
   ]);
   const refs = safeGit(input.slotClone, ["for-each-ref", "--format=%(refname)"])
     .stdout.split("\n")

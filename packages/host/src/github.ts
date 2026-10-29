@@ -12,13 +12,18 @@ import {
 
 // The GitHub side of HostAdapter. Reads are conditional (If-None-Match): GitHub answers 304 without counting
 // against the rate limit when nothing changed, which is what a poll every minute mostly finds. The ETags are
-// kept in memory for the life of the process. Nothing here calls GitHub's merge endpoint; a person merges.
+// kept in memory, the ones used longest ago dropped past a limit. Nothing here calls GitHub's merge endpoint;
+// a person merges.
 
 export interface GitHubOptions {
   tokens: TokenSource;
   apiUrl?: string;
   fetch?: typeof fetch;
+  maxCachedResponses?: number; // how many GET responses are kept for If-None-Match; default 500
 }
+
+const PAGE_SIZE = 100; // GitHub's largest page
+const MAX_PAGES = 50; // a list longer than this is refused, not judged by its first 5000
 
 const OPEN: TokenPermissions = { pull_requests: "write", contents: "read" };
 const CLOSE: TokenPermissions = { pull_requests: "write" };
@@ -42,6 +47,7 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
   const apiUrl = options.apiUrl ?? "https://api.github.com";
   const doFetch = options.fetch ?? fetch;
   const etags = new Map<string, { etag: string; body: unknown }>();
+  const maxCached = options.maxCachedResponses ?? 500;
 
   async function call(
     repo: RepoRef,
@@ -53,6 +59,11 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     const token = await options.tokens.tokenFor({ repo, permissions });
     const url = `${apiUrl}/repos/${repo.owner}/${repo.name}${path}`;
     const known = method === "GET" ? etags.get(url) : undefined;
+    if (known) {
+      // used now: it goes to the back of the line for being dropped
+      etags.delete(url);
+      etags.set(url, known);
+    }
     const response = await doFetch(url, {
       method,
       headers: {
@@ -68,8 +79,14 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       return { status: 200, body: known.body };
     const parsed = await response.json().catch(() => ({}));
     const etag = response.headers.get("etag");
-    if (method === "GET" && response.ok && etag)
+    if (method === "GET" && response.ok && etag) {
+      etags.delete(url);
       etags.set(url, { etag, body: parsed });
+      for (const oldest of etags.keys()) {
+        if (etags.size <= maxCached) break;
+        etags.delete(oldest);
+      }
+    }
     return { status: response.status, body: parsed };
   }
 
@@ -83,11 +100,32 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     return body;
   };
 
+  // A list that GitHub hands out in pages of at most 100, read until a page comes back short.
+  async function getPages<T>(
+    repo: RepoRef,
+    path: string,
+    items: (body: unknown) => T[],
+  ): Promise<T[]> {
+    const all: T[] = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const batch = items(
+        await get(repo, `${path}?per_page=${PAGE_SIZE}&page=${page}`),
+      );
+      all.push(...batch);
+      if (batch.length < PAGE_SIZE) return all;
+    }
+    throw new HostError(
+      `GitHub has more than ${MAX_PAGES * PAGE_SIZE} entries for ${repo.owner}/${repo.name}${path}; not judging by the first of them`,
+      200,
+    );
+  }
+
   async function review(repo: RepoRef, number: number): Promise<ReviewState> {
-    const reviews = (await get(
+    const reviews = await getPages(
       repo,
-      `/pulls/${number}/reviews?per_page=100`,
-    )) as { user: { login: string }; state: string }[];
+      `/pulls/${number}/reviews`,
+      (body) => body as { user: { login: string }; state: string }[],
+    );
     // What counts is each reviewer's latest verdict; a comment does not take back an approval.
     const latest = new Map<string, string>();
     for (const r of reviews)
@@ -99,11 +137,16 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
   }
 
   async function ci(repo: RepoRef, sha: string): Promise<CiState> {
-    const runs = (
-      (await get(repo, `/commits/${sha}/check-runs?per_page=100`)) as {
-        check_runs: { status: string; conclusion: string | null }[];
-      }
-    ).check_runs;
+    const runs = await getPages(
+      repo,
+      `/commits/${sha}/check-runs`,
+      (body) =>
+        (
+          body as {
+            check_runs: { status: string; conclusion: string | null }[];
+          }
+        ).check_runs,
+    );
     const status = (await get(repo, `/commits/${sha}/status`)) as {
       state: string;
       total_count: number;

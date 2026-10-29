@@ -265,18 +265,25 @@ export class FakeGitHub {
       return this.conditional(
         req,
         res,
-        (this.reviews.get(Number(reviews[1])) ?? []).map((r) => ({
-          user: { login: r.user },
-          state: r.state,
-        })),
+        this.page(
+          url,
+          (this.reviews.get(Number(reviews[1])) ?? []).map((r) => ({
+            user: { login: r.user },
+            state: r.state,
+          })),
+        ),
       );
     const checkRuns = /^\/commits\/([0-9a-f]+)\/check-runs$/.exec(rest);
-    if (req.method === "GET" && checkRuns)
+    if (req.method === "GET" && checkRuns) {
+      const all = (this.checks.get(checkRuns[1] as string) ?? []).map((c) => ({
+        status: c.status,
+        conclusion: c.conclusion,
+      }));
       return this.conditional(req, res, {
-        check_runs: (this.checks.get(checkRuns[1] as string) ?? []).map(
-          (c) => ({ status: c.status, conclusion: c.conclusion }),
-        ),
+        total_count: all.length,
+        check_runs: this.page(url, all),
       });
+    }
     const status = /^\/commits\/([0-9a-f]+)\/status$/.exec(rest);
     if (req.method === "GET" && status) {
       const state = this.statuses.get(status[1] as string);
@@ -286,6 +293,16 @@ export class FakeGitHub {
       });
     }
     return this.json(res, 404, { message: "Not Found" });
+  }
+
+  // One page of a list, the way GitHub cuts it: 30 to a page unless per_page says otherwise, at most 100.
+  private page<T>(url: URL, all: T[]): T[] {
+    const perPage = Math.min(
+      Number(url.searchParams.get("per_page") ?? 30) || 30,
+      100,
+    );
+    const page = Math.max(Number(url.searchParams.get("page") ?? 1) || 1, 1);
+    return all.slice((page - 1) * perPage, page * perPage);
   }
 
   private conditional(

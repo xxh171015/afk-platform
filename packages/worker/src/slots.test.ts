@@ -269,6 +269,32 @@ describe("zombie slots", () => {
     );
   });
 
+  it("does not log the integration branch the dead run was made from as an extra ref", async () => {
+    const dead = { ...task(1), integration: "spec/s" };
+    const slot = await acquire(manager(1), dead);
+    git(slot.dir, ["branch", "spec/s"]);
+    git(slot.dir, ["checkout", "--quiet", "-b", "agent/T-1"]);
+    writeFileSync(join(slot.dir, "done.ts"), "export {};\n");
+    git(slot.dir, ["add", "-A"]);
+    git(slot.dir, [
+      "-c",
+      "user.name=A",
+      "-c",
+      "user.email=a@b",
+      "commit",
+      "--quiet",
+      "-m",
+      "agent work",
+    ]);
+    writeFileSync(
+      join(root, "0", "lock"),
+      JSON.stringify({ ...dead, pid: deadPid() }),
+    );
+    await acquire(manager(1), task(2));
+    expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
+    expect(logs.filter((line) => line.includes("extra ref"))).toEqual([]);
+  });
+
   it("then saves uncommitted changes as a diff", async () => {
     await abandoned({ commit: true, dirty: true, pid: deadPid() });
     await acquire(manager(1), task(2));
@@ -441,6 +467,18 @@ describe("taking the result back", () => {
     ]);
     expect(log.join("\n")).toContain("refs/heads/agent/T-2");
     expect(log.join("\n")).toContain("refs/heads/spec/s");
+  });
+
+  it("does not call the integration branch the ticket was made from extra", () => {
+    const slotClone = slotWithBranches(["agent/T-1", "spec/s", "agent/T-2"]);
+    expect(
+      retrieveResult({
+        slotClone,
+        mainClone: main.dir,
+        ref: "agent/T-1",
+        integration: "spec/s",
+      }).extraRefs,
+    ).toEqual(["refs/heads/agent/T-2"]);
   });
 
   it("also reports tags, and does not follow them along with the branch", () => {

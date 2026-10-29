@@ -137,6 +137,52 @@ describe("getPullRequest", () => {
     );
   });
 
+  it("reads every page of reviews: a change request after the first hundred counts", async () => {
+    const a = adapter();
+    await open(a);
+    for (let i = 0; i < 120; i++)
+      github.addReview(1, { user: `ann${i}`, state: "APPROVED" });
+    github.addReview(1, { user: "zed", state: "CHANGES_REQUESTED" });
+    expect((await a.getPullRequest({ repo, number: 1 })).review).toBe(
+      "changes-requested",
+    );
+  });
+
+  it("reads every page of check runs: a failure after the first hundred counts", async () => {
+    const a = adapter();
+    const { headSha } = await open(a);
+    github.setChecks(headSha, [
+      ...Array.from({ length: 110 }, () => ({
+        status: "completed" as const,
+        conclusion: "success" as const,
+      })),
+      { status: "completed" as const, conclusion: "failure" as const },
+    ]);
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("failure");
+  });
+
+  it("refuses a list it cannot read to the end instead of judging by part of it", async () => {
+    const a = adapter();
+    await open(a);
+    for (let i = 0; i < 5001; i++)
+      github.addReview(1, { user: `ann${i}`, state: "APPROVED" });
+    await expect(a.getPullRequest({ repo, number: 1 })).rejects.toBeInstanceOf(
+      HostError,
+    );
+  });
+
+  it("stops at the first page that is not full: a short list is one request", async () => {
+    const a = adapter();
+    await open(a);
+    for (let i = 0; i < 3; i++)
+      github.addReview(1, { user: `ann${i}`, state: "APPROVED" });
+    const before = github.requests.length;
+    await a.getPullRequest({ repo, number: 1 });
+    expect(
+      github.requests.slice(before).filter((r) => r.includes("/reviews")),
+    ).toHaveLength(1);
+  });
+
   it("uses conditional requests: a second look at an unchanged pull request is answered 304 and still complete", async () => {
     const a = adapter();
     const { headSha } = await open(a);
@@ -146,6 +192,33 @@ describe("getPullRequest", () => {
     const second = await a.getPullRequest({ repo, number: 1 });
     expect(second).toEqual(first);
     expect(github.notModified - before).toBe(4); // pull, reviews, check runs, status
+  });
+
+  it("keeps a bounded number of responses: the one used longest ago is forgotten first", async () => {
+    const a = createGitHubAdapter({
+      apiUrl: github.url,
+      tokens: createAppTokenSource({
+        credentials: { appId: "1", installationId: "2", privateKey },
+        apiUrl: github.url,
+      }),
+      maxCachedResponses: 4, // one pull request is four responses
+    });
+    await open(a);
+    await a.openPullRequest({
+      repo,
+      head: "spec/s-2",
+      base: "main",
+      title: "S-2",
+      body: "Spec: S-2",
+    });
+    await a.getPullRequest({ repo, number: 1 });
+    await a.getPullRequest({ repo, number: 2 });
+    let before = github.notModified;
+    await a.getPullRequest({ repo, number: 2 });
+    expect(github.notModified - before).toBe(4);
+    before = github.notModified;
+    await a.getPullRequest({ repo, number: 1 });
+    expect(github.notModified - before).toBe(0);
   });
 
   it("sees a change after a 304 run", async () => {
