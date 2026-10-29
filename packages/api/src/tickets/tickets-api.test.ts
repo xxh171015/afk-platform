@@ -276,6 +276,10 @@ describe("allow-paths", () => {
       status: 200,
       body: { allowed: [".github/CODEOWNERS"] },
     });
+    const view = await call("GET", "/tickets/1");
+    expect(view.body.ticket.allowedProtectedPaths).toEqual([
+      ".github/CODEOWNERS",
+    ]);
     expect(await row(1)).toMatchObject({
       state: "blocked", // approving does not run it; a person retries
       allowed_protected_paths: [".github/CODEOWNERS"],

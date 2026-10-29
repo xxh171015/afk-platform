@@ -339,9 +339,13 @@ describe("plat", () => {
     expect(allowed).toEqual({
       code: 0,
       stdout:
-        "approved for T-1: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json; retry it with: plat ticket retry T-1\n",
+        "approved for T-1: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json; retry it with: plat ticket retry T-1 --mode continue|restart\n",
       stderr: "",
     });
+    const viewed = await plat("ticket", "view", "T-1");
+    expect(viewed.stdout).toContain(
+      "approved protected paths: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json",
+    );
     await plat("ticket", "retry", "T-1", "--mode", "restart"); // now it is queued, not blocked
     expect((await plat("ticket", "allow-path", "T-1", "x")).stderr).toMatch(
       /only a blocked ticket/,

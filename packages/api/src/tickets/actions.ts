@@ -149,7 +149,7 @@ export async function approveProtected(
 }
 
 // For any blocked ticket: more paths are added to its approved ones, for the next run. The ticket stays blocked;
-// a retry is a separate decision. The paths are checked like the file's `protected_paths_ok`: non-empty text.
+// a retry is a separate decision. (The route checks the paths like the import's `protected_paths_ok`: non-empty text.)
 export async function allowPaths(
   pool: pg.Pool,
   ticketId: number,

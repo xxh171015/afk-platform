@@ -320,7 +320,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (!data) throw failureFrom(response, error);
       print(
         data,
-        `approved for ${id}: ${data.allowed.join(", ")}; retry it with: plat ticket retry ${id}`,
+        `approved for ${id}: ${data.allowed.join(", ")}; retry it with: plat ticket retry ${id} --mode continue|restart`,
       );
     });
   ticketCommands

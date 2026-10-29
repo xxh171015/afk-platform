@@ -68,7 +68,7 @@ _Avoid_: CI、检查
 agent 不允许改动的路径，改了就需要人批准。
 
 **Approved protected path（已批准的保护路径）**：
-人在确认拆分时为某张 Ticket 提前批准可以改动的保护路径；只对这张 Ticket 有效，其余保护路径仍然不许改。
+人在确认拆分时为某张 Ticket 提前批准可以改动的保护路径；Ticket 被阻塞后，也可以在重试前追加；只对这张 Ticket 有效，其余保护路径仍然不许改。
 _Avoid_: 白名单、豁免路径
 
 **Blocked reason（blocked 原因码）**：

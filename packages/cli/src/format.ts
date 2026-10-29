@@ -95,6 +95,7 @@ export function blockedText(queue: {
 export function ticketText(view: {
   ticket: TicketLike & {
     acceptanceCriteria: string[];
+    allowedProtectedPaths: string[];
     fixCounts: Record<string, number>;
     contentVersion: number;
   };
@@ -116,6 +117,9 @@ export function ticketText(view: {
     ...briefLines(ticket.brief),
     "acceptance:",
     ...ticket.acceptanceCriteria.map((c) => `  - ${c}`),
+    ...(ticket.allowedProtectedPaths.length
+      ? [`approved protected paths: ${ticket.allowedProtectedPaths.join(", ")}`]
+      : []),
     ...(view.upstream.length
       ? [
           "waits for:",
