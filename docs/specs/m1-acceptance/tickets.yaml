@@ -1,7 +1,7 @@
 # M1 验收需求：订单备注（试点仓库 afk-pilot-backend）
-# 用 `plat tickets import <S-xx> tickets.yaml` 导入。格式见 docs/design.md「plat CLI 与票的导入」。
+# 用 `plat tickets import S-1 tickets.yaml` 导入（建在新库里的第一个需求是 S-1；换了编号就同步改下面的 spec）。格式见 docs/design.md「plat CLI 与票的导入」。
 # 有意覆盖：已批准的保护路径、契约 SHA、依赖链、模块重叠告警（票 4 与票 2/3/5、票 3 与票 5）、并行。
-spec: S-M1-ACCEPT
+spec: S-1
 tickets:
   - key: contract
     repo: backend
