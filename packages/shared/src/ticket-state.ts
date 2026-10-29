@@ -36,7 +36,9 @@ export type TicketEvent =
   | { type: "retry" }
   // A person accepts the protected path changes of a blocked ticket: it goes on from the gate.
   | { type: "approve-protected" }
-  | { type: "cancel" };
+  | { type: "cancel" }
+  // The whole spec is cancelled: every ticket that has not finished goes with it, even one under way.
+  | { type: "spec-cancelled" };
 
 type PlainState = Exclude<TicketState, "blocked">;
 
@@ -48,15 +50,24 @@ export type TicketTransition =
 const TRANSITIONS: Partial<
   Record<TicketState, Partial<Record<TicketEvent["type"], PlainState>>>
 > = {
-  pending: { enqueue: "queued", cancel: "cancelled" },
-  queued: { claim: "running" },
-  running: { "checks-passed": "merging" },
+  pending: {
+    enqueue: "queued",
+    cancel: "cancelled",
+    "spec-cancelled": "cancelled",
+  },
+  queued: { claim: "running", "spec-cancelled": "cancelled" },
+  running: { "checks-passed": "merging", "spec-cancelled": "cancelled" },
   blocked: {
     retry: "pending",
     "approve-protected": "running",
     cancel: "cancelled",
+    "spec-cancelled": "cancelled",
   },
-  merging: { "merge-succeeded": "done", "merge-fix-needed": "running" },
+  merging: {
+    "merge-succeeded": "done",
+    "merge-fix-needed": "running",
+    "spec-cancelled": "cancelled",
+  },
 };
 
 const FROM_RUNNING: TicketState[] = ["running"];

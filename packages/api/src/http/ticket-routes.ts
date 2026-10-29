@@ -6,6 +6,7 @@ import { retryFinalization } from "../finalize/finalize.ts";
 import {
   allowPaths,
   approveProtected,
+  cancelSpec,
   cancelTicket,
   resumeSpec,
   retryTicket,
@@ -358,6 +359,23 @@ const resumeRoute = createRoute({
   },
 });
 
+const cancelSpecRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/cancel",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The spec is cancelled, with the tickets that went with it",
+      z.object({
+        state: z.enum(SPEC_STATES),
+        cancelled: z.array(z.string()),
+      }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is merged or already cancelled", ErrorReply),
+  },
+});
+
 const retryFinalRoute = createRoute({
   method: "post",
   path: "/specs/{id}/final/retry",
@@ -464,6 +482,15 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(cancelSpecRoute, async (c) => {
+    const result = await cancelSpec(pool, c.req.valid("param").id);
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state, cancelled: result.cancelled }, 200);
   });
 
   app.openapi(retryFinalRoute, async (c) => {

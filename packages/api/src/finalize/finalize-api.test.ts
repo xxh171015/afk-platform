@@ -194,11 +194,11 @@ describe("when the overall review starts", () => {
     expect(await spec()).toBe("finalizing"); // a cancelled, b done
   });
 
-  it("does not finalize a spec in which nothing got done", async () => {
+  it("does not finalize a spec in which nothing got done: it is cancelled", async () => {
     await runningSpec([ticket("a")]);
     await step("implement", { outcome: "agent-gave-up" });
     await call("POST", "/tickets/1/cancel", { cascade: false });
-    expect(await spec()).toBe("running");
+    expect(await spec()).toBe("cancelled");
     expect(await fin()).toEqual([]);
   });
 });

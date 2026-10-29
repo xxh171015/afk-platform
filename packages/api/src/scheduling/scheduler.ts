@@ -10,7 +10,10 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
-import { startFinalization } from "../finalize/start.ts";
+import {
+  cancelIfAllTicketsCancelled,
+  startFinalization,
+} from "../finalize/start.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
@@ -148,7 +151,9 @@ export async function schedulePass(
   );
   const row = spec.rows[0];
   if (row?.state !== "running") return none;
-  // Nothing left to run: the spec moves on to its overall review instead of being scheduled.
+  // Nothing left to run: the spec moves on to its overall review instead of being scheduled, or, when every
+  // ticket was cancelled, is cancelled itself.
+  if (await cancelIfAllTicketsCancelled(client, specId)) return none;
   if (await startFinalization(client, specId)) return none;
 
   // Concurrency is counted across the project's specs, so passes of different specs must not interleave

@@ -75,7 +75,11 @@ async function finalizations(
   params: unknown[],
 ): Promise<FinalizationSummary[]> {
   const { rows } = await pool.query(
-    `SELECT f.spec_id, f.step, f.state, f.blocked_reason, r.role FROM finalizations f JOIN repos r ON r.id = f.repo_id
+    // A review that was not finished when its spec was cancelled is cancelled with it, whatever it was waiting for.
+    `SELECT f.spec_id, f.step, r.role,
+            CASE WHEN f.state <> 'done' AND s.state = 'cancelled' THEN 'cancelled' ELSE f.state END AS state,
+            CASE WHEN s.state = 'cancelled' THEN NULL ELSE f.blocked_reason END AS blocked_reason
+     FROM finalizations f JOIN repos r ON r.id = f.repo_id JOIN specs s ON s.id = f.spec_id
      WHERE ${where} ORDER BY f.id`,
     params,
   );
@@ -366,7 +370,8 @@ export async function search(pool: pg.Pool, text: string) {
   };
 }
 
-// Everything waiting for a person: tickets that are blocked and specs that the platform paused.
+// Everything waiting for a person: tickets that are blocked, blocked steps of an overall review, and specs that the
+// platform paused. A cancelled spec waits for no one.
 export async function blockedQueue(pool: pg.Pool) {
   const tickets = await summaries(pool, "t.state = 'blocked'", []);
   const specs = await pool.query(
@@ -374,7 +379,11 @@ export async function blockedQueue(pool: pg.Pool) {
   );
   return {
     tickets,
-    finalizations: await finalizations(pool, "f.state = 'blocked'", []),
+    finalizations: await finalizations(
+      pool,
+      "f.state = 'blocked' AND f.spec_id NOT IN (SELECT id FROM specs WHERE state = 'cancelled')",
+      [],
+    ),
     specs: specs.rows.map((s) => ({
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),

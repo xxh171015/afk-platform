@@ -24,6 +24,8 @@ This repo is the project's `backend` repo (`repo: backend` in the ticket file). 
 - **Unblock**: `plat ticket retry T-8`, `plat ticket approve-protected T-8` (only after the gate found a
   protected-path change), `plat ticket allow-path T-8 .github/CODEOWNERS` (a blocked ticket that needs a protected path
   the file did not approve; then retry it), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the top level.
+  To give up a whole spec, `plat spec cancel S-7` cancels its unfinished tickets and stops its jobs (a spec whose tickets
+  are all cancelled is cancelled by itself).
 
 Numbers are global and are never reused, and a failed `spec create` may still take one. Always use the number the
 command printed.

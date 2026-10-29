@@ -405,6 +405,31 @@ describe("plat", () => {
     );
   });
 
+  it("cancels a spec: its tickets go with it, spec show says cancelled, and a second cancel is refused", async () => {
+    await register();
+    files["tickets.yaml"] = TICKETS_YAML;
+    await plat("tickets", "import", "S-1", "tickets.yaml");
+    await plat("spec", "confirm", "S-1");
+    const cancelled = await plat("spec", "cancel", "S-1");
+    expect(cancelled).toEqual({
+      code: 0,
+      stdout: "S-1 is cancelled; cancelled T-1, T-2, T-3, T-4\n",
+      stderr: "",
+    });
+    const shown = await plat("spec", "show", "S-1");
+    expect(shown.stdout).toMatch(/^S-1 {2}cancelled /);
+    expect(shown.stdout).toMatch(/T-1 {2}cancelled/);
+    expect((await plat("spec", "cancel", "S-1")).stderr).toMatch(
+      /not allowed in cancelled/,
+    );
+    expect((await plat("spec", "cancel", "S-99")).stderr).toMatch(
+      /no such spec/,
+    );
+    expect((await plat("spec", "cancel", "T-1")).stderr).toMatch(
+      /not a spec id/,
+    );
+  });
+
   it("retries, cancels and approves, and refuses what does not apply", async () => {
     await blockedContract();
     expect((await plat("ticket", "approve-protected", "T-1")).stderr).toMatch(

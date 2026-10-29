@@ -294,6 +294,22 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `${id} is ${data.state}`);
     });
 
+  spec
+    .command("cancel <spec>")
+    .description(
+      "give up a spec: its unfinished tickets are cancelled and its jobs stopped (merged work stays)",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST("/specs/{id}/cancel", {
+        params: { path: { id: specIdOf(id) } },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `${id} is ${data.state}${data.cancelled.length ? `; cancelled ${data.cancelled.join(", ")}` : ""}`,
+      );
+    });
+
   const ticketCommands = program.command("ticket").description("tickets");
   ticketCommands
     .command("view <ticket>")

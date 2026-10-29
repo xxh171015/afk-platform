@@ -449,6 +449,188 @@ describe("cancel", () => {
   });
 });
 
+describe("cancelling a spec", () => {
+  const specState = async () =>
+    (await db.pool.query("SELECT state FROM specs")).rows[0].state;
+  const openJobs = async () =>
+    Number(
+      (
+        await db.pool.query(
+          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running')",
+        )
+      ).rows[0].n,
+    );
+
+  it("cancels every unfinished ticket, stops the jobs, and the scheduler hands out nothing more", async () => {
+    const specId = await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c"),
+    ]);
+    const held = (await worker.claim()).body.job as Claimed; // a is under way, c is queued
+    expect(await openJobs()).toBe(2);
+
+    const result = await call("POST", `/specs/${specId}/cancel`);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      state: "cancelled",
+      cancelled: ["T-1", "T-2", "T-3"],
+    });
+    expect(await states()).toEqual([
+      "1:cancelled",
+      "2:cancelled",
+      "3:cancelled",
+    ]);
+    expect(await specState()).toBe("cancelled");
+    expect(await openJobs()).toBe(0);
+    expect((await worker.claim()).body.job).toBeNull();
+
+    // the worker that still holds a's job is told it no longer does, and its result changes nothing
+    expect(
+      (
+        await worker.complete(held.id, held.attempt, {
+          stage: "implement",
+          ...DONE,
+        })
+      ).status,
+    ).toBe(409);
+    expect(await states()).toEqual([
+      "1:cancelled",
+      "2:cancelled",
+      "3:cancelled",
+    ]);
+    const run = await db.pool.query(
+      "SELECT result, finished_at FROM runs WHERE job_id = $1",
+      [held.id],
+    );
+    expect(run.rows[0].result).toBe("cancelled");
+    expect(run.rows[0].finished_at).not.toBeNull();
+  });
+
+  it("leaves a done ticket as it is", async () => {
+    const specId = await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+    ]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    const result = await call("POST", `/specs/${specId}/cancel`);
+    expect(result.body.cancelled).toEqual(["T-2"]);
+    expect(await states()).toEqual(["1:done", "2:cancelled"]);
+  });
+
+  it("works for a draft spec too", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const draft = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "d",
+      title: "Draft",
+    });
+    expect((await call("POST", `/specs/${draft.body.id}/cancel`)).status).toBe(
+      200,
+    );
+    expect(await specState()).toBe("cancelled");
+  });
+
+  it("refuses a spec that is merged or already cancelled, and an unknown one", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    expect((await call("POST", `/specs/${specId}/cancel`)).status).toBe(200);
+    const again = await call("POST", `/specs/${specId}/cancel`);
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/not allowed in cancelled/);
+    await db.pool.query("UPDATE specs SET state = 'merged'");
+    expect((await call("POST", `/specs/${specId}/cancel`)).status).toBe(409);
+    expect((await call("POST", "/specs/99/cancel")).status).toBe(404);
+  });
+
+  it("no longer lists its tickets or blocked finalizations among what waits for a person", async () => {
+    const specId = await runningSpec([ticket("a"), ticket("b")]);
+    await stage("implement", GAVE_UP);
+    expect((await call("GET", "/blocked")).body.tickets).toHaveLength(1);
+    await call("POST", `/specs/${specId}/cancel`);
+    const blocked = (await call("GET", "/blocked")).body;
+    expect(blocked.tickets).toEqual([]);
+    expect(blocked.specs).toEqual([]);
+  });
+});
+
+describe("cancelling a spec in its overall review", () => {
+  it("takes its blocked finalizations off the list of what waits for a person", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id, step, state, blocked_reason) VALUES ($1, 1, 'final-review', 'blocked', 'job-failed')",
+      [specId],
+    );
+    expect((await call("GET", "/blocked")).body.finalizations).toHaveLength(1);
+    expect((await call("POST", `/specs/${specId}/cancel`)).status).toBe(200);
+    expect((await call("GET", "/blocked")).body.finalizations).toEqual([]);
+  });
+
+  it("shows its unfinished overall review as cancelled, and a finished one as it was", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id, step, state, blocked_reason) VALUES ($1, 1, 'final-review', 'blocked', 'job-failed')",
+      [specId],
+    );
+    await call("POST", `/specs/${specId}/cancel`);
+    const view = (await call("GET", `/specs/${specId}`)).body;
+    expect(view.finalizations).toMatchObject([
+      {
+        step: "final-review",
+        state: "cancelled",
+        blockedReason: null,
+        brief: null,
+      },
+    ]);
+    await db.pool.query(
+      "UPDATE finalizations SET state = 'done', blocked_reason = NULL",
+    );
+    const done = (await call("GET", `/specs/${specId}`)).body;
+    expect(done.finalizations[0].state).toBe("done");
+  });
+});
+
+describe("a spec whose tickets are all cancelled", () => {
+  const specState = async () =>
+    (await db.pool.query("SELECT state FROM specs")).rows[0].state;
+
+  it("is cancelled itself, instead of staying running for ever", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    expect(await specState()).toBe("running");
+    await call("POST", "/tickets/1/cancel", { cascade: false });
+    expect(await specState()).toBe("cancelled");
+  });
+
+  it("is cancelled when the last of several tickets is cancelled", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await stage("implement", GAVE_UP);
+    await call("POST", "/tickets/1/cancel", { cascade: false });
+    expect(await specState()).toBe("running"); // b waits blocked (upstream-cancelled)
+    await call("POST", "/tickets/2/cancel", { cascade: false });
+    expect(await specState()).toBe("cancelled");
+  });
+
+  it("goes on to its overall review when some of its tickets are done", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    await db.pool.query(
+      "UPDATE jobs SET state = 'done' WHERE (payload->>'ticketId')::int = 1",
+    );
+    await stage("implement", GAVE_UP); // b
+    await call("POST", "/tickets/2/cancel", { cascade: false });
+    expect(await specState()).toBe("finalizing");
+  });
+});
+
 describe("resuming a paused spec", () => {
   async function pausedSpec() {
     const specId = await runningSpec([ticket("a"), ticket("b")]);

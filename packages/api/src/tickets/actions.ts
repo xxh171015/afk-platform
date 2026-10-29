@@ -274,6 +274,23 @@ export async function cancelTicket(
   });
 }
 
+// The spec's state once its lock is held, so it cannot change under the caller; undefined for an unknown spec.
+async function lockedSpecState(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<SpecState | undefined> {
+  const found = await client.query("SELECT 1 FROM specs WHERE id = $1", [
+    specId,
+  ]);
+  if (!found.rows[0]) return undefined;
+  await lockSpec(client, specId);
+  const current = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  return current.rows[0]?.state;
+}
+
 // A spec the platform paused (its agent time ran out) goes on after a person says how much more it may use.
 export async function resumeSpec(
   pool: pg.Pool,
@@ -281,17 +298,9 @@ export async function resumeSpec(
   extraSeconds: number,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return inTransaction(pool, async (client) => {
-    const spec = await client.query<{ state: SpecState }>(
-      "SELECT state FROM specs WHERE id = $1",
-      [specId],
-    );
-    if (!spec.rows[0]) return { status: "no-ticket" };
-    await lockSpec(client, specId);
-    const current = await client.query<{ state: SpecState }>(
-      "SELECT state FROM specs WHERE id = $1",
-      [specId],
-    );
-    const next = specTransition(current.rows[0]?.state as SpecState, "resume");
+    const state = await lockedSpecState(client, specId);
+    if (!state) return { status: "no-ticket" };
+    const next = specTransition(state, "resume");
     if (!next.ok) return refused(next.reason);
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
@@ -303,5 +312,59 @@ export async function resumeSpec(
       [specId],
     );
     return { status: "ok", state: after.rows[0]?.state as SpecState };
+  });
+}
+
+// The whole spec is given up. Every ticket that has not finished is cancelled (one under way too), the jobs of the
+// spec are failed so nothing more is claimed and a worker still holding one learns on its next call that it no
+// longer does, and their Runs are closed. Done tickets and what was already merged stay as they are.
+export async function cancelSpec(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState; cancelled: string[] }>> {
+  return inTransaction(pool, async (client) => {
+    const state = await lockedSpecState(client, specId);
+    if (!state) return { status: "no-ticket" };
+    const next = specTransition(state, "cancel");
+    if (!next.ok)
+      return refused(`${next.reason}: a merged or cancelled spec is final`);
+    await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+      specId,
+      next.state,
+    ]);
+
+    const tickets = await client.query<{ id: number; state: TicketState }>(
+      "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",
+      [specId],
+    );
+    const cancelled: number[] = [];
+    for (const ticket of tickets.rows) {
+      if (ticketTransition(ticket.state, { type: "spec-cancelled" }).ok)
+        cancelled.push(ticket.id);
+    }
+    if (cancelled.length > 0) {
+      await client.query(
+        "UPDATE tickets SET state = 'cancelled', blocked_reason = NULL WHERE id = ANY($1)",
+        [cancelled],
+      );
+    }
+    // Every kind of job names its spec in the payload: stages, final steps, open-pr.
+    await client.query(
+      `UPDATE jobs SET state = 'failed', error = 'the spec was cancelled', lease_owner = NULL, lease_expires_at = NULL
+       WHERE state IN ('queued', 'running') AND (payload->>'specId')::int = $1`,
+      [specId],
+    );
+    await client.query(
+      `UPDATE runs SET finished_at = now(), result = 'cancelled',
+         duration_ms = LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int,
+         output = jsonb_build_object('error', 'the spec was cancelled')
+       WHERE spec_id = $1 AND finished_at IS NULL`,
+      [specId],
+    );
+    return {
+      status: "ok",
+      state: next.state,
+      cancelled: cancelled.map((id) => formatDisplayId("ticket", id)),
+    };
   });
 }

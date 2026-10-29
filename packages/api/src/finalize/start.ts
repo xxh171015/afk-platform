@@ -1,6 +1,20 @@
-import { specTransition } from "@afk/shared";
+import { type SpecEvent, specTransition } from "@afk/shared";
 import type pg from "pg";
 import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
+
+// A running spec takes the event; called with the spec locked.
+async function moveRunningSpec(
+  client: pg.PoolClient,
+  specId: number,
+  event: SpecEvent,
+): Promise<void> {
+  const next = specTransition("running", event);
+  if (!next.ok) throw new Error(next.reason);
+  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+    specId,
+    next.state,
+  ]);
+}
 
 // When the last ticket of a running spec is done, the spec moves to finalizing and every repo it touched gets
 // its overall review queued. Called by the scheduler with the spec locked, so it happens exactly once.
@@ -18,12 +32,7 @@ export async function startFinalization(
   const { open, done } = counts.rows[0] as { open: string; done: string };
   if (Number(open) > 0 || Number(done) === 0) return false;
 
-  const next = specTransition("running", "all-tickets-done");
-  if (!next.ok) throw new Error(next.reason);
-  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
-    specId,
-    next.state,
-  ]);
+  await moveRunningSpec(client, specId, "all-tickets-done");
 
   const repos = await client.query<{ repo_id: number }>(
     "SELECT DISTINCT repo_id FROM tickets WHERE spec_id = $1 AND state = 'done' ORDER BY repo_id",
@@ -36,5 +45,27 @@ export async function startFinalization(
     );
     await enqueueFinalJob(client, { specId, repoId }, "final-review");
   }
+  return true;
+}
+
+// A running spec whose tickets are all cancelled, with none done, has nothing to review or merge: it is cancelled
+// too, instead of staying running for ever. Called by the scheduler with the spec locked, before startFinalization.
+export async function cancelIfAllTicketsCancelled(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<boolean> {
+  const counts = await client.query<{ cancelled: string; other: string }>(
+    `SELECT count(*) FILTER (WHERE state = 'cancelled') AS cancelled,
+            count(*) FILTER (WHERE state <> 'cancelled') AS other
+     FROM tickets WHERE spec_id = $1`,
+    [specId],
+  );
+  const { cancelled, other } = counts.rows[0] as {
+    cancelled: string;
+    other: string;
+  };
+  if (Number(other) > 0 || Number(cancelled) === 0) return false;
+
+  await moveRunningSpec(client, specId, "cancel");
   return true;
 }

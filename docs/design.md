@@ -223,7 +223,7 @@ erDiagram
 
 状态机：
 
-- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled；update-branch 失败时自动 paused，并进入 blocked 队列。
+- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的留着；已 merged 的不能取消；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
 - **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。running 内部的阶段（implement、门禁、review、fix）记在 Run 上，不拆成票的状态。
 - **能不能开工实时计算，不存成状态**：只有 pending 是存下来的状态，“可开工”（runnable）由调度器每次算：票是 pending、所有入边都满足、没超并发和预算上限。这样就不会出现“标了可开工、其实还被挡着”的情况。
 
@@ -956,6 +956,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat ticket approve-protected T-123`              | 批准保护路径改动                            |
 | `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |
 | `plat ticket cancel T-123 [--cascade]`             | 取消，可选一并取消下游                      |
+| `plat spec cancel S-12`                            | 取消整个 spec（没做完的票、作业一并停掉）   |
 | `plat blocked`                                     | 列出待处理的 blocked 票和 paused 的 spec    |
 | `plat context --files a.ts b.ts`                   | 缺陷回流时查上下文                          |
 

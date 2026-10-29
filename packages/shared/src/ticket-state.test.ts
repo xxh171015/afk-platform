@@ -75,6 +75,25 @@ describe("ticketTransition: blocked, retry, cancel", () => {
   });
 });
 
+describe("ticketTransition: the spec is cancelled", () => {
+  it.each(["pending", "queued", "running", "merging", "blocked"] as const)(
+    "a ticket that is %s is cancelled with its spec",
+    (from) => {
+      expect(ticketTransition(from, { type: "spec-cancelled" })).toEqual({
+        ok: true,
+        state: "cancelled",
+      });
+    },
+  );
+
+  it.each(["done", "cancelled"] as const)(
+    "a %s ticket stays as it is",
+    (from) => {
+      expect(ticketTransition(from, { type: "spec-cancelled" }).ok).toBe(false);
+    },
+  );
+});
+
 describe("ticketTransition: illegal moves", () => {
   it.each([
     ["pending", { type: "claim" }],
