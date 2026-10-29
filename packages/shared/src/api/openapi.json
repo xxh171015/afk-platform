@@ -1373,6 +1373,9 @@
                     "integrationBranch": {
                       "type": ["string", "null"]
                     },
+                    "agentBranch": {
+                      "type": "string"
+                    },
                     "protectedPaths": {
                       "type": "array",
                       "items": {
@@ -1440,6 +1443,7 @@
                     "spec",
                     "repo",
                     "integrationBranch",
+                    "agentBranch",
                     "protectedPaths",
                     "allowedProtectedPaths",
                     "contract",

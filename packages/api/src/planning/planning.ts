@@ -148,7 +148,8 @@ export async function createSpec(
   if (project.rowCount === 0) return { status: "no-project" };
   try {
     const { rows } = await pool.query(
-      `INSERT INTO specs (project_id, type, slug, title, body) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace)
+       SELECT $1, $2, $3, $4, $5, id FROM instance RETURNING id`,
       [spec.projectId, spec.type, spec.slug, spec.title, spec.body ?? ""],
     );
     const id = rows[0].id as number;

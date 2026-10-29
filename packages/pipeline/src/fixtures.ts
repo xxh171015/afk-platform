@@ -38,6 +38,7 @@ export function bundleFor(
       defaultBranch: "main",
     },
     integrationBranch: "spec/order-export",
+    agentBranch: "agent/T-123",
     protectedPaths: ["openapi/**", ".github/"],
     allowedProtectedPaths: [],
     contract: null,

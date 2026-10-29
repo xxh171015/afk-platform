@@ -199,6 +199,34 @@ describe("a spec-cleanup task", () => {
     ).resolves.toMatchObject({ closed: [5] });
   });
 
+  it("deletes the branches of a spec that carries its database's id, and refuses a look-alike", async () => {
+    const adapter = recorder();
+    const lines: string[] = [];
+    const repoUrl = "https://github.com/me/pilot.git";
+    await runHostTask(
+      { adapter, repoRef: ref },
+      cleanup({
+        pulls: [],
+        branches: [
+          { repoUrl, branch: "spec/a1b2c3/export" },
+          { repoUrl, branch: "agent/a1b2c3/T-1" },
+          { repoUrl, branch: "agent/a1b2c3/S-1-final" },
+          { repoUrl, branch: "agent/a1b2/T-1" },
+          { repoUrl, branch: "release/a1b2c3/T-1" },
+        ],
+      }),
+      (line) => lines.push(line),
+    );
+    expect(adapter.calls).toEqual([
+      "delete spec/a1b2c3/export",
+      "delete agent/a1b2c3/T-1",
+      "delete agent/a1b2c3/S-1-final",
+    ]);
+    expect(lines.filter((l) => /not a branch of a spec/.test(l))).toHaveLength(
+      2,
+    );
+  });
+
   it("deletes only branches a spec makes, whatever the task says", async () => {
     const adapter = recorder();
     const lines: string[] = [];

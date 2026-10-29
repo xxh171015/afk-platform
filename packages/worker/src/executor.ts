@@ -89,10 +89,9 @@ const runIdOf = (bundle: Bundle): string => {
   return bundle.run.displayId;
 };
 
-// The branch a stage works on: a ticket's own, or the one the overall fix of a spec is made on.
+// The label of what a stage works on (its gate branch is named after it): a ticket, or the overall fix of a spec.
 const subjectLabel = (bundle: Bundle) =>
   bundle.ticket?.displayId ?? `${bundle.spec.displayId}-final`;
-const agentRef = (bundle: Bundle) => `agent/${subjectLabel(bundle)}`;
 const successful = new Set(["done", "passed", "pass", "merged"]);
 export const isSuccess = (body: StageOutcomeBody) =>
   successful.has(body.outcome);
@@ -118,7 +117,7 @@ export async function executeStage(
     jobId: context.job.id,
     attempt: context.job.attempt,
     repo: bundle.repo.role,
-    ref: agentRef(bundle),
+    ref: bundle.agentBranch,
     integration: bundle.integrationBranch as string,
   });
   if (!slot) throw new NoFreeSlotError("no free slot");
@@ -184,7 +183,7 @@ async function runStage(
   // What origin still has under that name is replaced at the push, under a lease on the tip it had.
   let replaced: string | undefined;
   if (bundle.job.stage === "implement" && bundle.ticket?.restart) {
-    const ref = `refs/heads/${agentRef(bundle)}`;
+    const ref = `refs/heads/${bundle.agentBranch}`;
     // The lease is on what origin has, which the main clone may not have fetched.
     const onOrigin = git(mainDir, ["ls-remote", "origin", ref])
       .stdout.split("\t")[0]
@@ -193,9 +192,9 @@ async function runStage(
       onOrigin || (hasRef(mainDir, ref) ? tip(mainDir, ref) : undefined);
     if (hasRef(mainDir, ref)) gitOrThrow(mainDir, ["update-ref", "-d", ref]);
     if (replaced)
-      context.log(`restart: dropped ${agentRef(bundle)} (was ${replaced})`);
+      context.log(`restart: dropped ${bundle.agentBranch} (was ${replaced})`);
   }
-  bringBranches(slot, mainDir, [integration, agentRef(bundle)]);
+  bringBranches(slot, mainDir, [integration, bundle.agentBranch]);
   switch (bundle.job.stage) {
     case "implement":
     case "gate-fix":
@@ -234,7 +233,7 @@ function renderFor(
     run: {
       runId: runIdOf(bundle),
       baseSha,
-      branch: agentRef(bundle),
+      branch: bundle.agentBranch,
     },
     ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
     ...(bundle.review ? { review: bundle.review } : {}),
@@ -266,7 +265,7 @@ async function agentChange(
     | "review-fix"
     | "merge-fix"
     | "final-fix";
-  const agent = agentRef(bundle);
+  const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   const baseSha = branchBase(mainDir, integration, agent);
   const before = exists(mainDir, agent) ? tip(mainDir, agent) : baseSha;
@@ -381,7 +380,7 @@ async function review(
   slot: Slot,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
-  const agent = agentRef(bundle);
+  const agent = bundle.agentBranch;
   const stage = bundle.job.stage as "review" | "final-review";
   // A ticket is reviewed against where its branch left the integration branch; a whole spec against where the
   // integration branch left the default branch.
@@ -464,7 +463,7 @@ async function gate(
   slot: Slot,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
-  const agent = agentRef(bundle);
+  const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   if (!exists(mainDir, agent))
     throw new InfrastructureError(`${agent} is not there to gate`);
@@ -627,7 +626,7 @@ async function mergeOnce(
   slot: Slot,
 ): Promise<StageOutcomeBody | { integrationMoved: string }> {
   const { bundle, log, job } = context;
-  const agent = agentRef(bundle);
+  const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
   const stage = bundle.job.stage as "merge" | "final-merge";

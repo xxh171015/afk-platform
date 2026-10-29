@@ -124,15 +124,20 @@ async function workUntilMerged(worker: FakeWorker) {
   throw new Error("no ticket was merged");
 }
 
+const instanceId = async () =>
+  (await db.pool.query<{ id: string }>("SELECT id FROM instance")).rows[0]?.id;
+
 describe("confirming the split", () => {
   it("runs the spec, names one integration branch per repo and queues only the tickets that can start", async () => {
     const { specId } = await draftSpec(chain());
     const confirmed = await post(`/specs/${specId}/confirm`);
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.state).toBe("running");
+    // the branch carries this database's id, so another database on the same repository cannot make it too
+    const id = await instanceId();
     expect(confirmed.body.integrationBranches).toEqual([
-      { repoId: 1, branch: "spec/order-export" },
-      { repoId: 2, branch: "spec/order-export" },
+      { repoId: 1, branch: `spec/${id}/order-export` },
+      { repoId: 2, branch: `spec/${id}/order-export` },
     ]);
     expect(confirmed.body.enqueued).toMatchObject([
       { ticketId: 1, displayId: "T-1" },
@@ -166,6 +171,18 @@ describe("confirming the split", () => {
     ]);
   });
 
+  it("keeps the flat branch name for a spec that was made before the databases had ids", async () => {
+    const { specId } = await draftSpec(chain());
+    await db.pool.query(
+      "UPDATE specs SET branch_namespace = NULL WHERE id = $1",
+      [specId],
+    );
+    const confirmed = await post(`/specs/${specId}/confirm`);
+    expect(confirmed.body.integrationBranches).toEqual([
+      { repoId: 1, branch: "spec/order-export" },
+      { repoId: 2, branch: "spec/order-export" },
+    ]);
+  });
   it("refuses an unknown spec, a spec without tickets, and a second confirmation", async () => {
     expect((await post("/specs/99/confirm")).status).toBe(404);
     const project = await post("/projects", { name: "p" });

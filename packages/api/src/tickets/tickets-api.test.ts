@@ -900,8 +900,9 @@ describe("what a person sees", () => {
       state: "running",
       pauseReason: null,
     });
+    const id = (await db.pool.query("SELECT id FROM instance")).rows[0].id;
     expect(view.body.spec.integrationBranches).toEqual([
-      { repoId: 1, branch: "spec/s" },
+      { repoId: 1, branch: `spec/${id}/s` },
     ]);
     expect(view.body.spec.warnings).toHaveLength(1); // a and b overlap without a path between them
     expect(

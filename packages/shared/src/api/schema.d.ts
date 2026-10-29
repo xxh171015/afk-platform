@@ -826,6 +826,7 @@ export interface paths {
                 defaultBranch: string;
               };
               integrationBranch: string | null;
+              agentBranch: string;
               protectedPaths: string[];
               allowedProtectedPaths: string[];
               contract: {

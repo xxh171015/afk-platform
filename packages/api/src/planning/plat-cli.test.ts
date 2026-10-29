@@ -161,7 +161,8 @@ describe("plat", () => {
     expect(confirmed.code).toBe(0);
     expect(confirmed.stdout).toContain("S-1 is running");
     expect(confirmed.stdout).toContain("queued T-1");
-    expect(confirmed.stdout).toContain("spec/order-export");
+    const id = (await db.pool.query("SELECT id FROM instance")).rows[0].id;
+    expect(confirmed.stdout).toContain(`spec/${id}/order-export`);
     const again = await plat("spec", "confirm", "S-1");
     expect(again.code).toBe(1);
     expect(again.stderr).toMatch(/not allowed in running/);

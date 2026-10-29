@@ -162,6 +162,8 @@ const Bundle = z.object({
     defaultBranch: z.string(),
   }),
   integrationBranch: z.string().nullable(),
+  // The branch the stage's work is made on: the ticket's own, or the one of the spec's overall fix.
+  agentBranch: z.string(),
   protectedPaths: z.array(z.string()),
   allowedProtectedPaths: z.array(z.string()),
   contract: z

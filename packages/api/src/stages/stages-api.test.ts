@@ -72,6 +72,9 @@ async function runningSpec(
   return spec.body.id;
 }
 
+const instanceId = async () =>
+  (await db.pool.query<{ id: string }>("SELECT id FROM instance")).rows[0]?.id;
+
 interface Claimed {
   id: number;
   type: string;
@@ -725,6 +728,7 @@ describe("the bundle", () => {
     const job = (await worker.claim()).body.job as Claimed;
     const reply = await bundle(job);
     expect(reply.status).toBe(200);
+    const id = await instanceId();
     expect(reply.body).toMatchObject({
       job: { id: job.id, stage: "implement", attempt: 1 },
       ticket: {
@@ -747,7 +751,8 @@ describe("the bundle", () => {
         type: "feature",
       },
       repo: { role: "backend", url: "git@x:backend", defaultBranch: "main" },
-      integrationBranch: "spec/order-export",
+      integrationBranch: `spec/${id}/order-export`,
+      agentBranch: `agent/${id}/T-1`,
       protectedPaths: ["openapi/**", ".github/**"],
       allowedProtectedPaths: ["openapi/openapi.yaml"],
       contract: null,
@@ -794,7 +799,16 @@ describe("the bundle", () => {
       path: "backend:openapi/openapi.yaml",
       repoId: 1,
     });
-    expect(reply.body.integrationBranch).toBe("spec/order-export");
+    expect(reply.body.integrationBranch).toBe(
+      `spec/${await instanceId()}/order-export`,
+    );
+  });
+
+  it("names the ticket's branch with the flat name for a spec that was made before the databases had ids", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE specs SET branch_namespace = NULL");
+    const reply = await bundle((await worker.claim()).body.job as Claimed);
+    expect(reply.body.agentBranch).toBe("agent/T-1");
   });
 
   it("builds a bundle after a project edit from the project's new contract path", async () => {

@@ -91,6 +91,8 @@ A worker that is missing any of these, or cannot reach the API, says what is wro
 
 How a run is carried out comes from the project, per job, not from the worker: `--limit runIdleSeconds=…` (an agent silent for that long is stopped; default 600) and `--limit runWallclockSeconds=…` (a run's total time; default 3600) on `plat project create` or `plat project edit`, and the project's default model (`--default-model` on the same commands; `AFK_MODEL` is what a project without one gets; the Run records the model it used). Cursor's raw event lines go to the run's log (`plat run logs R-…`) with the worker's `CURSOR_API_KEY` replaced by `***`; a line is cut at 16 KB, and a stage uploads at most 8 MB of them. The full stream also stays on the worker, unredacted, under `$AFK_HOME/sandbox-logs/` (keep that folder private: a tool that echoed the key puts it there).
 
+Branch names carry the database's id (six hex digits, made once by the migration, kept in the `instance` table) so that two databases working on one repository never make the same branch: `spec/<id>/<slug>`, `agent/<id>/T-<n>`, `agent/<id>/S-<n>-final`. A spec made before the ids existed keeps `spec/<slug>`, `agent/T-<n>`, `agent/S-<n>-final`. Upgrade the API and its workers together: a worker and an API from before and after this change do not understand each other's bundles.
+
 **A first spec** (`pnpm plat …` talks to `$AFK_API_URL`; add `--json` for machine output)
 
 ```sh

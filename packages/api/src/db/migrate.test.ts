@@ -17,6 +17,7 @@ const ENTITY_TABLES = [
   "finalizations",
   "findings",
   "gate_results",
+  "instance",
   "jobs",
   "projects",
   "pull_requests",
@@ -58,6 +59,69 @@ describe("migrate", () => {
       "SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations",
     );
     expect(again.rows[0].n).toBe(rows[0].n);
+  });
+});
+
+describe("the id of the database", () => {
+  const idOf = async (pool: TestDatabase["pool"]) =>
+    (await pool.query<{ id: string }>("SELECT id FROM instance")).rows;
+
+  it("is made once, six hex digits, by the migration that creates it, and stays through later runs", async () => {
+    await migrate(db.pool);
+    const [first, ...others] = await idOf(db.pool);
+    expect(others).toEqual([]);
+    expect(first?.id).toMatch(/^[0-9a-f]{6}$/);
+    await migrate(db.pool);
+    expect(await idOf(db.pool)).toEqual([first]);
+  });
+
+  it("is not the same in two databases, so their branch names do not meet", async () => {
+    const other = await createTestDatabase();
+    try {
+      await migrate(db.pool);
+      await migrate(other.pool);
+      expect(await idOf(db.pool)).not.toEqual(await idOf(other.pool));
+    } finally {
+      await other.drop();
+    }
+  });
+
+  it("is added to a database that already has specs, and leaves them without one, so their branches keep their names", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      // the migrations as they were before this one
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => e.tag !== "0014_branch_namespace",
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+      await db.pool.query(
+        "INSERT INTO specs (project_id, type, slug, title) VALUES (1, 'feature', 'export', 'Export')",
+      );
+
+      await migrate(db.pool);
+      const specs = await db.pool.query("SELECT branch_namespace FROM specs");
+      expect(specs.rows).toEqual([{ branch_namespace: null }]);
+      expect(await idOf(db.pool)).toHaveLength(1);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+
+  it("cannot get a second row", async () => {
+    await migrate(db.pool);
+    await expect(
+      db.pool.query(
+        "INSERT INTO instance (singleton, id) VALUES (false, 'abcdef')",
+      ),
+    ).rejects.toThrow();
+    await expect(
+      db.pool.query("INSERT INTO instance (id) VALUES ('abcdef')"),
+    ).rejects.toThrow();
   });
 });
 

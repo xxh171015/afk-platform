@@ -1,4 +1,9 @@
-import { formatDisplayId, resolveLimits, type TicketState } from "@afk/shared";
+import {
+  branchNames,
+  formatDisplayId,
+  resolveLimits,
+  type TicketState,
+} from "@afk/shared";
 import type pg from "pg";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 
@@ -42,6 +47,8 @@ export interface Bundle {
   };
   repo: { id: number; role: string; url: string; defaultBranch: string };
   integrationBranch: string | null;
+  // The branch the stage's work is made on: the ticket's own, or the one of the spec's overall fix.
+  agentBranch: string;
   // The project's protected path globs, and the subset of changes to them this ticket may make.
   protectedPaths: string[];
   allowedProtectedPaths: string[];
@@ -99,7 +106,7 @@ export async function buildBundle(
     `SELECT t.id, t.type, t.title, t.body, t.acceptance_criteria, t.modules, t.state, t.content_version,
             t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths,
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
-            s.integration_branches,
+            s.integration_branches, s.branch_namespace,
             r.id AS repo_id, r.role, r.url, r.default_branch,
             p.contract_path, p.protected_paths, p.limits, p.default_model
      FROM tickets t
@@ -183,6 +190,9 @@ export async function buildBundle(
       defaultBranch: row.default_branch,
     },
     integrationBranch,
+    agentBranch: branchNames(row.branch_namespace).ticket(
+      formatDisplayId("ticket", row.id),
+    ),
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: row.allowed_protected_paths,
     contract:
@@ -209,7 +219,8 @@ async function buildFinalBundle(
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
-            s.integration_branches, r.id AS repo_id, r.role, r.url, r.default_branch, p.protected_paths,
+            s.integration_branches, s.branch_namespace, r.id AS repo_id, r.role, r.url, r.default_branch,
+            p.protected_paths,
             p.limits, p.default_model
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
     [final.specId, final.repoId],
@@ -269,6 +280,9 @@ async function buildFinalBundle(
     },
     integrationBranch:
       branches.find((b) => b.repoId === row.repo_id)?.branch ?? null,
+    agentBranch: branchNames(row.branch_namespace).final(
+      formatDisplayId("spec", row.spec_id),
+    ),
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: [],
     contract: null,

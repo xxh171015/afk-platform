@@ -78,7 +78,7 @@ export const SpecSchema = z.object({
   body: z.string(),
   state: z.enum(SPEC_STATES),
   sourceSpecId: IdSchema.optional(),
-  // One integration branch (spec/<slug>) per repo the spec touches.
+  // One integration branch (spec/<id>/<slug>) per repo the spec touches.
   integrationBranches: z
     .array(z.object({ repoId: IdSchema, branch: z.string().min(1) }))
     .default([]),

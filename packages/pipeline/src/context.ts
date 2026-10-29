@@ -9,7 +9,7 @@ import { git } from "./exec.ts";
 export interface RunFacts {
   runId: string; // R-<n>
   baseSha: string; // what the review diffs against
-  branch: string; // agent/<ticket id>
+  branch: string; // agent/<id>/<ticket id>
 }
 
 export interface ContextInput {

@@ -6,6 +6,11 @@ export type {
   paths,
 } from "./api/client.ts";
 export { createApiClient } from "./api/client.ts";
+export {
+  branchNames,
+  isPlatformBranch,
+  parseTicketBranch,
+} from "./branches.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
 export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";

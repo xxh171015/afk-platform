@@ -38,7 +38,7 @@ export interface PullRequestInfo {
 
 export interface OpenPullRequestInput {
   repo: RepoRef;
-  head: string; // the branch with the changes, spec/<slug>
+  head: string; // the branch with the changes, spec/<id>/<slug>
   base: string; // the branch they are meant for
   title: string;
   body: string;

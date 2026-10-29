@@ -144,6 +144,14 @@ describe("acquiring a slot", () => {
     expect(results.filter(Boolean)).toHaveLength(1);
   });
 
+  it("takes the branch of a spec that carries its database's id as a ticket branch too", async () => {
+    const slot = await acquire(manager(), {
+      ...task(1),
+      ref: "agent/a1b2c3/T-1",
+    });
+    expect(slot.dir).toContain(root);
+  });
+
   it("refuses a ref that is not a ticket branch", async () => {
     await expect(
       manager().acquire({ ...task(1), ref: "main" }),
@@ -412,7 +420,7 @@ describe("taking the result back", () => {
     for (const branch of branches) {
       git(slot, ["checkout", "--quiet", "-b", branch]);
       writeFileSync(
-        join(slot, `${branch.replace("/", "-")}.txt`),
+        join(slot, `${branch.replaceAll("/", "-")}.txt`),
         `${branch}\n`,
       );
       git(slot, ["add", "-A"]);
@@ -491,6 +499,21 @@ describe("taking the result back", () => {
     });
     expect(result.extraRefs).toEqual(["refs/tags/v1"]);
     expect(gitOut(main.dir, ["tag"])).toBe("");
+  });
+
+  it("takes back the ticket branch of a spec that carries its database's id, and knows its gate branch", () => {
+    const slotClone = slotWithBranches([
+      "agent/a1b2c3/T-1",
+      "gate/T-1",
+      "agent/a1b2c3/T-2",
+    ]);
+    const result = retrieveResult({
+      slotClone,
+      mainClone: main.dir,
+      ref: "agent/a1b2c3/T-1",
+    });
+    expect(result.fetched).toBe(true);
+    expect(result.extraRefs).toEqual(["refs/heads/agent/a1b2c3/T-2"]);
   });
 
   it("does not call this ticket's gate branch or the default branch extra", () => {

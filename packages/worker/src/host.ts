@@ -4,7 +4,7 @@ import {
   parseRepoUrl,
   type RepoRef,
 } from "@afk/host";
-import type { HostTask } from "@afk/shared";
+import { type HostTask, isPlatformBranch } from "@afk/shared";
 import { InfrastructureError } from "./executor.ts";
 
 // The jobs that talk to the code host. The worker does them because the host's credentials are only here.
@@ -67,12 +67,10 @@ export async function runHostTask(
   return { stage: "host-sync", pulls };
 }
 
-// Only what a spec makes is ever deleted: spec/<slug>, agent/T-<n> and agent/S-<n>-final. The API names the
-// branches; this is the check that a wrong name there cannot reach a default or a release branch.
-const SPEC_BRANCH =
-  /^(spec\/[a-z0-9]+(-[a-z0-9]+)*|agent\/(T-[1-9][0-9]*|S-[1-9][0-9]*-final))$/;
-
-// Closes the spec's open pull requests and deletes its branches. A step that fails does not stop the others (a
+// Closes the spec's open pull requests and deletes its branches. Only what a spec makes is ever deleted
+// (isPlatformBranch: spec/<slug>, agent/T-<n>, agent/S-<n>-final, each with or without the database's id after
+// the first slash): the API names the branches, and this is the check that a wrong name there cannot reach a
+// default or a release branch. A step that fails does not stop the others (a
 // branch that cannot be deleted must not keep a pull request open); the job then fails, is tried again, and
 // everything already done is a no-op the second time.
 async function cleanUp(
@@ -102,7 +100,7 @@ async function cleanUp(
       if (after.state === "closed") closed.push(pull.id);
     });
   for (const { repoUrl, branch } of task.branches) {
-    if (!SPEC_BRANCH.test(branch)) {
+    if (!isPlatformBranch(branch)) {
       log(`${branch} of ${repoUrl} is not a branch of a spec: left alone`);
       continue;
     }

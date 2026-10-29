@@ -1,4 +1,5 @@
 import {
+  branchNames,
   type Capacity,
   formatDisplayId,
   type IncomingEdge,
@@ -68,7 +69,7 @@ export async function inTransaction<T>(
   }
 }
 
-// draft -> planned -> running in one step, one integration branch (spec/<slug>) per repo the spec touches,
+// draft -> planned -> running in one step, one integration branch (spec/<id>/<slug>) per repo the spec touches,
 // then the first scheduling pass.
 export async function confirmSpec(
   pool: pg.Pool,
@@ -76,11 +77,15 @@ export async function confirmSpec(
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      "SELECT slug, state FROM specs WHERE id = $1 FOR UPDATE",
+      "SELECT slug, state, branch_namespace FROM specs WHERE id = $1 FOR UPDATE",
       [specId],
     );
     if (spec.rowCount === 0) return { status: "no-spec" };
-    const { slug, state } = spec.rows[0] as { slug: string; state: SpecState };
+    const { slug, state, branch_namespace } = spec.rows[0] as {
+      slug: string;
+      state: SpecState;
+      branch_namespace: string | null;
+    };
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
       return { status: "not-confirmable", message: planned.reason };
@@ -99,7 +104,7 @@ export async function confirmSpec(
     if (!running.ok) throw new Error(running.reason);
     const integrationBranches = repos.rows.map((row) => ({
       repoId: row.repo_id,
-      branch: `spec/${slug}`,
+      branch: branchNames(branch_namespace).integration(slug),
     }));
     await client.query(
       "UPDATE specs SET state = $2, integration_branches = $3 WHERE id = $1",

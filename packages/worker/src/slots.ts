@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { git, gitOrThrow } from "@afk/pipeline";
+import { parseTicketBranch } from "@afk/shared";
 
 // Slots: every task gets its own throwaway clone of the repo, so whatever an agent breaks, it breaks in its own
 // copy (docs/design.md「Git 操作规范」). The number of slots is the worker's concurrency limit (GLOSSARY: Slot).
@@ -24,7 +25,7 @@ export interface SlotTask {
   jobId: number;
   attempt: number;
   repo: string; // directory name of the repo, e.g. "backend"
-  ref: string; // the ticket's branch, agent/T-123: the only ref that is ever taken back
+  ref: string; // the ticket's branch, agent/<id>/T-123: the only ref that is ever taken back
   integration?: string; // the branch it was made from, put in the slot on purpose: not an extra ref
 }
 
@@ -56,8 +57,6 @@ export interface Slot {
   release(outcome: "success" | "failure"): Promise<void>;
 }
 
-// A ticket's branch, or the one the overall fix of a spec is made on.
-const TICKET_REF = /^agent\/(T-[1-9][0-9]*|S-[1-9][0-9]*-final)$/;
 // A lock file another process is still writing is not a zombie; give it a moment.
 const LOCK_WRITE_GRACE_MS = 5_000;
 
@@ -99,7 +98,7 @@ export class SlotManager {
 
   // A free slot with a fresh clone, or undefined when every slot is busy.
   async acquire(task: SlotTask): Promise<Slot | undefined> {
-    if (!TICKET_REF.test(task.ref))
+    if (!parseTicketBranch(task.ref))
       throw new RangeError(`not a ticket branch: ${task.ref}`);
     for (let index = 0; index < this.options.count; index++) {
       mkdirSync(this.slotDir(index), { recursive: true });
@@ -340,13 +339,13 @@ export function retrieveResult(input: {
   integration?: string; // the branch the ticket was made from, which the slot has on purpose
   log?: (line: string) => void;
 }): RetrieveResult {
-  const match = TICKET_REF.exec(input.ref);
-  if (!match) throw new RangeError(`not a ticket branch: ${input.ref}`);
+  const label = parseTicketBranch(input.ref);
+  if (!label) throw new RangeError(`not a ticket branch: ${input.ref}`);
   const wanted = `refs/heads/${input.ref}`;
   // the platform's own local branches for this ticket are expected; the default branch and remotes are plumbing
   const expected = new Set([
     wanted,
-    `refs/heads/gate/${match[1]}`,
+    `refs/heads/gate/${label}`,
     "refs/heads/main",
     ...(input.integration ? [`refs/heads/${input.integration}`] : []),
   ]);

@@ -1,5 +1,6 @@
 import {
   type BlockedReason,
+  branchNames,
   formatDisplayId,
   type SpecState,
   specTransition,
@@ -110,10 +111,13 @@ export async function buildHostTask(
   if (job.type === "open-pr") {
     const { specId, repoId } = payload as OpenPrPayload;
     const spec = (
-      await pool.query<{ slug: string; title: string }>(
-        "SELECT slug, title FROM specs WHERE id = $1",
-        [specId],
-      )
+      await pool.query<{
+        slug: string;
+        title: string;
+        branch_namespace: string | null;
+      }>("SELECT slug, title, branch_namespace FROM specs WHERE id = $1", [
+        specId,
+      ])
     ).rows[0];
     const repo = (
       await pool.query<{ url: string; default_branch: string }>(
@@ -131,7 +135,7 @@ export async function buildHostTask(
       kind: "open-pr",
       repoUrl: repo.url,
       base: repo.default_branch,
-      head: `spec/${spec.slug}`,
+      head: branchNames(spec.branch_namespace).integration(spec.slug),
       title: `${display} ${spec.title}`,
       body: [
         `Spec: ${display}`,
@@ -172,9 +176,10 @@ async function specCleanupTask(
   { specId }: SpecCleanupPayload,
 ): Promise<HostTask | undefined> {
   const spec = (
-    await pool.query<{ slug: string }>("SELECT slug FROM specs WHERE id = $1", [
-      specId,
-    ])
+    await pool.query<{ slug: string; branch_namespace: string | null }>(
+      "SELECT slug, branch_namespace FROM specs WHERE id = $1",
+      [specId],
+    )
   ).rows[0];
   if (!spec) return undefined;
   const open = await pool.query<{ id: number; url: string; number: number }>(
@@ -193,17 +198,18 @@ async function specCleanupTask(
     "SELECT id, repo_id FROM tickets WHERE spec_id = $1 ORDER BY id",
     [specId],
   );
+  const names = branchNames(spec.branch_namespace);
   const branches = repos.rows.flatMap((repo) => [
-    { repoUrl: repo.url, branch: `spec/${spec.slug}` },
+    { repoUrl: repo.url, branch: names.integration(spec.slug) },
     ...tickets.rows
       .filter((t) => t.repo_id === repo.id)
       .map((t) => ({
         repoUrl: repo.url,
-        branch: `agent/${formatDisplayId("ticket", t.id)}`,
+        branch: names.ticket(formatDisplayId("ticket", t.id)),
       })),
     {
       repoUrl: repo.url,
-      branch: `agent/${formatDisplayId("spec", specId)}-final`,
+      branch: names.final(formatDisplayId("spec", specId)),
     },
   ]);
   return {

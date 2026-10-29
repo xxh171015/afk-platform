@@ -273,11 +273,13 @@ describe("the overall review and the one fix", () => {
         `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
       ).then((r) => r.json())) as Json;
     const first = await bundleOf(review);
+    const id = (await db.pool.query("SELECT id FROM instance")).rows[0].id;
     expect(first).toMatchObject({
       job: { stage: "final-review" },
       ticket: null,
       spec: { displayId: "S-1", slug: "s" },
-      integrationBranch: "spec/s",
+      integrationBranch: `spec/${id}/s`,
+      agentBranch: `agent/${id}/S-1-final`,
       repo: { role: "backend" },
       failureLog: null,
       review: null,

@@ -16,7 +16,8 @@ export interface StageTicket {
 }
 
 // Agent runs and gates are free-floating; a merge holds the integration branch's lock for its whole lease
-// (docs/specs/m1-platform.md「作业队列」: integration:<仓库>:<spec/slug>).
+// (docs/specs/m1-platform.md「作业队列」: integration:<仓库>:<spec/slug>). The key only has to be unique inside this
+// database, so it does not carry the database's id and is not the branch's name (branchNames makes that).
 function jobType(stage: Stage): string {
   if (stage === "merge") return "merge";
   if (stage === "gate") return "gate";

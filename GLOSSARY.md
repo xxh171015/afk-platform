@@ -49,7 +49,7 @@ _Avoid_: 接口文档、API 定义
 _Avoid_: 执行、任务
 
 **Integration branch（集成分支）**：
-一个 Spec 在一个 Repo 里的分支 `spec/<slug>`，票合并到这里，最后以 PR 的形式合进 main。
+一个 Spec 在一个 Repo 里的分支 `spec/<id>/<slug>`（`<id>` 是数据库的标识，六位十六进制；标识出现之前建的 spec 是 `spec/<slug>`），票合并到这里，最后以 PR 的形式合进 main。票的分支是 `agent/<id>/T-<n>`，总览修复的是 `agent/<id>/S-<n>-final`。
 _Avoid_: 特性分支、feature branch
 
 **Lock key（互斥键）**：

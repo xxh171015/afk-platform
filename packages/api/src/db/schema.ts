@@ -69,6 +69,20 @@ export const repos = pgTable(
   ],
 );
 
+// One row, made by the migration that created it: the id of this database, which the branch names of every spec
+// made from then on carry (packages/shared/src/branches.ts). Two databases working on one repository get two ids.
+export const instance = pgTable(
+  "instance",
+  {
+    singleton: boolean("singleton").primaryKey().default(true),
+    id: text("id").notNull(),
+  },
+  (t) => [
+    check("instance_singleton_check", sql`${t.singleton}`),
+    check("instance_id_check", sql`${t.id} ~ '^[0-9a-f]{6}$'`),
+  ],
+);
+
 export const specs = pgTable(
   "specs",
   {
@@ -85,6 +99,9 @@ export const specs = pgTable(
       (): AnyPgColumn => specs.id,
     ),
     integrationBranches: jsonb("integration_branches").notNull().default([]),
+    // The database's id as it was when the spec was made; null for a spec older than that, whose branches have
+    // the flat names.
+    branchNamespace: text("branch_namespace"),
     // Warnings from the last tickets import (module overlap), shown when the plan is confirmed.
     importWarnings: jsonb("import_warnings").notNull().default([]),
     // Why the platform paused the spec, shown in the blocked queue.

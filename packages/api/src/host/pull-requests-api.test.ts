@@ -124,6 +124,9 @@ const pulls = async () =>
       "SELECT repo_id, number, url, state, ci, review FROM pull_requests ORDER BY repo_id",
     )
   ).rows as Json[];
+const instanceId = async () =>
+  (await db.pool.query<{ id: string }>("SELECT id FROM instance")).rows[0]?.id;
+
 const jobsOf = async (type: string) =>
   (
     await db.pool.query(
@@ -201,12 +204,19 @@ describe("opening the pull requests", () => {
       kind: "open-pr",
       repoUrl: "https://github.com/me/shop-backend.git",
       base: "main",
-      head: "spec/export",
+      head: `spec/${await instanceId()}/export`,
       title: "S-1 Export orders",
       draft: false,
     });
     expect(task.body.body).toContain("Spec: S-1");
     expect(task.body.body).toContain("- T-1 Ticket backend");
+  });
+
+  it("opens the pull request from the flat branch of a spec that was made before the databases had ids", async () => {
+    await settledSpec(["backend"]);
+    await db.pool.query("UPDATE specs SET branch_namespace = NULL");
+    const job = await claimOf("open-pr");
+    expect((await taskOf(job)).body).toMatchObject({ head: "spec/export" });
   });
 
   it("only gives the task to the job's current holder", async () => {
@@ -904,6 +914,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
 
   it("tells the worker which open pull requests to close and which branches to delete, in every repo of the spec", async () => {
     await awaitingReview(["backend", "frontend"]);
+    const id = await instanceId();
     await call("POST", "/specs/1/cancel");
     const job = await claimCleanup();
     expect((await taskOf(job)).body).toEqual({
@@ -913,14 +924,26 @@ describe("cleaning up after a cancelled or merged spec", () => {
         { id: 2, repoUrl: FRONTEND, number: 2 },
       ],
       branches: [
-        { repoUrl: BACKEND, branch: "spec/export" },
-        { repoUrl: BACKEND, branch: "agent/T-1" },
-        { repoUrl: BACKEND, branch: "agent/S-1-final" },
-        { repoUrl: FRONTEND, branch: "spec/export" },
-        { repoUrl: FRONTEND, branch: "agent/T-2" },
-        { repoUrl: FRONTEND, branch: "agent/S-1-final" },
+        { repoUrl: BACKEND, branch: `spec/${id}/export` },
+        { repoUrl: BACKEND, branch: `agent/${id}/T-1` },
+        { repoUrl: BACKEND, branch: `agent/${id}/S-1-final` },
+        { repoUrl: FRONTEND, branch: `spec/${id}/export` },
+        { repoUrl: FRONTEND, branch: `agent/${id}/T-2` },
+        { repoUrl: FRONTEND, branch: `agent/${id}/S-1-final` },
       ],
     });
+  });
+
+  it("deletes the flat names of a spec that was made before the databases had ids, and nothing that carries an id", async () => {
+    await awaitingReview(["backend"]);
+    await db.pool.query("UPDATE specs SET branch_namespace = NULL");
+    await call("POST", "/specs/1/cancel");
+    const job = await claimCleanup();
+    expect((await taskOf(job)).body.branches).toEqual([
+      { repoUrl: BACKEND, branch: "spec/export" },
+      { repoUrl: BACKEND, branch: "agent/T-1" },
+      { repoUrl: BACKEND, branch: "agent/S-1-final" },
+    ]);
   });
 
   it("does not ask for a pull request that is already closed or merged to be closed", async () => {
@@ -958,7 +981,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
     expect(task.pulls).toEqual([]);
     expect(task.branches).toContainEqual({
       repoUrl: BACKEND,
-      branch: "spec/export",
+      branch: `spec/${await instanceId()}/export`,
     });
   });
 

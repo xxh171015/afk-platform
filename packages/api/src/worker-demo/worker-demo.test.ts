@@ -31,6 +31,9 @@ import { FakeClock, listen, type RunningApi } from "../test/fake-worker.ts";
 // A whole spec from import to done, with a real Postgres, the HTTP API, real git and slots, and a worker that has
 // a fake agent and a fake gate sandbox: no Cursor, no GitHub, no Docker.
 
+// The database's id as these tests set it: the branches of every spec made here carry it.
+const ID = "abc123";
+
 let db: TestDatabase;
 let api: RunningApi;
 let clock: FakeClock;
@@ -55,6 +58,7 @@ const GATES = [
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
+  await db.pool.query("UPDATE instance SET id = $1", [ID]);
   clock = new FakeClock();
   logDir = mkdtempSync(join(tmpdir(), "afk-demo-logs-"));
   home = mkdtempSync(join(tmpdir(), "afk-demo-home-"));
@@ -96,6 +100,7 @@ const ticket = (key: string, extra: Record<string, unknown> = {}) => ({
 async function confirmedSpec(
   tickets: Record<string, unknown>[],
   project: Record<string, unknown> = {},
+  { flatNames = false } = {},
 ) {
   const created = await post("/projects", {
     name: "shop",
@@ -115,6 +120,9 @@ async function confirmedSpec(
   expect(
     (await post(`/specs/${spec.body.id}/tickets/import`, { tickets })).status,
   ).toBe(200);
+  // a spec made before the databases had ids: its branches have the flat names
+  if (flatNames)
+    await db.pool.query("UPDATE specs SET branch_namespace = NULL");
   expect((await post(`/specs/${spec.body.id}/confirm`)).status).toBe(200);
   return spec.body.id;
 }
@@ -158,7 +166,7 @@ function deps(
           return { output: PASS };
         return {
           files: {
-            [`src/${ctx.branch.replace("/", "-")}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,
+            [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,
           },
           message: `${ctx.stage} on ${ctx.branch}`,
           output: DONE,
@@ -200,10 +208,10 @@ describe("a whole spec with a fake agent", () => {
 
     // the integration branch on "GitHub" has both tickets' work, and main was never touched
     expect(
-      gitOut(origin, ["show", "spec/order-export:src/agent-T-1.ts"]),
+      gitOut(origin, ["show", `spec/${ID}/order-export:src/agent-T-1.ts`]),
     ).toContain("implement");
     expect(
-      gitOut(origin, ["show", "spec/order-export:src/agent-T-2.ts"]),
+      gitOut(origin, ["show", `spec/${ID}/order-export:src/agent-T-2.ts`]),
     ).toContain("implement");
     expect(gitOut(origin, ["rev-parse", "main"])).toBe(
       gitOut(seed.dir, ["rev-parse", "main"]),
@@ -214,22 +222,55 @@ describe("a whole spec with a fake agent", () => {
       "--format=%s",
       "--first-parent",
       "--reverse",
-      "main..spec/order-export",
+      `main..spec/${ID}/order-export`,
     ]).split("\n");
     expect(order).toEqual([
-      "Merge agent/T-1 into spec/order-export",
-      "Merge agent/T-2 into spec/order-export",
+      `Merge agent/${ID}/T-1 into spec/${ID}/order-export`,
+      `Merge agent/${ID}/T-2 into spec/${ID}/order-export`,
     ]);
     // the ticket branches were pushed, with the traceability trailers on the agent's commits
     for (const [id, run] of [
       ["T-1", "R-1"],
       ["T-2", "R-5"],
     ]) {
-      const body = gitOut(origin, ["log", "-1", "--format=%B", `agent/${id}`]);
+      const body = gitOut(origin, [
+        "log",
+        "-1",
+        "--format=%B",
+        `agent/${ID}/${id}`,
+      ]);
       expect(body).toContain("Spec: S-1");
       expect(body).toContain(`Ticket: ${id}`);
       expect(body).toContain(`Run: ${run}`);
     }
+  });
+
+  it("works a spec made before the databases had ids on the flat branch names, start to end", async () => {
+    await confirmedSpec(
+      [ticket("a"), ticket("b", { blocked_by: ["a"] })],
+      {},
+      { flatNames: true },
+    );
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    expect(
+      gitOut(origin, ["log", "--format=%s", "main..spec/order-export"]).split(
+        "\n",
+      ),
+    ).toContain("Merge agent/T-2 into spec/order-export");
+    expect(
+      git(origin, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        `spec/${ID}/order-export`,
+      ]).code,
+    ).not.toBe(0);
   });
 
   it("records a Run with a log for every stage, and the gate results", async () => {
@@ -259,7 +300,9 @@ describe("a whole spec with a fake agent", () => {
     const logs = await fetch(`${api.url}/runs/${runs.rows[0].id}/logs`).then(
       (r) => r.json(),
     );
-    expect(logs.text).toContain("implement: running the agent on agent/T-1");
+    expect(logs.text).toContain(
+      `implement: running the agent on agent/${ID}/T-1`,
+    );
     expect(logs.text).toContain("result: implement done");
     const findings = await db.pool.query(
       "SELECT kind, resolution FROM findings",
@@ -396,9 +439,9 @@ describe("a whole spec with a fake agent", () => {
             "fetch",
             "--quiet",
             ".",
-            "refs/heads/spec/order-export:refs/heads/spec/order-export",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
           ]);
-          git(ctx.dir, ["merge", "--no-edit", "spec/order-export"]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
           return { files: { "shared.txt": "settled\n" }, output: DONE };
         }
         return undefined;
@@ -411,7 +454,7 @@ describe("a whole spec with a fake agent", () => {
       heartbeatMs: 50,
     });
     expect(await stateOf()).toEqual(["1:done", "2:done"]);
-    expect(gitOut(origin, ["show", "spec/order-export:shared.txt"])).toBe(
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:shared.txt`])).toBe(
       "settled",
     );
   });
@@ -479,9 +522,9 @@ describe("a person's decisions about a blocked ticket", () => {
     };
     await work({ script });
     expect(await stateOf()).toEqual(["1:blocked/gate-failed"]);
-    expect(gitOut(origin, ["log", "--format=%s", "main..agent/T-1"])).toContain(
-      "old work",
-    );
+    expect(
+      gitOut(origin, ["log", "--format=%s", `main..agent/${ID}/T-1`]),
+    ).toContain("old work");
 
     expect((await post("/tickets/1/retry", { mode: "restart" })).status).toBe(
       200,
@@ -489,15 +532,15 @@ describe("a person's decisions about a blocked ticket", () => {
     await work({ script });
     expect(await stateOf()).toEqual(["1:done"]);
     // the branch on origin is the new attempt only: the old commits are not in it, and not in the integration branch
-    expect(gitOut(origin, ["log", "--format=%s", "main..agent/T-1"])).toBe(
-      "new work",
-    );
+    expect(
+      gitOut(origin, ["log", "--format=%s", `main..agent/${ID}/T-1`]),
+    ).toBe("new work");
     for (const gone of ["OLD.txt", "STILL.txt", "BROKEN"]) {
       expect(
-        git(origin, ["cat-file", "-e", `spec/order-export:${gone}`]).code,
+        git(origin, ["cat-file", "-e", `spec/${ID}/order-export:${gone}`]).code,
       ).not.toBe(0);
     }
-    expect(gitOut(origin, ["show", "spec/order-export:src/new.ts"])).toBe(
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:src/new.ts`])).toBe(
       "export {};",
     );
   });
@@ -550,7 +593,10 @@ describe("a person's decisions about a blocked ticket", () => {
     await work({ script });
     expect(await stateOf()).toEqual(["1:done"]);
     expect(
-      gitOut(origin, ["show", "spec/order-export:.github/workflows/ci.yml"]),
+      gitOut(origin, [
+        "show",
+        `spec/${ID}/order-export:.github/workflows/ci.yml`,
+      ]),
     ).toBe("on: push");
     // the agent was not asked again: one implement run
     const stages = await db.pool.query(
@@ -598,7 +644,7 @@ describe("work an interrupted run left behind", () => {
   function leaveCommit(message: string, published: boolean) {
     const wd = join(home, "salvaged");
     git(home, ["clone", "--quiet", origin, wd]);
-    git(wd, ["checkout", "--quiet", "-b", "agent/T-1"]);
+    git(wd, ["checkout", "--quiet", "-b", `agent/${ID}/T-1`]);
     writeFileSync(join(wd, "salvaged.ts"), "export const s = 1;\n");
     git(wd, ["add", "."]);
     git(wd, [
@@ -616,8 +662,8 @@ describe("work an interrupted run left behind", () => {
       origin,
       "main",
     );
-    git(wd, ["push", "--quiet", mainClone, "agent/T-1"]);
-    if (published) git(wd, ["push", "--quiet", "origin", "agent/T-1"]);
+    git(wd, ["push", "--quiet", mainClone, `agent/${ID}/T-1`]);
+    if (published) git(wd, ["push", "--quiet", "origin", `agent/${ID}/T-1`]);
     return gitOut(wd, ["rev-parse", "HEAD"]);
   }
 
@@ -626,12 +672,12 @@ describe("work an interrupted run left behind", () => {
     leaveCommit("salvaged work", false);
     await work({ script: implementDoneWithoutCommitting });
     expect(await stateOf()).toEqual(["1:done"]);
-    expect(gitOut(origin, ["log", "--format=%B", "main..agent/T-1"])).toContain(
-      "Ticket: T-1",
-    );
-    expect(gitOut(origin, ["show", "spec/order-export:salvaged.ts"])).toBe(
-      "export const s = 1;",
-    );
+    expect(
+      gitOut(origin, ["log", "--format=%B", `main..agent/${ID}/T-1`]),
+    ).toContain("Ticket: T-1");
+    expect(
+      gitOut(origin, ["show", `spec/${ID}/order-export:salvaged.ts`]),
+    ).toBe("export const s = 1;");
   });
 
   it("leaves commits an earlier run already stamped and published as they are", async () => {
@@ -642,9 +688,9 @@ describe("work an interrupted run left behind", () => {
     );
     await work({ script: implementDoneWithoutCommitting });
     expect(await stateOf()).toEqual(["1:done"]);
-    expect(gitOut(origin, ["rev-parse", "agent/T-1"])).toBe(tip);
+    expect(gitOut(origin, ["rev-parse", `agent/${ID}/T-1`])).toBe(tip);
     expect(
-      gitOut(origin, ["log", "--format=%B", "main..agent/T-1"]).match(
+      gitOut(origin, ["log", "--format=%B", `main..agent/${ID}/T-1`]).match(
         /^Run: /gm,
       ),
     ).toHaveLength(1);
@@ -732,7 +778,7 @@ describe("the overall review of the integration branch", () => {
         "log",
         "--format=%s",
         "--first-parent",
-        "main..spec/order-export",
+        `main..spec/${ID}/order-export`,
       ]).split("\n"),
     ).toHaveLength(2);
   });
@@ -764,16 +810,16 @@ describe("the overall review of the integration branch", () => {
     expect(fixSaw.tickets).toContain("T-2 Ticket b");
     // the fix is on the integration branch, merged as a candidate that passed the gate
     expect(
-      gitOut(origin, ["show", "spec/order-export:src/shared-name.ts"]),
+      gitOut(origin, ["show", `spec/${ID}/order-export:src/shared-name.ts`]),
     ).toBe("export const name = 1;");
     expect(
-      gitOut(origin, ["log", "-1", "--format=%s", "spec/order-export"]),
-    ).toBe("Merge agent/S-1-final into spec/order-export");
+      gitOut(origin, ["log", "-1", "--format=%s", `spec/${ID}/order-export`]),
+    ).toBe(`Merge agent/${ID}/S-1-final into spec/${ID}/order-export`);
     const trailers = gitOut(origin, [
       "log",
       "-1",
       "--format=%B",
-      "agent/S-1-final",
+      `agent/${ID}/S-1-final`,
     ]);
     expect(trailers).toContain("Spec: S-1");
     expect(trailers).not.toContain("Ticket:");
@@ -814,7 +860,7 @@ describe("the overall review of the integration branch", () => {
       "log",
       "--format=%s",
       "--first-parent",
-      "main..spec/order-export",
+      `main..spec/${ID}/order-export`,
     ]);
     expect(await finalization()).toEqual([
       {
@@ -824,7 +870,7 @@ describe("the overall review of the integration branch", () => {
       },
     ]);
     expect(
-      git(origin, ["cat-file", "-e", "spec/order-export:BROKEN"]).code,
+      git(origin, ["cat-file", "-e", `spec/${ID}/order-export:BROKEN`]).code,
     ).not.toBe(0);
     expect(before.split("\n")).toHaveLength(1);
     const queue = await fetch(`${api.url}/blocked`).then((r) => r.json());
@@ -903,7 +949,7 @@ describe("the overall review of the integration branch", () => {
     expect(await finalization()).toEqual([
       { step: "final-merge", state: "done", blocked_reason: null },
     ]);
-    expect(gitOut(origin, ["show", "spec/order-export:src/fix.ts"])).toBe(
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:src/fix.ts`])).toBe(
       "export {};",
     );
   });
@@ -922,7 +968,7 @@ describe("the test count guard", () => {
     await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
     await work({
       script: (ctx) => {
-        if (ctx.stage === "implement" && ctx.branch === "agent/T-2") {
+        if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-2`) {
           return {
             files: { "tests.count": "2\n" },
             message: "delete a test",
@@ -1163,7 +1209,7 @@ describe("the merge stage", () => {
       "rev-list",
       "--count",
       "--merges",
-      "main..spec/order-export",
+      `main..spec/${ID}/order-export`,
     ]);
     expect(mergesAfterFirst).toBe("1"); // it did push
 
@@ -1181,7 +1227,7 @@ describe("the merge stage", () => {
         "rev-list",
         "--count",
         "--merges",
-        "main..spec/order-export",
+        `main..spec/${ID}/order-export`,
       ]),
     ).toBe("1");
     const jobs = await db.pool.query(
@@ -1198,13 +1244,13 @@ describe("the merge stage", () => {
     ]);
     const script: Script = (ctx) => {
       // a measures 3 tests (the default), b adds one, c puts the count back to 3
-      if (ctx.stage === "implement" && ctx.branch === "agent/T-2")
+      if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-2`)
         return {
           files: { "tests.count": "4\n" },
           message: "add a test",
           output: DONE,
         };
-      if (ctx.stage === "implement" && ctx.branch === "agent/T-3")
+      if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-3`)
         return {
           files: { "tests.count": "3\n" },
           message: "drop a test",
@@ -1309,7 +1355,7 @@ describe("the merge stage", () => {
     );
     expect(merge.rows).toEqual([
       {
-        head_sha: gitOut(origin, ["rev-parse", "spec/order-export"]),
+        head_sha: gitOut(origin, ["rev-parse", `spec/${ID}/order-export`]),
         result: "merged",
         measured: null,
       },
@@ -1338,7 +1384,7 @@ describe("the merge stage", () => {
     );
     expect(jobs.rows[0]).toEqual({ state: "running", result: null }); // its lease runs out, then it is dispatched again
     expect(
-      git(origin, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
+      git(origin, ["rev-parse", "--verify", "--quiet", `agent/${ID}/T-1`]).code,
     ).not.toBe(0);
   });
 
@@ -1354,9 +1400,9 @@ describe("the merge stage", () => {
     });
     // the agent branch was never published either: the very first pre-push (before the implement push) said lost
     expect(
-      git(origin, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
+      git(origin, ["rev-parse", "--verify", "--quiet", `agent/${ID}/T-1`]).code,
     ).not.toBe(0);
-    expect(gitOut(origin, ["rev-parse", "spec/order-export"])).toBe(
+    expect(gitOut(origin, ["rev-parse", `spec/${ID}/order-export`])).toBe(
       gitOut(origin, ["rev-parse", "main"]),
     );
     expect(await stateOf()).toEqual(["1:running"]);
@@ -1375,7 +1421,7 @@ describe("the merge stage", () => {
             pushed += 1;
             rmSync(intruder, { recursive: true, force: true });
             git(home, ["clone", "--quiet", origin, intruder]);
-            git(intruder, ["checkout", "--quiet", "spec/order-export"]);
+            git(intruder, ["checkout", "--quiet", `spec/${ID}/order-export`]);
             git(intruder, [
               "-c",
               "user.name=X",
@@ -1387,7 +1433,12 @@ describe("the merge stage", () => {
               "-m",
               `intruder ${pushed}`,
             ]);
-            git(intruder, ["push", "--quiet", "origin", "spec/order-export"]);
+            git(intruder, [
+              "push",
+              "--quiet",
+              "origin",
+              `spec/${ID}/order-export`,
+            ]);
           }
           return inner.open(ref);
         },
@@ -1414,9 +1465,12 @@ describe("the merge stage", () => {
         "log",
         "--format=%s",
         "--first-parent",
-        "main..spec/order-export",
+        `main..spec/${ID}/order-export`,
       ]).split("\n"),
-    ).toEqual(["Merge agent/T-1 into spec/order-export", "intruder 1"]);
+    ).toEqual([
+      `Merge agent/${ID}/T-1 into spec/${ID}/order-export`,
+      "intruder 1",
+    ]);
     // one merge job did it all, and the candidate that was pushed was gated on the new tip
     const merges = await db.pool.query(
       "SELECT state, attempt FROM jobs WHERE type = 'merge'",
@@ -1452,12 +1506,14 @@ describe("the merge stage", () => {
     expect(merges.rows[0].error).toContain("kept moving");
     // nothing of ours reached the branch: the last thing on it is the intruder's
     expect(
-      gitOut(origin, ["log", "-1", "--format=%s", "spec/order-export"]),
+      gitOut(origin, ["log", "-1", "--format=%s", `spec/${ID}/order-export`]),
     ).toBe("intruder 9");
     expect(
-      gitOut(origin, ["log", "--format=%s", "spec/order-export"]).includes(
-        "Merge agent/T-1",
-      ),
+      gitOut(origin, [
+        "log",
+        "--format=%s",
+        `spec/${ID}/order-export`,
+      ]).includes(`Merge agent/${ID}/T-1`),
     ).toBe(false);
     expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
   });
@@ -1675,7 +1731,11 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
 
     expect(await specState()).toBe("awaiting-review");
     expect(github.pullRequests()).toMatchObject([
-      { head: "spec/order-export", base: "main", title: "S-1 Order export" },
+      {
+        head: `spec/${ID}/order-export`,
+        base: "main",
+        title: "S-1 Order export",
+      },
     ]);
     expect(github.pullRequests()[0]?.body).toContain("Spec: S-1");
     expect(github.pullRequests()[0]?.body).toContain("- T-1 Ticket a");
@@ -1730,9 +1790,9 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
     for (const branch of [
       "main",
       "release/1.0",
-      "spec/order-export",
-      "agent/T-1",
-      "agent/S-1-final",
+      `spec/${ID}/order-export`,
+      `agent/${ID}/T-1`,
+      `agent/${ID}/S-1-final`,
     ])
       github.addBranch(branch);
   };
