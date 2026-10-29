@@ -1,0 +1,36 @@
+# 中断演练（#42）用的需求：三张串行的小票，每张只加一个文档文件，足够让一次运行有 implement、gate、review、merge 各阶段。
+# 用 `plat tickets import <编号> tickets.yaml` 导入；编号是 spec create 打印出来的那个。
+spec: S-6
+tickets:
+  - key: drill-a
+    repo: backend
+    type: implementation
+    title: 演练 A
+    modules: ["docs/drill/**"]
+    acceptance:
+      - "docs/drill/a.md 存在，内容是一行：drill a"
+    body: |
+      新建 docs/drill/a.md，只写那一行，不改别的文件。
+
+  - key: drill-b
+    repo: backend
+    type: implementation
+    title: 演练 B
+    modules: ["docs/drill/**"]
+    blocked_by: [drill-a]
+    acceptance:
+      - "docs/drill/b.md 存在，内容是一行：drill b"
+    body: |
+      新建 docs/drill/b.md，只写那一行，不改别的文件。
+
+  - key: drill-c
+    repo: backend
+    type: implementation
+    title: 演练 C
+    modules: ["docs/drill/**"]
+    blocked_by: [drill-b]
+    acceptance:
+      - "docs/drill/c.md 存在，内容是一行：drill c"
+    body: |
+      新建 docs/drill/c.md，只写那一行，不改别的文件。
+external_blocked_by: []
