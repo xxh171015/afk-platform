@@ -457,7 +457,9 @@ describe("taking the result back", () => {
       tree.slice(2),
     );
     // corrupt the tree object: fsck on receive rejects it, a plain fetch of a local path may not
-    writeFileSync(objectPath, "garbage", { mode: 0o644, flag: "w" });
+    // (git writes objects read-only: only root can write over one, so remove it first)
+    rmSync(objectPath);
+    writeFileSync(objectPath, "garbage", { mode: 0o644 });
     const result = retrieveResult({
       slotClone,
       mainClone: main.dir,
