@@ -23,7 +23,7 @@ export interface WorkerOptions {
   pollMs?: number; // wait between claims when the queue is empty
   concurrency?: number; // jobs at once; no more than there are slots
   stopWhenIdle?: boolean; // return as soon as a claim finds nothing (tests, one-shot runs)
-  signal?: AbortSignal; // stop claiming
+  signal?: AbortSignal; // stop: claim nothing more and abandon the jobs in hand
   log?: (line: string) => void;
 }
 
@@ -97,6 +97,11 @@ export async function processJob(
   const { api } = options;
   const log = (line: string) => options.log?.(`job ${job.id}: ${line}`);
   const lost = new AbortController();
+  // A worker told to stop gives up the jobs in hand the same way as a lost lease: the local run is aborted, nothing
+  // is reported, and the job is dispatched again when its lease runs out.
+  const stopping = () => lost.abort();
+  if (options.signal?.aborted) stopping();
+  options.signal?.addEventListener("abort", stopping, { once: true });
   let failedBeats = 0;
   const heartbeats = setInterval(async () => {
     try {
@@ -179,6 +184,7 @@ export async function processJob(
     await api.fail(job, message.slice(0, 1000)).catch(() => undefined);
     return "failed";
   } finally {
+    options.signal?.removeEventListener("abort", stopping);
     clearInterval(heartbeats);
     stopStreaming();
   }

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,6 +109,39 @@ describe("pnpm worker", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("the worker cannot start");
       expect(result.stderr).toContain("CURSOR_API_KEY is not set");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("names a sandbox image that is not there (or Docker that is not)", () => {
+    const home = mkdtempSync(join(tmpdir(), "afk-worker-home-"));
+    try {
+      // credentials that load, so the next check is the image
+      const dir = join(home, ".afk", "secrets", "github-app");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "app.json"),
+        '{"appId":"1","installationId":"2"}',
+      );
+      writeFileSync(join(dir, "private-key.pem"), "key", { mode: 0o600 });
+      const main = fileURLToPath(new URL("./main.ts", import.meta.url));
+      const result = spawnSync(process.execPath, [main], {
+        env: {
+          PATH: process.env.PATH,
+          HOME: home,
+          CURSOR_API_KEY: "k",
+          AFK_MODEL: "m",
+          AFK_SKILLS_DIR: home,
+          AFK_SANDBOX_IMAGE: "afk-test-image-that-does-not-exist:none",
+        },
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(
+        /docker is not available|afk-test-image-that-does-not-exist:none is not built/,
+      );
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

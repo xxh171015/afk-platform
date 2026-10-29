@@ -158,6 +158,7 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 都带 `(作业号, attempt)`，API 只认当前 attempt：
 
 - `POST /worker/jobs/claim`：带能力标签，返回作业、attempt、租约到期时间和 `lock_key`。
+- `GET /worker/jobs/:id/lease?attempt=`：只读，这个 attempt 是否仍持有有效租约；worker 判断槽位锁是不是僵尸时用，不续期。
 - `POST /worker/jobs/:id/heartbeat`：续期。
 - `POST /worker/jobs/:id/pre-push`：推送前校验并续期。
 - `POST /worker/jobs/:id/complete`、`/fail`：交回阶段结果。

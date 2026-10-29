@@ -942,6 +942,32 @@ describe("the merge stage", () => {
     expect(jobs.rows[0].attempt).toBe(2);
   });
 
+  it("stops when told to: the job in hand is abandoned, nothing is reported, and no other job is claimed", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")]);
+    const stop = new AbortController();
+    const run = await runWorker({
+      api: workerFor(),
+      executor: deps({
+        // Ctrl-C arrives while the first agent is at work
+        script: () => {
+          stop.abort();
+          return undefined;
+        },
+      }),
+      signal: stop.signal,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(run.jobs).toBe(1);
+    const jobs = await db.pool.query(
+      "SELECT state, result FROM jobs ORDER BY id",
+    );
+    expect(jobs.rows[0]).toEqual({ state: "running", result: null }); // its lease runs out, then it is dispatched again
+    expect(
+      git(origin, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
+    ).not.toBe(0);
+  });
+
   it("pushes nothing when the lease is gone at the pre-push check", async () => {
     await confirmedSpec([ticket("a")]);
     const real = workerFor();

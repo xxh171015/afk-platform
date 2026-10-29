@@ -45,11 +45,11 @@ Columns with a closed vocabulary (ticket and spec states and types, blocked reas
 
 ## Job queue and worker API
 
-Jobs live in the `jobs` table; `packages/api/src/jobs/queue.ts` holds the queue and `packages/api/src/http/worker-routes.ts` the worker-facing HTTP routes (`POST /worker/jobs/claim`, then `/{id}/heartbeat`, `/pre-push`, `/complete`, `/fail`). A claim takes a 2-minute lease (`FOR UPDATE SKIP LOCKED`); workers heartbeat every 30 seconds. Every call after the claim carries `(workerId, attempt)` and is refused with 409 unless it is the current lease holder; a lease that runs out puts the job back with `attempt + 1`. The first attempt is 1. Jobs are enqueued in-process with `enqueueJob`, keyed by `ticketJobKey(...)`; the same key returns the existing job. The routes have no authentication yet.
+Jobs live in the `jobs` table; `packages/api/src/jobs/queue.ts` holds the queue and `packages/api/src/http/worker-routes.ts` the worker-facing HTTP routes (`POST /worker/jobs/claim`, then `/{id}/heartbeat`, `/pre-push`, `/complete`, `/fail`, plus the read-only `GET /{id}/lease?attempt=` a worker asks before treating a slot lock as a zombie's). A claim takes a 2-minute lease (`FOR UPDATE SKIP LOCKED`); workers heartbeat every 30 seconds. Every call after the claim carries `(workerId, attempt)` and is refused with 409 unless it is the current lease holder; a lease that runs out puts the job back with `attempt + 1`. The first attempt is 1. Jobs are enqueued in-process with `enqueueJob`, keyed by `ticketJobKey(...)`; the same key returns the existing job. The routes have no authentication yet.
 
 ## Run it on this machine (Mac)
 
-Four processes: Postgres, the API, the page and one worker. Everything listens on 127.0.0.1 only.
+Four processes: Postgres, the API, the page and one worker. All of them listen on 127.0.0.1 only (compose binds Postgres there too).
 
 **Once**
 
@@ -69,7 +69,7 @@ pnpm web                      # http://127.0.0.1:5173
 
 export AFK_MODEL=<cursor model>
 export AFK_SKILLS_DIR=<skills checkout>/skills/engineering
-pnpm worker                   # Ctrl-C stops it; jobs in hand go back to the queue when their lease runs out
+pnpm worker                   # Ctrl-C aborts the runs in hand and stops; those jobs are dispatched again when their lease runs out (Ctrl-C twice: exit at once)
 ```
 
 | Worker setting | Default |

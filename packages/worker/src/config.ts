@@ -107,6 +107,7 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
     model,
     skillsDir,
     cursorApiKey,
+    // fixed under ~/.afk/secrets by design (not under AFK_HOME): secrets do not move with the working folders
     credentialsDir:
       env.AFK_GITHUB_APP_DIR ||
       join(sources.homedir, ".afk", "secrets", "github-app"),
