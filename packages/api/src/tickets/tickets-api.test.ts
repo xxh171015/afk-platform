@@ -475,6 +475,7 @@ describe("cancelling a spec", () => {
     expect(result.body).toEqual({
       state: "cancelled",
       cancelled: ["T-1", "T-2", "T-3"],
+      pullRequests: [],
     });
     expect(await states()).toEqual([
       "1:cancelled",

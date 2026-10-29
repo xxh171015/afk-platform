@@ -376,10 +376,13 @@ const cancelSpecRoute = createRoute({
   request: { params: z.object({ id: PathId }) },
   responses: {
     200: reply(
-      "The spec is cancelled, with the tickets that went with it",
+      "The spec is cancelled, with the tickets that went with it and the pull requests still open on the code host (the platform closes none)",
       z.object({
         state: z.enum(SPEC_STATES),
         cancelled: z.array(z.string()),
+        pullRequests: z.array(
+          z.object({ repo: z.string(), number: z.number(), url: z.string() }),
+        ),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -501,7 +504,14 @@ export function registerTicketRoutes(
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
-    return c.json({ state: result.state, cancelled: result.cancelled }, 200);
+    return c.json(
+      {
+        state: result.state,
+        cancelled: result.cancelled,
+        pullRequests: result.pullRequests,
+      },
+      200,
+    );
   });
 
   app.openapi(retryFinalRoute, async (c) => {

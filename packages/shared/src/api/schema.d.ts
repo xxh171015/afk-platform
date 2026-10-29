@@ -2095,7 +2095,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The spec is cancelled, with the tickets that went with it */
+        /** @description The spec is cancelled, with the tickets that went with it and the pull requests still open on the code host (the platform closes none) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2115,6 +2115,11 @@ export interface paths {
                 | "paused"
                 | "cancelled";
               cancelled: string[];
+              pullRequests: {
+                repo: string;
+                number: number;
+                url: string;
+              }[];
             };
           };
         };

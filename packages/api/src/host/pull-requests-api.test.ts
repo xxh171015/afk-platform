@@ -517,6 +517,35 @@ describe("what waits for a person among the pull requests", () => {
     expect(await waiting()).toEqual([]);
   });
 
+  it("says, when a spec is cancelled, which of its pull requests are still open on the host", async () => {
+    await awaitingReview();
+    const cancelled = await call("POST", "/specs/1/cancel");
+    expect(cancelled.body.pullRequests).toEqual([
+      {
+        repo: "backend",
+        number: 1,
+        url: "https://github.com/me/shop/pull/1",
+      },
+    ]);
+  });
+
+  it("names no pull request that is already closed or merged, and none for a spec that never had one", async () => {
+    await awaitingReview();
+    await sync(synced(1, { state: "closed" }));
+    expect((await call("POST", "/specs/1/cancel")).body.pullRequests).toEqual(
+      [],
+    );
+  });
+
+  it("is told to the person by plat spec cancel, which does not close anything itself", async () => {
+    await awaitingReview();
+    expect(await plat("spec", "cancel", "S-1")).toBe(
+      "S-1 is cancelled\n" +
+        "pull requests still open on the code host (the platform does not close them; close each yourself):\n" +
+        "  backend #1  https://github.com/me/shop/pull/1\n",
+    );
+  });
+
   it("does not list the pull requests of a cancelled spec", async () => {
     await awaitingReview();
     await sync(synced(1, { state: "closed" }));

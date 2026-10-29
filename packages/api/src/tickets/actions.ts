@@ -321,7 +321,13 @@ export async function resumeSpec(
 export async function cancelSpec(
   pool: pg.Pool,
   specId: number,
-): Promise<ActionResult<{ state: SpecState; cancelled: string[] }>> {
+): Promise<
+  ActionResult<{
+    state: SpecState;
+    cancelled: string[];
+    pullRequests: { repo: string; number: number; url: string }[];
+  }>
+> {
   return inTransaction(pool, async (client) => {
     const state = await lockedSpecState(client, specId);
     if (!state) return { status: "no-ticket" };
@@ -361,10 +367,21 @@ export async function cancelSpec(
        WHERE spec_id = $1 AND finished_at IS NULL`,
       [specId],
     );
+    // The platform never closes a pull request: the ones it last saw open are handed to the person.
+    const open = await client.query<{
+      repo: string;
+      number: number;
+      url: string;
+    }>(
+      `SELECT r.role AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+       WHERE p.spec_id = $1 AND p.state = 'open' ORDER BY p.id`,
+      [specId],
+    );
     return {
       status: "ok",
       state: next.state,
       cancelled: cancelled.map((id) => formatDisplayId("ticket", id)),
+      pullRequests: open.rows,
     };
   });
 }
