@@ -1,5 +1,7 @@
 export type { ClaimedJob, Holding, WorkerApi } from "./api.ts";
 export { createWorkerApi } from "./api.ts";
+export type { ConfigSources, WorkerConfig } from "./config.ts";
+export { ConfigError, loadConfig, parseEnvFile } from "./config.ts";
 export type { Credentials } from "./credentials.ts";
 export type {
   ExecutorDeps,

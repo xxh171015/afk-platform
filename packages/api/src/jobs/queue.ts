@@ -207,3 +207,16 @@ export async function checkHolder(
     ? { status: "ok" }
     : { status: await classify(pool, call.jobId) };
 }
+
+// Does anyone hold the live lease of this job at this attempt? For a worker deciding whether a slot's lock belongs
+// to a zombie; it does not say who holds it and does not renew anything.
+export async function isLeaseLive(
+  pool: Queryable,
+  call: { jobId: number; attempt: number; now: Date },
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    "SELECT 1 FROM jobs WHERE id = $1 AND state = 'running' AND attempt = $2 AND lease_expires_at > $3",
+    [call.jobId, call.attempt, call.now],
+  );
+  return rowCount === 1;
+}

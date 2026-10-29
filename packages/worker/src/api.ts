@@ -26,6 +26,8 @@ export interface WorkerApi {
   prePush(job: ClaimedJob): Promise<Holding>;
   bundle(job: ClaimedJob): Promise<Bundle | "lost">;
   hostTask(job: ClaimedJob): Promise<HostTask | "lost">;
+  // Is this job still running under a live lease at this attempt? Throws when the API cannot be asked.
+  isHeld(jobId: number, attempt: number): Promise<boolean>;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
   fail(job: ClaimedJob, error: string): Promise<Holding>;
   appendLog(runId: number, job: ClaimedJob, chunk: string): Promise<Holding>;
@@ -76,6 +78,13 @@ export function createWorkerApi(
       if (data) return data;
       if (holding(response.status) === "lost") return "lost";
       throw new Error(`bundle failed: HTTP ${response.status}`);
+    },
+    async isHeld(jobId, attempt) {
+      const { data, response } = await client.GET("/worker/jobs/{id}/lease", {
+        params: { path: { id: jobId }, query: { attempt } },
+      });
+      if (!data) throw new Error(`lease check failed: HTTP ${response.status}`);
+      return data.held;
     },
     async hostTask(job) {
       const { data, response } = await client.GET(

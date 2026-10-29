@@ -13,7 +13,10 @@
     "db:temp": "scripts/pg-temp.sh",
     "db:migrate": "pnpm --filter @afk/api db:migrate",
     "gen:api": "pnpm --filter @afk/api openapi:generate && pnpm --filter @afk/shared openapi:types && biome format --write packages/shared/src/api",
-    "api": "pnpm --filter @afk/api start"
+    "api": "pnpm --filter @afk/api start",
+    "worker": "pnpm --filter @afk/worker start",
+    "plat": "node packages/cli/src/bin.ts",
+    "web": "pnpm --filter @afk/web dev"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

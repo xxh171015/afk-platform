@@ -1480,6 +1480,50 @@
         }
       }
     },
+    "/worker/jobs/{id}/lease": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether the job is running under a live lease at that attempt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "held": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["held"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/{id}/fail": {
       "post": {
         "parameters": [

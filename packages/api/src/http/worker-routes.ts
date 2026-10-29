@@ -16,6 +16,7 @@ import {
   failJob,
   type HolderOutcome,
   heartbeat,
+  isLeaseLive,
 } from "../jobs/queue.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
@@ -243,6 +244,24 @@ const hostTaskRoute = createRoute({
   },
 });
 
+const leaseRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/lease",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({ attempt: z.coerce.number().int().min(1).max(INT4_MAX) }),
+  },
+  responses: {
+    200: {
+      description:
+        "Whether the job is running under a live lease at that attempt",
+      content: {
+        "application/json": { schema: z.object({ held: z.boolean() }) },
+      },
+    },
+  },
+});
+
 const failRoute = holderRoute(
   "fail",
   { error: z.string() },
@@ -415,6 +434,17 @@ export function registerWorkerRoutes(
     if (!task)
       return c.json({ error: "this job is not for the code host" }, 404);
     return c.json(task, 200);
+  });
+
+  app.openapi(leaseRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { attempt } = c.req.valid("query");
+    const held = await isLeaseLive(context.pool, {
+      jobId: id,
+      attempt,
+      now: context.clock(),
+    });
+    return c.json({ held }, 200);
   });
 
   app.openapi(failRoute, async (c) => {
