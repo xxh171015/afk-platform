@@ -1,4 +1,4 @@
-import { createPool } from "@afk/shared";
+import { createPool } from "@afk/shared/db";
 import { migrate } from "./migrate.ts";
 
 const pool = createPool();
