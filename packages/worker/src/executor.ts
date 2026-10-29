@@ -23,6 +23,7 @@ import {
   reviewFindings,
   runGate,
   stampTrailers,
+  type TestCounts,
 } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
@@ -509,6 +510,82 @@ async function merge(
   }
 }
 
+// The gate on one commit, run on a branch of its own that is gone again afterwards. The baseline, when there is one,
+// is what the counts are held to.
+async function gateCommit(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+  commit: { sha: string; configSha: string; baseline?: TestCounts },
+  lostMessage: string,
+): Promise<GateOutcome> {
+  const gateBranch = `gate/${subjectLabel(context.bundle)}`;
+  gitOrThrow(mainDir, ["update-ref", `refs/heads/${gateBranch}`, commit.sha]);
+  try {
+    bringBranches(slot, mainDir, [gateBranch]);
+    const outcome = await runGate({
+      repoDir: mainDir,
+      sandbox: deps.makeGateSandbox(slot.dir),
+      signal: context.signal,
+      ref: gateBranch,
+      commitSha: commit.sha,
+      configSha: commit.configSha,
+      ...(commit.baseline ? { baseline: commit.baseline } : {}),
+      cache: deps.gateCache,
+    });
+    if (context.signal.aborted) throw new JobLostError(lostMessage);
+    logGate(context.log, outcome);
+    return outcome;
+  } finally {
+    git(mainDir, ["update-ref", "-d", `refs/heads/${gateBranch}`]);
+  }
+}
+
+// The gate on a branch head that is already merged, for its test counts. It cannot undo the merge, so a head that
+// fails is logged and reported without measurements (the next ticket's own gate will say if something is broken).
+// The configuration is read from the head's first parent: what the branch was before the merge.
+async function measureMergedHead(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+  head: string,
+): Promise<GateOutcome | undefined> {
+  const firstParent = git(mainDir, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${head}^1`,
+  ]);
+  let outcome: GateOutcome;
+  try {
+    outcome = await gateCommit(
+      deps,
+      context,
+      mainDir,
+      slot,
+      {
+        sha: head,
+        configSha: firstParent.code === 0 ? firstParent.stdout.trim() : head,
+      },
+      "the lease was lost during the gate of the merged head",
+    );
+  } catch (error) {
+    // Measuring is a courtesy to the next gate: a sandbox that will not start must not fail a merge that landed.
+    if (error instanceof JobLostError) throw error;
+    context.log(
+      `merge: the merged head could not be measured (${error instanceof Error ? error.message : error}); reporting the merge without its measurements`,
+    );
+    return undefined;
+  }
+  if (outcome.pass) return outcome;
+  context.log(
+    "merge: the merged head does not pass the gate; reporting the merge without its measurements",
+  );
+  return undefined;
+}
+
 async function mergeOnce(
   deps: ExecutorDeps,
   context: StageContext,
@@ -520,15 +597,26 @@ async function mergeOnce(
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
   const stage = bundle.job.stage as "merge" | "final-merge";
-  const gateBranch = `gate/${subjectLabel(bundle)}`;
 
-  // Already merged (a previous attempt got as far as the push): say so instead of merging twice.
+  // Already merged (a previous attempt got as far as the push): say so instead of merging twice. What the first
+  // attempt measured never arrived, so the branch is measured as it is now, and the Run records its head: without
+  // that the next gate would be held to an older merge's counts.
   if (isAncestor(mainDir, agent, integration)) {
     log(`merge: ${agent} is already part of ${integration}`);
+    const head = tip(mainDir, integration);
+    const measured = await measureMergedHead(
+      deps,
+      context,
+      mainDir,
+      slot,
+      head,
+    );
     return {
       stage,
       outcome: "merged",
-      headSha: tip(mainDir, integration),
+      headSha: head,
+      run: { headSha: head },
+      ...(measured ? { gate: gateFacts(measured) } : {}),
     };
   }
 
@@ -575,57 +663,46 @@ async function mergeOnce(
   }
 
   // The candidate is gated on a branch of its own; only a passing candidate moves the integration branch.
-  gitOrThrow(mainDir, [
-    "update-ref",
-    `refs/heads/${gateBranch}`,
-    candidate.candidate,
-  ]);
-  try {
-    bringBranches(slot, mainDir, [gateBranch]);
-    const outcome = await runGate({
-      repoDir: mainDir,
-      sandbox: deps.makeGateSandbox(slot.dir),
-      signal: context.signal,
-      ref: gateBranch,
-      commitSha: candidate.candidate,
+  const outcome = await gateCommit(
+    deps,
+    context,
+    mainDir,
+    slot,
+    {
+      sha: candidate.candidate,
       configSha: oldTip,
       ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
-      cache: deps.gateCache,
-    });
-    if (context.signal.aborted)
-      throw new JobLostError("the lease was lost during the candidate gate");
-    logGate(log, outcome);
-    if (!outcome.pass) {
-      return {
-        stage,
-        outcome: "gate-failed",
-        run: {
-          output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
-        },
-        gate: gateFacts(outcome),
-      };
-    }
-    // Still the holder? This check renews the lease as well.
-    if ((await deps.api.prePush(job)) === "lost")
-      throw new JobLostError("the lease was lost before the push");
-    const pushed = deps.push({
-      repoDir: mainDir,
-      source: candidate.candidate,
-      target: integrationRef,
-      expectedOld: oldTip,
-    });
-    if (!pushed.ok) return { integrationMoved: pushed.error };
-    gitOrThrow(mainDir, ["update-ref", integrationRef, candidate.candidate]);
-    log(`merge: ${integration} is now ${candidate.candidate}`);
+    },
+    "the lease was lost during the candidate gate",
+  );
+  if (!outcome.pass) {
     return {
       stage,
-      outcome: "merged",
-      headSha: candidate.candidate,
-      // recorded on the Run, so the next gate can be measured against what this merge measured
-      run: { headSha: candidate.candidate },
+      outcome: "gate-failed",
+      run: {
+        output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
+      },
       gate: gateFacts(outcome),
     };
-  } finally {
-    git(mainDir, ["update-ref", "-d", `refs/heads/${gateBranch}`]);
   }
+  // Still the holder? This check renews the lease as well.
+  if ((await deps.api.prePush(job)) === "lost")
+    throw new JobLostError("the lease was lost before the push");
+  const pushed = deps.push({
+    repoDir: mainDir,
+    source: candidate.candidate,
+    target: integrationRef,
+    expectedOld: oldTip,
+  });
+  if (!pushed.ok) return { integrationMoved: pushed.error };
+  gitOrThrow(mainDir, ["update-ref", integrationRef, candidate.candidate]);
+  log(`merge: ${integration} is now ${candidate.candidate}`);
+  return {
+    stage,
+    outcome: "merged",
+    headSha: candidate.candidate,
+    // recorded on the Run, so the next gate can be measured against what this merge measured
+    run: { headSha: candidate.candidate },
+    gate: gateFacts(outcome),
+  };
 }

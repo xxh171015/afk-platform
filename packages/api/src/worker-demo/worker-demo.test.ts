@@ -942,6 +942,132 @@ describe("the merge stage", () => {
     expect(jobs.rows[0].attempt).toBe(2);
   });
 
+  it("records the head of a merge it recognises, so the next gate is measured against that merge", async () => {
+    await confirmedSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c", { blocked_by: ["b"] }),
+    ]);
+    const script: Script = (ctx) => {
+      // a measures 3 tests (the default), b adds one, c puts the count back to 3
+      if (ctx.stage === "implement" && ctx.branch === "agent/T-2")
+        return {
+          files: { "tests.count": "4\n" },
+          message: "add a test",
+          output: DONE,
+        };
+      if (ctx.stage === "implement" && ctx.branch === "agent/T-3")
+        return {
+          files: { "tests.count": "3\n" },
+          message: "drop a test",
+          output: DONE,
+        };
+      if (ctx.stage === "gate-fix")
+        return {
+          files: { "tests.count": "4\n" },
+          message: "put the test back",
+          output: DONE,
+        };
+      return undefined;
+    };
+    const real = workerFor();
+    let merges = 0;
+    let lost: number | undefined;
+    // the API is unreachable whenever the result of the second merge job (ticket b's) is handed in
+    const unreachable = {
+      ...real,
+      complete: async (
+        job: Parameters<typeof real.complete>[0],
+        body: unknown,
+      ) => {
+        if ((body as { stage: string }).stage === "merge") {
+          if (lost === undefined && ++merges === 2) lost = job.id;
+          if (job.id === lost) throw new Error("connection reset");
+        }
+        return real.complete(job, body);
+      },
+    };
+    await runWorker({
+      api: unreachable,
+      executor: deps({ script }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:merging", "3:pending"]);
+
+    clock.advanceSeconds(121); // b's merge job is dispatched again and finds its merge already on the branch
+    await runWorker({
+      api: workerFor("w2"),
+      executor: deps({ script }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done", "3:done"]);
+
+    const merge = await db.pool.query(
+      `SELECT r.head_sha, g.tests_total FROM runs r
+       LEFT JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
+       WHERE r.ticket_id = 2 AND r.stage = 'merge'`,
+    );
+    expect(merge.rows).toHaveLength(1);
+    expect(merge.rows[0].head_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(merge.rows[0].tests_total).toBe(4);
+    // c's first gate is held to what b's merge measured (4), not to what a's did (3)
+    const gates = await db.pool.query(
+      "SELECT result, output FROM runs WHERE ticket_id = 3 AND stage = 'gate' ORDER BY id",
+    );
+    expect(gates.rows.map((r) => r.result)).toEqual(["failed", "passed"]);
+    expect(gates.rows[0].output.reasons).toEqual([
+      "fewer tests than the baseline: 3 < 4",
+    ]);
+  });
+
+  it("still reports a merge it recognises when the merged head cannot be measured", async () => {
+    await confirmedSpec([ticket("a")]);
+    const real = workerFor();
+    const unreachable = {
+      ...real,
+      complete: async (
+        job: Parameters<typeof real.complete>[0],
+        body: unknown,
+      ) => {
+        if ((body as { stage: string }).stage === "merge")
+          throw new Error("connection reset");
+        return real.complete(job, body);
+      },
+    };
+    await runWorker({
+      api: unreachable,
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    clock.advanceSeconds(121);
+    const recovering = deps();
+    recovering.makeGateSandbox = () => {
+      throw new Error("no sandbox for you");
+    };
+    await runWorker({
+      api: workerFor("w2"),
+      executor: recovering,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const merge = await db.pool.query(
+      `SELECT r.head_sha, r.result, g.commit_sha AS measured FROM runs r
+       LEFT JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
+       WHERE r.stage = 'merge'`,
+    );
+    expect(merge.rows).toEqual([
+      {
+        head_sha: gitOut(origin, ["rev-parse", "spec/order-export"]),
+        result: "merged",
+        measured: null,
+      },
+    ]);
+  });
+
   it("stops when told to: the job in hand is abandoned, nothing is reported, and no other job is claimed", async () => {
     await confirmedSpec([ticket("a"), ticket("b")]);
     const stop = new AbortController();
