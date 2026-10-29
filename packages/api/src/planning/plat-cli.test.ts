@@ -327,6 +327,30 @@ describe("plat", () => {
     expect((await plat("spec", "show", "S-99")).stderr).toMatch(/no such spec/);
   });
 
+  it("approves protected paths for a blocked ticket, and says to retry it", async () => {
+    await blockedContract();
+    const allowed = await plat(
+      "ticket",
+      "allow-path",
+      "T-1",
+      ".github/CODEOWNERS",
+      "tsconfig.json",
+    );
+    expect(allowed).toEqual({
+      code: 0,
+      stdout:
+        "approved for T-1: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json; retry it with: plat ticket retry T-1\n",
+      stderr: "",
+    });
+    await plat("ticket", "retry", "T-1", "--mode", "restart"); // now it is queued, not blocked
+    expect((await plat("ticket", "allow-path", "T-1", "x")).stderr).toMatch(
+      /only a blocked ticket/,
+    );
+    expect((await plat("ticket", "allow-path", "T-99", "x")).stderr).toMatch(
+      /no such ticket/,
+    );
+  });
+
   it("retries, cancels and approves, and refuses what does not apply", async () => {
     await blockedContract();
     expect((await plat("ticket", "approve-protected", "T-1")).stderr).toMatch(

@@ -148,6 +148,30 @@ export async function approveProtected(
   });
 }
 
+// For any blocked ticket: more paths are added to its approved ones, for the next run. The ticket stays blocked;
+// a retry is a separate decision. The paths are checked like the file's `protected_paths_ok`: non-empty text.
+export async function allowPaths(
+  pool: pg.Pool,
+  ticketId: number,
+  paths: string[],
+): Promise<ActionResult<{ allowed: string[] }>> {
+  return inTransaction(pool, async (client) => {
+    const ticket = await loadLocked(client, ticketId);
+    if (!ticket) return { status: "no-ticket" };
+    if (ticket.state !== "blocked") {
+      return refused(
+        `only a blocked ticket can be given more protected paths; this one is ${ticket.state}`,
+      );
+    }
+    const allowed = [...new Set([...ticket.allowed_protected_paths, ...paths])];
+    await client.query(
+      "UPDATE tickets SET allowed_protected_paths = $2 WHERE id = $1",
+      [ticketId, allowed],
+    );
+    return { status: "ok", allowed };
+  });
+}
+
 export interface CancelOutcome {
   cancelled: string[]; // display ids
   blocked: string[]; // downstream tickets put into blocked (upstream-cancelled)

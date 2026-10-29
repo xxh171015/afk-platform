@@ -954,6 +954,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat ticket edit T-123 --file t.md`               | 编辑票，内容版本号加一                      |
 | `plat ticket retry T-123 --mode continue\|restart` | 处理 blocked                                |
 | `plat ticket approve-protected T-123`              | 批准保护路径改动                            |
+| `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |
 | `plat ticket cancel T-123 [--cascade]`             | 取消，可选一并取消下游                      |
 | `plat blocked`                                     | 列出待处理的 blocked 票和 paused 的 spec    |
 | `plat context --files a.ts b.ts`                   | 缺陷回流时查上下文                          |

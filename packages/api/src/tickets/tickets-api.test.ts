@@ -265,6 +265,57 @@ describe("approve-protected", () => {
   });
 });
 
+describe("allow-paths", () => {
+  it("adds paths to a blocked ticket's approved ones, and a retry carries them to the agent", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    const result = await call("POST", "/tickets/1/allow-paths", {
+      paths: [".github/CODEOWNERS"],
+    });
+    expect(result).toMatchObject({
+      status: 200,
+      body: { allowed: [".github/CODEOWNERS"] },
+    });
+    expect(await row(1)).toMatchObject({
+      state: "blocked", // approving does not run it; a person retries
+      allowed_protected_paths: [".github/CODEOWNERS"],
+    });
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    const next = (await worker.claim()).body.job as Claimed;
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${next.id}/bundle?workerId=w1&attempt=${next.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.allowedProtectedPaths).toEqual([".github/CODEOWNERS"]);
+  });
+
+  it("refuses a ticket that is not blocked, an unknown one, and a bad list", async () => {
+    await runningSpec([ticket("a")]);
+    const paths = { paths: [".github/CODEOWNERS"] };
+    const running = await call("POST", "/tickets/1/allow-paths", paths);
+    expect(running.status).toBe(409);
+    expect(running.body.error).toMatch(/only a blocked ticket/);
+    expect((await row(1)).allowed_protected_paths).toEqual([]);
+    expect((await call("POST", "/tickets/99/allow-paths", paths)).status).toBe(
+      404,
+    );
+    for (const bad of [{ paths: [] }, { paths: [""] }, {}]) {
+      expect((await call("POST", "/tickets/1/allow-paths", bad)).status).toBe(
+        400,
+      );
+    }
+  });
+
+  it("keeps what was approved before and adds each path once", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    await call("POST", "/tickets/1/allow-paths", { paths: ["a.txt"] });
+    const again = await call("POST", "/tickets/1/allow-paths", {
+      paths: ["a.txt", "b.txt"],
+    });
+    expect(again.body.allowed).toEqual(["a.txt", "b.txt"]);
+  });
+});
+
 describe("cancel", () => {
   // a -> b -> c, and d on its own
   const chain = () => [

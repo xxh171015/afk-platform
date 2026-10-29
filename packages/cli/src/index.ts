@@ -308,6 +308,22 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       );
     });
   ticketCommands
+    .command("allow-path <ticket> <paths...>")
+    .description(
+      "approve protected paths for a blocked ticket's next run (then: ticket retry)",
+    )
+    .action(async (id: string, paths: string[]) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/allow-paths",
+        { params: { path: { id: ticketIdOf(id) } }, body: { paths } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `approved for ${id}: ${data.allowed.join(", ")}; retry it with: plat ticket retry ${id}`,
+      );
+    });
+  ticketCommands
     .command("cancel <ticket>")
     .description(
       "cancel a pending or blocked ticket; the tickets behind it go to blocked unless --cascade",

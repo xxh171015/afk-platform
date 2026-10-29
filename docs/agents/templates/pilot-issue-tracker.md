@@ -22,7 +22,8 @@ This repo is the project's `backend` repo (`repo: backend` in the ticket file). 
 - **Fetch a ticket** (a skill's "fetch the relevant ticket"): `plat ticket view T-8`.
 - **See what waits for a person**: `plat blocked`. Read a run's log: `plat run logs R-25`.
 - **Unblock**: `plat ticket retry T-8`, `plat ticket approve-protected T-8` (only after the gate found a
-  protected-path change), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the top level.
+  protected-path change), `plat ticket allow-path T-8 .github/CODEOWNERS` (a blocked ticket that needs a protected path
+  the file did not approve; then retry it), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the top level.
 
 Numbers are global and are never reused, and a failed `spec create` may still take one. Always use the number the
 command printed.
@@ -62,7 +63,7 @@ Rules the importer enforces, and mistakes seen in practice:
   YAML will not parse. Quoting them all is the safe habit.
 - A ticket that changes a **protected path** (project setting, `.github/**` by default, plus the contract file) must
   list the exact files in `protected_paths_ok`. Without it the agent stops before changing anything and the ticket is
-  blocked; there is no way to approve it afterwards, so the spec has to be redone.
+  blocked; fix it with `plat ticket allow-path` and `plat ticket retry`.
 - `type: contract` is for a ticket that only edits the contract file. A ticket using `contract: <key>` must point at a
   contract ticket. The project needs a contract path (`plat project create --contract-path backend:openapi/openapi.yaml`);
   the import is refused without it.

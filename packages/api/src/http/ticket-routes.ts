@@ -4,6 +4,7 @@ import { AcceptancePack, PullRequestRow } from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
+  allowPaths,
   approveProtected,
   cancelTicket,
   resumeSpec,
@@ -290,6 +291,25 @@ const approveRoute = createRoute({
   },
 });
 
+const allowPathsRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/allow-paths",
+  request: {
+    params: z.object({ id: PathId }),
+    body: {
+      content: json(z.object({ paths: z.array(z.string().min(1)).min(1) })),
+    },
+  },
+  responses: {
+    200: reply(
+      "The ticket's approved protected paths now",
+      z.object({ allowed: z.array(z.string()) }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply("Only a blocked ticket can be given paths", ErrorReply),
+  },
+});
+
 const cancelRoute = createRoute({
   method: "post",
   path: "/tickets/{id}/cancel",
@@ -398,6 +418,19 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ approved: result.approved }, 200);
+  });
+
+  app.openapi(allowPathsRoute, async (c) => {
+    const result = await allowPaths(
+      pool,
+      c.req.valid("param").id,
+      c.req.valid("json").paths,
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ allowed: result.allowed }, 200);
   });
 
   app.openapi(cancelRoute, async (c) => {
