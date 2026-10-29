@@ -1191,9 +1191,9 @@ M0 第一天先做这几个验证，任何一个不通都要先换方案：
 - [x] cursor provider 的 stream-json 输出能被 `Output.object` 正确提取（M0）
 - [x] 容器内访问 Cursor 公网 API 稳定（M0）。实测可用（Docker Desktop、Apple Silicon）；“稳定”只跑了十几次，限流和断网时的行为没测
 - [x] `git rebase --exec` 补 trailer 后 Sandcastle 复用 worktree 正常（M0）。注意 Sandcastle 对干净的 worktree 不是“复用”而是重建，见「单票执行流水线」的 worktree 语义
-- [ ] 没有 `workflows` 权限的 GitHub App 推不了对 `.github/workflows/` 的改动（M1 第一周用真实的 App 验证；方案“平台自己保证 + 事后检测”第 3 层的前提）
-- [ ] GitHub App 开的 PR，本人可以直接合并（免费版没有 approve 要求，预计没问题；M1 第一周验证）
-- [ ] 检测工作流能区分“经 PR 合并”和“直接推送”（M1 第一周验证）
+- [x] 没有 `workflows` 权限的 GitHub App 推不了对 `.github/workflows/` 的改动（M1 第一周用真实的 App 验证；方案“平台自己保证 + 事后检测”第 3 层的前提）
+- [x] GitHub App 开的 PR，本人可以直接合并（免费版没有 approve 要求，预计没问题；M1 第一周验证）
+- [x] 检测工作流能区分“经 PR 合并”和“直接推送”（M1 第一周验证）
 - [ ] 槽位方案可行：用 Sandcastle 的 `cwd` 选项指向 `~/.afk/slots/<n>/<repo>` 跑通 agent 运行和门禁，`git fetch` 只取回一个 ref 并开 `transfer.fsckObjects`，`--no-hardlinks` 克隆的耗时可接受（M1 第一周在 M0 脚本里验证；M0 实测都是在主 clone 上跑的）
 - [ ] 选定的队列库支持租约续期和 attempt（M1）。调研结论：graphile-worker 不满足，pg-boss 基本满足，自己在 Postgres 表上实现完全满足，选型待定
 - [ ] 另一仓库只读快照挂载 + compose 网络联调的原型可行（M2）
