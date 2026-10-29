@@ -7,7 +7,11 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
-import { enqueueSpecCleanup } from "../host/host-jobs.ts";
+import {
+  CLEANUP_GRACE_SECONDS,
+  enqueueSpecCleanup,
+  inSeconds,
+} from "../host/host-jobs.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import {
   inTransaction,
@@ -329,6 +333,7 @@ export interface OpenPullRequest {
 export async function cancelSpec(
   pool: pg.Pool,
   specId: number,
+  now: Date,
 ): Promise<
   ActionResult<{
     state: SpecState;
@@ -385,7 +390,11 @@ export async function cancelSpec(
       [specId],
     );
     // After the jobs of the spec were stopped: the one that closes its pull requests and deletes its branches.
-    await enqueueSpecCleanup(client, { specId });
+    await enqueueSpecCleanup(
+      client,
+      { specId },
+      inSeconds(now, CLEANUP_GRACE_SECONDS),
+    );
     // What the cleanup is going to close, for the person who cancelled.
     const open = await client.query<OpenPullRequest>(
       `SELECT r.role AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id
@@ -398,5 +407,30 @@ export async function cancelSpec(
       cancelled: cancelled.map((id) => formatDisplayId("ticket", id)),
       pullRequests: open.rows,
     };
+  });
+}
+
+// A person asks for the cleanup of a cancelled or merged spec again (it failed three times, or something was made
+// after it ran). Nothing is queued twice.
+export async function retrySpecCleanup(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ queued: true }>> {
+  return inTransaction(pool, async (client) => {
+    const state = await lockedSpecState(client, specId);
+    if (!state) return { status: "no-ticket" };
+    if (state !== "cancelled" && state !== "merged")
+      return refused(
+        `the spec is ${state}: only a cancelled or merged spec is cleaned up`,
+      );
+    const waiting = await client.query(
+      `SELECT 1 FROM jobs WHERE type = 'spec-cleanup' AND state IN ('queued', 'running')
+         AND (payload->>'specId')::int = $1`,
+      [specId],
+    );
+    if (waiting.rowCount)
+      return refused("a clean-up of this spec is already waiting or running");
+    await enqueueSpecCleanup(client, { specId });
+    return { status: "ok", queued: true };
   });
 }

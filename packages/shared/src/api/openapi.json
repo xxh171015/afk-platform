@@ -3092,7 +3092,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Blocked tickets, stuck pull requests and paused specs, everything waiting for a person",
+            "description": "Blocked tickets, stuck pull requests, cleanups that failed and paused specs, everything waiting for a person",
             "content": {
               "application/json": {
                 "schema": {
@@ -3283,6 +3283,24 @@
                         ]
                       }
                     },
+                    "cleanups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["specId", "specDisplayId", "error"]
+                      }
+                    },
                     "specs": {
                       "type": "array",
                       "items": {
@@ -3309,6 +3327,7 @@
                     "tickets",
                     "finalizations",
                     "pullRequests",
+                    "cleanups",
                     "specs"
                   ]
                 }
@@ -3912,6 +3931,73 @@
           },
           "409": {
             "description": "Nothing is blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/cleanup": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The clean-up (closing its pull requests, deleting its branches) is queued again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "queued": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["queued"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not cancelled or merged, or a clean-up of it is already waiting",
             "content": {
               "application/json": {
                 "schema": {

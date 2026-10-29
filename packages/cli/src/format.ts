@@ -97,12 +97,14 @@ export function blockedText(queue: {
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
   pullRequests: PullRequestProblemLike[];
+  cleanups: { specDisplayId: string; error: string }[];
   specs: { displayId: string; title: string; reason: string }[];
 }): string {
   if (
     queue.tickets.length === 0 &&
     queue.finalizations.length === 0 &&
     queue.pullRequests.length === 0 &&
+    queue.cleanups.length === 0 &&
     queue.specs.length === 0
   ) {
     return "nothing is waiting for you";
@@ -118,6 +120,10 @@ export function blockedText(queue: {
       `    then: plat spec retry-final ${f.specDisplayId}`,
     ]),
     ...queue.pullRequests.flatMap(pullRequestProblemLines),
+    ...queue.cleanups.flatMap((c) => [
+      `${c.specDisplayId}  clean-up of the spec did not finish: ${c.error}`,
+      `    branches or pull requests may be left on the code host; try again: plat spec cleanup ${c.specDisplayId}`,
+    ]),
     ...queue.specs.map(
       (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,
     ),

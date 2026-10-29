@@ -66,6 +66,7 @@ const server = () =>
         edges: [],
         finalizations: [],
         pullRequests: [],
+        cleanups: [],
         acceptancePack: null,
       },
     }),
@@ -149,6 +150,7 @@ describe("the app", () => {
           ],
           finalizations: [],
           pullRequests: [],
+          cleanups: [],
           specs: [
             { id: 3, displayId: "S-3", title: "Third", reason: "paused" },
           ],
@@ -173,7 +175,13 @@ describe("the app", () => {
       fakeServer({
         "GET /specs": () => ({ json: { specs: [] } }),
         "GET /blocked": () => ({
-          json: { tickets: [], finalizations: [], pullRequests: [], specs: [] },
+          json: {
+            tickets: [],
+            finalizations: [],
+            pullRequests: [],
+            cleanups: [],
+            specs: [],
+          },
         }),
       }),
     );

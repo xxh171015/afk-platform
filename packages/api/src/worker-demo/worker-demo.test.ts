@@ -1744,6 +1744,10 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
     branchesOfTheSpec();
 
     expect((await post("/specs/1/cancel")).status).toBe(200);
+    // the clean-up waits for the jobs the cancel stopped to be shut out; here none is running, so no waiting
+    await db.pool.query(
+      "UPDATE jobs SET not_before = NULL WHERE type = 'spec-cleanup' AND state = 'queued'",
+    );
     await runWorker(hostWorker());
 
     expect(github.pullRequests()[0]).toMatchObject({

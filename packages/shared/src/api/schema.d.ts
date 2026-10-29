@@ -1654,7 +1654,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description Blocked tickets, stuck pull requests and paused specs, everything waiting for a person */
+        /** @description Blocked tickets, stuck pull requests, cleanups that failed and paused specs, everything waiting for a person */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1716,6 +1716,11 @@ export interface paths {
                 url: string;
                 state: string;
                 syncError: string | null;
+              }[];
+              cleanups: {
+                specId: number;
+                specDisplayId: string;
+                error: string;
               }[];
               specs: {
                 id: number;
@@ -2209,6 +2214,68 @@ export interface paths {
           };
         };
         /** @description Nothing is blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/cleanup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The clean-up (closing its pull requests, deleting its branches) is queued again */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              queued: true;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not cancelled or merged, or a clean-up of it is already waiting */
         409: {
           headers: {
             [name: string]: unknown;

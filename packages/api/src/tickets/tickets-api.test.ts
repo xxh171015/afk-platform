@@ -804,6 +804,7 @@ describe("what a person sees", () => {
       tickets: [],
       finalizations: [],
       pullRequests: [],
+      cleanups: [],
       specs: [],
     });
   });

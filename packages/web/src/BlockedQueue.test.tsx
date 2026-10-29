@@ -43,12 +43,14 @@ interface Queue {
   tickets: unknown[];
   finalizations: unknown[];
   pullRequests: unknown[];
+  cleanups: unknown[];
   specs: unknown[];
 }
 const queue = (over: Partial<Queue> = {}): Queue => ({
   tickets: [],
   finalizations: [],
   pullRequests: [],
+  cleanups: [],
   specs: [],
   ...over,
 });
@@ -609,6 +611,30 @@ describe("pull requests a person has to look at", () => {
       item.getByText(/could not be read: GitHub answered 404/),
     ).toBeTruthy();
     expect(item.queryByText(/closed without merge/)).toBeNull();
+  });
+});
+
+describe("a clean-up that did not finish", () => {
+  it("is listed with its error, and says what to do", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            cleanups: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                error: "GitHub answered 503",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("cleanup-S-1"));
+    expect(item.getByText(/GitHub answered 503/)).toBeTruthy();
+    expect(item.getByText(/plat spec cleanup S-1/)).toBeTruthy();
   });
 });
 

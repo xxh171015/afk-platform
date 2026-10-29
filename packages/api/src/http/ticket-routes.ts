@@ -9,6 +9,7 @@ import {
   cancelSpec,
   cancelTicket,
   resumeSpec,
+  retrySpecCleanup,
   retryTicket,
 } from "../tickets/actions.ts";
 import {
@@ -239,7 +240,7 @@ const blockedRoute = createRoute({
   path: "/blocked",
   responses: {
     200: reply(
-      "Blocked tickets, stuck pull requests and paused specs, everything waiting for a person",
+      "Blocked tickets, stuck pull requests, cleanups that failed and paused specs, everything waiting for a person",
       z.object({
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
@@ -252,6 +253,13 @@ const blockedRoute = createRoute({
             url: z.string(),
             state: z.string(),
             syncError: z.string().nullable(),
+          }),
+        ),
+        cleanups: z.array(
+          z.object({
+            specId: Id,
+            specDisplayId: z.string(),
+            error: z.string(),
           }),
         ),
         specs: z.array(
@@ -411,6 +419,23 @@ const retryFinalRoute = createRoute({
   },
 });
 
+const retryCleanupRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/cleanup",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The clean-up (closing its pull requests, deleting its branches) is queued again",
+      z.object({ queued: z.literal(true) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply(
+      "The spec is not cancelled or merged, or a clean-up of it is already waiting",
+      ErrorReply,
+    ),
+  },
+});
+
 export function registerTicketRoutes(
   app: OpenAPIHono,
   context: AppContext,
@@ -506,7 +531,11 @@ export function registerTicketRoutes(
   });
 
   app.openapi(cancelSpecRoute, async (c) => {
-    const result = await cancelSpec(pool, c.req.valid("param").id);
+    const result = await cancelSpec(
+      pool,
+      c.req.valid("param").id,
+      context.clock(),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")
@@ -528,5 +557,14 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ retried: result.retried }, 200);
+  });
+
+  app.openapi(retryCleanupRoute, async (c) => {
+    const result = await retrySpecCleanup(pool, c.req.valid("param").id);
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ queued: true as const }, 200);
   });
 }

@@ -403,6 +403,25 @@ async function pullRequestProblems(
   }));
 }
 
+// A cancelled or merged spec whose cleanup failed every time it was tried: branches or pull requests may be left on
+// the code host. A failure only counts when no cleanup of that spec that is queued, running or done came after it.
+async function cleanupProblems(pool: pg.Pool) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (spec_id) spec_id, error FROM (
+       SELECT (payload->>'specId')::int AS spec_id, error, state, id FROM jobs WHERE type = 'spec-cleanup'
+     ) j
+     WHERE state = 'failed' AND NOT EXISTS (
+       SELECT 1 FROM jobs k WHERE k.type = 'spec-cleanup' AND (k.payload->>'specId')::int = j.spec_id
+         AND k.id > j.id AND k.state IN ('queued', 'running', 'done'))
+     ORDER BY spec_id, id DESC`,
+  );
+  return rows.map((row) => ({
+    specId: row.spec_id as number,
+    specDisplayId: formatDisplayId("spec", row.spec_id),
+    error: (row.error as string | null) ?? "",
+  }));
+}
+
 // Everything waiting for a person: tickets that are blocked, blocked steps of an overall review, pull requests that
 // were closed or cannot be read, and specs that the platform paused. A cancelled spec waits for no one.
 export async function blockedQueue(pool: pg.Pool) {
@@ -418,6 +437,7 @@ export async function blockedQueue(pool: pg.Pool) {
       [],
     ),
     pullRequests: await pullRequestProblems(pool),
+    cleanups: await cleanupProblems(pool),
     specs: specs.rows.map((s) => ({
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),

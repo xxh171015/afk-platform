@@ -865,6 +865,7 @@ describe("the acceptance pack", () => {
   });
 });
 
+const CLEANUP_GRACE_SECONDS = 150; // a lease (120 s) and a heartbeat
 describe("cleaning up after a cancelled or merged spec", () => {
   async function awaitingReview(repos: string[] = ["backend"]) {
     await settledSpec(repos);
@@ -875,6 +876,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
   }
   // The sync that was queued first may still be waiting; it is answered with nothing to report.
   async function claimCleanup() {
+    clock.advanceSeconds(CLEANUP_GRACE_SECONDS);
     for (let i = 0; i < 5; i++) {
       const job = (await worker.claim()).body.job;
       if (!job) break;
@@ -969,5 +971,129 @@ describe("cleaning up after a cancelled or merged spec", () => {
     }
     expect(await jobsOf("spec-cleanup")).toHaveLength(3);
     expect((await worker.claim()).body.job).toBeNull();
+  });
+
+  // Is the cleanup claimable now? Any sync that is due is answered with nothing to report on the way.
+  async function cleanupIsDue() {
+    for (let i = 0; i < 5; i++) {
+      const job = (await worker.claim()).body.job;
+      if (!job) return false;
+      if (job.type === "spec-cleanup") return true;
+      await worker.complete(job.id, job.attempt, {
+        stage: "host-sync",
+        pulls: [],
+      });
+    }
+    return false;
+  }
+
+  it("starts the cleanup of a cancelled spec only after every job it stopped has been shut out", async () => {
+    await awaitingReview();
+    await call("POST", "/specs/1/cancel");
+    expect(await cleanupIsDue()).toBe(false);
+    clock.advanceSeconds(CLEANUP_GRACE_SECONDS - 1);
+    expect(await cleanupIsDue()).toBe(false);
+    clock.advanceSeconds(2);
+    expect(await cleanupIsDue()).toBe(true);
+  });
+
+  it("waits a minute before trying a failed cleanup again", async () => {
+    await awaitingReview();
+    await call("POST", "/specs/1/cancel");
+    const first = await claimCleanup();
+    await worker.fail(first.id, first.attempt, "GitHub answered 503");
+    expect((await worker.claim()).body.job).toBeNull();
+    clock.advanceSeconds(59);
+    expect((await worker.claim()).body.job).toBeNull();
+    clock.advanceSeconds(2);
+    expect((await worker.claim()).body.job?.type).toBe("spec-cleanup");
+  });
+
+  async function failThreeTimes() {
+    await awaitingReview();
+    await call("POST", "/specs/1/cancel");
+    for (let n = 1; n <= 3; n++) {
+      clock.advanceSeconds(CLEANUP_GRACE_SECONDS);
+      const job = await claimCleanup();
+      await worker.fail(job.id, job.attempt, `GitHub answered 50${n}`);
+    }
+  }
+  const leftover = async () =>
+    (await call("GET", "/blocked")).body.cleanups as Json[];
+
+  it("puts a cleanup that failed three times in what waits for a person, with the last error", async () => {
+    await awaitingReview();
+    await call("POST", "/specs/1/cancel");
+    expect(await leftover()).toEqual([]);
+    const job = await claimCleanup();
+    await worker.fail(job.id, job.attempt, "GitHub answered 501");
+    expect(await leftover()).toEqual([]); // it will be tried again
+    clock.advanceSeconds(CLEANUP_GRACE_SECONDS);
+    for (const n of [2, 3]) {
+      const next = await claimCleanup();
+      await worker.fail(next.id, next.attempt, `GitHub answered 50${n}`);
+      clock.advanceSeconds(CLEANUP_GRACE_SECONDS);
+    }
+    expect(await leftover()).toEqual([
+      { specId: 1, specDisplayId: "S-1", error: "GitHub answered 503" },
+    ]);
+  });
+
+  it("queues the cleanup again on a person's word, and it leaves the list while it is queued", async () => {
+    await failThreeTimes();
+    expect((await call("POST", "/specs/1/cleanup")).status).toBe(200);
+    expect(await leftover()).toEqual([]);
+    expect((await call("POST", "/specs/1/cleanup")).status).toBe(409); // one is already waiting
+    const job = await claimCleanup();
+    await worker.complete(job.id, job.attempt, {
+      stage: "spec-cleanup",
+      closed: [1],
+    });
+    expect(await leftover()).toEqual([]);
+  });
+
+  it("lists a cleanup that fails again after an earlier one succeeded", async () => {
+    await failThreeTimes();
+    await call("POST", "/specs/1/cleanup");
+    const done = await claimCleanup();
+    await worker.complete(done.id, done.attempt, {
+      stage: "spec-cleanup",
+      closed: [],
+    });
+    expect(await leftover()).toEqual([]);
+    await call("POST", "/specs/1/cleanup");
+    const failed = await claimCleanup();
+    await worker.fail(failed.id, failed.attempt, "GitHub answered 504");
+    expect(await leftover()).toEqual([
+      { specId: 1, specDisplayId: "S-1", error: "GitHub answered 504" },
+    ]);
+  });
+
+  it("does not clean up a spec that is not over", async () => {
+    await awaitingReview();
+    const refused = await call("POST", "/specs/1/cleanup");
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/cancelled or merged/);
+  });
+
+  it("is said by plat blocked and can be asked for again with plat spec cleanup", async () => {
+    await failThreeTimes();
+    let out = "";
+    const io: Io = {
+      stdout: (text) => {
+        out += text;
+      },
+      stderr: () => {},
+      env: { AFK_API_URL: api.url },
+      readFile: async () => "",
+    };
+    expect(await run(["blocked"], io)).toBe(0);
+    expect(out).toBe(
+      "S-1  clean-up of the spec did not finish: GitHub answered 503\n" +
+        "    branches or pull requests may be left on the code host; try again: plat spec cleanup S-1\n",
+    );
+    out = "";
+    expect(await run(["spec", "cleanup", "S-1"], io)).toBe(0);
+    expect(out).toBe("S-1: clean-up queued\n");
   });
 });

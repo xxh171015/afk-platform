@@ -80,6 +80,7 @@ export const specCleanupKeyPrefix = ({ specId }: SpecCleanupPayload) =>
 export async function enqueueSpecCleanup(
   client: pg.PoolClient,
   payload: SpecCleanupPayload,
+  notBefore?: Date,
 ) {
   const prefix = specCleanupKeyPrefix(payload);
   const earlier = await client.query<{ n: string }>(
@@ -91,8 +92,19 @@ export async function enqueueSpecCleanup(
     payload: { ...payload },
     requiredCapabilities: [HOST_CAPABILITY],
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+    ...(notBefore ? { notBefore } : {}),
   });
 }
+
+// A cancelled spec's cleanup starts only after a lease (120 s) and a heartbeat (30 s): the jobs the cancel stopped
+// may still be running in their sandboxes, but each is refused at its next heartbeat, and a push or a result of
+// it is refused by the fence, so after this nothing of the spec is being made any more.
+export const CLEANUP_GRACE_SECONDS = 150;
+// A failed cleanup is tried again after this, so that a short outage of the host does not use up all three tries.
+export const CLEANUP_RETRY_SECONDS = 60;
+
+export const inSeconds = (now: Date, seconds: number) =>
+  new Date(now.getTime() + seconds * 1000);
 
 // A project has one host-sync chain: each run queues the next one a minute later while a pull request is open.
 // Nothing is queued when one is already waiting or running.

@@ -336,6 +336,21 @@ function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
   );
 }
 
+function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
+  return (
+    <li className="blocked-card" data-testid={`cleanup-${item.specDisplayId}`}>
+      <h3>
+        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>
+      </h3>
+      <p className="error">Clean-up did not finish: {item.error}</p>
+      <p className="note">
+        Branches or pull requests may be left on the code host. Try again with
+        plat spec cleanup {item.specDisplayId}.
+      </p>
+    </li>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <>
@@ -357,12 +372,13 @@ export function BlockedQueue() {
         Could not load the queue: {queue.error.message}
       </p>
     );
-  const { tickets, finalizations, pullRequests, specs } =
+  const { tickets, finalizations, pullRequests, cleanups, specs } =
     queue.data as NonNullable<typeof queue.data>;
   if (
     tickets.length +
       finalizations.length +
       pullRequests.length +
+      cleanups.length +
       specs.length ===
     0
   ) {
@@ -394,6 +410,13 @@ export function BlockedQueue() {
         <Section title="Pull requests that need a look">
           {pullRequests.map((item) => (
             <StuckPullRequest key={`${item.specId}-${item.repo}`} item={item} />
+          ))}
+        </Section>
+      ) : null}
+      {cleanups.length > 0 ? (
+        <Section title="Clean-ups that did not finish">
+          {cleanups.map((item) => (
+            <StuckCleanup key={item.specId} item={item} />
           ))}
         </Section>
       ) : null}

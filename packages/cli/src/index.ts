@@ -286,6 +286,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("cleanup <spec>")
+    .description(
+      "close the open pull requests and delete the branches of a cancelled or merged spec again (after plat blocked said the clean-up did not finish)",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/cleanup",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: clean-up queued`);
+    });
+
+  spec
     .command("resume <spec>")
     .description("let a paused spec go on, with more agent time")
     .option(

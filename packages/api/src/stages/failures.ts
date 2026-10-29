@@ -5,8 +5,10 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import {
+  CLEANUP_RETRY_SECONDS,
   enqueueOpenPr,
   enqueueSpecCleanup,
+  inSeconds,
   openPrKeyPrefix,
   readOpenPrPayload,
   readSpecCleanupPayload,
@@ -65,6 +67,7 @@ export async function recordJobFailure(
   client: pg.PoolClient,
   job: StageJob,
   error: string,
+  now: Date,
 ): Promise<FailureOutcome> {
   await finishRun(client, job.id, error);
 
@@ -75,7 +78,7 @@ export async function recordJobFailure(
   const openPr = readOpenPrPayload(job);
   if (openPr) return openPrFailed(client, openPr);
   const cleanup = readSpecCleanupPayload(job);
-  if (cleanup) return specCleanupFailed(client, cleanup);
+  if (cleanup) return specCleanupFailed(client, cleanup, now);
   return { status: "not-a-stage" };
 }
 
@@ -221,9 +224,10 @@ async function openPrFailed(
 async function specCleanupFailed(
   client: pg.PoolClient,
   read: SpecCleanupPayload,
+  now: Date,
 ): Promise<FailureOutcome> {
   const failures = await failuresOf(client, specCleanupKeyPrefix(read), 0);
   if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
-  await enqueueSpecCleanup(client, read);
+  await enqueueSpecCleanup(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
   return { status: "requeued", failures };
 }

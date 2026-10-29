@@ -489,7 +489,12 @@ export function registerWorkerRoutes(
           "SELECT id, type, payload FROM jobs WHERE id = $1",
           [id],
         );
-        const failure = await recordJobFailure(client, job.rows[0], error);
+        const failure = await recordJobFailure(
+          client,
+          job.rows[0],
+          error,
+          context.clock(),
+        );
         const sync = readHostSyncPayload(job.rows[0]);
         if (failure.status === "not-a-stage" && sync)
           await hostSyncFailed(client, sync.projectId, context.clock());
