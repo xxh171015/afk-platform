@@ -1,27 +1,28 @@
 # Issue tracker: afk-platform (`plat`)
 
 Specs and tickets for this repo live in the afk-platform, not in GitHub issues. Use the `plat` CLI for all operations.
-Run it from a clone of afk-platform: `pnpm plat …` (it talks to `$AFK_API_URL`, default `http://127.0.0.1:3000`).
-Add `--json` for machine output. The platform must be running (`pnpm api`) and a worker too (`pnpm worker`).
+`plat` is a command on this machine (a wrapper around the afk-platform CLI); run it from this repo, so file paths are
+relative to here. It talks to `$AFK_API_URL`, default `http://127.0.0.1:3000`.
+Add `--json` for machine output. The platform's API must be running; a worker must be running for tickets to be worked.
 
 This repo is the project's `backend` repo (`repo: backend` in the ticket file). One spec can only change one repo in M1.
 
 ## Conventions
 
 - **Publish a spec** (what a skill means by "publish to the issue tracker" for a PRD):
-  `pnpm plat spec create --project <id> --type feature --title "<title>" --slug <english-slug> --file <spec.md>`
+  `plat spec create --project <id> --type feature --title "<title>" --slug <english-slug> --file <spec.md>`
   It prints the spec number, e.g. `S-7`. Pass `--slug` (lowercase letters, digits, hyphens) whenever the title has no
   Latin words: a Chinese-only title cannot be turned into a slug.
 - **Publish tickets** (to-tickets): write a `tickets.yaml` (format below), then
-  `pnpm plat tickets import S-7 tickets.yaml`. The import is all or nothing and lists every problem at once. Tickets
+  `plat tickets import S-7 tickets.yaml`. The import is all or nothing and lists every problem at once. Tickets
   can only be imported into a draft spec, and only once.
-- **Confirm the split**: `pnpm plat spec confirm S-7` starts the pipeline. A person does this, after reading the tickets
+- **Confirm the split**: `plat spec confirm S-7` starts the pipeline. A person does this, after reading the tickets
   and the overlap warnings. A skill never confirms.
-- **Read a spec**: `pnpm plat spec show S-7` (tickets, edges, warnings; after the run, the acceptance pack).
-- **Fetch a ticket** (a skill's "fetch the relevant ticket"): `pnpm plat ticket view T-8`.
-- **See what waits for a person**: `pnpm plat blocked`. Read a run's log: `pnpm plat run logs R-25`.
-- **Unblock**: `pnpm plat ticket retry T-8`, `pnpm plat ticket approve-protected T-8` (only after the gate found a
-  protected-path change), `pnpm plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the top level.
+- **Read a spec**: `plat spec show S-7` (tickets, edges, warnings; after the run, the acceptance pack).
+- **Fetch a ticket** (a skill's "fetch the relevant ticket"): `plat ticket view T-8`.
+- **See what waits for a person**: `plat blocked`. Read a run's log: `plat run logs R-25`.
+- **Unblock**: `plat ticket retry T-8`, `plat ticket approve-protected T-8` (only after the gate found a
+  protected-path change), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the top level.
 
 Numbers are global and are never reused, and a failed `spec create` may still take one. Always use the number the
 command printed.
