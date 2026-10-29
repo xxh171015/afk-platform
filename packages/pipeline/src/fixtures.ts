@@ -1,4 +1,4 @@
-import type { Bundle } from "@afk/shared";
+import { type Bundle, DEFAULT_LIMITS } from "@afk/shared";
 
 // A bundle as GET /worker/jobs/:id/bundle returns it, for tests.
 export function bundleFor(
@@ -44,6 +44,11 @@ export function bundleFor(
     failureLog: null,
     review: null,
     gateBaseline: null,
+    limits: {
+      runIdleSeconds: DEFAULT_LIMITS.runIdleSeconds,
+      runWallclockSeconds: DEFAULT_LIMITS.runWallclockSeconds,
+    },
+    model: null,
     ...rest,
   };
 }

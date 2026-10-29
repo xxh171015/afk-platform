@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { redactSecrets } from "@afk/shared";
 
 // Runs a program and keeps both its output streams. Secrets named in `redact` never appear in the output, so
 // a log line or an error built from it cannot leak a token.
@@ -27,11 +28,7 @@ export function exec(
     input: options.input,
     maxBuffer: 64 << 20,
   });
-  const scrub = (text: string) =>
-    (options.redact ?? []).reduce(
-      (acc, secret) => (secret ? acc.split(secret).join("***") : acc),
-      text,
-    );
+  const scrub = (text: string) => redactSecrets(text, options.redact ?? []);
   const stdout = scrub(result.stdout ?? "");
   return {
     code: result.status ?? -1,

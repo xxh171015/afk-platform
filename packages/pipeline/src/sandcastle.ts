@@ -22,7 +22,6 @@ export interface SandcastleConfig {
   skillsMount: string; // host directory with the pinned skills
   cursorApiKey: string;
   logDir: string; // where the raw logs of this task go
-  onRawLine?: (line: string) => void; // Cursor's event lines, for uploading to the API
   onNote?: (line: string) => void; // things worth a line in the run log
 }
 
@@ -111,7 +110,9 @@ export class SandcastleAgentRunner implements AgentRunner {
     const started = Date.now();
     try {
       const result = await run({
-        agent: cursor(config.model, { env: agentEnv(config.cursorApiKey) }),
+        agent: cursor(options.model ?? config.model, {
+          env: agentEnv(config.cursorApiKey),
+        }),
         sandbox: provider(config, options.ctxDir),
         cwd: config.cwd,
         branchStrategy: {
@@ -133,7 +134,7 @@ export class SandcastleAgentRunner implements AgentRunner {
               join(config.logDir, `${options.stage}.stream.jsonl`),
               `${event.line}\n`,
             );
-            config.onRawLine?.(event.line);
+            options.onRawLine?.(event.line);
           },
         },
       });

@@ -205,6 +205,8 @@ describe("plat", () => {
       "3",
       "--budget-limit",
       "50",
+      "--default-model",
+      "composer-2",
       "--limit",
       "repoConcurrency=4",
     );
@@ -214,9 +216,10 @@ describe("plat", () => {
       stderr: "",
     });
     const row = await db.pool.query(
-      "SELECT contract_path, protected_paths, max_concurrency, budget_limit, limits FROM projects",
+      "SELECT default_model, contract_path, protected_paths, max_concurrency, budget_limit, limits FROM projects",
     );
     expect(row.rows[0]).toEqual({
+      default_model: "composer-2",
       contract_path: "backend:openapi.yaml",
       protected_paths: [".github/**"],
       max_concurrency: 3,

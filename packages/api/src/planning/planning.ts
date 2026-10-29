@@ -51,6 +51,7 @@ export async function createProject(
 export type ProjectEdit = Partial<
   Pick<
     NewProject,
+    | "defaultModel"
     | "contractPath"
     | "protectedPaths"
     | "maxConcurrency"
@@ -74,6 +75,7 @@ export async function editProject(
       `${column} = ${expression.replace("$", `$${values.length}`)}`,
     );
   };
+  if (edit.defaultModel !== undefined) set("default_model", edit.defaultModel);
   if (edit.contractPath !== undefined) set("contract_path", edit.contractPath);
   if (edit.protectedPaths !== undefined)
     set("protected_paths", edit.protectedPaths);

@@ -89,6 +89,7 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
+            defaultModel?: string;
             contractPath?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
@@ -838,6 +839,11 @@ export interface paths {
                 tests: number;
                 skipped: number;
               } | null;
+              limits: {
+                runIdleSeconds: number;
+                runWallclockSeconds: number;
+              };
+              model: string | null;
             };
           };
         };

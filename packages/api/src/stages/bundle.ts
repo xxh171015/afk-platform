@@ -1,4 +1,4 @@
-import { formatDisplayId, type TicketState } from "@afk/shared";
+import { formatDisplayId, resolveLimits, type TicketState } from "@afk/shared";
 import type pg from "pg";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 
@@ -52,7 +52,20 @@ export interface Bundle {
   // What the last merge into the integration branch measured: a gate may not find fewer tests or more skipped ones
   // than this. Null before the spec has merged anything.
   gateBaseline: { tests: number; skipped: number } | null;
+  // The project's say over how a run is carried out: how long an agent may be silent or run in all, and the model
+  // it uses (null: the worker's own AFK_MODEL).
+  limits: { runIdleSeconds: number; runWallclockSeconds: number };
+  model: string | null;
 }
+
+// Defaults where the project sets nothing; only the two run limits travel, the rest is the API's business.
+const runSettings = (limits: unknown, defaultModel: unknown) => {
+  const { runIdleSeconds, runWallclockSeconds } = resolveLimits(limits);
+  return {
+    limits: { runIdleSeconds, runWallclockSeconds },
+    model: (defaultModel as string | null) ?? null,
+  };
+};
 
 async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   const { rows } = await pool.query<{
@@ -88,7 +101,7 @@ export async function buildBundle(
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
             s.integration_branches,
             r.id AS repo_id, r.role, r.url, r.default_branch,
-            p.contract_path, p.protected_paths
+            p.contract_path, p.protected_paths, p.limits, p.default_model
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
@@ -183,6 +196,7 @@ export async function buildBundle(
     failureLog: failed.rows[0]?.log ?? null,
     review: reviewed.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
+    ...runSettings(row.limits, row.default_model),
   };
 }
 
@@ -195,7 +209,8 @@ async function buildFinalBundle(
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
-            s.integration_branches, r.id AS repo_id, r.role, r.url, r.default_branch, p.protected_paths
+            s.integration_branches, r.id AS repo_id, r.role, r.url, r.default_branch, p.protected_paths,
+            p.limits, p.default_model
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
     [final.specId, final.repoId],
   );
@@ -260,5 +275,6 @@ async function buildFinalBundle(
     failureLog: failed.rows[0]?.log ?? null,
     review: review.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
+    ...runSettings(row.limits, row.default_model),
   };
 }

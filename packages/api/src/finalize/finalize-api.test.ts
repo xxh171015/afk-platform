@@ -293,6 +293,10 @@ describe("the overall review and the one fix", () => {
       ...REVIEW_FIX,
     });
     const fix = (await claim()) as Claimed;
+    expect(await bundleOf(fix)).toMatchObject({
+      limits: { runIdleSeconds: 600, runWallclockSeconds: 3600 },
+      model: null,
+    });
     expect((await bundleOf(fix)).review).toMatchObject({ verdict: "fix" }); // the fix is told what to fix
   });
 });

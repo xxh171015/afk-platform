@@ -29,6 +29,7 @@ import type { Bundle } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
 import type { PushFn } from "./push.ts";
+import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
 import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
 
@@ -45,8 +46,8 @@ export interface ExecutorDeps {
   makeAgentRunner(slotDir: string): AgentRunner;
   makeGateSandbox(slotDir: string): GateSandbox;
   tmpRoot?: string;
-  idleSeconds: number;
-  wallClockMs: number;
+  model?: string; // the worker's own model: what a project that sets none gets
+  secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
 }
 
 export interface StageContext {
@@ -54,6 +55,20 @@ export interface StageContext {
   bundle: Bundle;
   signal: AbortSignal;
   log: (line: string) => void;
+  logRaw: (line: string) => void; // goes to the Run's log only, not to the worker's own output
+}
+
+// What a run is asked for, from the project's say (the bundle) and the worker's own defaults.
+function runOptions(deps: ExecutorDeps, context: StageContext) {
+  const { bundle } = context;
+  const model = bundle.model ?? deps.model;
+  return {
+    idleSeconds: bundle.limits.runIdleSeconds,
+    wallClockMs: bundle.limits.runWallclockSeconds * 1000,
+    ...(model ? { model } : {}),
+    onRawLine: (line: string) =>
+      context.logRaw(sanitizeRawLine(line, deps.secrets ?? [])),
+  };
 }
 
 // A problem with the worker's own environment, not with the ticket: the job fails and is dispatched again.
@@ -258,6 +273,7 @@ async function agentChange(
   try {
     const ctxDir = renderFor(context, mainDir, baseSha, tmp);
     log(`${stage}: running the agent on ${agent}`);
+    const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
       stage,
       branch: agent,
@@ -265,8 +281,7 @@ async function agentChange(
       promptFile: promptFor(stage),
       ctxDir,
       schema: ImplementOutputSchema,
-      idleSeconds: deps.idleSeconds,
-      wallClockMs: deps.wallClockMs,
+      ...options,
       signal: context.signal,
     });
     if (context.signal.aborted)
@@ -283,6 +298,7 @@ async function agentChange(
       baseSha,
       commits: run.commits,
       durationMs: run.durationMs,
+      ...(options.model ? { model: options.model } : {}),
       output: run.output ?? { error: run.error },
     };
     if (verdict.outcome !== "done")
@@ -363,6 +379,7 @@ async function review(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(context, mainDir, baseSha, tmp);
+    const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
       stage,
       branch: agent,
@@ -370,8 +387,7 @@ async function review(
       promptFile: promptFor(stage),
       ctxDir,
       schema: ReviewOutputSchema,
-      idleSeconds: deps.idleSeconds,
-      wallClockMs: deps.wallClockMs,
+      ...options,
       signal: context.signal,
     });
     if (context.signal.aborted)
@@ -392,6 +408,7 @@ async function review(
         baseSha,
         commits: run.commits,
         durationMs: run.durationMs,
+        ...(options.model ? { model: options.model } : {}),
         output: run.output ?? { error: run.error },
       },
       findings: run.output ? reviewFindings(run.output) : [],

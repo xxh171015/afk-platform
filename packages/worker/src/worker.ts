@@ -1,4 +1,8 @@
-import { HOST_CAPABILITY, HOST_JOB_TYPES } from "@afk/shared";
+import {
+  HOST_CAPABILITY,
+  HOST_JOB_TYPES,
+  MAX_LOG_CHUNK_BYTES,
+} from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import {
   type ExecutorDeps,
@@ -9,6 +13,7 @@ import {
   NoFreeSlotError,
 } from "./executor.ts";
 import { type HostDeps, runHostTask } from "./host.ts";
+import { rawLogSink } from "./raw-log.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -82,11 +87,27 @@ class LogUploader {
   };
 
   async flush() {
-    if (this.buffer.length === 0) return;
-    const chunk = this.buffer.join("");
+    const lines = this.buffer;
     this.buffer = [];
-    // a log that cannot be uploaded is never a reason to fail the stage
-    await this.send(chunk).catch(() => undefined);
+    // the API takes no more than a chunk's worth at once, and raw events can come fast
+    let chunk = "";
+    let size = 0;
+    for (const line of lines) {
+      const bytes = Buffer.byteLength(line);
+      if (chunk && size + bytes > MAX_LOG_CHUNK_BYTES) {
+        await this.upload(chunk);
+        chunk = "";
+        size = 0;
+      }
+      chunk += line;
+      size += bytes;
+    }
+    if (chunk) await this.upload(chunk);
+  }
+
+  // a log that cannot be uploaded is never a reason to fail the stage
+  private upload(chunk: string) {
+    return this.send(chunk).catch(() => undefined);
   }
 }
 
@@ -160,6 +181,7 @@ export async function processJob(
         bundle,
         signal: lost.signal,
         log: stageLog,
+        logRaw: rawLogSink(upload.add),
       },
     );
     stageLog(`result: ${body.stage} ${body.outcome}`);

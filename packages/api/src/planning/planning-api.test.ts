@@ -382,6 +382,15 @@ describe("project edit", () => {
     });
   });
 
+  it("changes the default model", async () => {
+    await post("/projects", { name: "shop", defaultModel: "old-model" });
+    expect(
+      (await patch("/projects/1", { defaultModel: "composer-2" })).status,
+    ).toBe(200);
+    expect((await projectRow()).default_model).toBe("composer-2");
+    expect((await patch("/projects/1", { defaultModel: "" })).status).toBe(400);
+  });
+
   it("replaces the protected paths as a whole and merges limits over the stored ones", async () => {
     await post("/projects", {
       name: "shop",

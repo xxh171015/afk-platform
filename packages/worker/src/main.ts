@@ -13,7 +13,6 @@ import {
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
-import { DEFAULT_LIMITS } from "@afk/shared";
 import { createWorkerApi } from "./api.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { pushWithToken } from "./push.ts";
@@ -134,8 +133,8 @@ await runWorker({
       new SandcastleAgentRunner(sandcastle(slotDir)),
     makeGateSandbox: (slotDir) =>
       new SandcastleGateSandbox(sandcastle(slotDir)),
-    idleSeconds: DEFAULT_LIMITS.runIdleSeconds,
-    wallClockMs: DEFAULT_LIMITS.runWallclockSeconds * 1000,
+    model: config.model,
+    secrets: [config.cursorApiKey],
   },
   concurrency: config.slots,
   signal: stop.signal,

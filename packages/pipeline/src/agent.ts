@@ -56,6 +56,8 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   schema: Schema;
   idleSeconds: number;
   wallClockMs: number;
+  model?: string; // for this run; the runner's own model when not given
+  onRawLine?: (line: string) => void; // Cursor's event lines as they come, for the run's log
   // Aborted when the job is lost (the lease was taken back): the run must stop at once.
   signal?: AbortSignal;
 }

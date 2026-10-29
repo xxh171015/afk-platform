@@ -154,6 +154,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "defaultModel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
                   "contractPath": {
                     "type": "string",
                     "minLength": 1,
@@ -1410,6 +1415,21 @@
                         }
                       },
                       "required": ["tests", "skipped"]
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "runIdleSeconds": {
+                          "type": "integer"
+                        },
+                        "runWallclockSeconds": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["runIdleSeconds", "runWallclockSeconds"]
+                    },
+                    "model": {
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -1424,7 +1444,9 @@
                     "allowedProtectedPaths",
                     "contract",
                     "failureLog",
-                    "gateBaseline"
+                    "gateBaseline",
+                    "limits",
+                    "model"
                   ]
                 }
               }

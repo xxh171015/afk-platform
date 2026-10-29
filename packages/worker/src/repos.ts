@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, gitOrThrow, hasRef } from "@afk/pipeline";
+import { redactSecrets } from "@afk/shared";
 import { basicAuth, secretsOf } from "./push.ts";
 
 // The worker's main clones, one per repo, kept bare: they hold the branches every slot clone starts from.
@@ -74,12 +75,7 @@ export class RepoStore {
     } catch (error) {
       const token = this.tokenOf?.();
       if (!token || !(error instanceof Error)) throw error;
-      throw new Error(
-        secretsOf(token).reduce(
-          (m, secret) => m.split(secret).join("***"),
-          error.message,
-        ),
-      );
+      throw new Error(redactSecrets(error.message, secretsOf(token)));
     }
   }
 

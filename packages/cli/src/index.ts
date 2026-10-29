@@ -73,7 +73,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .command("create <name>")
     .description("register a project")
     .option("--default-agent <agent>")
-    .option("--default-model <model>")
+    .option(
+      "--default-model <model>",
+      "the Cursor model for its agent runs (the worker's AFK_MODEL when unset)",
+    )
     .option("--contract-path <path>", "e.g. backend:openapi/openapi.yaml")
     .option("--protected-path <glob>", "repeatable", collect)
     .option("--max-concurrency <n>", "tickets running at once", toInt)
@@ -107,6 +110,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description(
       "change settings of an existing project; only the given ones change (tickets already made keep theirs)",
     )
+    .option(
+      "--default-model <model>",
+      "the Cursor model for its agent runs (the worker's AFK_MODEL when unset)",
+    )
     .option("--contract-path <path>", "e.g. backend:openapi/openapi.yaml")
     .option(
       "--protected-path <glob>",
@@ -122,6 +129,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     )
     .action(async (id: string, options) => {
       const body = {
+        defaultModel: options.defaultModel,
         contractPath: options.contractPath,
         protectedPaths: options.protectedPath,
         maxConcurrency: options.maxConcurrency,
@@ -130,7 +138,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --contract-path, --protected-path, --max-concurrency, --budget-limit or --limit",
+          "nothing to change: pass --default-model, --contract-path, --protected-path, --max-concurrency, --budget-limit or --limit",
         );
       }
       const projectId = toInt(id);

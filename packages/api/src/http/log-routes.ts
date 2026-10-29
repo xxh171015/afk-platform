@@ -1,7 +1,7 @@
+import { MAX_LOG_CHUNK_BYTES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { checkHolder } from "../jobs/queue.ts";
-import { MAX_CHUNK_BYTES } from "../logs/log-store.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const RunId = z.coerce.number().int().min(1).max(INT4_MAX);
@@ -21,10 +21,13 @@ const appendRoute = createRoute({
             attempt: z.number().int().min(1).max(INT4_MAX),
             chunk: z
               .string()
-              .max(MAX_CHUNK_BYTES)
-              .refine((text) => Buffer.byteLength(text) <= MAX_CHUNK_BYTES, {
-                message: "a chunk is at most 1 MiB",
-              }),
+              .max(MAX_LOG_CHUNK_BYTES)
+              .refine(
+                (text) => Buffer.byteLength(text) <= MAX_LOG_CHUNK_BYTES,
+                {
+                  message: "a chunk is at most 1 MiB",
+                },
+              ),
           }),
         },
       },

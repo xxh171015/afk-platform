@@ -24,6 +24,7 @@ export interface FakeAgentStep {
   message?: string; // commit message; no commit when there are no files
   output?: unknown; // the agent's structured result, validated against the stage's schema
   error?: { kind: "invalid-output" | "timeout" | "other"; message: string };
+  rawLines?: string[]; // Cursor's event lines, as the run produces them
 }
 
 export interface FakeAgentContext {
@@ -32,6 +33,9 @@ export interface FakeAgentContext {
   dir: string; // the worktree the agent works in
   context: (file: string) => string | undefined; // reads /context/<file>
   signal?: AbortSignal; // aborted when the job is lost
+  idleSeconds: number; // the limits and the model the run was asked for
+  wallClockMs: number;
+  model?: string;
 }
 
 export class FakeAgentRunner implements AgentRunner {
@@ -77,11 +81,15 @@ export class FakeAgentRunner implements AgentRunner {
         branch: options.branch,
         dir: worktree,
         signal: options.signal,
+        idleSeconds: options.idleSeconds,
+        wallClockMs: options.wallClockMs,
+        ...(options.model ? { model: options.model } : {}),
         context: (file) => {
           const path = join(options.ctxDir, file);
           return existsSync(path) ? readFileSync(path, "utf8") : undefined;
         },
       });
+      for (const line of step.rawLines ?? []) options.onRawLine?.(line);
       for (const [path, content] of Object.entries(step.files ?? {})) {
         mkdirSync(dirname(join(worktree, path)), { recursive: true });
         writeFileSync(join(worktree, path), content);

@@ -63,7 +63,9 @@ const projectEditRoute = createRoute({
       projectId: z.coerce.number().int().min(1).max(INT4_MAX),
     }),
     body: {
-      content: json(z.object(projectSettings)),
+      content: json(
+        z.object({ defaultModel: Text.optional(), ...projectSettings }),
+      ),
     },
   },
   responses: {

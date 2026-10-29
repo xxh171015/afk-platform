@@ -136,7 +136,9 @@ const PASS = {
 type Script = (
   ctx: FakeAgentContext,
 ) => FakeAgentStep | undefined | Promise<FakeAgentStep | undefined>;
-function deps(over: { script?: Script; concurrency?: number } = {}) {
+function deps(
+  over: { script?: Script; concurrency?: number; secrets?: string[] } = {},
+) {
   const base: Omit<ExecutorDeps, "api"> = {
     slots: new SlotManager({
       root: join(home, "slots"),
@@ -163,8 +165,7 @@ function deps(over: { script?: Script; concurrency?: number } = {}) {
         };
       }),
     makeGateSandbox: (slotDir) => new FakeGateSandbox(slotDir),
-    idleSeconds: 600,
-    wallClockMs: 60_000,
+    ...(over.secrets ? { secrets: over.secrets } : {}),
   };
   const repos = new RepoStore(join(home, "repos"));
   base.repos = repos;
@@ -888,6 +889,179 @@ describe("the test count guard", () => {
   });
 });
 
+describe("what the project says about a run", () => {
+  const work = (over?: Parameters<typeof deps>[0]) =>
+    runWorker({
+      api: workerFor(),
+      executor: deps(over),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+
+  it("runs the agent with the project's limits and default model, and records the model on the Run", async () => {
+    await confirmedSpec([ticket("a")], {
+      defaultModel: "composer-2",
+      limits: { runIdleSeconds: 5, runWallclockSeconds: 7 },
+    });
+    const seen: {
+      stage: string;
+      idle: number;
+      wall: number;
+      model?: string;
+    }[] = [];
+    await work({
+      script: (ctx) => {
+        seen.push({
+          stage: ctx.stage,
+          idle: ctx.idleSeconds,
+          wall: ctx.wallClockMs,
+          model: ctx.model,
+        });
+        return undefined;
+      },
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(seen.length).toBeGreaterThan(2); // implement, review, final review
+    for (const run of seen)
+      expect(run).toMatchObject({ idle: 5, wall: 7000, model: "composer-2" });
+    const models = await db.pool.query(
+      "SELECT DISTINCT model FROM runs WHERE stage IN ('implement', 'review', 'final-review')",
+    );
+    expect(models.rows).toEqual([{ model: "composer-2" }]);
+  });
+
+  it("uses the defaults, and leaves the model to the worker's own, when the project says nothing", async () => {
+    await confirmedSpec([ticket("a")]);
+    let seen: { idle: number; wall: number; model?: string } | undefined;
+    await work({
+      script: (ctx) => {
+        seen ??= {
+          idle: ctx.idleSeconds,
+          wall: ctx.wallClockMs,
+          model: ctx.model,
+        };
+        return undefined;
+      },
+    });
+    expect(seen).toEqual({ idle: 600, wall: 3_600_000, model: undefined });
+  });
+
+  it("gives a project that sets no model the worker's own, and the project's model wins when it sets one", async () => {
+    await confirmedSpec([ticket("a")]);
+    const seen: (string | undefined)[] = [];
+    const base = deps({
+      script: (ctx) => {
+        seen.push(ctx.model);
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor: { ...base, model: "worker-model" },
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(new Set(seen)).toEqual(new Set(["worker-model"]));
+    const models = await db.pool.query(
+      "SELECT DISTINCT model FROM runs WHERE stage = 'implement'",
+    );
+    expect(models.rows).toEqual([{ model: "worker-model" }]);
+  });
+
+  it("prefers the project's model to the worker's own", async () => {
+    await confirmedSpec([ticket("a")], { defaultModel: "project-model" });
+    const seen: (string | undefined)[] = [];
+    const base = deps({
+      script: (ctx) => {
+        seen.push(ctx.model);
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor: { ...base, model: "worker-model" },
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(new Set(seen)).toEqual(new Set(["project-model"]));
+  });
+
+  it("uploads Cursor's raw event lines to the Run's log, without the secrets", async () => {
+    await confirmedSpec([ticket("a")]);
+    const secret = "key_abcdef0123456789";
+    await work({
+      secrets: [secret],
+      script: (ctx) =>
+        ctx.stage === "implement"
+          ? {
+              rawLines: [
+                '{"type":"assistant","text":"working on it"}',
+                `{"type":"tool","output":"CURSOR_API_KEY=${secret}"}`,
+                `x${"y".repeat(200_000)}`,
+              ],
+              files: { "src/a.ts": "export const a = 1;\n" },
+              output: DONE,
+            }
+          : undefined,
+    });
+    const run = await db.pool.query(
+      "SELECT id FROM runs WHERE stage = 'implement'",
+    );
+    const text = (
+      await fetch(`${api.url}/runs/${run.rows[0].id}/logs`).then((r) =>
+        r.json(),
+      )
+    ).text as string;
+    expect(text).toContain('{"type":"assistant","text":"working on it"}');
+    expect(text).toContain('"output":"CURSOR_API_KEY=***"');
+    expect(text).not.toContain(secret);
+    // a line is cut to a sensible size instead of filling the log
+    expect(text.length).toBeLessThan(100_000);
+    expect(text).toContain("[line cut]");
+  });
+});
+
+describe("a flood of raw event lines", () => {
+  it("is uploaded in pieces the API accepts, up to a limit, and the rest is left out with a note", async () => {
+    await confirmedSpec([ticket("a")]);
+    // 600 lines of 15 000 characters: more than one chunk, and more than the stage may upload in all
+    const lines = Array.from(
+      { length: 600 },
+      (_, i) => `line-${i}-${"z".repeat(15_000)}`,
+    );
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) =>
+          ctx.stage === "implement"
+            ? {
+                rawLines: lines,
+                files: { "src/a.ts": "export const a = 1;\n" },
+                output: DONE,
+              }
+            : undefined,
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const run = await db.pool.query(
+      "SELECT id FROM runs WHERE stage = 'implement'",
+    );
+    const stored = readFileSync(
+      join(logDir, `run-${run.rows[0].id}`, "attempt-1.log"),
+      "utf8",
+    );
+    expect(stored).toContain("line-0-"); // the first chunk arrived
+    expect(stored).toContain("line-400-"); // so did the later ones
+    expect(stored).not.toContain("line-599-");
+    expect(stored).toContain(
+      "raw events beyond the size limit are not uploaded",
+    );
+    expect(stored.length).toBeLessThan(9 * 1024 * 1024);
+    expect(stored).toContain("result: implement done"); // the stage's own lines still got through
+  });
+});
+
 describe("the merge stage", () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);
@@ -1020,7 +1194,7 @@ describe("the merge stage", () => {
     expect(gates.rows[0].output.reasons).toEqual([
       "fewer tests than the baseline: 3 < 4",
     ]);
-  });
+  }, 30_000); // three tickets, a lost result and a second worker: close to the default limit when the machine is busy
 
   it("still reports a merge it recognises when the merged head cannot be measured", async () => {
     await confirmedSpec([ticket("a")]);

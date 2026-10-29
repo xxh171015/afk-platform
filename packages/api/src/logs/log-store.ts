@@ -7,7 +7,6 @@ import { join } from "node:path";
 // The HTTP interface does not depend on this being a directory: M3 swaps the store for MinIO.
 
 export const MAX_LOG_BYTES = 50 * 1024 * 1024; // per run attempt
-export const MAX_CHUNK_BYTES = 1024 * 1024;
 
 export const defaultLogDir = (env: NodeJS.ProcessEnv = process.env) =>
   env.AFK_LOG_DIR ?? join(homedir(), ".afk", "logs");

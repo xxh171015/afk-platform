@@ -21,6 +21,8 @@ export {
   LimitOverridesSchema,
   resolveLimits,
 } from "./limits.ts";
+export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
+export { redactSecrets } from "./redact.ts";
 export type {
   Capacity,
   IncomingEdge,

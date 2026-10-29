@@ -754,6 +754,26 @@ describe("the bundle", () => {
     });
   });
 
+  it("carries the project's run limits and default model, and the defaults when it sets none", async () => {
+    await runningSpec([ticket("a")]);
+    const plain = await bundle((await worker.claim()).body.job as Claimed);
+    expect(plain.body).toMatchObject({
+      limits: { runIdleSeconds: 600, runWallclockSeconds: 3600 },
+      model: null,
+    });
+    await db.pool.query(
+      "UPDATE projects SET default_model = 'composer-2', limits = $1",
+      [JSON.stringify({ runIdleSeconds: 30, runWallclockSeconds: 120 })],
+    );
+    const job = (await db.pool.query("SELECT id, attempt FROM jobs LIMIT 1"))
+      .rows[0];
+    const tuned = await bundle(job);
+    expect(tuned.body).toMatchObject({
+      limits: { runIdleSeconds: 30, runWallclockSeconds: 120 },
+      model: "composer-2",
+    });
+  });
+
   it("points a downstream ticket at the contract SHA and the project's contract file", async () => {
     await runningSpec(
       [

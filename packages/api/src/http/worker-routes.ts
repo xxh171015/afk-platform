@@ -167,6 +167,11 @@ const Bundle = z.object({
   gateBaseline: z
     .object({ tests: z.number().int(), skipped: z.number().int() })
     .nullable(),
+  limits: z.object({
+    runIdleSeconds: z.number().int(),
+    runWallclockSeconds: z.number().int(),
+  }),
+  model: z.string().nullable(),
 });
 
 const bundleRoute = createRoute({
