@@ -541,7 +541,7 @@ describe("what waits for a person among the pull requests", () => {
     await awaitingReview();
     expect(await plat("spec", "cancel", "S-1")).toBe(
       "S-1 is cancelled\n" +
-        "pull requests still open on the code host (the platform does not close them; close each yourself):\n" +
+        "pull requests last seen open on the code host (the platform does not close them; close each yourself):\n" +
         "  backend #1  https://github.com/me/shop/pull/1\n",
     );
   });

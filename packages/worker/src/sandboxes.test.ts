@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Docker, removeSandboxesUnder } from "./sandboxes.ts";
 
@@ -43,8 +46,44 @@ describe("removeSandboxesUnder", () => {
     expect(fake.calls).toEqual([["ps", "-q"]]);
   });
 
-  it("carries on when docker cannot be asked: nothing is stopped and nothing throws", () => {
+  it("carries on when docker cannot be asked: nothing is removed, nothing throws, and it says so", () => {
     const down: Docker = () => ({ code: 1, stdout: "" });
-    expect(removeSandboxesUnder("/home/w/slots/0", down)).toEqual([]);
+    const logs: string[] = [];
+    expect(
+      removeSandboxesUnder("/home/w/slots/0", down, (line) => logs.push(line)),
+    ).toEqual([]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(/docker could not be asked/);
+  });
+
+  it("carries on when docker does not answer in time, and says so", () => {
+    const hung: Docker = () => ({ code: -1, stdout: "", timedOut: true });
+    const logs: string[] = [];
+    expect(
+      removeSandboxesUnder("/home/w/slots/0", hung, (line) => logs.push(line)),
+    ).toEqual([]);
+    expect(logs[0]).toMatch(/did not answer in time/);
+  });
+
+  it("resolves the symlink through the nearest parent that exists when the slot directory is already gone", () => {
+    const base = mkdtempSync(join(tmpdir(), "afk-sandboxes-"));
+    const real = join(base, "real");
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, join(base, "link"));
+    const fake = fakeDocker({ a1: [`${real}/0/backend/.git`] });
+    expect(removeSandboxesUnder(join(base, "link", "0"), fake.docker)).toEqual([
+      "a1",
+    ]);
+  });
+
+  it("finds a container whose mount docker reports under the real path of a symlinked directory", () => {
+    const base = mkdtempSync(join(tmpdir(), "afk-sandboxes-"));
+    const real = join(base, "real");
+    mkdirSync(join(real, "0"), { recursive: true });
+    symlinkSync(real, join(base, "link"));
+    const fake = fakeDocker({ a1: [`${real}/0/backend/.git`] });
+    expect(removeSandboxesUnder(join(base, "link", "0"), fake.docker)).toEqual([
+      "a1",
+    ]);
   });
 });

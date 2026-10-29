@@ -318,7 +318,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `${id} is ${data.state}${data.cancelled.length ? `; cancelled ${data.cancelled.join(", ")}` : ""}`,
           ...(data.pullRequests.length
             ? [
-                "pull requests still open on the code host (the platform does not close them; close each yourself):",
+                "pull requests last seen open on the code host (the platform does not close them; close each yourself):",
                 ...data.pullRequests.map(
                   (p) => `  ${p.repo} #${p.number}  ${p.url}`,
                 ),

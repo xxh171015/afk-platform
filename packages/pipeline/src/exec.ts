@@ -7,6 +7,7 @@ export interface ExecResult {
   code: number;
   out: string; // stdout and stderr together
   stdout: string;
+  timedOut?: boolean; // killed because `timeoutMs` ran out
 }
 
 export interface ExecOptions {
@@ -14,6 +15,7 @@ export interface ExecOptions {
   env?: Record<string, string | undefined>;
   input?: string;
   redact?: readonly string[];
+  timeoutMs?: number; // the program is killed when it runs longer than this
 }
 
 export function exec(
@@ -27,6 +29,8 @@ export function exec(
     env: { ...process.env, ...options.env },
     input: options.input,
     maxBuffer: 64 << 20,
+    timeout: options.timeoutMs,
+    killSignal: "SIGKILL", // a program that ignores SIGTERM must not outlive its timeout
   });
   const scrub = (text: string) => redactSecrets(text, options.redact ?? []);
   const stdout = scrub(result.stdout ?? "");
@@ -34,6 +38,9 @@ export function exec(
     code: result.status ?? -1,
     out: stdout + scrub(result.stderr ?? ""),
     stdout,
+    ...(result.error && (result.error as { code?: string }).code === "ETIMEDOUT"
+      ? { timedOut: true }
+      : {}),
   };
 }
 

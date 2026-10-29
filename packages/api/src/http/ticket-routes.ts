@@ -376,12 +376,16 @@ const cancelSpecRoute = createRoute({
   request: { params: z.object({ id: PathId }) },
   responses: {
     200: reply(
-      "The spec is cancelled, with the tickets that went with it and the pull requests still open on the code host (the platform closes none)",
+      "The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host (the platform closes none)",
       z.object({
         state: z.enum(SPEC_STATES),
         cancelled: z.array(z.string()),
         pullRequests: z.array(
-          z.object({ repo: z.string(), number: z.number(), url: z.string() }),
+          z.object({
+            repo: z.string(),
+            number: z.number().int(),
+            url: z.string(),
+          }),
         ),
       }),
     ),

@@ -124,7 +124,7 @@ await runWorker({
       mainCloneFor: (role) => repos.dirFor(role),
       salvageDir: join(config.home, "salvage"),
       isHeld: (jobId, attempt) => api.isHeld(jobId, attempt),
-      removeSandboxes: removeSandboxesUnder,
+      removeSandboxes: (dir) => removeSandboxesUnder(dir, undefined, log),
       log,
     }),
     repos,
