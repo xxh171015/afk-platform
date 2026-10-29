@@ -10,9 +10,9 @@ tickets:
     modules: ["openapi/**"]
     protected_paths_ok: ["openapi/openapi.yaml"]
     acceptance:
-      - openapi.yaml 的 Order 和 NewOrder 里有可选字符串字段 note，最长 200 个字符
-      - openapi.yaml 里有 PATCH /orders/{id}，请求体是 { note }，成功返回更新后的订单，订单不存在返回 404，note 超长返回 400
-      - 现有接口的描述不变
+      - "openapi.yaml 的 Order 和 NewOrder 里有可选字符串字段 note，最长 200 个字符"
+      - "openapi.yaml 里有 PATCH /orders/{id}，请求体是 { note }，成功返回更新后的订单，订单不存在返回 404，note 超长返回 400"
+      - "现有接口的描述不变"
     body: |
       只改契约，不改代码。note 缺省时表示没有备注（响应里该字段可以不出现）。
 
@@ -23,10 +23,10 @@ tickets:
     modules: ["src/orders/**", "test/**"]
     blocked_by: [contract]
     acceptance:
-      - POST /orders 接受可选的 note（字符串，去掉首尾空白，最长 200），超长返回 400，错误信息是 "note must be at most 200 characters"
-      - 订单响应在有备注时包含 note，没有时不出现该字段
-      - GET /orders 和 GET /orders/:id 返回的订单都带上 note
-      - 每条验收标准都有对应的 HTTP 测试，已有测试不减少、不跳过
+      - "POST /orders 接受可选的 note（字符串，去掉首尾空白，最长 200），超长返回 400，错误信息是 \"note must be at most 200 characters\""
+      - "订单响应在有备注时包含 note，没有时不出现该字段"
+      - "GET /orders 和 GET /orders/:id 返回的订单都带上 note"
+      - "每条验收标准都有对应的 HTTP 测试，已有测试不减少、不跳过"
     body: |
       按契约实现，不要修改契约文件。
 
@@ -38,11 +38,11 @@ tickets:
     blocked_by: [contract, note-field]
     contract: contract
     acceptance:
-      - PATCH /orders/:id 请求体 { "note": "..." }，成功返回 200 和更新后的订单
-      - note 为空字符串时清除备注（响应里不再有 note）
-      - 订单不存在返回 404，note 不是字符串或超长返回 400
-      - 已取消（cancelled）的订单不允许修改备注，返回 409，错误信息是 "cannot edit a cancelled order"
-      - 每条验收标准都有对应的 HTTP 测试
+      - "PATCH /orders/:id 请求体 { \"note\": \"...\" }，成功返回 200 和更新后的订单"
+      - "note 为空字符串时清除备注（响应里不再有 note）"
+      - "订单不存在返回 404，note 不是字符串或超长返回 400"
+      - "已取消（cancelled）的订单不允许修改备注，返回 409，错误信息是 \"cannot edit a cancelled order\""
+      - "每条验收标准都有对应的 HTTP 测试"
     body: |
       按契约（契约 SHA 上的版本）实现。
 
@@ -52,11 +52,11 @@ tickets:
     title: 按客户过滤订单列表
     modules: ["src/orders/**", "test/**"]
     acceptance:
-      - GET /orders?customer=alice 只返回 customer 精确等于 alice 的订单（区分大小写），顺序仍按创建顺序
-      - 可以和 status 过滤同时使用，两个条件取交集
-      - customer 为空字符串时返回 400，错误信息是 "customer must not be empty"
-      - 不带 customer 时行为不变
-      - 每条验收标准都有对应的 HTTP 测试
+      - "GET /orders?customer=alice 只返回 customer 精确等于 alice 的订单（区分大小写），顺序仍按创建顺序"
+      - "可以和 status 过滤同时使用，两个条件取交集"
+      - "customer 为空字符串时返回 400，错误信息是 \"customer must not be empty\""
+      - "不带 customer 时行为不变"
+      - "每条验收标准都有对应的 HTTP 测试"
     body: |
       在已有的订单列表接口上加一个可选查询参数。不改契约文件（契约的同步由单独的契约票处理）。
 
@@ -67,10 +67,10 @@ tickets:
     modules: ["src/orders/**", "test/**"]
     blocked_by: [note-field]
     acceptance:
-      - GET /orders/stats 的响应里增加 byStatus，格式是 { pending, paid, shipped, cancelled }，每项是 { count, total }
-      - 原有的 count、total、totalFormatted 保持不变（仍然不含已取消订单）
-      - 没有订单时 byStatus 里每一项都是 { count: 0, total: 0 }
-      - 每条验收标准都有对应的 HTTP 测试
+      - "GET /orders/stats 的响应里增加 byStatus，格式是 { pending, paid, shipped, cancelled }，每项是 { count, total }"
+      - "原有的 count、total、totalFormatted 保持不变（仍然不含已取消订单）"
+      - "没有订单时 byStatus 里每一项都是 { count: 0, total: 0 }"
+      - "每条验收标准都有对应的 HTTP 测试"
     body: |
       不改契约文件。
 
