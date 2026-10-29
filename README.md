@@ -56,7 +56,12 @@ Four processes: Postgres, the API, the page and one worker. All of them listen o
 1. Docker Desktop running, and the sandbox image built: `scripts/verify-sandbox-image.sh` (tags `sandcastle:afk-platform`).
 2. GitHub App credentials in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
 3. The Cursor key in `~/.afk/env` as `CURSOR_API_KEY=…` (or exported). The worker reads nothing else from that file.
-4. A checkout of the skills repo at the pinned commit; the worker mounts its `skills/engineering` directory read-only.
+4. A checkout of [mattpocock/skills](https://github.com/mattpocock/skills) at the pinned commit `59db609eb1e18aaf59b63284d0e52255aff0c63c`; the worker mounts its `skills/engineering` directory read-only:
+
+```sh
+git clone https://github.com/mattpocock/skills.git ~/.afk/skills
+git -C ~/.afk/skills switch --detach 59db609eb1e18aaf59b63284d0e52255aff0c63c
+```
 
 **Each time** (one terminal each)
 
@@ -68,19 +73,19 @@ pnpm api                      # http://127.0.0.1:3000 ($PORT to change)
 pnpm web                      # http://127.0.0.1:5173
 
 export AFK_MODEL=<cursor model>
-export AFK_SKILLS_DIR=<skills checkout>/skills/engineering
+export AFK_SKILLS_DIR=~/.afk/skills/skills/engineering
 pnpm worker                   # Ctrl-C aborts the runs in hand and stops; those jobs are dispatched again when their lease runs out (Ctrl-C twice: exit at once)
 ```
 
-| Worker setting | Default |
-| --- | --- |
-| `AFK_API_URL` | `http://127.0.0.1:3000` |
-| `AFK_HOME` | `~/.afk` (slots, main clones, salvage, sandbox logs) |
-| `AFK_SLOTS` | 2 (jobs at once) |
-| `AFK_SANDBOX_IMAGE` | `sandcastle:afk-platform` |
-| `AFK_WORKER_ID` | the host name |
-| `AFK_GITHUB_APP_DIR` | `~/.afk/secrets/github-app` |
-| `CURSOR_API_KEY`, `AFK_MODEL`, `AFK_SKILLS_DIR` | required |
+| Worker setting                                  | Default                                              |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `AFK_API_URL`                                   | `http://127.0.0.1:3000`                              |
+| `AFK_HOME`                                      | `~/.afk` (slots, main clones, salvage, sandbox logs) |
+| `AFK_SLOTS`                                     | 2 (jobs at once)                                     |
+| `AFK_SANDBOX_IMAGE`                             | `sandcastle:afk-platform`                            |
+| `AFK_WORKER_ID`                                 | the host name                                        |
+| `AFK_GITHUB_APP_DIR`                            | `~/.afk/secrets/github-app`                          |
+| `CURSOR_API_KEY`, `AFK_MODEL`, `AFK_SKILLS_DIR` | required                                             |
 
 A worker that is missing any of these, or cannot reach the API, says what is wrong and exits before taking a job.
 

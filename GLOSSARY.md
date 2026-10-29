@@ -39,6 +39,9 @@ _Avoid_: 接口文档、API 定义
 **Contract SHA（契约 SHA）**：
 契约票合并后集成分支的 head；下游票只使用这个提交上的契约。
 
+**Skills SHA（skills SHA）**：
+平台固定使用的 [mattpocock/skills](https://github.com/mattpocock/skills) commit；worker 只挂这个提交上的 `skills/engineering`，Run 记下这个 SHA。当前固定为 `59db609eb1e18aaf59b63284d0e52255aff0c63c`。
+
 ## 执行
 
 **Run（运行）**：
