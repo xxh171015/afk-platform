@@ -16,3 +16,7 @@ export type ApiClient = ReturnType<typeof createApiClient>;
 // What GET /worker/jobs/{id}/bundle returns: everything a worker renders into /context.
 export type Bundle =
   paths["/worker/jobs/{id}/bundle"]["get"]["responses"][200]["content"]["application/json"];
+
+// What GET /worker/jobs/{id}/host-task returns: what an open-pr or host-sync job has to do on the code host.
+export type HostTask =
+  paths["/worker/jobs/{id}/host-task"]["get"]["responses"][200]["content"]["application/json"];

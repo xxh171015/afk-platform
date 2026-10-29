@@ -48,6 +48,9 @@ importers:
       '@afk/cli':
         specifier: workspace:*
         version: link:../cli
+      '@afk/host':
+        specifier: workspace:*
+        version: link:../host
       '@afk/pipeline':
         specifier: workspace:*
         version: link:../pipeline
@@ -72,6 +75,8 @@ importers:
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+
+  packages/host: {}
 
   packages/pipeline:
     dependencies:
@@ -149,6 +154,9 @@ importers:
 
   packages/worker:
     dependencies:
+      '@afk/host':
+        specifier: workspace:*
+        version: link:../host
       '@afk/pipeline':
         specifier: workspace:*
         version: link:../pipeline

@@ -93,4 +93,8 @@ export function pushRef(
     : { ok: false, error: result.out.trim().slice(0, 400) };
 }
 
-export type PushFn = (request: PushRequest) => PushResult;
+// The token is the one the stage holds at the moment of the push; a PushFn that has none of its own uses it.
+export type PushFn = (request: PushRequest, token?: string) => PushResult;
+
+export const pushWithToken: PushFn = (request, token) =>
+  pushRef(request, token ? { token } : {});

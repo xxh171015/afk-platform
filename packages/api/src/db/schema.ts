@@ -192,6 +192,8 @@ export const jobs = pgTable(
     // the format for jobs without a ticket (finalize, open-pr, host-sync) is the queue's to define (#23).
     idempotencyKey: text("idempotency_key").notNull().unique(),
     lockKey: text("lock_key"),
+    // A queued job is not claimed before this time (host-sync runs a minute after the last one).
+    notBefore: timestamp("not_before", { withTimezone: true }),
     requiredCapabilities: text("required_capabilities")
       .array()
       .notNull()
@@ -235,6 +237,44 @@ export const finalizations = pgTable(
     check(
       "finalizations_blocked_reason_check",
       sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
+    ),
+  ],
+);
+
+// A spec's pull request in one repo, as the code host last reported it (the platform records it, a person merges).
+export const pullRequests = pgTable(
+  "pull_requests",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id),
+    number: integer("number").notNull(),
+    url: text("url").notNull(),
+    state: text("state").notNull().default("open"),
+    draft: boolean("draft").notNull().default(false),
+    headSha: text("head_sha").notNull(),
+    ci: text("ci").notNull().default("none"),
+    review: text("review").notNull().default("none"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("pull_requests_spec_repo_unique").on(t.specId, t.repoId),
+    check(
+      "pull_requests_state_check",
+      oneOf(t.state, ["open", "closed", "merged"]),
+    ),
+    check(
+      "pull_requests_ci_check",
+      oneOf(t.ci, ["none", "pending", "success", "failure"]),
+    ),
+    check(
+      "pull_requests_review_check",
+      oneOf(t.review, ["none", "approved", "changes-requested"]),
     ),
   ],
 );

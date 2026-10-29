@@ -1,6 +1,9 @@
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createAppTokenSource, createGitHubAdapter } from "@afk/host";
+import { FakeGitHub } from "@afk/host/testing";
 import { GateCache, git, gitOut } from "@afk/pipeline";
 import {
   type FakeAgentContext,
@@ -1215,6 +1218,125 @@ describe("losing the lease", () => {
       join(home, "slots", "0"),
     );
     expect(entries).not.toContain("lock");
+  });
+});
+
+describe("from the last ticket to a merged spec, with a fake GitHub", () => {
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: "spki", format: "pem" },
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
+  });
+  let github: FakeGitHub;
+  beforeEach(async () => {
+    github = new FakeGitHub({
+      appId: "5519235",
+      installationId: "176373363",
+      publicKey,
+      owner: "me",
+      repo: "afk-pilot-backend",
+    });
+    await github.start();
+  });
+  afterEach(() => github.stop());
+
+  const hostWorker = () => {
+    const tokens = createAppTokenSource({
+      credentials: {
+        appId: "5519235",
+        installationId: "176373363",
+        privateKey,
+      },
+      apiUrl: github.url,
+    });
+    const repoRef = () => ({ owner: "me", name: "afk-pilot-backend" });
+    return {
+      api: workerFor(),
+      executor: {
+        ...deps(),
+        credentials: { tokens, repoRef },
+        push: ((request, token) =>
+          pushRef(request, token ? { token } : {})) as ExecutorDeps["push"],
+      },
+      host: {
+        adapter: createGitHubAdapter({ tokens, apiUrl: github.url }),
+        repoRef,
+      },
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    } satisfies Parameters<typeof runWorker>[0];
+  };
+  const specState = async () =>
+    (await db.pool.query("SELECT state FROM specs")).rows[0].state as string;
+
+  it("opens the pull request, follows it, and marks the spec merged once a person has merged it", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker(hostWorker());
+
+    expect(await specState()).toBe("awaiting-review");
+    expect(github.pullRequests()).toMatchObject([
+      { head: "spec/order-export", base: "main", title: "S-1 Order export" },
+    ]);
+    expect(github.pullRequests()[0]?.body).toContain("Spec: S-1");
+    expect(github.pullRequests()[0]?.body).toContain("- T-1 Ticket a");
+
+    // each token was asked for what its job needed, for the one repo, and never for workflows or administration
+    const asked = github.tokensIssued.map((t) => t.permissions);
+    expect(asked).toContainEqual({ contents: "write" });
+    expect(asked).toContainEqual({ pull_requests: "write", contents: "read" });
+    for (const t of github.tokensIssued) {
+      expect(t.repositories).toEqual(["afk-pilot-backend"]);
+      expect(Object.keys(t.permissions)).not.toContain("workflows");
+      expect(Object.keys(t.permissions)).not.toContain("administration");
+    }
+
+    // the next look is a minute away; until then a worker finds nothing
+    expect((await runWorker(hostWorker())).jobs).toBe(0);
+
+    // CI and a review show up on the host
+    const sha = github.pullRequests()[0]?.sha as string;
+    github.setChecks(sha, [{ status: "completed", conclusion: "success" }]);
+    github.addReview(1, { user: "ann", state: "APPROVED" });
+    await db.pool.query(
+      "UPDATE jobs SET not_before = NULL WHERE type = 'host-sync' AND state = 'queued'",
+    );
+    await runWorker(hostWorker());
+    expect(
+      (await db.pool.query("SELECT state, ci, review FROM pull_requests")).rows,
+    ).toEqual([{ state: "open", ci: "success", review: "approved" }]);
+    expect(await specState()).toBe("awaiting-review");
+
+    // a person merges it on GitHub
+    github.mergePull(1);
+    await db.pool.query(
+      "UPDATE jobs SET not_before = NULL WHERE type = 'host-sync' AND state = 'queued'",
+    );
+    await runWorker(hostWorker());
+    expect(await specState()).toBe("merged");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT count(*)::int AS n FROM jobs WHERE type = 'host-sync' AND state = 'queued'",
+        )
+      ).rows[0].n,
+    ).toBe(0);
+  });
+
+  it("is not done by a worker that has no code host: it leaves the jobs alone", async () => {
+    await confirmedSpec([ticket("a")]);
+    const plain = hostWorker();
+    await runWorker({
+      api: plain.api,
+      executor: plain.executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await specState()).toBe("finalizing");
+    expect(github.pullRequests()).toEqual([]);
+    expect(
+      (await db.pool.query("SELECT state FROM jobs WHERE type = 'open-pr'"))
+        .rows,
+    ).toEqual([{ state: "queued" }]);
   });
 });
 

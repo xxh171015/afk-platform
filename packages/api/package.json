@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@afk/cli": "workspace:*",
+    "@afk/host": "workspace:*",
     "@afk/pipeline": "workspace:*",
     "@afk/worker": "workspace:*",
     "@types/pg": "^8.23.1",

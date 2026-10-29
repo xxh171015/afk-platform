@@ -28,6 +28,7 @@ export interface NewJob {
   idempotencyKey: string;
   lockKey?: string;
   requiredCapabilities?: string[];
+  notBefore?: Date; // not claimable before this time
 }
 
 const COLUMNS = `id, type, payload, state, lease_owner AS "leaseOwner", lease_expires_at AS "leaseExpiresAt",
@@ -41,8 +42,8 @@ export async function enqueueJob(
   job: NewJob,
 ): Promise<{ job: Job; created: boolean }> {
   const inserted = await pool.query<Job>(
-    `INSERT INTO jobs (type, payload, idempotency_key, lock_key, required_capabilities)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO jobs (type, payload, idempotency_key, lock_key, required_capabilities, not_before)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (idempotency_key) DO NOTHING
      RETURNING ${COLUMNS}`,
     [
@@ -51,6 +52,7 @@ export async function enqueueJob(
       job.idempotencyKey,
       job.lockKey ?? null,
       job.requiredCapabilities ?? [],
+      job.notBefore ?? null,
     ],
   );
   if (inserted.rows[0]) return { job: inserted.rows[0], created: true };
@@ -89,6 +91,7 @@ export async function claimJob(
       `UPDATE jobs SET state = 'running', lease_owner = $1, lease_expires_at = $2
        WHERE id = (SELECT j.id FROM jobs j
          WHERE j.state = 'queued'
+           AND (j.not_before IS NULL OR j.not_before <= $4)
            AND j.required_capabilities <@ $3::text[]
            AND (j.lock_key IS NULL OR (
              -- the key is free: nobody holds a live lease on it ...

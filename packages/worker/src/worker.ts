@@ -7,6 +7,12 @@ import {
   JobLostError,
   NoFreeSlotError,
 } from "./executor.ts";
+import {
+  HOST_CAPABILITY,
+  HOST_JOB_TYPES,
+  type HostDeps,
+  runHostTask,
+} from "./host.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -15,6 +21,7 @@ export interface WorkerOptions {
   api: WorkerApi;
   executor: Omit<ExecutorDeps, "api">;
   capabilities?: string[];
+  host?: HostDeps; // the code host: a worker that has it also takes open-pr and host-sync jobs
   heartbeatMs?: number; // the lease is 120 s; the design renews every 30 s
   logFlushMs?: number; // how often a running stage uploads what it has logged so far
   pollMs?: number; // wait between claims when the queue is empty
@@ -48,7 +55,10 @@ export async function runWorker(
   let jobs = 0;
   const loop = async () => {
     while (!options.signal?.aborted) {
-      const job = await options.api.claim(options.capabilities ?? []);
+      const job = await options.api.claim([
+        ...(options.capabilities ?? []),
+        ...(options.host ? [HOST_CAPABILITY] : []),
+      ]);
       if (!job) {
         if (options.stopWhenIdle) return;
         await sleep(options.pollMs ?? 2_000, options.signal);
@@ -113,6 +123,18 @@ export async function processJob(
   let uploader: LogUploader | undefined;
   let stopStreaming = () => {};
   try {
+    if (HOST_JOB_TYPES.includes(job.type)) {
+      if (!options.host)
+        throw new InfrastructureError("this worker has no code host");
+      const task = await api.hostTask(job);
+      if (task === "lost") return "abandoned";
+      const body = await runHostTask(options.host, task, log);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      log(`${job.type} ok`);
+      return "completed";
+    }
     const bundle = await api.bundle(job);
     if (bundle === "lost") return "abandoned";
     const runId = bundle.run?.id;

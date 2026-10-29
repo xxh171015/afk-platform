@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@afk/host": "workspace:*",
     "@afk/shared": "workspace:*",
     "@afk/pipeline": "workspace:*"
   }

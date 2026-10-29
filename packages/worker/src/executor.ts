@@ -26,6 +26,7 @@ import {
 } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
+import { type Credentials, withCredentials } from "./credentials.ts";
 import type { PushFn } from "./push.ts";
 import type { RepoStore } from "./repos.ts";
 import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
@@ -37,6 +38,7 @@ export interface ExecutorDeps {
   slots: SlotManager;
   repos: RepoStore;
   push: PushFn;
+  credentials?: Credentials; // tokens for the code host; without them git uses whatever it is already set up with
   api: Pick<WorkerApi, "prePush">; // supplied by the worker loop
   gateCache: GateCache;
   makeAgentRunner(slotDir: string): AgentRunner;
@@ -80,10 +82,11 @@ export const isSuccess = (body: StageOutcomeBody) =>
   successful.has(body.outcome);
 
 export async function executeStage(
-  deps: ExecutorDeps,
+  rawDeps: ExecutorDeps,
   context: StageContext,
 ): Promise<StageOutcomeBody> {
   const { bundle } = context;
+  const deps = await withCredentials(rawDeps, bundle.repo.url);
   if (!bundle.integrationBranch)
     throw new InfrastructureError(
       "the spec has no integration branch for this repo",

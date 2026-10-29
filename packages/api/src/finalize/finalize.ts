@@ -10,6 +10,8 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
+import { enqueueOpenPr } from "../host/host-jobs.ts";
+import { startOpeningPullRequests } from "../host/pull-requests.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
@@ -112,6 +114,8 @@ export async function recordFinalResult(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",
       [fin.id],
     );
+    // the last repo to settle sends all of the spec's pull requests out
+    await startOpeningPullRequests(client, read.specId);
   } else {
     await client.query(
       "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
@@ -174,13 +178,31 @@ export async function retryFinalization(
         message: `${formatDisplayId("spec", specId)} has no blocked finalization`,
       };
     }
+    const retried: string[] = [];
     for (const row of blocked.rows) {
       await client.query(
         "UPDATE finalizations SET state = 'active', blocked_reason = NULL,\n           job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
         [row.id],
       );
-      await enqueueFinalJob(client, { specId, repoId: row.repo_id }, row.step);
+      // A branch that was settled when the pull request could not be opened needs the pull request, not the
+      // review or the merge again.
+      const settled = await client.query(
+        `SELECT 1 FROM runs WHERE spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL
+           AND ((stage = 'final-review' AND result = 'pass') OR (stage = 'final-merge' AND result = 'merged'))`,
+        [specId, row.repo_id],
+      );
+      if (settled.rowCount) {
+        await enqueueOpenPr(client, { specId, repoId: row.repo_id });
+        retried.push("open-pr");
+      } else {
+        await enqueueFinalJob(
+          client,
+          { specId, repoId: row.repo_id },
+          row.step,
+        );
+        retried.push(row.step);
+      }
     }
-    return { status: "ok", retried: blocked.rows.map((r) => r.step) };
+    return { status: "ok", retried };
   });
 }

@@ -1335,6 +1335,151 @@
         }
       }
     },
+    "/worker/jobs/{id}/host-task": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What an open-pr or host-sync job has to do on the code host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["open-pr"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "base": {
+                          "type": "string"
+                        },
+                        "head": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "draft": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "base",
+                        "head",
+                        "title",
+                        "body",
+                        "draft"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["host-sync"]
+                        },
+                        "pulls": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["id", "repoUrl", "number"]
+                          }
+                        }
+                      },
+                      "required": ["kind", "pulls"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or not a job for the code host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/{id}/fail": {
       "post": {
         "parameters": [

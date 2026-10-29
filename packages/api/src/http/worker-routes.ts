@@ -1,6 +1,13 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
+import { readHostSyncPayload, readOpenPrPayload } from "../host/host-jobs.ts";
+import {
+  buildHostTask,
+  hostSyncFailed,
+  recordHostSync,
+  recordOpenPr,
+} from "../host/pull-requests.ts";
 import {
   checkBeforePush,
   checkHolder,
@@ -187,6 +194,55 @@ const bundleRoute = createRoute({
   },
 });
 
+const HostTask = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("open-pr"),
+    repoUrl: z.string(),
+    base: z.string(),
+    head: z.string(),
+    title: z.string(),
+    body: z.string(),
+    draft: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal("host-sync"),
+    pulls: z.array(
+      z.object({
+        id: z.number().int(),
+        repoUrl: z.string(),
+        number: z.number().int(),
+      }),
+    ),
+  }),
+]);
+
+const hostTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/host-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What an open-pr or host-sync job has to do on the code host",
+      content: { "application/json": { schema: HostTask } },
+    },
+    404: {
+      description: "No such job, or not a job for the code host",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const failRoute = holderRoute(
   "fail",
   { error: z.string() },
@@ -287,13 +343,21 @@ export function registerWorkerRoutes(
       );
       if (finished.status === "ok") {
         const job = await client.query(
-          "SELECT id, payload FROM jobs WHERE id = $1",
+          "SELECT id, type, payload FROM jobs WHERE id = $1",
           [id],
         );
         const recorded = await recordStageResult(client, job.rows[0], result);
-        // not a ticket stage: it may be a step of a finalization
-        if (recorded.status === "no-ticket")
-          await recordFinalResult(client, job.rows[0], result);
+        // not a ticket stage: it may be a step of a finalization, or a job for the code host
+        if (recorded.status === "no-ticket") {
+          const final = await recordFinalResult(client, job.rows[0], result);
+          if (final.status === "not-final") {
+            const openPr = readOpenPrPayload(job.rows[0]);
+            const sync = readHostSyncPayload(job.rows[0]);
+            if (openPr) await recordOpenPr(client, openPr, result);
+            else if (sync)
+              await recordHostSync(client, sync, result, context.clock());
+          }
+        }
       }
       return finished;
     });
@@ -326,6 +390,32 @@ export function registerWorkerRoutes(
     return c.json(bundle, 200);
   });
 
+  app.openapi(hostTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const row = job.rows[0];
+    const payload = row && (readOpenPrPayload(row) ?? readHostSyncPayload(row));
+    const task =
+      row && payload && (await buildHostTask(context.pool, row, payload));
+    if (!task)
+      return c.json({ error: "this job is not for the code host" }, 404);
+    return c.json(task, 200);
+  });
+
   app.openapi(failRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { workerId, attempt, error } = c.req.valid("json");
@@ -338,10 +428,13 @@ export function registerWorkerRoutes(
       );
       if (failed.status === "ok") {
         const job = await client.query(
-          "SELECT id, payload FROM jobs WHERE id = $1",
+          "SELECT id, type, payload FROM jobs WHERE id = $1",
           [id],
         );
-        await recordJobFailure(client, job.rows[0], error);
+        const failure = await recordJobFailure(client, job.rows[0], error);
+        const sync = readHostSyncPayload(job.rows[0]);
+        if (failure.status === "not-a-stage" && sync)
+          await hostSyncFailed(client, sync.projectId, context.clock());
       }
       return failed;
     });

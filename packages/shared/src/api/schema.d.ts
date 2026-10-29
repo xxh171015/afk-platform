@@ -805,6 +805,87 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/jobs/{id}/host-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What an open-pr or host-sync job has to do on the code host */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json":
+              | {
+                  /** @enum {string} */
+                  kind: "open-pr";
+                  repoUrl: string;
+                  base: string;
+                  head: string;
+                  title: string;
+                  body: string;
+                  draft: boolean;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "host-sync";
+                  pulls: {
+                    id: number;
+                    repoUrl: string;
+                    number: number;
+                  }[];
+                };
+          };
+        };
+        /** @description No such job, or not a job for the code host */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/{id}/fail": {
     parameters: {
       query?: never;

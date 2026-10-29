@@ -18,6 +18,7 @@ const ENTITY_TABLES = [
   "gate_results",
   "jobs",
   "projects",
+  "pull_requests",
   "repos",
   "runs",
   "specs",

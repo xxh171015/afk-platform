@@ -90,6 +90,7 @@ export type StageResult = z.infer<typeof StageResultSchema>;
 
 export interface StageJob {
   id: number;
+  type?: string;
   payload: Record<string, unknown>;
 }
 

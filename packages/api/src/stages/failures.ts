@@ -4,6 +4,11 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
+import {
+  enqueueOpenPr,
+  openPrKeyPrefix,
+  readOpenPrPayload,
+} from "../host/host-jobs.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
   enqueueFinalJob,
@@ -63,6 +68,8 @@ export async function recordJobFailure(
   if (stage) return ticketStageFailed(client, stage);
   const final = readFinalPayload(job.payload);
   if (final) return finalStepFailed(client, final);
+  const openPr = readOpenPrPayload(job);
+  if (openPr) return openPrFailed(client, openPr);
   return { status: "not-a-stage" };
 }
 
@@ -159,6 +166,41 @@ async function finalStepFailed(
   );
   if (failures < MAX_JOB_FAILURES) {
     await enqueueFinalJob(client, read, read.step);
+    return { status: "requeued", failures };
+  }
+  await client.query(
+    "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+    [fin.id, JOB_FAILED],
+  );
+  return { status: "blocked", failures };
+}
+
+// The pull request could not be opened. Tried again; after three failures the repo's finalization is blocked, and
+// a person's retry opens it again (retryFinalization sees that the branch itself was settled).
+async function openPrFailed(
+  client: pg.PoolClient,
+  read: { specId: number; repoId: number },
+): Promise<FailureOutcome> {
+  await lockSpec(client, read.specId);
+  const fin = (
+    await client.query<{ id: number; state: string; job_floor: number }>(
+      "SELECT id, state, job_floor FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+      [read.specId, read.repoId],
+    )
+  ).rows[0];
+  const spec = await client.query<{ state: string }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [read.specId],
+  );
+  if (!fin || spec.rows[0]?.state !== "finalizing")
+    return { status: "ignored" };
+  const failures = await failuresOf(
+    client,
+    openPrKeyPrefix(read),
+    fin.job_floor,
+  );
+  if (failures < MAX_JOB_FAILURES) {
+    await enqueueOpenPr(client, read);
     return { status: "requeued", failures };
   }
   await client.query(

@@ -1,4 +1,9 @@
-import { type ApiClient, type Bundle, createApiClient } from "@afk/shared";
+import {
+  type ApiClient,
+  type Bundle,
+  createApiClient,
+  type HostTask,
+} from "@afk/shared";
 
 // The worker talks to the platform over HTTP only (docs/specs/m1-platform.md「worker 专用接口」): it has no
 // database connection and does not import the api package. Every call that concerns a job carries
@@ -20,6 +25,7 @@ export interface WorkerApi {
   heartbeat(job: ClaimedJob): Promise<Holding>;
   prePush(job: ClaimedJob): Promise<Holding>;
   bundle(job: ClaimedJob): Promise<Bundle | "lost">;
+  hostTask(job: ClaimedJob): Promise<HostTask | "lost">;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
   fail(job: ClaimedJob, error: string): Promise<Holding>;
   appendLog(runId: number, job: ClaimedJob, chunk: string): Promise<Holding>;
@@ -70,6 +76,20 @@ export function createWorkerApi(
       if (data) return data;
       if (holding(response.status) === "lost") return "lost";
       throw new Error(`bundle failed: HTTP ${response.status}`);
+    },
+    async hostTask(job) {
+      const { data, response } = await client.GET(
+        "/worker/jobs/{id}/host-task",
+        {
+          params: {
+            path: { id: job.id },
+            query: { workerId, attempt: job.attempt },
+          },
+        },
+      );
+      if (data) return data;
+      if (holding(response.status) === "lost") return "lost";
+      throw new Error(`host task failed: HTTP ${response.status}`);
     },
     async complete(job, result) {
       const { params, body } = call(job);
