@@ -438,6 +438,7 @@ describe("the acceptance pack", () => {
     { name: "exports a csv", classname: "orders", status: "passed" },
     { name: "rejects an empty range", classname: "orders", status: "failed" },
     { name: "keeps the order", classname: "orders", status: "skipped" },
+    { name: "orders > has a header", classname: "", status: "passed" },
   ];
   const stages: StageResults = {
     implement: {
@@ -450,7 +451,8 @@ describe("the acceptance pack", () => {
             "exports orders": ["exports a csv"],
             "empty range is refused": ["orders rejects an empty range"],
             "order is kept": ["keeps the order"],
-            "has a header": ["header test that does not exist"],
+            "has a header": ["has a header"],
+            "has a footer": ["footer test that does not exist"],
           },
           uncertainties: ["not sure the date format is right"],
         },
@@ -501,6 +503,7 @@ describe("the acceptance pack", () => {
     "empty range is refused",
     "order is kept",
     "has a header",
+    "has a footer",
     "nobody named a test",
   ];
 
@@ -549,9 +552,10 @@ describe("the acceptance pack", () => {
       status: "unverified",
       reason: "skipped: keeps the order",
     });
-    expect(byText["has a header"]).toMatchObject({
+    expect(byText["has a header"]).toMatchObject({ status: "verified" }); // "orders > has a header"
+    expect(byText["has a footer"]).toMatchObject({
       status: "unverified",
-      reason: "not in the JUnit report: header test that does not exist",
+      reason: "not in the JUnit report: footer test that does not exist",
     });
     expect(byText["nobody named a test"]).toMatchObject({
       status: "unverified",

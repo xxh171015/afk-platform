@@ -84,12 +84,21 @@ table.specs th {
   background: #e5dbff;
 }
 .spec-merged,
-.ticket-done {
+.ticket-done,
+.criterion-verified,
+.pr-merged {
   background: #d3f9d8;
 }
 .spec-paused,
-.ticket-blocked {
+.ticket-blocked,
+.criterion-unverified {
   background: #ffe3e3;
+}
+.pr-open {
+  background: #d0ebff;
+}
+.pr-closed {
+  background: #e9ecef;
 }
 .spec-cancelled,
 .ticket-cancelled {

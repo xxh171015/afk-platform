@@ -112,7 +112,7 @@ interface TestCaseRow {
 
 // A criterion is verified when every test the agent named for it is in the JUnit report of the integration
 // branch's last gate and passed there. The agent may name a test as the report does, or as "classname name" or
-// "classname.name".
+// "classname.name", or only the last part of a nested "suite > test" name.
 export function checkCriterion(
   tests: string[],
   cases: TestCaseRow[] | undefined,
@@ -131,7 +131,9 @@ export function checkCriterion(
       (c) =>
         c.name === name ||
         `${c.classname} ${c.name}` === name ||
-        `${c.classname}.${c.name}` === name,
+        `${c.classname}.${c.name}` === name ||
+        // vitest and jest report nested tests as "suite > test": the agent may name only the last part
+        c.name.endsWith(` > ${name}`),
     );
     if (found.length === 0) problems.push(`not in the JUnit report: ${name}`);
     else if (found.some((c) => c.status === "failed"))

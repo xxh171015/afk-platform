@@ -212,7 +212,7 @@ export function acceptancePackText(pack: PackLike): string {
         `    ${t.displayId}  ${t.title}`,
         ...t.criteria.map(
           (c) =>
-            `      [${c.status === "verified" ? "verified" : "unverified"}] ${c.text}${c.tests.length ? `  (${c.tests.join(", ")})` : ""}${c.reason ? `  -- ${c.reason}` : ""}`,
+            `      [${c.status}] ${c.text}${c.tests.length ? `  (${c.tests.join(", ")})` : ""}${c.reason ? `  -- ${c.reason}` : ""}`,
         ),
       ]),
     ),
