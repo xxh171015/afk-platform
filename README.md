@@ -17,7 +17,7 @@ Tests use a real Postgres, never a mock. Pick one:
 **Docker (local machine)**
 
 ```sh
-docker compose up -d postgres
+docker compose up -d --wait postgres
 export DATABASE_URL=postgres://afk:afk@localhost:5432/afk   # see .env.example
 ```
 
@@ -61,7 +61,7 @@ Four processes: Postgres, the API, the page and one worker. All of them listen o
 **Each time** (one terminal each)
 
 ```sh
-docker compose up -d postgres
+docker compose up -d --wait postgres
 export DATABASE_URL=postgres://afk:afk@localhost:5432/afk
 pnpm db:migrate
 pnpm api                      # http://127.0.0.1:3000 ($PORT to change)
