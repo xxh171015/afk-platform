@@ -1,0 +1,13 @@
+# 中断演练 3、4 用的需求：一张小票。spec 编号用 spec create 打印出来的那个。
+spec: S-7
+tickets:
+  - key: drill-d
+    repo: backend
+    type: implementation
+    title: 演练 D
+    modules: ["docs/drill/**"]
+    acceptance:
+      - "docs/drill/d.md 存在，内容是一行：drill d"
+    body: |
+      新建 docs/drill/d.md，只写那一行，不改别的文件。
+external_blocked_by: []

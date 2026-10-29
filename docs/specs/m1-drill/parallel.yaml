@@ -1,0 +1,23 @@
+# 中断演练 5 用的需求：两张互不依赖的小票，同一仓库，会同时排上 merge 作业。
+spec: S-7
+tickets:
+  - key: drill-e
+    repo: backend
+    type: implementation
+    title: 演练 E
+    modules: ["docs/drill/e/**"]
+    acceptance:
+      - "docs/drill/e/e.md 存在，内容是一行：drill e"
+    body: |
+      新建 docs/drill/e/e.md，只写那一行，不改别的文件。
+
+  - key: drill-f
+    repo: backend
+    type: implementation
+    title: 演练 F
+    modules: ["docs/drill/f/**"]
+    acceptance:
+      - "docs/drill/f/f.md 存在，内容是一行：drill f"
+    body: |
+      新建 docs/drill/f/f.md，只写那一行，不改别的文件。
+external_blocked_by: []
