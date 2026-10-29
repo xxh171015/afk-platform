@@ -17,6 +17,7 @@ import { createWorkerApi } from "./api.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
+import { removeSandboxesUnder } from "./sandboxes.ts";
 import { SlotManager } from "./slots.ts";
 import { runWorker } from "./worker.ts";
 
@@ -123,6 +124,7 @@ await runWorker({
       mainCloneFor: (role) => repos.dirFor(role),
       salvageDir: join(config.home, "salvage"),
       isHeld: (jobId, attempt) => api.isHeld(jobId, attempt),
+      removeSandboxes: removeSandboxesUnder,
       log,
     }),
     repos,

@@ -527,7 +527,7 @@ flowchart LR
 
 中断恢复：
 
-- 中断发生在 agent 运行中，下一个作业回收这个僵尸槽位时按顺序做三件事：(1) 槽位里的 `agent/<ticket-id>` 比主 clone 多出 commit 时，先按「Git 操作规范」的取回规则取回（保留 commits）；(2) 把槽位里 `.sandcastle/worktrees/<分支名里的 / 换成 ->/` 的未提交改动存成 diff，写进运行日志；(3) 整个槽位删掉重建。这个阶段从头跑：新会话不知道半成品的意图，所以不接着用它。
+- 中断发生在 agent 运行中，下一个作业回收这个僵尸槽位时按顺序做三件事：(1) 槽位里的 `agent/<ticket-id>` 比主 clone 多出 commit 时，先按「Git 操作规范」的取回规则取回（保留 commits）；(2) 把槽位里 `.sandcastle/worktrees/<分支名里的 / 换成 ->/` 的未提交改动存成 diff，写进运行日志；(3) 整个槽位删掉重建。在这三步之前，先删掉仍然挂着这个槽位目录的沙箱容器：被 `SIGKILL` 的 worker 不会清理自己的沙箱，容器还在往旧目录写，重建出来的同名目录也挂不进新容器（M1 演练实测：docker 报 `error while creating mount source path`）。取回的 commits 留在 `agent/<ticket-id>` 上，implement 阶段重跑时 agent 看到的是带着它们的分支；agent 发现活已干完而没有新 commit 时，只要分支上已有 commit 就算 `done`（0 个 commit 且分支为空才是 `no-commits`），这些 commit 若还没有 `Run:` trailer，从分叉点起补上。这个阶段从头跑：新会话不知道半成品的意图，所以不接着用它。
 - 中断发生在门禁或合并：这两步没有副作用，直接重跑。集成分支只在门禁通过后前移，而且是用 `--force-with-lease` 一次完成的，所以不会出现“分支前移了，状态却没写回”的情况；就算真的出现，幂等检查也会把它识别成已合并。
 - 心跳被拒绝时，worker 用 `AbortSignal` 立刻中止本地运行。同一台机器上，槽位锁（见「Git 操作规范」）保证新旧进程不会同时用同一个槽位。Sandcastle 的 worktree 锁（ADR 0007）在 0.12.0 里没有发布，这把槽位锁取代它；新作业拿到别的空闲槽位，没有空闲槽位就退回队列稍后重试。
 

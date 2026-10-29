@@ -40,6 +40,10 @@ export interface SlotManagerOptions {
   // If the API cannot be asked, the lock is assumed to be held: never destroy work on a guess.
   isHeld(jobId: number, attempt: number): Promise<boolean>;
   isProcessAlive?: (pid: number) => boolean;
+  // Removes what still runs on a slot's directory (the sandbox of a worker that died keeps running on it) and
+  // returns what it removed. Called before the slot's leftovers are salvaged, so that nobody writes to the clone
+  // meanwhile and the rebuilt clone is not shadowed by a container still holding the old directory.
+  removeSandboxes?: (slotDir: string) => string[];
   log?: (line: string) => void;
 }
 
@@ -191,6 +195,14 @@ export class SlotManager {
   private rebuild(index: number, task: SlotTask) {
     const dir = this.slotDir(index);
     const lastPath = join(dir, "last.json");
+    const leftovers = readdirSync(dir).filter((name) => name !== "lock");
+    if (leftovers.length > 0) {
+      const removed = this.options.removeSandboxes?.(dir) ?? [];
+      if (removed.length > 0)
+        this.log(
+          `slot ${index}: removed the sandbox(es) still running on it: ${removed.join(" ")}`,
+        );
+    }
     if (existsSync(lastPath)) this.salvage(index, readLast(lastPath));
     // anything else left in the slot (another repo's clone) is gone too
     for (const name of readdirSync(dir)) {

@@ -250,6 +250,25 @@ describe("zombie slots", () => {
     expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
   });
 
+  it("removes the sandboxes still running on the zombie's slot before anything of its is touched", async () => {
+    const slot = await abandoned({ commit: true, pid: deadPid() });
+    const stopped: { dir: string; cloneStillThere: boolean }[] = [];
+    await acquire(
+      manager(1, {
+        removeSandboxes: (dir) => {
+          stopped.push({ dir, cloneStillThere: existsSync(slot.dir) });
+          return ["abc123"];
+        },
+      }),
+      task(2),
+    );
+    expect(stopped).toEqual([{ dir: join(root, "0"), cloneStillThere: true }]);
+    expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
+    expect(logs.some((line) => /removed the sandbox.*abc123/.test(line))).toBe(
+      true,
+    );
+  });
+
   it("then saves uncommitted changes as a diff", async () => {
     await abandoned({ commit: true, dirty: true, pid: deadPid() });
     await acquire(manager(1), task(2));

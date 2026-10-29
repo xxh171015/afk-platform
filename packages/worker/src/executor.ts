@@ -269,6 +269,15 @@ async function agentChange(
   const integration = bundle.integrationBranch as string;
   const baseSha = branchBase(mainDir, integration, agent);
   const before = exists(mainDir, agent) ? tip(mainDir, agent) : baseSha;
+  // implement owns every commit of the branch, those an interrupted run left in it included, unless an earlier
+  // run already stamped them (and maybe published them): those are not rewritten. A fix owns its own commits.
+  const stampFrom =
+    stage === "implement" &&
+    !/^Run: /m.test(
+      git(mainDir, ["log", "--format=%B", `${baseSha}..${before}`]).stdout,
+    )
+      ? baseSha
+      : before;
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(context, mainDir, baseSha, tmp);
@@ -286,7 +295,13 @@ async function agentChange(
     });
     if (context.signal.aborted)
       throw new JobLostError("the lease was lost during the agent run");
-    const verdict = classifyAgentRun(run);
+    // Commits the branch already carries (salvaged from an interrupted run, or kept by a continue-retry) are the
+    // ticket's work: an agent that finds it complete adds none, and that is done, not no-commits.
+    const inherited =
+      stage === "implement" && before !== baseSha && run.commits.length === 0;
+    const verdict = classifyAgentRun(
+      inherited ? { ...run, commits: [before] } : run,
+    );
     if (verdict.kind === "infrastructure-failure")
       throw new InfrastructureError(verdict.error);
     log(
@@ -318,7 +333,7 @@ async function agentChange(
     const stamped = stampTrailers({
       repoDir: mainDir,
       branch: agent,
-      before,
+      before: stampFrom,
       exclude: integration,
       ids: {
         spec: bundle.spec.displayId,
@@ -347,7 +362,7 @@ async function agentChange(
     facts.commits = gitOrThrow(mainDir, [
       "rev-list",
       "--reverse",
-      `${before}..${agent}`,
+      `${stampFrom}..${agent}`,
     ])
       .split("\n")
       .filter(Boolean);

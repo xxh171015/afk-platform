@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAppTokenSource, createGitHubAdapter } from "@afk/host";
@@ -580,6 +580,80 @@ describe("a person's decisions about a blocked ticket", () => {
       "1:cancelled",
       "2:blocked/upstream-cancelled",
     ]);
+  });
+});
+
+describe("work an interrupted run left behind", () => {
+  const work = (over?: Parameters<typeof deps>[0]) =>
+    runWorker({
+      api: workerFor(),
+      executor: deps(over),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+  const implementDoneWithoutCommitting: Script = (ctx) =>
+    ctx.stage === "implement" ? { output: DONE } : undefined;
+
+  // A commit on agent/T-1 as slot salvage leaves it: in the main clone, and on origin too when the run had pushed.
+  function leaveCommit(message: string, published: boolean) {
+    const wd = join(home, "salvaged");
+    git(home, ["clone", "--quiet", origin, wd]);
+    git(wd, ["checkout", "--quiet", "-b", "agent/T-1"]);
+    writeFileSync(join(wd, "salvaged.ts"), "export const s = 1;\n");
+    git(wd, ["add", "."]);
+    git(wd, [
+      "-c",
+      "user.name=agent",
+      "-c",
+      "user.email=agent@example.com",
+      "commit",
+      "--quiet",
+      "-m",
+      message,
+    ]);
+    const mainClone = new RepoStore(join(home, "repos")).ensure(
+      "backend",
+      origin,
+      "main",
+    );
+    git(wd, ["push", "--quiet", mainClone, "agent/T-1"]);
+    if (published) git(wd, ["push", "--quiet", "origin", "agent/T-1"]);
+    return gitOut(wd, ["rev-parse", "HEAD"]);
+  }
+
+  it("counts the commits already in the branch as the implement stage's work, and stamps them", async () => {
+    await confirmedSpec([ticket("a")]);
+    leaveCommit("salvaged work", false);
+    await work({ script: implementDoneWithoutCommitting });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(gitOut(origin, ["log", "--format=%B", "main..agent/T-1"])).toContain(
+      "Ticket: T-1",
+    );
+    expect(gitOut(origin, ["show", "spec/order-export:salvaged.ts"])).toBe(
+      "export const s = 1;",
+    );
+  });
+
+  it("leaves commits an earlier run already stamped and published as they are", async () => {
+    await confirmedSpec([ticket("a")]);
+    const tip = leaveCommit(
+      "published work\n\nSpec: S-1\nTicket: T-1\nRun: R-99",
+      true,
+    );
+    await work({ script: implementDoneWithoutCommitting });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(gitOut(origin, ["rev-parse", "agent/T-1"])).toBe(tip);
+    expect(
+      gitOut(origin, ["log", "--format=%B", "main..agent/T-1"]).match(
+        /^Run: /gm,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("still blocks a done without a commit when the branch has nothing", async () => {
+    await confirmedSpec([ticket("a")]);
+    await work({ script: implementDoneWithoutCommitting });
+    expect(await stateOf()).toEqual(["1:blocked/no-commits"]);
   });
 });
 
