@@ -13,6 +13,7 @@ export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
 export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS } from "./findings.ts";
+export { HOST_CAPABILITY, HOST_JOB_TYPES } from "./host-jobs.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
 export type { LimitOverrides, Limits } from "./limits.ts";

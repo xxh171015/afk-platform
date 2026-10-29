@@ -9,6 +9,7 @@ CREATE TABLE "pull_requests" (
 	"head_sha" text NOT NULL,
 	"ci" text DEFAULT 'none' NOT NULL,
 	"review" text DEFAULT 'none' NOT NULL,
+	"sync_error" text,
 	"synced_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "pull_requests_spec_repo_unique" UNIQUE("spec_id","repo_id"),

@@ -9,6 +9,16 @@ import { exec } from "@afk/pipeline";
 const ALLOWED =
   /^refs\/heads\/(agent|spec)\/[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 
+// What the host wants in the Authorization header for an installation token.
+// The token and its encoded form: neither may appear in anything that is logged or thrown.
+export const secretsOf = (token: string) => [
+  token,
+  Buffer.from(`x-access-token:${token}`).toString("base64"),
+];
+
+export const basicAuth = (token: string) =>
+  `basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+
 export interface PushRequest {
   repoDir: string;
   remote?: string; // default origin
@@ -62,7 +72,7 @@ export function pushRef(
     );
   }
   const header = options.token
-    ? `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`
+    ? `AUTHORIZATION: ${basicAuth(options.token)}`
     : undefined;
   const lease =
     request.expectedOld === undefined
@@ -71,7 +81,6 @@ export function pushRef(
   const result = exec(
     "git",
     [
-      ...(header ? ["-c", `http.extraHeader=${header}`] : []),
       "push",
       "--quiet",
       ...lease,
@@ -80,12 +89,15 @@ export function pushRef(
     ],
     {
       cwd: request.repoDir,
-      redact: options.token
-        ? [
-            options.token,
-            Buffer.from(`x-access-token:${options.token}`).toString("base64"),
-          ]
-        : [],
+      // in git's environment, not its arguments: argv shows in `ps`
+      env: header
+        ? {
+            GIT_CONFIG_COUNT: "1",
+            GIT_CONFIG_KEY_0: "http.extraHeader",
+            GIT_CONFIG_VALUE_0: header,
+          }
+        : {},
+      redact: options.token ? secretsOf(options.token) : [],
     },
   );
   return result.code === 0

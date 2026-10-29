@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, gitOrThrow, hasRef } from "@afk/pipeline";
+import { basicAuth, secretsOf } from "./push.ts";
 
 // The worker's main clones, one per repo, kept bare: they hold the branches every slot clone starts from.
 // They follow origin for the default branch and the integration branches; ticket branches only move forward.
@@ -26,7 +27,7 @@ export class RepoStore {
     return {
       GIT_CONFIG_COUNT: "1",
       GIT_CONFIG_KEY_0: "http.extraHeader",
-      GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
+      GIT_CONFIG_VALUE_0: `AUTHORIZATION: ${basicAuth(token)}`,
     };
   }
 
@@ -39,26 +40,18 @@ export class RepoStore {
     const dir = this.dirFor(role);
     if (!existsSync(dir)) {
       mkdirSync(dirname(dir), { recursive: true });
-      gitOrThrow(
-        this.root,
-        ["clone", "--quiet", "--bare", url, dir],
-        this.env(),
-      );
+      this.run(this.root, ["clone", "--quiet", "--bare", url, dir]);
     }
     // '+' for the branches origin owns; a failure here means the default branch or the integration branch is
     // stale, so it is an error, not something to carry on with.
-    gitOrThrow(
-      dir,
-      [
-        "fetch",
-        "--quiet",
-        "--no-tags",
-        "origin",
-        `+refs/heads/${defaultBranch}:refs/heads/${defaultBranch}`,
-        "+refs/heads/spec/*:refs/heads/spec/*",
-      ],
-      this.env(),
-    );
+    this.run(dir, [
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      "origin",
+      `+refs/heads/${defaultBranch}:refs/heads/${defaultBranch}`,
+      "+refs/heads/spec/*:refs/heads/spec/*",
+    ]);
     // Ticket branches only move forward and can hold work origin has not seen: a refused update is fine.
     git(
       dir,
@@ -72,6 +65,22 @@ export class RepoStore {
       this.env(),
     );
     return dir;
+  }
+
+  // gitOrThrow with the token scrubbed from the message it throws.
+  private run(cwd: string, args: string[]): string {
+    try {
+      return gitOrThrow(cwd, args, this.env());
+    } catch (error) {
+      const token = this.tokenOf?.();
+      if (!token || !(error instanceof Error)) throw error;
+      throw new Error(
+        secretsOf(token).reduce(
+          (m, secret) => m.split(secret).join("***"),
+          error.message,
+        ),
+      );
+    }
   }
 
   has(dir: string, ref: string): boolean {

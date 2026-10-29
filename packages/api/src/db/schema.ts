@@ -259,6 +259,8 @@ export const pullRequests = pgTable(
     headSha: text("head_sha").notNull(),
     ci: text("ci").notNull().default("none"),
     review: text("review").notNull().default("none"),
+    // Why the last look at the host failed for this pull request; cleared by the next one that works.
+    syncError: text("sync_error"),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
     createdAt: createdAt(),
   },

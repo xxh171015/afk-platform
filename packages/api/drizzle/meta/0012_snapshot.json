@@ -1,5 +1,5 @@
 {
-  "id": "d65d3dd2-71cf-4693-80a6-4b676abf0fba",
+  "id": "80db0f77-eb46-4a38-87a7-783d3b3f081b",
   "prevId": "ccd383ff-09c6-4114-85a9-4f629f6d31fe",
   "version": "7",
   "dialect": "postgresql",
@@ -660,6 +660,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'none'"
+        },
+        "sync_error": {
+          "name": "sync_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "synced_at": {
           "name": "synced_at",

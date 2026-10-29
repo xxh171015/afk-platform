@@ -1,3 +1,4 @@
+import { HOST_CAPABILITY, HOST_JOB_TYPES } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import {
   type ExecutorDeps,
@@ -7,12 +8,7 @@ import {
   JobLostError,
   NoFreeSlotError,
 } from "./executor.ts";
-import {
-  HOST_CAPABILITY,
-  HOST_JOB_TYPES,
-  type HostDeps,
-  runHostTask,
-} from "./host.ts";
+import { type HostDeps, runHostTask } from "./host.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -123,7 +119,7 @@ export async function processJob(
   let uploader: LogUploader | undefined;
   let stopStreaming = () => {};
   try {
-    if (HOST_JOB_TYPES.includes(job.type)) {
+    if ((HOST_JOB_TYPES as readonly string[]).includes(job.type)) {
       if (!options.host)
         throw new InfrastructureError("this worker has no code host");
       const task = await api.hostTask(job);

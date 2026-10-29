@@ -1,4 +1,4 @@
-import { formatDisplayId } from "@afk/shared";
+import { formatDisplayId, HOST_CAPABILITY } from "@afk/shared";
 import type pg from "pg";
 import { enqueueJob } from "../jobs/queue.ts";
 
@@ -7,8 +7,6 @@ import { enqueueJob } from "../jobs/queue.ts";
 // pull request of a project that is still open. Neither holds a lock key.
 
 export const SYNC_INTERVAL_SECONDS = 60;
-// Only workers that hold the host's credentials claim these (they declare it when they claim).
-export const HOST_CAPABILITY = "host";
 
 export interface OpenPrPayload {
   specId: number;

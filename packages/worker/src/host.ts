@@ -13,9 +13,6 @@ export interface HostDeps {
   repoRef?: (url: string) => RepoRef;
 }
 
-export const HOST_JOB_TYPES: readonly string[] = ["open-pr", "host-sync"];
-export const HOST_CAPABILITY = "host";
-
 export async function runHostTask(
   deps: HostDeps,
   task: HostTask,

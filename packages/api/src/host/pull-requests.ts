@@ -216,10 +216,31 @@ export async function recordOpenPr(
       read.specId,
       next.state,
     ]);
+    // a pull request that was already merged when it was found (opened by an earlier try) may be the last one
+    await markMergedWhenAllAre(client, read.specId);
   }
   const projectId = await projectOf(client, read.specId);
   if (projectId !== undefined) await enqueueHostSync(client, projectId);
   return { status: "applied" };
+}
+
+// When a person has merged every one of a spec's pull requests, the spec is merged (the spec is locked).
+async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
+  const open = await client.query(
+    "SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state <> 'merged'",
+    [specId],
+  );
+  const state = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  if (open.rowCount || state.rows[0]?.state !== "awaiting-review") return;
+  const next = specTransition("awaiting-review", "all-prs-merged");
+  if (!next.ok) throw new Error(next.reason);
+  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+    specId,
+    next.state,
+  ]);
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,
@@ -235,13 +256,26 @@ export async function recordHostSync(
     await scheduleNextSync(client, read.projectId, now);
     return { status: "ignored", reason: "host-sync result is not valid" };
   }
-  const specs = new Set<number>();
+  // Spec lock first, as everywhere else: lock the specs these pull requests belong to before touching their rows.
+  const owners = await client.query<{ spec_id: number }>(
+    `SELECT DISTINCT p.spec_id FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+     WHERE p.id = ANY($1::int[]) AND r.project_id = $2 ORDER BY p.spec_id`,
+    [parsed.data.pulls.map((p) => p.id), read.projectId],
+  );
+  for (const { spec_id: specId } of owners.rows) await lockSpec(client, specId);
   for (const pull of parsed.data.pulls) {
-    if ("error" in pull) continue;
-    const updated = await client.query<{ spec_id: number }>(
-      `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, synced_at = now()
-       FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7
-       RETURNING p.spec_id`,
+    if ("error" in pull) {
+      // kept on the row, so that a pull request the host keeps refusing is not silent
+      await client.query(
+        `UPDATE pull_requests p SET sync_error = $2, synced_at = now() FROM repos r
+         WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $3`,
+        [pull.id, pull.error, read.projectId],
+      );
+      continue;
+    }
+    await client.query(
+      `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now()
+       FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7`,
       [
         pull.id,
         pull.state,
@@ -252,26 +286,9 @@ export async function recordHostSync(
         read.projectId,
       ],
     );
-    if (updated.rows[0]) specs.add(updated.rows[0].spec_id);
   }
-  for (const specId of [...specs].sort((a, b) => a - b)) {
-    await lockSpec(client, specId);
-    const open = await client.query(
-      "SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state <> 'merged'",
-      [specId],
-    );
-    const state = await client.query<{ state: SpecState }>(
-      "SELECT state FROM specs WHERE id = $1",
-      [specId],
-    );
-    if (open.rowCount || state.rows[0]?.state !== "awaiting-review") continue;
-    const next = specTransition("awaiting-review", "all-prs-merged");
-    if (!next.ok) throw new Error(next.reason);
-    await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
-      specId,
-      next.state,
-    ]);
-  }
+  for (const { spec_id: specId } of owners.rows)
+    await markMergedWhenAllAre(client, specId);
   await scheduleNextSync(client, read.projectId, now);
   return { status: "applied" };
 }

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AppCredentials } from "./github-app.ts";
@@ -19,9 +19,13 @@ export function loadAppCredentials(
     throw new Error(
       `${join(dir, "app.json")} must hold { "appId": "...", "installationId": "..." } as strings`,
     );
+  const keyPath = join(dir, "private-key.pem");
+  // a key other users can read is not a secret any more
+  if (statSync(keyPath).mode & 0o077)
+    throw new Error(`${keyPath} must only be readable by you: chmod 600 it`);
   return {
     appId: ids.appId,
     installationId: ids.installationId,
-    privateKey: readFileSync(join(dir, "private-key.pem"), "utf8"),
+    privateKey: readFileSync(keyPath, "utf8"),
   };
 }

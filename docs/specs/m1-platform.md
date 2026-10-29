@@ -168,7 +168,7 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 
 - worker 里所有 `git push` 走同一个函数，只放行 `refs/heads/agent/*` 和 `refs/heads/spec/*`；平台代码里不调用任何合并 PR 的接口。
 - 每个仓库一个检测用的 Actions 工作流，监听 `push` 到 `main`，用 commits → pulls 接口查这次提交有没有对应的已合并 PR；没有或推送者是 bot，就失败并开 issue。只做事后检测。
-- GitHub App 权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读，**不给** Workflows、Administration、Actions 写、Issues、Secrets；不订阅 webhook，轮询（每分钟）同步。凭据在 `~/.afk/secrets/github-app/`，worker 换 installation token 时限定本次任务的仓库和权限，缓存到过期前 5 分钟；推送用 `http.extraHeader`。
+- GitHub App 权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读，**不给** Workflows、Administration、Actions 写、Issues、Secrets；不订阅 webhook，轮询（每分钟）同步。凭据在 `~/.afk/secrets/github-app/`（`private-key.pem`，权限 600；`app.json`：`{"appId":"…","installationId":"…"}`），worker 换 installation token 时限定本次任务的仓库和权限，缓存到过期前 5 分钟；推送用 `http.extraHeader`。
 
 ### plat CLI
 

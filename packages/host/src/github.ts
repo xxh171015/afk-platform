@@ -163,7 +163,7 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
           repo,
           OPEN,
           "GET",
-          `/pulls?head=${encodeURIComponent(`${repo.owner}:${input.head}`)}&state=all`,
+          `/pulls?head=${encodeURIComponent(`${repo.owner}:${input.head}`)}&state=open`,
         );
         const existing = (found.body as RawPull[])[0];
         if (found.status === 200 && existing)

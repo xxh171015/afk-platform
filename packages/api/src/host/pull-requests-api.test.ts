@@ -224,6 +224,13 @@ describe("opening the pull requests", () => {
     ]);
   });
 
+  it("is merged straight away when the pull request found was already merged", async () => {
+    await settledSpec(["backend"]);
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7, { state: "merged" }));
+    expect(await specState()).toBe("merged");
+  });
+
   it("keeps the spec in finalizing until every repo has its pull request", async () => {
     await settledSpec(["backend", "frontend"]);
     const first = await claimOf("open-pr");
@@ -376,6 +383,26 @@ describe("following the pull requests", () => {
       ],
     });
     expect(await pulls()).toMatchObject([{ ci: "none" }, { ci: "failure" }]);
+  });
+
+  it("keeps the reason a pull request could not be read, until a look works again", async () => {
+    await awaitingReview();
+    const first = await claimOf("host-sync");
+    await worker.complete(first.id, first.attempt, {
+      stage: "host-sync",
+      pulls: [{ id: 1, error: "GitHub answered 404" }],
+    });
+    const error = async () =>
+      (await db.pool.query("SELECT sync_error FROM pull_requests")).rows[0]
+        .sync_error;
+    expect(await error()).toBe("GitHub answered 404");
+    clock.advanceSeconds(60);
+    const second = await claimOf("host-sync");
+    await worker.complete(second.id, second.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1)],
+    });
+    expect(await error()).toBeNull();
   });
 
   it("looks again in a minute when a look failed", async () => {
