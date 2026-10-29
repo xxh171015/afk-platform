@@ -18,6 +18,15 @@ const info = (
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
+// the parts of the host these tests do not use
+const noCleanup = {
+  closePullRequest: async (): Promise<PullRequestInfo> => {
+    throw new Error("not used");
+  },
+  deleteBranch: async (): Promise<"deleted" | "gone"> => {
+    throw new Error("not used");
+  },
+};
 const log = () => {};
 const open = {
   kind: "open-pr" as const,
@@ -33,6 +42,7 @@ describe("an open-pr task", () => {
   it("opens the pull request the task describes and reports what the host said", async () => {
     const calls: unknown[] = [];
     const adapter: HostAdapter = {
+      ...noCleanup,
       async openPullRequest(input) {
         calls.push(input);
         return info(7);
@@ -55,6 +65,7 @@ describe("an open-pr task", () => {
 
   it("fails as an infrastructure problem when the host refuses, so the job is tried again", async () => {
     const adapter: HostAdapter = {
+      ...noCleanup,
       openPullRequest: async () => {
         throw new HostError("GitHub answered 503 opening a pull request", 503);
       },
@@ -77,6 +88,7 @@ describe("a host-sync task", () => {
 
   it("reports each open pull request", async () => {
     const adapter: HostAdapter = {
+      ...noCleanup,
       openPullRequest: async () => info(0),
       getPullRequest: async ({ number }) =>
         info(number, number === 2 ? { state: "merged" } : {}),
@@ -107,6 +119,7 @@ describe("a host-sync task", () => {
 
   it("reports the one it could not read and still the others", async () => {
     const adapter: HostAdapter = {
+      ...noCleanup,
       openPullRequest: async () => info(0),
       getPullRequest: async ({ number }) => {
         if (number === 1) throw new HostError("GitHub answered 502", 502);
@@ -120,5 +133,110 @@ describe("a host-sync task", () => {
     )) as { pulls: Record<string, unknown>[] };
     expect(result.pulls[0]).toEqual({ id: 1, error: "GitHub answered 502" });
     expect(result.pulls[1]).toMatchObject({ id: 2, state: "open" });
+  });
+});
+
+describe("a spec-cleanup task", () => {
+  const cleanup = (
+    over: Partial<{
+      pulls: { id: number; repoUrl: string; number: number }[];
+      branches: { repoUrl: string; branch: string }[];
+    }> = {},
+  ) => ({
+    kind: "spec-cleanup" as const,
+    pulls: [{ id: 5, repoUrl: "https://github.com/me/pilot.git", number: 7 }],
+    branches: [
+      { repoUrl: "https://github.com/me/pilot.git", branch: "spec/export" },
+      { repoUrl: "https://github.com/me/pilot.git", branch: "agent/T-1" },
+      { repoUrl: "https://github.com/me/pilot.git", branch: "agent/S-1-final" },
+    ],
+    ...over,
+  });
+  function recorder(
+    over: Partial<HostAdapter> = {},
+  ): HostAdapter & { calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(0),
+      closePullRequest: async ({ number }) => {
+        calls.push(`close ${number}`);
+        return info(number, { state: "closed" });
+      },
+      deleteBranch: async ({ branch }) => {
+        calls.push(`delete ${branch}`);
+        return "deleted";
+      },
+      ...over,
+    };
+  }
+
+  it("closes the pull requests and deletes the branches, and reports the ids it closed", async () => {
+    const adapter = recorder();
+    const result = await runHostTask({ adapter, repoRef: ref }, cleanup(), log);
+    expect(adapter.calls).toEqual([
+      "close 7",
+      "delete spec/export",
+      "delete agent/T-1",
+      "delete agent/S-1-final",
+    ]);
+    expect(result).toEqual({ stage: "spec-cleanup", closed: [5] });
+  });
+
+  it("does not report a pull request as closed when the host says a person merged it meanwhile", async () => {
+    const adapter = recorder({
+      closePullRequest: async ({ number }) => info(number, { state: "merged" }),
+    });
+    const result = await runHostTask({ adapter, repoRef: ref }, cleanup(), log);
+    expect(result).toEqual({ stage: "spec-cleanup", closed: [] });
+  });
+
+  it("takes a branch that is already gone as deleted", async () => {
+    const adapter = recorder({ deleteBranch: async () => "gone" });
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, cleanup(), log),
+    ).resolves.toMatchObject({ closed: [5] });
+  });
+
+  it("deletes only branches a spec makes, whatever the task says", async () => {
+    const adapter = recorder();
+    const lines: string[] = [];
+    await runHostTask(
+      { adapter, repoRef: ref },
+      cleanup({
+        pulls: [],
+        branches: [
+          { repoUrl: "https://github.com/me/pilot.git", branch: "main" },
+          { repoUrl: "https://github.com/me/pilot.git", branch: "release/1.0" },
+          {
+            repoUrl: "https://github.com/me/pilot.git",
+            branch: "agent/T-1/../x",
+          },
+          { repoUrl: "https://github.com/me/pilot.git", branch: "agent/T-2" },
+        ],
+      }),
+      (line) => lines.push(line),
+    );
+    expect(adapter.calls).toEqual(["delete agent/T-2"]);
+    expect(lines.filter((l) => /not a branch of a spec/.test(l))).toHaveLength(
+      3,
+    );
+  });
+
+  it("does the rest when one step fails, then fails as an infrastructure problem so the job is tried again", async () => {
+    const adapter = recorder({
+      closePullRequest: async () => {
+        throw new HostError("GitHub answered 503 closing pull request 7", 503);
+      },
+    });
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, cleanup(), log),
+    ).rejects.toThrow(InfrastructureError);
+    expect(adapter.calls).toEqual([
+      "delete spec/export",
+      "delete agent/T-1",
+      "delete agent/S-1-final",
+    ]);
   });
 });

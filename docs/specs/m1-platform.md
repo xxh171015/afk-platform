@@ -131,7 +131,7 @@ Spec 和 Ticket 的状态机照 design.md：Spec 的 draft → planned → runni
 
 ### 阶段与流水线
 
-阶段：`prepare / implement / gate / review / merge / gate-fix / review-fix / merge-fix / final-review / final-fix`，另有作业类型 `open-pr`、`host-sync`。流程照 [design.md「单票执行流水线」](../design.md#单票执行流水线)：implement → 补 trailer 并推送 → 保护路径检查 → 门禁 → review（只跑一次）→ `merge`（merge-tree 候选 → 候选门禁 → 带 lease 前移集成分支）。每种 fix 每张票最多一次，一张票最多 5 次 agent 运行。
+阶段：`prepare / implement / gate / review / merge / gate-fix / review-fix / merge-fix / final-review / final-fix`，另有作业类型 `open-pr`、`host-sync`、`spec-cleanup`（spec 取消或 merged 后关 PR、删 `spec/*` 和 `agent/*` 分支）。流程照 [design.md「单票执行流水线」](../design.md#单票执行流水线)：implement → 补 trailer 并推送 → 保护路径检查 → 门禁 → review（只跑一次）→ `merge`（merge-tree 候选 → 候选门禁 → 带 lease 前移集成分支）。每种 fix 每张票最多一次，一张票最多 5 次 agent 运行。
 
 - `merge` 是独立的阶段作业，带 `lock_key`。冲突或候选门禁失败时它结束、锁随租约释放，merge-fix 作为不带键的 agent 作业去跑，再排一个新的 `merge` 作业。
 - 推送集成分支前先调 `pre-push`（校验仍是当前持有者并续期），推送用 `--force-with-lease`，另有"agent 分支 head 已是集成分支祖先就当作已合并"的幂等检查。

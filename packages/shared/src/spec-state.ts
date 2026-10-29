@@ -38,12 +38,19 @@ const TRANSITIONS: Partial<
 };
 
 const TERMINAL_STATES = new Set<SpecState>(["merged", "cancelled"]);
+// A person has already merged part of it: what is merged cannot be taken back by cancelling. Nothing moves a spec
+// into partially-merged yet (a spec with a merged pull request stays in awaiting-review until all are merged), so
+// cancelSpec also refuses a spec that has a merged pull request, which is the check that works today.
+const NOT_CANCELLABLE = new Set<SpecState>([
+  ...TERMINAL_STATES,
+  "partially-merged",
+]);
 
 export function specTransition(
   from: SpecState,
   event: SpecEvent,
 ): SpecTransition {
-  if (event === "cancel" && !TERMINAL_STATES.has(from))
+  if (event === "cancel" && !NOT_CANCELLABLE.has(from))
     return { ok: true, state: "cancelled" };
   const state = TRANSITIONS[from]?.[event];
   if (!state)

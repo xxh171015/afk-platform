@@ -416,7 +416,9 @@ describe("plat", () => {
     const cancelled = await plat("spec", "cancel", "S-1");
     expect(cancelled).toEqual({
       code: 0,
-      stdout: "S-1 is cancelled; cancelled T-1, T-2, T-3, T-4\n",
+      stdout:
+        "S-1 is cancelled; cancelled T-1, T-2, T-3, T-4\n" +
+        "a worker that has the code host will close its open pull requests and delete its spec/* and agent/* branches\n",
       stderr: "",
     });
     const shown = await plat("spec", "show", "S-1");

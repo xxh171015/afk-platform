@@ -6,8 +6,12 @@ import {
 import type pg from "pg";
 import {
   enqueueOpenPr,
+  enqueueSpecCleanup,
   openPrKeyPrefix,
   readOpenPrPayload,
+  readSpecCleanupPayload,
+  type SpecCleanupPayload,
+  specCleanupKeyPrefix,
 } from "../host/host-jobs.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
@@ -70,6 +74,8 @@ export async function recordJobFailure(
   if (final) return finalStepFailed(client, final);
   const openPr = readOpenPrPayload(job);
   if (openPr) return openPrFailed(client, openPr);
+  const cleanup = readSpecCleanupPayload(job);
+  if (cleanup) return specCleanupFailed(client, cleanup);
   return { status: "not-a-stage" };
 }
 
@@ -208,4 +214,16 @@ async function openPrFailed(
     [fin.id, JOB_FAILED],
   );
   return { status: "blocked", failures };
+}
+
+// The cleanup of a cancelled or merged spec could not be done: tried again, three times in all. Nothing waits for
+// it, so after that it is left (the job stays failed, with its error).
+async function specCleanupFailed(
+  client: pg.PoolClient,
+  read: SpecCleanupPayload,
+): Promise<FailureOutcome> {
+  const failures = await failuresOf(client, specCleanupKeyPrefix(read), 0);
+  if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
+  await enqueueSpecCleanup(client, read);
+  return { status: "requeued", failures };
 }

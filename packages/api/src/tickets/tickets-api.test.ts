@@ -456,10 +456,16 @@ describe("cancelling a spec", () => {
     Number(
       (
         await db.pool.query(
-          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running')",
+          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running') AND type <> 'spec-cleanup'",
         )
       ).rows[0].n,
     );
+  const cleanups = async () =>
+    (
+      await db.pool.query(
+        "SELECT payload FROM jobs WHERE type = 'spec-cleanup' AND state = 'queued'",
+      )
+    ).rows.map((r) => r.payload);
 
   it("cancels every unfinished ticket, stops the jobs, and the scheduler hands out nothing more", async () => {
     const specId = await runningSpec([
@@ -484,6 +490,7 @@ describe("cancelling a spec", () => {
     ]);
     expect(await specState()).toBe("cancelled");
     expect(await openJobs()).toBe(0);
+    expect(await cleanups()).toEqual([{ specId }]); // for a worker with the code host; this one has none
     expect((await worker.claim()).body.job).toBeNull();
 
     // the worker that still holds a's job is told it no longer does, and its result changes nothing
@@ -609,6 +616,14 @@ describe("a spec whose tickets are all cancelled", () => {
     expect(await specState()).toBe("running");
     await call("POST", "/tickets/1/cancel", { cascade: false });
     expect(await specState()).toBe("cancelled");
+    // it made branches like any other spec: they are cleaned up too
+    expect(
+      (
+        await db.pool.query(
+          "SELECT payload FROM jobs WHERE type = 'spec-cleanup' AND state = 'queued'",
+        )
+      ).rows.map((r) => r.payload),
+    ).toEqual([{ specId: 1 }]);
   });
 
   it("is cancelled when the last of several tickets is cancelled", async () => {

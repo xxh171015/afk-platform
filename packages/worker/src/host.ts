@@ -41,6 +41,7 @@ export async function runHostTask(
     log(`opened ${pr.url} (${pr.state})`);
     return { stage: "open-pr", outcome: "opened", ...pr };
   }
+  if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
   const pulls = [];
   for (const pull of task.pulls) {
     try {
@@ -64,4 +65,58 @@ export async function runHostTask(
     }
   }
   return { stage: "host-sync", pulls };
+}
+
+// Only what a spec makes is ever deleted: spec/<slug>, agent/T-<n> and agent/S-<n>-final. The API names the
+// branches; this is the check that a wrong name there cannot reach a default or a release branch.
+const SPEC_BRANCH =
+  /^(spec\/[a-z0-9]+(-[a-z0-9]+)*|agent\/(T-[1-9][0-9]*|S-[1-9][0-9]*-final))$/;
+
+// Closes the spec's open pull requests and deletes its branches. A step that fails does not stop the others (a
+// branch that cannot be deleted must not keep a pull request open); the job then fails, is tried again, and
+// everything already done is a no-op the second time.
+async function cleanUp(
+  deps: HostDeps,
+  task: Extract<HostTask, { kind: "spec-cleanup" }>,
+  log: (line: string) => void,
+): Promise<Record<string, unknown>> {
+  const repoRef = deps.repoRef ?? parseRepoUrl;
+  const closed: number[] = [];
+  const failures: string[] = [];
+  const attempt = async (what: string, step: () => Promise<void>) => {
+    try {
+      await step();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`${what}: ${message}`);
+      failures.push(`${what}: ${message}`);
+    }
+  };
+  for (const pull of task.pulls)
+    await attempt(`closing pull request ${pull.number}`, async () => {
+      const after = await deps.adapter.closePullRequest({
+        repo: repoRef(pull.repoUrl),
+        number: pull.number,
+      });
+      log(`pull request ${pull.number} of ${pull.repoUrl} is ${after.state}`);
+      if (after.state === "closed") closed.push(pull.id);
+    });
+  for (const { repoUrl, branch } of task.branches) {
+    if (!SPEC_BRANCH.test(branch)) {
+      log(`${branch} of ${repoUrl} is not a branch of a spec: left alone`);
+      continue;
+    }
+    await attempt(`deleting ${branch}`, async () => {
+      const outcome = await deps.adapter.deleteBranch({
+        repo: repoRef(repoUrl),
+        branch,
+      });
+      log(`${branch} of ${repoUrl}: ${outcome}`);
+    });
+  }
+  if (failures.length > 0)
+    throw new InfrastructureError(
+      `spec cleanup could not do: ${failures.join("; ")}`.slice(0, 1000),
+    );
+  return { stage: "spec-cleanup", closed };
 }

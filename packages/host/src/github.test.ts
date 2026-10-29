@@ -169,6 +169,72 @@ describe("getPullRequest", () => {
   });
 });
 
+describe("closePullRequest", () => {
+  it("closes an open pull request, and reports it closed", async () => {
+    await open();
+    const closed = await adapter().closePullRequest({ repo, number: 1 });
+    expect(closed).toMatchObject({ number: 1, state: "closed" });
+    expect(github.pullRequests()[0]).toMatchObject({
+      state: "closed",
+      merged: false,
+    });
+  });
+
+  it("leaves a merged pull request alone: it is reported merged and nothing is sent", async () => {
+    await open();
+    github.mergePull(1);
+    const before = github.requests.length;
+    const result = await adapter().closePullRequest({ repo, number: 1 });
+    expect(result.state).toBe("merged");
+    expect(
+      github.requests.slice(before).filter((r) => r.startsWith("PATCH")),
+    ).toEqual([]);
+  });
+
+  it("asks for a token that can write pull requests", async () => {
+    await open();
+    await adapter().closePullRequest({ repo, number: 1 });
+    expect(github.tokensIssued.at(-1)?.permissions).toMatchObject({
+      pull_requests: "write",
+    });
+  });
+});
+
+describe("deleteBranch", () => {
+  it("deletes a branch, and says it is gone when asked again", async () => {
+    github.addBranch("spec/s-1");
+    const a = adapter();
+    expect(await a.deleteBranch({ repo, branch: "spec/s-1" })).toBe("deleted");
+    expect(github.branches()).toEqual([]);
+    expect(await a.deleteBranch({ repo, branch: "spec/s-1" })).toBe("gone");
+  });
+
+  it("asks for a token that can write contents", async () => {
+    github.addBranch("agent/T-1");
+    await adapter().deleteBranch({ repo, branch: "agent/T-1" });
+    expect(github.tokensIssued.at(-1)?.permissions).toMatchObject({
+      contents: "write",
+    });
+  });
+
+  it("does not take a 422 for a branch that is gone when GitHub refuses it for another reason", async () => {
+    github.addBranch("agent/T-1");
+    github.protectBranch("agent/T-1");
+    await expect(
+      adapter().deleteBranch({ repo, branch: "agent/T-1" }),
+    ).rejects.toMatchObject({ name: "HostError", status: 422 });
+    expect(github.branches()).toEqual(["agent/T-1"]);
+  });
+
+  it("throws a HostError with the status when GitHub refuses", async () => {
+    github.addBranch("agent/T-1");
+    github.refuseBranchDeletes = true;
+    await expect(
+      adapter().deleteBranch({ repo, branch: "agent/T-1" }),
+    ).rejects.toMatchObject({ name: "HostError", status: 403 });
+  });
+});
+
 describe("parseRepoUrl", () => {
   it.each([
     [

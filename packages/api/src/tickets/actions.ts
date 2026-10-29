@@ -7,6 +7,7 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
+import { enqueueSpecCleanup } from "../host/host-jobs.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import {
   inTransaction,
@@ -341,6 +342,15 @@ export async function cancelSpec(
     const next = specTransition(state, "cancel");
     if (!next.ok)
       return refused(`${next.reason}: a merged or cancelled spec is final`);
+    // A person merged part of it before the host-sync that would say so was recorded: still not cancellable.
+    const merged = await client.query(
+      "SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state = 'merged' LIMIT 1",
+      [specId],
+    );
+    if (merged.rowCount)
+      return refused(
+        "a pull request of this spec is already merged; what is merged cannot be taken back by cancelling",
+      );
     await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
       specId,
       next.state,
@@ -374,7 +384,9 @@ export async function cancelSpec(
        WHERE spec_id = $1 AND finished_at IS NULL`,
       [specId],
     );
-    // The platform never closes a pull request: the ones it last saw open are handed to the person.
+    // After the jobs of the spec were stopped: the one that closes its pull requests and deletes its branches.
+    await enqueueSpecCleanup(client, { specId });
+    // What the cleanup is going to close, for the person who cancelled.
     const open = await client.query<OpenPullRequest>(
       `SELECT r.role AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id
        WHERE p.spec_id = $1 AND p.state = 'open' ORDER BY p.id`,

@@ -13,7 +13,7 @@ _Avoid_: 产品线、应用
 _Avoid_: 代码库、工程
 
 **Spec（需求）**：
-一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的留着；所有票都被取消、没有一张 done 时自动取消。
+一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并的 spec 不能取消。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
 **Ticket（票）**：

@@ -1523,7 +1523,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr or host-sync job has to do on the code host",
+            "description": "What an open-pr, host-sync or spec-cleanup job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -1591,6 +1591,49 @@
                         }
                       },
                       "required": ["kind", "pulls"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["spec-cleanup"]
+                        },
+                        "pulls": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["id", "repoUrl", "number"]
+                          }
+                        },
+                        "branches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["repoUrl", "branch"]
+                          }
+                        }
+                      },
+                      "required": ["kind", "pulls", "branches"]
                     }
                   ]
                 }
@@ -3731,7 +3774,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host (the platform closes none)",
+            "description": "The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host, which a worker with the code host then closes",
             "content": {
               "application/json": {
                 "schema": {
@@ -3799,7 +3842,7 @@
             }
           },
           "409": {
-            "description": "The spec is merged or already cancelled",
+            "description": "The spec is merged or already cancelled, or one of its pull requests is merged",
             "content": {
               "application/json": {
                 "schema": {

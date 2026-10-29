@@ -11,8 +11,10 @@ import { lockSpec } from "../scheduling/scheduler.ts";
 import {
   enqueueHostSync,
   enqueueOpenPr,
+  enqueueSpecCleanup,
   type HostSyncPayload,
   type OpenPrPayload,
+  type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
 } from "./host-jobs.ts";
 
@@ -36,6 +38,11 @@ export type HostTask =
   | {
       kind: "host-sync";
       pulls: { id: number; repoUrl: string; number: number }[];
+    }
+  | {
+      kind: "spec-cleanup";
+      pulls: { id: number; repoUrl: string; number: number }[]; // last seen open: to be closed
+      branches: { repoUrl: string; branch: string }[]; // to be deleted
     };
 
 const PullFacts = {
@@ -52,6 +59,11 @@ export const OpenPrResultSchema = z.object({
   number: z.number().int().min(1),
   url: z.string().min(1),
   ...PullFacts,
+});
+
+export const SpecCleanupResultSchema = z.object({
+  stage: z.literal("spec-cleanup"),
+  closed: z.array(z.number().int()), // pull request ids the worker closed
 });
 
 export const HostSyncResultSchema = z.object({
@@ -91,8 +103,10 @@ export async function startOpeningPullRequests(
 export async function buildHostTask(
   pool: pg.Pool,
   job: { type?: string; payload: Record<string, unknown> },
-  payload: OpenPrPayload | HostSyncPayload,
+  payload: OpenPrPayload | HostSyncPayload | SpecCleanupPayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "spec-cleanup")
+    return specCleanupTask(pool, payload as SpecCleanupPayload);
   if (job.type === "open-pr") {
     const { specId, repoId } = payload as OpenPrPayload;
     const spec = (
@@ -149,6 +163,76 @@ export async function buildHostTask(
       number: p.number,
     })),
   };
+}
+
+// A spec's pull requests that were last seen open, and the branches it made in every repo it touched: the
+// integration branch, one per ticket, and the one an overall fix is made on. Nothing else is ever named here.
+async function specCleanupTask(
+  pool: pg.Pool,
+  { specId }: SpecCleanupPayload,
+): Promise<HostTask | undefined> {
+  const spec = (
+    await pool.query<{ slug: string }>("SELECT slug FROM specs WHERE id = $1", [
+      specId,
+    ])
+  ).rows[0];
+  if (!spec) return undefined;
+  const open = await pool.query<{ id: number; url: string; number: number }>(
+    `SELECT p.id, r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+     WHERE p.spec_id = $1 AND p.state = 'open' ORDER BY p.id`,
+    [specId],
+  );
+  const repos = await pool.query<{ id: number; url: string }>(
+    `SELECT r.id, r.url FROM repos r WHERE r.id IN (
+       SELECT repo_id FROM tickets WHERE spec_id = $1
+       UNION SELECT repo_id FROM pull_requests WHERE spec_id = $1
+       UNION SELECT repo_id FROM finalizations WHERE spec_id = $1) ORDER BY r.id`,
+    [specId],
+  );
+  const tickets = await pool.query<{ id: number; repo_id: number }>(
+    "SELECT id, repo_id FROM tickets WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  const branches = repos.rows.flatMap((repo) => [
+    { repoUrl: repo.url, branch: `spec/${spec.slug}` },
+    ...tickets.rows
+      .filter((t) => t.repo_id === repo.id)
+      .map((t) => ({
+        repoUrl: repo.url,
+        branch: `agent/${formatDisplayId("ticket", t.id)}`,
+      })),
+    {
+      repoUrl: repo.url,
+      branch: `agent/${formatDisplayId("spec", specId)}-final`,
+    },
+  ]);
+  return {
+    kind: "spec-cleanup",
+    pulls: open.rows.map((p) => ({
+      id: p.id,
+      repoUrl: p.url,
+      number: p.number,
+    })),
+    branches,
+  };
+}
+
+// The worker closed these pull requests: the platform does not wait for the next look at the host to know.
+export async function recordSpecCleanup(
+  client: pg.PoolClient,
+  read: SpecCleanupPayload,
+  result: unknown,
+): Promise<RecordHostResult> {
+  const parsed = SpecCleanupResultSchema.safeParse(result);
+  if (!parsed.success)
+    return { status: "ignored", reason: "spec-cleanup result is not valid" };
+  // Spec lock first, as in recordHostSync: a look at the host that was under way must not write `open` over this.
+  await lockSpec(client, read.specId);
+  await client.query(
+    "UPDATE pull_requests SET state = 'closed', synced_at = now() WHERE spec_id = $1 AND id = ANY($2::int[]) AND state = 'open'",
+    [read.specId, parsed.data.closed],
+  );
+  return { status: "applied" };
 }
 
 export type RecordHostResult =
@@ -249,6 +333,7 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     specId,
     next.state,
   ]);
+  await enqueueSpecCleanup(client, { specId });
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,

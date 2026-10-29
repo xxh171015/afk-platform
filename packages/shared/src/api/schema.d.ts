@@ -900,7 +900,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr or host-sync job has to do on the code host */
+        /** @description What an open-pr, host-sync or spec-cleanup job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -924,6 +924,19 @@ export interface paths {
                     id: number;
                     repoUrl: string;
                     number: number;
+                  }[];
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "spec-cleanup";
+                  pulls: {
+                    id: number;
+                    repoUrl: string;
+                    number: number;
+                  }[];
+                  branches: {
+                    repoUrl: string;
+                    branch: string;
                   }[];
                 };
           };
@@ -2095,7 +2108,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host (the platform closes none) */
+        /** @description The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host, which a worker with the code host then closes */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2134,7 +2147,7 @@ export interface paths {
             };
           };
         };
-        /** @description The spec is merged or already cancelled */
+        /** @description The spec is merged or already cancelled, or one of its pull requests is merged */
         409: {
           headers: {
             [name: string]: unknown;

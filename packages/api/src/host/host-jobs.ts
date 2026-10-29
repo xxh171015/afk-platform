@@ -15,6 +15,9 @@ export interface OpenPrPayload {
 export interface HostSyncPayload {
   projectId: number;
 }
+export interface SpecCleanupPayload {
+  specId: number;
+}
 
 export function readOpenPrPayload(job: {
   type?: string;
@@ -38,6 +41,16 @@ export function readHostSyncPayload(job: {
     : undefined;
 }
 
+export function readSpecCleanupPayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): SpecCleanupPayload | undefined {
+  const { specId } = job.payload;
+  return job.type === "spec-cleanup" && typeof specId === "number"
+    ? { specId }
+    : undefined;
+}
+
 export const openPrKeyPrefix = ({ specId, repoId }: OpenPrPayload) =>
   `${formatDisplayId("spec", specId)}:repo-${repoId}:open-pr:`;
 
@@ -53,6 +66,28 @@ export async function enqueueOpenPr(
   );
   return enqueueJob(client, {
     type: "open-pr",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+  });
+}
+
+export const specCleanupKeyPrefix = ({ specId }: SpecCleanupPayload) =>
+  `${formatDisplayId("spec", specId)}:cleanup:`;
+
+// A spec that is cancelled or merged: its open pull requests are closed and its branches deleted, by a worker that
+// holds the host's credentials. A second one (after a failure) gets the next sequence.
+export async function enqueueSpecCleanup(
+  client: pg.PoolClient,
+  payload: SpecCleanupPayload,
+) {
+  const prefix = specCleanupKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "spec-cleanup",
     payload: { ...payload },
     requiredCapabilities: [HOST_CAPABILITY],
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,

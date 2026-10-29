@@ -305,7 +305,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("cancel <spec>")
     .description(
-      "give up a spec: its unfinished tickets are cancelled and its jobs stopped (merged work stays); its open pull requests are listed, and left for you to close",
+      "give up a spec: its unfinished tickets are cancelled and its jobs stopped (merged work stays); a worker that has the code host then closes its open pull requests and deletes its spec/* and agent/* branches. A spec with a merged pull request cannot be cancelled",
     )
     .action(async (id: string) => {
       const { data, response, error } = await api().POST("/specs/{id}/cancel", {
@@ -316,14 +316,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         data,
         [
           `${id} is ${data.state}${data.cancelled.length ? `; cancelled ${data.cancelled.join(", ")}` : ""}`,
-          ...(data.pullRequests.length
-            ? [
-                "pull requests last seen open on the code host (the platform does not close them; close each yourself):",
-                ...data.pullRequests.map(
-                  (p) => `  ${p.repo} #${p.number}  ${p.url}`,
-                ),
-              ]
-            : []),
+          "a worker that has the code host will close its open pull requests and delete its spec/* and agent/* branches",
+          ...data.pullRequests.map((p) => `  ${p.repo} #${p.number}  ${p.url}`),
         ].join("\n"),
       );
     });

@@ -1,5 +1,6 @@
 import { type SpecEvent, specTransition } from "@afk/shared";
 import type pg from "pg";
+import { enqueueSpecCleanup } from "../host/host-jobs.ts";
 import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
 
 // A running spec takes the event; called with the spec locked.
@@ -67,5 +68,7 @@ export async function cancelIfAllTicketsCancelled(
   if (Number(other) > 0 || Number(cancelled) === 0) return false;
 
   await moveRunningSpec(client, specId, "cancel");
+  // the branches it made, like any cancelled spec's
+  await enqueueSpecCleanup(client, { specId });
   return true;
 }

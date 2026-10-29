@@ -1722,6 +1722,55 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
     ).toBe(0);
   });
 
+  const pullStates = async () =>
+    (
+      await db.pool.query("SELECT state FROM pull_requests ORDER BY id")
+    ).rows.map((r) => r.state);
+  const branchesOfTheSpec = () => {
+    for (const branch of [
+      "main",
+      "release/1.0",
+      "spec/order-export",
+      "agent/T-1",
+      "agent/S-1-final",
+    ])
+      github.addBranch(branch);
+  };
+
+  it("closes the open pull request and deletes the branches of a spec that is cancelled, and nothing else", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker(hostWorker());
+    expect(await specState()).toBe("awaiting-review");
+    branchesOfTheSpec();
+
+    expect((await post("/specs/1/cancel")).status).toBe(200);
+    await runWorker(hostWorker());
+
+    expect(github.pullRequests()[0]).toMatchObject({
+      state: "closed",
+      merged: false,
+    });
+    expect(await pullStates()).toEqual(["closed"]);
+    expect(github.branches()).toEqual(["main", "release/1.0"]);
+    expect(await specState()).toBe("cancelled");
+  });
+
+  it("deletes the branches of a spec once it is merged, and leaves the merged pull request as it is", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker(hostWorker());
+    branchesOfTheSpec();
+
+    github.mergePull(1);
+    await db.pool.query(
+      "UPDATE jobs SET not_before = NULL WHERE type = 'host-sync' AND state = 'queued'",
+    );
+    await runWorker(hostWorker());
+
+    expect(await specState()).toBe("merged");
+    expect(github.pullRequests()[0]).toMatchObject({ merged: true });
+    expect(github.branches()).toEqual(["main", "release/1.0"]);
+  });
+
   it("lists a pull request closed without merge as waiting for a person, until it is reopened, then goes on to merged", async () => {
     await confirmedSpec([ticket("a")]);
     await runWorker(hostWorker());

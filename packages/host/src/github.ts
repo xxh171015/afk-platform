@@ -21,6 +21,8 @@ export interface GitHubOptions {
 }
 
 const OPEN: TokenPermissions = { pull_requests: "write", contents: "read" };
+const CLOSE: TokenPermissions = { pull_requests: "write" };
+const DELETE_BRANCH: TokenPermissions = { contents: "write" };
 const READ: TokenPermissions = {
   pull_requests: "read",
   checks: "read",
@@ -44,7 +46,7 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
   async function call(
     repo: RepoRef,
     permissions: TokenPermissions,
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     body?: unknown,
   ): Promise<{ status: number; body: unknown }> {
@@ -144,6 +146,37 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
 
   return {
     getPullRequest,
+    async closePullRequest({ repo, number }) {
+      const current = await getPullRequest({ repo, number });
+      if (current.state !== "open") return current;
+      const closed = await call(repo, CLOSE, "PATCH", `/pulls/${number}`, {
+        state: "closed",
+      });
+      if (closed.status !== 200)
+        throw new HostError(
+          `GitHub answered ${closed.status} closing pull request ${number}`,
+          closed.status,
+        );
+      return getPullRequest({ repo, number });
+    },
+    async deleteBranch({ repo, branch }) {
+      // slashes stay: GitHub's ref path is refs/heads/<branch>
+      const path = `/git/refs/heads/${branch.split("/").map(encodeURIComponent).join("/")}`;
+      const deleted = await call(repo, DELETE_BRANCH, "DELETE", path);
+      if (deleted.status === 204) return "deleted";
+      // GitHub answers a branch that is not there with 422 "Reference does not exist"; other 422s (a protected
+      // branch, ...) are refusals and must not look like success
+      if (
+        deleted.status === 404 ||
+        (deleted.status === 422 &&
+          JSON.stringify(deleted.body).includes("Reference does not exist"))
+      )
+        return "gone";
+      throw new HostError(
+        `GitHub answered ${deleted.status} deleting branch ${branch}`,
+        deleted.status,
+      );
+    },
     async openPullRequest(input: OpenPullRequestInput) {
       const { repo } = input;
       const created = await call(repo, OPEN, "POST", "/pulls", {

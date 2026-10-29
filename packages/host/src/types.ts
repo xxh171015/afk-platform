@@ -52,6 +52,17 @@ export interface HostAdapter {
     repo: RepoRef;
     number: number;
   }): Promise<PullRequestInfo>;
+  // Closes the pull request without merging it. One that is not open (already closed, merged) is returned as it
+  // is, nothing is sent: closing never undoes a merge.
+  closePullRequest(input: {
+    repo: RepoRef;
+    number: number;
+  }): Promise<PullRequestInfo>;
+  // "gone" when the branch was not there: deleting twice is not a failure.
+  deleteBranch(input: {
+    repo: RepoRef;
+    branch: string;
+  }): Promise<"deleted" | "gone">;
 }
 
 // A call the host refused or could not answer. The message never holds a token.

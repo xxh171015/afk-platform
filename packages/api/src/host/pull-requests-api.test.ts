@@ -371,6 +371,7 @@ describe("following the pull requests", () => {
     });
     expect(await specState()).toBe("merged");
     clock.advanceSeconds(600);
+    await claimOf("spec-cleanup"); // the clean-up of the spec; nothing else is looked at
     expect((await worker.claim()).body.job).toBeNull();
   });
 
@@ -402,6 +403,7 @@ describe("following the pull requests", () => {
     });
     expect(await specState()).toBe("merged");
     clock.advanceSeconds(600);
+    await claimOf("spec-cleanup"); // the clean-up of the spec; nothing else is looked at
     expect((await worker.claim()).body.job).toBeNull();
   });
 
@@ -414,7 +416,22 @@ describe("following the pull requests", () => {
       pulls: [synced(1)],
     });
     clock.advanceSeconds(600);
+    await claimOf("spec-cleanup"); // the clean-up of the spec; nothing else is looked at
     expect((await worker.claim()).body.job).toBeNull();
+  });
+
+  it("refuses to cancel a spec one of whose pull requests a person has merged", async () => {
+    await awaitingReview(["backend", "frontend"]);
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged" }), synced(2)],
+    });
+    expect(await specState()).toBe("awaiting-review");
+    const refused = await call("POST", "/specs/1/cancel");
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/already merged/);
+    expect(await specState()).toBe("awaiting-review");
   });
 
   it("skips a pull request the host could not answer for, and keeps the rest", async () => {
@@ -537,11 +554,11 @@ describe("what waits for a person among the pull requests", () => {
     );
   });
 
-  it("is told to the person by plat spec cancel, which does not close anything itself", async () => {
+  it("is told to the person by plat spec cancel, which closes nothing itself: a worker with the code host does", async () => {
     await awaitingReview();
     expect(await plat("spec", "cancel", "S-1")).toBe(
       "S-1 is cancelled\n" +
-        "pull requests last seen open on the code host (the platform does not close them; close each yourself):\n" +
+        "a worker that has the code host will close its open pull requests and delete its spec/* and agent/* branches\n" +
         "  backend #1  https://github.com/me/shop/pull/1\n",
     );
   });
@@ -845,5 +862,112 @@ describe("the acceptance pack", () => {
       "backend @ head: 3 tests, 1 skipped, 4.0 s (setup 1.5 s, test 2.5 s)",
     );
     expect(out).toContain("T-1: .github/workflows/ci.yml");
+  });
+});
+
+describe("cleaning up after a cancelled or merged spec", () => {
+  async function awaitingReview(repos: string[] = ["backend"]) {
+    await settledSpec(repos);
+    for (let n = 1; n <= repos.length; n++) {
+      const job = await claimOf("open-pr");
+      await worker.complete(job.id, job.attempt, opened(n));
+    }
+  }
+  // The sync that was queued first may still be waiting; it is answered with nothing to report.
+  async function claimCleanup() {
+    for (let i = 0; i < 5; i++) {
+      const job = (await worker.claim()).body.job;
+      if (!job) break;
+      if (job.type === "spec-cleanup") return job;
+      await worker.complete(job.id, job.attempt, {
+        stage: "host-sync",
+        pulls: [],
+      });
+    }
+    throw new Error("no spec-cleanup job was queued");
+  }
+  const BACKEND = "https://github.com/me/shop-backend.git";
+  const FRONTEND = "https://github.com/me/shop-frontend.git";
+
+  it("queues one cleanup job for the code host when a spec is cancelled, and not again when it is cancelled twice", async () => {
+    await awaitingReview();
+    await call("POST", "/specs/1/cancel");
+    expect(await call("POST", "/specs/1/cancel")).toMatchObject({
+      status: 409,
+    });
+    expect(await jobsOf("spec-cleanup")).toMatchObject([
+      { state: "queued", payload: { specId: 1 }, lock_key: null },
+    ]);
+  });
+
+  it("tells the worker which open pull requests to close and which branches to delete, in every repo of the spec", async () => {
+    await awaitingReview(["backend", "frontend"]);
+    await call("POST", "/specs/1/cancel");
+    const job = await claimCleanup();
+    expect((await taskOf(job)).body).toEqual({
+      kind: "spec-cleanup",
+      pulls: [
+        { id: 1, repoUrl: BACKEND, number: 1 },
+        { id: 2, repoUrl: FRONTEND, number: 2 },
+      ],
+      branches: [
+        { repoUrl: BACKEND, branch: "spec/export" },
+        { repoUrl: BACKEND, branch: "agent/T-1" },
+        { repoUrl: BACKEND, branch: "agent/S-1-final" },
+        { repoUrl: FRONTEND, branch: "spec/export" },
+        { repoUrl: FRONTEND, branch: "agent/T-2" },
+        { repoUrl: FRONTEND, branch: "agent/S-1-final" },
+      ],
+    });
+  });
+
+  it("does not ask for a pull request that is already closed or merged to be closed", async () => {
+    await awaitingReview(["backend", "frontend"]);
+    const sync = await claimOf("host-sync");
+    await worker.complete(sync.id, sync.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "closed" }), synced(2)],
+    });
+    await call("POST", "/specs/1/cancel");
+    const task = (await taskOf(await claimCleanup())).body;
+    expect(task.pulls).toEqual([{ id: 2, repoUrl: FRONTEND, number: 2 }]);
+  });
+
+  it("records the pull requests the worker closed as closed", async () => {
+    await awaitingReview(["backend", "frontend"]);
+    await call("POST", "/specs/1/cancel");
+    const job = await claimCleanup();
+    await worker.complete(job.id, job.attempt, {
+      stage: "spec-cleanup",
+      closed: [1, 2],
+    });
+    expect((await pulls()).map((p) => p.state)).toEqual(["closed", "closed"]);
+  });
+
+  it("cleans up a spec that has been merged too: its branches go, there is no pull request to close", async () => {
+    await awaitingReview();
+    const sync = await claimOf("host-sync");
+    await worker.complete(sync.id, sync.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged" })],
+    });
+    expect(await specState()).toBe("merged");
+    const task = (await taskOf(await claimCleanup())).body;
+    expect(task.pulls).toEqual([]);
+    expect(task.branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: "spec/export",
+    });
+  });
+
+  it("tries a failed cleanup again, three times in all, and then leaves it", async () => {
+    await awaitingReview();
+    await call("POST", "/specs/1/cancel");
+    for (let n = 1; n <= 3; n++) {
+      const job = await claimCleanup();
+      await worker.fail(job.id, job.attempt, "GitHub answered 503");
+    }
+    expect(await jobsOf("spec-cleanup")).toHaveLength(3);
+    expect((await worker.claim()).body.job).toBeNull();
   });
 });

@@ -376,7 +376,7 @@ const cancelSpecRoute = createRoute({
   request: { params: z.object({ id: PathId }) },
   responses: {
     200: reply(
-      "The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host (the platform closes none)",
+      "The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host, which a worker with the code host then closes",
       z.object({
         state: z.enum(SPEC_STATES),
         cancelled: z.array(z.string()),
@@ -390,7 +390,10 @@ const cancelSpecRoute = createRoute({
       }),
     ),
     404: reply("No such spec", ErrorReply),
-    409: reply("The spec is merged or already cancelled", ErrorReply),
+    409: reply(
+      "The spec is merged or already cancelled, or one of its pull requests is merged",
+      ErrorReply,
+    ),
   },
 });
 

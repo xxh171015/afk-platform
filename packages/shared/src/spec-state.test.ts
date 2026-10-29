@@ -32,7 +32,6 @@ describe("specTransition: pause, resume, cancel", () => {
     "finalizing",
     "awaiting-review",
     "paused",
-    "partially-merged",
     "reworking",
   ] as const)("cancels from %s", (from) => {
     expect(specTransition(from, "cancel")).toEqual({
@@ -62,6 +61,7 @@ describe("specTransition: illegal moves", () => {
     ["merged", "resume"],
     ["cancelled", "resume"],
     ["partially-merged", "all-prs-merged"],
+    ["partially-merged", "cancel"], // a pull request of it is merged: a person has taken part of it
     ["reworking", "pr-opened"],
   ] as const)("%s rejects %s", (from, event) => {
     const result = specTransition(from, event);

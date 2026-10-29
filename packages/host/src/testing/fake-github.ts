@@ -39,8 +39,11 @@ export class FakeGitHub {
   readonly requests: string[] = [];
   notModified = 0;
   tokenLifetimeMs = 60 * 60 * 1000;
+  refuseBranchDeletes = false; // answer 403 to a branch delete, as a token without contents:write would get
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
+  private readonly branchNames = new Set<string>();
+  private readonly protectedBranches = new Set<string>();
   private readonly reviews = new Map<number, FakeReview[]>();
   private readonly checks = new Map<string, FakeCheck[]>();
   private readonly statuses = new Map<string, string>();
@@ -104,6 +107,15 @@ export class FakeGitHub {
   }
   setStatus(sha: string, state: "success" | "failure" | "pending"): void {
     this.statuses.set(sha, state);
+  }
+  addBranch(name: string): void {
+    this.branchNames.add(name);
+  }
+  protectBranch(name: string): void {
+    this.protectedBranches.add(name);
+  }
+  branches(): string[] {
+    return [...this.branchNames].sort();
   }
   pullRequests(): readonly FakePull[] {
     return this.pulls;
@@ -227,6 +239,26 @@ export class FakeGitHub {
       const pull = this.pulls.find((p) => p.number === Number(one[1]));
       if (!pull) return this.json(res, 404, { message: "Not Found" });
       return this.conditional(req, res, this.render(pull));
+    }
+    if (req.method === "PATCH" && one) {
+      const pull = this.pulls.find((p) => p.number === Number(one[1]));
+      if (!pull) return this.json(res, 404, { message: "Not Found" });
+      if (body.state === "closed" && !pull.merged) pull.state = "closed";
+      return this.json(res, 200, this.render(pull));
+    }
+    const ref = /^\/git\/refs\/heads\/(.+)$/.exec(rest);
+    if (req.method === "DELETE" && ref) {
+      if (this.refuseBranchDeletes)
+        return this.json(res, 403, { message: "Resource not accessible" });
+      const branch = decodeURIComponent(ref[1] as string);
+      if (this.protectedBranches.has(branch))
+        return this.json(res, 422, {
+          message: "Cannot delete a protected branch",
+        });
+      if (!this.branchNames.delete(branch))
+        return this.json(res, 422, { message: "Reference does not exist" });
+      res.writeHead(204);
+      return res.end();
     }
     const reviews = /^\/pulls\/(\d+)\/reviews$/.exec(rest);
     if (req.method === "GET" && reviews)

@@ -1,12 +1,17 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
-import { readHostSyncPayload, readOpenPrPayload } from "../host/host-jobs.ts";
+import {
+  readHostSyncPayload,
+  readOpenPrPayload,
+  readSpecCleanupPayload,
+} from "../host/host-jobs.ts";
 import {
   buildHostTask,
   hostSyncFailed,
   recordHostSync,
   recordOpenPr,
+  recordSpecCleanup,
 } from "../host/pull-requests.ts";
 import {
   checkBeforePush,
@@ -220,6 +225,17 @@ const HostTask = z.discriminatedUnion("kind", [
       }),
     ),
   }),
+  z.object({
+    kind: z.literal("spec-cleanup"),
+    pulls: z.array(
+      z.object({
+        id: z.number().int(),
+        repoUrl: z.string(),
+        number: z.number().int(),
+      }),
+    ),
+    branches: z.array(z.object({ repoUrl: z.string(), branch: z.string() })),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -235,7 +251,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr or host-sync job has to do on the code host",
+        "What an open-pr, host-sync or spec-cleanup job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -377,10 +393,12 @@ export function registerWorkerRoutes(
           if (final.status === "not-final") {
             const openPr = readOpenPrPayload(job.rows[0]);
             const sync = readHostSyncPayload(job.rows[0]);
+            const cleanup = readSpecCleanupPayload(job.rows[0]);
             if (openPr)
               await recordOpenPr(client, openPr, result, context.clock());
             else if (sync)
               await recordHostSync(client, sync, result, context.clock());
+            else if (cleanup) await recordSpecCleanup(client, cleanup, result);
           }
         }
       }
@@ -433,7 +451,11 @@ export function registerWorkerRoutes(
       payload: Record<string, unknown>;
     }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
     const row = job.rows[0];
-    const payload = row && (readOpenPrPayload(row) ?? readHostSyncPayload(row));
+    const payload =
+      row &&
+      (readOpenPrPayload(row) ??
+        readHostSyncPayload(row) ??
+        readSpecCleanupPayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)

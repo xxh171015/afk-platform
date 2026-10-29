@@ -223,7 +223,7 @@ erDiagram
 
 状态机：
 
-- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的留着；已 merged 的不能取消；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
+- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的票留着，随后由 worker 关掉它还开着的 PR、删掉它的分支；已 merged 的、`partially-merged` 的、以及已经有 PR 被合并的 spec 不能取消，因为合并的东西取消收不回；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
 - **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。running 内部的阶段（implement、门禁、review、fix）记在 Run 上，不拆成票的状态。
 - **能不能开工实时计算，不存成状态**：只有 pending 是存下来的状态，“可开工”（runnable）由调度器每次算：票是 pending、所有入边都满足、没超并发和预算上限。这样就不会出现“标了可开工、其实还被挡着”的情况。
 
@@ -524,6 +524,7 @@ flowchart LR
 | `rework`        | spec × 仓库 | 处理 PR 评论                                                            |
 | `trial-merge`   | 仓库        | 检测在跑的集成分支之间的潜在冲突                                        |
 | `host-sync`     | 项目        | 轮询或处理 webhook，同步 PR、CI、评论                                   |
+| `spec-cleanup`  | spec        | spec 被取消或 merged 后，关掉还开着的 PR，删掉它的 `spec/*`、`agent/*` 远端分支 |
 
 中断恢复：
 
@@ -568,7 +569,7 @@ sequenceDiagram
 | 票分支         | `agent/<ticket-id>` 从集成分支切出（Sandcastle 的 `baseBranch`）。分支名固定，重试时从这个分支重新建 worktree，之前的 commits 不丢（分支是连续性的单位，不是 worktree）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 候选门禁       | 在临时分支 `gate/<ticket-id>` 上起沙箱跑，跑完删除                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | commit trailer | 每次 agent 运行后，worker 给本次新增的 commits 补上 `Spec: S-12`、`Ticket: T-123`、`Run: R-456`（M1 实现改用 plumbing：对 `before..分支` 中不属于集成分支的 commits 逐个 `commit-tree` 重写，保留树、作者和 merge 结构；最初的 M0 做法是 `git rebase --exec 'git commit --amend --no-edit --trailer …'`，但 `--rebase-merges` 重建 merge 时会丢掉冲突解决）。分支此时还没推送、只有 worker 在用，改写是安全的。Link 记改写后的 SHA，不记 Sandcastle 返回的原始 SHA                                                                                                                                                                                                                                                                                                          |
-| 清理           | 任务结束时按“槽位”一行处理槽位和 worktree；票 done 后分支保留；M1 不删 `spec/*`、`agent/*`（删远端分支会让开着的 PR 自动关闭，是对外且不可逆的动作），分支和 PR 都留给人处理；`plat spec cancel` 列出平台最后一次同步时仍开着的 PR，平台自己不关                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 清理           | 任务结束时按“槽位”一行处理槽位和 worktree；票 done 后分支保留；spec merged 或 cancelled 后，由带代码托管凭据的 worker 执行 `spec-cleanup` 作业：关掉还开着的 PR（先问托管上的当前状态，只关还开着的，不会动已合并的），删远端的 `spec/<slug>`、`agent/T-<n>`、`agent/S-<n>-final`（只删这三种名字，已不存在的算删过，失败重试三次）。不需要新的 App 权限（关 PR 用 Pull requests 写，删分支用 Contents 写，本来就有）。已知的边界：取消时是否已有 PR 被合并，看的是上一次 host-sync 记下的状态（最多落后一分钟）；取消那一刻还在跑的作业可能在清理之后又推送一个 `agent/T-<n>`，或开出一个没人记录的 PR（`spec/<slug>` 删掉后这个 PR 会被 GitHub 自动关闭）；清理失败重试三次（不等间隔）就不再试，job 留在 failed，`plat blocked` 看不到；各 worker 主 clone 里的本地分支不删 |
 | 凭据           | git token 只在 worker 进程里，沙箱里的仓库没有可用的推送凭据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 一个需求在一个仓库里的分支变化（T1、T2 是两张票，中途 main 被别的需求前移过一次）：
@@ -956,7 +957,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat ticket approve-protected T-123`              | 批准保护路径改动                            |
 | `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |
 | `plat ticket cancel T-123 [--cascade]`             | 取消，可选一并取消下游                      |
-| `plat spec cancel S-12`                            | 取消整个 spec（没做完的票、作业一并停掉，列出仍开着的 PR） |
+| `plat spec cancel S-12`                            | 取消整个 spec（没做完的票、作业一并停掉，随后关 PR、删分支；有 PR 已合并的不能取消） |
 | `plat blocked`                                     | 列出待处理的 blocked 票、paused 的 spec，以及关闭未合并或读不出来的 PR |
 | `plat context --files a.ts b.ts`                   | 缺陷回流时查上下文                          |
 
