@@ -6,10 +6,11 @@ import {
 } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { pullStateLabel } from "./pull-request.ts";
 
 // Everything that waits for a person: blocked tickets with the reason and what went wrong, specs the platform
-// paused, and overall reviews that stopped. Each has the actions that apply; after one succeeds the lists are
-// fetched again.
+// paused, overall reviews that stopped, and pull requests that were closed or cannot be read. Each has the actions
+// that apply; after one succeeds the lists are fetched again.
 
 export const BLOCKED_KEY = ["blocked"] as const;
 
@@ -301,6 +302,40 @@ function BlockedFinalization({
   );
 }
 
+// Nothing here is done by a button: the platform never touches a pull request. A person reopens it on the host, or
+// reworks the spec, or cancels it (plat spec cancel).
+function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
+  return (
+    <li
+      className="blocked-card"
+      data-testid={`pull-${item.specDisplayId}-${item.repo}`}
+    >
+      <h3>
+        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>{" "}
+        <a href={item.url}>
+          {item.repo} #{item.number}
+        </a>
+      </h3>
+      <p>
+        {item.state === "closed" ? (
+          <span className={`badge pr-${item.state}`}>
+            {pullStateLabel(item.state)}
+          </span>
+        ) : null}
+        {item.syncError ? (
+          <span className="error"> could not be read: {item.syncError}</span>
+        ) : null}
+      </p>
+      {item.state === "closed" ? (
+        <p className="note">
+          Reopen it on the host, rework the spec, or cancel it (plat spec cancel{" "}
+          {item.specDisplayId}).
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <>
@@ -322,10 +357,15 @@ export function BlockedQueue() {
         Could not load the queue: {queue.error.message}
       </p>
     );
-  const { tickets, finalizations, specs } = queue.data as NonNullable<
-    typeof queue.data
-  >;
-  if (tickets.length + finalizations.length + specs.length === 0) {
+  const { tickets, finalizations, pullRequests, specs } =
+    queue.data as NonNullable<typeof queue.data>;
+  if (
+    tickets.length +
+      finalizations.length +
+      pullRequests.length +
+      specs.length ===
+    0
+  ) {
     return <p className="note">Nothing is waiting for you.</p>;
   }
   return (
@@ -347,6 +387,13 @@ export function BlockedQueue() {
               key={`${item.specId}-${item.repo}`}
               item={item}
             />
+          ))}
+        </Section>
+      ) : null}
+      {pullRequests.length > 0 ? (
+        <Section title="Pull requests that need a look">
+          {pullRequests.map((item) => (
+            <StuckPullRequest key={`${item.specId}-${item.repo}`} item={item} />
           ))}
         </Section>
       ) : null}

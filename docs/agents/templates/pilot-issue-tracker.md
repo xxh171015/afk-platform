@@ -20,7 +20,9 @@ This repo is the project's `backend` repo (`repo: backend` in the ticket file). 
   and the overlap warnings. A skill never confirms.
 - **Read a spec**: `plat spec show S-7` (tickets, edges, warnings; after the run, the acceptance pack).
 - **Fetch a ticket** (a skill's "fetch the relevant ticket"): `plat ticket view T-8`.
-- **See what waits for a person**: `plat blocked`. Read a run's log: `plat run logs R-25`.
+- **See what waits for a person**: `plat blocked` (blocked tickets, paused specs, and pull requests that were closed
+  without merge or could not be read; the platform never touches a pull request, so reopen it on the host, rework the
+  spec, or `plat spec cancel S-7`). Read a run's log: `plat run logs R-25`.
 - **Unblock**: `plat ticket retry T-8`, `plat ticket approve-protected T-8` (only after the gate found a
   protected-path change), `plat ticket allow-path T-8 .github/CODEOWNERS` (a blocked ticket that needs a protected path
   the file did not approve; then retry it), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the top level.

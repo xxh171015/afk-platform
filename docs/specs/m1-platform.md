@@ -61,7 +61,7 @@ M0 已经证明单张票的链路可行（在 Mac 上，Sandcastle 加 Cursor Ag
 27. As a 开发者, I want 票进 blocked 时带原因码和简报（失败步骤、日志指针、agent 的结构化输出）, so that 我不用翻原始输出。
 28. As a 开发者, I want 在页面或用 `plat` 选择"接着重试 / 从头重试 / 批准保护路径改动 / 取消", so that 我处理一张 blocked 票只需要一个动作。
 29. As a 开发者, I want 取消一张票时选择下游票是进 blocked 还是一并取消, so that 我控制影响范围。
-30. As a 开发者, I want `plat blocked` 列出所有待处理的 blocked 票和 paused 的需求, so that 我一眼知道有什么要我处理。
+30. As a 开发者, I want `plat blocked` 列出所有待处理的 blocked 票、paused 的需求，以及在代码托管上关闭但没合并（或平台读不出状态）的 PR, so that 我一眼知道有什么要我处理。
 
 可见性与追溯
 

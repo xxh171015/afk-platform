@@ -24,6 +24,7 @@ export function App() {
   const waiting = queue.data
     ? queue.data.tickets.length +
       queue.data.finalizations.length +
+      queue.data.pullRequests.length +
       queue.data.specs.length
     : 0;
   const spec = /^\/specs\/([1-9][0-9]*)$/.exec(path);

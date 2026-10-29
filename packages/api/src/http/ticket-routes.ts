@@ -239,10 +239,21 @@ const blockedRoute = createRoute({
   path: "/blocked",
   responses: {
     200: reply(
-      "Blocked tickets and paused specs, everything waiting for a person",
+      "Blocked tickets, stuck pull requests and paused specs, everything waiting for a person",
       z.object({
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
+        pullRequests: z.array(
+          z.object({
+            specId: Id,
+            specDisplayId: z.string(),
+            repo: z.string(),
+            number: z.number().int(),
+            url: z.string(),
+            state: z.string(),
+            syncError: z.string().nullable(),
+          }),
+        ),
         specs: z.array(
           z.object({
             id: Id,

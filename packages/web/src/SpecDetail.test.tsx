@@ -230,6 +230,31 @@ describe("the spec page", () => {
     expect(screen.getByText(/T-1: .github\/ci.yml/)).toBeTruthy();
   });
 
+  it("says a pull request closed on the host was closed without merge", async () => {
+    const pullRequests = [
+      {
+        order: 1,
+        repo: "backend",
+        number: 7,
+        url: "https://github.com/me/shop/pull/7",
+        state: "closed",
+        draft: false,
+        ci: "success",
+        review: "none",
+        syncError: null,
+      },
+    ];
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({ spec: { state: "awaiting-review" }, pullRequests }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("closed without merge")).toBeTruthy();
+  });
+
   it("has no pull request or pack section before there is one", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,

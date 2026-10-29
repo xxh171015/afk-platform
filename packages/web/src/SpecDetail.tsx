@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
+import { pullStateLabel } from "./pull-request.ts";
 
 // One spec: the dependency graph with a node per ticket coloured by its state, the warnings the import left, and
 // the button that confirms the split so that the platform starts working on it.
@@ -306,7 +307,7 @@ export function SpecDetail({ specId }: { specId: number }) {
                   {pr.repo} #{pr.number}
                 </a>{" "}
                 <span className={`badge pr-${pr.state}`}>
-                  {pr.state}
+                  {pullStateLabel(pr.state)}
                   {pr.draft ? " (draft)" : ""}
                 </span>{" "}
                 CI {pr.ci}, review {pr.review}

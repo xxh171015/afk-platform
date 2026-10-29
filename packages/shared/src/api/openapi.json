@@ -3027,7 +3027,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Blocked tickets and paused specs, everything waiting for a person",
+            "description": "Blocked tickets, stuck pull requests and paused specs, everything waiting for a person",
             "content": {
               "application/json": {
                 "schema": {
@@ -3180,6 +3180,44 @@
                         ]
                       }
                     },
+                    "pullRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "syncError": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "number",
+                          "url",
+                          "state",
+                          "syncError"
+                        ]
+                      }
+                    },
                     "specs": {
                       "type": "array",
                       "items": {
@@ -3202,7 +3240,12 @@
                       }
                     }
                   },
-                  "required": ["tickets", "finalizations", "specs"]
+                  "required": [
+                    "tickets",
+                    "finalizations",
+                    "pullRequests",
+                    "specs"
+                  ]
                 }
               }
             }

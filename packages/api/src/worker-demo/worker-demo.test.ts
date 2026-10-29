@@ -1348,6 +1348,45 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
     ).toBe(0);
   });
 
+  it("lists a pull request closed without merge as waiting for a person, until it is reopened, then goes on to merged", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker(hostWorker());
+    expect(await specState()).toBe("awaiting-review");
+    const look = async () => {
+      await db.pool.query(
+        "UPDATE jobs SET not_before = NULL WHERE type = 'host-sync' AND state = 'queued'",
+      );
+      await runWorker(hostWorker());
+    };
+    const waiting = async () =>
+      (
+        (await (await fetch(`${api.url}/blocked`)).json()) as {
+          pullRequests: { specDisplayId: string; state: string }[];
+        }
+      ).pullRequests;
+
+    github.closePull(1); // closed on GitHub, not merged
+    await look();
+    expect(await waiting()).toMatchObject([
+      { specDisplayId: "S-1", state: "closed" },
+    ]);
+    expect(await specState()).toBe("awaiting-review");
+
+    github.reopenPull(1);
+    await look();
+    expect(await waiting()).toEqual([]);
+    expect(await specState()).toBe("awaiting-review");
+
+    github.closePull(1);
+    await look();
+    expect(await waiting()).toHaveLength(1);
+    github.reopenPull(1);
+    github.mergePull(1); // reopened, then merged by a person
+    await look();
+    expect(await waiting()).toEqual([]);
+    expect(await specState()).toBe("merged");
+  });
+
   it("is not done by a worker that has no code host: it leaves the jobs alone", async () => {
     await confirmedSpec([ticket("a")]);
     const plain = hostWorker();

@@ -957,7 +957,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |
 | `plat ticket cancel T-123 [--cascade]`             | 取消，可选一并取消下游                      |
 | `plat spec cancel S-12`                            | 取消整个 spec（没做完的票、作业一并停掉）   |
-| `plat blocked`                                     | 列出待处理的 blocked 票和 paused 的 spec    |
+| `plat blocked`                                     | 列出待处理的 blocked 票、paused 的 spec，以及关闭未合并或读不出来的 PR |
 | `plat context --files a.ts b.ts`                   | 缺陷回流时查上下文                          |
 
 导入格式（to-tickets 产出）：

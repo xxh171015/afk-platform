@@ -19,6 +19,10 @@ import {
 // A spec's pull requests: opened once its repos are all finalized, then followed until a person has merged them
 // all. The platform only records what the host says; it has no call that merges (docs/design.md「代码托管」).
 
+// The pull requests still worth a look: not merged, and of a spec that is not over. One closed without merge stays in,
+// so that a reopen or a merge is noticed. Written for queries that alias the pull request `p` and its spec `s`.
+export const FOLLOWED_PULL_REQUESTS = `p.state <> 'merged' AND s.state NOT IN ('merged', 'cancelled')`;
+
 export type HostTask =
   | {
       kind: "open-pr";
@@ -133,8 +137,8 @@ export async function buildHostTask(
   const { projectId } = payload as HostSyncPayload;
   const pulls = await pool.query<{ id: number; url: string; number: number }>(
     `SELECT p.id, r.url, p.number FROM pull_requests p
-     JOIN repos r ON r.id = p.repo_id
-     WHERE r.project_id = $1 AND p.state = 'open' ORDER BY p.id`,
+     JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
+     WHERE r.project_id = $1 AND ${FOLLOWED_PULL_REQUESTS} ORDER BY p.id`,
     [projectId],
   );
   return {
@@ -248,7 +252,7 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,
-// the spec is merged. While any is still open, the next look is queued a minute from now.
+// the spec is merged. While any is still followed (see above), the next look is queued a minute from now.
 export async function recordHostSync(
   client: pg.PoolClient,
   read: HostSyncPayload,
@@ -303,8 +307,8 @@ async function scheduleNextSync(
   now: Date,
 ) {
   const open = await client.query(
-    `SELECT 1 FROM pull_requests p JOIN repos r ON r.id = p.repo_id
-     WHERE r.project_id = $1 AND p.state = 'open' LIMIT 1`,
+    `SELECT 1 FROM pull_requests p JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
+     WHERE r.project_id = $1 AND ${FOLLOWED_PULL_REQUESTS} LIMIT 1`,
     [projectId],
   );
   if (open.rowCount)

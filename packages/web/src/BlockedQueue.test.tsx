@@ -42,11 +42,13 @@ const ticket = (
 interface Queue {
   tickets: unknown[];
   finalizations: unknown[];
+  pullRequests: unknown[];
   specs: unknown[];
 }
 const queue = (over: Partial<Queue> = {}): Queue => ({
   tickets: [],
   finalizations: [],
+  pullRequests: [],
   specs: [],
   ...over,
 });
@@ -536,6 +538,77 @@ describe("paused specs and stopped overall reviews", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(
       "resume is not allowed in running",
     );
+  });
+});
+
+describe("pull requests a person has to look at", () => {
+  const pull = (over: Record<string, unknown> = {}) => ({
+    specId: 1,
+    specDisplayId: "S-1",
+    repo: "backend",
+    number: 7,
+    url: "https://github.com/me/shop/pull/7",
+    state: "closed",
+    syncError: null,
+    ...over,
+  });
+
+  it("says a pull request was closed without merge, and what a person can do about it", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({ json: queue({ pullRequests: [pull()] }) }),
+      }),
+    );
+    const item = within(await screen.findByTestId("pull-S-1-backend"));
+    expect(item.getByText(/closed without merge/)).toBeTruthy();
+    expect(
+      item.getByRole("link", { name: "backend #7" }).getAttribute("href"),
+    ).toBe("https://github.com/me/shop/pull/7");
+    expect(item.getByRole("link", { name: "S-1" }).getAttribute("href")).toBe(
+      "#/specs/1",
+    );
+    expect(
+      item.getByText(/Reopen it on the host, rework the spec, or cancel it/),
+    ).toBeTruthy();
+  });
+
+  it("shows both when a closed pull request also cannot be read", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            pullRequests: [pull({ syncError: "GitHub answered 404" })],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("pull-S-1-backend"));
+    expect(item.getByText("closed without merge")).toBeTruthy();
+    expect(
+      item.getByText(/could not be read: GitHub answered 404/),
+    ).toBeTruthy();
+  });
+
+  it("shows why a pull request cannot be read", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            pullRequests: [
+              pull({ state: "open", syncError: "GitHub answered 404" }),
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("pull-S-1-backend"));
+    expect(
+      item.getByText(/could not be read: GitHub answered 404/),
+    ).toBeTruthy();
+    expect(item.queryByText(/closed without merge/)).toBeNull();
   });
 });
 

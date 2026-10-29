@@ -1,6 +1,7 @@
 import { formatDisplayId, type SpecState, type TicketState } from "@afk/shared";
 import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
+import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -370,8 +371,40 @@ export async function search(pool: pg.Pool, text: string) {
   };
 }
 
-// Everything waiting for a person: tickets that are blocked, blocked steps of an overall review, and specs that the
-// platform paused. A cancelled spec waits for no one.
+export interface PullRequestProblem {
+  specId: number;
+  specDisplayId: string;
+  repo: string;
+  number: number;
+  url: string;
+  state: string;
+  syncError: string | null;
+}
+
+// A pull request the platform cannot move on from by itself: closed without merge, or one the host keeps
+// refusing to answer for. Nothing is done about it; a person decides (reopen it, rework, cancel the spec).
+async function pullRequestProblems(
+  pool: pg.Pool,
+): Promise<PullRequestProblem[]> {
+  const { rows } = await pool.query(
+    `SELECT p.spec_id, r.role, p.number, p.url, p.state, p.sync_error
+     FROM pull_requests p JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
+     WHERE ${FOLLOWED_PULL_REQUESTS} AND (p.state = 'closed' OR p.sync_error IS NOT NULL)
+     ORDER BY p.id`,
+  );
+  return rows.map((row) => ({
+    specId: row.spec_id as number,
+    specDisplayId: formatDisplayId("spec", row.spec_id),
+    repo: row.role as string,
+    number: row.number as number,
+    url: row.url as string,
+    state: row.state as string,
+    syncError: (row.sync_error as string | null) ?? null,
+  }));
+}
+
+// Everything waiting for a person: tickets that are blocked, blocked steps of an overall review, pull requests that
+// were closed or cannot be read, and specs that the platform paused. A cancelled spec waits for no one.
 export async function blockedQueue(pool: pg.Pool) {
   const tickets = await summaries(pool, "t.state = 'blocked'", []);
   const specs = await pool.query(
@@ -384,6 +417,7 @@ export async function blockedQueue(pool: pg.Pool) {
       "f.state = 'blocked' AND f.spec_id NOT IN (SELECT id FROM specs WHERE state = 'cancelled')",
       [],
     ),
+    pullRequests: await pullRequestProblems(pool),
     specs: specs.rows.map((s) => ({
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),

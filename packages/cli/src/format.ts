@@ -64,14 +64,45 @@ interface FinalizationLike {
 const finalState = (f: FinalizationLike) =>
   `${f.step} ${f.state}${f.blockedReason ? ` (${f.blockedReason})` : ""}`;
 
+// A pull request closed on the host without being merged says so, instead of just "closed".
+const pullState = (state: string) =>
+  state === "closed" ? "closed without merge" : state;
+
+interface PullRequestProblemLike {
+  specDisplayId: string;
+  repo: string;
+  number: number;
+  url: string;
+  state: string;
+  syncError: string | null;
+}
+
+const pullRequestProblemLines = (p: PullRequestProblemLike): string[] => {
+  const closed = p.state === "closed";
+  const unreadable = p.syncError ? `could not be read: ${p.syncError}` : null;
+  return [
+    closed
+      ? `${p.specDisplayId}  pull request ${p.repo} #${p.number} was ${pullState(p.state)}: ${p.url}`
+      : `${p.specDisplayId}  pull request ${p.repo} #${p.number} ${unreadable}`,
+    ...(closed && unreadable ? [`    ${unreadable}`] : []),
+    ...(closed
+      ? [
+          `    reopen it, or rework the spec, or cancel it: plat spec cancel ${p.specDisplayId}`,
+        ]
+      : []),
+  ];
+};
+
 export function blockedText(queue: {
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
+  pullRequests: PullRequestProblemLike[];
   specs: { displayId: string; title: string; reason: string }[];
 }): string {
   if (
     queue.tickets.length === 0 &&
     queue.finalizations.length === 0 &&
+    queue.pullRequests.length === 0 &&
     queue.specs.length === 0
   ) {
     return "nothing is waiting for you";
@@ -86,6 +117,7 @@ export function blockedText(queue: {
       ...briefLines(f.brief, "    "),
       `    then: plat spec retry-final ${f.specDisplayId}`,
     ]),
+    ...queue.pullRequests.flatMap(pullRequestProblemLines),
     ...queue.specs.map(
       (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,
     ),
@@ -152,18 +184,23 @@ export function ticketText(view: {
   ].join("\n");
 }
 
+interface PullRequestRowLike {
+  order: number;
+  repo: string;
+  number: number;
+  url: string;
+  state: string;
+  draft: boolean;
+  ci: string;
+  review: string;
+  syncError: string | null;
+}
+
+const pullRequestRow = (p: PullRequestRowLike) =>
+  `${p.order}. ${p.repo} #${p.number}  ${pullState(p.state)}${p.draft ? " (draft)" : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`;
+
 interface PackLike {
-  pullRequests: {
-    order: number;
-    repo: string;
-    number: number;
-    url: string;
-    state: string;
-    draft: boolean;
-    ci: string;
-    review: string;
-    syncError: string | null;
-  }[];
+  pullRequests: PullRequestRowLike[];
   tickets: {
     displayId: string;
     title: string;
@@ -205,10 +242,7 @@ export function acceptancePackText(pack: PackLike): string {
     "acceptance pack:",
     ...section(
       "pull requests (merge in this order)",
-      pack.pullRequests.map(
-        (p) =>
-          `    ${p.order}. ${p.repo} #${p.number}  ${p.state}${p.draft ? " (draft)" : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`,
-      ),
+      pack.pullRequests.map((p) => `    ${pullRequestRow(p)}`),
     ),
     ...section(
       "acceptance criteria",
@@ -259,6 +293,7 @@ export function specText(view: {
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
   edges: { from: string; to: string; kind: string }[];
+  pullRequests?: PullRequestRowLike[];
   acceptancePack?: PackLike | null;
 }): string {
   return [
@@ -278,7 +313,15 @@ export function specText(view: {
           ]),
         ]
       : []),
-    ...(view.acceptancePack ? [acceptancePackText(view.acceptancePack)] : []),
+    // the pack lists the pull requests itself; until it exists (some repos' are still being opened) they are shown here
+    ...(view.acceptancePack
+      ? [acceptancePackText(view.acceptancePack)]
+      : view.pullRequests?.length
+        ? [
+            "pull requests:",
+            ...view.pullRequests.map((p) => `  ${pullRequestRow(p)}`),
+          ]
+        : []),
     ...(view.edges.length
       ? [
           "edges:",

@@ -1635,7 +1635,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description Blocked tickets and paused specs, everything waiting for a person */
+        /** @description Blocked tickets, stuck pull requests and paused specs, everything waiting for a person */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1688,6 +1688,15 @@ export interface paths {
                   output?: unknown;
                   logPath: string;
                 } | null;
+              }[];
+              pullRequests: {
+                specId: number;
+                specDisplayId: string;
+                repo: string;
+                number: number;
+                url: string;
+                state: string;
+                syncError: string | null;
               }[];
               specs: {
                 id: number;

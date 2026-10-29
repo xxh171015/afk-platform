@@ -385,6 +385,38 @@ describe("following the pull requests", () => {
     expect(await pulls()).toMatchObject([{ state: "closed" }]);
   });
 
+  it("goes on looking at a pull request closed without merge, so a reopen or a merge is noticed", async () => {
+    await awaitingReview();
+    const first = await claimOf("host-sync");
+    await worker.complete(first.id, first.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "closed" })],
+    });
+    expect(await specState()).toBe("awaiting-review");
+    clock.advanceSeconds(60);
+    const second = await claimOf("host-sync");
+    expect((await taskOf(second)).body.pulls).toMatchObject([{ id: 1 }]);
+    await worker.complete(second.id, second.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged" })],
+    });
+    expect(await specState()).toBe("merged");
+    clock.advanceSeconds(600);
+    expect((await worker.claim()).body.job).toBeNull();
+  });
+
+  it("stops looking at the pull requests of a cancelled spec", async () => {
+    await awaitingReview();
+    const job = await claimOf("host-sync");
+    await call("POST", "/specs/1/cancel");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1)],
+    });
+    clock.advanceSeconds(600);
+    expect((await worker.claim()).body.job).toBeNull();
+  });
+
   it("skips a pull request the host could not answer for, and keeps the rest", async () => {
     await awaitingReview(["backend", "frontend"]);
     const job = await claimOf("host-sync");
@@ -430,6 +462,138 @@ describe("following the pull requests", () => {
   it("keeps one chain of looks per project", async () => {
     await awaitingReview(["backend", "frontend"]);
     expect(await jobsOf("host-sync")).toHaveLength(1);
+  });
+});
+
+describe("what waits for a person among the pull requests", () => {
+  async function awaitingReview() {
+    await settledSpec(["backend"]);
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(1));
+  }
+  const sync = async (pull: Json) => {
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [pull],
+    });
+    clock.advanceSeconds(60);
+  };
+  const waiting = async () =>
+    (await call("GET", "/blocked")).body.pullRequests as Json[];
+
+  it("lists a spec whose pull request was closed without merge, until it is open or merged again", async () => {
+    await awaitingReview();
+    expect(await waiting()).toEqual([]);
+    await sync(synced(1, { state: "closed" }));
+    expect(await waiting()).toEqual([
+      {
+        specId: 1,
+        specDisplayId: "S-1",
+        repo: "backend",
+        number: 1,
+        url: "https://github.com/me/shop/pull/1",
+        state: "closed",
+        syncError: null,
+      },
+    ]);
+    await sync(synced(1)); // reopened
+    expect(await waiting()).toEqual([]);
+    expect(await specState()).toBe("awaiting-review");
+    await sync(synced(1, { state: "closed" }));
+    expect(await waiting()).toHaveLength(1);
+    await sync(synced(1, { state: "merged" }));
+    expect(await waiting()).toEqual([]);
+    expect(await specState()).toBe("merged");
+  });
+
+  it("lists a pull request the host keeps refusing, with the reason, until a look works again", async () => {
+    await awaitingReview();
+    await sync({ id: 1, error: "GitHub answered 404" });
+    expect(await waiting()).toMatchObject([
+      { specDisplayId: "S-1", state: "open", syncError: "GitHub answered 404" },
+    ]);
+    await sync(synced(1));
+    expect(await waiting()).toEqual([]);
+  });
+
+  it("does not list the pull requests of a cancelled spec", async () => {
+    await awaitingReview();
+    await sync(synced(1, { state: "closed" }));
+    expect(await waiting()).toHaveLength(1);
+    await call("POST", "/specs/1/cancel");
+    expect(await waiting()).toEqual([]);
+  });
+
+  async function plat(...args: string[]) {
+    let out = "";
+    const io: Io = {
+      stdout: (text) => {
+        out += text;
+      },
+      stderr: () => {},
+      env: { AFK_API_URL: api.url },
+      readFile: async () => "",
+    };
+    expect(await run(args, io)).toBe(0);
+    return out;
+  }
+
+  it("is said by plat blocked and plat spec show, for a closed pull request and for one that cannot be read", async () => {
+    await awaitingReview();
+    expect(await plat("blocked")).toBe("nothing is waiting for you\n");
+
+    await sync(synced(1, { state: "closed" }));
+    expect(await plat("blocked")).toBe(
+      "S-1  pull request backend #1 was closed without merge: https://github.com/me/shop/pull/1\n" +
+        "    reopen it, or rework the spec, or cancel it: plat spec cancel S-1\n",
+    );
+    expect(await plat("spec", "show", "S-1")).toContain(
+      "1. backend #1  closed without merge  ci pending",
+    );
+
+    await sync({ id: 1, error: "GitHub answered 404" }); // still closed as far as anyone knows, and now unreadable
+    const stuck = await plat("blocked");
+    expect(stuck).toContain("pull request backend #1 was closed without merge");
+    expect(stuck).toContain("    could not be read: GitHub answered 404");
+    expect(await plat("spec", "show", "S-1")).toContain(
+      "[could not be read: GitHub answered 404]",
+    );
+
+    await sync(synced(1));
+    expect(await plat("blocked")).toBe("nothing is waiting for you\n");
+  });
+
+  it("is said by plat blocked for an open pull request that cannot be read, without the closed wording", async () => {
+    await awaitingReview();
+    await sync({ id: 1, error: "GitHub answered 502" });
+    const out = await plat("blocked");
+    expect(out).toBe(
+      "S-1  pull request backend #1 could not be read: GitHub answered 502\n",
+    );
+  });
+
+  it("shows the pull requests in plat spec show before the acceptance pack exists", async () => {
+    await settledSpec(["backend", "frontend"]);
+    const first = await claimOf("open-pr");
+    await worker.complete(first.id, first.attempt, opened(1));
+    await claimOf("open-pr"); // the other repo's pull request is still being opened
+    await sync(synced(1, { state: "closed" }));
+    expect(await specState()).toBe("finalizing");
+    const shown = await plat("spec", "show", "S-1");
+    expect(shown).not.toContain("acceptance pack:");
+    expect(shown).toContain("pull requests:");
+    expect(shown).toContain("backend #1  closed without merge");
+    expect(await plat("blocked")).toContain(
+      "pull request backend #1 was closed without merge",
+    );
+  });
+
+  it("says closed without merge on the pull request row of the acceptance pack", async () => {
+    await awaitingReview();
+    await sync(synced(1, { state: "closed" }));
+    const view = (await call("GET", "/specs/1")).body;
+    expect(view.pullRequests).toMatchObject([{ state: "closed" }]);
   });
 });
 

@@ -90,6 +90,9 @@ export class FakeGitHub {
   closePull(number: number): void {
     this.pull(number).state = "closed";
   }
+  reopenPull(number: number): void {
+    this.pull(number).state = "open";
+  }
   pushCommit(number: number, sha: string): void {
     this.pull(number).sha = sha;
   }
