@@ -267,6 +267,27 @@ describe("the prompts", () => {
     for (const stage of ["gate-fix", "review-fix", "merge-fix"] as const)
       expect(promptFor(stage)).toBe(PROMPTS.fix);
   });
+
+  it("gives an integration ticket's implement its own prompt, which says to write the e2e against the real services", () => {
+    expect(promptFor("implement", { integration: true })).toBe(
+      PROMPTS.integrationImplement,
+    );
+    // the fixes keep their prompt: the environment is the only difference
+    expect(promptFor("gate-fix", { integration: true })).toBe(PROMPTS.fix);
+    const prompt = readFileSync(PROMPTS.integrationImplement, "utf8");
+    for (const word of [
+      "cannot-proceed",
+      "<result>",
+      "e2e",
+      "uncertainties",
+      "BACKEND_URL",
+      "/context/ticket.md",
+    ])
+      expect(prompt).toContain(word);
+    // does not give up on a fault in another repo, and does not touch the other repos
+    expect(prompt).toContain("不要因此输出 cannot-proceed");
+    expect(prompt).toContain("不改");
+  });
 });
 
 describe("a fake agent run, end to end", () => {

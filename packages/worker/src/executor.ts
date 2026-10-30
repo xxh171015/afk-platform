@@ -29,6 +29,7 @@ import {
   reviewFindings,
   runE2e,
   runGate,
+  type SandboxPlacement,
   stampTrailers,
   startEnvironment,
   type TestCounts,
@@ -323,17 +324,28 @@ async function agentChange(
     const { refs, refShas } = snapshotRefs(deps, bundle);
     log(`${stage}: running the agent on ${agent}`);
     const options = runOptions(deps, context);
-    const run = await deps.makeAgentRunner(slot.dir).run({
-      stage,
-      branch: agent,
-      baseBranch: integration,
-      promptFile: promptFor(stage),
-      ctxDir,
-      refs,
-      schema: ImplementOutputSchema,
-      ...options,
-      signal: context.signal,
-    });
+    // An integration ticket's agent works in its integration environment: it writes the e2e against real services,
+    // and a fix reproduces the failure there. The environment is gone again when the run is over.
+    const inEnvironment =
+      bundle.ticket?.type === "integration" && bundle.environment.length > 0;
+    const runAgent = (placement?: SandboxPlacement) =>
+      deps.makeAgentRunner(slot.dir).run({
+        stage,
+        branch: agent,
+        baseBranch: integration,
+        promptFile: promptFor(stage, { integration: inEnvironment }),
+        ctxDir,
+        refs,
+        schema: ImplementOutputSchema,
+        ...(placement ? { placement } : {}),
+        ...options,
+        signal: context.signal,
+      });
+    const run = inEnvironment
+      ? await withEnvironment(deps, context, stage, (environment) =>
+          runAgent({ network: environment.network, env: environment.env }),
+        )
+      : await runAgent();
     if (context.signal.aborted)
       throw new JobLostError("the lease was lost during the agent run");
     // Commits the branch already carries (salvaged from an interrupted run, or kept by a continue-retry) are the
@@ -809,27 +821,23 @@ async function mergeOnce(
   };
 }
 
-// The last stage of an integration ticket: its repo at the head of the integration branch, in a fresh sandbox on the
-// network of a fresh integration environment, running the repo's e2e. A deterministic step, not an agent run: the
-// JUnit report is the verdict. An environment that cannot be made fails the job (the API tries again, and blocks
-// the ticket after three), an e2e that fails is a result.
-async function e2e(
+// A fresh integration environment, built from snapshots of the repos the ticket names (the heads of their integration
+// branches, the default branch where the spec has not merged anything), in the order the ticket names them; `use`
+// runs in it, and it is taken down again whatever `use` does. An environment that cannot be made fails the job (the
+// API tries again, and blocks the ticket after three). Whoever starts a sandbox in it closes the sandbox before
+// `use` returns: only then can compose take the network down.
+async function withEnvironment<T>(
   deps: ExecutorDeps,
   context: StageContext,
-  mainDir: string,
-  slot: Slot,
-): Promise<StageOutcomeBody> {
+  label: string,
+  use: (environment: Environment) => Promise<T>,
+): Promise<T> {
   const { bundle, log } = context;
   const { docker, environments } = deps;
   if (!docker || !environments)
     throw new InfrastructureError(
       "this worker has no integration environments",
     );
-  const integration = bundle.integrationBranch as string;
-  const head = tip(mainDir, integration);
-
-  // The environment is built from snapshots of the repos at the heads of their integration branches (the default
-  // branch where the spec has not merged anything), in the order the ticket names them.
   const { refs, refShas } = snapshotRefs(deps, bundle, bundle.environment);
   const repos: EnvironmentRepo[] = refs.map((ref) => ({
     name: ref.name,
@@ -871,9 +879,30 @@ async function e2e(
       throw error;
     }
     log(
-      `e2e: environment ${environment.project} is up after ${environment.upMs} ms`,
+      `${label}: environment ${environment.project} is up after ${environment.upMs} ms`,
     );
+    return await use(environment);
+  } finally {
+    await environment?.stop();
+    environments.projects.delete(project);
+    release();
+  }
+}
 
+// The last stage of an integration ticket: its repo at the head of the integration branch, in a fresh sandbox on the
+// network of a fresh integration environment, running the repo's e2e. A deterministic step, not an agent run: the
+// JUnit report is the verdict. An e2e that fails is a result.
+async function e2e(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+): Promise<StageOutcomeBody> {
+  const { bundle, log } = context;
+  const integration = bundle.integrationBranch as string;
+  const head = tip(mainDir, integration);
+
+  return withEnvironment(deps, context, "e2e", async (environment) => {
     // The e2e runs on a branch of its own that is gone again afterwards, like a gate.
     const branch = `e2e/${subjectLabel(bundle)}`;
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, head]);
@@ -933,10 +962,5 @@ async function e2e(
     } finally {
       git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
     }
-  } finally {
-    // The sandbox is closed by now (runE2e does it): only then can compose take the network down.
-    await environment?.stop();
-    environments.projects.delete(project);
-    release();
-  }
+  });
 }

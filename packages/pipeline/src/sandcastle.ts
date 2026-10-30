@@ -130,7 +130,12 @@ export class SandcastleAgentRunner implements AgentRunner {
         agent: cursor(options.model ?? config.model, {
           env: agentEnv(config.cursorApiKey),
         }),
-        sandbox: provider(config, options.ctxDir, options.refs),
+        sandbox: provider(
+          config,
+          options.ctxDir,
+          options.refs,
+          options.placement,
+        ),
         cwd: config.cwd,
         branchStrategy: {
           type: "branch",

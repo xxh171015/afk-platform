@@ -1,7 +1,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GateCache, git, gitOut } from "@afk/pipeline";
+import type { AgentRunOptions, AgentRunResult } from "@afk/pipeline";
+import {
+  GateCache,
+  git,
+  gitOut,
+  PROMPTS,
+  type SandboxPlacement,
+} from "@afk/pipeline";
 import {
   FakeAgentRunner,
   FakeDocker,
@@ -20,6 +27,7 @@ import {
   SnapshotStore,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { z } from "zod";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
@@ -38,6 +46,13 @@ let backendSeed: TestRepo;
 let frontendSeed: TestRepo;
 let docker: FakeDocker;
 let environments: EnvironmentLimiter;
+// What each agent run was given, and how many integration environments were up while it ran.
+let agentRuns: {
+  stage: string;
+  prompt: string;
+  placement: SandboxPlacement | undefined;
+  environmentsUp: number;
+}[];
 const origins: Record<string, string> = {};
 
 const COUNT_TESTS =
@@ -94,6 +109,7 @@ beforeEach(async () => {
   bareOf("frontend", frontendSeed);
   docker = new FakeDocker();
   environments = new EnvironmentLimiter();
+  agentRuns = [];
 });
 afterEach(async () => {
   await api.close();
@@ -157,6 +173,21 @@ async function confirmedSpec(
   expect((await post(`/specs/${spec.body.id}/confirm`)).status).toBe(200);
 }
 
+// A fake agent that writes down what it was asked to run with, and whether an environment was up at the time.
+class RecordingAgentRunner extends FakeAgentRunner {
+  override async run<Schema extends z.ZodType>(
+    options: AgentRunOptions<Schema>,
+  ): Promise<AgentRunResult<z.infer<Schema>>> {
+    agentRuns.push({
+      stage: options.stage,
+      prompt: options.promptFile,
+      placement: options.placement,
+      environmentsUp: docker.active,
+    });
+    return super.run(options);
+  }
+}
+
 const DONE = {
   status: "done",
   summary: "x",
@@ -187,7 +218,7 @@ function executor(): Omit<ExecutorDeps, "api"> {
     docker: docker.cli,
     environments,
     makeAgentRunner: (slotDir) =>
-      new FakeAgentRunner(slotDir, async (ctx) =>
+      new RecordingAgentRunner(slotDir, async (ctx) =>
         ctx.stage === "review"
           ? { output: PASS }
           : {
@@ -285,23 +316,66 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
       { kind: "gate", tests_total: 3 },
     ]);
 
-    // what docker was asked, in order: leftovers first, then up, the seed, and the whole thing down again
+    // what docker was asked, in order: for the agent's run and for the e2e, leftovers first, then up, the seed, and
+    // the whole thing down again
     const words = docker.calls
       .filter((c) => c[0] === "compose")
       .map(
         (c) =>
           `${c[2]}:${c.includes("down") ? "down" : c.includes("up") ? "up" : c[c.indexOf("run")]}`,
       );
-    const runId = (
-      await db.pool.query("SELECT id FROM runs WHERE stage = 'e2e'")
-    ).rows[0].id;
-    const project = `afk-r-${runId}`;
-    expect(words).toEqual([
+    // the runs that had an environment: the integration ticket's implement (ticket 2) and its e2e
+    const runOf = async (stage: string) =>
+      (
+        await db.pool.query(
+          "SELECT id FROM runs WHERE stage = $1 AND ticket_id = 2",
+          [stage],
+        )
+      ).rows[0].id;
+    const lifecycle = (project: string) => [
       "afk-r-77:down",
       `${project}:up`,
       `${project}:run`,
       `${project}:down`,
+    ];
+    expect(words).toEqual([
+      ...lifecycle(`afk-r-${await runOf("implement")}`),
+      ...lifecycle(`afk-r-${await runOf("e2e")}`),
     ]);
+  });
+
+  it("runs the agent of an integration ticket in its environment, with the prompt for writing e2e", async () => {
+    await confirmedSpec(["e2e"]);
+    await work();
+
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    // the backend ticket's agent is as it was; the integration ticket's is on the environment's network, with the
+    // services' addresses, and the environment is up while it runs
+    const [backend, integration] = agentRuns.filter(
+      (r) => r.stage === "implement",
+    );
+    expect(backend).toMatchObject({
+      prompt: PROMPTS.implement,
+      placement: undefined,
+      environmentsUp: 0,
+    });
+    expect(integration).toMatchObject({
+      prompt: PROMPTS.integrationImplement,
+      placement: {
+        network: expect.stringMatching(/^afk-r-\d+_default$/),
+        env: { BACKEND_URL: "http://backend:8080" },
+      },
+      environmentsUp: 1,
+    });
+    // the environment is gone again, and the ticket went on through the gate, review and merge to its e2e
+    expect(docker.active).toBe(0);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT stage FROM runs WHERE ticket_id = 2 ORDER BY id",
+        )
+      ).rows.map((r) => r.stage),
+    ).toEqual(["implement", "gate", "review", "merge", "e2e"]);
   });
 
   it("blocks the ticket, with the failing tests in the run, when the e2e fails", async () => {
@@ -330,13 +404,15 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
       tests_failed: 1,
     });
     expect(run.output.failingTests).toEqual(["exports"]);
-    // the environment is gone in any case
-    expect(docker.calls.filter((c) => c.includes("down"))).toHaveLength(1);
+    // the environment is gone in any case: the agent's, and the e2e's
+    expect(docker.calls.filter((c) => c.includes("down"))).toHaveLength(2);
   });
 
   it("is blocked as integration-environment-failed after three environments that did not come up", async () => {
+    // the environment the agent works in comes up; the ones for the e2e do not
+    let ups = 0;
     docker.answer = (args) =>
-      args.includes("up")
+      args.includes("up") && ++ups > 1
         ? { code: 1, out: "backend is unhealthy" }
         : undefined;
     await confirmedSpec(["e2e"]);
@@ -346,11 +422,11 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
       "1:done",
       "2:blocked/integration-environment-failed",
     ]);
-    expect(docker.calls.filter((c) => c.includes("up"))).toHaveLength(3);
+    expect(docker.calls.filter((c) => c.includes("up"))).toHaveLength(4);
     // every try took its environment down again
     expect(
       docker.calls.filter((c) => c.includes("down")).length,
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(4);
     const failed = await db.pool.query(
       "SELECT output FROM runs WHERE stage = 'e2e' AND result = 'job-failed'",
     );

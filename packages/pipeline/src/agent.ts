@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AGENT_FAILURES, FinalStep, Stage } from "@afk/shared";
 import { z } from "zod";
+import type { SandboxPlacement } from "./gate.ts";
 
 // The seam to the agent runner. Sandcastle sits behind `AgentRunner` (#29); everything else in the pipeline,
 // and every test, uses a fake. The structured outputs below are what an agent is asked to end with.
@@ -55,6 +56,8 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   ctxDir: string; // mounted read-only as /context
   refs?: { name: string; dir: string }[]; // snapshots of the repos the ticket refs, read-only at /refs/<name>
   schema: Schema;
+  // Put the agent's sandbox on an integration environment's network, with the addresses of its services
+  placement?: SandboxPlacement;
   idleSeconds: number;
   wallClockMs: number;
   model?: string; // for this run; the runner's own model when not given
@@ -156,13 +159,15 @@ export const PROMPT_DIR = join(
 );
 export const PROMPTS = {
   implement: join(PROMPT_DIR, "implement.md"),
+  integrationImplement: join(PROMPT_DIR, "integration-implement.md"),
   fix: join(PROMPT_DIR, "fix.md"),
   review: join(PROMPT_DIR, "review.md"),
   finalReview: join(PROMPT_DIR, "final-review.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
 } as const;
 
-// Only the stages that run an agent have a prompt; the three fixes share one.
+// Only the stages that run an agent have a prompt; the three fixes share one. An integration ticket's implement
+// writes e2e against real services and has a prompt of its own; its fixes are the ordinary ones.
 export function promptFor(
   stage:
     | "implement"
@@ -172,6 +177,7 @@ export function promptFor(
     | "merge-fix"
     | "final-review"
     | "final-fix",
+  options: { integration?: boolean } = {},
 ): string {
   switch (stage) {
     case "final-review":
@@ -179,7 +185,9 @@ export function promptFor(
     case "final-fix":
       return PROMPTS.finalFix;
     case "implement":
-      return PROMPTS.implement;
+      return options.integration
+        ? PROMPTS.integrationImplement
+        : PROMPTS.implement;
     case "review":
       return PROMPTS.review;
     case "gate-fix":
