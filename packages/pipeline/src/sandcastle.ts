@@ -13,7 +13,7 @@ import {
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "./agent.ts";
-import type { GateSandbox, SandboxSession } from "./gate.ts";
+import type { GateSandbox, SandboxPlacement, SandboxSession } from "./gate.ts";
 
 export interface SandcastleConfig {
   cwd: string; // the slot's clone of the repo: the agent and the gate only ever see this copy
@@ -71,10 +71,13 @@ const provider = (
   config: SandcastleConfig,
   ctxDir?: string,
   refs?: readonly { name: string; dir: string }[],
+  placement?: SandboxPlacement,
 ) =>
   docker({
     imageName: config.image,
     mounts: sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
+    // on an integration environment's network, which reaches its services by name and the model API as well
+    ...(placement ? { network: placement.network, env: placement.env } : {}),
   });
 
 export function classifyAgentError(error: unknown): {
@@ -180,10 +183,13 @@ export class SandcastleGateSandbox implements GateSandbox {
     this.config = config;
   }
 
-  async open(ref: string): Promise<SandboxSession> {
+  async open(
+    ref: string,
+    placement?: SandboxPlacement,
+  ): Promise<SandboxSession> {
     const sandbox = await createSandbox({
       branch: ref,
-      sandbox: provider(this.config),
+      sandbox: provider(this.config, undefined, undefined, placement),
       cwd: this.config.cwd,
     });
     return {

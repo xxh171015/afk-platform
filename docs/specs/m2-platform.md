@@ -122,6 +122,9 @@ implement（agent，在联调环境里写 e2e 并提交）→ 门禁（本仓库
 
 - 联调票的 `environment:` 列出的仓库，每个提供一个 compose 片段 `.sandcastle/integration/compose.yaml`。worker 给每个仓库打快照（同上的 SHA 规则），片段里带 `build:` 的服务在它自己仓库的快照里 **`docker build --pull=false`**，镜像名 `afk-<run-id>-<服务名>`；然后 `docker compose -p afk-<run-id> -f 片段1 -f 片段2 … up --no-build -d --wait`。不用 `compose build`（它会去远端解析基础镜像，Mac 上连不上 Docker Hub）。
 - 一次性的数据准备服务一律叫 `seed-<仓库名>`，环境起来后按 `environment:` 的顺序逐个 `compose run --rm`。服务名在所有片段之间必须唯一。
+- 实现时定下的约定：`up` 只列出非 `seed-` 的服务（种子服务只用 `run` 跑）；仓库没有 `seed-<仓库名>` 服务就跳过；带 `build:` 的服务不能同时写 `image:`（镜像名固定是 `afk-<run-id>-<服务名>`，也就是 compose 给没写 `image:` 的服务取的名字）；`build.context` 和 `dockerfile` 相对片段所在目录。沙箱里要用的服务地址写在片段顶层的 `x-afk-env:`（compose 会忽略 `x-` 开头的键），例如 `BACKEND_URL: http://backend:8080`，各片段合并后整体通过 `docker({ env })` 传入，同名不同值报错。
+- e2e 命令是 `npm run e2e`（前置命令用仓库 `gates.yaml` 的 `setup`），JUnit 写在 `reports/e2e-junit.xml`；命令退出码非 0 时也读这份报告（测试框架在有失败时照样写报告）。有失败用例，或报告里没有用例，都算 e2e 失败。
+- e2e 失败时票先进 blocked，原因码暂用 `post-merge-gate-failed`，失败用例在 Run 的输出里；诊断和修复票做完后换成专门的原因码。
 - 网络按 compose 的 label 找（`com.docker.compose.project=afk-<run-id>` + `com.docker.compose.network=default`），不拼名字；建沙箱前确认网络存在（网络不存在时 Sandcastle 会留下一个 `Created` 状态的孤儿容器）。默认网络不能设成 `internal`（沙箱要经它访问模型 API）。
 - 沙箱：联调票所在仓库的镜像（agent 运行、门禁、联调共用），`docker({ network, env })`，服务地址通过 `env` 传（试点前端是 `BACKEND_URL`），`/context` 和 `/refs/*` 只读挂载。
 - **清理**：先结束沙箱，再 `compose down -v`，再按 label 查一次网络，还在就再 down 一次（沙箱还挂着时 `compose down` 返回 0 但网络会留下）；删掉 `afk-<run-id>-*` 镜像。worker 回收孤儿容器从 `docker ps -q` 改为 `docker ps -a`（包括 `Created`）；worker 被杀后，下一个作业按 compose 项目名 `afk-<run-id>` 找回并 down 掉它的环境。

@@ -74,6 +74,11 @@
                         "minimum": 1,
                         "maximum": 2147483647
                       },
+                      "maxIntegrationEnvironments": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
                       "runIdleSeconds": {
                         "type": "integer",
                         "minimum": 1,
@@ -187,6 +192,11 @@
                         "maximum": 2147483647
                       },
                       "repoConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "maxIntegrationEnvironments": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 2147483647
@@ -1529,6 +1539,27 @@
                         "required": ["name", "url", "defaultBranch", "sha"]
                       }
                     },
+                    "environment": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "defaultBranch": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": ["name", "url", "defaultBranch", "sha"]
+                      }
+                    },
                     "failureLog": {
                       "type": ["string", "null"]
                     },
@@ -1553,9 +1584,16 @@
                         },
                         "runWallclockSeconds": {
                           "type": "integer"
+                        },
+                        "maxIntegrationEnvironments": {
+                          "type": "integer"
                         }
                       },
-                      "required": ["runIdleSeconds", "runWallclockSeconds"]
+                      "required": [
+                        "runIdleSeconds",
+                        "runWallclockSeconds",
+                        "maxIntegrationEnvironments"
+                      ]
                     },
                     "model": {
                       "type": ["string", "null"]
@@ -1574,6 +1612,7 @@
                     "allowedProtectedPaths",
                     "contracts",
                     "refs",
+                    "environment",
                     "failureLog",
                     "gateBaseline",
                     "limits",
@@ -2535,6 +2574,10 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["gate", "e2e"]
+                          },
                           "commitSha": {
                             "type": "string"
                           },
@@ -2553,6 +2596,7 @@
                           }
                         },
                         "required": [
+                          "kind",
                           "commitSha",
                           "configSha",
                           "commandResults",

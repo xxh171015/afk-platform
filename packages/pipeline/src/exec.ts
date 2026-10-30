@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { redactSecrets } from "@afk/shared";
 
 // Runs a program and keeps both its output streams. Secrets named in `redact` never appear in the output, so
@@ -42,6 +42,67 @@ export function exec(
       ? { timedOut: true }
       : {}),
   };
+}
+
+export interface ExecAsyncOptions extends ExecOptions {
+  signal?: AbortSignal; // the program is killed when this is aborted
+}
+
+// The same without blocking the event loop: for programs that take minutes (docker build, compose up), where the
+// worker has to go on renewing its lease. The output is capped at its last 8 MiB.
+const MAX_OUTPUT = 8 << 20;
+export function execAsync(
+  command: string,
+  args: string[],
+  options: ExecAsyncOptions = {},
+): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: { ...process.env, ...options.env },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let out = "";
+    let timedOut = false;
+    const keep = (text: string) => text.slice(-MAX_OUTPUT);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout = keep(stdout + chunk);
+      out = keep(out + chunk);
+    });
+    child.stderr.on("data", (chunk: string) => {
+      out = keep(out + chunk);
+    });
+    const kill = () => child.kill("SIGKILL"); // a program that ignores SIGTERM must not outlive its timeout
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          kill();
+        }, options.timeoutMs)
+      : undefined;
+    if (options.signal?.aborted) kill();
+    options.signal?.addEventListener("abort", kill, { once: true });
+    const finish = (code: number) => {
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", kill);
+      const scrub = (text: string) => redactSecrets(text, options.redact ?? []);
+      resolve({
+        code,
+        out: scrub(out),
+        stdout: scrub(stdout),
+        ...(timedOut ? { timedOut: true } : {}),
+      });
+    };
+    child.on("error", (error) => {
+      out += String(error);
+      finish(-1);
+    });
+    child.on("close", (code) => finish(code ?? -1));
+    child.stdin.on("error", () => {}); // the program may exit without reading its input
+    child.stdin.end(options.input ?? "");
+  });
 }
 
 // The platform's own commits and rewrites are made by this identity.

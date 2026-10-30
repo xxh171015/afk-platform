@@ -26,6 +26,8 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     ["running", "invalid-output"],
     ["running", "timeout"],
     ["running", "integration-loop-exceeded"],
+    ["running", "integration-environment-failed"],
+    ["merging", "integration-environment-failed"],
     ["merging", "invalid-output"],
     ["merging", "timeout"],
     ["running", "job-failed"],

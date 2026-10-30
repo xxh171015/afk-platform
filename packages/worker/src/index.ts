@@ -3,6 +3,7 @@ export { createWorkerApi } from "./api.ts";
 export type { ConfigSources, WorkerConfig } from "./config.ts";
 export { ConfigError, loadConfig, parseEnvFile } from "./config.ts";
 export type { Credentials } from "./credentials.ts";
+export { EnvironmentLimiter } from "./environments.ts";
 export type {
   ExecutorDeps,
   StageContext,

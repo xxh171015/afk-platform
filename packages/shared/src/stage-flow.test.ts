@@ -205,6 +205,7 @@ describe("a worst-case ticket", () => {
       "gate-fix",
       "review-fix",
       "merge-fix",
+      "e2e",
     ]);
     let agentRuns = 0;
     for (const report of reports) {
@@ -240,6 +241,45 @@ describe("shape", () => {
       "gate-fix",
       "review-fix",
       "merge-fix",
+      "e2e",
     ]);
+  });
+});
+
+describe("an integration ticket", () => {
+  const merged = { stage: "merge", outcome: "merged" } as const;
+
+  it("goes from merge to e2e instead of done, and stays merging", () => {
+    const decision = advanceStage(merged, reviewed(fresh), "integration");
+    expect(decision).toEqual(enqueue("e2e"));
+    expect(decision).not.toHaveProperty("event");
+  });
+
+  it("is done when e2e passes", () => {
+    expect(
+      advanceStage(
+        { stage: "e2e", outcome: "passed" },
+        reviewed(fresh),
+        "integration",
+      ),
+    ).toEqual({ type: "done" });
+  });
+
+  it("is blocked when e2e fails (for now as a post-merge gate failure)", () => {
+    expect(
+      advanceStage(
+        { stage: "e2e", outcome: "failed" },
+        reviewed(fresh),
+        "integration",
+      ),
+    ).toEqual(block("post-merge-gate-failed"));
+  });
+
+  it("other ticket types are done at merge", () => {
+    for (const type of ["implementation", "contract", "fix"]) {
+      expect(advanceStage(merged, reviewed(fresh), type)).toEqual({
+        type: "done",
+      });
+    }
   });
 });

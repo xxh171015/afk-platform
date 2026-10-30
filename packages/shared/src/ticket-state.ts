@@ -22,6 +22,8 @@ export const BLOCKED_REASONS = [
   "invalid-output",
   "timeout",
   "integration-loop-exceeded",
+  // the integration environment could not be brought up (build, health check, service names), three times over
+  "integration-environment-failed",
   "upstream-cancelled",
   // the worker could not carry out a stage, three times over: its environment is at fault, not the ticket
   "job-failed",
@@ -89,6 +91,7 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "merge-conflict": FROM_MERGING,
   "post-merge-gate-failed": FROM_MERGING,
   "integration-loop-exceeded": FROM_RUNNING,
+  "integration-environment-failed": [...FROM_RUNNING, ...FROM_MERGING],
   "upstream-cancelled": ["pending"],
   "job-failed": [...FROM_RUNNING, ...FROM_MERGING],
 };

@@ -33,7 +33,7 @@ function namesOf(dir: string): string[] {
   return [...new Set(names)];
 }
 
-// Removes every running container that mounts `dir` or something under it, and returns their ids. A worker that
+// Removes every container (running or not) that mounts `dir` or something under it, and returns their ids. A worker that
 // died leaves its sandbox running on the slot; the slot cannot be rebuilt under it. If docker cannot be asked
 // (not installed, daemon down, not answering) nothing is removed and `log` says so: the next sandbox will fail
 // with docker's own words.
@@ -50,7 +50,8 @@ export function removeSandboxesUnder(
     );
     return [];
   };
-  const listed = docker(["ps", "-q"]);
+  // -a: a sandbox whose network was gone is left `Created`, and still holds its mounts
+  const listed = docker(["ps", "-a", "-q"]);
   if (listed.code !== 0) return giveUp("ps", listed);
   const running = listed.stdout.split("\n").filter(Boolean);
   if (running.length === 0) return [];

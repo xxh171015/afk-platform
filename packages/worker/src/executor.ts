@@ -8,6 +8,10 @@ import {
   checkProtectedPaths,
   classifyAgentRun,
   classifyReviewRun,
+  type DockerCli,
+  type Environment,
+  EnvironmentError,
+  type EnvironmentRepo,
   type GateCache,
   type GateOutcome,
   type GateSandbox,
@@ -17,18 +21,23 @@ import {
   ImplementOutputSchema,
   isAncestor,
   mergeCandidate,
+  projectOf,
   promptFor,
   ReviewOutputSchema,
+  reclaimEnvironments,
   renderContext,
   reviewFindings,
+  runE2e,
   runGate,
   stampTrailers,
+  startEnvironment,
   type TestCounts,
 } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
+import type { EnvironmentLimiter } from "./environments.ts";
 import type { PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
@@ -46,6 +55,9 @@ export interface ExecutorDeps {
   credentials?: Credentials; // tokens for the code host; without them git uses whatever it is already set up with
   api: Pick<WorkerApi, "prePush">; // supplied by the worker loop
   gateCache: GateCache;
+  // What an integration environment needs: docker, and the limit on how many a worker runs at once.
+  docker?: DockerCli;
+  environments?: EnvironmentLimiter;
   makeAgentRunner(slotDir: string): AgentRunner;
   makeGateSandbox(slotDir: string): GateSandbox;
   tmpRoot?: string;
@@ -214,6 +226,8 @@ async function runStage(
     case "merge":
     case "final-merge":
       return merge(deps, context, mainDir, slot);
+    case "e2e":
+      return e2e(deps, context, mainDir, slot);
     default:
       throw new InfrastructureError(`unknown stage ${bundle.job.stage}`);
   }
@@ -247,12 +261,17 @@ function renderFor(
   return dir;
 }
 
-// Snapshots of the repos the ticket refs, taken at the SHA the bundle names (the head of the default branch when it
-// names none), to be mounted read-only at /refs/<name>. The SHAs go on the Run.
-function snapshotRefs(deps: ExecutorDeps, bundle: Bundle) {
+// Snapshots of repos at the SHA the bundle names (the head of the default branch when it names none): the ones
+// the ticket refs, to be mounted read-only at /refs/<name>, or the ones an integration environment is built from.
+// The SHAs go on the Run.
+function snapshotRefs(
+  deps: ExecutorDeps,
+  bundle: Bundle,
+  from: Bundle["refs"] = bundle.refs,
+) {
   const refs: { name: string; dir: string }[] = [];
   const refShas: Record<string, string> = {};
-  for (const ref of bundle.refs) {
+  for (const ref of from) {
     const clone = deps.repos.ensure(ref.name, ref.url, ref.defaultBranch);
     const sha = ref.sha ?? tip(clone, ref.defaultBranch);
     refs.push({
@@ -788,4 +807,136 @@ async function mergeOnce(
     run: { headSha: candidate.candidate },
     gate: gateFacts(outcome),
   };
+}
+
+// The last stage of an integration ticket: its repo at the head of the integration branch, in a fresh sandbox on the
+// network of a fresh integration environment, running the repo's e2e. A deterministic step, not an agent run: the
+// JUnit report is the verdict. An environment that cannot be made fails the job (the API tries again, and blocks
+// the ticket after three), an e2e that fails is a result.
+async function e2e(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+): Promise<StageOutcomeBody> {
+  const { bundle, log } = context;
+  const { docker, environments } = deps;
+  if (!docker || !environments)
+    throw new InfrastructureError(
+      "this worker has no integration environments",
+    );
+  const integration = bundle.integrationBranch as string;
+  const head = tip(mainDir, integration);
+
+  // The environment is built from snapshots of the repos at the heads of their integration branches (the default
+  // branch where the spec has not merged anything), in the order the ticket names them.
+  const { refs, refShas } = snapshotRefs(deps, bundle, bundle.environment);
+  const repos: EnvironmentRepo[] = refs.map((ref) => ({
+    name: ref.name,
+    dir: ref.dir,
+    sha: refShas[ref.name] as string,
+  }));
+
+  const runId = runIdOf(bundle);
+  const project = projectOf(runId);
+  const release = await environments
+    .acquire(bundle.limits.maxIntegrationEnvironments, context.signal)
+    .catch((error) => {
+      throw new JobLostError(error.message);
+    });
+  environments.projects.add(project);
+  let environment: Environment | undefined;
+  try {
+    // Environments a worker that was killed left behind go first: nothing else will remove them.
+    await reclaimEnvironments({
+      docker,
+      keep: environments.projects,
+      log,
+    });
+    try {
+      environment = await startEnvironment({
+        docker,
+        runId,
+        repos,
+        signal: context.signal,
+        log,
+      });
+    } catch (error) {
+      if (context.signal.aborted)
+        throw new JobLostError(
+          "the lease was lost while the environment came up",
+        );
+      if (error instanceof EnvironmentError)
+        throw new InfrastructureError(error.message);
+      throw error;
+    }
+    log(
+      `e2e: environment ${environment.project} is up after ${environment.upMs} ms`,
+    );
+
+    // The e2e runs on a branch of its own that is gone again afterwards, like a gate.
+    const branch = `e2e/${subjectLabel(bundle)}`;
+    gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, head]);
+    try {
+      bringBranches(slot, mainDir, [branch]);
+      const outcome = await runE2e({
+        repoDir: mainDir,
+        sandbox: deps.makeGateSandbox(slot.dir),
+        ref: branch,
+        commitSha: head,
+        configSha: head,
+        network: environment.network,
+        env: environment.env,
+        signal: context.signal,
+      });
+      if (context.signal.aborted)
+        throw new JobLostError("the lease was lost during the e2e");
+      for (const step of outcome.steps)
+        log(`e2e: ${step.name} exit ${step.exitCode} (${step.ms} ms)`);
+      for (const [name, text] of Object.entries(outcome.stepLogs))
+        log(`--- ${name} ---\n${text}`);
+      return {
+        stage: "e2e",
+        outcome: outcome.pass ? "passed" : "failed",
+        run: {
+          branch: integration,
+          headSha: head,
+          // the repos the environment was built from; the e2e's own repo is the head SHA
+          refShas: environment.shas,
+          envUpMs: environment.upMs,
+          ...(outcome.counts
+            ? {
+                testsTotal: outcome.counts.tests,
+                testsFailed: outcome.counts.failed,
+              }
+            : {}),
+          output: {
+            failureLog: outcome.failureLog,
+            reasons: outcome.reasons,
+            failingTests: outcome.failingTests,
+          },
+        },
+        gate: {
+          kind: "e2e",
+          commitSha: head,
+          configSha: head,
+          commandResults: outcome.steps,
+          ...(outcome.counts
+            ? {
+                testsTotal: outcome.counts.tests,
+                testsSkipped: outcome.counts.skipped,
+              }
+            : {}),
+          ...(outcome.testCases ? { testCases: outcome.testCases } : {}),
+        },
+      };
+    } finally {
+      git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
+    }
+  } finally {
+    // The sandbox is closed by now (runE2e does it): only then can compose take the network down.
+    await environment?.stop();
+    environments.projects.delete(project);
+    release();
+  }
 }

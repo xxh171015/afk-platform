@@ -11,6 +11,7 @@ describe("resolveLimits", () => {
       workerSlots: 2,
       projectConcurrency: 2,
       repoConcurrency: 2,
+      maxIntegrationEnvironments: 1,
       runIdleSeconds: 600,
       runWallclockSeconds: 3600,
       ticketWallclockSeconds: 10_800,

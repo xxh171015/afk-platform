@@ -34,6 +34,7 @@ export interface paths {
               workerSlots?: number;
               projectConcurrency?: number;
               repoConcurrency?: number;
+              maxIntegrationEnvironments?: number;
               runIdleSeconds?: number;
               runWallclockSeconds?: number;
               ticketWallclockSeconds?: number;
@@ -96,6 +97,7 @@ export interface paths {
               workerSlots?: number;
               projectConcurrency?: number;
               repoConcurrency?: number;
+              maxIntegrationEnvironments?: number;
               runIdleSeconds?: number;
               runWallclockSeconds?: number;
               ticketWallclockSeconds?: number;
@@ -904,6 +906,12 @@ export interface paths {
                 defaultBranch: string;
                 sha: string | null;
               }[];
+              environment: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+                sha: string | null;
+              }[];
               failureLog: string | null;
               review?: unknown;
               gateBaseline: {
@@ -913,6 +921,7 @@ export interface paths {
               limits: {
                 runIdleSeconds: number;
                 runWallclockSeconds: number;
+                maxIntegrationEnvironments: number;
               };
               model: string | null;
             };
@@ -1432,6 +1441,8 @@ export interface paths {
                 resolution: string;
               }[];
               gateResults: {
+                /** @enum {string} */
+                kind: "gate" | "e2e";
                 commitSha: string;
                 configSha: string;
                 commandResults: unknown[];

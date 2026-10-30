@@ -298,7 +298,7 @@ async function agentSecondsUsed(
   const { rows } = await client.query<{ ms: string }>(
     `SELECT COALESCE(sum(COALESCE(duration_ms,
               LEAST(extract(epoch FROM (now() - started_at)) * 1000, $2::float8))), 0) AS ms
-     FROM runs WHERE spec_id = $1 AND (duration_ms IS NOT NULL OR (started_at IS NOT NULL AND finished_at IS NULL))`,
+     FROM runs WHERE spec_id = $1 AND stage <> 'e2e' AND (duration_ms IS NOT NULL OR (started_at IS NOT NULL AND finished_at IS NULL))`,
     [specId, runWallclockSeconds * 1000],
   );
   return Number(rows[0]?.ms) / 1000;

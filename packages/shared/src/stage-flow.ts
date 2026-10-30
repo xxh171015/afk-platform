@@ -12,6 +12,7 @@ export const STAGES = [
   "gate-fix",
   "review-fix",
   "merge-fix",
+  "e2e", // an integration ticket's last stage: a worker-run step in a fresh integration environment
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
@@ -44,7 +45,8 @@ export type StageReport =
         | "contract-copy-mismatch";
     }
   | { stage: "review"; outcome: "pass" | "fix" | "invalid-output" | "timeout" }
-  | { stage: "merge"; outcome: "merged" | "conflict" | "gate-failed" };
+  | { stage: "merge"; outcome: "merged" | "conflict" | "gate-failed" }
+  | { stage: "e2e"; outcome: "passed" | "failed" };
 
 // What the ticket remembers between stages.
 export interface Progress {
@@ -87,9 +89,12 @@ function spendFix(progress: Progress, kind: FixKind): Progress | undefined {
 const toMerge = (progress: Progress) =>
   enqueue("merge", progress, { type: "checks-passed" });
 
+// `ticketType` is the type of the ticket the stage ran for: an integration ticket is not done at its merge, it
+// still has to pass its e2e (docs/specs/m2-platform.md「联调」).
 export function advanceStage(
   report: StageReport,
   progress: Progress,
+  ticketType?: string,
 ): StageDecision {
   switch (report.stage) {
     case "implement":
@@ -128,7 +133,12 @@ export function advanceStage(
     }
 
     case "merge": {
-      if (report.outcome === "merged") return { type: "done" };
+      if (report.outcome === "merged") {
+        // no ticket event: the ticket stays merging while its e2e runs
+        return ticketType === "integration"
+          ? enqueue("e2e", progress)
+          : { type: "done" };
+      }
       const spent = spendFix(progress, "merge-fix");
       if (spent) {
         return enqueue("merge-fix", spent, { type: "merge-fix-needed" });
@@ -139,5 +149,12 @@ export function advanceStage(
           : "post-merge-gate-failed",
       );
     }
+
+    case "e2e":
+      // Diagnosis and repair tickets come later; until then a failed e2e is a blocked ticket, with the failure
+      // in its brief.
+      return report.outcome === "passed"
+        ? { type: "done" }
+        : block("post-merge-gate-failed");
   }
 }

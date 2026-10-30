@@ -5,6 +5,7 @@ export const DEFAULT_LIMITS = {
   workerSlots: 2, // read by the worker, not the scheduler
   projectConcurrency: 2, // agent runs at once in one project
   repoConcurrency: 2, // agent runs at once in one repo
+  maxIntegrationEnvironments: 1, // integration environments at once on one worker; read by the worker
   runIdleSeconds: 600,
   runWallclockSeconds: 60 * 60,
   ticketWallclockSeconds: 3 * 60 * 60,

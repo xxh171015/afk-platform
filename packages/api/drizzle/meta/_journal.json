@@ -162,6 +162,13 @@
       "when": 1793366294496,
       "tag": "0022_spec_order_broken",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793370294496,
+      "tag": "0023_e2e_stage",
+      "breakpoints": true
     }
   ]
 }

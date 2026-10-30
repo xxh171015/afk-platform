@@ -1,11 +1,13 @@
 import type pg from "pg";
 import type { BundleRef } from "./bundle.ts";
 
-// The repos a ticket reads, each with the SHA its snapshot is taken at: the head of the integration branch (what
+// The repos a ticket names in `column` (`refs`: the ones it reads, `environment`: the ones an integration
+// environment is built from), each with the SHA its snapshot is taken at: the head of the integration branch (what
 // the last merge of the spec in that repo left), or null when nothing of the spec has merged there yet.
-export async function refsOf(
+async function reposNamed(
   pool: pg.Pool,
   ticketId: number,
+  column: "refs" | "environment",
 ): Promise<BundleRef[]> {
   const { rows } = await pool.query<{
     name: string;
@@ -19,9 +21,9 @@ export async function refsOf(
              ORDER BY m.id DESC LIMIT 1) AS sha
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
-     JOIN repos r ON r.project_id = s.project_id AND r.name = ANY(t.refs)
+     JOIN repos r ON r.project_id = s.project_id AND r.name = ANY(t.${column})
      WHERE t.id = $1
-     ORDER BY array_position(t.refs, r.name)`,
+     ORDER BY array_position(t.${column}, r.name)`,
     [ticketId],
   );
   return rows.map((row) => ({
@@ -31,3 +33,9 @@ export async function refsOf(
     sha: row.sha,
   }));
 }
+
+export const refsOf = (pool: pg.Pool, ticketId: number) =>
+  reposNamed(pool, ticketId, "refs");
+
+export const environmentOf = (pool: pg.Pool, ticketId: number) =>
+  reposNamed(pool, ticketId, "environment");

@@ -32,8 +32,13 @@ export interface SandboxSession {
   readFile(path: string): Promise<string | undefined>;
   close(): Promise<void>;
 }
+// Where a sandbox is put: the compose network of an integration environment, and the addresses of its services.
+export interface SandboxPlacement {
+  network: string;
+  env: Record<string, string>;
+}
 export interface GateSandbox {
-  open(ref: string): Promise<SandboxSession>;
+  open(ref: string, placement?: SandboxPlacement): Promise<SandboxSession>;
 }
 
 export interface TestCounts {
@@ -61,7 +66,8 @@ export interface GateOutcome {
 }
 
 // `timeout N cmd` only times the first word, so the whole command line goes to a shell as one argument.
-const shellQuote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+export const shellQuote = (text: string) =>
+  `'${text.replaceAll("'", `'\\''`)}'`;
 
 export function readGateConfig(repoDir: string, configSha: string): GateConfig {
   const text = gitOrThrow(repoDir, [
@@ -229,7 +235,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
 }
 
 // The tail of the failing step's output, then the verdict: this is what gate-fix reads.
-function failureLog(
+export function failureLog(
   steps: StepOutcome[],
   logs: Record<string, string>,
   reasons: string[],

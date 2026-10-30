@@ -39,11 +39,17 @@ const RunFacts = z.object({
   output: z.unknown().optional(),
   logUrl: z.string().optional(),
   refShas: z.record(z.string(), z.string()).optional(),
+  // an e2e's JUnit counts and how long the environment took to come up
+  testsTotal: z.number().int().min(0).optional(),
+  testsFailed: z.number().int().min(0).optional(),
+  envUpMs: z.number().int().min(0).optional(),
   startedAt: z.iso.datetime().optional(),
   finishedAt: z.iso.datetime().optional(),
 });
 
 const GateFacts = z.object({
+  // an e2e is kept apart from the unit gate of the same commit
+  kind: z.enum(["gate", "e2e"]).default("gate"),
   commitSha: z.string().min(1),
   configSha: z.string().min(1),
   commandResults: z.array(z.unknown()).default([]),
@@ -102,6 +108,11 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
     headSha: z.string().min(1).optional(),
     ...commonFields,
   }),
+  z.object({
+    stage: z.literal("e2e"),
+    outcome: z.enum(["passed", "failed"]),
+    ...commonFields,
+  }),
 ]);
 export type StageResult = z.infer<typeof StageResultSchema>;
 
@@ -139,6 +150,7 @@ export const EXPECTED_STATE: Record<Stage, TicketState> = {
   "review-fix": "running",
   "merge-fix": "running",
   merge: "merging",
+  e2e: "merging", // the ticket is merged and stays merging until its e2e has passed
 };
 
 export async function recordStageResult(
@@ -209,7 +221,7 @@ export async function recordStageResult(
     reviewed: ticket.reviewed,
   };
   const decision: StageDecision = valid
-    ? advanceStage(valid as StageReport, progress)
+    ? advanceStage(valid as StageReport, progress, ticket.type)
     : { type: "block", reason: "invalid-output" };
 
   await applyDecision(client, ticket, decision, valid);
@@ -290,6 +302,17 @@ export async function writeFacts(
     );
   }
   const runId = inserted.rows[0]?.id as number;
+  if (run?.testsTotal !== undefined || run?.envUpMs !== undefined) {
+    await client.query(
+      "UPDATE runs SET tests_total = $2, tests_failed = $3, env_up_ms = $4 WHERE id = $1",
+      [
+        runId,
+        run.testsTotal ?? null,
+        run.testsFailed ?? null,
+        run.envUpMs ?? null,
+      ],
+    );
+  }
   if (run?.refShas) {
     await client.query("UPDATE runs SET ref_shas = $2 WHERE id = $1", [
       runId,
@@ -301,9 +324,9 @@ export async function writeFacts(
     const gate = result.gate;
     // The same commit can be gated again (a rerun after a restart): the latest facts win.
     await client.query(
-      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, log_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (repo_id, commit_sha) DO UPDATE SET config_sha = EXCLUDED.config_sha,
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, log_url, kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (repo_id, commit_sha, kind) DO UPDATE SET config_sha = EXCLUDED.config_sha,
          command_results = EXCLUDED.command_results, tests_total = EXCLUDED.tests_total,
          tests_skipped = EXCLUDED.tests_skipped, test_cases = EXCLUDED.test_cases, log_url = EXCLUDED.log_url`,
       [
@@ -315,6 +338,7 @@ export async function writeFacts(
         gate.testsSkipped ?? null,
         gate.testCases === undefined ? null : JSON.stringify(gate.testCases),
         gate.logUrl ?? null,
+        gate.kind,
       ],
     );
   }

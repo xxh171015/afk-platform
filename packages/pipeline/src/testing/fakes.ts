@@ -12,7 +12,8 @@ import { dirname, join } from "node:path";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "../agent.ts";
 import { git, gitOrThrow } from "../exec.ts";
-import type { GateSandbox, SandboxSession } from "../gate.ts";
+import type { GateSandbox, SandboxPlacement, SandboxSession } from "../gate.ts";
+import type { DockerCli, DockerResult } from "../integration-env.ts";
 
 // Stand-ins for the two things the pipeline cannot run for real in tests: an agent in a sandbox, and the
 // gate's sandbox. They do real git and real shell work in temporary directories, so what the pipeline does
@@ -156,14 +157,19 @@ export class FakeAgentRunner implements AgentRunner {
 // The gate's "fresh sandbox": a detached worktree of the ref, where commands really run with `sh -c`.
 export class FakeGateSandbox implements GateSandbox {
   readonly opened: string[] = [];
+  readonly placements: (SandboxPlacement | undefined)[] = [];
   private readonly repoDir: string;
 
   constructor(repoDir: string) {
     this.repoDir = repoDir;
   }
 
-  async open(ref: string): Promise<SandboxSession> {
+  async open(
+    ref: string,
+    placement?: SandboxPlacement,
+  ): Promise<SandboxSession> {
     this.opened.push(ref);
+    this.placements.push(placement);
     const dir = mkdtempSync(join(tmpdir(), "afk-fake-gate-"));
     const worktree = join(dir, "wt");
     gitOrThrow(this.repoDir, [
@@ -179,6 +185,7 @@ export class FakeGateSandbox implements GateSandbox {
         const result = spawnSync("sh", ["-c", command], {
           cwd: worktree,
           encoding: "utf8",
+          env: { ...process.env, ...placement?.env }, // what docker({ env }) sets inside the container
         });
         return {
           exitCode: result.status ?? -1,
@@ -194,5 +201,67 @@ export class FakeGateSandbox implements GateSandbox {
         rmSync(dir, { recursive: true, force: true });
       },
     };
+  }
+}
+
+// A docker that only writes down what it is asked and answers like a compose host would: a project that has been
+// brought up has a default network until it is taken down. Counts the projects that are up at the same time.
+export class FakeDocker {
+  readonly calls: string[][] = [];
+  // projects left behind by a worker that stopped: they show in `ps -a`
+  orphans: string[] = [];
+  // the first `compose down` of a project leaves its network, as it does with a sandbox still attached
+  leaveNetworkAfterDown = false;
+  // answers a call by itself instead of the usual way; undefined lets the usual way answer
+  answer: (args: string[]) => Partial<DockerResult> | undefined = () =>
+    undefined;
+  upDelayMs = 0; // how long `compose up` takes
+  active = 0;
+  maxActive = 0;
+  private readonly up = new Set<string>();
+  private readonly networks = new Set<string>();
+
+  readonly cli: DockerCli = async (args) => {
+    this.calls.push(args);
+    const custom = this.answer(args);
+    const reply = (stdout: string, code = 0): DockerResult => ({
+      code,
+      out: stdout,
+      stdout,
+    });
+    if (custom) {
+      const out = custom.out ?? custom.stdout ?? "";
+      return { code: 0, out, stdout: out, ...custom };
+    }
+    const project = args[0] === "compose" ? args[2] : undefined;
+    if (project && args.includes("up") && !args.includes("down")) {
+      this.up.add(project);
+      this.active = this.up.size;
+      this.maxActive = Math.max(this.maxActive, this.active);
+      if (this.upDelayMs > 0)
+        await new Promise((resolve) => setTimeout(resolve, this.upDelayMs));
+      this.networks.add(project);
+    }
+    if (project && args.includes("down")) {
+      this.up.delete(project);
+      this.active = this.up.size;
+      if (this.leaveNetworkAfterDown) this.leaveNetworkAfterDown = false;
+      else this.networks.delete(project);
+    }
+    if (args[0] === "network" && args[1] === "ls") {
+      const label = args.find((a) =>
+        a.startsWith("label=com.docker.compose.project="),
+      );
+      const project = label?.split("=").at(-1) ?? "";
+      return reply(this.networks.has(project) ? `${project}_default` : "");
+    }
+    if (args[0] === "ps")
+      return reply([...this.orphans, ...this.up].join("\n"));
+    return reply("");
+  };
+
+  // The calls that start with these words.
+  only(...words: string[]): string[][] {
+    return this.calls.filter((call) => words.every((w, i) => call[i] === w));
   }
 }

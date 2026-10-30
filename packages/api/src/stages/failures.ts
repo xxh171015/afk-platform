@@ -36,6 +36,11 @@ export const MAX_JOB_FAILURES = 3;
 
 const JOB_FAILED: BlockedReason = "job-failed";
 
+// The e2e stage only fails as a job when its environment cannot be brought up (an e2e that runs and fails is a
+// result, not a failed job), so three failures of it name the environment.
+const reasonOfFailed = (stage: string): BlockedReason =>
+  stage === "e2e" ? "integration-environment-failed" : JOB_FAILED;
+
 export type FailureOutcome =
   | { status: "not-a-stage" } // a job that is neither a ticket stage nor a finalization step
   | { status: "ignored" } // the ticket or the finalization has moved on
@@ -140,11 +145,12 @@ async function ticketStageFailed(
   }
   // A ticket that never got to start counts as running now, so that the state machine can block it.
   const from: TicketState = row.state === "queued" ? "running" : row.state;
-  const blocked = ticketTransition(from, { type: "block", reason: JOB_FAILED });
+  const reason = reasonOfFailed(read.stage);
+  const blocked = ticketTransition(from, { type: "block", reason });
   if (!blocked.ok) throw new Error(blocked.reason);
   await client.query(
     "UPDATE tickets SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
-    [read.ticketId, JOB_FAILED],
+    [read.ticketId, reason],
   );
   // it no longer holds an agent run
   await schedulePass(client, row.spec_id);

@@ -185,6 +185,14 @@ const Bundle = z.object({
       sha: z.string().nullable(),
     }),
   ),
+  environment: z.array(
+    z.object({
+      name: z.string(),
+      url: z.string(),
+      defaultBranch: z.string(),
+      sha: z.string().nullable(),
+    }),
+  ),
   failureLog: z.string().nullable(),
   review: z.unknown(),
   gateBaseline: z
@@ -193,6 +201,7 @@ const Bundle = z.object({
   limits: z.object({
     runIdleSeconds: z.number().int(),
     runWallclockSeconds: z.number().int(),
+    maxIntegrationEnvironments: z.number().int(),
   }),
   model: z.string().nullable(),
 });

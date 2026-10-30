@@ -7,7 +7,7 @@ import {
 import type pg from "pg";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 import { contractsOf } from "./contracts.ts";
-import { refsOf } from "./refs.ts";
+import { environmentOf, refsOf } from "./refs.ts";
 
 // Everything a worker needs to render /context for a stage job (docs/design.md「Agent 与 skills 对接」).
 // The contract travels as a pointer, a SHA and a path in the repo that holds it: the worker reads the file
@@ -74,6 +74,9 @@ export interface Bundle {
   // One per repo that provides a contract this ticket builds against: the file at the newest contract ticket's SHA.
   contracts: BundleContract[];
   refs: BundleRef[];
+  // For an integration ticket: the repos whose services make up its integration environment, in the order their
+  // seed services run.
+  environment: BundleRef[];
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
   review: unknown;
@@ -82,15 +85,20 @@ export interface Bundle {
   gateBaseline: { tests: number; skipped: number } | null;
   // The project's say over how a run is carried out: how long an agent may be silent or run in all, and the model
   // it uses (null: the worker's own AFK_MODEL).
-  limits: { runIdleSeconds: number; runWallclockSeconds: number };
+  limits: {
+    runIdleSeconds: number;
+    runWallclockSeconds: number;
+    maxIntegrationEnvironments: number;
+  };
   model: string | null;
 }
 
-// Defaults where the project sets nothing; only the two run limits travel, the rest is the API's business.
+// Defaults where the project sets nothing; only the limits a worker acts on travel, the rest is the API's business.
 const runSettings = (limits: unknown, defaultModel: unknown) => {
-  const { runIdleSeconds, runWallclockSeconds } = resolveLimits(limits);
+  const { runIdleSeconds, runWallclockSeconds, maxIntegrationEnvironments } =
+    resolveLimits(limits);
   return {
-    limits: { runIdleSeconds, runWallclockSeconds },
+    limits: { runIdleSeconds, runWallclockSeconds, maxIntegrationEnvironments },
     model: (defaultModel as string | null) ?? null,
   };
 };
@@ -101,7 +109,7 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
     tests_skipped: number | null;
   }>(
     `SELECT g.tests_total, g.tests_skipped FROM runs r
-     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
+     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 1`,
@@ -149,6 +157,7 @@ export async function buildBundle(
 
   const contracts = await contractsOf(pool, ticketId);
   const refs = await refsOf(pool, ticketId);
+  const environment = await environmentOf(pool, ticketId);
 
   const run = await pool.query<{ id: number }>(
     "SELECT id FROM runs WHERE job_id = $1",
@@ -212,6 +221,7 @@ export async function buildBundle(
     allowedProtectedPaths: row.allowed_protected_paths,
     contracts,
     refs,
+    environment,
     failureLog: failed.rows[0]?.log ?? null,
     review: reviewed.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
@@ -296,6 +306,7 @@ async function buildFinalBundle(
     allowedProtectedPaths: [],
     contracts: [],
     refs: [],
+    environment: [],
     failureLog: failed.rows[0]?.log ?? null,
     review: review.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),

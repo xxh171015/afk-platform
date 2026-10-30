@@ -1026,6 +1026,7 @@ describe("what a person sees", () => {
     ]);
     expect(view.body.gateResults).toEqual([
       {
+        kind: "gate",
         commitSha: "abc",
         configSha: "cfg",
         commandResults: [{ name: "test", exitCode: 0 }],

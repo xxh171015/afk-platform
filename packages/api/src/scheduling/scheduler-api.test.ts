@@ -108,6 +108,7 @@ const SUCCESS = {
   gate: { outcome: "passed" },
   review: { outcome: "pass" },
   merge: { outcome: "merged", headSha: "integration-head" },
+  e2e: { outcome: "passed" },
 } as const;
 
 async function step(worker: FakeWorker) {
@@ -246,6 +247,10 @@ describe("scheduling along the dependency chain", () => {
     ]);
     order.push(await workUntilMerged(worker));
     expect(order).toEqual([1, 2, 3, 4]);
+    // ticket 4 is the integration ticket: it is done once its e2e has passed
+    expect(await ticketStates()).toContain("4:merging");
+    expect(await step(worker)).toEqual({ ticketId: 4, stage: "e2e" });
+    expect(await ticketStates()).toContain("4:done");
     // the spec is finished, so what is left is its overall review
     const final = (await worker.claim()).body.job;
     expect(final?.payload).toMatchObject({ stage: "final-review" });

@@ -216,7 +216,7 @@ export async function buildAcceptancePack(
     `SELECT DISTINCT ON (r.repo_id) r.repo_id, g.commit_sha, g.tests_total, g.tests_skipped,
             g.command_results, g.test_cases
      FROM runs r
-     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
+     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge') AND r.result = 'merged'
      ORDER BY r.repo_id, r.id DESC`,
     [specId],

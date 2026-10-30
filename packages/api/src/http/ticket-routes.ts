@@ -136,6 +136,7 @@ const ticketRoute = createRoute({
         ),
         gateResults: z.array(
           z.object({
+            kind: z.enum(["gate", "e2e"]),
             commitSha: z.string(),
             configSha: z.string(),
             commandResults: z.array(z.unknown()),

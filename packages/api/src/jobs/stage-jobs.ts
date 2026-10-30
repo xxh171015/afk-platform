@@ -21,6 +21,7 @@ export interface StageTicket {
 function jobType(stage: Stage): string {
   if (stage === "merge") return "merge";
   if (stage === "gate") return "gate";
+  if (stage === "e2e") return "e2e";
   return "agent-run";
 }
 

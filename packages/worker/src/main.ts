@@ -9,12 +9,14 @@ import {
 } from "@afk/host";
 import {
   GateCache,
+  realDocker,
   SandcastleAgentRunner,
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
 import { createWorkerApi } from "./api.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
+import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
 import { removeSandboxesUnder } from "./sandboxes.ts";
@@ -137,6 +139,8 @@ await runWorker({
     push: pushWithToken,
     credentials: { tokens },
     gateCache: new GateCache(),
+    docker: realDocker,
+    environments: new EnvironmentLimiter(),
     makeAgentRunner: (slotDir) =>
       new SandcastleAgentRunner(sandcastle(slotDir)),
     makeGateSandbox: (slotDir) =>

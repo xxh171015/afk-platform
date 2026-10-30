@@ -374,6 +374,10 @@ export const runs = pgTable(
     contractShas: jsonb("contract_shas"),
     // The SHA of the snapshot of each repo the ticket refs that the worker mounted at /refs/<name> (name -> sha).
     refShas: jsonb("ref_shas"),
+    // An e2e Run's JUnit counts, and how long its integration environment took to come up.
+    testsTotal: integer("tests_total"),
+    testsFailed: integer("tests_failed"),
+    envUpMs: integer("env_up_ms"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
@@ -414,6 +418,9 @@ export const gateResults = pgTable(
       .notNull()
       .references(() => repos.id),
     commitSha: text("commit_sha").notNull(),
+    // 'gate': the repo's own checks; 'e2e': an integration ticket's e2e in the integration environment. The same
+    // commit has one of each.
+    kind: text("kind").notNull().default("gate"),
     configSha: text("config_sha").notNull(),
     commandResults: jsonb("command_results").notNull().default([]),
     testsTotal: integer("tests_total"),
@@ -423,5 +430,12 @@ export const gateResults = pgTable(
     logUrl: text("log_url"),
     createdAt: createdAt(),
   },
-  (t) => [unique("gate_results_repo_commit_unique").on(t.repoId, t.commitSha)],
+  (t) => [
+    unique("gate_results_repo_commit_kind_unique").on(
+      t.repoId,
+      t.commitSha,
+      t.kind,
+    ),
+    check("gate_results_kind_check", oneOf(t.kind, ["gate", "e2e"])),
+  ],
 );

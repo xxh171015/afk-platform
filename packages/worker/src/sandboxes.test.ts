@@ -5,12 +5,21 @@ import { describe, expect, it } from "vitest";
 import { type Docker, removeSandboxesUnder } from "./sandboxes.ts";
 
 // A docker whose containers are listed as id -> the host paths they mount; `rm -f` takes them away.
-function fakeDocker(containers: Record<string, string[]>) {
+// `created` are containers that never started: `docker ps` only shows them with -a.
+function fakeDocker(
+  containers: Record<string, string[]>,
+  created: readonly string[] = [],
+) {
   const calls: string[][] = [];
   const docker: Docker = (args) => {
     calls.push(args);
     if (args[0] === "ps")
-      return { code: 0, stdout: `${Object.keys(containers).join("\n")}\n` };
+      return {
+        code: 0,
+        stdout: `${Object.keys(containers)
+          .filter((id) => args.includes("-a") || !created.includes(id))
+          .join("\n")}\n`,
+      };
     if (args[0] === "inspect") {
       const ids = args.filter((a) => a in containers);
       return {
@@ -40,10 +49,17 @@ describe("removeSandboxesUnder", () => {
     expect(Object.keys(fake.containers).sort()).toEqual(["b2", "d4"]);
   });
 
+  it("removes a container that was left Created, which a plain ps does not list", () => {
+    const fake = fakeDocker({ a1: ["/home/w/slots/0/backend/.git"] }, ["a1"]);
+    expect(removeSandboxesUnder("/home/w/slots/0", fake.docker)).toEqual([
+      "a1",
+    ]);
+  });
+
   it("does nothing, and asks nothing more, when no container is running", () => {
     const fake = fakeDocker({});
     expect(removeSandboxesUnder("/home/w/slots/0", fake.docker)).toEqual([]);
-    expect(fake.calls).toEqual([["ps", "-q"]]);
+    expect(fake.calls).toEqual([["ps", "-a", "-q"]]);
   });
 
   it("carries on when docker cannot be asked: nothing is removed, nothing throws, and it says so", () => {
