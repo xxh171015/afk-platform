@@ -14,6 +14,100 @@ export interface Brief {
   result: string | null;
   output: unknown; // the structured output of the agent, or the gate's failure log and reasons
   logPath: string; // GET this to read the run's log
+  // An integration ticket that has run its e2e: every try, with what the diagnosis said and the fix ticket it made.
+  attempts?: IntegrationAttempt[];
+}
+
+export interface IntegrationAttempt {
+  e2e: {
+    id: number;
+    displayId: string;
+    result: string | null;
+    testsTotal: number | null;
+    testsFailed: number | null;
+    envUpMs: number | null;
+    refShas: Record<string, string> | null;
+    headSha: string | null;
+  };
+  // the diagnosis that followed a failed e2e (not the one before the pull request, which makes no fix ticket)
+  diagnosis: {
+    result: string | null;
+    failingRepo: string | null;
+    evidence: string;
+    failingTests: string[];
+  } | null;
+  fixTicket: {
+    id: number;
+    displayId: string;
+    state: TicketState;
+    repo: string;
+  } | null;
+}
+
+// Each e2e of an integration ticket in the order they ran, with the diagnosis that came after it and the fix
+// ticket that diagnosis made (the k-th diagnosed one belongs to the k-th fix ticket). Empty for a ticket that has
+// not run an e2e.
+export async function integrationAttempts(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<IntegrationAttempt[]> {
+  const { rows } = await pool.query(
+    `SELECT id, stage, result, output, tests_total, tests_failed, env_up_ms, ref_shas, head_sha FROM runs
+     WHERE ticket_id = $1 AND stage IN ('e2e', 'diagnose') ORDER BY id`,
+    [ticketId],
+  );
+  const fixes = await pool.query(
+    `SELECT t.id, t.state, r.name AS repo FROM tickets t JOIN repos r ON r.id = t.repo_id
+     WHERE t.fix_for_ticket_id = $1 ORDER BY t.fix_round`,
+    [ticketId],
+  );
+  const attempts: IntegrationAttempt[] = [];
+  let diagnosed = 0;
+  for (const row of rows) {
+    if (row.stage === "e2e") {
+      attempts.push({
+        e2e: {
+          id: row.id,
+          displayId: formatDisplayId("run", row.id),
+          result: row.result ?? null,
+          testsTotal: row.tests_total ?? null,
+          testsFailed: row.tests_failed ?? null,
+          envUpMs: row.env_up_ms ?? null,
+          refShas: row.ref_shas ?? null,
+          headSha: row.head_sha ?? null,
+        },
+        diagnosis: null,
+        fixTicket: null,
+      });
+      continue;
+    }
+    const attempt = attempts.at(-1);
+    if (!attempt || attempt.diagnosis) continue;
+    const said = (row.output ?? {}) as {
+      result?: string;
+      failingRepo?: string | null;
+      evidence?: string;
+      failingTests?: string[];
+    };
+    attempt.diagnosis = {
+      result: said.result ?? null,
+      failingRepo: said.failingRepo ?? null,
+      evidence: said.evidence ?? "",
+      failingTests: said.failingTests ?? [],
+    };
+    if (row.result === "diagnosed") {
+      const fix = fixes.rows[diagnosed];
+      diagnosed += 1;
+      if (fix)
+        attempt.fixTicket = {
+          id: fix.id,
+          displayId: formatDisplayId("ticket", fix.id),
+          state: fix.state,
+          repo: fix.repo,
+        };
+    }
+  }
+  return attempts;
 }
 
 const GOOD_RESULTS = ["done", "passed", "pass", "merged"];
@@ -30,12 +124,14 @@ async function briefFor(
   );
   const run = rows[0];
   if (!run) return null;
+  const attempts = await integrationAttempts(pool, ticketId);
   return {
     run: { id: run.id, displayId: formatDisplayId("run", run.id) },
     stage: run.stage,
     result: run.result,
     output: run.output,
     logPath: `/runs/${run.id}/logs`,
+    ...(attempts.length > 0 ? { attempts } : {}),
   };
 }
 
@@ -158,7 +254,7 @@ export async function ticketView(
   const [summary] = await summaries(pool, "t.id = $1", [ticketId]);
   if (!summary) return undefined;
   const detail = await pool.query(
-    `SELECT body, acceptance_criteria, modules, allowed_protected_paths, content_version, contract_sha, fix_counts, reviewed
+    `SELECT body, acceptance_criteria, modules, allowed_protected_paths, content_version, contract_sha, fix_counts, reviewed, integration_rounds
      FROM tickets WHERE id = $1`,
     [ticketId],
   );
@@ -217,6 +313,14 @@ export async function ticketView(
       )
     : { rows: [] };
   return {
+    // an integration ticket's e2e tries, with their diagnoses and fix tickets; null for any other ticket
+    integration:
+      summary.type === "integration"
+        ? {
+            rounds: d.integration_rounds as number,
+            attempts: await integrationAttempts(pool, ticketId),
+          }
+        : null,
     ticket: {
       ...summary,
       ...content,

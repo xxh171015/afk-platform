@@ -7,7 +7,10 @@ import {
   checkContractCopies,
   checkProtectedPaths,
   classifyAgentRun,
+  classifyDiagnoseRun,
   classifyReviewRun,
+  type DiagnoseOutput,
+  DiagnoseOutputSchema,
   type DockerCli,
   type Environment,
   EnvironmentError,
@@ -229,6 +232,8 @@ async function runStage(
       return merge(deps, context, mainDir, slot);
     case "e2e":
       return e2e(deps, context, mainDir, slot);
+    case "diagnose":
+      return diagnose(deps, context, mainDir, slot);
     default:
       throw new InfrastructureError(`unknown stage ${bundle.job.stage}`);
   }
@@ -963,4 +968,90 @@ async function e2e(
       git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
     }
   });
+}
+
+// After a failed e2e: an agent in a fresh integration environment, on the repo at the head of its integration
+// branch, finds out which repo is at fault. It only diagnoses: whatever it commits is thrown away with its branch.
+async function diagnose(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+): Promise<StageOutcomeBody> {
+  const { bundle, log } = context;
+  const integration = bundle.integrationBranch as string;
+  const head = tip(mainDir, integration);
+  const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
+  try {
+    const ctxDir = renderFor(deps, context, head, tmp);
+    const { refs } = snapshotRefs(deps, bundle);
+    const options = runOptions(deps, context);
+    // on a branch of its own that is gone again afterwards, like the e2e's
+    const branch = `diagnose/${subjectLabel(bundle)}`;
+    gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, head]);
+    try {
+      bringBranches(slot, mainDir, [branch]);
+      const run = await withEnvironment(
+        deps,
+        context,
+        "diagnose",
+        async (environment) => ({
+          environment,
+          run: await deps.makeAgentRunner(slot.dir).run({
+            stage: "diagnose",
+            branch,
+            baseBranch: integration,
+            promptFile: promptFor("diagnose"),
+            ctxDir,
+            refs,
+            schema: DiagnoseOutputSchema,
+            placement: { network: environment.network, env: environment.env },
+            ...options,
+            signal: context.signal,
+          }),
+        }),
+      );
+      if (context.signal.aborted)
+        throw new JobLostError("the lease was lost during the diagnosis");
+      const verdict = classifyDiagnoseRun(run.run);
+      if (verdict.kind === "infrastructure-failure")
+        throw new InfrastructureError(verdict.error);
+      log(
+        `diagnose: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
+      );
+      if (run.run.commits.length > 0)
+        log(
+          `diagnose: WARNING the agent made ${run.run.commits.length} commit(s); it should only look, and they are dropped`,
+        );
+      const output: DiagnoseOutput | undefined = run.run.output;
+      return {
+        stage: "diagnose",
+        outcome: verdict.outcome,
+        run: {
+          branch: integration,
+          headSha: head,
+          // the repos the environment was built from; the ticket's own repo is the head SHA
+          refShas: run.environment.shas,
+          envUpMs: run.environment.upMs,
+          durationMs: run.run.durationMs,
+          ...(options.model ? { model: options.model } : {}),
+          output: output ?? { error: run.run.error },
+        },
+        // a repo is only named when the outcome is "diagnosed"
+        ...(verdict.outcome === "diagnosed" && output
+          ? {
+              diagnosis: {
+                failingRepo: output.failingRepo,
+                evidence: output.evidence,
+                failingTests: output.failingTests,
+              },
+            }
+          : {}),
+      };
+    } finally {
+      git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }

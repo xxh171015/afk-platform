@@ -1,5 +1,4 @@
 import {
-  branchNames,
   type ExistingGraph,
   formatDisplayId,
   type ImportWarning,
@@ -11,6 +10,7 @@ import {
 import type pg from "pg";
 import { schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
+import { ensureIntegrationBranches } from "./integration-branches.ts";
 
 // Registering projects, repos and specs, and importing a spec's whole ticket graph
 // (docs/specs/m1-platform.md「plat CLI」, docs/design.md「导入格式」).
@@ -353,29 +353,11 @@ export async function importTickets(
     ]);
 
     if (append) {
-      // a repo the spec had not touched yet needs its integration branch before its first ticket runs
-      const branches = specRow.integration_branches as {
-        repoId: number;
-        branch: string;
-      }[];
-      const missing = [...new Set(plan.tickets.map((t) => t.repoId))].filter(
-        (repoId) => !branches.some((b) => b.repoId === repoId),
+      await ensureIntegrationBranches(
+        client,
+        specId,
+        plan.tickets.map((t) => t.repoId),
       );
-      if (missing.length > 0) {
-        const branch = branchNames(specRow.branch_namespace).integration(
-          specRow.slug,
-        );
-        await client.query(
-          "UPDATE specs SET integration_branches = $2 WHERE id = $1",
-          [
-            specId,
-            JSON.stringify([
-              ...branches,
-              ...missing.map((repoId) => ({ repoId, branch })),
-            ]),
-          ],
-        );
-      }
       await schedulePass(client, specId);
     }
     await client.query("COMMIT");

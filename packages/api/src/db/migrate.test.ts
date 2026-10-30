@@ -40,6 +40,7 @@ const LATER_THAN_REPO_NAMES = [
   "0021_ticket_versions",
   "0022_spec_order_broken",
   "0023_e2e_stage",
+  "0024_integration_rounds",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

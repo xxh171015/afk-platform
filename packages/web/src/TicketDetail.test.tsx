@@ -322,6 +322,74 @@ describe("the ticket page", () => {
     expect(screen.getByText(/blocked: gate-failed/)).toBeTruthy();
   });
 
+  it("shows every e2e of an integration ticket with its diagnosis and its fix ticket", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: { ...view().ticket, type: "integration" },
+          integration: {
+            rounds: 1,
+            attempts: [
+              {
+                e2e: {
+                  id: 20,
+                  displayId: "R-20",
+                  result: "failed",
+                  testsTotal: 3,
+                  testsFailed: 1,
+                  envUpMs: 4000,
+                  refShas: { backend: "0123456789abcdef" },
+                  headSha: "abc",
+                },
+                diagnosis: {
+                  result: "fail",
+                  failingRepo: "backend",
+                  evidence: "GET /orders/1/export answers 404",
+                  failingTests: ["downloads the export"],
+                },
+                fixTicket: {
+                  id: 9,
+                  displayId: "T-9",
+                  state: "done",
+                  repo: "backend",
+                },
+              },
+              {
+                e2e: {
+                  id: 24,
+                  displayId: "R-24",
+                  result: "passed",
+                  testsTotal: 3,
+                  testsFailed: 0,
+                  envUpMs: 4100,
+                  refShas: null,
+                  headSha: "abd",
+                },
+                diagnosis: null,
+                fixTicket: null,
+              },
+            ],
+          },
+        }),
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    expect(await screen.findByText("E2E tries")).toBeTruthy();
+    expect(screen.getByText(/1 of 2 fix rounds used/)).toBeTruthy();
+    expect(screen.getByText(/R-20 failed/)).toBeTruthy();
+    expect(
+      screen.getByText(/1 of 3 tests failed, built from backend@01234567/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/GET \/orders\/1\/export answers 404/),
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "T-9" }).getAttribute("href")).toBe(
+      "#/tickets/9",
+    );
+    expect(screen.getByText(/R-24 passed/)).toBeTruthy();
+  });
+
   it("names the tickets it waits for and the ones waiting for it", async () => {
     const server = fakeServer({
       "GET /tickets/4": () => ({

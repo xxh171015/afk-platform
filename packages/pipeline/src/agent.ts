@@ -48,6 +48,16 @@ export const ReviewOutputSchema = z
   });
 export type ReviewOutput = z.infer<typeof ReviewOutputSchema>;
 
+// What a diagnosis ends with (docs/specs/m2-platform.md「联调」): which repo is at fault for a failed e2e.
+export const DiagnoseOutputSchema = z.object({
+  result: z.enum(["pass", "fail"]),
+  // a repo's name, "unknown", or null when the e2e passed after all
+  failingRepo: z.string().nullable(),
+  evidence: z.string(),
+  failingTests: z.array(z.string()).default([]),
+});
+export type DiagnoseOutput = z.infer<typeof DiagnoseOutputSchema>;
+
 export interface AgentRunOptions<Schema extends z.ZodType> {
   stage: Stage | FinalStep;
   branch: string; // the ticket's branch, created from baseBranch when it does not exist
@@ -124,6 +134,38 @@ export function classifyAgentRun(
     : { kind: "outcome", outcome: "done" };
 }
 
+// What a diagnosis means for the ticket: a repo is named (a fix ticket follows), no repo can be named (a person has to
+// look), or the output was not usable. An agent that finds the e2e passing after all names no repo either.
+export type DiagnoseOutcome =
+  | "diagnosed"
+  | "unknown-side"
+  | "invalid-output"
+  | "timeout";
+
+export function classifyDiagnoseRun(
+  result: AgentRunResult<DiagnoseOutput>,
+): Classification<DiagnoseOutcome> {
+  const failure = failureOf(result);
+  if (failure) return failure;
+  const output = result.output;
+  if (!output) {
+    return { kind: "outcome", outcome: "invalid-output", detail: "no result" };
+  }
+  if (output.result === "fail" && output.failingRepo?.trim()) {
+    return output.failingRepo === "unknown"
+      ? { kind: "outcome", outcome: "unknown-side" }
+      : { kind: "outcome", outcome: "diagnosed" };
+  }
+  return {
+    kind: "outcome",
+    outcome: "unknown-side",
+    detail:
+      output.result === "pass"
+        ? "the e2e passed when the diagnosis ran it again"
+        : "no repo is named",
+  };
+}
+
 export function classifyReviewRun(
   result: AgentRunResult<ReviewOutput>,
 ): Classification<ReviewOutcome> {
@@ -160,6 +202,7 @@ export const PROMPT_DIR = join(
 export const PROMPTS = {
   implement: join(PROMPT_DIR, "implement.md"),
   integrationImplement: join(PROMPT_DIR, "integration-implement.md"),
+  diagnose: join(PROMPT_DIR, "afk-integration.md"),
   fix: join(PROMPT_DIR, "fix.md"),
   review: join(PROMPT_DIR, "review.md"),
   finalReview: join(PROMPT_DIR, "final-review.md"),
@@ -176,7 +219,8 @@ export function promptFor(
     | "review-fix"
     | "merge-fix"
     | "final-review"
-    | "final-fix",
+    | "final-fix"
+    | "diagnose",
   options: { integration?: boolean } = {},
 ): string {
   switch (stage) {
@@ -184,6 +228,8 @@ export function promptFor(
       return PROMPTS.finalReview;
     case "final-fix":
       return PROMPTS.finalFix;
+    case "diagnose":
+      return PROMPTS.diagnose;
     case "implement":
       return options.integration
         ? PROMPTS.integrationImplement

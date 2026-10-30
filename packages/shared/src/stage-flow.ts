@@ -13,6 +13,7 @@ export const STAGES = [
   "review-fix",
   "merge-fix",
   "e2e", // an integration ticket's last stage: a worker-run step in a fresh integration environment
+  "diagnose", // after a failed e2e: an agent in the environment says which repo is at fault (it changes nothing)
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
@@ -46,13 +47,23 @@ export type StageReport =
     }
   | { stage: "review"; outcome: "pass" | "fix" | "invalid-output" | "timeout" }
   | { stage: "merge"; outcome: "merged" | "conflict" | "gate-failed" }
-  | { stage: "e2e"; outcome: "passed" | "failed" };
+  | { stage: "e2e"; outcome: "passed" | "failed" }
+  // diagnosed: the diagnosis names a repo of the environment (or the ticket's own)
+  | {
+      stage: "diagnose";
+      outcome: "diagnosed" | "unknown-side" | "invalid-output" | "timeout";
+    };
 
 // What the ticket remembers between stages.
 export interface Progress {
   fixCounts: FixCounts;
   reviewed: boolean; // review runs once per ticket
+  // An integration ticket's e2e failures that were followed by a fix ticket (absent: none yet).
+  integrationRounds?: number;
 }
+
+// A failed e2e and the fix ticket after it make a round; the third failure is one too many.
+export const MAX_INTEGRATION_ROUNDS = 2;
 
 export type StageDecision =
   | {
@@ -63,6 +74,8 @@ export type StageDecision =
       progress: Progress;
     }
   | { type: "block"; reason: BlockedReason }
+  // The diagnosis is in: a fix ticket is to be made, and the ticket waits for it (back to pending).
+  | { type: "await-fix"; progress: Progress }
   | { type: "done" };
 
 const enqueue = (
@@ -150,11 +163,28 @@ export function advanceStage(
       );
     }
 
-    case "e2e":
-      // Diagnosis and repair tickets come later; until then a failed e2e is a blocked ticket, with the failure
-      // in its brief.
-      return report.outcome === "passed"
-        ? { type: "done" }
-        : block("post-merge-gate-failed");
+    case "e2e": {
+      if (report.outcome === "passed") return { type: "done" };
+      const rounds = progress.integrationRounds ?? 0;
+      return rounds >= MAX_INTEGRATION_ROUNDS
+        ? block("integration-loop-exceeded")
+        : enqueue("diagnose", progress);
+    }
+
+    case "diagnose":
+      if (report.outcome === "diagnosed") {
+        return {
+          type: "await-fix",
+          progress: {
+            ...progress,
+            integrationRounds: (progress.integrationRounds ?? 0) + 1,
+          },
+        };
+      }
+      return block(
+        report.outcome === "unknown-side"
+          ? "integration-unknown-side"
+          : report.outcome,
+      );
   }
 }

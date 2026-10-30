@@ -194,6 +194,12 @@ const DONE = {
   acceptance: {},
   uncertainties: [],
 };
+const DIAGNOSIS = {
+  result: "fail",
+  failingRepo: "backend",
+  evidence: "GET /orders/export answers 404",
+  failingTests: ["exports"],
+};
 const PASS = {
   verdict: "pass",
   mustFix: [],
@@ -221,13 +227,15 @@ function executor(): Omit<ExecutorDeps, "api"> {
       new RecordingAgentRunner(slotDir, async (ctx) =>
         ctx.stage === "review"
           ? { output: PASS }
-          : {
-              files: {
-                [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const x = 1;\n`,
+          : ctx.stage === "diagnose"
+            ? { output: DIAGNOSIS } // only looks: no files
+            : {
+                files: {
+                  [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const x = 1;\n`,
+                },
+                message: `${ctx.stage} on ${ctx.branch}`,
+                output: DONE,
               },
-              message: `${ctx.stage} on ${ctx.branch}`,
-              output: DONE,
-            },
       ),
     makeGateSandbox: (slotDir) => new FakeGateSandbox(slotDir),
   };
@@ -378,7 +386,7 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
     ).toEqual(["implement", "gate", "review", "merge", "e2e"]);
   });
 
-  it("blocks the ticket, with the failing tests in the run, when the e2e fails", async () => {
+  it("diagnoses a failed e2e, makes a fix ticket in the repo it names, and gives up after two rounds", async () => {
     writeFileSync(join(frontendSeed.dir, "E2E_FAIL"), "");
     git(frontendSeed.dir, ["add", "."]);
     git(frontendSeed.dir, ["commit", "-qm", "fail the e2e"]);
@@ -393,19 +401,46 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
     await confirmedSpec(["e2e"]);
     await work();
 
+    // T-1 backend, T-2 the integration ticket, T-3 and T-4 the fix tickets of the two rounds (both in the backend)
     expect(await stateOf()).toEqual([
       "1:done",
-      "2:blocked/post-merge-gate-failed",
+      "2:blocked/integration-loop-exceeded",
+      "3:done",
+      "4:done",
     ]);
-    const [run] = await e2eRuns();
-    expect(run).toMatchObject({
-      result: "failed",
-      tests_total: 2,
-      tests_failed: 1,
-    });
-    expect(run.output.failingTests).toEqual(["exports"]);
-    // the environment is gone in any case: the agent's, and the e2e's
-    expect(docker.calls.filter((c) => c.includes("down"))).toHaveLength(2);
+    const runs = await e2eRuns();
+    expect(runs.map((r) => r.result)).toEqual(["failed", "failed", "failed"]);
+    expect(runs[0]).toMatchObject({ tests_total: 2, tests_failed: 1 });
+    expect(runs[0].output.failingTests).toEqual(["exports"]);
+    const fixes = await db.pool.query(
+      "SELECT id, type, fix_for_ticket_id, fix_round, (SELECT name FROM repos WHERE id = repo_id) AS repo FROM tickets WHERE type = 'fix' ORDER BY id",
+    );
+    expect(fixes.rows).toEqual([
+      {
+        id: 3,
+        type: "fix",
+        fix_for_ticket_id: 2,
+        fix_round: 1,
+        repo: "backend",
+      },
+      {
+        id: 4,
+        type: "fix",
+        fix_for_ticket_id: 2,
+        fix_round: 2,
+        repo: "backend",
+      },
+    ]);
+    // the diagnosis ran in an environment, with the diagnosis prompt, and left nothing behind
+    const diagnoses = agentRuns.filter((r) => r.stage === "diagnose");
+    expect(diagnoses).toHaveLength(2);
+    for (const run of diagnoses)
+      expect(run).toMatchObject({
+        prompt: PROMPTS.diagnose,
+        placement: { env: { BACKEND_URL: "http://backend:8080" } },
+        environmentsUp: 1,
+      });
+    expect(docker.active).toBe(0);
   });
 
   it("is blocked as integration-environment-failed after three environments that did not come up", async () => {

@@ -1369,6 +1369,40 @@ export interface paths {
                   result: string | null;
                   output?: unknown;
                   logPath: string;
+                  attempts?: {
+                    e2e: {
+                      id: number;
+                      displayId: string;
+                      result: string | null;
+                      testsTotal: number | null;
+                      testsFailed: number | null;
+                      envUpMs: number | null;
+                      refShas: {
+                        [key: string]: string;
+                      } | null;
+                      headSha: string | null;
+                    };
+                    diagnosis: {
+                      result: string | null;
+                      failingRepo: string | null;
+                      evidence: string;
+                      failingTests: string[];
+                    } | null;
+                    fixTicket: {
+                      id: number;
+                      displayId: string;
+                      /** @enum {string} */
+                      state:
+                        | "pending"
+                        | "queued"
+                        | "running"
+                        | "merging"
+                        | "done"
+                        | "blocked"
+                        | "cancelled";
+                      repo: string;
+                    } | null;
+                  }[];
                 } | null;
                 body: string;
                 acceptanceCriteria: string[];
@@ -1381,6 +1415,43 @@ export interface paths {
                 };
                 reviewed: boolean;
               };
+              integration: {
+                rounds: number;
+                attempts: {
+                  e2e: {
+                    id: number;
+                    displayId: string;
+                    result: string | null;
+                    testsTotal: number | null;
+                    testsFailed: number | null;
+                    envUpMs: number | null;
+                    refShas: {
+                      [key: string]: string;
+                    } | null;
+                    headSha: string | null;
+                  };
+                  diagnosis: {
+                    result: string | null;
+                    failingRepo: string | null;
+                    evidence: string;
+                    failingTests: string[];
+                  } | null;
+                  fixTicket: {
+                    id: number;
+                    displayId: string;
+                    /** @enum {string} */
+                    state:
+                      | "pending"
+                      | "queued"
+                      | "running"
+                      | "merging"
+                      | "done"
+                      | "blocked"
+                      | "cancelled";
+                    repo: string;
+                  } | null;
+                }[];
+              } | null;
               versions: {
                 version: number;
                 createdAt: string;
@@ -1554,6 +1625,40 @@ export interface paths {
                   result: string | null;
                   output?: unknown;
                   logPath: string;
+                  attempts?: {
+                    e2e: {
+                      id: number;
+                      displayId: string;
+                      result: string | null;
+                      testsTotal: number | null;
+                      testsFailed: number | null;
+                      envUpMs: number | null;
+                      refShas: {
+                        [key: string]: string;
+                      } | null;
+                      headSha: string | null;
+                    };
+                    diagnosis: {
+                      result: string | null;
+                      failingRepo: string | null;
+                      evidence: string;
+                      failingTests: string[];
+                    } | null;
+                    fixTicket: {
+                      id: number;
+                      displayId: string;
+                      /** @enum {string} */
+                      state:
+                        | "pending"
+                        | "queued"
+                        | "running"
+                        | "merging"
+                        | "done"
+                        | "blocked"
+                        | "cancelled";
+                      repo: string;
+                    } | null;
+                  }[];
                 } | null;
               }[];
               finalizations: {
@@ -1572,6 +1677,40 @@ export interface paths {
                   result: string | null;
                   output?: unknown;
                   logPath: string;
+                  attempts?: {
+                    e2e: {
+                      id: number;
+                      displayId: string;
+                      result: string | null;
+                      testsTotal: number | null;
+                      testsFailed: number | null;
+                      envUpMs: number | null;
+                      refShas: {
+                        [key: string]: string;
+                      } | null;
+                      headSha: string | null;
+                    };
+                    diagnosis: {
+                      result: string | null;
+                      failingRepo: string | null;
+                      evidence: string;
+                      failingTests: string[];
+                    } | null;
+                    fixTicket: {
+                      id: number;
+                      displayId: string;
+                      /** @enum {string} */
+                      state:
+                        | "pending"
+                        | "queued"
+                        | "running"
+                        | "merging"
+                        | "done"
+                        | "blocked"
+                        | "cancelled";
+                      repo: string;
+                    } | null;
+                  }[];
                 } | null;
               }[];
               mergeOrder: {
@@ -1834,6 +1973,40 @@ export interface paths {
                   result: string | null;
                   output?: unknown;
                   logPath: string;
+                  attempts?: {
+                    e2e: {
+                      id: number;
+                      displayId: string;
+                      result: string | null;
+                      testsTotal: number | null;
+                      testsFailed: number | null;
+                      envUpMs: number | null;
+                      refShas: {
+                        [key: string]: string;
+                      } | null;
+                      headSha: string | null;
+                    };
+                    diagnosis: {
+                      result: string | null;
+                      failingRepo: string | null;
+                      evidence: string;
+                      failingTests: string[];
+                    } | null;
+                    fixTicket: {
+                      id: number;
+                      displayId: string;
+                      /** @enum {string} */
+                      state:
+                        | "pending"
+                        | "queued"
+                        | "running"
+                        | "merging"
+                        | "done"
+                        | "blocked"
+                        | "cancelled";
+                      repo: string;
+                    } | null;
+                  }[];
                 } | null;
               }[];
               finalizations: {
@@ -1852,6 +2025,40 @@ export interface paths {
                   result: string | null;
                   output?: unknown;
                   logPath: string;
+                  attempts?: {
+                    e2e: {
+                      id: number;
+                      displayId: string;
+                      result: string | null;
+                      testsTotal: number | null;
+                      testsFailed: number | null;
+                      envUpMs: number | null;
+                      refShas: {
+                        [key: string]: string;
+                      } | null;
+                      headSha: string | null;
+                    };
+                    diagnosis: {
+                      result: string | null;
+                      failingRepo: string | null;
+                      evidence: string;
+                      failingTests: string[];
+                    } | null;
+                    fixTicket: {
+                      id: number;
+                      displayId: string;
+                      /** @enum {string} */
+                      state:
+                        | "pending"
+                        | "queued"
+                        | "running"
+                        | "merging"
+                        | "done"
+                        | "blocked"
+                        | "cancelled";
+                      repo: string;
+                    } | null;
+                  }[];
                 } | null;
               }[];
               pullRequests: {

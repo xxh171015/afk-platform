@@ -7,7 +7,9 @@ import type { z } from "zod";
 import {
   type AgentRunResult,
   classifyAgentRun,
+  classifyDiagnoseRun,
   classifyReviewRun,
+  DiagnoseOutputSchema,
   type ImplementOutput,
   ImplementOutputSchema,
   PROMPTS,
@@ -224,6 +226,67 @@ describe("classifying a review run", () => {
         suggestions: [],
       }),
     ).toEqual([{ kind: "must-fix", body: "b.ts p" }]);
+  });
+});
+
+describe("classifyDiagnoseRun", () => {
+  const run = (output: unknown, extra: Record<string, unknown> = {}) =>
+    classifyDiagnoseRun({
+      output: output as never,
+      commits: [],
+      durationMs: 1,
+      ...extra,
+    });
+  const fail = (failingRepo: string | null) => ({
+    result: "fail",
+    failingRepo,
+    evidence: "404 on /orders/1/export",
+    failingTests: ["exports"],
+  });
+
+  it("is diagnosed when a repo is named", () => {
+    expect(run(fail("backend"))).toEqual({
+      kind: "outcome",
+      outcome: "diagnosed",
+    });
+  });
+
+  it("is unknown-side when the agent says unknown, names nothing, or finds the e2e passing", () => {
+    for (const output of [
+      fail("unknown"),
+      fail(null),
+      { ...fail(null), result: "pass" },
+    ])
+      expect(run(output)).toMatchObject({
+        kind: "outcome",
+        outcome: "unknown-side",
+      });
+  });
+
+  it("is invalid output without a result, and a timeout when the agent ran out of time", () => {
+    expect(run(undefined)).toMatchObject({ outcome: "invalid-output" });
+    expect(
+      run(undefined, { error: "idle", errorKind: "timeout" }),
+    ).toMatchObject({ outcome: "timeout" });
+  });
+
+  it("asks for the structured output the schema accepts, from a prompt that changes nothing", () => {
+    expect(DiagnoseOutputSchema.safeParse(fail("backend")).success).toBe(true);
+    expect(DiagnoseOutputSchema.safeParse({ result: "fail" }).success).toBe(
+      false,
+    );
+    expect(promptFor("diagnose")).toBe(PROMPTS.diagnose);
+    const prompt = readFileSync(PROMPTS.diagnose, "utf8");
+    for (const word of [
+      "failingRepo",
+      "evidence",
+      "failingTests",
+      "unknown",
+      "<result>",
+      "/context/failure/gate.log",
+      "不要提交",
+    ])
+      expect(prompt).toContain(word);
   });
 });
 

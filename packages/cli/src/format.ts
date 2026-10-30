@@ -1,12 +1,71 @@
-import type { AcceptancePackView, PullRequestRowView } from "@afk/shared";
+import {
+  type AcceptancePackView,
+  MAX_INTEGRATION_ROUNDS,
+  type PullRequestRowView,
+} from "@afk/shared";
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
+
+// One e2e of an integration ticket, with the diagnosis after it and the fix ticket that came of it.
+interface AttemptLike {
+  e2e: {
+    displayId: string;
+    result: string | null;
+    testsTotal: number | null;
+    testsFailed: number | null;
+    envUpMs: number | null;
+    refShas: Record<string, string> | null;
+  };
+  diagnosis: {
+    failingRepo: string | null;
+    evidence: string;
+    failingTests: string[];
+  } | null;
+  fixTicket: { displayId: string; state: string; repo: string } | null;
+}
 
 interface BriefLike {
   run: { displayId: string };
   stage: string;
   result: string | null;
   output?: unknown;
+  attempts?: AttemptLike[];
+}
+
+export function attemptLines(
+  attempts: AttemptLike[],
+  indent: string,
+): string[] {
+  return attempts.flatMap((attempt, i) => {
+    const { e2e, diagnosis, fixTicket } = attempt;
+    const counts =
+      e2e.testsTotal === null
+        ? ""
+        : `, ${e2e.testsFailed ?? 0} of ${e2e.testsTotal} tests failed`;
+    const env =
+      e2e.envUpMs === null
+        ? ""
+        : `, environment up in ${(e2e.envUpMs / 1000).toFixed(1)} s`;
+    const shas = Object.entries(e2e.refShas ?? {})
+      .map(([name, sha]) => `${name}@${sha.slice(0, 8)}`)
+      .join(", ");
+    return [
+      `${indent}e2e ${i + 1}: ${e2e.result ?? "running"} in ${e2e.displayId}${counts}${env}${shas ? `, built from ${shas}` : ""}`,
+      ...(diagnosis
+        ? [
+            `${indent}  diagnosis: ${diagnosis.failingRepo ?? "no repo"}: ${diagnosis.evidence.split("\n")[0] ?? ""}`,
+            ...(diagnosis.failingTests.length
+              ? [`${indent}  failing: ${diagnosis.failingTests.join(", ")}`]
+              : []),
+          ]
+        : []),
+      ...(fixTicket
+        ? [
+            `${indent}  fix ticket: ${fixTicket.displayId} (${fixTicket.state}, ${fixTicket.repo})`,
+          ]
+        : []),
+    ];
+  });
 }
 
 const detailOf = (output: unknown): string => {
@@ -38,6 +97,9 @@ export function briefLines(
   return [
     `${indent}${brief.stage} ended ${brief.result ?? "?"} in ${brief.run.displayId}${detail ? `: ${detail}` : ""}`,
     `${indent}log: plat run logs ${brief.run.displayId}`,
+    ...(brief.attempts?.length
+      ? [`${indent}e2e tries:`, ...attemptLines(brief.attempts, `${indent}  `)]
+      : []),
   ];
 }
 
@@ -184,6 +246,7 @@ export function ticketText(view: {
     refShas: Record<string, string> | null;
   }[];
   findings: { kind: string; body: string; resolution: string }[];
+  integration?: { rounds: number } | null;
 }): string {
   const { ticket } = view;
   return [
@@ -196,6 +259,11 @@ export function ticketText(view: {
       : []),
     ...contextLines(ticket, ""),
     ...briefLines(ticket.brief),
+    ...(view.integration
+      ? [
+          `integration: ${view.integration.rounds} of ${MAX_INTEGRATION_ROUNDS} fix rounds used`,
+        ]
+      : []),
     "acceptance:",
     ...ticket.acceptanceCriteria.map((c) => `  - ${c}`),
     ...(ticket.allowedProtectedPaths.length

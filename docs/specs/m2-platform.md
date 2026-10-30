@@ -125,7 +125,13 @@ implement（agent，在联调环境里写 e2e 并提交）→ 门禁（本仓库
 - 实现时定下的约定：`up` 只列出非 `seed-` 的服务（种子服务只用 `run` 跑）；仓库没有 `seed-<仓库名>` 服务就跳过；带 `build:` 的服务不能同时写 `image:`（镜像名固定是 `afk-<run-id>-<服务名>`，也就是 compose 给没写 `image:` 的服务取的名字）；`build.context` 和 `dockerfile` 相对片段所在目录。沙箱里要用的服务地址写在片段顶层的 `x-afk-env:`（compose 会忽略 `x-` 开头的键），例如 `BACKEND_URL: http://backend:8080`，各片段合并后整体通过 `docker({ env })` 传入，同名不同值报错。
 - e2e 命令是 `npm run e2e`（前置命令用仓库 `gates.yaml` 的 `setup`），JUnit 写在 `reports/e2e-junit.xml`；命令退出码非 0 时也读这份报告（测试框架在有失败时照样写报告）。有失败用例，或报告里没有用例，都算 e2e 失败。
 - 实现时定下的约定：联调票的 implement 和三种 fix 运行（`gate-fix`、`review-fix`、`merge-fix`）在环境里跑，阶段名不变（不单设 `integration-implement` 阶段），由票的类型决定；implement 用 `integration-implement.md` prompt，fix 仍用 `fix.md`。环境按 `environment:` 起、沙箱接进它的网络、运行结束就拆掉；起不来照作业失败重排。
-- e2e 失败时票先进 blocked，原因码暂用 `post-merge-gate-failed`，失败用例在 Run 的输出里；诊断和修复票做完后换成专门的原因码。
+- e2e 失败时接着跑 diagnose，失败用例在 e2e Run 的输出里；诊断和修复票的做法见上面「联调」一节。
+- 实现时定下的约定（诊断与修复票）：
+  - diagnose 在新起的环境里跑（e2e 的环境已经拆了，起法和快照 SHA 的规则相同），沙箱用同样的 `docker({ network, env })`；它在一个自己的分支 `diagnose/<票号>` 上，agent 提交的内容随分支丢弃。
+  - 诊断结论 `pass`（复现时 e2e 通过了）、`failingRepo` 为 `unknown` 或没填，都按 `integration-unknown-side` 处理；`failingRepo` 写了既不是票自己的仓库也不在 `environment:` 里的名字，按 `invalid-output`。
+  - 轮数 `integration_rounds` 在诊断指出仓库、建出修复票时加一；e2e 再失败时轮数已是 2，直接 `integration-loop-exceeded`，不再诊断。修复票自己有编号（`fix_round`，同一张联调票从 1 起一直增加，不随「重新跑 e2e」清零），同一编号只能有一张，诊断结果重复送来不会建出第二张。
+  - 联调票 merge 通过后记下 `resume_stage = e2e`；之后它每次回到 pending 再开工（修复票 done、人重试）都从 e2e 阶段开始。人对联调票点重试（不分 continue / restart）就是「重新跑 e2e」，轮数清零；「追加修复票后重试」同样是重试，追加的票用 blocks 边挡在它前面即可。
+  - diagnose 作业连续三次失败（环境起不来）按 `integration-environment-failed`，同 e2e。
 - 网络按 compose 的 label 找（`com.docker.compose.project=afk-<run-id>` + `com.docker.compose.network=default`），不拼名字；建沙箱前确认网络存在（网络不存在时 Sandcastle 会留下一个 `Created` 状态的孤儿容器）。默认网络不能设成 `internal`（沙箱要经它访问模型 API）。
 - 沙箱：联调票所在仓库的镜像（agent 运行、门禁、联调共用），`docker({ network, env })`，服务地址通过 `env` 传（试点前端是 `BACKEND_URL`），`/context` 和 `/refs/*` 只读挂载。
 - **清理**：先结束沙箱，再 `compose down -v`，再按 label 查一次网络，还在就再 down 一次（沙箱还挂着时 `compose down` 返回 0 但网络会留下）；删掉 `afk-<run-id>-*` 镜像。worker 回收孤儿容器从 `docker ps -q` 改为 `docker ps -a`（包括 `Created`）；worker 被杀后，下一个作业按 compose 项目名 `afk-<run-id>` 找回并 down 掉它的环境。

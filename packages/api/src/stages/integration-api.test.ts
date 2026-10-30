@@ -118,14 +118,12 @@ describe("the e2e stage", () => {
     expect((await ticketRow()).state).toBe("done");
   });
 
-  it("blocks the ticket when the e2e fails", async () => {
+  it("is followed by a diagnosis when the e2e fails (see diagnosis-api.test.ts)", async () => {
     await runningSpec();
     await mergeIntegrationTicket();
     await stage("e2e", { outcome: "failed" });
-    expect(await ticketRow()).toMatchObject({
-      state: "blocked",
-      blocked_reason: "post-merge-gate-failed",
-    });
+    expect((await claim())?.payload.stage).toBe("diagnose");
+    expect((await ticketRow()).state).toBe("merging");
   });
 
   it("is not queued for a ticket that is not an integration ticket", async () => {

@@ -167,7 +167,7 @@ export async function buildBundle(
   // Only the most recent gate or merge counts: an old failure that was fixed since is not news.
   const failed = await pool.query<{ log: string | null }>(
     `SELECT output->>'failureLog' AS log FROM runs
-     WHERE id = (SELECT max(id) FROM runs WHERE ticket_id = $1 AND stage IN ('gate', 'merge') AND result IS NOT NULL)
+     WHERE id = (SELECT max(id) FROM runs WHERE ticket_id = $1 AND stage IN ('gate', 'merge', 'e2e') AND result IS NOT NULL)
        AND result IN ('failed', 'gate-failed', 'conflict')`,
     [ticketId],
   );

@@ -37,6 +37,35 @@ const reply = (description: string, schema: z.ZodType) => ({
   content: json(schema),
 });
 
+const IntegrationAttempt = z.object({
+  e2e: z.object({
+    id: Id,
+    displayId: z.string(),
+    result: z.string().nullable(),
+    testsTotal: Id.nullable(),
+    testsFailed: Id.nullable(),
+    envUpMs: Id.nullable(),
+    refShas: z.record(z.string(), z.string()).nullable(),
+    headSha: z.string().nullable(),
+  }),
+  diagnosis: z
+    .object({
+      result: z.string().nullable(),
+      failingRepo: z.string().nullable(),
+      evidence: z.string(),
+      failingTests: z.array(z.string()),
+    })
+    .nullable(),
+  fixTicket: z
+    .object({
+      id: Id,
+      displayId: z.string(),
+      state: z.enum(TICKET_STATES),
+      repo: z.string(),
+    })
+    .nullable(),
+});
+
 const Brief = z
   .object({
     run: z.object({ id: Id, displayId: z.string() }),
@@ -44,6 +73,7 @@ const Brief = z
     result: z.string().nullable(),
     output: z.unknown(),
     logPath: z.string(),
+    attempts: z.array(IntegrationAttempt).optional(),
   })
   .nullable();
 
@@ -104,6 +134,12 @@ const ticketRoute = createRoute({
           fixCounts: z.record(z.string(), Id),
           reviewed: z.boolean(),
         }),
+        integration: z
+          .object({
+            rounds: Id,
+            attempts: z.array(IntegrationAttempt),
+          })
+          .nullable(),
         versions: z.array(z.object({ version: Id, createdAt: z.string() })),
         upstream: z.array(EdgeEnd),
         downstream: z.array(EdgeEnd),

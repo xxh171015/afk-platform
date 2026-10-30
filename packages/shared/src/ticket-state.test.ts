@@ -16,6 +16,19 @@ describe("ticketTransition: forward path", () => {
   });
 });
 
+describe("ticketTransition: an integration ticket around its e2e", () => {
+  it("is queued straight into merging to run its e2e again, and goes back to pending to wait for a fix ticket", () => {
+    expect(ticketTransition("queued", { type: "resume-e2e" })).toEqual({
+      ok: true,
+      state: "merging",
+    });
+    expect(ticketTransition("merging", { type: "await-fix" })).toEqual({
+      ok: true,
+      state: "pending",
+    });
+  });
+});
+
 describe("ticketTransition: blocked, retry, cancel", () => {
   it.each([
     ["running", "gate-failed"],
@@ -25,7 +38,8 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     ["running", "contract-change-needed"],
     ["running", "invalid-output"],
     ["running", "timeout"],
-    ["running", "integration-loop-exceeded"],
+    ["merging", "integration-loop-exceeded"],
+    ["merging", "integration-unknown-side"],
     ["running", "integration-environment-failed"],
     ["merging", "integration-environment-failed"],
     ["merging", "invalid-output"],
@@ -117,7 +131,10 @@ describe("ticketTransition: illegal moves", () => {
     ["running", { type: "block", reason: "merge-conflict" }],
     ["merging", { type: "block", reason: "no-commits" }],
     ["pending", { type: "block", reason: "gate-failed" }],
-    ["merging", { type: "block", reason: "integration-loop-exceeded" }],
+    ["running", { type: "block", reason: "integration-loop-exceeded" }],
+    ["running", { type: "block", reason: "integration-unknown-side" }],
+    ["running", { type: "await-fix" }],
+    ["merging", { type: "resume-e2e" }],
     ["running", { type: "block", reason: "post-merge-gate-failed" }],
     ["running", { type: "block", reason: "upstream-cancelled" }],
   ] as const)("%s rejects %j", (from, event) => {

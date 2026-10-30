@@ -88,7 +88,8 @@ export async function retryTicket(
     }
     const plan = retryPlan(mode === "continue" ? "resume" : "restart");
     await client.query(
-      `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, restart = $3,
+      `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false,
+         restart = $3 AND resume_stage IS NULL, integration_rounds = 0,
          job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
        WHERE id = $1`,
       [ticketId, JSON.stringify(plan.fixCounts), plan.deleteBranch],

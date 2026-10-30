@@ -169,6 +169,13 @@
       "when": 1793370294496,
       "tag": "0023_e2e_stage",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793374294496,
+      "tag": "0024_integration_rounds",
+      "breakpoints": true
     }
   ]
 }

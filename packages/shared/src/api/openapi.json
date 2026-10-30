@@ -2327,6 +2327,115 @@
                             "output": {},
                             "logPath": {
                               "type": "string"
+                            },
+                            "attempts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "e2e": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "integer"
+                                      },
+                                      "displayId": {
+                                        "type": "string"
+                                      },
+                                      "result": {
+                                        "type": ["string", "null"]
+                                      },
+                                      "testsTotal": {
+                                        "type": ["integer", "null"]
+                                      },
+                                      "testsFailed": {
+                                        "type": ["integer", "null"]
+                                      },
+                                      "envUpMs": {
+                                        "type": ["integer", "null"]
+                                      },
+                                      "refShas": {
+                                        "type": ["object", "null"],
+                                        "additionalProperties": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "headSha": {
+                                        "type": ["string", "null"]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "displayId",
+                                      "result",
+                                      "testsTotal",
+                                      "testsFailed",
+                                      "envUpMs",
+                                      "refShas",
+                                      "headSha"
+                                    ]
+                                  },
+                                  "diagnosis": {
+                                    "type": ["object", "null"],
+                                    "properties": {
+                                      "result": {
+                                        "type": ["string", "null"]
+                                      },
+                                      "failingRepo": {
+                                        "type": ["string", "null"]
+                                      },
+                                      "evidence": {
+                                        "type": "string"
+                                      },
+                                      "failingTests": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "result",
+                                      "failingRepo",
+                                      "evidence",
+                                      "failingTests"
+                                    ]
+                                  },
+                                  "fixTicket": {
+                                    "type": ["object", "null"],
+                                    "properties": {
+                                      "id": {
+                                        "type": "integer"
+                                      },
+                                      "displayId": {
+                                        "type": "string"
+                                      },
+                                      "state": {
+                                        "type": "string",
+                                        "enum": [
+                                          "pending",
+                                          "queued",
+                                          "running",
+                                          "merging",
+                                          "done",
+                                          "blocked",
+                                          "cancelled"
+                                        ]
+                                      },
+                                      "repo": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "displayId",
+                                      "state",
+                                      "repo"
+                                    ]
+                                  }
+                                },
+                                "required": ["e2e", "diagnosis", "fixTicket"]
+                              }
                             }
                           },
                           "required": ["run", "stage", "result", "logPath"]
@@ -2391,6 +2500,119 @@
                         "fixCounts",
                         "reviewed"
                       ]
+                    },
+                    "integration": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "rounds": {
+                          "type": "integer"
+                        },
+                        "attempts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "e2e": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  },
+                                  "result": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "testsTotal": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "testsFailed": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "envUpMs": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "refShas": {
+                                    "type": ["object", "null"],
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "headSha": {
+                                    "type": ["string", "null"]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "displayId",
+                                  "result",
+                                  "testsTotal",
+                                  "testsFailed",
+                                  "envUpMs",
+                                  "refShas",
+                                  "headSha"
+                                ]
+                              },
+                              "diagnosis": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "result": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "failingRepo": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "evidence": {
+                                    "type": "string"
+                                  },
+                                  "failingTests": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "result",
+                                  "failingRepo",
+                                  "evidence",
+                                  "failingTests"
+                                ]
+                              },
+                              "fixTicket": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "queued",
+                                      "running",
+                                      "merging",
+                                      "done",
+                                      "blocked",
+                                      "cancelled"
+                                    ]
+                                  },
+                                  "repo": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId", "state", "repo"]
+                              }
+                            },
+                            "required": ["e2e", "diagnosis", "fixTicket"]
+                          }
+                        }
+                      },
+                      "required": ["rounds", "attempts"]
                     },
                     "versions": {
                       "type": "array",
@@ -2608,6 +2830,7 @@
                   },
                   "required": [
                     "ticket",
+                    "integration",
                     "versions",
                     "upstream",
                     "downstream",
@@ -2812,6 +3035,115 @@
                               "output": {},
                               "logPath": {
                                 "type": "string"
+                              },
+                              "attempts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "e2e": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "testsTotal": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "testsFailed": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "envUpMs": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "refShas": {
+                                          "type": ["object", "null"],
+                                          "additionalProperties": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "headSha": {
+                                          "type": ["string", "null"]
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "result",
+                                        "testsTotal",
+                                        "testsFailed",
+                                        "envUpMs",
+                                        "refShas",
+                                        "headSha"
+                                      ]
+                                    },
+                                    "diagnosis": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "failingRepo": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "evidence": {
+                                          "type": "string"
+                                        },
+                                        "failingTests": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "result",
+                                        "failingRepo",
+                                        "evidence",
+                                        "failingTests"
+                                      ]
+                                    },
+                                    "fixTicket": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "state": {
+                                          "type": "string",
+                                          "enum": [
+                                            "pending",
+                                            "queued",
+                                            "running",
+                                            "merging",
+                                            "done",
+                                            "blocked",
+                                            "cancelled"
+                                          ]
+                                        },
+                                        "repo": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "state",
+                                        "repo"
+                                      ]
+                                    }
+                                  },
+                                  "required": ["e2e", "diagnosis", "fixTicket"]
+                                }
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
@@ -2881,6 +3213,115 @@
                               "output": {},
                               "logPath": {
                                 "type": "string"
+                              },
+                              "attempts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "e2e": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "testsTotal": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "testsFailed": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "envUpMs": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "refShas": {
+                                          "type": ["object", "null"],
+                                          "additionalProperties": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "headSha": {
+                                          "type": ["string", "null"]
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "result",
+                                        "testsTotal",
+                                        "testsFailed",
+                                        "envUpMs",
+                                        "refShas",
+                                        "headSha"
+                                      ]
+                                    },
+                                    "diagnosis": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "failingRepo": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "evidence": {
+                                          "type": "string"
+                                        },
+                                        "failingTests": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "result",
+                                        "failingRepo",
+                                        "evidence",
+                                        "failingTests"
+                                      ]
+                                    },
+                                    "fixTicket": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "state": {
+                                          "type": "string",
+                                          "enum": [
+                                            "pending",
+                                            "queued",
+                                            "running",
+                                            "merging",
+                                            "done",
+                                            "blocked",
+                                            "cancelled"
+                                          ]
+                                        },
+                                        "repo": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "state",
+                                        "repo"
+                                      ]
+                                    }
+                                  },
+                                  "required": ["e2e", "diagnosis", "fixTicket"]
+                                }
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
@@ -3594,6 +4035,115 @@
                               "output": {},
                               "logPath": {
                                 "type": "string"
+                              },
+                              "attempts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "e2e": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "testsTotal": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "testsFailed": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "envUpMs": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "refShas": {
+                                          "type": ["object", "null"],
+                                          "additionalProperties": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "headSha": {
+                                          "type": ["string", "null"]
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "result",
+                                        "testsTotal",
+                                        "testsFailed",
+                                        "envUpMs",
+                                        "refShas",
+                                        "headSha"
+                                      ]
+                                    },
+                                    "diagnosis": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "failingRepo": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "evidence": {
+                                          "type": "string"
+                                        },
+                                        "failingTests": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "result",
+                                        "failingRepo",
+                                        "evidence",
+                                        "failingTests"
+                                      ]
+                                    },
+                                    "fixTicket": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "state": {
+                                          "type": "string",
+                                          "enum": [
+                                            "pending",
+                                            "queued",
+                                            "running",
+                                            "merging",
+                                            "done",
+                                            "blocked",
+                                            "cancelled"
+                                          ]
+                                        },
+                                        "repo": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "state",
+                                        "repo"
+                                      ]
+                                    }
+                                  },
+                                  "required": ["e2e", "diagnosis", "fixTicket"]
+                                }
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
@@ -3663,6 +4213,115 @@
                               "output": {},
                               "logPath": {
                                 "type": "string"
+                              },
+                              "attempts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "e2e": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "testsTotal": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "testsFailed": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "envUpMs": {
+                                          "type": ["integer", "null"]
+                                        },
+                                        "refShas": {
+                                          "type": ["object", "null"],
+                                          "additionalProperties": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "headSha": {
+                                          "type": ["string", "null"]
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "result",
+                                        "testsTotal",
+                                        "testsFailed",
+                                        "envUpMs",
+                                        "refShas",
+                                        "headSha"
+                                      ]
+                                    },
+                                    "diagnosis": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "result": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "failingRepo": {
+                                          "type": ["string", "null"]
+                                        },
+                                        "evidence": {
+                                          "type": "string"
+                                        },
+                                        "failingTests": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "result",
+                                        "failingRepo",
+                                        "evidence",
+                                        "failingTests"
+                                      ]
+                                    },
+                                    "fixTicket": {
+                                      "type": ["object", "null"],
+                                      "properties": {
+                                        "id": {
+                                          "type": "integer"
+                                        },
+                                        "displayId": {
+                                          "type": "string"
+                                        },
+                                        "state": {
+                                          "type": "string",
+                                          "enum": [
+                                            "pending",
+                                            "queued",
+                                            "running",
+                                            "merging",
+                                            "done",
+                                            "blocked",
+                                            "cancelled"
+                                          ]
+                                        },
+                                        "repo": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "displayId",
+                                        "state",
+                                        "repo"
+                                      ]
+                                    }
+                                  },
+                                  "required": ["e2e", "diagnosis", "fixTicket"]
+                                }
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]

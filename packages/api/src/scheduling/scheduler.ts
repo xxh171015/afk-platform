@@ -139,6 +139,7 @@ interface TicketRow {
   state: TicketState;
   content_version: number;
   contract_sha: string | null;
+  resume_stage: "e2e" | null;
 }
 
 export async function schedulePass(
@@ -187,7 +188,7 @@ export async function schedulePass(
   }
 
   const tickets = await client.query<TicketRow>(
-    "SELECT id, repo_id, state, content_version, contract_sha FROM tickets WHERE spec_id = $1 ORDER BY id",
+    "SELECT id, repo_id, state, content_version, contract_sha, resume_stage FROM tickets WHERE spec_id = $1 ORDER BY id",
     [specId],
   );
   const byId = new Map(tickets.rows.map((ticket) => [ticket.id, ticket]));
@@ -261,7 +262,8 @@ export async function schedulePass(
         repoId: ticket.repo_id,
         contentVersion: ticket.content_version,
       },
-      "implement",
+      // a ticket that is merged already (its e2e failed, and the fix is done) starts again from its e2e
+      ticket.resume_stage ?? "implement",
     );
     usage.project += 1;
     usage.repos.set(ticket.repo_id, repoUsed + 1);

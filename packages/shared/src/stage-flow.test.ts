@@ -213,6 +213,7 @@ describe("a worst-case ticket", () => {
       const decision = advanceStage(report, progress);
       if (decision.type === "block")
         throw new Error(`blocked: ${decision.reason}`);
+      if (decision.type === "await-fix") throw new Error("unexpected fix wait");
       if (decision.type === "done") {
         const next = ticketTransition(state, { type: "merge-succeeded" });
         expect(next).toMatchObject({ ok: true, state: "done" });
@@ -242,6 +243,7 @@ describe("shape", () => {
       "review-fix",
       "merge-fix",
       "e2e",
+      "diagnose",
     ]);
   });
 });
@@ -265,14 +267,47 @@ describe("an integration ticket", () => {
     ).toEqual({ type: "done" });
   });
 
-  it("is blocked when e2e fails (for now as a post-merge gate failure)", () => {
+  it("is diagnosed when e2e fails, and stays merging", () => {
+    const decision = advanceStage(
+      { stage: "e2e", outcome: "failed" },
+      reviewed(fresh),
+      "integration",
+    );
+    expect(decision).toEqual(enqueue("diagnose"));
+    expect(decision).not.toHaveProperty("event");
+  });
+
+  it("waits for a fix ticket after a diagnosis, and counts the round", () => {
+    expect(
+      advanceStage(
+        { stage: "diagnose", outcome: "diagnosed" },
+        { ...reviewed(fresh), integrationRounds: 1 },
+        "integration",
+      ),
+    ).toEqual({
+      type: "await-fix",
+      progress: { ...reviewed(fresh), integrationRounds: 2 },
+    });
+  });
+
+  it("is blocked as integration-loop-exceeded at the third failure, without a diagnosis", () => {
     expect(
       advanceStage(
         { stage: "e2e", outcome: "failed" },
-        reviewed(fresh),
+        { ...reviewed(fresh), integrationRounds: 2 },
         "integration",
       ),
-    ).toEqual(block("post-merge-gate-failed"));
+    ).toEqual(block("integration-loop-exceeded"));
+  });
+
+  it.each([
+    ["unknown-side", "integration-unknown-side"],
+    ["invalid-output", "invalid-output"],
+    ["timeout", "timeout"],
+  ] as const)("is blocked when the diagnosis is %s", (outcome, reason) => {
+    expect(
+      advanceStage({ stage: "diagnose", outcome }, fresh, "integration"),
+    ).toEqual(block(reason));
   });
 
   it("other ticket types are done at merge", () => {

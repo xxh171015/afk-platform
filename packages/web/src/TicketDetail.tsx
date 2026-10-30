@@ -45,6 +45,7 @@ export function TicketDetail({
     gateResults,
     upstream,
     downstream,
+    integration,
   } = view.data;
   // by default the newest run, which is the one that is going or that went wrong last
   const shown = picked ?? runs.at(-1)?.id;
@@ -81,6 +82,53 @@ export function TicketDetail({
           in {ticket.brief.run.displayId}
           <pre>{JSON.stringify(ticket.brief.output, null, 2)}</pre>
         </div>
+      ) : null}
+
+      {integration ? (
+        <>
+          <h3>E2E tries</h3>
+          <p className="note">
+            {integration.rounds} of 2 fix rounds used.
+            {integration.attempts.length === 0 ? " No e2e has run yet." : ""}
+          </p>
+          <ol className="attempts">
+            {integration.attempts.map((attempt) => (
+              <li key={attempt.e2e.id}>
+                <strong>
+                  {attempt.e2e.displayId} {attempt.e2e.result ?? "running"}
+                </strong>
+                {attempt.e2e.testsTotal === null
+                  ? ""
+                  : `, ${attempt.e2e.testsFailed ?? 0} of ${attempt.e2e.testsTotal} tests failed`}
+                {attempt.e2e.refShas
+                  ? `, built from ${Object.entries(attempt.e2e.refShas)
+                      .map(([name, sha]) => `${name}@${sha.slice(0, 8)}`)
+                      .join(", ")}`
+                  : ""}
+                {attempt.diagnosis ? (
+                  <div className="diagnosis">
+                    Diagnosis: {attempt.diagnosis.failingRepo ?? "no repo"}
+                    <pre>{attempt.diagnosis.evidence}</pre>
+                    {attempt.diagnosis.failingTests.length > 0 ? (
+                      <p className="note">
+                        Failing: {attempt.diagnosis.failingTests.join(", ")}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {attempt.fixTicket ? (
+                  <p className="note">
+                    Fix ticket{" "}
+                    <a href={`#/tickets/${attempt.fixTicket.id}`}>
+                      {attempt.fixTicket.displayId}
+                    </a>{" "}
+                    ({attempt.fixTicket.state}, {attempt.fixTicket.repo})
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </>
       ) : null}
 
       <h3>Acceptance criteria</h3>

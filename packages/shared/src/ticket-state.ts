@@ -22,6 +22,8 @@ export const BLOCKED_REASONS = [
   "invalid-output",
   "timeout",
   "integration-loop-exceeded",
+  // the diagnosis could not tell which repo is at fault (or named one the ticket's environment does not have)
+  "integration-unknown-side",
   // the integration environment could not be brought up (build, health check, service names), three times over
   "integration-environment-failed",
   "upstream-cancelled",
@@ -36,6 +38,10 @@ export type TicketEvent =
   | { type: "checks-passed" }
   | { type: "merge-succeeded" }
   | { type: "merge-fix-needed" }
+  // An integration ticket whose e2e is to run (again): from the queue straight to merging, it is merged already.
+  | { type: "resume-e2e" }
+  // A failed e2e was diagnosed and a fix ticket was made: the ticket waits for it, to run its e2e again.
+  | { type: "await-fix" }
   | { type: "block"; reason: BlockedReason }
   | { type: "retry" }
   // A person accepts the protected path changes of a blocked ticket: it goes on from the gate.
@@ -59,7 +65,11 @@ const TRANSITIONS: Partial<
     cancel: "cancelled",
     "spec-cancelled": "cancelled",
   },
-  queued: { claim: "running", "spec-cancelled": "cancelled" },
+  queued: {
+    claim: "running",
+    "resume-e2e": "merging",
+    "spec-cancelled": "cancelled",
+  },
   running: { "checks-passed": "merging", "spec-cancelled": "cancelled" },
   blocked: {
     retry: "pending",
@@ -70,6 +80,7 @@ const TRANSITIONS: Partial<
   merging: {
     "merge-succeeded": "done",
     "merge-fix-needed": "running",
+    "await-fix": "pending",
     "spec-cancelled": "cancelled",
   },
 };
@@ -90,7 +101,8 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   timeout: [...FROM_RUNNING, ...FROM_MERGING],
   "merge-conflict": FROM_MERGING,
   "post-merge-gate-failed": FROM_MERGING,
-  "integration-loop-exceeded": FROM_RUNNING,
+  "integration-loop-exceeded": FROM_MERGING,
+  "integration-unknown-side": FROM_MERGING,
   "integration-environment-failed": [...FROM_RUNNING, ...FROM_MERGING],
   "upstream-cancelled": ["pending"],
   "job-failed": [...FROM_RUNNING, ...FROM_MERGING],

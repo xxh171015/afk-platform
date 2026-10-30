@@ -3,13 +3,17 @@ export type {
   AgentRunOptions,
   AgentRunResult,
   Classification,
+  DiagnoseOutcome,
+  DiagnoseOutput,
   ImplementOutput,
   ReviewOutput,
 } from "./agent.ts";
 export {
   CANNOT_PROCEED_REASONS,
   classifyAgentRun,
+  classifyDiagnoseRun,
   classifyReviewRun,
+  DiagnoseOutputSchema,
   ImplementOutputSchema,
   PROMPTS,
   promptFor,

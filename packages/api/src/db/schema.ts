@@ -22,6 +22,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // Display ids (S-12, T-123, R-456) are the prefix plus the serial id; they are not stored.
@@ -162,11 +163,28 @@ export const tickets = pgTable(
     // Jobs up to this id were made before the last human retry: their failures no longer count towards blocking.
     jobFloor: integer("job_floor").notNull().default(0),
     contractSha: text("contract_sha"),
+    // An integration ticket: the e2e failures that were followed by a fix ticket (at most two, then it is blocked).
+    integrationRounds: integer("integration_rounds").notNull().default(0),
+    // Where a pending ticket starts: null is the beginning (implement); "e2e" for a ticket that is merged already.
+    resumeStage: text("resume_stage"),
+    // A fix ticket the platform made for a failed e2e: the integration ticket it is for, and the round of it. One
+    // fix ticket per round, so a diagnosis that is handed in twice makes no second one.
+    fixForTicketId: integer("fix_for_ticket_id").references(
+      (): AnyPgColumn => tickets.id,
+    ),
+    fixRound: integer("fix_round"),
     createdAt: createdAt(),
   },
   (t) => [
     index("tickets_spec_state_idx").on(t.specId, t.state),
     index("tickets_repo_idx").on(t.repoId),
+    uniqueIndex("tickets_fix_round_unique")
+      .on(t.fixForTicketId, t.fixRound)
+      .where(sql`${t.fixForTicketId} is not null`),
+    check(
+      "tickets_resume_stage_check",
+      sql`${t.resumeStage} is null or ${t.resumeStage} = 'e2e'`,
+    ),
     check("tickets_type_check", oneOf(t.type, TICKET_TYPES)),
     check("tickets_state_check", oneOf(t.state, TICKET_STATES)),
     // blocked <-> reason, as in TicketSchema

@@ -60,6 +60,7 @@ export {
   AGENT_FAILURES,
   AGENT_STAGES,
   advanceStage,
+  MAX_INTEGRATION_ROUNDS,
   STAGES,
 } from "./stage-flow.ts";
 export type {

@@ -8,6 +8,7 @@ import {
   type Stage,
   type StageDecision,
   type StageReport,
+  type TicketEvent,
   type TicketState,
   ticketTransition,
 } from "@afk/shared";
@@ -20,6 +21,7 @@ import {
   schedulePass,
 } from "../scheduling/scheduler.ts";
 import { contractsOf } from "./contracts.ts";
+import { createFixTicket } from "./integration.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -113,6 +115,19 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
     outcome: z.enum(["passed", "failed"]),
     ...commonFields,
   }),
+  z.object({
+    stage: z.literal("diagnose"),
+    outcome: z.enum(["diagnosed", "unknown-side", "invalid-output", "timeout"]),
+    // what a "diagnosed" outcome is made of: the repo at fault, with the evidence and the failing tests
+    diagnosis: z
+      .object({
+        failingRepo: z.string().min(1),
+        evidence: z.string(),
+        failingTests: z.array(z.string()).max(1000).default([]),
+      })
+      .optional(),
+    ...commonFields,
+  }),
 ]);
 export type StageResult = z.infer<typeof StageResultSchema>;
 
@@ -139,6 +154,11 @@ interface TicketRow {
   content_version: number;
   fix_counts: Progress["fixCounts"];
   reviewed: boolean;
+  integration_rounds: number;
+  title: string;
+  acceptance_criteria: string[];
+  repo_name: string;
+  environment: string[];
 }
 
 // The state a ticket is in while each stage's job is out.
@@ -151,7 +171,23 @@ export const EXPECTED_STATE: Record<Stage, TicketState> = {
   "merge-fix": "running",
   merge: "merging",
   e2e: "merging", // the ticket is merged and stays merging until its e2e has passed
+  diagnose: "merging",
 };
+
+// The event that takes a queued ticket into its stage: an e2e is the run of a ticket that is merged already.
+const claimEventOf = (stage: Stage): TicketEvent =>
+  stage === "e2e" ? { type: "resume-e2e" } : { type: "claim" };
+
+// A diagnosis that names a repo must say which, and it must be the ticket's own repo or one of its environment:
+// anything else is not usable, like any other output that does not fit.
+function checkedDiagnosis(result: StageResult, ticket: TicketRow): StageReport {
+  if (result.stage !== "diagnose" || result.outcome !== "diagnosed")
+    return result as StageReport;
+  const repo = result.diagnosis?.failingRepo;
+  const known =
+    repo === ticket.repo_name || ticket.environment.includes(repo ?? "");
+  return known ? result : { stage: "diagnose", outcome: "invalid-output" };
+}
 
 export async function recordStageResult(
   client: pg.PoolClient,
@@ -170,8 +206,9 @@ export async function recordStageResult(
 
   const ticket = (
     await client.query<TicketRow>(
-      `SELECT id, spec_id, repo_id, state, type, content_version, fix_counts, reviewed
-       FROM tickets WHERE id = $1`,
+      `SELECT t.id, t.spec_id, t.repo_id, t.state, t.type, t.content_version, t.fix_counts, t.reviewed,
+              t.integration_rounds, t.title, t.acceptance_criteria, t.environment, r.name AS repo_name
+       FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
       [ticketId],
     )
   ).rows[0] as TicketRow;
@@ -179,7 +216,7 @@ export async function recordStageResult(
   const expected = EXPECTED_STATE[stage];
   const stateFits =
     ticket.state === expected ||
-    (stage === "implement" && ticket.state === "queued");
+    ((stage === "implement" || stage === "e2e") && ticket.state === "queued");
   if (!stateFits || read.contentVersion !== ticket.content_version) {
     return {
       status: "ignored",
@@ -210,18 +247,24 @@ export async function recordStageResult(
     ]);
 
   if (ticket.state === "queued") {
-    await client.query("UPDATE tickets SET state = 'running' WHERE id = $1", [
+    // a ticket that is queued for its e2e is merged already
+    const claimed = ticketTransition("queued", claimEventOf(stage));
+    if (!claimed.ok || claimed.state === "blocked")
+      throw new Error("unexpected claim");
+    await client.query("UPDATE tickets SET state = $2 WHERE id = $1", [
       ticket.id,
+      claimed.state,
     ]);
-    ticket.state = "running";
+    ticket.state = claimed.state;
   }
 
   const progress: Progress = {
     fixCounts: ticket.fix_counts,
     reviewed: ticket.reviewed,
+    integrationRounds: ticket.integration_rounds,
   };
   const decision: StageDecision = valid
-    ? advanceStage(valid as StageReport, progress, ticket.type)
+    ? advanceStage(checkedDiagnosis(valid, ticket), progress, ticket.type)
     : { type: "block", reason: "invalid-output" };
 
   await applyDecision(client, ticket, decision, valid);
@@ -388,6 +431,27 @@ async function applyDecision(
     await blockTicket(client, ticket, decision.reason);
     return;
   }
+  if (decision.type === "await-fix") {
+    const diagnosis =
+      result?.stage === "diagnose" ? result.diagnosis : undefined;
+    if (!diagnosis) throw new Error("a fix is awaited without a diagnosis");
+    const rounds = decision.progress.integrationRounds ?? 0;
+    const fixId = await createFixTicket(client, ticket, diagnosis);
+    if (fixId === undefined) {
+      await blockTicket(client, ticket, "invalid-output");
+      return;
+    }
+    const waiting = ticketTransition(ticket.state, { type: "await-fix" });
+    if (!waiting.ok || waiting.state === "blocked")
+      throw new Error(waiting.ok ? "unexpected block" : waiting.reason);
+    // merged already: when the fix is done it starts again from its e2e
+    await client.query(
+      "UPDATE tickets SET state = $2, integration_rounds = $3, resume_stage = 'e2e' WHERE id = $1",
+      [ticket.id, waiting.state, rounds],
+    );
+    await schedulePass(client, ticket.spec_id);
+    return;
+  }
   let state = ticket.state;
   if (decision.event) {
     const next = ticketTransition(state, decision.event);
@@ -396,12 +460,14 @@ async function applyDecision(
     state = next.state;
   }
   await client.query(
-    "UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4 WHERE id = $1",
+    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4,
+       resume_stage = CASE WHEN $5 = 'e2e' THEN 'e2e' ELSE resume_stage END WHERE id = $1`,
     [
       ticket.id,
       state,
       JSON.stringify(decision.progress.fixCounts),
       decision.progress.reviewed,
+      decision.stage,
     ],
   );
   await enqueueStageJob(
@@ -439,8 +505,9 @@ export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
   const read = readStagePayload(job.payload);
   if (!read) return;
   const { ticketId, stage } = read;
-  if (stage === "implement") {
-    const next = ticketTransition("queued", { type: "claim" });
+  if (stage === "implement" || stage === "e2e") {
+    // an e2e that is queued is the ticket's run again after a fix: it is merged already
+    const next = ticketTransition("queued", claimEventOf(stage));
     if (next.ok && next.state !== "blocked") {
       await pool.query(
         "UPDATE tickets SET state = $2 WHERE id = $1 AND state = 'queued'",

@@ -37,9 +37,11 @@ export const MAX_JOB_FAILURES = 3;
 const JOB_FAILED: BlockedReason = "job-failed";
 
 // The e2e stage only fails as a job when its environment cannot be brought up (an e2e that runs and fails is a
-// result, not a failed job), so three failures of it name the environment.
+// result, not a failed job), and the diagnosis runs in a fresh environment too: three failures of either name it.
 const reasonOfFailed = (stage: string): BlockedReason =>
-  stage === "e2e" ? "integration-environment-failed" : JOB_FAILED;
+  stage === "e2e" || stage === "diagnose"
+    ? "integration-environment-failed"
+    : JOB_FAILED;
 
 export type FailureOutcome =
   | { status: "not-a-stage" } // a job that is neither a ticket stage nor a finalization step
