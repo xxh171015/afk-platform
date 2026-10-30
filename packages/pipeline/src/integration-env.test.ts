@@ -309,6 +309,29 @@ describe("reclaiming the environments of workers that were killed", () => {
     ]);
   });
 
+  it("never touches a project that only looks like one of ours: a person's own compose project may be called afk-<something>", async () => {
+    // afk-platform is what compose names the platform's own repo (and its Postgres); `down -v` on it deletes the data
+    const fake = fakeDocker(
+      listing([
+        "afk-platform",
+        "afk-pilot-backend",
+        "afk-r-",
+        "afk-r-3x",
+        "afk-r-0007-old",
+        "afk-R-3",
+        "afk-r-3",
+      ]),
+    );
+    const reclaimed = await reclaimEnvironments({
+      docker: fake.docker,
+      keep: new Set(),
+    });
+    expect(reclaimed).toEqual(["afk-r-3"]);
+    expect(fake.only("compose")).toEqual([
+      ["compose", "-p", "afk-r-3", "down", "-v", "--remove-orphans"],
+    ]);
+  });
+
   it("leaves everything alone when docker cannot be asked", async () => {
     const fake = fakeDocker((args) =>
       args[0] === "ps" ? { code: 1 } : undefined,

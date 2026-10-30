@@ -56,6 +56,12 @@ const slug = (runId: string) =>
   runId.toLowerCase().replaceAll(/[^a-z0-9_-]/g, "-");
 export const projectOf = (runId: string) => `afk-${slug(runId)}`;
 
+// The compose projects the platform makes are `afk-r-<number>`, one per Run. Only those are ever taken down by
+// the platform: a person's own project may well start with `afk-` (the platform's own compose project is
+// `afk-platform`, and `down -v` of it deletes its database).
+const isEnvironmentProject = (project: string) =>
+  /^afk-r-[0-9]+$/.test(project);
+
 interface Fragment {
   repo: EnvironmentRepo;
   file: string;
@@ -273,7 +279,7 @@ async function networkOf(
 }
 
 // A worker that was killed leaves its environment running (its containers carry the compose project label).
-// Takes down every `afk-` project that is not one of `keep`, and removes the images built for it. Returns the
+// Takes down every `afk-r-<number>` project that is not one of `keep`, and removes the images built for it. Returns the
 // projects it took down. If docker cannot be asked nothing is touched.
 export async function reclaimEnvironments(input: {
   docker: DockerCli;
@@ -295,7 +301,9 @@ export async function reclaimEnvironments(input: {
   if (listed.code !== 0) return [];
   const orphans = [
     ...new Set(listed.stdout.split("\n").map((line) => line.trim())),
-  ].filter((project) => project.startsWith("afk-") && !input.keep.has(project));
+  ].filter(
+    (project) => isEnvironmentProject(project) && !input.keep.has(project),
+  );
   for (const project of orphans) {
     input.log?.(
       `environment: taking down ${project}, left by a worker that stopped`,
