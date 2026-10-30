@@ -1,6 +1,7 @@
 import { formatDisplayId, type SpecState, type TicketState } from "@afk/shared";
 import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
+import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
@@ -307,6 +308,7 @@ export async function specView(pool: pg.Pool, specId: number) {
     },
     tickets,
     finalizations: await finalizations(pool, "f.spec_id = $1", [specId]),
+    mergeOrder: await mergeOrderOf(pool, specId),
     pullRequests: await pullRequestRows(pool, specId),
     acceptancePack: await readAcceptancePack(pool, specId),
     edges: edges.rows.map((e) => ({
@@ -465,6 +467,31 @@ async function cleanupProblems(pool: pg.Pool) {
   }));
 }
 
+// A draft pull request that could not be turned ready, three times over: it stays a draft until a person turns it
+// ready on the host (a look at the host sees that). A failure only counts while the pull request is still a draft
+// and no later pr-ready of it is queued, running or done.
+async function readyFailures(pool: pg.Pool) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error
+     FROM jobs j
+     JOIN pull_requests p ON p.id = (j.payload->>'pullId')::int
+     JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
+     WHERE j.type = 'pr-ready' AND j.state = 'failed' AND p.draft AND ${FOLLOWED_PULL_REQUESTS}
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs k WHERE k.type = 'pr-ready' AND (k.payload->>'pullId')::int = p.id
+           AND k.id > j.id AND k.state IN ('queued', 'running', 'done'))
+     ORDER BY p.id, j.id DESC`,
+  );
+  return rows.map((row) => ({
+    specId: row.spec_id as number,
+    specDisplayId: formatDisplayId("spec", row.spec_id),
+    repo: row.repo as string,
+    number: row.number as number,
+    url: row.url as string,
+    error: (row.error as string | null) ?? "",
+  }));
+}
+
 // Everything waiting for a person: tickets that are blocked, blocked steps of an overall review, pull requests that
 // were closed or cannot be read, and specs that the platform paused. A cancelled spec waits for no one.
 export async function blockedQueue(pool: pg.Pool) {
@@ -481,6 +508,7 @@ export async function blockedQueue(pool: pg.Pool) {
     ),
     pullRequests: await pullRequestProblems(pool),
     cleanups: await cleanupProblems(pool),
+    readyFailures: await readyFailures(pool),
     specs: specs.rows.map((s) => ({
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),

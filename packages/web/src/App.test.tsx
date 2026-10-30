@@ -67,6 +67,7 @@ const server = () =>
         finalizations: [],
         pullRequests: [],
         cleanups: [],
+        readyFailures: [],
         acceptancePack: null,
       },
     }),
@@ -152,6 +153,7 @@ describe("the app", () => {
           finalizations: [],
           pullRequests: [],
           cleanups: [],
+          readyFailures: [],
           specs: [
             { id: 3, displayId: "S-3", title: "Third", reason: "paused" },
           ],
@@ -181,6 +183,7 @@ describe("the app", () => {
             finalizations: [],
             pullRequests: [],
             cleanups: [],
+            readyFailures: [],
             specs: [],
           },
         }),

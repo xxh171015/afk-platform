@@ -4,6 +4,7 @@ import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import {
   readHostSyncPayload,
   readOpenPrPayload,
+  readPrReadyPayload,
   readSpecCleanupPayload,
 } from "../host/host-jobs.ts";
 import {
@@ -11,6 +12,7 @@ import {
   hostSyncFailed,
   recordHostSync,
   recordOpenPr,
+  recordPrReady,
   recordSpecCleanup,
 } from "../host/pull-requests.ts";
 import {
@@ -242,6 +244,14 @@ const HostTask = z.discriminatedUnion("kind", [
     ),
   }),
   z.object({
+    kind: z.literal("pr-ready"),
+    pull: z.object({
+      id: z.number().int(),
+      repoUrl: z.string(),
+      number: z.number().int(),
+    }),
+  }),
+  z.object({
     kind: z.literal("spec-cleanup"),
     pulls: z.array(
       z.object({
@@ -267,7 +277,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync or spec-cleanup job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -410,11 +420,13 @@ export function registerWorkerRoutes(
             const openPr = readOpenPrPayload(job.rows[0]);
             const sync = readHostSyncPayload(job.rows[0]);
             const cleanup = readSpecCleanupPayload(job.rows[0]);
+            const ready = readPrReadyPayload(job.rows[0]);
             if (openPr)
               await recordOpenPr(client, openPr, result, context.clock());
             else if (sync)
               await recordHostSync(client, sync, result, context.clock());
             else if (cleanup) await recordSpecCleanup(client, cleanup, result);
+            else if (ready) await recordPrReady(client, ready, result);
           }
         }
       }
@@ -471,6 +483,7 @@ export function registerWorkerRoutes(
       row &&
       (readOpenPrPayload(row) ??
         readHostSyncPayload(row) ??
+        readPrReadyPayload(row) ??
         readSpecCleanupPayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));

@@ -12,12 +12,15 @@ import { lockSpec } from "../scheduling/scheduler.ts";
 import {
   enqueueHostSync,
   enqueueOpenPr,
+  enqueuePrReady,
   enqueueSpecCleanup,
   type HostSyncPayload,
   type OpenPrPayload,
+  type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
 } from "./host-jobs.ts";
+import { mergeOrderOf } from "./merge-order.ts";
 
 // A spec's pull requests: opened once its repos are all finalized, then followed until a person has merged them
 // all. The platform only records what the host says; it has no call that merges (docs/design.md「代码托管」).
@@ -41,6 +44,10 @@ export type HostTask =
       pulls: { id: number; repoUrl: string; number: number }[];
     }
   | {
+      kind: "pr-ready";
+      pull: { id: number; repoUrl: string; number: number };
+    }
+  | {
       kind: "spec-cleanup";
       pulls: { id: number; repoUrl: string; number: number }[]; // last seen open: to be closed
       branches: { repoUrl: string; branch: string }[]; // to be deleted
@@ -59,6 +66,11 @@ export const OpenPrResultSchema = z.object({
   outcome: z.literal("opened"),
   number: z.number().int().min(1),
   url: z.string().min(1),
+  ...PullFacts,
+});
+
+export const PrReadyResultSchema = z.object({
+  stage: z.literal("pr-ready"),
   ...PullFacts,
 });
 
@@ -104,10 +116,29 @@ export async function startOpeningPullRequests(
 export async function buildHostTask(
   pool: pg.Pool,
   job: { type?: string; payload: Record<string, unknown> },
-  payload: OpenPrPayload | HostSyncPayload | SpecCleanupPayload,
+  payload:
+    | OpenPrPayload
+    | HostSyncPayload
+    | SpecCleanupPayload
+    | PrReadyPayload,
 ): Promise<HostTask | undefined> {
   if (job.type === "spec-cleanup")
     return specCleanupTask(pool, payload as SpecCleanupPayload);
+  if (job.type === "pr-ready") {
+    const { pullId } = payload as PrReadyPayload;
+    const pull = (
+      await pool.query<{ id: number; url: string; number: number }>(
+        `SELECT p.id, r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    return pull
+      ? {
+          kind: "pr-ready",
+          pull: { id: pull.id, repoUrl: pull.url, number: pull.number },
+        }
+      : undefined;
+  }
   if (job.type === "open-pr") {
     const { specId, repoId } = payload as OpenPrPayload;
     const spec = (
@@ -120,8 +151,8 @@ export async function buildHostTask(
       ])
     ).rows[0];
     const repo = (
-      await pool.query<{ url: string; default_branch: string }>(
-        "SELECT url, default_branch FROM repos WHERE id = $1",
+      await pool.query<{ url: string; default_branch: string; name: string }>(
+        "SELECT url, default_branch, name FROM repos WHERE id = $1",
         [repoId],
       )
     ).rows[0];
@@ -149,7 +180,9 @@ export async function buildHostTask(
         "",
         "Opened by the AFK platform. Merging is up to you; the platform never merges.",
       ].join("\n"),
-      draft: false,
+      // a repo that uses another repo's contract is merged after it, and says so by being a draft until then
+      draft:
+        ((await mergeOrderOf(pool, specId)).after[repo.name] ?? []).length > 0,
     };
   }
   const { projectId } = payload as HostSyncPayload;
@@ -238,6 +271,34 @@ export async function recordSpecCleanup(
     "UPDATE pull_requests SET state = 'closed', synced_at = now() WHERE spec_id = $1 AND id = ANY($2::int[]) AND state = 'open'",
     [read.specId, parsed.data.closed],
   );
+  return { status: "applied" };
+}
+
+// The worker turned a draft pull request ready (or found it already so): the platform does not wait for the next
+// look at the host to know.
+export async function recordPrReady(
+  client: pg.PoolClient,
+  read: PrReadyPayload,
+  result: unknown,
+): Promise<RecordHostResult> {
+  const parsed = PrReadyResultSchema.safeParse(result);
+  if (!parsed.success)
+    return { status: "ignored", reason: "pr-ready result is not valid" };
+  const owner = await client.query<{ spec_id: number }>(
+    "SELECT spec_id FROM pull_requests WHERE id = $1",
+    [read.pullId],
+  );
+  const specId = owner.rows[0]?.spec_id;
+  if (specId === undefined)
+    return { status: "ignored", reason: "no such pull request" };
+  await lockSpec(client, specId);
+  const pr = parsed.data;
+  await client.query(
+    `UPDATE pull_requests SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now()
+     WHERE id = $1`,
+    [read.pullId, pr.state, pr.draft, pr.headSha, pr.ci, pr.review],
+  );
+  await markMergedWhenAllAre(client, specId);
   return { status: "applied" };
 }
 
@@ -386,10 +447,45 @@ export async function recordHostSync(
       ],
     );
   }
-  for (const { spec_id: specId } of owners.rows)
+  for (const { spec_id: specId } of owners.rows) {
     await markMergedWhenAllAre(client, specId);
+    await queueReadyPullRequests(client, specId);
+  }
   await scheduleNextSync(client, read.projectId, now);
   return { status: "applied" };
+}
+
+// A draft pull request goes ready once every pull request it is behind (the repos whose contracts its repo uses) is
+// merged. One a person has already turned ready is not a draft any more and is left alone; one that has had a job
+// (waiting, running, failed or done) is not queued again by this: a failed one waits in plat blocked for a person,
+// and one the host still shows as a draft after a job succeeded is not asked again every minute.
+async function queueReadyPullRequests(client: pg.PoolClient, specId: number) {
+  const order = await mergeOrderOf(client, specId);
+  const pulls = await client.query<{
+    id: number;
+    name: string;
+    state: string;
+    draft: boolean;
+  }>(
+    `SELECT p.id, r.name, p.state, p.draft FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+     WHERE p.spec_id = $1 ORDER BY p.id`,
+    [specId],
+  );
+  const mergedRepos = new Set(
+    pulls.rows.filter((p) => p.state === "merged").map((p) => p.name),
+  );
+  for (const pull of pulls.rows) {
+    if (pull.state !== "open" || !pull.draft) continue;
+    const before = order.after[pull.name] ?? [];
+    if (before.length === 0 || !before.every((name) => mergedRepos.has(name)))
+      continue;
+    const pending = await client.query(
+      `SELECT 1 FROM jobs WHERE type = 'pr-ready' AND (payload->>'pullId')::int = $1
+         AND state IN ('queued', 'running', 'failed', 'done') LIMIT 1`,
+      [pull.id],
+    );
+    if (!pending.rowCount) await enqueuePrReady(client, { pullId: pull.id });
+  }
 }
 
 async function scheduleNextSync(

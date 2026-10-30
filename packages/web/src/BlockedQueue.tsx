@@ -351,6 +351,27 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
   );
 }
 
+function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
+  return (
+    <li
+      className="blocked-card"
+      data-testid={`ready-${item.specDisplayId}-${item.repo}`}
+    >
+      <h3>
+        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>{" "}
+        <a href={item.url}>
+          {item.repo} #{item.number}
+        </a>
+      </h3>
+      <p className="error">Could not be turned ready: {item.error}</p>
+      <p className="note">
+        It is still a draft. Turn it ready on the code host once the pull
+        requests it follows are merged; the platform sees that at its next look.
+      </p>
+    </li>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <>
@@ -372,13 +393,20 @@ export function BlockedQueue() {
         Could not load the queue: {queue.error.message}
       </p>
     );
-  const { tickets, finalizations, pullRequests, cleanups, specs } =
-    queue.data as NonNullable<typeof queue.data>;
+  const {
+    tickets,
+    finalizations,
+    pullRequests,
+    cleanups,
+    readyFailures,
+    specs,
+  } = queue.data as NonNullable<typeof queue.data>;
   if (
     tickets.length +
       finalizations.length +
       pullRequests.length +
       cleanups.length +
+      readyFailures.length +
       specs.length ===
     0
   ) {
@@ -417,6 +445,13 @@ export function BlockedQueue() {
         <Section title="Clean-ups that did not finish">
           {cleanups.map((item) => (
             <StuckCleanup key={item.specId} item={item} />
+          ))}
+        </Section>
+      ) : null}
+      {readyFailures.length > 0 ? (
+        <Section title="Draft pull requests that could not be turned ready">
+          {readyFailures.map((item) => (
+            <StuckReady key={`${item.specId}-${item.repo}`} item={item} />
           ))}
         </Section>
       ) : null}

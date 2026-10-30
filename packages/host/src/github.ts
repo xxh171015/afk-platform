@@ -27,6 +27,7 @@ const MAX_PAGES = 50; // a list longer than this is refused, not judged by its f
 
 const OPEN: TokenPermissions = { pull_requests: "write", contents: "read" };
 const CLOSE: TokenPermissions = { pull_requests: "write" };
+const MARK_READY: TokenPermissions = { pull_requests: "write" };
 const DELETE_BRANCH: TokenPermissions = { contents: "write" };
 const READ: TokenPermissions = {
   pull_requests: "read",
@@ -36,6 +37,7 @@ const READ: TokenPermissions = {
 
 interface RawPull {
   number: number;
+  node_id?: string;
   html_url: string;
   state: "open" | "closed";
   draft?: boolean;
@@ -44,7 +46,10 @@ interface RawPull {
 }
 
 export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
-  const apiUrl = options.apiUrl ?? "https://api.github.com";
+  const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(
+    /\/+$/,
+    "",
+  );
   const doFetch = options.fetch ?? fetch;
   const etags = new Map<string, { etag: string; body: unknown }>();
   const maxCached = options.maxCachedResponses ?? 500;
@@ -187,8 +192,51 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     number,
   }) => info(repo, (await get(repo, `/pulls/${number}`)) as RawPull);
 
+  // GraphQL is the only way to turn a draft ready. The address is next to the REST one: api.github.com/graphql, or
+  // <host>/api/graphql for an enterprise server whose REST address is <host>/api/v3.
+  const graphqlUrl = apiUrl.endsWith("/api/v3")
+    ? `${apiUrl.slice(0, -"/api/v3".length)}/api/graphql`
+    : `${apiUrl}/graphql`;
+
   return {
     getPullRequest,
+    async markReady({ repo, number }) {
+      const raw = (await get(repo, `/pulls/${number}`)) as RawPull;
+      if (raw.state !== "open" || raw.merged || raw.draft !== true)
+        return info(repo, raw);
+      if (!raw.node_id)
+        throw new HostError(
+          `GitHub gave no node id for pull request ${number}`,
+          502,
+        );
+      const token = await options.tokens.tokenFor({
+        repo,
+        permissions: MARK_READY,
+      });
+      const response = await doFetch(graphqlUrl, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          query:
+            "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }",
+          variables: { id: raw.node_id },
+        }),
+      });
+      const answer = (await response.json().catch(() => ({}))) as {
+        errors?: { message?: string }[];
+      };
+      if (!response.ok || answer.errors?.length) {
+        const why = answer.errors?.map((e) => e.message).join("; ");
+        throw new HostError(
+          `GitHub refused to mark pull request ${number} ready (${response.status})${why ? `: ${why}` : ""}`,
+          response.ok ? 403 : response.status,
+        );
+      }
+      return getPullRequest({ repo, number });
+    },
     async closePullRequest({ repo, number }) {
       const current = await getPullRequest({ repo, number });
       if (current.state !== "open") return current;

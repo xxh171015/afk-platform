@@ -60,6 +60,7 @@ const view = (
     { from: "T-1", to: "T-3", kind: "contract" },
   ],
   finalizations: over.finalizations ?? [],
+  mergeOrder: { ordered: [], after: {}, unordered: [] },
   pullRequests: over.pullRequests ?? [],
   acceptancePack: over.acceptancePack ?? null,
 });
@@ -136,6 +137,65 @@ describe("the spec page", () => {
     expect(node("T-2").textContent).toContain("appended");
   });
 
+  it("shows which pull request waits for which, and that it is a draft until then", async () => {
+    const pullRequests = [
+      {
+        order: 1,
+        waitsFor: [],
+        repo: "backend",
+        number: 7,
+        url: "https://github.com/me/shop-backend/pull/7",
+        state: "open",
+        draft: false,
+        ci: "success",
+        review: "none",
+        syncError: null,
+      },
+      {
+        order: 2,
+        waitsFor: ["backend"],
+        repo: "frontend",
+        number: 8,
+        url: "https://github.com/me/shop-frontend/pull/8",
+        state: "open",
+        draft: true,
+        ci: "none",
+        review: "none",
+        syncError: null,
+      },
+      {
+        order: 3,
+        waitsFor: [],
+        repo: "docs",
+        number: 9,
+        url: "https://github.com/me/shop-docs/pull/9",
+        state: "open",
+        draft: false,
+        ci: "none",
+        review: "none",
+        syncError: null,
+      },
+    ];
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: {
+          ...view({ spec: { state: "awaiting-review" }, pullRequests }),
+          mergeOrder: {
+            ordered: ["backend", "frontend"],
+            after: { backend: [], frontend: ["backend"] },
+            unordered: ["docs"],
+          },
+        },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+
+    const frontend = (await screen.findByText(/frontend #8/)).closest("li");
+    expect(frontend?.textContent).toContain("(draft)");
+    expect(frontend?.textContent).toContain("after backend");
+    expect(screen.getByText(/No order between: docs/)).toBeTruthy();
+  });
+
   it("lists the tickets and their states below the graph", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,
@@ -161,6 +221,7 @@ describe("the spec page", () => {
     const pullRequests = [
       {
         order: 1,
+        waitsFor: [],
         repo: "backend",
         number: 7,
         url: "https://github.com/me/shop/pull/7",
@@ -172,6 +233,7 @@ describe("the spec page", () => {
       },
       {
         order: 2,
+        waitsFor: [],
         repo: "frontend",
         number: 3,
         url: "https://github.com/me/shop-web/pull/3",
@@ -275,6 +337,7 @@ describe("the spec page", () => {
     const pullRequests = [
       {
         order: 1,
+        waitsFor: [],
         repo: "backend",
         number: 7,
         url: "https://github.com/me/shop/pull/7",

@@ -7,10 +7,14 @@ import type pg from "pg";
 import {
   CLEANUP_RETRY_SECONDS,
   enqueueOpenPr,
+  enqueuePrReady,
   enqueueSpecCleanup,
   inSeconds,
   openPrKeyPrefix,
+  type PrReadyPayload,
+  prReadyKeyPrefix,
   readOpenPrPayload,
+  readPrReadyPayload,
   readSpecCleanupPayload,
   type SpecCleanupPayload,
   specCleanupKeyPrefix,
@@ -79,6 +83,8 @@ export async function recordJobFailure(
   if (openPr) return openPrFailed(client, openPr);
   const cleanup = readSpecCleanupPayload(job);
   if (cleanup) return specCleanupFailed(client, cleanup, now);
+  const ready = readPrReadyPayload(job);
+  if (ready) return prReadyFailed(client, ready, now);
   return { status: "not-a-stage" };
 }
 
@@ -229,5 +235,19 @@ async function specCleanupFailed(
   const failures = await failuresOf(client, specCleanupKeyPrefix(read), 0);
   if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
   await enqueueSpecCleanup(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
+  return { status: "requeued", failures };
+}
+
+// A draft could not be turned ready: tried again a minute later, three times in all. After that the job stays failed,
+// and plat blocked lists the pull request for a person (who can turn it ready on the host, which a look at the
+// host will then see).
+async function prReadyFailed(
+  client: pg.PoolClient,
+  read: PrReadyPayload,
+  now: Date,
+): Promise<FailureOutcome> {
+  const failures = await failuresOf(client, prReadyKeyPrefix(read), 0);
+  if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
+  await enqueuePrReady(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
   return { status: "requeued", failures };
 }

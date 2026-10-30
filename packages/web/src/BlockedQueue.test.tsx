@@ -44,6 +44,7 @@ interface Queue {
   finalizations: unknown[];
   pullRequests: unknown[];
   cleanups: unknown[];
+  readyFailures: unknown[];
   specs: unknown[];
 }
 const queue = (over: Partial<Queue> = {}): Queue => ({
@@ -51,6 +52,7 @@ const queue = (over: Partial<Queue> = {}): Queue => ({
   finalizations: [],
   pullRequests: [],
   cleanups: [],
+  readyFailures: [],
   specs: [],
   ...over,
 });
@@ -635,6 +637,33 @@ describe("a clean-up that did not finish", () => {
     const item = within(await screen.findByTestId("cleanup-S-1"));
     expect(item.getByText(/GitHub answered 503/)).toBeTruthy();
     expect(item.getByText(/plat spec cleanup S-1/)).toBeTruthy();
+  });
+});
+
+describe("a draft pull request that could not be turned ready", () => {
+  it("is listed with its error, and says it is still a draft", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            readyFailures: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "frontend",
+                number: 2,
+                url: "https://github.com/me/shop-frontend/pull/2",
+                error: "GitHub refused to mark pull request 2 ready (403)",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("ready-S-1-frontend"));
+    expect(item.getByText(/refused to mark pull request 2 ready/)).toBeTruthy();
+    expect(item.getByText(/still a draft/)).toBeTruthy();
   });
 });
 

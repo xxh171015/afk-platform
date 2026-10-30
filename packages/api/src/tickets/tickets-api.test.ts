@@ -957,6 +957,7 @@ describe("what a person sees", () => {
       finalizations: [],
       pullRequests: [],
       cleanups: [],
+      readyFailures: [],
       specs: [],
     });
   });

@@ -168,6 +168,11 @@ const specRoute = createRoute({
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
+        mergeOrder: z.object({
+          ordered: z.array(z.string()),
+          after: z.record(z.string(), z.array(z.string())),
+          unordered: z.array(z.string()),
+        }),
         pullRequests: z.array(PullRequestRow),
         acceptancePack: AcceptancePack.nullable(),
         edges: z.array(
@@ -272,6 +277,16 @@ const blockedRoute = createRoute({
           z.object({
             specId: Id,
             specDisplayId: z.string(),
+            error: z.string(),
+          }),
+        ),
+        readyFailures: z.array(
+          z.object({
+            specId: Id,
+            specDisplayId: z.string(),
+            repo: z.string(),
+            number: z.number().int(),
+            url: z.string(),
             error: z.string(),
           }),
         ),

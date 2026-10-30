@@ -273,6 +273,57 @@ describe("closePullRequest", () => {
   });
 });
 
+describe("markReady", () => {
+  const openDraft = () =>
+    adapter().openPullRequest({
+      repo,
+      head: "spec/s-1",
+      base: "main",
+      title: "S-1",
+      body: "Spec: S-1",
+      draft: true,
+    });
+
+  it("turns a draft pull request ready and reports it as one", async () => {
+    await openDraft();
+    expect(github.pullRequests()[0]?.draft).toBe(true);
+    const ready = await adapter().markReady({ repo, number: 1 });
+    expect(ready).toMatchObject({ number: 1, state: "open", draft: false });
+    expect(github.pullRequests()[0]?.draft).toBe(false);
+  });
+
+  it("sends nothing for a pull request that is not a draft (a person got there first)", async () => {
+    await open();
+    const before = github.requests.length;
+    const result = await adapter().markReady({ repo, number: 1 });
+    expect(result.draft).toBe(false);
+    expect(
+      github.requests.slice(before).filter((r) => r.includes("graphql")),
+    ).toEqual([]);
+  });
+
+  it("asks for a token that can write pull requests", async () => {
+    await openDraft();
+    await adapter().markReady({ repo, number: 1 });
+    expect(github.tokensIssued.at(-1)?.permissions).toMatchObject({
+      pull_requests: "write",
+    });
+  });
+
+  it("throws a HostError when GitHub refuses, whether by status or by a GraphQL error", async () => {
+    await openDraft();
+    github.refuseReady = "status";
+    await expect(
+      adapter().markReady({ repo, number: 1 }),
+    ).rejects.toBeInstanceOf(HostError);
+    github.refuseReady = "error";
+    await expect(adapter().markReady({ repo, number: 1 })).rejects.toThrow(
+      /Resource not accessible/,
+    );
+    expect(github.pullRequests()[0]?.draft).toBe(true);
+  });
+});
+
 describe("deleteBranch", () => {
   it("deletes a branch, and says it is gone when asked again", async () => {
     github.addBranch("spec/s-1");

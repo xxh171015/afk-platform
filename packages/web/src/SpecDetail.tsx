@@ -261,8 +261,15 @@ export function SpecDetail({ specId }: { specId: number }) {
         Could not load the spec: {view.error.message}
       </p>
     );
-  const { spec, tickets, edges, finalizations, pullRequests, acceptancePack } =
-    view.data;
+  const {
+    spec,
+    tickets,
+    edges,
+    finalizations,
+    pullRequests,
+    mergeOrder,
+    acceptancePack,
+  } = view.data;
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;
 
@@ -307,6 +314,9 @@ export function SpecDetail({ specId }: { specId: number }) {
           <h3>Pull requests</h3>
           <p className="note">
             Merge them in this order; the platform never merges.
+            {mergeOrder.ordered.length > 0 && mergeOrder.unordered.length > 0
+              ? ` No order between: ${mergeOrder.unordered.join(", ")} (no contract relation).`
+              : ""}
           </p>
           <ol className="pull-requests">
             {pullRequests.map((pr) => (
@@ -318,6 +328,12 @@ export function SpecDetail({ specId }: { specId: number }) {
                   {pullStateLabel(pr.state)}
                   {pr.draft ? " (draft)" : ""}
                 </span>{" "}
+                {pr.waitsFor.length > 0 ? (
+                  <span className="note">
+                    after {pr.waitsFor.join(", ")}
+                    {" · "}
+                  </span>
+                ) : null}
                 CI {pr.ci}, review {pr.review}
                 {pr.syncError ? (
                   <span className="error">

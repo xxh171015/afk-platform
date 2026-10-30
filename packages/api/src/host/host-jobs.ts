@@ -2,7 +2,7 @@ import { formatDisplayId, HOST_CAPABILITY } from "@afk/shared";
 import type pg from "pg";
 import { enqueueJob } from "../jobs/queue.ts";
 
-// The two jobs that talk to the code host. A worker runs them because the host's credentials live there only
+// The jobs that talk to the code host. A worker runs them because the host's credentials live there only
 // (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` looks at every
 // pull request of a project that is still open. Neither holds a lock key.
 
@@ -17,6 +17,20 @@ export interface HostSyncPayload {
 }
 export interface SpecCleanupPayload {
   specId: number;
+}
+
+export interface PrReadyPayload {
+  pullId: number;
+}
+
+export function readPrReadyPayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): PrReadyPayload | undefined {
+  const { pullId } = job.payload;
+  return job.type === "pr-ready" && typeof pullId === "number"
+    ? { pullId }
+    : undefined;
 }
 
 export function readOpenPrPayload(job: {
@@ -131,4 +145,29 @@ export async function enqueueHostSync(
     ...(notBefore ? { notBefore } : {}),
   });
   return true;
+}
+
+export const prReadyKeyPrefix = ({ pullId }: PrReadyPayload) =>
+  `pull-${pullId}:pr-ready:`;
+
+// A draft pull request whose prerequisites are merged is to be turned ready by a worker with the host's credentials.
+// A second one (after a failure) gets the next sequence, and waits `notBefore` so that a short outage of the host
+// does not use up all three tries.
+export async function enqueuePrReady(
+  client: pg.PoolClient,
+  payload: PrReadyPayload,
+  notBefore?: Date,
+) {
+  const prefix = prReadyKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "pr-ready",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+    ...(notBefore ? { notBefore } : {}),
+  });
 }

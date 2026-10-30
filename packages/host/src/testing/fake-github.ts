@@ -39,6 +39,7 @@ export class FakeGitHub {
   readonly requests: string[] = [];
   notModified = 0;
   tokenLifetimeMs = 60 * 60 * 1000;
+  refuseReady: "status" | "error" | false = false; // how a mark-ready is refused: HTTP 403, or a GraphQL error
   refuseBranchDeletes = false; // answer 403 to a branch delete, as a token without contents:write would get
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
@@ -197,6 +198,30 @@ export class FakeGitHub {
     if (!expiry || expiry <= this.now())
       return this.json(res, 401, { message: "Bad credentials" });
 
+    if (req.method === "POST" && path === "/graphql") {
+      const query = String(body.query ?? "");
+      const id = (body.variables as { id?: string } | undefined)?.id;
+      const pull = this.pulls.find((p) => `PR_${p.number}` === id);
+      if (!query.includes("markPullRequestReadyForReview") || !pull)
+        return this.json(res, 200, {
+          errors: [{ message: "Could not resolve" }],
+        });
+      if (this.refuseReady === "status")
+        return this.json(res, 403, {
+          message: "Resource not accessible by integration",
+        });
+      if (this.refuseReady === "error")
+        return this.json(res, 200, {
+          errors: [{ message: "Resource not accessible by integration" }],
+        });
+      pull.draft = false;
+      return this.json(res, 200, {
+        data: {
+          markPullRequestReadyForReview: { pullRequest: { isDraft: false } },
+        },
+      });
+    }
+
     const base = `/repos/${this.options.owner}/${this.options.repo}`;
     if (!path.startsWith(`${base}/`))
       return this.json(res, 404, { message: "Not Found" });
@@ -322,6 +347,7 @@ export class FakeGitHub {
   private render(pull: FakePull) {
     return {
       number: pull.number,
+      node_id: `PR_${pull.number}`,
       html_url: `https://github.example/${this.options.owner}/${this.options.repo}/pull/${pull.number}`,
       state: pull.state,
       draft: pull.draft,

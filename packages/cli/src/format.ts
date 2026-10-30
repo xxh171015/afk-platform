@@ -119,6 +119,12 @@ export function blockedText(queue: {
   finalizations: FinalizationLike[];
   pullRequests: PullRequestProblemLike[];
   cleanups: { specDisplayId: string; error: string }[];
+  readyFailures: {
+    specDisplayId: string;
+    repo: string;
+    number: number;
+    error: string;
+  }[];
   specs: { displayId: string; title: string; reason: string }[];
 }): string {
   if (
@@ -126,6 +132,7 @@ export function blockedText(queue: {
     queue.finalizations.length === 0 &&
     queue.pullRequests.length === 0 &&
     queue.cleanups.length === 0 &&
+    queue.readyFailures.length === 0 &&
     queue.specs.length === 0
   ) {
     return "nothing is waiting for you";
@@ -144,6 +151,10 @@ export function blockedText(queue: {
     ...queue.cleanups.flatMap((c) => [
       `${c.specDisplayId}  clean-up of the spec did not finish: ${c.error}`,
       `    branches or pull requests may be left on the code host; try again: plat spec cleanup ${c.specDisplayId}`,
+    ]),
+    ...queue.readyFailures.flatMap((r) => [
+      `${r.specDisplayId}  ${r.repo} #${r.number} could not be turned ready: ${r.error}`,
+      "    it is still a draft; turn it ready on the code host once the pull requests it follows are merged",
     ]),
     ...queue.specs.map(
       (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,
@@ -222,6 +233,7 @@ export function ticketText(view: {
 
 interface PullRequestRowLike {
   order: number;
+  waitsFor: string[];
   repo: string;
   number: number;
   url: string;
@@ -233,7 +245,7 @@ interface PullRequestRowLike {
 }
 
 const pullRequestRow = (p: PullRequestRowLike) =>
-  `${p.order}. ${p.repo} #${p.number}  ${pullState(p.state)}${p.draft ? " (draft)" : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`;
+  `${p.order}. ${p.repo} #${p.number}  ${pullState(p.state)}${p.draft ? " (draft)" : ""}${p.waitsFor.length > 0 ? `  after ${p.waitsFor.join(", ")}` : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`;
 
 interface PackLike {
   pullRequests: PullRequestRowLike[];

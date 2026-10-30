@@ -1,6 +1,7 @@
 import { formatDisplayId } from "@afk/shared";
 import { z } from "@hono/zod-openapi";
 import type pg from "pg";
+import { mergeOrderOf } from "../host/merge-order.ts";
 
 // The acceptance pack: what a person needs to decide whether to merge a spec's pull requests
 // (docs/design.md「合并到 main 与信任阶梯」). It is built from what the platform recorded, once, when the
@@ -15,6 +16,7 @@ const Step = z.object({
 
 export const PullRequestRow = z.object({
   order: z.number().int(), // the order to merge them in, 1 first
+  waitsFor: z.array(z.string()).default([]), // the repos whose pull requests come before this one
   repo: z.string(),
   number: z.number().int(),
   url: z.string(),
@@ -71,10 +73,8 @@ export const AcceptancePack = z.object({
 });
 export type AcceptancePack = z.infer<typeof AcceptancePack>;
 
-// The backend goes first: the frontend depends on it, so its pull request is merged (and deployed) before.
-const mergeOrder = (a: { name: string; id: number }, b: typeof a) =>
-  Number(b.name === "backend") - Number(a.name === "backend") || a.id - b.id;
-
+// The pull requests in the order to merge them: the repos whose contracts others use come first, as the contract
+// edges of the spec say (mergeOrderOf); a repo in no relation has no place in the order and follows.
 export async function pullRequestRows(
   pool: Pick<pg.Pool, "query">,
   specId: number,
@@ -84,15 +84,16 @@ export async function pullRequestRows(
      FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.spec_id = $1`,
     [specId],
   );
+  const merge = await mergeOrderOf(pool as pg.Pool, specId);
+  const place = (name: string) => {
+    const at = merge.ordered.indexOf(name);
+    return at === -1 ? merge.ordered.length : at;
+  };
   return rows
-    .sort((a, b) =>
-      mergeOrder(
-        { name: a.name, id: a.repo_id },
-        { name: b.name, id: b.repo_id },
-      ),
-    )
+    .sort((a, b) => place(a.name) - place(b.name) || a.repo_id - b.repo_id)
     .map((row, index) => ({
       order: index + 1,
+      waitsFor: merge.after[row.name] ?? [],
       repo: row.name,
       number: row.number,
       url: row.url,

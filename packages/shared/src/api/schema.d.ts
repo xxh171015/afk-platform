@@ -971,7 +971,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync or spec-cleanup job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -996,6 +996,15 @@ export interface paths {
                     repoUrl: string;
                     number: number;
                   }[];
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "pr-ready";
+                  pull: {
+                    id: number;
+                    repoUrl: string;
+                    number: number;
+                  };
                 }
               | {
                   /** @enum {string} */
@@ -1554,8 +1563,17 @@ export interface paths {
                   logPath: string;
                 } | null;
               }[];
+              mergeOrder: {
+                ordered: string[];
+                after: {
+                  [key: string]: string[];
+                };
+                unordered: string[];
+              };
               pullRequests: {
                 order: number;
+                /** @default [] */
+                waitsFor: string[];
                 repo: string;
                 number: number;
                 url: string;
@@ -1572,6 +1590,8 @@ export interface paths {
                 generatedAt: string;
                 pullRequests: {
                   order: number;
+                  /** @default [] */
+                  waitsFor: string[];
                   repo: string;
                   number: number;
                   url: string;
@@ -1812,6 +1832,14 @@ export interface paths {
               cleanups: {
                 specId: number;
                 specDisplayId: string;
+                error: string;
+              }[];
+              readyFailures: {
+                specId: number;
+                specDisplayId: string;
+                repo: string;
+                number: number;
+                url: string;
                 error: string;
               }[];
               specs: {

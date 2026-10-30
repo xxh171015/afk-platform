@@ -41,6 +41,25 @@ export async function runHostTask(
     log(`opened ${pr.url} (${pr.state})`);
     return { stage: "open-pr", outcome: "opened", ...pr };
   }
+  if (task.kind === "pr-ready") {
+    try {
+      const info = await deps.adapter.markReady({
+        repo: repoRef(task.pull.repoUrl),
+        number: task.pull.number,
+      });
+      log(
+        `pull request ${task.pull.number} of ${task.pull.repoUrl} is ${info.draft ? "still a draft" : "ready"}`,
+      );
+      return { stage: "pr-ready", ...info };
+    } catch (error) {
+      // the job fails and is tried again a minute later (and, after three failures, a person looks at it)
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not mark the pull request ready: ${String(error)}`,
+      );
+    }
+  }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
   const pulls = [];
   for (const pull of task.pulls) {

@@ -1654,7 +1654,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync or spec-cleanup job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -1722,6 +1722,31 @@
                         }
                       },
                       "required": ["kind", "pulls"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["pr-ready"]
+                        },
+                        "pull": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "repoUrl": {
+                              "type": "string"
+                            },
+                            "number": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["id", "repoUrl", "number"]
+                        }
+                      },
+                      "required": ["kind", "pull"]
                     },
                     {
                       "type": "object",
@@ -2828,6 +2853,33 @@
                         ]
                       }
                     },
+                    "mergeOrder": {
+                      "type": "object",
+                      "properties": {
+                        "ordered": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "after": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "unordered": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["ordered", "after", "unordered"]
+                    },
                     "pullRequests": {
                       "type": "array",
                       "items": {
@@ -2835,6 +2887,13 @@
                         "properties": {
                           "order": {
                             "type": "integer"
+                          },
+                          "waitsFor": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
                           },
                           "repo": {
                             "type": "string"
@@ -2890,6 +2949,13 @@
                             "properties": {
                               "order": {
                                 "type": "integer"
+                              },
+                              "waitsFor": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "default": []
                               },
                               "repo": {
                                 "type": "string"
@@ -3140,6 +3206,7 @@
                     "spec",
                     "tickets",
                     "finalizations",
+                    "mergeOrder",
                     "pullRequests",
                     "acceptancePack",
                     "edges"
@@ -3526,6 +3593,40 @@
                         "required": ["specId", "specDisplayId", "error"]
                       }
                     },
+                    "readyFailures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "number",
+                          "url",
+                          "error"
+                        ]
+                      }
+                    },
                     "specs": {
                       "type": "array",
                       "items": {
@@ -3553,6 +3654,7 @@
                     "finalizations",
                     "pullRequests",
                     "cleanups",
+                    "readyFailures",
                     "specs"
                   ]
                 }

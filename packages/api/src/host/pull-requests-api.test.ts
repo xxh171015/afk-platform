@@ -59,7 +59,11 @@ type StageResults = Record<string, Record<string, unknown>>;
 async function settledSpec(
   repos: string[],
   holdRepoId?: number,
-  options: { tickets?: Record<string, unknown>[]; stages?: StageResults } = {},
+  options: {
+    tickets?: Record<string, unknown>[];
+    stages?: StageResults;
+    contractPaths?: Record<string, string>; // repo name -> its contract path
+  } = {},
 ) {
   let held: { id: number; attempt: number } | undefined;
   const project = await call("POST", "/projects", { name: "shop" });
@@ -68,6 +72,19 @@ async function settledSpec(
       url: `https://github.com/me/shop-${role}.git`,
       role,
     });
+  for (const [name, contractPath] of Object.entries(
+    options.contractPaths ?? {},
+  ).filter(([name]) => repos.includes(name))) {
+    const response = await fetch(
+      `${api.url}/projects/${project.body.id}/repos/${name}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contractPath }),
+      },
+    );
+    expect(response.status).toBe(200);
+  }
   const spec = await call("POST", "/specs", {
     projectId: project.body.id,
     type: "feature",
@@ -165,6 +182,260 @@ const synced = (id: number, extra: Record<string, unknown> = {}) => ({
   ci: "pending",
   review: "none",
   ...extra,
+});
+
+// backend's contract is used by the frontend; payments' contract is used by the backend
+const CONTRACT_PATHS = { backend: "openapi.yaml", payments: "pay.yaml" };
+const contractTicket = (key: string, repo: string) =>
+  ticket(key, repo, undefined, { type: "contract" });
+
+describe("the order pull requests are merged in", () => {
+  async function draftsByRepo() {
+    const drafts: Record<string, boolean> = {};
+    for (const job of await jobsOf("open-pr")) {
+      const claimed = await claimOf("open-pr");
+      const task = await taskOf(claimed);
+      drafts[task.body.repoUrl.match(/shop-(\w+)\.git/)[1]] = task.body.draft;
+      await worker.complete(
+        claimed.id,
+        claimed.attempt,
+        opened(job.payload.repoId, { draft: task.body.draft }),
+      );
+    }
+    return drafts;
+  }
+
+  it("opens the pull request of the repo that uses another's contract as a draft, and the other not", async () => {
+    await settledSpec(["backend", "frontend"], undefined, {
+      contractPaths: CONTRACT_PATHS,
+      tickets: [
+        contractTicket("contract", "backend"),
+        ticket("fe", "frontend", undefined, { contract: "contract" }),
+      ],
+    });
+    expect(await draftsByRepo()).toEqual({ backend: false, frontend: true });
+  });
+
+  it("opens no draft when the repos have no contract relation", async () => {
+    await settledSpec(["backend", "frontend"]);
+    expect(await draftsByRepo()).toEqual({ backend: false, frontend: false });
+  });
+
+  it("orders three repos along two relations: payments, then backend, then frontend", async () => {
+    await settledSpec(["backend", "frontend", "payments"], undefined, {
+      contractPaths: CONTRACT_PATHS,
+      tickets: [
+        contractTicket("cp", "payments"),
+        contractTicket("cb", "backend"),
+        ticket("be", "backend", undefined, { contract: "cp" }),
+        ticket("fe", "frontend", undefined, { contract: "cb" }),
+      ],
+    });
+    expect(await draftsByRepo()).toEqual({
+      backend: true,
+      frontend: true,
+      payments: false,
+    });
+    const view = (await call("GET", "/specs/1")).body;
+    expect(view.mergeOrder).toEqual({
+      ordered: ["payments", "backend", "frontend"],
+      after: { payments: [], backend: ["payments"], frontend: ["backend"] },
+      unordered: [],
+    });
+    expect(view.pullRequests.map((p: Json) => [p.repo, p.draft])).toEqual(
+      expect.arrayContaining([
+        ["payments", false],
+        ["backend", true],
+        ["frontend", true],
+      ]),
+    );
+  });
+});
+
+describe("turning a draft pull request ready", () => {
+  // backend's pull request is #1 (not a draft); the frontend's, which uses its contract, is #2 and a draft
+  async function draftSetup() {
+    await settledSpec(["backend", "frontend"], undefined, {
+      contractPaths: CONTRACT_PATHS,
+      tickets: [
+        contractTicket("contract", "backend"),
+        ticket("fe", "frontend", undefined, { contract: "contract" }),
+      ],
+    });
+    for (const [n, draft] of [
+      [1, false],
+      [2, true],
+    ] as const) {
+      const job = await claimOf("open-pr");
+      await worker.complete(job.id, job.attempt, opened(n, { draft }));
+    }
+  }
+  // the next job of this type; a host-sync that is due first is answered with nothing to report
+  async function claimNamed(type: string) {
+    for (let i = 0; i < 5; i++) {
+      const job = (await worker.claim()).body.job;
+      if (!job) break;
+      if (job.type === type)
+        return job as { id: number; attempt: number; payload: Json };
+      if (job.type === "host-sync") {
+        await worker.complete(job.id, job.attempt, {
+          stage: "host-sync",
+          pulls: [],
+        });
+      } else {
+        throw new Error(`unexpected ${job.type} job`);
+      }
+    }
+    throw new Error(`no ${type} job`);
+  }
+  // The next host-sync; a pr-ready job queued before it is left running (a worker that has taken it and not yet
+  // finished), which is also what keeps another from being queued.
+  async function claimSyncKeeping() {
+    for (let i = 0; i < 5; i++) {
+      const job = (await worker.claim()).body.job;
+      if (!job) break;
+      if (job.type === "host-sync")
+        return job as { id: number; attempt: number; payload: Json };
+    }
+    throw new Error("no host-sync job");
+  }
+  // answers the next host-sync with the given facts for the two pull requests
+  async function sync(facts: Record<number, Record<string, unknown>>) {
+    clock.advanceSeconds(61);
+    const job = await claimSyncKeeping();
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: Object.entries(facts).map(([id, extra]) =>
+        synced(Number(id), extra),
+      ),
+    });
+  }
+  const BACKEND_MERGED = { 1: { state: "merged" }, 2: { draft: true } };
+
+  it("queues a pr-ready job for the draft once the pull request it waits for is merged, and not before", async () => {
+    await draftSetup();
+    await sync({ 1: {}, 2: { draft: true } });
+    expect(await jobsOf("pr-ready")).toEqual([]);
+
+    await sync(BACKEND_MERGED);
+    expect(await jobsOf("pr-ready")).toMatchObject([
+      { state: "queued", lock_key: null, payload: { pullId: 2 } },
+    ]);
+    // another look while it is still queued adds nothing
+    await sync(BACKEND_MERGED);
+    expect(await jobsOf("pr-ready")).toHaveLength(1);
+  });
+
+  it("tells the worker which pull request to turn ready, and records it as ready when the worker has", async () => {
+    await draftSetup();
+    await sync(BACKEND_MERGED);
+    const job = await claimOf("pr-ready");
+    expect((await taskOf(job)).body).toEqual({
+      kind: "pr-ready",
+      pull: {
+        id: 2,
+        repoUrl: "https://github.com/me/shop-frontend.git",
+        number: 2,
+      },
+    });
+    await worker.complete(job.id, job.attempt, {
+      stage: "pr-ready",
+      ...synced(2, { draft: false }),
+    });
+    expect((await pulls()).find((p) => p.number === 2)).toBeTruthy();
+    const draft = await db.pool.query(
+      "SELECT draft FROM pull_requests WHERE id = 2",
+    );
+    expect(draft.rows[0].draft).toBe(false);
+    expect(
+      (await call("GET", "/specs/1")).body.pullRequests.find(
+        (p: Json) => p.repo === "frontend",
+      ).draft,
+    ).toBe(false);
+  });
+
+  it("queues nothing when a person has already turned it ready", async () => {
+    await draftSetup();
+    await sync({ 1: { state: "merged" }, 2: { draft: false } });
+    expect(await jobsOf("pr-ready")).toEqual([]);
+  });
+
+  it("waits for every pull request a draft is behind", async () => {
+    await settledSpec(["backend", "frontend", "payments"], undefined, {
+      contractPaths: CONTRACT_PATHS,
+      tickets: [
+        contractTicket("cp", "payments"),
+        contractTicket("cb", "backend"),
+        ticket("be", "backend", undefined, { contract: "cp" }),
+        ticket("fe", "frontend", undefined, { contract: "cb" }),
+      ],
+    });
+    // repos are numbered backend 1, frontend 2, payments 3; their pull requests are numbered the same way
+    for (const [n, draft] of [
+      [1, true],
+      [2, true],
+      [3, false],
+    ] as const) {
+      const job = await claimOf("open-pr");
+      await worker.complete(
+        job.id,
+        job.attempt,
+        opened(job.payload.repoId, { draft }),
+      );
+      void n;
+    }
+    await sync({
+      3: { state: "merged" },
+      1: { draft: true },
+      2: { draft: true },
+    });
+    expect(
+      (await jobsOf("pr-ready")).map((j: Json) => j.payload.pullId),
+    ).toEqual([1]); // backend is ready to go; the frontend still waits for the backend
+    const job = await claimOf("pr-ready");
+    await worker.complete(job.id, job.attempt, {
+      stage: "pr-ready",
+      ...synced(1, { draft: false }),
+    });
+    await sync({
+      3: { state: "merged" },
+      1: { state: "merged" },
+      2: { draft: true },
+    });
+    expect(
+      (await jobsOf("pr-ready")).map((j: Json) => j.payload.pullId),
+    ).toEqual([1, 2]);
+  });
+
+  it("tries a failed pr-ready again a minute later, three times in all, and then shows it in plat blocked", async () => {
+    await draftSetup();
+    await sync(BACKEND_MERGED);
+    for (let n = 1; n <= 3; n++) {
+      const job = await claimNamed("pr-ready");
+      await worker.fail(job.id, job.attempt, "GitHub answered 403");
+      if (n < 3) {
+        // a minute has to pass before the next try
+        expect((await worker.claim()).body.job?.type ?? "nothing").not.toBe(
+          "pr-ready",
+        );
+        clock.advanceSeconds(61);
+      }
+    }
+    expect(await jobsOf("pr-ready")).toHaveLength(3);
+
+    const blocked = (await call("GET", "/blocked")).body;
+    expect(blocked.readyFailures).toEqual([
+      expect.objectContaining({
+        specId: 1,
+        repo: "frontend",
+        number: 2,
+        error: expect.stringMatching(/403/),
+      }),
+    ]);
+    // the next look at the host does not queue it again by itself
+    await sync(BACKEND_MERGED);
+    expect(await jobsOf("pr-ready")).toHaveLength(3);
+  });
 });
 
 describe("opening the pull requests", () => {
@@ -823,8 +1094,15 @@ describe("the acceptance pack", () => {
     expect(acceptancePack.agentSeconds).toBeGreaterThanOrEqual(4);
   });
 
-  it("lists the pull requests in the order to merge them, the backend first, with today's CI and review", async () => {
-    await settledSpec(["frontend", "backend"]); // the frontend repo was added first
+  it("lists the pull requests in the order to merge them, the repo whose contract is used first, with today's CI and review", async () => {
+    // the frontend repo was added first, and uses the backend's contract
+    await settledSpec(["frontend", "backend"], undefined, {
+      contractPaths: { backend: "openapi.yaml" },
+      tickets: [
+        contractTicket("contract", "backend"),
+        ticket("fe", "frontend", undefined, { contract: "contract" }),
+      ],
+    });
     for (let n = 1; n <= 2; n++) {
       const job = await claimOf("open-pr");
       await worker.complete(job.id, job.attempt, opened(n));

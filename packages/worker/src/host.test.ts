@@ -20,6 +20,9 @@ const info = (
 const ref = () => ({ owner: "me", name: "pilot" });
 // the parts of the host these tests do not use
 const noCleanup = {
+  markReady: async (): Promise<PullRequestInfo> => {
+    throw new Error("not used");
+  },
   closePullRequest: async (): Promise<PullRequestInfo> => {
     throw new Error("not used");
   },
@@ -37,6 +40,46 @@ const open = {
   body: "Spec: S-1",
   draft: false,
 };
+
+describe("a pr-ready task", () => {
+  const task = {
+    kind: "pr-ready" as const,
+    pull: { id: 4, repoUrl: "https://github.com/me/pilot.git", number: 9 },
+  };
+
+  it("turns the pull request ready and reports what the host says now", async () => {
+    const calls: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(1),
+      getPullRequest: async () => info(9),
+      markReady: async (input) => {
+        calls.push(input);
+        return info(9, { draft: false });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(calls).toEqual([{ repo: ref(), number: 9 }]);
+    expect(result).toEqual({ stage: "pr-ready", ...info(9, { draft: false }) });
+  });
+
+  it("fails as an infrastructure problem when the host refuses, so the job is tried again", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(1),
+      getPullRequest: async () => info(9),
+      markReady: async () => {
+        throw new HostError(
+          "GitHub refused to mark pull request 9 ready (403)",
+          403,
+        );
+      },
+    };
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, task, log),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+});
 
 describe("an open-pr task", () => {
   it("opens the pull request the task describes and reports what the host said", async () => {
@@ -160,6 +203,7 @@ describe("a spec-cleanup task", () => {
       calls,
       openPullRequest: async () => info(0),
       getPullRequest: async () => info(0),
+      markReady: async () => info(0),
       closePullRequest: async ({ number }) => {
         calls.push(`close ${number}`);
         return info(number, { state: "closed" });
