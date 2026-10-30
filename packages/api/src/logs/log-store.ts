@@ -8,8 +8,12 @@ import { join } from "node:path";
 
 export const MAX_LOG_BYTES = 50 * 1024 * 1024; // per run attempt
 
-export const defaultLogDir = (env: NodeJS.ProcessEnv = process.env) =>
-  env.AFK_LOG_DIR ?? join(homedir(), ".afk", "logs");
+// $AFK_LOG_DIR as given, else ~/.afk/logs/<instance id>: run numbers restart in every database, so two databases
+// on one machine must not share a directory (their run-1 logs would be appended to one file).
+export const defaultLogDir = (
+  instanceId: string,
+  env: NodeJS.ProcessEnv = process.env,
+) => env.AFK_LOG_DIR ?? join(homedir(), ".afk", "logs", instanceId);
 
 const isNotFound = (error: unknown) =>
   (error as { code?: string }).code === "ENOENT";

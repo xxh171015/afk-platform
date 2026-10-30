@@ -69,7 +69,7 @@ git -C ~/.afk/skills switch --detach 59db609eb1e18aaf59b63284d0e52255aff0c63c
 docker compose up -d --wait postgres
 export DATABASE_URL=postgres://afk:afk@localhost:5432/afk
 pnpm db:migrate
-pnpm api                      # http://127.0.0.1:3000 ($PORT to change)
+pnpm api                      # http://127.0.0.1:3000 ($PORT to change); run logs go to ~/.afk/logs/<instance id>/ ($AFK_LOG_DIR to change; give each database its own)
 pnpm web                      # http://127.0.0.1:5173
 
 export AFK_MODEL=<cursor model>

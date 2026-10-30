@@ -5,13 +5,16 @@ import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
 import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
-import { defaultLogDir, LogStore } from "./logs/log-store.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { LogStore } from "./logs/log-store.ts";
 
 export interface AppOptions {
   pool: pg.Pool;
   clock?: () => Date;
   leaseSeconds?: number;
-  // Where run logs are kept: $AFK_LOG_DIR, else ~/.afk/logs.
+  // Where run logs are kept; startServer fills in $AFK_LOG_DIR or ~/.afk/logs/<instance id>.
   logDir?: string;
 }
 
@@ -32,7 +35,7 @@ export function createApp(options: AppOptions): OpenAPIHono {
     pool: options.pool,
     clock: options.clock ?? (() => new Date()),
     leaseSeconds: options.leaseSeconds ?? LEASE_SECONDS,
-    logs: new LogStore(options.logDir ?? defaultLogDir()),
+    logs: new LogStore(options.logDir ?? mkdtempSync(join(tmpdir(), "afk-logs-"))),
   };
   const app = new OpenAPIHono();
   // The API starts agents and has no login, so it only talks to this machine. CORS alone would only stop a foreign

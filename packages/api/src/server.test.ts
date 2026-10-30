@@ -1,6 +1,9 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { migrate } from "./db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "./db/test-db.ts";
+import { defaultLogDir } from "./logs/log-store.ts";
 import { HOST, type RunningServer, startServer } from "./server.ts";
 
 let db: TestDatabase | undefined;
@@ -172,5 +175,14 @@ describe("starting the process", () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toMatch(/PORT must be a port number/);
+  });
+
+  it("keeps run logs of each database in its own directory unless AFK_LOG_DIR says otherwise", () => {
+    expect(defaultLogDir("a1b2c3", {})).toBe(
+      join(homedir(), ".afk", "logs", "a1b2c3"),
+    );
+    expect(defaultLogDir("a1b2c3", { AFK_LOG_DIR: "/var/logs" })).toBe(
+      "/var/logs",
+    );
   });
 });
