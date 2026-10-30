@@ -56,10 +56,18 @@ export async function runWorker(
   let jobs = 0;
   const loop = async () => {
     while (!options.signal?.aborted) {
-      const job = await options.api.claim([
-        ...(options.capabilities ?? []),
-        ...(options.host ? [HOST_CAPABILITY] : []),
-      ]);
+      let job: ClaimedJob | null;
+      try {
+        job = await options.api.claim([
+          ...(options.capabilities ?? []),
+          ...(options.host ? [HOST_CAPABILITY] : []),
+        ]);
+      } catch (error) {
+        // the other slots are still working: a claim that did not get through is tried again after the poll wait
+        options.log?.(`claim failed: ${String(error)}`);
+        await sleep(options.pollMs ?? 2_000, options.signal);
+        continue;
+      }
       if (!job) {
         if (options.stopWhenIdle) return;
         await sleep(options.pollMs ?? 2_000, options.signal);
