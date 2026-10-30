@@ -1,6 +1,11 @@
 import { SPEC_STATES, TICKET_STATES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { AcceptancePack, PullRequestRow } from "../acceptance/pack.ts";
+import {
+  AcceptancePack,
+  MergeOrderView,
+  OrderBroken,
+  PullRequestRow,
+} from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
@@ -168,14 +173,8 @@ const specRoute = createRoute({
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
-        mergeOrder: z.object({
-          ordered: z.array(z.string()),
-          after: z.record(z.string(), z.array(z.string())),
-          unordered: z.array(z.string()),
-        }),
-        orderBroken: z.array(
-          z.object({ repo: z.string(), skipped: z.array(z.string()) }),
-        ),
+        mergeOrder: MergeOrderView,
+        orderBroken: OrderBroken,
         pullRequests: z.array(PullRequestRow),
         acceptancePack: AcceptancePack.nullable(),
         edges: z.array(

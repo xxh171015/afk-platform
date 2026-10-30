@@ -1591,66 +1591,80 @@ export interface paths {
                 syncError: string | null;
               }[];
               acceptancePack: {
-                /** @default [] */
+                generatedAt: string;
+                mergeOrder: {
+                  ordered: string[];
+                  after: {
+                    [key: string]: string[];
+                  };
+                  unordered: string[];
+                };
                 orderBroken: {
                   repo: string;
                   skipped: string[];
                 }[];
-                generatedAt: string;
-                pullRequests: {
-                  order: number;
-                  /** @default [] */
-                  waitsFor: string[];
+                repos: {
                   repo: string;
-                  number: number;
-                  url: string;
-                  /** @enum {string} */
-                  state: "open" | "closed" | "merged";
-                  draft: boolean;
-                  /** @enum {string} */
-                  ci: "none" | "pending" | "success" | "failure";
-                  /** @enum {string} */
-                  review: "none" | "approved" | "changes-requested";
-                  syncError: string | null;
+                  pullRequest: {
+                    order: number;
+                    /** @default [] */
+                    waitsFor: string[];
+                    repo: string;
+                    number: number;
+                    url: string;
+                    /** @enum {string} */
+                    state: "open" | "closed" | "merged";
+                    draft: boolean;
+                    /** @enum {string} */
+                    ci: "none" | "pending" | "success" | "failure";
+                    /** @enum {string} */
+                    review: "none" | "approved" | "changes-requested";
+                    syncError: string | null;
+                  } | null;
+                  gate: {
+                    commitSha: string;
+                    testsTotal: number | null;
+                    testsSkipped: number | null;
+                    durationMs: number;
+                    steps: {
+                      name: string;
+                      exitCode: number;
+                      ms: number;
+                    }[];
+                  } | null;
+                  tickets: {
+                    displayId: string;
+                    title: string;
+                    appended: boolean;
+                    criteria: {
+                      text: string;
+                      tests: string[];
+                      /** @enum {string} */
+                      status: "verified" | "unverified";
+                      reason: string | null;
+                    }[];
+                  }[];
+                  findings: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    kind: string;
+                    body: string;
+                    resolution: string;
+                  }[];
+                  uncertainties: {
+                    source: string;
+                    text: string;
+                  }[];
+                  protectedPathApprovals: {
+                    ticket: string;
+                    paths: string[];
+                  }[];
                 }[];
-                tickets: {
+                cancelledTickets: {
                   displayId: string;
                   title: string;
-                  criteria: {
-                    text: string;
-                    tests: string[];
-                    /** @enum {string} */
-                    status: "verified" | "unverified";
-                    reason: string | null;
-                  }[];
-                }[];
-                findings: {
-                  ticket: string | null;
-                  run: string;
-                  stage: string;
-                  kind: string;
-                  body: string;
-                  resolution: string;
-                }[];
-                uncertainties: {
-                  source: string;
-                  text: string;
-                }[];
-                gates: {
                   repo: string;
-                  commitSha: string;
-                  testsTotal: number | null;
-                  testsSkipped: number | null;
-                  durationMs: number;
-                  steps: {
-                    name: string;
-                    exitCode: number;
-                    ms: number;
-                  }[];
-                }[];
-                protectedPathApprovals: {
-                  ticket: string;
-                  paths: string[];
                 }[];
                 agentSeconds: number;
               } | null;

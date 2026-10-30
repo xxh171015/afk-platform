@@ -3,7 +3,7 @@ import type pg from "pg";
 
 // The merge order of a spec's repos, from the contract edges between its tickets that have not been cancelled.
 export async function mergeOrderOf(
-  db: pg.Pool | pg.PoolClient,
+  db: Pick<pg.Pool, "query">,
   specId: number,
 ): Promise<MergeOrder> {
   const repos = await db.query<{ name: string }>(

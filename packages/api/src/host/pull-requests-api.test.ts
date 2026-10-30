@@ -55,7 +55,10 @@ const ticket = (
 });
 
 // A spec whose tickets are all done and whose repos' overall reviews have all passed: it is time for pull requests.
-type StageResults = Record<string, Record<string, unknown>>;
+type StageResults = Record<
+  string,
+  Record<string, unknown> | Record<string, unknown>[]
+>;
 async function settledSpec(
   repos: string[],
   holdRepoId?: number,
@@ -125,9 +128,16 @@ async function settledSpec(
       held = claimed;
       continue;
     }
+    // a list of results is used one by one, the last one for every later job of the stage
+    const planned = stages[claimed.payload.stage];
+    const result = Array.isArray(planned)
+      ? planned.length > 1
+        ? planned.shift()
+        : planned[0]
+      : planned;
     await worker.complete(claimed.id, claimed.attempt, {
       stage: claimed.payload.stage,
-      ...stages[claimed.payload.stage],
+      ...result,
     });
   }
   return { specId: spec.body.id as number, held };
@@ -1129,14 +1139,17 @@ describe("the acceptance pack", () => {
     const view = await packOf();
     expect(view.spec.state).toBe("awaiting-review");
     expect(view.acceptancePack).not.toBeNull();
-    expect(view.acceptancePack.pullRequests).toEqual(view.pullRequests);
+    expect(view.acceptancePack.repos).toHaveLength(1);
+    expect(view.acceptancePack.repos[0].pullRequest).toEqual(
+      view.pullRequests[0],
+    );
   });
 
   it("marks a criterion verified only when its named test is in the JUnit report and passed", async () => {
     const { acceptancePack } = await packOf();
-    expect(acceptancePack.tickets).toHaveLength(1);
+    expect(acceptancePack.repos[0].tickets).toHaveLength(1);
     const byText = Object.fromEntries(
-      acceptancePack.tickets[0].criteria.map((c: Json) => [c.text, c]),
+      acceptancePack.repos[0].tickets[0].criteria.map((c: Json) => [c.text, c]),
     );
     expect(byText["exports orders"]).toMatchObject({
       status: "verified",
@@ -1164,7 +1177,7 @@ describe("the acceptance pack", () => {
 
   it("carries the review's findings with what became of them, and every uncertainty", async () => {
     const { acceptancePack } = await packOf();
-    expect(acceptancePack.findings).toEqual([
+    expect(acceptancePack.repos[0].findings).toEqual([
       {
         ticket: "T-1",
         run: expect.stringMatching(/^R-\d+$/),
@@ -1174,7 +1187,7 @@ describe("the acceptance pack", () => {
         resolution: "acceptance-pack",
       },
     ]);
-    expect(acceptancePack.uncertainties).toEqual([
+    expect(acceptancePack.repos[0].uncertainties).toEqual([
       { source: "T-1 implement", text: "not sure the date format is right" },
       { source: "T-1 review", text: "the review could not run the export" },
       { source: "S-1 final review", text: "migration order" },
@@ -1183,20 +1196,17 @@ describe("the acceptance pack", () => {
 
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {
     const { acceptancePack } = await packOf();
-    expect(acceptancePack.gates).toEqual([
-      {
-        repo: "backend",
-        commitSha: "head",
-        testsTotal: 3,
-        testsSkipped: 1,
-        durationMs: 4000,
-        steps: [
-          { name: "setup", exitCode: 0, ms: 1500 },
-          { name: "test", exitCode: 0, ms: 2500 },
-        ],
-      },
-    ]);
-    expect(acceptancePack.protectedPathApprovals).toEqual([
+    expect(acceptancePack.repos[0].gate).toEqual({
+      commitSha: "head",
+      testsTotal: 3,
+      testsSkipped: 1,
+      durationMs: 4000,
+      steps: [
+        { name: "setup", exitCode: 0, ms: 1500 },
+        { name: "test", exitCode: 0, ms: 2500 },
+      ],
+    });
+    expect(acceptancePack.repos[0].protectedPathApprovals).toEqual([
       { ticket: "T-1", paths: [".github/workflows/ci.yml"] },
     ]);
     expect(acceptancePack.agentSeconds).toBeGreaterThanOrEqual(4);
@@ -1222,16 +1232,137 @@ describe("the acceptance pack", () => {
     });
     const { acceptancePack } = (await call("GET", "/specs/1")).body;
     expect(
-      acceptancePack.pullRequests.map((p: Json) => [
-        p.order,
-        p.repo,
-        p.ci,
-        p.review,
+      acceptancePack.repos.map((r: Json) => [
+        r.pullRequest.order,
+        r.repo,
+        r.pullRequest.ci,
+        r.pullRequest.review,
       ]),
     ).toEqual([
       [1, "backend", "pending", "approved"],
       [2, "frontend", "success", "none"],
     ]);
+  });
+
+  it("opens with the merge order and has a section for each repo, in that order, with its own pull request, gate and tickets", async () => {
+    await settledSpec(["frontend", "backend"], undefined, {
+      contractPaths: { backend: "openapi.yaml" },
+      tickets: [
+        contractTicket("contract", "backend"),
+        ticket("fe", "frontend", ["fe works"], { contract: "contract" }),
+      ],
+      stages,
+    });
+    for (let n = 1; n <= 2; n++) {
+      const job = await claimOf("open-pr");
+      await worker.complete(job.id, job.attempt, opened(n));
+    }
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.mergeOrder).toEqual({
+      ordered: ["backend", "frontend"],
+      after: { backend: [], frontend: ["backend"] },
+      unordered: [],
+    });
+    expect(acceptancePack.repos.map((r: Json) => r.repo)).toEqual([
+      "backend",
+      "frontend",
+    ]);
+    const [backend, frontend] = acceptancePack.repos;
+    expect(backend.tickets.map((t: Json) => t.displayId)).toEqual(["T-1"]);
+    expect(frontend.tickets.map((t: Json) => t.displayId)).toEqual(["T-2"]);
+    expect(frontend.pullRequest).toMatchObject({
+      repo: "frontend",
+      waitsFor: ["backend"],
+    });
+    expect(backend.gate).toMatchObject({ commitSha: "head" });
+    expect(frontend.gate).toMatchObject({ commitSha: "head" });
+  });
+
+  it("verifies a criterion with a test that a fix run added, the last run's naming of it winning", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [ticket("a", "backend", ["exports orders", "has a header"])],
+      stages: {
+        ...stages,
+        implement: {
+          outcome: "done",
+          run: {
+            output: {
+              status: "done",
+              summary: "did it",
+              acceptance: {
+                "exports orders": ["footer test that does not exist"],
+              },
+              uncertainties: [],
+            },
+          },
+        },
+        gate: [
+          { outcome: "failed", run: { output: { failureLog: "boom" } } },
+          { outcome: "passed" },
+        ],
+        "gate-fix": {
+          outcome: "done",
+          run: {
+            output: {
+              status: "done",
+              summary: "fixed",
+              acceptance: {
+                "exports orders": ["exports a csv"],
+                "has a header": ["has a header"],
+              },
+              uncertainties: [],
+            },
+          },
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    const criteria = acceptancePack.repos[0].tickets[0].criteria;
+    expect(criteria).toMatchObject([
+      { text: "exports orders", status: "verified", tests: ["exports a csv"] },
+      { text: "has a header", status: "verified", tests: ["has a header"] },
+    ]);
+  });
+
+  it("marks tickets appended after the plan was confirmed, and lists the cancelled ones", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [ticket("a", "backend"), ticket("b", "backend", ["b works"])],
+    });
+    // b is cancelled before it ran, a new one is appended and goes through
+    await db.pool.query("UPDATE tickets SET state = 'cancelled' WHERE id = 2");
+    await db.pool.query("UPDATE tickets SET appended = true WHERE id = 1");
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.repos[0].tickets).toMatchObject([
+      { displayId: "T-1", appended: true },
+    ]);
+    expect(acceptancePack.cancelledTickets).toEqual([
+      { displayId: "T-2", title: "Ticket b", repo: "backend" },
+    ]);
+  });
+
+  it("makes a pack again from the record when the stored one is of the older kind, without repo sections", async () => {
+    await packOf();
+    await db.pool.query(
+      "UPDATE acceptance_packs SET content = $1 WHERE spec_id = 1",
+      [
+        JSON.stringify({
+          generatedAt: "2026-10-01T00:00:00.000Z",
+          pullRequests: [],
+          tickets: [],
+        }),
+      ],
+    );
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.generatedAt).toBe("2026-10-01T00:00:00.000Z");
+    expect(acceptancePack.repos[0].tickets[0].criteria.length).toBeGreaterThan(
+      0,
+    );
+    const stored = await db.pool.query("SELECT content FROM acceptance_packs");
+    expect(Array.isArray(stored.rows[0].content.repos)).toBe(true);
   });
 
   it("is printed by plat spec show, with the pull requests in merge order and each criterion's verdict", async () => {

@@ -2957,6 +2957,36 @@
                     "acceptancePack": {
                       "type": ["object", "null"],
                       "properties": {
+                        "generatedAt": {
+                          "type": "string"
+                        },
+                        "mergeOrder": {
+                          "type": "object",
+                          "properties": {
+                            "ordered": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "after": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "unordered": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": ["ordered", "after", "unordered"]
+                        },
                         "orderBroken": {
                           "type": "array",
                           "items": {
@@ -2973,78 +3003,253 @@
                               }
                             },
                             "required": ["repo", "skipped"]
-                          },
-                          "default": []
+                          }
                         },
-                        "generatedAt": {
-                          "type": "string"
-                        },
-                        "pullRequests": {
+                        "repos": {
                           "type": "array",
                           "items": {
                             "type": "object",
                             "properties": {
-                              "order": {
-                                "type": "integer"
-                              },
-                              "waitsFor": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                },
-                                "default": []
-                              },
                               "repo": {
                                 "type": "string"
                               },
-                              "number": {
-                                "type": "integer"
-                              },
-                              "url": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string",
-                                "enum": ["open", "closed", "merged"]
-                              },
-                              "draft": {
-                                "type": "boolean"
-                              },
-                              "ci": {
-                                "type": "string",
-                                "enum": [
-                                  "none",
-                                  "pending",
-                                  "success",
-                                  "failure"
+                              "pullRequest": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "order": {
+                                    "type": "integer"
+                                  },
+                                  "waitsFor": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "default": []
+                                  },
+                                  "repo": {
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "integer"
+                                  },
+                                  "url": {
+                                    "type": "string"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": ["open", "closed", "merged"]
+                                  },
+                                  "draft": {
+                                    "type": "boolean"
+                                  },
+                                  "ci": {
+                                    "type": "string",
+                                    "enum": [
+                                      "none",
+                                      "pending",
+                                      "success",
+                                      "failure"
+                                    ]
+                                  },
+                                  "review": {
+                                    "type": "string",
+                                    "enum": [
+                                      "none",
+                                      "approved",
+                                      "changes-requested"
+                                    ]
+                                  },
+                                  "syncError": {
+                                    "type": ["string", "null"]
+                                  }
+                                },
+                                "required": [
+                                  "order",
+                                  "repo",
+                                  "number",
+                                  "url",
+                                  "state",
+                                  "draft",
+                                  "ci",
+                                  "review",
+                                  "syncError"
                                 ]
                               },
-                              "review": {
-                                "type": "string",
-                                "enum": [
-                                  "none",
-                                  "approved",
-                                  "changes-requested"
+                              "gate": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "commitSha": {
+                                    "type": "string"
+                                  },
+                                  "testsTotal": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "testsSkipped": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "durationMs": {
+                                    "type": "integer"
+                                  },
+                                  "steps": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "exitCode": {
+                                          "type": "integer"
+                                        },
+                                        "ms": {
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": ["name", "exitCode", "ms"]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "commitSha",
+                                  "testsTotal",
+                                  "testsSkipped",
+                                  "durationMs",
+                                  "steps"
                                 ]
                               },
-                              "syncError": {
-                                "type": ["string", "null"]
+                              "tickets": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "appended": {
+                                      "type": "boolean"
+                                    },
+                                    "criteria": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "text": {
+                                            "type": "string"
+                                          },
+                                          "tests": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["verified", "unverified"]
+                                          },
+                                          "reason": {
+                                            "type": ["string", "null"]
+                                          }
+                                        },
+                                        "required": [
+                                          "text",
+                                          "tests",
+                                          "status",
+                                          "reason"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "displayId",
+                                    "title",
+                                    "appended",
+                                    "criteria"
+                                  ]
+                                }
+                              },
+                              "findings": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "resolution": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "kind",
+                                    "body",
+                                    "resolution"
+                                  ]
+                                }
+                              },
+                              "uncertainties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["source", "text"]
+                                }
+                              },
+                              "protectedPathApprovals": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": "string"
+                                    },
+                                    "paths": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": ["ticket", "paths"]
+                                }
                               }
                             },
                             "required": [
-                              "order",
                               "repo",
-                              "number",
-                              "url",
-                              "state",
-                              "draft",
-                              "ci",
-                              "review",
-                              "syncError"
+                              "pullRequest",
+                              "gate",
+                              "tickets",
+                              "findings",
+                              "uncertainties",
+                              "protectedPathApprovals"
                             ]
                           }
                         },
-                        "tickets": {
+                        "cancelledTickets": {
                           "type": "array",
                           "items": {
                             "type": "object",
@@ -3055,154 +3260,11 @@
                               "title": {
                                 "type": "string"
                               },
-                              "criteria": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "text": {
-                                      "type": "string"
-                                    },
-                                    "tests": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "status": {
-                                      "type": "string",
-                                      "enum": ["verified", "unverified"]
-                                    },
-                                    "reason": {
-                                      "type": ["string", "null"]
-                                    }
-                                  },
-                                  "required": [
-                                    "text",
-                                    "tests",
-                                    "status",
-                                    "reason"
-                                  ]
-                                }
-                              }
-                            },
-                            "required": ["displayId", "title", "criteria"]
-                          }
-                        },
-                        "findings": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "ticket": {
-                                "type": ["string", "null"]
-                              },
-                              "run": {
-                                "type": "string"
-                              },
-                              "stage": {
-                                "type": "string"
-                              },
-                              "kind": {
-                                "type": "string"
-                              },
-                              "body": {
-                                "type": "string"
-                              },
-                              "resolution": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "ticket",
-                              "run",
-                              "stage",
-                              "kind",
-                              "body",
-                              "resolution"
-                            ]
-                          }
-                        },
-                        "uncertainties": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "source": {
-                                "type": "string"
-                              },
-                              "text": {
-                                "type": "string"
-                              }
-                            },
-                            "required": ["source", "text"]
-                          }
-                        },
-                        "gates": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
                               "repo": {
                                 "type": "string"
-                              },
-                              "commitSha": {
-                                "type": "string"
-                              },
-                              "testsTotal": {
-                                "type": ["integer", "null"]
-                              },
-                              "testsSkipped": {
-                                "type": ["integer", "null"]
-                              },
-                              "durationMs": {
-                                "type": "integer"
-                              },
-                              "steps": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "name": {
-                                      "type": "string"
-                                    },
-                                    "exitCode": {
-                                      "type": "integer"
-                                    },
-                                    "ms": {
-                                      "type": "integer"
-                                    }
-                                  },
-                                  "required": ["name", "exitCode", "ms"]
-                                }
                               }
                             },
-                            "required": [
-                              "repo",
-                              "commitSha",
-                              "testsTotal",
-                              "testsSkipped",
-                              "durationMs",
-                              "steps"
-                            ]
-                          }
-                        },
-                        "protectedPathApprovals": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "ticket": {
-                                "type": "string"
-                              },
-                              "paths": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              }
-                            },
-                            "required": ["ticket", "paths"]
+                            "required": ["displayId", "title", "repo"]
                           }
                         },
                         "agentSeconds": {
@@ -3211,12 +3273,10 @@
                       },
                       "required": [
                         "generatedAt",
-                        "pullRequests",
-                        "tickets",
-                        "findings",
-                        "uncertainties",
-                        "gates",
-                        "protectedPathApprovals",
+                        "mergeOrder",
+                        "orderBroken",
+                        "repos",
+                        "cancelledTickets",
                         "agentSeconds"
                       ]
                     },

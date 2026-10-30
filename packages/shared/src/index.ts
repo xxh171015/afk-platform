@@ -1,8 +1,10 @@
 export type {
+  AcceptancePackView,
   ApiClient,
   Bundle,
   components,
   HostTask,
+  PullRequestRowView,
   paths,
 } from "./api/client.ts";
 export { createApiClient } from "./api/client.ts";

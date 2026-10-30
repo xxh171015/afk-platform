@@ -148,84 +148,128 @@ function AcceptancePackSection({
   return (
     <section className="acceptance-pack">
       <h3>Acceptance pack</h3>
-      <h4>Criteria</h4>
-      {pack.tickets.map((ticket) => (
-        <div key={ticket.displayId}>
-          <p>
-            <strong>{ticket.displayId}</strong> {ticket.title}
-          </p>
-          <ul className="criteria">
-            {ticket.criteria.map((criterion) => (
-              <li key={criterion.text} data-status={criterion.status}>
-                <span className={`badge criterion-${criterion.status}`}>
-                  {criterion.status}
-                </span>{" "}
-                {criterion.text}
-                {criterion.tests.length > 0
-                  ? ` (${criterion.tests.join(", ")})`
-                  : ""}
-                {criterion.reason ? (
-                  <span className="note"> — {criterion.reason}</span>
+      {pack.orderBroken.map((b) => (
+        <p key={b.repo} className="error">
+          Merge order broken: {b.repo} was merged before {b.skipped.join(", ")}.
+        </p>
+      ))}
+      <p className="note" data-testid="pack-merge-order">
+        {pack.mergeOrder.ordered.length > 0
+          ? `Merge order: ${pack.mergeOrder.ordered.join(" → ")}${
+              pack.mergeOrder.unordered.length > 0
+                ? ` (no order: ${pack.mergeOrder.unordered.join(", ")})`
+                : ""
+            }`
+          : "Merge order: none, the repos have no contract relation."}
+      </p>
+      {pack.repos.map((repo) => (
+        <section
+          key={repo.repo}
+          className="pack-repo"
+          data-testid={`pack-repo-${repo.repo}`}
+        >
+          <h4>{repo.repo}</h4>
+          {repo.pullRequest ? (
+            <p>
+              <a href={repo.pullRequest.url}>
+                Pull request #{repo.pullRequest.number}
+              </a>{" "}
+              <span className={`badge pr-${repo.pullRequest.state}`}>
+                {pullStateLabel(repo.pullRequest.state)}
+                {repo.pullRequest.draft ? " (draft)" : ""}
+              </span>{" "}
+              CI {repo.pullRequest.ci}, review {repo.pullRequest.review}
+            </p>
+          ) : null}
+          {repo.tickets.map((ticket) => (
+            <div key={ticket.displayId}>
+              <p>
+                <strong>{ticket.displayId}</strong> {ticket.title}
+                {ticket.appended ? (
+                  <span className="badge appended"> appended</span>
                 ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
+              </p>
+              <ul className="criteria">
+                {ticket.criteria.map((criterion) => (
+                  <li key={criterion.text} data-status={criterion.status}>
+                    <span className={`badge criterion-${criterion.status}`}>
+                      {criterion.status}
+                    </span>{" "}
+                    {criterion.text}
+                    {criterion.tests.length > 0
+                      ? ` (${criterion.tests.join(", ")})`
+                      : ""}
+                    {criterion.reason ? (
+                      <span className="note"> — {criterion.reason}</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          {repo.findings.length > 0 ? (
+            <ul className="pack-findings">
+              {repo.findings.map((finding) => (
+                <li key={`${finding.run}-${finding.kind}-${finding.body}`}>
+                  <span className="badge">{finding.resolution}</span>{" "}
+                  {finding.ticket ?? "spec"} {finding.stage} {finding.kind}:{" "}
+                  {finding.body}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {repo.uncertainties.length > 0 ? (
+            <>
+              <p className="note">What the agents were unsure of:</p>
+              <ul className="uncertainties">
+                {repo.uncertainties.map((u) => (
+                  <li key={`${u.source}-${u.text}`}>
+                    {u.source}: {u.text}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {repo.gate ? (
+            <p className="gates">
+              Gate: {repo.gate.commitSha.slice(0, 8)}:{" "}
+              {repo.gate.testsTotal ?? "?"} tests,{" "}
+              {repo.gate.testsSkipped ?? "?"} skipped,{" "}
+              {seconds(repo.gate.durationMs)} (
+              {repo.gate.steps
+                .map(
+                  (step) =>
+                    `${step.name} ${seconds(step.ms)}${step.exitCode === 0 ? "" : ` exit ${step.exitCode}`}`,
+                )
+                .join(", ")}
+              )
+            </p>
+          ) : null}
+
+          {repo.protectedPathApprovals.length > 0 ? (
+            <ul className="approvals">
+              {repo.protectedPathApprovals.map((approval) => (
+                <li key={approval.ticket}>
+                  Approved protected paths, {approval.ticket}:{" "}
+                  {approval.paths.join(", ")}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
       ))}
 
-      <h4>Review findings</h4>
-      {pack.findings.length === 0 ? (
-        <p className="note">None.</p>
-      ) : (
-        <ul className="pack-findings">
-          {pack.findings.map((finding) => (
-            <li key={`${finding.run}-${finding.kind}-${finding.body}`}>
-              <span className="badge">{finding.resolution}</span>{" "}
-              {finding.ticket ?? "spec"} {finding.stage} {finding.kind}:{" "}
-              {finding.body}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h4>What the agents were unsure of</h4>
-      {pack.uncertainties.length === 0 ? (
-        <p className="note">Nothing.</p>
-      ) : (
-        <ul className="uncertainties">
-          {pack.uncertainties.map((u) => (
-            <li key={`${u.source}-${u.text}`}>
-              {u.source}: {u.text}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h4>Gates</h4>
-      <ul className="gates">
-        {pack.gates.map((gate) => (
-          <li key={gate.repo}>
-            {gate.repo} @ {gate.commitSha.slice(0, 8)}: {gate.testsTotal ?? "?"}{" "}
-            tests, {gate.testsSkipped ?? "?"} skipped,{" "}
-            {seconds(gate.durationMs)} (
-            {gate.steps
-              .map(
-                (step) =>
-                  `${step.name} ${seconds(step.ms)}${step.exitCode === 0 ? "" : ` exit ${step.exitCode}`}`,
-              )
-              .join(", ")}
-            )
-          </li>
-        ))}
-      </ul>
-
-      {pack.protectedPathApprovals.length > 0 ? (
+      {pack.cancelledTickets.length > 0 ? (
         <>
-          <h4>Approved protected paths</h4>
-          <ul className="approvals">
-            {pack.protectedPathApprovals.map((approval) => (
-              <li key={approval.ticket}>
-                {approval.ticket}: {approval.paths.join(", ")}
+          <h4>Cancelled tickets</h4>
+          <ul className="cancelled-tickets">
+            {pack.cancelledTickets.map((ticket) => (
+              <li key={ticket.displayId}>
+                <strong>{ticket.displayId}</strong> {ticket.title} [
+                {ticket.repo}] <span className="badge">cancelled</span>
               </li>
             ))}
           </ul>

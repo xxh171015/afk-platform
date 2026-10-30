@@ -251,49 +251,79 @@ describe("the spec page", () => {
     ];
     const acceptancePack = {
       generatedAt: "2026-10-28T10:00:00.000Z",
-      pullRequests,
-      tickets: [
-        {
-          displayId: "T-1",
-          title: "Ticket 1",
-          criteria: [
-            {
-              text: "exports orders",
-              tests: ["exports a csv"],
-              status: "verified",
-              reason: null,
-            },
-            {
-              text: "has a header",
-              tests: [],
-              status: "unverified",
-              reason: "the agent named no test",
-            },
-          ],
-        },
-      ],
-      findings: [
-        {
-          ticket: "T-1",
-          run: "R-3",
-          stage: "review",
-          kind: "suggestion",
-          body: "rename x",
-          resolution: "acceptance-pack",
-        },
-      ],
-      uncertainties: [{ source: "T-1 implement", text: "date format?" }],
-      gates: [
+      mergeOrder: {
+        ordered: ["backend", "frontend"],
+        after: { backend: [], frontend: ["backend"] },
+        unordered: [],
+      },
+      orderBroken: [],
+      repos: [
         {
           repo: "backend",
-          commitSha: "0123456789abcdef",
-          testsTotal: 3,
-          testsSkipped: 1,
-          durationMs: 4000,
-          steps: [{ name: "test", exitCode: 0, ms: 2500 }],
+          pullRequest: pullRequests[0],
+          gate: {
+            commitSha: "0123456789abcdef",
+            testsTotal: 3,
+            testsSkipped: 1,
+            durationMs: 4000,
+            steps: [{ name: "test", exitCode: 0, ms: 2500 }],
+          },
+          tickets: [
+            {
+              displayId: "T-1",
+              title: "Ticket 1",
+              appended: false,
+              criteria: [
+                {
+                  text: "exports orders",
+                  tests: ["exports a csv"],
+                  status: "verified",
+                  reason: null,
+                },
+                {
+                  text: "has a header",
+                  tests: [],
+                  status: "unverified",
+                  reason: "the agent named no test",
+                },
+              ],
+            },
+          ],
+          findings: [
+            {
+              ticket: "T-1",
+              run: "R-3",
+              stage: "review",
+              kind: "suggestion",
+              body: "rename x",
+              resolution: "acceptance-pack",
+            },
+          ],
+          uncertainties: [{ source: "T-1 implement", text: "date format?" }],
+          protectedPathApprovals: [
+            { ticket: "T-1", paths: [".github/ci.yml"] },
+          ],
+        },
+        {
+          repo: "frontend",
+          pullRequest: pullRequests[1],
+          gate: null,
+          tickets: [
+            {
+              displayId: "T-2",
+              title: "Ticket 2",
+              appended: true,
+              criteria: [],
+            },
+          ],
+          findings: [],
+          uncertainties: [],
+          protectedPathApprovals: [],
         },
       ],
-      protectedPathApprovals: [{ ticket: "T-1", paths: [".github/ci.yml"] }],
+      cancelledTickets: [
+        { displayId: "T-3", title: "Dropped", repo: "backend" },
+      ],
       agentSeconds: 12,
     };
     renderWithApp(
@@ -333,9 +363,23 @@ describe("the spec page", () => {
     expect(screen.getByText(/rename x/)).toBeTruthy();
     expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
     expect(
-      screen.getByText(/backend @ 01234567: 3 tests, 1 skipped, 4.0 s/),
+      screen.getByText(/Gate: 01234567: 3 tests, 1 skipped, 4.0 s/),
     ).toBeTruthy();
-    expect(screen.getByText(/T-1: .github\/ci.yml/)).toBeTruthy();
+    expect(screen.getByText(/\.github\/ci.yml/)).toBeTruthy();
+    // the pack opens with the merge order and has a section for each repo, in that order
+    expect(screen.getByTestId("pack-merge-order").textContent).toContain(
+      "backend → frontend",
+    );
+    const sections = screen.getAllByTestId(/^pack-repo-/);
+    expect(sections.map((e) => e.getAttribute("data-testid"))).toEqual([
+      "pack-repo-backend",
+      "pack-repo-frontend",
+    ]);
+    expect(sections[1]?.textContent).toContain("appended");
+    expect(screen.getByText("Cancelled tickets")).toBeTruthy();
+    expect(screen.getByText(/Dropped/).closest("li")?.textContent).toContain(
+      "cancelled",
+    );
   });
 
   it("says a pull request closed on the host was closed without merge", async () => {

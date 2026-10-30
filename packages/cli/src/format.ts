@@ -1,3 +1,5 @@
+import type { AcceptancePackView, PullRequestRowView } from "@afk/shared";
+
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
 
 interface BriefLike {
@@ -231,106 +233,78 @@ export function ticketText(view: {
   ].join("\n");
 }
 
-interface PullRequestRowLike {
-  order: number;
-  waitsFor: string[];
-  repo: string;
-  number: number;
-  url: string;
-  state: string;
-  draft: boolean;
-  ci: string;
-  review: string;
-  syncError: string | null;
-}
-
-const pullRequestRow = (p: PullRequestRowLike) =>
+const pullRequestRow = (p: PullRequestRowView) =>
   `${p.order}. ${p.repo} #${p.number}  ${pullState(p.state)}${p.draft ? " (draft)" : ""}${p.waitsFor.length > 0 ? `  after ${p.waitsFor.join(", ")}` : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`;
 
 const brokenOrderLine = (b: { repo: string; skipped: string[] }) =>
   `merge order broken: ${b.repo} was merged before ${b.skipped.join(", ")}`;
 
-interface PackLike {
-  orderBroken?: { repo: string; skipped: string[] }[];
-  pullRequests: PullRequestRowLike[];
-  tickets: {
-    displayId: string;
-    title: string;
-    criteria: {
-      text: string;
-      tests: string[];
-      status: string;
-      reason: string | null;
-    }[];
-  }[];
-  findings: {
-    ticket: string | null;
-    stage: string;
-    kind: string;
-    body: string;
-    resolution: string;
-  }[];
-  uncertainties: { source: string; text: string }[];
-  gates: {
-    repo: string;
-    commitSha: string;
-    testsTotal: number | null;
-    testsSkipped: number | null;
-    durationMs: number;
-    steps: { name: string; exitCode: number; ms: number }[];
-  }[];
-  protectedPathApprovals: { ticket: string; paths: string[] }[];
-  agentSeconds: number;
-}
-
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
-// What a person reads before merging: the pull requests in the order to merge them, which criteria are backed by
-// a passing test, what the reviews said and what the agents were unsure of, the gates, and approved exceptions.
-export function acceptancePackText(pack: PackLike): string {
-  const section = (title: string, lines: string[]) =>
-    lines.length ? [`  ${title}:`, ...lines] : [];
+// What a person reads before merging: the order to merge in, then a section for each repo (its pull request, which
+// criteria are backed by a passing test, what the reviews said and what the agents were unsure of, its gate, and
+// approved exceptions), and the tickets that were cancelled.
+export function acceptancePackText(pack: AcceptancePackView): string {
+  const order = pack.mergeOrder;
   return [
     "acceptance pack:",
-    ...(pack.orderBroken ?? []).map((b) => `  ${brokenOrderLine(b)}`),
-    ...section(
-      "pull requests (merge in this order)",
-      pack.pullRequests.map((p) => `    ${pullRequestRow(p)}`),
-    ),
-    ...section(
-      "acceptance criteria",
-      pack.tickets.flatMap((t) => [
-        `    ${t.displayId}  ${t.title}`,
-        ...t.criteria.map(
-          (c) =>
-            `      [${c.status}] ${c.text}${c.tests.length ? `  (${c.tests.join(", ")})` : ""}${c.reason ? `  -- ${c.reason}` : ""}`,
+    ...pack.orderBroken.map((b) => `  ${brokenOrderLine(b)}`),
+    order.ordered.length > 0
+      ? `  merge order: ${order.ordered.join(" -> ")}${order.unordered.length ? `  (no order: ${order.unordered.join(", ")})` : ""}`
+      : "  merge order: none (no contract relation between the repos)",
+    ...pack.repos.flatMap((repo) => {
+      const section = (title: string, lines: string[]) =>
+        lines.length ? [`    ${title}:`, ...lines] : [];
+      return [
+        `  ${repo.repo}:`,
+        ...(repo.pullRequest
+          ? [`    pull request: ${pullRequestRow(repo.pullRequest)}`]
+          : ["    pull request: none yet"]),
+        ...section(
+          "acceptance criteria",
+          repo.tickets.flatMap((t) => [
+            `      ${t.displayId}  ${t.title}${t.appended ? "  (appended)" : ""}`,
+            ...t.criteria.map(
+              (c) =>
+                `        [${c.status}] ${c.text}${c.tests.length ? `  (${c.tests.join(", ")})` : ""}${c.reason ? `  -- ${c.reason}` : ""}`,
+            ),
+          ]),
         ),
-      ]),
-    ),
-    ...section(
-      "findings",
-      pack.findings.map(
-        (f) =>
-          `    [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage} ${f.kind}: ${f.body}`,
-      ),
-    ),
-    ...section(
-      "uncertainties",
-      pack.uncertainties.map((u) => `    ${u.source}: ${u.text}`),
-    ),
-    ...section(
-      "gates",
-      pack.gates.map(
-        (g) =>
-          `    ${g.repo} @ ${g.commitSha.slice(0, 8)}: ${g.testsTotal ?? "?"} tests, ${g.testsSkipped ?? "?"} skipped, ${seconds(g.durationMs)} (${g.steps.map((s) => `${s.name} ${seconds(s.ms)}${s.exitCode === 0 ? "" : ` exit ${s.exitCode}`}`).join(", ")})`,
-      ),
-    ),
-    ...section(
-      "approved protected paths",
-      pack.protectedPathApprovals.map(
-        (a) => `    ${a.ticket}: ${a.paths.join(", ")}`,
-      ),
-    ),
+        ...section(
+          "findings",
+          repo.findings.map(
+            (f) =>
+              `      [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage} ${f.kind}: ${f.body}`,
+          ),
+        ),
+        ...section(
+          "uncertainties",
+          repo.uncertainties.map((u) => `      ${u.source}: ${u.text}`),
+        ),
+        ...section(
+          "gate",
+          repo.gate
+            ? [
+                `      ${repo.repo} @ ${repo.gate.commitSha.slice(0, 8)}: ${repo.gate.testsTotal ?? "?"} tests, ${repo.gate.testsSkipped ?? "?"} skipped, ${seconds(repo.gate.durationMs)} (${repo.gate.steps.map((s) => `${s.name} ${seconds(s.ms)}${s.exitCode === 0 ? "" : ` exit ${s.exitCode}`}`).join(", ")})`,
+              ]
+            : [],
+        ),
+        ...section(
+          "approved protected paths",
+          repo.protectedPathApprovals.map(
+            (a) => `      ${a.ticket}: ${a.paths.join(", ")}`,
+          ),
+        ),
+      ];
+    }),
+    ...(pack.cancelledTickets.length
+      ? [
+          "  cancelled tickets:",
+          ...pack.cancelledTickets.map(
+            (t) => `    ${t.displayId}  ${t.title}  [${t.repo}]  (cancelled)`,
+          ),
+        ]
+      : []),
     `  agent time: ${pack.agentSeconds} s`,
   ].join("\n");
 }
@@ -347,8 +321,8 @@ export function specText(view: {
   finalizations: FinalizationLike[];
   edges: { from: string; to: string; kind: string }[];
   orderBroken?: { repo: string; skipped: string[] }[];
-  pullRequests?: PullRequestRowLike[];
-  acceptancePack?: PackLike | null;
+  pullRequests?: PullRequestRowView[];
+  acceptancePack?: AcceptancePackView | null;
 }): string {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
