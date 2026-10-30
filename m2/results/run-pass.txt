@@ -1,0 +1,9 @@
+[   0.0s] docker 28.2.2
+[   0.0s] shas {"backend":"4b99a7f","frontend":"c5407e5"}
+[   0.1s] snapshot {"dir":"/Users/xuxinghua/afk-m2-proto/work/snapshots/afk-pilot-backend@4b99a7fedafa","ms":7,"bytes":204800}
+[   4.5s] environment {"buildMs":416,"upMs":2916,"seedMs":1012,"seed":" Container afk-pmvuqwzfw-backend-1  Running","network":"afk-pmvuqwzfw_default"}
+[Agent] Started on branch proto/integration-pmvuqwzfw
+  tail -f /Users/xuxinghua/afk-m2-proto/work/logs/pmvuqwzfw.log
+[  93.9s] agent {"output":{"result":"pass","failingSide":null,"evidence":["npm run e2e：1 passed（lists the seeded orders and opens one with its status history）","GET http://backend:8080/orders 返回种子客户甲/乙；GET /orders/O-1/history 为 pending→paid，与页面断言一致"],"failingTests":[]},"commits":[],"agentMs":89355}
+[ 104.6s] cleanup {"downExit":0,"networksLeft":"none","sandboxesLeft":"none"}
+[ 104.6s] done {"totalSeconds":105}

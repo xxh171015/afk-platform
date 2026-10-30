@@ -1,0 +1,10 @@
+[   0.0s] docker 28.2.2
+[   0.1s] shas {"backend":"4b99a7f","frontend":"c5407e5"}
+[   0.1s] snapshot {"dir":"/Users/xuxinghua/afk-m2-proto/work/snapshots/afk-pilot-backend@4b99a7fedafa","ms":19,"bytes":204800}
+[   0.1s] bug history() now returns newest first
+[   4.3s] environment {"buildMs":371,"upMs":2887,"seedMs":953,"seed":" Container afk-pmvuqzllm-backend-1  Running","network":"afk-pmvuqzllm_default"}
+[Agent] Started on branch proto/integration-pmvuqzllm
+  tail -f /Users/xuxinghua/afk-m2-proto/work/logs/pmvuqzllm.log
+[ 125.4s] agent {"output":{"result":"fail","failingSide":"backend","evidence":["curl GET http://backend:8080/orders/O-1/history 返回 {\"history\":[{\"status\":\"paid\",\"at\":\"2026-10-30T09:06:22.953Z\"},{\"status\":\"pending\",\"at\":\"2026-10-30T09:06:22.948Z\"}]}，较晚的 paid 排在较早的 pending 之前","contract/openapi.yaml 与 /refs/afk-pilot-backend/openapi/openapi.yaml 均描述 GET /orders/{id}/history 为「按时间顺序」；前端 OrderDetail.tsx 原样 map history；e2e 断言 nth(0)=待支付、nth(1)=已支付，实际首项为「已支付 · 2026-10-30T09:06:22.953Z」"],"failingTests":["lists the seeded orders and opens one with its status history"]},"commits":[],"agentMs":120980}
+[ 136.4s] cleanup {"downExit":0,"networksLeft":"none","sandboxesLeft":"none"}
+[ 136.4s] done {"totalSeconds":136}

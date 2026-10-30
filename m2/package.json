@@ -1,0 +1,10 @@
+{
+  "name": "m2-integration-prototype",
+  "private": true,
+  "type": "module",
+  "description": "PROTOTYPE, throwaway: M2 联调环境原型（wayfinder #70），不合并",
+  "dependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
+    "zod": "4.6.7"
+  }
+}
