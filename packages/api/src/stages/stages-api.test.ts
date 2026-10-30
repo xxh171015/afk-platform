@@ -243,6 +243,36 @@ describe("blocked reason codes", () => {
     });
   });
 
+  it("a contract copy that differs from the contract blocks after the gate, and the brief says which file", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "contract-copy-mismatch",
+      run: {
+        output: {
+          detail:
+            "contract/openapi.yaml differs from backend's contract at line 1",
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "contract-copy-mismatch",
+    });
+    const view = await (await fetch(`${api.url}/tickets/1`)).json();
+    expect(view.ticket.brief).toMatchObject({
+      stage: "gate",
+      result: "contract-copy-mismatch",
+      output: { detail: expect.stringMatching(/contract\/openapi.yaml/) },
+    });
+    const retried = await fetch(`${api.url}/tickets/1/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "continue" }),
+    });
+    expect(retried.status).toBe(200);
+  });
+
   it("a gate failure runs gate-fix once; failing again is gate-failed", async () => {
     await runningSpec([ticket("a")]);
     await stage("implement", IMPLEMENT_DONE);

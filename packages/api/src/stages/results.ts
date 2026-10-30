@@ -81,7 +81,12 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
   }),
   z.object({
     stage: z.literal("gate"),
-    outcome: z.enum(["passed", "failed", "protected-path-changed"]),
+    outcome: z.enum([
+      "passed",
+      "failed",
+      "protected-path-changed",
+      "contract-copy-mismatch",
+    ]),
     ...commonFields,
   }),
   z.object({

@@ -18,6 +18,8 @@ export {
 } from "./agent.ts";
 export type { ContextInput, RunFacts } from "./context.ts";
 export { readContract, renderContext } from "./context.ts";
+export type { ContractCopyProblem, ProvidedContract } from "./contract-copy.ts";
+export { checkContractCopies, copyPathOf } from "./contract-copy.ts";
 export type { ExecOptions, ExecResult } from "./exec.ts";
 export { exec, git, gitOrThrow, gitOut } from "./exec.ts";
 export type {

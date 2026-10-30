@@ -14,6 +14,8 @@ export const BLOCKED_REASONS = [
   "post-merge-gate-failed",
   "merge-conflict",
   "protected-path-changed",
+  // the contract copy in the repo is not the contract the ticket was pinned to (or a ticket without a contract edge touched one)
+  "contract-copy-mismatch",
   "no-commits",
   "agent-gave-up",
   "contract-change-needed",
@@ -77,6 +79,7 @@ const FROM_MERGING: TicketState[] = ["merging"];
 const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "gate-failed": FROM_RUNNING,
   "protected-path-changed": FROM_RUNNING,
+  "contract-copy-mismatch": FROM_RUNNING,
   "no-commits": FROM_RUNNING,
   "agent-gave-up": FROM_RUNNING,
   "contract-change-needed": FROM_RUNNING,

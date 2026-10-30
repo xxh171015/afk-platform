@@ -35,7 +35,14 @@ export type StageReport =
       stage: (typeof AGENT_STAGES)[number];
       outcome: "done" | (typeof AGENT_FAILURES)[number];
     }
-  | { stage: "gate"; outcome: "passed" | "failed" | "protected-path-changed" }
+  | {
+      stage: "gate";
+      outcome:
+        | "passed"
+        | "failed"
+        | "protected-path-changed"
+        | "contract-copy-mismatch";
+    }
   | { stage: "review"; outcome: "pass" | "fix" | "invalid-output" | "timeout" }
   | { stage: "merge"; outcome: "merged" | "conflict" | "gate-failed" };
 
@@ -96,6 +103,9 @@ export function advanceStage(
     case "gate": {
       if (report.outcome === "protected-path-changed") {
         return block("protected-path-changed");
+      }
+      if (report.outcome === "contract-copy-mismatch") {
+        return block("contract-copy-mismatch");
       }
       if (report.outcome === "passed") {
         return progress.reviewed

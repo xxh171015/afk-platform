@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   type AgentRunner,
   changedFiles,
+  checkContractCopies,
   checkProtectedPaths,
   classifyAgentRun,
   classifyReviewRun,
@@ -483,6 +484,30 @@ async function gate(
       stage: "gate",
       outcome: "protected-path-changed",
       run: { branch: agent, baseSha, output: { unapproved: check.unapproved } },
+    };
+  }
+
+  // A contract ticket writes the contract itself; only the tickets that consume one keep copies of it.
+  const copies =
+    bundle.ticket?.type === "contract"
+      ? []
+      : checkContractCopies({
+          repoDir: mainDir,
+          ref: agent,
+          base: baseSha,
+          contracts: fetchContracts(deps.repos, bundle.contracts),
+        });
+  if (copies.length > 0) {
+    const detail = copies.map((c) => c.detail).join("\n");
+    log(`gate: contract copies are wrong: ${detail}`);
+    return {
+      stage: "gate",
+      outcome: "contract-copy-mismatch",
+      run: {
+        branch: agent,
+        baseSha,
+        output: { detail, mismatches: copies },
+      },
     };
   }
 

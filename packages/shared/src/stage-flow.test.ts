@@ -90,6 +90,12 @@ describe("the gate", () => {
     ).toEqual(block("protected-path-changed"));
   });
 
+  it("blocks on a contract copy that differs without a fix", () => {
+    expect(
+      advanceStage({ stage: "gate", outcome: "contract-copy-mismatch" }, fresh),
+    ).toEqual(block("contract-copy-mismatch"));
+  });
+
   it("runs gate-fix once, then blocks gate-failed", () => {
     const first = advanceStage({ stage: "gate", outcome: "failed" }, fresh);
     expect(first).toEqual(enqueue("gate-fix"));
