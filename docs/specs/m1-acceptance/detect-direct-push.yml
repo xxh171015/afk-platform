@@ -1,0 +1,23 @@
+# Detection workflow for the pilot repo (#43): a push to the default branch that no pull request carries is flagged.
+# A person copies this to .github/workflows/ in afk-pilot-backend by hand: the App cannot write workflow files.
+name: detect-direct-push
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Was this commit merged through a pull request?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq 'length')
+          echo "pull requests that carry ${{ github.sha }}: $n"
+          if [ "$n" = "0" ]; then
+            echo "::error::direct push to main: no pull request carries this commit"
+            exit 1
+          fi

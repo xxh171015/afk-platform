@@ -1,0 +1,17 @@
+{
+  "name": "@afk/worker",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@afk/host": "workspace:*",
+    "@afk/shared": "workspace:*",
+    "@afk/pipeline": "workspace:*"
+  }
+}

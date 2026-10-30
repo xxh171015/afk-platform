@@ -1,0 +1,18 @@
+{
+  "name": "@afk/pipeline",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@afk/shared": "workspace:*",
+    "@ai-hero/sandcastle": "0.12.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  }
+}

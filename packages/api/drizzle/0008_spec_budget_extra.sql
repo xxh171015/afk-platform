@@ -1,0 +1,1 @@
+ALTER TABLE "specs" ADD COLUMN "budget_extra_seconds" integer DEFAULT 0 NOT NULL;

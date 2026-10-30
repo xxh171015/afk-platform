@@ -1,0 +1,32 @@
+{
+  "name": "@afk/api",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "db:migrate": "node src/db/migrate-cli.ts",
+    "db:generate": "drizzle-kit generate",
+    "openapi:generate": "node src/openapi-cli.ts",
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@afk/shared": "workspace:*",
+    "@hono/node-server": "^2.1.5",
+    "@hono/zod-openapi": "^1.6.3",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@afk/cli": "workspace:*",
+    "@afk/host": "workspace:*",
+    "@afk/pipeline": "workspace:*",
+    "@afk/worker": "workspace:*",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11"
+  }
+}

@@ -61,7 +61,7 @@ M0 已经证明单张票的链路可行（在 Mac 上，Sandcastle 加 Cursor Ag
 27. As a 开发者, I want 票进 blocked 时带原因码和简报（失败步骤、日志指针、agent 的结构化输出）, so that 我不用翻原始输出。
 28. As a 开发者, I want 在页面或用 `plat` 选择"接着重试 / 从头重试 / 批准保护路径改动 / 取消", so that 我处理一张 blocked 票只需要一个动作。
 29. As a 开发者, I want 取消一张票时选择下游票是进 blocked 还是一并取消, so that 我控制影响范围。
-30. As a 开发者, I want `plat blocked` 列出所有待处理的 blocked 票和 paused 的需求, so that 我一眼知道有什么要我处理。
+30. As a 开发者, I want `plat blocked` 列出所有待处理的 blocked 票、paused 的需求，以及在代码托管上关闭但没合并（或平台读不出状态）的 PR, so that 我一眼知道有什么要我处理。
 
 可见性与追溯
 
@@ -131,11 +131,11 @@ Spec 和 Ticket 的状态机照 design.md：Spec 的 draft → planned → runni
 
 ### 阶段与流水线
 
-阶段：`prepare / implement / gate / review / merge / gate-fix / review-fix / merge-fix / final-review / final-fix`，另有作业类型 `open-pr`、`host-sync`。流程照 [design.md「单票执行流水线」](../design.md#单票执行流水线)：implement → 补 trailer 并推送 → 保护路径检查 → 门禁 → review（只跑一次）→ `merge`（merge-tree 候选 → 候选门禁 → 带 lease 前移集成分支）。每种 fix 每张票最多一次，一张票最多 5 次 agent 运行。
+阶段：`prepare / implement / gate / review / merge / gate-fix / review-fix / merge-fix / final-review / final-fix`，另有作业类型 `open-pr`、`host-sync`、`spec-cleanup`（spec 取消或 merged 后关 PR、删 `spec/*` 和 `agent/*` 分支）。流程照 [design.md「单票执行流水线」](../design.md#单票执行流水线)：implement → 补 trailer 并推送 → 保护路径检查 → 门禁 → review（只跑一次）→ `merge`（merge-tree 候选 → 候选门禁 → 带 lease 前移集成分支）。每种 fix 每张票最多一次，一张票最多 5 次 agent 运行。
 
 - `merge` 是独立的阶段作业，带 `lock_key`。冲突或候选门禁失败时它结束、锁随租约释放，merge-fix 作为不带键的 agent 作业去跑，再排一个新的 `merge` 作业。
 - 推送集成分支前先调 `pre-push`（校验仍是当前持有者并续期），推送用 `--force-with-lease`，另有"agent 分支 head 已是集成分支祖先就当作已合并"的幂等检查。
-- 补 trailer 用临时 worktree 做 `rebase --exec`；Cursor 自带的 `Co-authored-by` trailer 保留，追溯只认 `Spec` / `Ticket` / `Run`。
+- 补 trailer 用 plumbing 逐个重写本次新增的 commits（同一棵树、同一作者、parent 映射到新 commit，不 rebase、不需要 worktree），所以 merge-fix 产生的 merge commit 和里面的冲突解决原样保留，从集成分支并进来的 commits 不动；Cursor 自带的 `Co-authored-by` trailer 保留，追溯只认 `Spec` / `Ticket` / `Run`。
 - review 只审查不改代码；它的 `suggestions` 记成 Finding（处理结果"进验收包"）。
 - 收尾 `finalize`：全部票 done 后对集成分支跑一次整体 review 和一次修复（`final-review`、`final-fix`，各一次），修复后过门禁，然后 `open-pr`。
 
@@ -143,7 +143,7 @@ Spec 和 Ticket 的状态机照 design.md：Spec 的 draft → planned → runni
 
 照 [design.md「Git 操作规范」](../design.md#git-操作规范)：槽位数等于 worker 并发上限；每个任务 `git clone --no-hardlinks` 主 clone 到 `~/.afk/slots/<n>/<repo>`，用 Sandcastle 的 `cwd` 选项指向它；成功即删，失败保留到下次占用；`O_EXCL` 槽位锁；取回结果只 `fetch` 回 `agent/<ticket-id>` 一个 ref 并开 `transfer.fsckObjects`；回收僵尸槽位按"取回 commits → 存 diff → 重建"。连续性的单位是分支，不是 worktree。
 
-Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（zod 校验，`<result>` 标签）；门禁另起新沙箱用 `sandbox.exec`，命令用 `timeout` 包住。沙箱里只有 `CURSOR_API_KEY`，通过 `cursor(model, { env })` 传入；`/context` 和 skills 只读挂载，skills 挂 `/home/agent/.cursor/skills`（固定 SHA 的 skills 仓库的 `skills/engineering`）。
+Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（zod 校验，`<result>` 标签）；门禁另起新沙箱用 `sandbox.exec`，命令用 `timeout` 包住。沙箱里只有 `CURSOR_API_KEY`，通过 `cursor(model, { env })` 传入；`/context` 和 skills 只读挂载，skills 挂 `/home/agent/.cursor/skills`（[mattpocock/skills](https://github.com/mattpocock/skills) 固定 `59db609eb1e18aaf59b63284d0e52255aff0c63c` 的 `skills/engineering`）。
 
 ### 门禁
 
@@ -158,6 +158,7 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 都带 `(作业号, attempt)`，API 只认当前 attempt：
 
 - `POST /worker/jobs/claim`：带能力标签，返回作业、attempt、租约到期时间和 `lock_key`。
+- `GET /worker/jobs/:id/lease?attempt=`：只读，这个 attempt 是否仍持有有效租约；worker 判断槽位锁是不是僵尸时用，不续期。
 - `POST /worker/jobs/:id/heartbeat`：续期。
 - `POST /worker/jobs/:id/pre-push`：推送前校验并续期。
 - `POST /worker/jobs/:id/complete`、`/fail`：交回阶段结果。
@@ -168,11 +169,11 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 
 - worker 里所有 `git push` 走同一个函数，只放行 `refs/heads/agent/*` 和 `refs/heads/spec/*`；平台代码里不调用任何合并 PR 的接口。
 - 每个仓库一个检测用的 Actions 工作流，监听 `push` 到 `main`，用 commits → pulls 接口查这次提交有没有对应的已合并 PR；没有或推送者是 bot，就失败并开 issue。只做事后检测。
-- GitHub App 权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读，**不给** Workflows、Administration、Actions 写、Issues、Secrets；不订阅 webhook，轮询（每分钟）同步。凭据在 `~/.afk/secrets/github-app/`，worker 换 installation token 时限定本次任务的仓库和权限，缓存到过期前 5 分钟；推送用 `http.extraHeader`。
+- GitHub App 权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读，**不给** Workflows、Administration、Actions 写、Issues、Secrets；不订阅 webhook，轮询（每分钟）同步。凭据在 `~/.afk/secrets/github-app/`（`private-key.pem`，权限 600；`app.json`：`{"appId":"…","installationId":"…"}`），worker 换 installation token 时限定本次任务的仓库和权限，缓存到过期前 5 分钟；推送用 `http.extraHeader`。
 
 ### plat CLI
 
-命令（都支持 `--json`）：`project create`、`repo add`、`spec create`、`tickets import`、`spec confirm`、`spec show`、`ticket view`、`ticket retry --mode continue|restart`、`ticket approve-protected`、`ticket cancel [--cascade]`、`blocked`、`run logs <run>`。不做 `ticket edit`、`context`、拆票。导入格式照 design.md 的 `tickets.yaml`；校验四条加模块重叠告警；`external_blocked_by` 必须为空。`contract` 边和契约 SHA 在同仓库内实现。
+命令（都支持 `--json`）：`project create`、`project edit`、`repo add`、`spec create`、`tickets import`、`spec confirm`、`spec show`、`spec cancel`、`spec cleanup`、`ticket view`、`ticket retry --mode continue|restart`、`ticket approve-protected`、`ticket allow-path`、`ticket cancel [--cascade]`、`blocked`、`run logs <run>`。不做 `ticket edit`、`context`、拆票。导入格式照 design.md 的 `tickets.yaml`；校验四条加模块重叠告警；`external_blocked_by` 必须为空。`contract` 边和契约 SHA 在同仓库内实现。
 
 ### 页面
 
@@ -266,11 +267,11 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 
 对照预期结果打勾：
 
-- [ ] 在 implement 运行中杀掉 worker：租约过期后作业被重新派发；槽位被回收（先取回已有 commits，再存 diff，再重建）；这一阶段从头跑；最终结果与不中断一致。
-- [ ] 在门禁运行中杀掉 worker：作业重派，重跑门禁，结果一致。
-- [ ] 在 `merge` 阶段（候选门禁中）杀掉 worker：锁随租约释放；新作业接手；集成分支没有被前移到半成品。
-- [ ] 旧 worker 睡醒后继续推送：旧 attempt 的 `pre-push` 被拒绝；即使它推送成功，新持有者的幂等检查也把它当作已合并，不重复合并。
-- [ ] 同一个 `lock_key` 上两个 `merge` 作业：第二个在第一个结束前不会被领取。
+- [x] 在 implement 运行中杀掉 worker（2026-10-29，#47：agent 提交后 SIGKILL，重启后自动移除孤儿沙箱、取回 commit、重派发，票只合并一次）：租约过期后作业被重新派发；槽位被回收（先取回已有 commits，再存 diff，再重建）；这一阶段从头跑；最终结果与不中断一致。
+- [x] 在门禁运行中杀掉 worker（2026-10-29，#42：S-6/T-10，门禁作业 attempt 2 重跑并通过）：作业重派，重跑门禁，结果一致。
+- [x] 在 `merge` 阶段（候选门禁中）杀掉 worker（2026-10-29，#42：S-7/T-11，杀后集成分支仍在出发点，重启后才前移到完整的合并提交）：锁随租约释放；新作业接手；集成分支没有被前移到半成品。
+- [x] 旧 worker 睡醒后继续推送（2026-10-29，#47：冻结后被另一个 worker 接手，醒来时心跳发现租约已失，放弃运行，没有推送；票只合并一次）：旧 attempt 的 `pre-push` 被拒绝；即使它推送成功，新持有者的幂等检查也把它当作已合并，不重复合并。
+- [x] 同一个 `lock_key` 上两个 `merge` 作业（2026-10-29，#42：S-8/T-12、T-13，第一个 done 时第二个才 running，没有重叠）：第二个在第一个结束前不会被领取。
 
 ### 并发与预算
 

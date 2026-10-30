@@ -13,7 +13,7 @@ _Avoid_: 产品线、应用
 _Avoid_: 代码库、工程
 
 **Spec（需求）**：
-一个要交付的需求（feature / bug / improvement），是拆票的来源。
+一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并的 spec 不能取消。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
 **Ticket（票）**：
@@ -24,12 +24,23 @@ _Avoid_: 任务、issue、子票
 两张 Ticket 之间的依赖，类型是 blocks 或 contract。
 _Avoid_: 依赖关系、blocked_by
 
+**Serial ID（序号）**：
+库里的自增主键，Spec、Ticket、Run 等实体各有一个，只在库内部用。
+_Avoid_: 编号（容易和显示编号混）
+
+**Display ID（显示编号）**：
+给人看和写进 commit trailer 的编号：前缀加序号，Spec 是 `S-12`，Ticket 是 `T-123`，Run 是 `R-456`。不存库，由 Serial ID 现算。
+_Avoid_: 票号、工单号
+
 **Contract（契约）**：
 写在主仓库里的前后端接口描述。
 _Avoid_: 接口文档、API 定义
 
 **Contract SHA（契约 SHA）**：
 契约票合并后集成分支的 head；下游票只使用这个提交上的契约。
+
+**Skills SHA（skills SHA）**：
+平台固定使用的 [mattpocock/skills](https://github.com/mattpocock/skills) commit；worker 只挂这个提交上的 `skills/engineering`，Run 记下这个 SHA。当前固定为 `59db609eb1e18aaf59b63284d0e52255aff0c63c`。
 
 ## 执行
 
@@ -38,7 +49,7 @@ _Avoid_: 接口文档、API 定义
 _Avoid_: 执行、任务
 
 **Integration branch（集成分支）**：
-一个 Spec 在一个 Repo 里的分支 `spec/<slug>`，票合并到这里，最后以 PR 的形式合进 main。
+一个 Spec 在一个 Repo 里的分支 `spec/<id>/<slug>`（`<id>` 是数据库的标识，六位十六进制；标识出现之前建的 spec 是 `spec/<slug>`），票合并到这里，最后以 PR 的形式合进 main。票的分支是 `agent/<id>/T-<n>`，总览修复的是 `agent/<id>/S-<n>-final`。
 _Avoid_: 特性分支、feature branch
 
 **Lock key（互斥键）**：
@@ -57,7 +68,7 @@ _Avoid_: CI、检查
 agent 不允许改动的路径，改了就需要人批准。
 
 **Approved protected path（已批准的保护路径）**：
-人在确认拆分时为某张 Ticket 提前批准可以改动的保护路径；只对这张 Ticket 有效，其余保护路径仍然不许改。
+人在确认拆分时为某张 Ticket 提前批准可以改动的保护路径；Ticket 被阻塞后，也可以在重试前追加；只对这张 Ticket 有效，其余保护路径仍然不许改。
 _Avoid_: 白名单、豁免路径
 
 **Blocked reason（blocked 原因码）**：

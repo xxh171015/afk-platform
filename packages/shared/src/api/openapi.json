@@ -1,0 +1,4024 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AFK platform API",
+    "version": "0.0.0"
+  },
+  "components": {
+    "schemas": {},
+    "parameters": {}
+  },
+  "paths": {
+    "/projects": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "defaultAgent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "defaultModel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "mergePolicy": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "contractPath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^:\\s]+:\\S.*$"
+                  },
+                  "protectedPaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "maxItems": 200
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "budgetLimit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "limits": {
+                    "type": "object",
+                    "properties": {
+                      "workerSlots": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "projectConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "repoConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "runIdleSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "runWallclockSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "ticketWallclockSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "specAgentSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "defaultModel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "contractPath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^:\\s]+:\\S.*$"
+                  },
+                  "protectedPaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "maxItems": 200
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "budgetLimit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "limits": {
+                    "type": "object",
+                    "properties": {
+                      "workerSlots": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "projectConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "repoConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "runIdleSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "runWallclockSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "ticketWallclockSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "specAgentSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    }
+                  },
+                  "required": ["id"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/repos": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "defaultBranch": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": ["url", "role"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "role": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "role"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The project already has a repo with this role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["feature", "bug", "improvement"]
+                  },
+                  "slug": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 1000000
+                  }
+                },
+                "required": ["projectId", "type", "slug", "title"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "displayId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "displayId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The project already has a spec with this slug",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Every spec, newest first, with the progress of its tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "planned",
+                              "running",
+                              "finalizing",
+                              "awaiting-review",
+                              "partially-merged",
+                              "reworking",
+                              "merged",
+                              "paused",
+                              "cancelled"
+                            ]
+                          },
+                          "pauseReason": {
+                            "type": ["string", "null"]
+                          },
+                          "project": {
+                            "type": "string"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "total": {
+                                "type": "integer"
+                              },
+                              "done": {
+                                "type": "integer"
+                              },
+                              "active": {
+                                "type": "integer"
+                              },
+                              "blocked": {
+                                "type": "integer"
+                              },
+                              "pending": {
+                                "type": "integer"
+                              },
+                              "cancelled": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "total",
+                              "done",
+                              "active",
+                              "blocked",
+                              "pending",
+                              "cancelled"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "slug",
+                          "title",
+                          "type",
+                          "state",
+                          "pauseReason",
+                          "project",
+                          "progress"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["specs"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{specId}/tickets/import": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "displayId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["key", "id", "displayId"]
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["module-overlap"]
+                          },
+                          "tickets": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "repoId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["type", "tickets", "repoId", "message"]
+                      }
+                    }
+                  },
+                  "required": ["tickets", "warnings"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not a draft or already has tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Rejected; nothing was written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["errors"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{specId}/confirm": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed; the spec is running and the tickets that can start are queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "planned",
+                        "running",
+                        "finalizing",
+                        "awaiting-review",
+                        "partially-merged",
+                        "reworking",
+                        "merged",
+                        "paused",
+                        "cancelled"
+                      ]
+                    },
+                    "integrationBranches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repoId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["repoId", "branch"]
+                      }
+                    },
+                    "enqueued": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ticketId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "jobId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          }
+                        },
+                        "required": ["ticketId", "displayId", "jobId"]
+                      }
+                    }
+                  },
+                  "required": ["state", "integrationBranches", "enqueued"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not a draft, or has no tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/claim": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "maxItems": 100
+                  }
+                },
+                "required": ["workerId", "capabilities"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A job leased to the worker, or null when nothing is claimable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "payload": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "attempt": {
+                          "type": "integer"
+                        },
+                        "lockKey": {
+                          "type": ["string", "null"]
+                        },
+                        "leaseExpiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "payload",
+                        "attempt",
+                        "lockKey",
+                        "leaseExpiresAt"
+                      ]
+                    }
+                  },
+                  "required": ["job"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/heartbeat": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                },
+                "required": ["workerId", "attempt"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "leaseExpiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["leaseExpiresAt"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/pre-push": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                },
+                "required": ["workerId", "attempt"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/complete": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "result": {}
+                },
+                "required": ["workerId", "attempt"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/bundle": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the worker renders into /context for this job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "stage": {
+                          "type": "string"
+                        },
+                        "attempt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["id", "stage", "attempt"]
+                    },
+                    "run": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "displayId"]
+                    },
+                    "ticket": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "acceptanceCriteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "modules": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "contentVersion": {
+                          "type": "integer"
+                        },
+                        "fixCounts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer"
+                          }
+                        },
+                        "reviewed": {
+                          "type": "boolean"
+                        },
+                        "restart": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "type",
+                        "title",
+                        "body",
+                        "acceptanceCriteria",
+                        "modules",
+                        "state",
+                        "contentVersion",
+                        "fixCounts",
+                        "reviewed",
+                        "restart"
+                      ]
+                    },
+                    "specTickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "acceptanceCriteria": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": ["displayId", "title", "acceptanceCriteria"]
+                      }
+                    },
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "slug",
+                        "title",
+                        "body",
+                        "type"
+                      ]
+                    },
+                    "repo": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "role", "url", "defaultBranch"]
+                    },
+                    "integrationBranch": {
+                      "type": ["string", "null"]
+                    },
+                    "agentBranch": {
+                      "type": "string"
+                    },
+                    "protectedPaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "allowedProtectedPaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "contract": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "sha": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "repoId": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["sha", "path", "repoId"]
+                    },
+                    "failureLog": {
+                      "type": ["string", "null"]
+                    },
+                    "review": {},
+                    "gateBaseline": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "tests": {
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["tests", "skipped"]
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "runIdleSeconds": {
+                          "type": "integer"
+                        },
+                        "runWallclockSeconds": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["runIdleSeconds", "runWallclockSeconds"]
+                    },
+                    "model": {
+                      "type": ["string", "null"]
+                    }
+                  },
+                  "required": [
+                    "job",
+                    "run",
+                    "ticket",
+                    "specTickets",
+                    "spec",
+                    "repo",
+                    "integrationBranch",
+                    "agentBranch",
+                    "protectedPaths",
+                    "allowedProtectedPaths",
+                    "contract",
+                    "failureLog",
+                    "gateBaseline",
+                    "limits",
+                    "model"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or the job has no ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/host-task": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What an open-pr, host-sync or spec-cleanup job has to do on the code host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["open-pr"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "base": {
+                          "type": "string"
+                        },
+                        "head": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "draft": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "base",
+                        "head",
+                        "title",
+                        "body",
+                        "draft"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["host-sync"]
+                        },
+                        "pulls": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["id", "repoUrl", "number"]
+                          }
+                        }
+                      },
+                      "required": ["kind", "pulls"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["spec-cleanup"]
+                        },
+                        "pulls": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["id", "repoUrl", "number"]
+                          }
+                        },
+                        "branches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["repoUrl", "branch"]
+                          }
+                        }
+                      },
+                      "required": ["kind", "pulls", "branches"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or not a job for the code host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/lease": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether the job is running under a live lease at that attempt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "held": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["held"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/fail": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": ["workerId", "attempt", "error"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/runs/{id}/logs": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "chunk": {
+                    "type": "string",
+                    "maxLength": 1048576
+                  }
+                },
+                "required": ["workerId", "attempt", "chunk"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appended; size is the log's length in bytes now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["size"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The log of this run attempt is full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "default": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4194304,
+              "default": 262144
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": false,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A slice of the log. Continue from nextOffset; when attempt changes, start again from 0",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attempt": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "nextOffset": {
+                      "type": "integer"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "finished": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "attempt",
+                    "offset",
+                    "nextOffset",
+                    "size",
+                    "text",
+                    "finished"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ticket, its runs, findings and gate results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ticket": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "specId": {
+                          "type": "integer"
+                        },
+                        "specDisplayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "queued",
+                            "running",
+                            "merging",
+                            "done",
+                            "blocked",
+                            "cancelled"
+                          ]
+                        },
+                        "blockedReason": {
+                          "type": ["string", "null"]
+                        },
+                        "repo": {
+                          "type": "string"
+                        },
+                        "brief": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "run": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "displayId"]
+                            },
+                            "stage": {
+                              "type": "string"
+                            },
+                            "result": {
+                              "type": ["string", "null"]
+                            },
+                            "output": {},
+                            "logPath": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["run", "stage", "result", "logPath"]
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "acceptanceCriteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "modules": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowedProtectedPaths": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "contentVersion": {
+                          "type": "integer"
+                        },
+                        "contractSha": {
+                          "type": ["string", "null"]
+                        },
+                        "fixCounts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer"
+                          }
+                        },
+                        "reviewed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "specId",
+                        "specDisplayId",
+                        "title",
+                        "type",
+                        "state",
+                        "blockedReason",
+                        "repo",
+                        "brief",
+                        "body",
+                        "acceptanceCriteria",
+                        "modules",
+                        "allowedProtectedPaths",
+                        "contentVersion",
+                        "contractSha",
+                        "fixCounts",
+                        "reviewed"
+                      ]
+                    },
+                    "upstream": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          }
+                        },
+                        "required": ["id", "displayId", "kind", "state"]
+                      }
+                    },
+                    "downstream": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          }
+                        },
+                        "required": ["id", "displayId", "kind", "state"]
+                      }
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "attempt": {
+                            "type": "integer"
+                          },
+                          "result": {
+                            "type": ["string", "null"]
+                          },
+                          "durationMs": {
+                            "type": ["integer", "null"]
+                          },
+                          "agent": {
+                            "type": ["string", "null"]
+                          },
+                          "model": {
+                            "type": ["string", "null"]
+                          },
+                          "skillsSha": {
+                            "type": ["string", "null"]
+                          },
+                          "cursorCliVersion": {
+                            "type": ["string", "null"]
+                          },
+                          "startedAt": {
+                            "type": ["string", "null"]
+                          },
+                          "finishedAt": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "stage",
+                          "attempt",
+                          "result",
+                          "durationMs",
+                          "agent",
+                          "model",
+                          "skillsSha",
+                          "cursorCliVersion",
+                          "startedAt",
+                          "finishedAt"
+                        ]
+                      }
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "runId": {
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "resolution": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "runId",
+                          "kind",
+                          "body",
+                          "resolution"
+                        ]
+                      }
+                    },
+                    "gateResults": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "commitSha": {
+                            "type": "string"
+                          },
+                          "configSha": {
+                            "type": "string"
+                          },
+                          "commandResults": {
+                            "type": "array",
+                            "items": {}
+                          },
+                          "testsTotal": {
+                            "type": ["integer", "null"]
+                          },
+                          "testsSkipped": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "commitSha",
+                          "configSha",
+                          "commandResults",
+                          "testsTotal",
+                          "testsSkipped"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "ticket",
+                    "upstream",
+                    "downstream",
+                    "runs",
+                    "findings",
+                    "gateResults"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spec with its tickets and dependency edges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "planned",
+                            "running",
+                            "finalizing",
+                            "awaiting-review",
+                            "partially-merged",
+                            "reworking",
+                            "merged",
+                            "paused",
+                            "cancelled"
+                          ]
+                        },
+                        "pauseReason": {
+                          "type": ["string", "null"]
+                        },
+                        "integrationBranches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoId": {
+                                "type": "integer"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["repoId", "branch"]
+                          }
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {}
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "displayId",
+                        "slug",
+                        "title",
+                        "type",
+                        "body",
+                        "state",
+                        "pauseReason",
+                        "integrationBranches",
+                        "warnings"
+                      ]
+                    },
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "type",
+                          "state",
+                          "blockedReason",
+                          "repo",
+                          "brief"
+                        ]
+                      }
+                    },
+                    "finalizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "step": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "step",
+                          "state",
+                          "blockedReason",
+                          "brief"
+                        ]
+                      }
+                    },
+                    "pullRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "order": {
+                            "type": "integer"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["open", "closed", "merged"]
+                          },
+                          "draft": {
+                            "type": "boolean"
+                          },
+                          "ci": {
+                            "type": "string",
+                            "enum": ["none", "pending", "success", "failure"]
+                          },
+                          "review": {
+                            "type": "string",
+                            "enum": ["none", "approved", "changes-requested"]
+                          },
+                          "syncError": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "order",
+                          "repo",
+                          "number",
+                          "url",
+                          "state",
+                          "draft",
+                          "ci",
+                          "review",
+                          "syncError"
+                        ]
+                      }
+                    },
+                    "acceptancePack": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "generatedAt": {
+                          "type": "string"
+                        },
+                        "pullRequests": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "order": {
+                                "type": "integer"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": ["open", "closed", "merged"]
+                              },
+                              "draft": {
+                                "type": "boolean"
+                              },
+                              "ci": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "pending",
+                                  "success",
+                                  "failure"
+                                ]
+                              },
+                              "review": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "approved",
+                                  "changes-requested"
+                                ]
+                              },
+                              "syncError": {
+                                "type": ["string", "null"]
+                              }
+                            },
+                            "required": [
+                              "order",
+                              "repo",
+                              "number",
+                              "url",
+                              "state",
+                              "draft",
+                              "ci",
+                              "review",
+                              "syncError"
+                            ]
+                          }
+                        },
+                        "tickets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "criteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "tests": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": ["verified", "unverified"]
+                                    },
+                                    "reason": {
+                                      "type": ["string", "null"]
+                                    }
+                                  },
+                                  "required": [
+                                    "text",
+                                    "tests",
+                                    "status",
+                                    "reason"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": ["displayId", "title", "criteria"]
+                          }
+                        },
+                        "findings": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "ticket": {
+                                "type": ["string", "null"]
+                              },
+                              "run": {
+                                "type": "string"
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "body": {
+                                "type": "string"
+                              },
+                              "resolution": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ticket",
+                              "run",
+                              "stage",
+                              "kind",
+                              "body",
+                              "resolution"
+                            ]
+                          }
+                        },
+                        "uncertainties": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "source": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["source", "text"]
+                          }
+                        },
+                        "gates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repo": {
+                                "type": "string"
+                              },
+                              "commitSha": {
+                                "type": "string"
+                              },
+                              "testsTotal": {
+                                "type": ["integer", "null"]
+                              },
+                              "testsSkipped": {
+                                "type": ["integer", "null"]
+                              },
+                              "durationMs": {
+                                "type": "integer"
+                              },
+                              "steps": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "exitCode": {
+                                      "type": "integer"
+                                    },
+                                    "ms": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["name", "exitCode", "ms"]
+                                }
+                              }
+                            },
+                            "required": [
+                              "repo",
+                              "commitSha",
+                              "testsTotal",
+                              "testsSkipped",
+                              "durationMs",
+                              "steps"
+                            ]
+                          }
+                        },
+                        "protectedPathApprovals": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "ticket": {
+                                "type": "string"
+                              },
+                              "paths": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["ticket", "paths"]
+                          }
+                        },
+                        "agentSeconds": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "generatedAt",
+                        "pullRequests",
+                        "tickets",
+                        "findings",
+                        "uncertainties",
+                        "gates",
+                        "protectedPathApprovals",
+                        "agentSeconds"
+                      ]
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["from", "to", "kind"]
+                      }
+                    }
+                  },
+                  "required": [
+                    "spec",
+                    "tickets",
+                    "finalizations",
+                    "pullRequests",
+                    "acceptancePack",
+                    "edges"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Specs and tickets whose number, title or body contains the text, ignoring case",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "planned",
+                              "running",
+                              "finalizing",
+                              "awaiting-review",
+                              "partially-merged",
+                              "reworking",
+                              "merged",
+                              "paused",
+                              "cancelled"
+                            ]
+                          },
+                          "matched": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["id", "title", "body"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "title",
+                          "state",
+                          "matched"
+                        ]
+                      }
+                    },
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "matched": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["id", "title", "body"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "title",
+                          "state",
+                          "specId",
+                          "specDisplayId",
+                          "matched"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["specs", "tickets"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/blocked": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Blocked tickets, stuck pull requests, cleanups that failed and paused specs, everything waiting for a person",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "queued",
+                              "running",
+                              "merging",
+                              "done",
+                              "blocked",
+                              "cancelled"
+                            ]
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "type",
+                          "state",
+                          "blockedReason",
+                          "repo",
+                          "brief"
+                        ]
+                      }
+                    },
+                    "finalizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "step": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "blockedReason": {
+                            "type": ["string", "null"]
+                          },
+                          "brief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer"
+                                  },
+                                  "displayId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "displayId"]
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "result": {
+                                "type": ["string", "null"]
+                              },
+                              "output": {},
+                              "logPath": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["run", "stage", "result", "logPath"]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "step",
+                          "state",
+                          "blockedReason",
+                          "brief"
+                        ]
+                      }
+                    },
+                    "pullRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "syncError": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "repo",
+                          "number",
+                          "url",
+                          "state",
+                          "syncError"
+                        ]
+                      }
+                    },
+                    "cleanups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["specId", "specDisplayId", "error"]
+                      }
+                    },
+                    "specs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "displayId", "title", "reason"]
+                      }
+                    }
+                  },
+                  "required": [
+                    "tickets",
+                    "finalizations",
+                    "pullRequests",
+                    "cleanups",
+                    "specs"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": ["continue", "restart"]
+                  }
+                },
+                "required": ["mode"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Back to pending (or already queued again)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "queued",
+                        "running",
+                        "merging",
+                        "done",
+                        "blocked",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is not blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/approve-protected": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved; the ticket goes on from the gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approved": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["approved"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is not blocked by protected-path-changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/allow-paths": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": ["paths"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The ticket's approved protected paths now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "allowed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["allowed"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Only a blocked ticket can be given paths",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cascade": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cancelled": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "blocked": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["cancelled", "blocked", "skipped"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Only a pending or blocked ticket can be cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/resume": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "extraSeconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 604800
+                  }
+                },
+                "required": ["extraSeconds"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Running again, with the extra agent time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "planned",
+                        "running",
+                        "finalizing",
+                        "awaiting-review",
+                        "partially-merged",
+                        "reworking",
+                        "merged",
+                        "paused",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spec is cancelled, with the tickets that went with it and the pull requests last seen open on the code host, which a worker with the code host then closes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "planned",
+                        "running",
+                        "finalizing",
+                        "awaiting-review",
+                        "partially-merged",
+                        "reworking",
+                        "merged",
+                        "paused",
+                        "cancelled"
+                      ]
+                    },
+                    "cancelled": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pullRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repo": {
+                            "type": "string"
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["repo", "number", "url"]
+                      }
+                    }
+                  },
+                  "required": ["state", "cancelled", "pullRequests"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is merged or already cancelled, or one of its pull requests is merged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/final/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The blocked steps of the overall review are queued again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "retried": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["retried"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing is blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/cleanup": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The clean-up (closing its pull requests, deleting its branches) is queued again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "queued": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["queued"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not cancelled or merged, or a clean-up of it is already waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

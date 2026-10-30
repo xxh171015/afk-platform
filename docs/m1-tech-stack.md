@@ -4,21 +4,21 @@
 
 ## 选型一览
 
-| 项 | 选择 | 理由 |
-| --- | --- | --- |
-| 运行时 | Node ≥ 22.18，原生直接跑 `.ts`（`api`、`worker`、`cli` 不需要构建步骤），`tsc --noEmit` 只做类型检查 | M0 已经这样用；少一个构建步骤。代价：不能用 `enum`、`namespace` 这类要转译的写法，相对导入带 `.ts` 后缀 |
-| 包管理 | pnpm workspace（`workspace:*`、`pnpm -r`），不用 Turborepo / Nx | 五六个包，用不上缓存和任务编排 |
-| API | Hono + `@hono/zod-openapi`，Node 适配器 `@hono/node-server` | 路由里用 zod 4 写校验同时生成 OpenAPI；和 M0 已有的 zod 一致；轻量 |
-| 客户端 | `openapi-typescript` 生成类型 + `openapi-fetch`，放进 `shared` 导出，CLI 和页面共用 | 一份接口描述，一份客户端 |
-| 数据库 | Postgres + Drizzle（`drizzle-orm`、`drizzle-kit`）+ `pg` 驱动 | 表结构写在 TS 里，迁移自动生成；队列里的手写 SQL 用 `sql` 模板 |
-| 作业队列 | 在 Postgres 表上自己实现，放在 `api` 的一个模块里；pg-boss 作为备选 | 调研：自己实现完全满足设计的语义（约 400 行代码 + 300 行测试）；pg-boss 缺按能力过滤；graphile-worker 锁不能续期。集成分支锁也由这套队列提供（作业上的 `lock_key`，领取时互斥），所以更适合自己实现 |
-| 页面 | React 19 + Vite + `@xyflow/react` + TanStack Query，样式用纯 CSS，不引 UI 组件库 | PoC 只有四个视图 |
-| CLI | `commander`，默认给人看的输出，`--json` 给 skills 和脚本 | |
-| 测试 | vitest；lint 和格式化用 Biome | 一个工具管 lint + 格式化 |
-| 测试数据库 | 用真 Postgres，不 mock；沙箱镜像里装 PostgreSQL，门禁的 `setup` 在一次性目录里起临时实例；本机开发用同一个脚本或 docker compose，都通过连接串指向 | 沙箱里没有 Docker，而 M1 的票以后可能由 AFK 流水线在沙箱里实现；租约和 `SKIP LOCKED` 的并发语义必须用真库测。不用 PGlite：单连接，测不了并发 |
-| 日志 | pino（JSON）| |
+| 项         | 选择                                                                                                                                              | 理由                                                                                                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 运行时     | Node ≥ 22.18，原生直接跑 `.ts`（`api`、`worker`、`cli` 不需要构建步骤），`tsc --noEmit` 只做类型检查                                              | M0 已经这样用；少一个构建步骤。代价：不能用 `enum`、`namespace` 这类要转译的写法，相对导入带 `.ts` 后缀                                                                                             |
+| 包管理     | pnpm workspace（`workspace:*`、`pnpm -r`），不用 Turborepo / Nx                                                                                   | 五六个包，用不上缓存和任务编排                                                                                                                                                                      |
+| API        | Hono + `@hono/zod-openapi`，Node 适配器 `@hono/node-server`                                                                                       | 路由里用 zod 4 写校验同时生成 OpenAPI；和 M0 已有的 zod 一致；轻量                                                                                                                                  |
+| 客户端     | `openapi-typescript` 生成类型 + `openapi-fetch`，放进 `shared` 导出，CLI 和页面共用                                                               | 一份接口描述，一份客户端                                                                                                                                                                            |
+| 数据库     | Postgres + Drizzle（`drizzle-orm`、`drizzle-kit`）+ `pg` 驱动                                                                                     | 表结构写在 TS 里，迁移自动生成；队列里的手写 SQL 用 `sql` 模板                                                                                                                                      |
+| 作业队列   | 在 Postgres 表上自己实现，放在 `api` 的一个模块里；pg-boss 作为备选                                                                               | 调研：自己实现完全满足设计的语义（约 400 行代码 + 300 行测试）；pg-boss 缺按能力过滤；graphile-worker 锁不能续期。集成分支锁也由这套队列提供（作业上的 `lock_key`，领取时互斥），所以更适合自己实现 |
+| 页面       | React 19 + Vite + `@xyflow/react` + TanStack Query，样式用纯 CSS，不引 UI 组件库                                                                  | PoC 只有四个视图                                                                                                                                                                                    |
+| CLI        | `commander`，默认给人看的输出，`--json` 给 skills 和脚本                                                                                          |                                                                                                                                                                                                     |
+| 测试       | vitest；lint 和格式化用 Biome                                                                                                                     | 一个工具管 lint + 格式化                                                                                                                                                                            |
+| 测试数据库 | 用真 Postgres，不 mock；沙箱镜像里装 PostgreSQL，门禁的 `setup` 在一次性目录里起临时实例；本机开发用同一个脚本或 docker compose，都通过连接串指向 | 沙箱里没有 Docker，而 M1 的票以后可能由 AFK 流水线在沙箱里实现；租约和 `SKIP LOCKED` 的并发语义必须用真库测。不用 PGlite：单连接，测不了并发                                                        |
+| 日志       | pino（JSON）                                                                                                                                      |                                                                                                                                                                                                     |
 
-固定的版本在 M1 第一周的脚手架里用锁文件确定；Sandcastle 和 Cursor CLI 仍锁精确版本（见 design.md）。
+固定的版本在 M1 第一周的脚手架里用锁文件确定；Sandcastle `0.12.0`、Cursor CLI（`.sandcastle/Dockerfile` 的 `CURSOR_CLI_VERSION`）、skills `59db609eb1e18aaf59b63284d0e52255aff0c63c` 仍锁精确版本（见 design.md）。
 
 ## 仓库布局
 

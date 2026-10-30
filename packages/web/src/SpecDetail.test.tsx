@@ -1,0 +1,489 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { SpecDetail } from "./SpecDetail.tsx";
+import { fakeServer, renderWithApp } from "./test-utils.tsx";
+
+afterEach(cleanup);
+
+const ticket = (
+  n: number,
+  state: string,
+  over: Record<string, unknown> = {},
+) => ({
+  id: n,
+  displayId: `T-${n}`,
+  specId: 1,
+  specDisplayId: "S-1",
+  title: `Ticket ${n}`,
+  type: "implementation",
+  state,
+  blockedReason: null,
+  repo: "backend",
+  brief: null,
+  ...over,
+});
+
+const view = (
+  over: {
+    spec?: Record<string, unknown>;
+    tickets?: unknown[];
+    edges?: unknown[];
+    finalizations?: unknown[];
+    pullRequests?: unknown[];
+    acceptancePack?: unknown;
+  } = {},
+) => ({
+  spec: {
+    id: 1,
+    displayId: "S-1",
+    slug: "order-export",
+    title: "Order export",
+    type: "feature",
+    body: "",
+    state: "draft",
+    pauseReason: null,
+    integrationBranches: [],
+    warnings: [],
+    ...over.spec,
+  },
+  tickets: over.tickets ?? [
+    ticket(1, "pending"),
+    ticket(2, "pending"),
+    ticket(3, "pending"),
+  ],
+  edges: over.edges ?? [
+    { from: "T-1", to: "T-2", kind: "blocks" },
+    { from: "T-1", to: "T-3", kind: "contract" },
+  ],
+  finalizations: over.finalizations ?? [],
+  pullRequests: over.pullRequests ?? [],
+  acceptancePack: over.acceptancePack ?? null,
+});
+
+const node = (id: string) => screen.getByTestId(`node-${id}`);
+
+describe("the spec page", () => {
+  it("draws a node per ticket, coloured by the ticket's state", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: { state: "running" },
+          tickets: [
+            ticket(1, "done"),
+            ticket(2, "blocked", { blockedReason: "agent-gave-up" }),
+            ticket(3, "running"),
+            ticket(4, "pending"),
+          ],
+          edges: [],
+        }),
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+
+    await screen.findByTestId("node-T-1");
+    expect(node("T-1").getAttribute("data-state")).toBe("done");
+    expect(node("T-2").getAttribute("data-state")).toBe("blocked");
+    expect(node("T-3").getAttribute("data-state")).toBe("running");
+    expect(node("T-4").getAttribute("data-state")).toBe("pending");
+    expect(node("T-2").textContent).toContain("blocked (agent-gave-up)");
+    expect(node("T-1").textContent).toContain("Ticket 1");
+    // each state has its own look: a blocked node is not drawn like a done one
+    const borders = ["T-1", "T-2", "T-3", "T-4"].map(
+      (id) => (node(id) as HTMLElement).style.borderColor,
+    );
+    expect(new Set(borders).size).toBe(4);
+  });
+
+  it("lists the tickets and their states below the graph", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "blocked", { blockedReason: "gate-failed" })],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    expect(
+      await screen.findByText(
+        (_, element) =>
+          element?.tagName === "LI" &&
+          /T-1 Ticket 1 — gate-failed/.test(element.textContent ?? ""),
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows the pull requests in merge order and the acceptance pack: what backs each criterion, findings, doubts, gates", async () => {
+    const pullRequests = [
+      {
+        order: 1,
+        repo: "backend",
+        number: 7,
+        url: "https://github.com/me/shop/pull/7",
+        state: "open",
+        draft: false,
+        ci: "success",
+        review: "approved",
+        syncError: null,
+      },
+      {
+        order: 2,
+        repo: "frontend",
+        number: 3,
+        url: "https://github.com/me/shop-web/pull/3",
+        state: "open",
+        draft: true,
+        ci: "pending",
+        review: "none",
+        syncError: "GitHub answered 502",
+      },
+    ];
+    const acceptancePack = {
+      generatedAt: "2026-10-28T10:00:00.000Z",
+      pullRequests,
+      tickets: [
+        {
+          displayId: "T-1",
+          title: "Ticket 1",
+          criteria: [
+            {
+              text: "exports orders",
+              tests: ["exports a csv"],
+              status: "verified",
+              reason: null,
+            },
+            {
+              text: "has a header",
+              tests: [],
+              status: "unverified",
+              reason: "the agent named no test",
+            },
+          ],
+        },
+      ],
+      findings: [
+        {
+          ticket: "T-1",
+          run: "R-3",
+          stage: "review",
+          kind: "suggestion",
+          body: "rename x",
+          resolution: "acceptance-pack",
+        },
+      ],
+      uncertainties: [{ source: "T-1 implement", text: "date format?" }],
+      gates: [
+        {
+          repo: "backend",
+          commitSha: "0123456789abcdef",
+          testsTotal: 3,
+          testsSkipped: 1,
+          durationMs: 4000,
+          steps: [{ name: "test", exitCode: 0, ms: 2500 }],
+        },
+      ],
+      protectedPathApprovals: [{ ticket: "T-1", paths: [".github/ci.yml"] }],
+      agentSeconds: 12,
+    };
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            pullRequests,
+            acceptancePack,
+          }),
+        }),
+      }),
+    );
+    const prs = (await screen.findAllByText(/CI /)).map((e) => e.textContent);
+    expect(prs[0]).toContain("CI success, review approved");
+    expect(prs[1]).toContain("CI pending, review none");
+    expect(
+      screen.getByText(/could not be read: GitHub answered 502/),
+    ).toBeTruthy();
+    expect(screen.getByText("backend #7").getAttribute("href")).toBe(
+      "https://github.com/me/shop/pull/7",
+    );
+    const criterion = (text: string) =>
+      screen.getByText(text, { exact: false }).closest("li") as HTMLElement;
+    expect(criterion("exports orders").getAttribute("data-status")).toBe(
+      "verified",
+    );
+    expect(criterion("has a header").getAttribute("data-status")).toBe(
+      "unverified",
+    );
+    expect(criterion("has a header").textContent).toContain(
+      "the agent named no test",
+    );
+    expect(screen.getByText(/rename x/)).toBeTruthy();
+    expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
+    expect(
+      screen.getByText(/backend @ 01234567: 3 tests, 1 skipped, 4.0 s/),
+    ).toBeTruthy();
+    expect(screen.getByText(/T-1: .github\/ci.yml/)).toBeTruthy();
+  });
+
+  it("says a pull request closed on the host was closed without merge", async () => {
+    const pullRequests = [
+      {
+        order: 1,
+        repo: "backend",
+        number: 7,
+        url: "https://github.com/me/shop/pull/7",
+        state: "closed",
+        draft: false,
+        ci: "success",
+        review: "none",
+        syncError: null,
+      },
+    ];
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({ spec: { state: "awaiting-review" }, pullRequests }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("closed without merge")).toBeTruthy();
+  });
+
+  it("has no pull request or pack section before there is one", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    await screen.findByText("Tickets");
+    expect(screen.queryByText("Acceptance pack")).toBeNull();
+    expect(screen.queryByText("Pull requests")).toBeNull();
+  });
+
+  it("shows the warnings the import left", async () => {
+    const warnings = [
+      {
+        type: "module-overlap",
+        tickets: ["a", "b"],
+        repoId: 1,
+        message:
+          "tickets a and b touch overlapping modules in the same repo but neither depends on the other",
+      },
+    ];
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({ json: view({ spec: { warnings } }) }),
+      }),
+    );
+    expect(
+      await screen.findByText(/tickets a and b touch overlapping modules/),
+    ).toBeTruthy();
+  });
+
+  it("says so when there are no warnings", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    expect(await screen.findByText("No warnings.")).toBeTruthy();
+  });
+
+  it("links every ticket to its own page, from the graph and from the list", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "done"), ticket(2, "pending")],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    await screen.findByTestId("node-T-2");
+    const links = screen.getAllByRole("link", { name: "T-2" });
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "#/tickets/2",
+      "#/tickets/2",
+    ]);
+  });
+
+  it("shows the title, the state, and why a spec was paused", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: {
+              state: "paused",
+              pauseReason: "the agent time limit of the spec was reached",
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByRole("heading", { level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toContain(
+      "S-1 Order export",
+    );
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toContain(
+      "paused",
+    );
+    expect(
+      screen.getByText(/Paused: the agent time limit of the spec was reached/),
+    ).toBeTruthy();
+  });
+
+  it("shows the overall review of a finalizing spec", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "finalizing" },
+            finalizations: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "backend",
+                step: "final-merge",
+                state: "blocked",
+                blockedReason: "merge-conflict",
+                brief: null,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(
+      await screen.findByText("backend: final-merge blocked (merge-conflict)"),
+    ).toBeTruthy();
+  });
+
+  it("links back to the list", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    const back = await screen.findByRole("link", { name: /all specs/ });
+    expect(back.getAttribute("href")).toBe("#/");
+  });
+});
+
+describe("confirming the split", () => {
+  // a spec that goes from draft to running when confirmed, like the real API
+  function confirmable() {
+    let confirmed = false;
+    const server = fakeServer({
+      "GET /specs/1": () =>
+        confirmed
+          ? {
+              json: view({
+                spec: { state: "running" },
+                tickets: [
+                  ticket(1, "queued"),
+                  ticket(2, "pending"),
+                  ticket(3, "pending"),
+                ],
+              }),
+            }
+          : { json: view() },
+      "POST /specs/1/confirm": () => {
+        confirmed = true;
+        return {
+          json: {
+            state: "running",
+            integrationBranches: [{ repoId: 1, branch: "spec/order-export" }],
+            enqueued: [{ ticketId: 1, displayId: "T-1", jobId: 1 }],
+          },
+        };
+      },
+    });
+    return server;
+  }
+
+  it("offers the button on a draft with tickets, and starts the spec when it is pressed", async () => {
+    const server = confirmable();
+    renderWithApp(<SpecDetail specId={1} />, server);
+    const button = await screen.findByRole("button", { name: "Confirm split" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(node("T-1").getAttribute("data-state")).toBe("pending");
+
+    fireEvent.click(button);
+
+    // the page asks the API, then shows the spec as it is now: running, with the first ticket queued
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Confirm split" }),
+      ).toBeNull(),
+    );
+    expect(server.calls).toContain("POST /specs/1/confirm");
+    await waitFor(() =>
+      expect(node("T-1").getAttribute("data-state")).toBe("queued"),
+    );
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toContain(
+      "running",
+    );
+  });
+
+  it("says what the API said when it refuses, and keeps the button", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({ json: view() }),
+      "POST /specs/1/confirm": () => ({
+        status: 409,
+        json: { error: "confirm-plan is not allowed in running" },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm split" }),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("confirm-plan is not allowed in running");
+    expect(screen.getByRole("button", { name: "Confirm split" })).toBeTruthy();
+  });
+
+  it("cannot be pressed while there is nothing to confirm", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({ json: view({ tickets: [], edges: [] }) }),
+      }),
+    );
+    const button = await screen.findByRole("button", { name: "Confirm split" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Import tickets first/)).toBeTruthy();
+    expect(screen.getByText("No tickets imported.")).toBeTruthy();
+  });
+
+  it("has no button once the spec has been confirmed", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({ json: view({ spec: { state: "running" } }) }),
+      }),
+    );
+    await screen.findByTestId("node-T-1");
+    expect(screen.queryByRole("button", { name: "Confirm split" })).toBeNull();
+  });
+});
+
+describe("when the spec cannot be shown", () => {
+  it("says it is loading, and then what went wrong", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({ status: 404, json: { error: "no such spec" } }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    expect(screen.getByText("Loading the spec…")).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load the spec: no such spec",
+    );
+  });
+});
