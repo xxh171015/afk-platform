@@ -115,7 +115,9 @@ describe("starting an environment", () => {
       runId: "R-9",
       repos: list,
     });
-    const [up] = fake.only("compose", "-p", "afk-r-9");
+    const up = fake
+      .only("compose", "-p", "afk-r-9")
+      .find((c) => c.includes("up"));
     expect(up?.slice(0, 7)).toEqual([
       "compose",
       "-p",
@@ -202,6 +204,20 @@ describe("starting an environment", () => {
         repos: [{ name: "bare", dir, sha: "x" }],
       }),
     ).rejects.toThrow(/bare has no .sandcastle\/integration\/compose.yaml/);
+  });
+
+  it("takes down what an earlier attempt at the same run left under its project, before it builds anything", async () => {
+    const fake = fakeDocker();
+    await startEnvironment({
+      docker: fake.docker,
+      runId: "R-9",
+      repos: repos(),
+    });
+    const [first] = fake.calls;
+    expect(first?.slice(0, 3)).toEqual(["compose", "-p", "afk-r-9"]);
+    expect(first?.slice(-3)).toEqual(["down", "-v", "--remove-orphans"]);
+    const firstBuild = fake.calls.findIndex((c) => c[0] === "build");
+    expect(firstBuild).toBeGreaterThan(0);
   });
 
   it("takes everything down again when the environment does not come up, and says why with the log tail", async () => {

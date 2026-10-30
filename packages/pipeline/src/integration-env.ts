@@ -200,6 +200,10 @@ export async function startEnvironment(
   };
 
   try {
+    // The project is this run's alone. If it is up, an attempt before this one (its worker was killed, or lost its
+    // lease) left it, with whatever its e2e wrote into the services: a new attempt starts from nothing, so that its
+    // result does not depend on the one before.
+    await composeDown(docker, project);
     for (const fragment of fragments) {
       for (const [service, spec] of fragment.services) {
         if (!spec.build) continue;
