@@ -406,6 +406,37 @@ describe("plat", () => {
     expect((await plat("blocked")).stdout).toBe("nothing is waiting for you\n");
   });
 
+  it("shows the repo, refs and environment of tickets", async () => {
+    await register();
+    files["tickets.yaml"] = `tickets:
+  - key: fe
+    repo: frontend
+    type: implementation
+    title: Button
+    modules: [src/**]
+    refs: [backend]
+    acceptance: [it works]
+  - key: e2e
+    repo: frontend
+    type: integration
+    title: E2E
+    modules: [e2e/**]
+    environment: [backend]
+    blocked_by: [fe]
+    acceptance: [it works]
+`;
+    expect((await plat("tickets", "import", "S-1", "tickets.yaml")).code).toBe(
+      0,
+    );
+    const spec = (await plat("spec", "show", "S-1")).stdout;
+    expect(spec).toContain("[frontend]  Button");
+    expect(spec).toContain("refs: backend");
+    expect(spec).toContain("environment: backend");
+    expect((await plat("ticket", "view", "T-2")).stdout).toContain(
+      "environment: backend",
+    );
+  });
+
   it("shows a ticket and a spec", async () => {
     await blockedContract();
     const ticket = await plat("ticket", "view", "T-1");

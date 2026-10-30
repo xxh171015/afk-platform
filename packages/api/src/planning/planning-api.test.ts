@@ -482,6 +482,65 @@ describe("project edit", () => {
   });
 });
 
+describe("tickets across repos", () => {
+  it("stores refs and environment, and reads them back in the ticket and spec views", async () => {
+    const { specId } = await setup();
+    const result = await post(`/specs/${specId}/tickets/import`, {
+      tickets: [
+        ticket("fe", { repo: "frontend", refs: ["backend"] }),
+        ticket("e2e", {
+          repo: "frontend",
+          type: "integration",
+          environment: ["backend"],
+          blocked_by: ["fe"],
+        }),
+      ],
+    });
+    expect(result.status).toBe(200);
+    const view = await (await fetch(`${api.url}/tickets/2`)).json();
+    expect(view.ticket).toMatchObject({
+      repo: "frontend",
+      refs: [],
+      environment: ["backend"],
+    });
+    const spec = await (await fetch(`${api.url}/specs/${specId}`)).json();
+    expect(spec.tickets.map((t: { refs: string[] }) => t.refs)).toEqual([
+      ["backend"],
+      [],
+    ]);
+  });
+
+  it("refuses names outside the project, an environment on a plain ticket and a repo ring, writing nothing", async () => {
+    const { projectId, specId } = await setup();
+    await post(`/projects/${projectId}/repos`, { url: "u", name: "payments" });
+    await patch(`/projects/${projectId}/repos/frontend`, {
+      contractPath: "fe.yaml",
+    });
+    await patch(`/projects/${projectId}/repos/payments`, {
+      contractPath: "pay.yaml",
+    });
+    const bad = await post(`/specs/${specId}/tickets/import`, {
+      tickets: [
+        ticket("a", { refs: ["nope"] }),
+        ticket("b", { environment: ["frontend"] }),
+        ticket("cb", { type: "contract" }),
+        ticket("cf", { type: "contract", repo: "frontend" }),
+        ticket("cp", { type: "contract", repo: "payments" }),
+        ticket("p", { repo: "payments", contract: "cb" }),
+        ticket("be", { repo: "backend", contract: "cf" }),
+        ticket("f", { repo: "frontend", contract: "cp" }),
+      ],
+    });
+    expect(bad.status).toBe(422);
+    expect(bad.body.errors).toEqual([
+      expect.stringMatching(/ticket a: refs nope/),
+      expect.stringMatching(/ticket b: environment .*integration/),
+      expect.stringMatching(/repo contract cycle/),
+    ]);
+    expect(await count("tickets")).toBe(0);
+  });
+});
+
 describe("repo edit", () => {
   const contractPaths = async () =>
     (await db.pool.query("SELECT name, contract_path FROM repos ORDER BY id"))

@@ -108,6 +108,8 @@ export interface TicketSummary {
   state: TicketState;
   blockedReason: string | null;
   repo: string;
+  refs: string[];
+  environment: string[];
   brief: Brief | null;
 }
 
@@ -117,7 +119,7 @@ async function summaries(
   params: unknown[],
 ): Promise<TicketSummary[]> {
   const { rows } = await pool.query(
-    `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, r.name AS repo
+    `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, t.refs, t.environment, r.name AS repo
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE ${where} ORDER BY t.id`,
     params,
   );
@@ -132,6 +134,8 @@ async function summaries(
       state: row.state as TicketState,
       blockedReason: (row.blocked_reason as string | null) ?? null,
       repo: row.repo as string,
+      refs: row.refs as string[],
+      environment: row.environment as string[],
       // an upstream cancel is not the fault of any run, so there is no brief to show
       brief:
         row.state === "blocked" && row.blocked_reason !== "upstream-cancelled"

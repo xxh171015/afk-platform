@@ -14,7 +14,15 @@ const ImportTicketSchema = z.strictObject({
   protected_paths_ok: z.array(z.string().min(1)).default([]),
   acceptance: z.array(z.string().min(1)).min(1),
   blocked_by: z.array(z.string().min(1)).default([]),
-  contract: z.string().min(1).optional(),
+  // One upstream contract ticket, or several (at most one chain of them per repo).
+  contract: z
+    .union([z.string().min(1), z.array(z.string().min(1))])
+    .transform((value) => (typeof value === "string" ? [value] : value))
+    .default([]),
+  // Names of repos: read-only references for the agent, and (integration tickets only) the repos whose services
+  // the e2e environment starts.
+  refs: z.array(z.string().min(1)).default([]),
+  environment: z.array(z.string().min(1)).default([]),
 });
 
 export const ImportFileSchema = z.strictObject({
@@ -33,6 +41,14 @@ export interface PlannedTicket {
   acceptanceCriteria: string[];
   modules: string[];
   allowedProtectedPaths: string[];
+  refs: string[];
+  environment: string[];
+}
+
+// What the validator needs to know about a repo of the project.
+export interface ImportRepo {
+  id: number;
+  contractPath: string | null;
 }
 
 // Both ends are the file's local keys; the caller swaps them for ticket ids.
@@ -58,11 +74,11 @@ export type ImportPlan =
     }
   | { ok: false; errors: string[] };
 
-// Validates a whole import against the project's repos (role -> repo id). Pure: nothing is written, and every
+// Validates a whole import against the project's repos (name -> repo). Pure: nothing is written, and every
 // problem is reported at once so the author fixes the file in one pass.
 export function planImport(
   input: unknown,
-  repoIdsByRole: ReadonlyMap<string, number>,
+  repos: ReadonlyMap<string, ImportRepo>,
   specId: number,
 ): ImportPlan {
   const parsed = ImportFileSchema.safeParse(input);
@@ -98,14 +114,18 @@ export function planImport(
 
   const edges: PlannedEdge[] = [];
   for (const ticket of file.tickets) {
-    if (!repoIdsByRole.has(ticket.repo)) {
+    if (!repos.has(ticket.repo)) {
       errors.push(
         `ticket ${ticket.key}: repo ${ticket.repo} does not belong to the project`,
       );
     }
     const upstreams: [string, EdgeKind][] = [];
     for (const key of ticket.blocked_by) upstreams.push([key, "blocks"]);
-    if (ticket.contract) upstreams.push([ticket.contract, "contract"]);
+    if (new Set(ticket.contract).size !== ticket.contract.length) {
+      errors.push(`ticket ${ticket.key}: contract lists the same ticket twice`);
+    }
+    for (const key of new Set(ticket.contract))
+      upstreams.push([key, "contract"]);
     for (const [upstream, kind] of upstreams) {
       const source = byKey.get(upstream);
       if (!source) {
@@ -116,8 +136,35 @@ export function planImport(
         errors.push(
           `ticket ${ticket.key}: ${upstream} is not a contract ticket, so it cannot be a contract edge upstream`,
         );
+      } else if (kind === "contract" && !repos.get(source.repo)?.contractPath) {
+        errors.push(
+          `ticket ${ticket.key}: contract upstream ${upstream} is in repo ${source.repo}, which has no contract path; set it with plat repo edit ${source.repo} --project <id> --contract-path <path>`,
+        );
       } else {
         edges.push({ from: upstream, to: ticket.key, kind });
+      }
+    }
+    for (const name of ticket.refs) {
+      if (!repos.has(name)) {
+        errors.push(
+          `ticket ${ticket.key}: refs ${name} does not belong to the project`,
+        );
+      }
+    }
+    if (ticket.environment.length > 0 && ticket.type !== "integration") {
+      errors.push(
+        `ticket ${ticket.key}: environment can only be written on an integration ticket`,
+      );
+    }
+    for (const name of ticket.environment) {
+      if (!repos.has(name)) {
+        errors.push(
+          `ticket ${ticket.key}: environment ${name} does not belong to the project`,
+        );
+      } else if (name === ticket.repo && ticket.type === "integration") {
+        errors.push(
+          `ticket ${ticket.key}: environment lists its own repo ${name}`,
+        );
       }
     }
   }
@@ -127,19 +174,25 @@ export function planImport(
     edges.map((edge) => [edge.from, edge.to]),
   );
   if (cycle) errors.push(`dependency cycle: ${cycle.join(" -> ")}`);
+  else {
+    errors.push(...contractChainErrors(file.tickets, edges));
+    errors.push(...repoCycleErrors(file.tickets, edges));
+  }
 
   if (errors.length > 0) return { ok: false, errors };
 
   const tickets = file.tickets.map(
     (ticket): PlannedTicket => ({
       key: ticket.key,
-      repoId: repoIdsByRole.get(ticket.repo) as number,
+      repoId: repos.get(ticket.repo)?.id as number,
       type: ticket.type,
       title: ticket.title,
       body: ticket.body,
       acceptanceCriteria: ticket.acceptance,
       modules: ticket.modules,
       allowedProtectedPaths: ticket.protected_paths_ok,
+      refs: ticket.refs,
+      environment: ticket.environment,
     }),
   );
   return {
@@ -148,6 +201,83 @@ export function planImport(
     edges,
     warnings: overlapWarnings(tickets, edges),
   };
+}
+
+interface RepoTicket {
+  key: string;
+  repo: string;
+}
+
+const reachable = (edges: readonly PlannedEdge[]) => {
+  const next = new Map<string, string[]>();
+  for (const edge of edges)
+    next.set(edge.from, [...(next.get(edge.from) ?? []), edge.to]);
+  return (from: string, to: string): boolean => {
+    const seen = new Set<string>();
+    const stack = [from];
+    while (stack.length > 0) {
+      const node = stack.pop() as string;
+      if (node === to) return true;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      stack.push(...(next.get(node) ?? []));
+    }
+    return false;
+  };
+};
+
+// A ticket's contract upstreams in one repo must form a chain: any two of them depend on each other, so the
+// newest one is the contract the ticket builds against.
+function contractChainErrors(
+  tickets: readonly RepoTicket[],
+  edges: readonly PlannedEdge[],
+): string[] {
+  const repoOf = new Map(tickets.map((t) => [t.key, t.repo]));
+  const reaches = reachable(edges);
+  const errors: string[] = [];
+  for (const ticket of tickets) {
+    const byRepo = new Map<string, string[]>();
+    for (const edge of edges) {
+      if (edge.kind !== "contract" || edge.to !== ticket.key) continue;
+      const repo = repoOf.get(edge.from) as string;
+      byRepo.set(repo, [...(byRepo.get(repo) ?? []), edge.from]);
+    }
+    for (const [repo, upstreams] of byRepo) {
+      for (const [i, a] of upstreams.entries()) {
+        for (const b of upstreams.slice(i + 1)) {
+          if (!reaches(a, b) && !reaches(b, a)) {
+            errors.push(
+              `ticket ${ticket.key}: contract upstreams ${a} and ${b} are both in repo ${repo} but neither depends on the other; they must form a chain (add blocked_by from the later one to the earlier one)`,
+            );
+          }
+        }
+      }
+    }
+  }
+  return errors;
+}
+
+// A contract edge from X to Y says Y's repo uses X's repo's contract; those relations between repos must not go round.
+function repoCycleErrors(
+  tickets: readonly RepoTicket[],
+  edges: readonly PlannedEdge[],
+): string[] {
+  const repoOf = new Map(tickets.map((t) => [t.key, t.repo]));
+  const pairs = new Set<string>();
+  for (const edge of edges) {
+    const from = repoOf.get(edge.from) as string;
+    const to = repoOf.get(edge.to) as string;
+    if (edge.kind === "contract" && from !== to) pairs.add(`${from}\0${to}`);
+  }
+  const cycle = findCycle(
+    [...new Set(tickets.map((t) => t.repo))],
+    [...pairs].map((pair) => pair.split("\0") as [string, string]),
+  );
+  return cycle
+    ? [
+        `repo contract cycle: ${cycle.join(" -> ")} (each repo's contract is used by the next)`,
+      ]
+    : [];
 }
 
 // Shape errors name the ticket by its key (when it has one) rather than its position in the file.
@@ -201,20 +331,7 @@ function overlapWarnings(
   tickets: PlannedTicket[],
   edges: PlannedEdge[],
 ): ImportWarning[] {
-  const next = new Map<string, string[]>(tickets.map((t) => [t.key, []]));
-  for (const edge of edges) next.get(edge.from)?.push(edge.to);
-  const reaches = (from: string, to: string): boolean => {
-    const seen = new Set<string>();
-    const stack = [from];
-    while (stack.length > 0) {
-      const node = stack.pop() as string;
-      if (node === to) return true;
-      if (seen.has(node)) continue;
-      seen.add(node);
-      stack.push(...(next.get(node) ?? []));
-    }
-    return false;
-  };
+  const reaches = reachable(edges);
 
   const warnings: ImportWarning[] = [];
   for (const [i, a] of tickets.entries()) {

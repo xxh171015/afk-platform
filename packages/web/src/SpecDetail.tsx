@@ -23,6 +23,7 @@ interface TicketNodeData extends Record<string, unknown> {
   id: number;
   displayId: string;
   title: string;
+  repo: string;
   state: TicketState;
   blockedReason: string | null;
 }
@@ -41,6 +42,7 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
         <strong>{data.displayId}</strong>
       </a>{" "}
       {data.title}
+      <div className="ticket-node-repo">{data.repo}</div>
       <div className="ticket-node-state">
         {data.state}
         {data.blockedReason ? ` (${data.blockedReason})` : ""}
@@ -52,7 +54,7 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
 
 const nodeTypes = { ticket: TicketNode };
 const NODE_WIDTH = 200;
-const NODE_HEIGHT = 64;
+const NODE_HEIGHT = 80;
 
 function useSpecView(specId: number) {
   const api = useApi();
@@ -96,6 +98,7 @@ function DependencyGraph({
         id: ticket.id,
         displayId: ticket.displayId,
         title: ticket.title,
+        repo: ticket.repo,
         state: ticket.state,
         blockedReason: ticket.blockedReason,
       },

@@ -141,6 +141,9 @@ export const tickets = pgTable(
       .array()
       .notNull()
       .default([]),
+    // Names of repos: read-only references for the agent, and the repos an integration ticket's e2e environment starts.
+    refs: text("refs").array().notNull().default([]),
+    environment: text("environment").array().notNull().default([]),
     state: text("state").notNull().default("pending"),
     blockedReason: text("blocked_reason"),
     contentVersion: integer("content_version").notNull().default(1),

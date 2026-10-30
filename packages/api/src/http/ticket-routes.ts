@@ -51,6 +51,8 @@ const TicketSummary = z.object({
   state: z.enum(TICKET_STATES),
   blockedReason: z.string().nullable(),
   repo: z.string(),
+  refs: z.array(z.string()),
+  environment: z.array(z.string()),
   brief: Brief,
 });
 

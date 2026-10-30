@@ -306,3 +306,7 @@ ul.blocked-list {
   margin: 0;
   padding-left: 16px;
 }
+.ticket-node-repo {
+  color: var(--muted);
+  font-style: italic;
+}

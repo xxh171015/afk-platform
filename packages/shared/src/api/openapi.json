@@ -2164,6 +2164,18 @@
                         "repo": {
                           "type": "string"
                         },
+                        "refs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "environment": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
                         "brief": {
                           "type": ["object", "null"],
                           "properties": {
@@ -2239,6 +2251,8 @@
                         "state",
                         "blockedReason",
                         "repo",
+                        "refs",
+                        "environment",
                         "brief",
                         "body",
                         "acceptanceCriteria",
@@ -2596,6 +2610,18 @@
                           "repo": {
                             "type": "string"
                           },
+                          "refs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "environment": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "brief": {
                             "type": ["object", "null"],
                             "properties": {
@@ -2635,6 +2661,8 @@
                           "state",
                           "blockedReason",
                           "repo",
+                          "refs",
+                          "environment",
                           "brief"
                         ]
                       }
@@ -3220,6 +3248,18 @@
                           "repo": {
                             "type": "string"
                           },
+                          "refs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "environment": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "brief": {
                             "type": ["object", "null"],
                             "properties": {
@@ -3259,6 +3299,8 @@
                           "state",
                           "blockedReason",
                           "repo",
+                          "refs",
+                          "environment",
                           "brief"
                         ]
                       }

@@ -1324,6 +1324,8 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                refs: string[];
+                environment: string[];
                 brief: {
                   run: {
                     id: number;
@@ -1494,6 +1496,8 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                refs: string[];
+                environment: string[];
                 brief: {
                   run: {
                     id: number;
@@ -1737,6 +1741,8 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                refs: string[];
+                environment: string[];
                 brief: {
                   run: {
                     id: number;

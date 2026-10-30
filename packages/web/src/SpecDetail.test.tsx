@@ -20,6 +20,8 @@ const ticket = (
   state,
   blockedReason: null,
   repo: "backend",
+  refs: [],
+  environment: [],
   brief: null,
   ...over,
 });
@@ -93,6 +95,25 @@ describe("the spec page", () => {
       (id) => (node(id) as HTMLElement).style.borderColor,
     );
     expect(new Set(borders).size).toBe(4);
+  });
+
+  it("names the repo of each ticket on its node in the graph", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          tickets: [
+            ticket(1, "done", { repo: "backend" }),
+            ticket(2, "pending", { repo: "payments" }),
+          ],
+          edges: [{ from: "T-1", to: "T-2", kind: "contract" }],
+        }),
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+
+    await screen.findByTestId("node-T-1");
+    expect(node("T-1").textContent).toContain("backend");
+    expect(node("T-2").textContent).toContain("payments");
   });
 
   it("lists the tickets and their states below the graph", async () => {

@@ -46,8 +46,21 @@ interface TicketLike {
   state: string;
   blockedReason: string | null;
   repo: string;
+  refs: string[];
+  environment: string[];
   brief: BriefLike | null;
 }
+
+// The other repos a ticket reads (refs) and starts services of (environment), if it names any.
+const contextLines = (
+  t: Pick<TicketLike, "refs" | "environment">,
+  indent: string,
+) => [
+  ...(t.refs.length ? [`${indent}refs: ${t.refs.join(", ")}`] : []),
+  ...(t.environment.length
+    ? [`${indent}environment: ${t.environment.join(", ")}`]
+    : []),
+];
 
 const stateOf = (t: Pick<TicketLike, "state" | "blockedReason">) =>
   t.blockedReason ? `${t.state} (${t.blockedReason})` : t.state;
@@ -152,6 +165,7 @@ export function ticketText(view: {
   return [
     `${ticket.displayId}  ${stateOf(ticket)}  ${ticket.title}`,
     `spec ${ticket.specDisplayId}, repo ${ticket.repo}, version ${ticket.contentVersion}`,
+    ...contextLines(ticket, ""),
     ...briefLines(ticket.brief),
     "acceptance:",
     ...ticket.acceptanceCriteria.map((c) => `  - ${c}`),
@@ -307,7 +321,8 @@ export function specText(view: {
     ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
     "tickets:",
     ...view.tickets.flatMap((t) => [
-      `  ${t.displayId}  ${stateOf(t)}  ${t.title}`,
+      `  ${t.displayId}  ${stateOf(t)}  [${t.repo}]  ${t.title}`,
+      ...contextLines(t, "      "),
       ...briefLines(t.brief, "      "),
     ]),
     ...(view.finalizations.length

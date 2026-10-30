@@ -27,6 +27,17 @@ const ENTITY_TABLES = [
   "tickets",
 ];
 
+// Tests that migrate "from before" leave out a migration and every one after it: drizzle skips an entry that is
+// older than the newest one already applied.
+const LATER_THAN_REPO_NAMES = [
+  "0015_repo_names_and_contracts",
+  "0016_ticket_refs_and_environment",
+];
+const LATER_THAN_BRANCH_NAMESPACE = [
+  "0014_branch_namespace",
+  ...LATER_THAN_REPO_NAMES,
+];
+
 let db: TestDatabase;
 beforeEach(async () => {
   db = await createTestDatabase();
@@ -94,9 +105,7 @@ describe("the id of the database", () => {
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
-        (e: { tag: string }) =>
-          e.tag !== "0014_branch_namespace" &&
-          e.tag !== "0015_repo_names_and_contracts",
+        (e: { tag: string }) => !LATER_THAN_BRANCH_NAMESPACE.includes(e.tag),
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
@@ -135,7 +144,7 @@ describe("the contract path", () => {
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
-        (e: { tag: string }) => e.tag !== "0015_repo_names_and_contracts",
+        (e: { tag: string }) => !LATER_THAN_REPO_NAMES.includes(e.tag),
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
@@ -185,7 +194,7 @@ describe("the contract path of a project that names no repo", () => {
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
-        (e: { tag: string }) => e.tag !== "0015_repo_names_and_contracts",
+        (e: { tag: string }) => !LATER_THAN_REPO_NAMES.includes(e.tag),
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);

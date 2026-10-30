@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { planImport } from "./ticket-import.ts";
 
 const repos = new Map([
-  ["backend", 1],
-  ["frontend", 2],
+  ["backend", { id: 1, contractPath: "openapi.yaml" }],
+  ["frontend", { id: 2, contractPath: "fe.yaml" }],
+  ["docs", { id: 4, contractPath: null }],
+  ["payments", { id: 3, contractPath: "pay.yaml" }],
 ]);
 
 const ticket = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -254,5 +256,142 @@ describe("module overlap warnings", () => {
       ),
     );
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("tickets across repos", () => {
+  const contractTicket = (key: string, extra: Record<string, unknown> = {}) =>
+    ticket(key, { type: "contract", ...extra });
+
+  it("takes contract and blocks edges that cross repos", () => {
+    const result = plan(
+      file(
+        contractTicket("c"),
+        ticket("fe", { repo: "frontend", contract: "c" }),
+        ticket("pay", { repo: "payments", blocked_by: ["fe"] }),
+      ),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      edges: [
+        { from: "c", to: "fe", kind: "contract" },
+        { from: "fe", to: "pay", kind: "blocks" },
+      ],
+    });
+  });
+
+  it("refuses a contract upstream whose repo has no contract path, naming the ticket", () => {
+    const errors = errorsOf(
+      file(
+        contractTicket("c", { repo: "docs" }),
+        ticket("be", { contract: "c" }),
+      ),
+    );
+    expect(errors).toEqual([
+      expect.stringMatching(/ticket be: .*c .*repo docs.*no contract path/),
+    ]);
+  });
+
+  it("takes several contract upstreams, and refuses two in one repo that do not depend on each other", () => {
+    const apart = file(
+      contractTicket("c1"),
+      contractTicket("c2"),
+      ticket("fe", { repo: "frontend", contract: ["c1", "c2"] }),
+    );
+    expect(errorsOf(apart)).toEqual([
+      expect.stringMatching(/ticket fe: .*c1.*c2.*repo backend.*chain/),
+    ]);
+    const chained = file(
+      contractTicket("c1"),
+      contractTicket("c2", { blocked_by: ["c1"] }),
+      ticket("fe", { repo: "frontend", contract: ["c1", "c2"] }),
+    );
+    expect(plan(chained).ok).toBe(true);
+    const otherRepos = file(
+      contractTicket("c1"),
+      contractTicket("c2", { repo: "payments" }),
+      ticket("fe", { repo: "frontend", contract: ["c1", "c2"] }),
+    );
+    expect(plan(otherRepos).ok).toBe(true);
+  });
+
+  it("refuses a contract upstream listed twice", () => {
+    expect(
+      errorsOf(
+        file(contractTicket("c"), ticket("fe", { contract: ["c", "c"] })),
+      ),
+    ).toEqual([
+      expect.stringMatching(/ticket fe: contract lists the same ticket twice/),
+    ]);
+  });
+
+  it("refuses contract relations between repos that go round, and takes three repos that do not", () => {
+    // payments uses backend's contract, backend uses frontend's, frontend uses payments'
+    const ring = file(
+      contractTicket("cb"),
+      contractTicket("cf", { repo: "frontend" }),
+      contractTicket("cp", { repo: "payments" }),
+      ticket("p", { repo: "payments", contract: "cb" }),
+      ticket("b", { repo: "backend", contract: "cf" }),
+      ticket("f", { repo: "frontend", contract: "cp" }),
+    );
+    expect(errorsOf(ring).join("\n")).toMatch(
+      /repo.*cycle.*(backend|frontend|payments)/,
+    );
+    const line = file(
+      contractTicket("cb"),
+      contractTicket("cp", { repo: "payments" }),
+      ticket("p", { repo: "payments", contract: "cb" }),
+      ticket("f", { repo: "frontend", contract: "cp" }),
+    );
+    expect(plan(line).ok).toBe(true);
+  });
+
+  it("keeps refs and environment, and refuses names outside the project", () => {
+    const result = plan(
+      file(
+        ticket("fe", { repo: "frontend", refs: ["backend"] }),
+        ticket("e2e", {
+          repo: "frontend",
+          type: "integration",
+          environment: ["backend", "payments"],
+        }),
+      ),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      tickets: [
+        { key: "fe", refs: ["backend"], environment: [] },
+        { key: "e2e", refs: [], environment: ["backend", "payments"] },
+      ],
+    });
+    expect(errorsOf(file(ticket("a", { refs: ["nope"] })))).toEqual([
+      expect.stringMatching(/ticket a: refs.*nope.*does not belong/),
+    ]);
+    expect(
+      errorsOf(
+        file(ticket("e", { type: "integration", environment: ["nope"] })),
+      ),
+    ).toEqual([
+      expect.stringMatching(/ticket e: environment.*nope.*does not belong/),
+    ]);
+  });
+
+  it("allows environment only on an integration ticket, without its own repo", () => {
+    expect(errorsOf(file(ticket("a", { environment: ["frontend"] })))).toEqual([
+      expect.stringMatching(/ticket a: environment.*integration/),
+    ]);
+    expect(
+      errorsOf(
+        file(
+          ticket("e", {
+            type: "integration",
+            environment: ["frontend", "backend"],
+          }),
+        ),
+      ),
+    ).toEqual([
+      expect.stringMatching(/ticket e: environment.*its own repo backend/),
+    ]);
   });
 });
