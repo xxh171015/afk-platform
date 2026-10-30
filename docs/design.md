@@ -6,6 +6,8 @@
 
 修订：2026-10-28 按 M0 实测结果修订「单票执行流水线」「门禁」「Agent 与 skills 对接」（上下文注入、结构化输出、AFK prompt 写法）和「待验证事项」。实测依据见「参考资料」里的调研文件和原型分支。同日又按「Sandcastle 隔离与并发缺口的 worker 侧对策」改了执行层架构图、「Git 操作规范」（新增“槽位”“取回结果”）、「作业与恢复」的中断恢复；集成分支锁也在同日改成作业上的 `lock_key`（见「Git 操作规范」「作业与恢复」）。
 
+修订：2026-10-30 按 M2 地图（#62）修订：仓库不再分前后端、契约属于提供接口的仓库、一个需求可以改任意几个仓库（「领域模型与状态机」「跨仓库需求」重写）；联调票由平台在联调环境里验证、失败自动建修复票；合并顺序由契约关系推出，`partially-merged` 和新的取消规则；需求确认后可以追加票、改票，做完的票不重开（「blocked 处理」「`plat` CLI 与票的导入」）；上下文注入按仓库放契约、`/refs` 快照的 SHA 规则；新原因码。M2 的详细设计见 [M2 spec](specs/m2-platform.md)。
+
 ## 背景与目标
 
 目标是让实现阶段无人值守：人只在规划（grill → spec → tickets）和最终合并时出现，中间由平台调度 Sandcastle，在沙箱里逐张票实现。
@@ -33,7 +35,7 @@
 | 3   | PoC 在自己机器上跑，稳定后上公司服务器                                                 | 同一套代码，迁移只改配置                                                                                                                                                                |
 | 4   | 合并到 main 由人做，后续再考虑交给 agent                                               | 在代码托管上用分支保护强制；用指标积累信任。GitHub 免费个人账号的私有仓库用不了分支保护和 ruleset（2026-10-28 实测），PoC 阶段改用“平台自己保证 + 事后检测”，见「平台与代码托管的分工」 |
 | 5   | 代码托管：PoC 用 GitHub，生产用自建 GitLab CE 17.3.1                                   | 做代码托管适配器，先 GitHub，后 GitLab                                                                                                                                                  |
-| 6   | 契约用 skills 写在后端仓库（主仓库）；规划在 Cursor 里做，后端是主项目，前端加入工作区 | tracker 文档放后端仓库；契约按 commit SHA 引用                                                                                                                                          |
+| 6   | 契约用 skills 写在后端仓库（主仓库）；规划在 Cursor 里做，后端是主项目，前端加入工作区（2026-10-30 推广：契约属于提供接口的仓库，不再有主仓库，见「跨仓库需求」） | tracker 文档放后端仓库；契约按 commit SHA 引用                                                                                                                                          |
 | 7   | PoC 的 AFK agent 用 Cursor Agent CLI，走公网                                           | 不依赖会话续接；prompt 只放指针                                                                                                                                                         |
 | 8   | PoC 只有自己用，worker 用本机 Docker                                                   | 不做登录，只监听 localhost；联调用本机 docker 网络                                                                                                                                      |
 
@@ -138,12 +140,12 @@ flowchart LR
 
 | 实体       | 关键字段                                                                                                                                                                                                                                                                                                                                      | 说明                                                                                 |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Project    | repos、默认 agent 和模型、契约文件位置、保护路径列表、并发和预算上限、合并策略                                                                                                                                                                                                                                                                | 一个产品                                                                             |
-| Repo       | 地址、默认分支、角色（主仓库 / 前端）                                                                                                                                                                                                                                                                                                         | 镜像、setup、门禁命令放在仓库自己的 `.sandcastle/` 里，跟代码一起版本化              |
+| Project    | repos、默认 agent 和模型、保护路径列表、并发和预算上限、合并策略                                                                                                                                                                                                                                                                | 一个产品                                                                             |
+| Repo       | 名字（项目内唯一）、地址、默认分支、契约路径（可空）                                                                                                                                                                                                                                                                                          | 镜像、setup、门禁命令放在仓库自己的 `.sandcastle/` 里，跟代码一起版本化              |
 | Spec       | 类型（feature / bug / improvement）、正文（to-spec 模板）、状态、每个涉及仓库的集成分支、来源（bug 指向原 spec）                                                                                                                                                                                                                              | 一个需求                                                                             |
-| Ticket     | 所属 spec、目标仓库、类型（契约 / 实现 / 联调 / 修复 / 系统）、正文、验收标准、会改动的模块（path glob）、状态、blocked 原因码、内容版本号、契约 SHA（契约票完成后写入）                                                                                                                                                                      | 一张票，只对应一个仓库。每次编辑内容版本号加一                                       |
+| Ticket     | 所属 spec、目标仓库、类型（契约 / 实现 / 联调 / 修复 / 系统）、正文、验收标准、会改动的模块（path glob）、状态、blocked 原因码、内容版本号（每版留快照）、契约 SHA（契约票完成后写入）、参考的仓库（`refs`）、联调环境的仓库（`environment`，只有联调票有）                                                                                                                                                                      | 一张票，只对应一个仓库。每次编辑内容版本号加一                                       |
 | Edge       | from、to、类型（blocks / contract）                                                                                                                                                                                                                                                                                                           | 依赖图，允许跨 spec，满足条件见下                                                    |
-| Run        | spec、repo、ticket（可空）、ticket 内容版本、阶段（implement / gate-fix / review / review-fix / merge-fix / integration / update-branch / final-review / final-fix / rework）、agent、模型、分支、起止 commit、commits、耗时（含 agent 报的 `duration_ms` 和 `duration_api_ms`）、token 用量（可空，Cursor 不报）、结果、结构化输出、日志地址 | 每次尝试新增一条，不覆盖。update-branch、收尾和返工这类运行不属于某张票，ticket 为空 |
+| Run        | spec、repo、ticket（可空）、ticket 内容版本、阶段（implement / gate-fix / review / review-fix / merge-fix / e2e / diagnose / update-branch / final-review / final-fix / final-e2e / rework）、用到的契约 SHA（按仓库）、参考快照和联调环境里各仓库的 SHA、agent、模型、分支、起止 commit、commits、耗时（含 agent 报的 `duration_ms` 和 `duration_api_ms`）、token 用量（可空，Cursor 不报）、结果、结构化输出、日志地址 | 每次尝试新增一条，不覆盖。update-branch、收尾和返工这类运行不属于某张票，ticket 为空 |
 | Finding    | 来源 run、类型（review / 门禁 / 人工 / PR 评论）、内容、处理结果（已修复 / 未处理 / 进验收包）                                                                                                                                                                                                                                                | review 意见和门禁失败                                                                |
 | Link       | commit SHA ↔ ticket ↔ spec ↔ PR ↔ bug                                                                                                                                                                                                                                                                                                         | 追溯和回流的基础，以 commit trailer 为准，见「上下文沉淀与缺陷回流」                 |
 | Job        | 类型、payload、状态、租约持有者、租约到期时间、attempt（fencing token）、幂等键、互斥键（`lock_key`，可空）、需要的 worker 能力                                                                                                                                                                                                               | 见「作业与恢复」                                                                     |
@@ -223,8 +225,8 @@ erDiagram
 
 状态机：
 
-- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的票留着，随后由 worker 关掉它还开着的 PR、删掉它的分支；已 merged 的、`partially-merged` 的、以及已经有 PR 被合并的 spec 不能取消，因为合并的东西取消收不回；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
-- **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。running 内部的阶段（implement、门禁、review、fix）记在 Run 上，不拆成票的状态。
+- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的票留着，随后由 worker 关掉它还开着的 PR、删掉它的分支；已 merged 的，以及有 PR 已被合并、又还有开着的 PR 的 spec 不能取消，因为合并的东西取消收不回（部分 PR 已合并、其余都已关闭的可以取消，已合并的部分留在 main 上）；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
+- **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。running 内部的阶段（implement、门禁、review、fix，联调票还有 e2e、diagnose）记在 Run 上，不拆成票的状态。done 是终态：做完的票不重开，要改就追加新票。联调票的 e2e 失败、平台建了修复票后，联调票回到 pending，等修复票 done 再从 e2e 阶段开始。
 - **能不能开工实时计算，不存成状态**：只有 pending 是存下来的状态，“可开工”（runnable）由调度器每次算：票是 pending、所有入边都满足、没超并发和预算上限。这样就不会出现“标了可开工、其实还被挡着”的情况。
 
 Spec 状态机：
@@ -470,15 +472,18 @@ sequenceDiagram
 | `invalid-output`                           | 结构化输出缺失或不符合 schema                              |
 | `timeout`                                  | 超过空闲或墙钟上限                                         |
 | `integration-loop-exceeded`                | 联调修复轮数超过上限                                       |
+| `integration-unknown-side`                 | 联调失败，诊断判断不出是哪个仓库的问题                     |
+| `integration-environment-failed`           | 联调环境起不来（构建失败、健康检查不过、服务名冲突），三次 |
+| `contract-copy-mismatch`                   | 使用方仓库的契约副本和这张票的契约 SHA 上的契约不一致      |
 | `upstream-cancelled`                       | 上游票被取消                                               |
 
 | 动作             | 效果                                                     |
 | ---------------- | -------------------------------------------------------- |
 | 接着重试         | 保留分支和 commits，回到 pending，fix 次数清零           |
 | 从头重试         | 删除 `agent/<ticket-id>` 分支和 worktree，回到 pending   |
-| 改票后重试       | 编辑票，内容版本号加一，再按上面两种方式之一重试         |
+| 改票后重试       | `plat ticket edit`：内容版本号加一，再按上面两种方式之一重试 |
 | 批准保护路径改动 | 只用于 `protected-path-changed`，跳过这一项检查继续门禁  |
-| 拆票             | 用 `plat tickets import` 导入新票，原票取消              |
+| 拆票             | 用 `plat tickets import --append` 追加新票，原票取消     |
 | 取消             | 下游票进 blocked（`upstream-cancelled`），或选择一并取消 |
 
 ```mermaid
@@ -525,6 +530,7 @@ flowchart LR
 | `trial-merge`   | 仓库        | 检测在跑的集成分支之间的潜在冲突                                        |
 | `host-sync`     | 项目        | 轮询或处理 webhook，同步 PR、CI、评论                                   |
 | `spec-cleanup`  | spec        | spec 被取消或 merged 后，关掉还开着的 PR，删掉它的 `spec/*`、`agent/*` 远端分支 |
+| `pr-ready`      | spec × 仓库 | 提供契约的仓库的 PR 合并后，把使用它的仓库的 draft PR 转成可合并 |
 
 中断恢复：
 
@@ -616,20 +622,23 @@ gitGraph
 
 ## 跨仓库需求
 
-跨仓库需求按契约先行拆票，每张票只动一个仓库，前后端可以并行开发。
+2026-10-30 按 M2 地图（#62）重写：仓库不再分前后端，契约属于提供接口的仓库，联调由平台在联调环境里验证。详细设计见 [M2 spec](specs/m2-platform.md)。
+
+一个项目可以有任意几个仓库（一个前端、几个后端都行），仓库只有名字。一个需求可以改其中任意几个，每张票只往自己的仓库提交；需要参考别的仓库时只读挂载它的快照。仓库之间的接口靠契约：契约写在提供接口的仓库里，按契约先行拆票，使用方和提供方可以并行开发。
 
 ```mermaid
 flowchart LR
-    contract["契约票 · 后端仓库<br/>改 OpenAPI 等接口描述<br/>合并后记下契约 SHA"]
-    backend["后端实现票 · 后端仓库<br/>按契约实现<br/>跑契约测试，不能改契约文件"]
-    frontend["前端实现票 · 前端仓库<br/>用固定 SHA 的契约生成 client<br/>对着 mock 开发"]
-    integration["联调票 · 前端仓库<br/>后端 compose + 前端沙箱<br/>在 docker 网络里跑 e2e"]
-    fix["修复票 · 出错的那个仓库<br/>修好后重跑联调，最多 2 轮"]
+    contract["契约票 · 提供方仓库<br/>改 OpenAPI 等接口描述<br/>合并后记下契约 SHA"]
+    backend["提供方实现票<br/>按契约实现<br/>跑契约测试，不能改契约文件"]
+    frontend["使用方实现票 · 另一个仓库<br/>契约副本 + 生成 client<br/>对着 mock 开发"]
+    integration["联调票 · 使用方仓库<br/>在联调环境里写 e2e<br/>平台跑 e2e，失败就诊断"]
+    fix["修复票 · 出错的仓库<br/>平台自动建，修好后重跑 e2e<br/>最多 2 轮"]
     contract --> backend
-    contract -->|固定 SHA| frontend
+    contract -->|契约 SHA，跨仓库| frontend
     backend --> integration
     frontend --> integration
-    integration -.->|联调失败| fix
+    integration -.->|e2e 失败| fix
+    fix -.-> integration
     classDef be fill:#e7f1fb,stroke:#5b8fd6
     classDef fe fill:#e5f4e4,stroke:#5aa55a
     class contract,backend be
@@ -638,17 +647,21 @@ flowchart LR
     style fix stroke-dasharray:5 5
 ```
 
-契约票是唯一的起点；它完成后前后端实现票同时开工，两者都完成才进入联调。
+契约票是起点；它完成后各仓库的实现票同时开工，都完成才进入联调。
 
-- **拆票**：契约票 → 后端实现票和前端实现票（并行）→ 联调票。
-- **契约**：用 skills 写在后端仓库，项目配置里声明文件位置（例如 `backend:openapi/openapi.yaml`）。契约票合并进集成分支后，平台把当时集成分支的 head 记为契约 SHA。下游所有票只用这个 SHA 上的契约：worker 用 `git show <SHA>:<path>` 导出到 `/context/contract/`，开发期间契约不会悄悄变化。
-- **契约变更**：后端实现票的门禁把契约文件列为保护路径。agent 认为契约要改时，输出 `cannot-proceed`，原因写 `contract-change-needed`，不自己改。人新建一张契约票，并把它设为原票和前端票的上游；新契约 SHA 产生后，已经基于旧 SHA 做完的前端票回到 pending 重做。
-- **后端票的验证**：在后端仓库里跑契约测试，确认实现和契约一致。
-- **前端票的验证**：用契约生成 client 和 mock，在前端仓库里对着 mock 开发和测试。
-- **参考另一个仓库**：worker 用 `git archive <SHA>` 导出另一个仓库的快照，只读挂到 `/refs/<repo>/`（Sandcastle 的 `mounts` 支持 `readonly: true`）。SHA 是这张票开工时那个仓库集成分支的 head，记在 Run 上。
-- **联调环境**：后端仓库提供 `.sandcastle/integration/compose.yaml`，包含后端服务（从集成分支构建）、数据库、缓存等依赖，以及一个 seed 作业。worker 用 `docker compose -p afk-<run-id> up` 起环境，前端沙箱通过 `docker({ network })` 加入这个 compose 网络，agent 对着后端地址跑 e2e。compose 网络不能设成 `internal`，否则沙箱连不到模型 API。不把 docker socket 挂进沙箱，那等于交出宿主机 root 权限。
-- **联调失败**：联调 agent 输出 integration 结构化结果（`failingSide`、证据、失败用例）。平台按 `failingSide` 建修复票，指向对应仓库；`failingSide` 是 `unknown` 时直接 blocked。修复 → 重跑联调最多 2 轮，超过就判 `integration-loop-exceeded`。
-- **合并顺序**：前后端分开部署，所以后端改动必须向后兼容。默认先合并、部署后端，再合并、部署前端。平台把前端 PR 先开成 draft，后端 PR 合并后再转成可合并，用这种方式在代码托管上体现顺序。破坏性变更拆成“先加新的、再迁移、最后删旧的”几个 spec，跨版本完成。
+- **仓库**：只有名字（项目内唯一，导入文件里 `repo:`、`refs:`、`environment:` 都写它），不分前后端，没有「主仓库」。worker 的主 clone 按名字存放。
+- **契约**：写在提供接口的仓库里，仓库配置里声明路径（每个仓库可有可无）。契约票合并进集成分支后，平台把当时集成分支的 head 记为契约 SHA。contract 边可以从任意仓库连到任意仓库；下游票只用契约 SHA 上的契约：worker 在提供方仓库的主 clone 里 `git show <SHA>:<path>`，导出到 `/context/contract/<仓库名>/`。一张票在同一个仓库有多张契约上游时，用依赖图里最下游那张的 SHA（导入时要求它们排成一条链）。
+- **契约副本**：使用方仓库提交一份契约副本（试点前端是 `contract/openapi.yaml`），生成的 client 以它为准，门禁用生成器的 `--check` 保证生成物和副本一致。worker 在保护路径检查同一步逐字节核对：有 contract 入边的票，副本必须等于它的契约 SHA 上的契约；没有的票不许改副本；违反 → `contract-copy-mismatch`。
+- **契约变更**：提供方实现票的门禁把契约文件列为保护路径。agent 认为契约要改时，输出 `cannot-proceed`，原因写 `contract-change-needed`，不自己改。人用**追加**（`plat tickets import --append`）加一张新契约票（`blocked_by` 旧契约票），把它设为原票和还没开工的使用方票的上游；原票停在 blocked，由人重试。**做完的票不重开**：已经按旧契约做完或正在做的票，追加时平台会列出来，人为它们追加适配票，挂在新契约票下面。
+- **提供方票的验证**：在提供方仓库里跑契约测试（试点用 openapi-backend 校验真实响应），门禁另外校验契约本身合法（OpenAPI 3.1 元 schema）。
+- **使用方票的验证**：用契约生成 client（试点用 openapi-typescript + openapi-fetch），mock 也受契约类型约束（MSW + openapi-msw），对着 mock 开发和测试。
+- **参考另一个仓库**：票在导入文件里声明 `refs: [仓库名…]`。worker 用 `git archive <SHA>` 导出快照（先解到临时目录再改名，导出前用 `info/attributes` 关掉 `export-ignore` / `export-subst`；不导出子模块、不展开 LFS），只读挂到 `/refs/<仓库名>/`。SHA 由 API 在每次 agent 运行时定：这个仓库在本需求里有集成分支就用它的 head，没有就用 main 的 head；记在 Run 上。
+- **联调环境**：联调票声明 `environment: [仓库名…]`。每个仓库提供一个 compose 片段 `.sandcastle/integration/compose.yaml`；worker 给每个仓库打快照（同上的 SHA 规则），片段里带 `build:` 的服务在它自己仓库的快照里 `docker build --pull=false`，再 `docker compose -p afk-<run-id> -f 片段… up --no-build --wait`，然后按顺序跑 `seed-<仓库名>`。不用 `compose build`：它会去远端解析基础镜像（Mac 上连不上 Docker Hub）。网络按 compose 的 label 找，建沙箱前确认网络存在。联调票所在仓库的沙箱通过 `docker({ network, env })` 加入网络，服务地址由 `env` 传入。compose 网络不能设成 `internal`，否则沙箱连不到模型 API。不把 docker socket 挂进沙箱，那等于交出宿主机 root 权限。
+- **联调票**：implement 运行在联调环境里，agent 按验收标准写 e2e、对着真服务跑通再提交；照常走门禁（不含 e2e）、review、merge；merge 之后由 worker 自己新起一个环境跑 e2e，以 JUnit 为准（原则 7），通过才 done。
+- **联调失败**：e2e 有失败时，agent 在同一个环境里诊断（只诊断不提交），输出 integration 结构化结果（`failingRepo`、证据、失败用例）。平台自动在 `failingRepo` 的仓库建修复票，挡在联调票前面；修复票 done 后联调票直接从 e2e 重跑。最多 2 轮，超过判 `integration-loop-exceeded`；`failingRepo` 是 `unknown` 时判 `integration-unknown-side`；环境起不来（三次）判 `integration-environment-failed`。
+- **清理**：先结束沙箱，再 `compose down -v`，再按 label 查一次网络（沙箱还挂着时 `compose down` 返回 0 但网络会留下）。worker 被杀后按 compose 项目名 `afk-<run-id>` 找回环境；孤儿容器按 `docker ps -a` 回收（网络不存在时 Sandcastle 会留下 `Created` 状态的容器）。
+- **合并顺序**：由 contract 边推出：提供契约的仓库先合，使用它的仓库的 PR 先开成 draft，前者合并后平台用 `pr-ready` 作业转成可合并，用这种方式在代码托管上体现顺序；没有契约关系的仓库之间没有顺序。提供方改动必须向后兼容，因为各仓库分开部署。破坏性变更拆成“先加新的、再迁移、最后删旧的”几个 spec，跨版本完成。
+- **不支持**：一个仓库依赖另一个仓库**未发布的包**（共享库在集成分支之间流转需要发包和版本号，平台没有这套机制）。
 
 契约 SHA 的流转，以及契约要改时怎么办：
 
@@ -656,26 +669,28 @@ flowchart LR
 sequenceDiagram
     participant A as 平台
     participant W as Worker
-    participant BE as 后端 spec/slug
-    participant FE as 前端沙箱
+    participant BE as 提供方 spec/slug
+    participant FE as 使用方沙箱
 
     W->>BE: 契约票合并，集成分支前移到 C1
     W->>A: 契约票 done
     A->>A: 记契约 SHA = C1
-    W->>A: 领取后端实现票和前端实现票
+    W->>A: 领取提供方实现票和使用方实现票
     W->>BE: git show C1:openapi/openapi.yaml
-    W->>FE: 写进 /context/contract/，只读挂载
-    note over BE: 后端实现票继续把 spec/slug 前移到 C2、C3
-    note over FE: 前端始终用 C1 的契约
-    opt 后端实现时发现契约要改
+    W->>FE: 写进 /context/contract/<仓库名>/，只读挂载
+    note over FE: agent 把它复制成契约副本，重新生成 client
+    W->>W: 核对副本 = C1 上的契约
+    note over BE: 提供方实现票继续把 spec/slug 前移到 C2、C3
+    note over FE: 使用方始终用 C1 的契约
+    opt 提供方实现时发现契约要改
         W->>A: cannot-proceed，contract-change-needed
-        A->>A: 票进 blocked，人建新契约票
+        A->>A: 票进 blocked，人追加新契约票（blocked_by 旧契约票）
         A->>A: 新契约票合并后，记契约 SHA = C4
-        A->>A: 基于 C1 做完的前端票回到 pending 重做
+        A->>A: 按 C1 做完的使用方票不重开，人追加的适配票用 C4
     end
 ```
 
-联调环境：
+联调环境（试点：一个后端）：
 
 ```mermaid
 flowchart LR
@@ -683,32 +698,33 @@ flowchart LR
     cur["Cursor 模型 API"]
     subgraph net["compose 网络 afk-{run-id}_default，非 internal"]
         direction LR
-        fe["前端沙箱<br/>agent 跑 e2e"]
-        be["backend<br/>从后端 spec/slug 构建"]
-        db[("数据库")]
-        cache[("缓存")]
-        seed["seed 作业"]
+        fe["使用方沙箱<br/>agent 写 e2e / 诊断<br/>或 worker 跑 e2e"]
+        be["backend<br/>从提供方快照 docker build"]
+        db[("数据库等依赖")]
+        seed["seed-{仓库名}"]
         fe -->|"http://backend:8080"| be
         be --> db
-        be --> cache
-        seed --> db
+        seed --> be
     end
-    w -->|docker compose up| net
-    w -->|"docker({ network })"| fe
+    w -->|"docker build，compose up --no-build"| net
+    w -->|"docker({ network, env })"| fe
     fe -->|经 NAT 出网| cur
 ```
 
-联调失败时的处理：
+联调票的流水线和失败时的处理：
 
 ```mermaid
 flowchart LR
-    it["联调运行"] --> r{"result"}
-    r -->|pass| ok(["联调票 done"])
-    r -->|fail| side{"failingSide"}
-    side -->|unknown| bk(["blocked"])
-    side -->|backend 或 frontend| n{"已修复几轮？"}
+    impl["implement<br/>在环境里写 e2e"] --> rest["门禁 → review → merge"]
+    rest --> e2e["e2e<br/>worker 新起环境跑，读 JUnit"]
+    e2e --> r{"全过？"}
+    r -->|是| ok(["联调票 done"])
+    r -->|否| diag["diagnose<br/>agent 只诊断"]
+    diag --> side{"failingRepo"}
+    side -->|unknown| bk(["blocked<br/>integration-unknown-side"])
+    side -->|某个仓库| n{"已修复几轮？"}
     n -->|小于 2| fix["在出错的仓库建修复票"]
-    fix --> it
+    fix --> e2e
     n -->|已 2 轮| bk2(["blocked<br/>integration-loop-exceeded"])
 ```
 
@@ -899,11 +915,11 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 | `/context/ticket.md`          | 票正文、验收标准、模块、目标仓库、内容版本                                                                                                                                           | 总是                |
 | `/context/spec.md`            | spec 正文，包括已确认的 seams 和共享名字                                                                                                                                             | 总是                |
 | `/context/run.json`           | 阶段、基准提交（fixed point）、分支名、集成分支名、上限、`allowedProtectedPaths`（这张票已批准可以改的保护路径，没有则为空数组）                                                     | 总是                |
-| `/context/contract/`          | 固定 SHA 上的契约文件                                                                                                                                                                | 有契约边时          |
+| `/context/contract/<仓库名>/` | 固定 SHA 上的契约文件，按提供契约的仓库分开                                                                                                                                                          | 有契约边时          |
 | `/context/failure/gate.log`   | 上一次门禁失败命令输出的最后 200 行，加门禁结论；merge-fix 时是 `merge-tree` 的冲突说明或候选门禁的失败日志                                                                          | gate-fix、merge-fix |
 | `/context/review.json`        | review 的 mustFix 列表                                                                                                                                                               | review-fix          |
 | `/context/pr-comments.md`     | PR 上人写的评论                                                                                                                                                                      | rework              |
-| `/refs/<repo>/`               | 另一个仓库的只读快照                                                                                                                                                                 | 跨仓库参考时        |
+| `/refs/<仓库名>/`             | 另一个仓库的只读快照（SHA：本需求有集成分支用它的 head，否则 main，由 API 每次运行定）                                                                                                                                                          | 跨仓库参考时        |
 | `/home/agent/.cursor/skills/` | skills，只读。源是 [mattpocock/skills](https://github.com/mattpocock/skills) 固定 commit `59db609eb1e18aaf59b63284d0e52255aff0c63c` 的 `skills/engineering` 目录；Run 上记下这个 SHA | 总是                |
 
 skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自动发现位置），不再用 `/skills`。M0 实测：agent 不读文件就能列出挂进去的技能，按绝对路径读 `SKILL.md` 也能照做。prompt 里仍写明绝对路径作为兜底。
@@ -914,7 +930,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | implement / fix / rework | `status`（done / cannot-proceed）、`blockedReason`（cannot-proceed 时必填，枚举：`agent-gave-up` / `contract-change-needed`）、`detail`（cannot-proceed 时的说明，自由文本）、`summary`、`acceptance`（验收标准 → 测试名列表）、`uncertainties` |
 | review / final-review    | `verdict`（pass / fix）、`mustFix`（文件、行、问题）、`suggestions`、`uncertainties`                                                                                                                                                            |
-| integration              | `result`（pass / fail）、`failingSide`（backend / frontend / unknown）、`evidence`、`failingTests`                                                                                                                                              |
+| integration（diagnose）  | `result`（pass / fail）、`failingRepo`（仓库名或 unknown）、`evidence`、`failingTests`                                                                                                                                              |
 
 `cannot-proceed` 给 agent 一个正当的出口：遇到需要人回答的问题时，输出原因然后结束，而不是停下来等提问被回答。
 
@@ -950,10 +966,12 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | 命令                                               | 用途                                        |
 | -------------------------------------------------- | ------------------------------------------- |
 | `plat spec create --type feature --file spec.md`   | 建 spec，返回 `S-12`                        |
+| `plat repo add --name <名字> --url … [--contract-path …]` / `plat repo edit <名字>` | 登记仓库（只有名字，不分前后端）、设契约路径 |
 | `plat tickets import S-12 tickets.yaml`            | 一次性导入整张依赖图，校验通过才写入        |
+| `plat tickets import S-12 more.yaml --append`      | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
 | `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做） |
 | `plat spec show S-12` / `plat ticket view T-123`   | 查看                                        |
-| `plat ticket edit T-123 --file t.md`               | 编辑票，内容版本号加一                      |
+| `plat ticket edit T-123 --file t.yaml`             | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版） |
 | `plat ticket retry T-123 --mode continue\|restart` | 处理 blocked                                |
 | `plat ticket approve-protected T-123`              | 批准保护路径改动                            |
 | `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |
@@ -969,7 +987,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 spec: S-12
 tickets:
   - key: contract # 文件内的局部 id，导入后换成 T-xxx
-    repo: backend
+    repo: afk-pilot-backend
     type: contract
     title: 定义订单导出接口
     modules: ["openapi/**"]
@@ -979,20 +997,22 @@ tickets:
     body: |
       …
   - key: be-export
-    repo: backend
+    repo: afk-pilot-backend
     type: implementation
     modules: ["src/orders/**"]
     blocked_by: [contract]
     acceptance: […]
   - key: fe-export
-    repo: frontend
+    repo: afk-pilot-frontend
     type: implementation
     modules: ["src/pages/orders/**"]
-    contract: contract # contract 类型的边
+    contract: contract # contract 类型的边，可以跨仓库
+    refs: [afk-pilot-backend] # 可选：只读参考的仓库，挂到 /refs/<仓库名>/
     acceptance: […]
   - key: e2e
-    repo: frontend
+    repo: afk-pilot-frontend
     type: integration
+    environment: [afk-pilot-backend] # 联调环境里起哪些仓库的服务
     blocked_by: [be-export, fe-export]
 external_blocked_by: [] # 跨 spec 的边，写 T-xxx
 ```
@@ -1000,7 +1020,10 @@ external_blocked_by: [] # 跨 spec 的边，写 T-xxx
 导入校验：
 
 - 依赖图无环；`repo` 都属于这个项目；每张票都有验收标准和非空的模块 glob。
-- contract 边的上游必须是契约类型的票。
+- contract 边的上游必须是契约类型的票，且它的仓库有契约路径；contract 边和 blocks 边都可以跨仓库。
+- 一张票在同一个仓库的所有 contract 上游必须在依赖图里排成一条链；由 contract 边推出的仓库关系（X 的契约被 Y 使用）不能成环。
+- `refs`、`environment` 里的名字必须是项目里的仓库；`environment` 只能写在联调票上，且不能包含票自己的仓库。
+- 追加（`--append`）时：每条新边至少一端是新票；被新票挡住的已有票必须是 pending 或 blocked；校验在合并后的整张图上做。
 - 同一仓库里，模块 glob 有重叠、但依赖图里没有路径相连的票：告警（不阻止导入），在确认拆分页面上显示。
 - 跨 spec 的边：提示它要等上游 spec 合进 main 才满足。
 
@@ -1173,6 +1196,8 @@ M0 第一天先做这几个验证，任何一个不通都要先换方案：
 - [x] cursor provider 下 `Output.object` 能取到结构化输出
 - [x] 门禁命令能在沙箱里跑，JUnit 结果能拿回来
 
+**M2 的详细范围**见 [M2 spec](specs/m2-platform.md)：多仓库（只有名字）、契约属于提供方仓库、追加与改票、跨仓库上下文和只读快照、联调票与修复票、按契约关系的合并顺序和 `partially-merged`、按仓库的验收包。
+
 **M1 的详细范围**（本机、GitHub、Cursor agent、单人）：
 
 | 部件        | 内容                                                                                                                |
@@ -1199,14 +1224,14 @@ M0 第一天先做这几个验证，任何一个不通都要先换方案：
 - [x] 没有 `workflows` 权限的 GitHub App 推不了对 `.github/workflows/` 的改动（M1 第一周用真实的 App 验证；方案“平台自己保证 + 事后检测”第 3 层的前提）
 - [x] GitHub App 开的 PR，本人可以直接合并（免费版没有 approve 要求，预计没问题；M1 第一周验证）
 - [x] 检测工作流能区分“经 PR 合并”和“直接推送”（M1 第一周验证）
-- [ ] 槽位方案可行：用 Sandcastle 的 `cwd` 选项指向 `~/.afk/slots/<n>/<repo>` 跑通 agent 运行和门禁，`git fetch` 只取回一个 ref 并开 `transfer.fsckObjects`，`--no-hardlinks` 克隆的耗时可接受（M1 第一周在 M0 脚本里验证；M0 实测都是在主 clone 上跑的）
-- [ ] 选定的队列库支持租约续期和 attempt（M1）。调研结论：graphile-worker 不满足，pg-boss 基本满足，自己在 Postgres 表上实现完全满足，选型待定
-- [ ] 另一仓库只读快照挂载 + compose 网络联调的原型可行（M2）
-- [ ] Cursor 侧能否拿到每次运行的 token 用量，用于成本统计（M2）。M0 结论：stream-json 里没有 token 字段，只有 `duration_ms` / `duration_api_ms`，先按时长记
+- [x] 槽位方案可行（M1 已实现并在 #42、#47 的演练里实测）：用 Sandcastle 的 `cwd` 选项指向 `~/.afk/slots/<n>/<repo>` 跑通 agent 运行和门禁，`git fetch` 只取回一个 ref 并开 `transfer.fsckObjects`，`--no-hardlinks` 克隆的耗时可接受（M1 第一周在 M0 脚本里验证；M0 实测都是在主 clone 上跑的）
+- [x] 选定的队列库支持租约续期和 attempt（M1）。调研结论：graphile-worker 不满足，pg-boss 基本满足，自己在 Postgres 表上实现完全满足；M1 选了自己实现（见 `docs/m1-tech-stack.md`）
+- [x] 另一仓库只读快照挂载 + compose 网络联调的原型可行（M2，2026-10-30 在 Mac 上实测，原型分支 `prototype/m2-integration`：环境 4.5s 起好，真实 agent 联调 89s 判 pass，后端注入 bug 时 121s 判对出错的仓库）
+- [ ] Cursor 侧能否拿到每次运行的 token 用量，用于成本统计（移出 M2，以后做成本统计时再看）。M0 结论：stream-json 里没有 token 字段，只有 `duration_ms` / `duration_api_ms`，先按时长记
 
 开放问题：
 
-- 契约文件的具体格式和路径（OpenAPI？放在后端仓库哪个目录？），以及 client 生成器、mock server、契约测试工具选哪个
+- ~~契约文件的具体格式和路径，以及 client 生成器、mock server、契约测试工具选哪个~~：M2 定为 OpenAPI 3.1、放在提供方仓库（试点 `openapi/openapi.yaml`）；openapi-typescript + openapi-fetch、MSW + openapi-msw、openapi-backend 加 `validate-api`（见 M2 spec「试点仓库」）
 - 信任阶梯各级的进入阈值（PoC 跑出数据后定）
 - 生产环境用哪个 agent（取决于合规结论）
 - 人合并时用 merge commit 还是 squash：追溯都靠 trailer，区别在于 squash 后 blame 只能定位到 spec

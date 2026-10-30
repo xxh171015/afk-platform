@@ -1,0 +1,66 @@
+# M2 验收需求：订单状态操作与取消原因（试点仓库 afk-pilot-backend、afk-pilot-frontend）
+# 用 `plat tickets import S-1 tickets.yaml` 导入（建在新库里的第一个需求是 S-1；换了编号就同步改下面的 spec）。
+# 仓库名按 M2 的模型写：在新库里用 `plat repo add --name afk-pilot-backend …` / `--name afk-pilot-frontend …` 登记，
+# 后端仓库的契约路径是 openapi/openapi.yaml。格式见 docs/design.md「plat CLI 与票的导入」和 docs/specs/m2-platform.md。
+# 有意覆盖：跨仓库的 contract 边和契约 SHA、契约副本、并行的前后端实现票、联调票（environment）、合并顺序（前端 PR 先 draft）。
+spec: S-1
+tickets:
+  - key: contract
+    repo: afk-pilot-backend
+    type: contract
+    title: 契约：取消订单必须带原因，状态记录带上原因
+    modules: ["openapi/**"]
+    protected_paths_ok: ["openapi/openapi.yaml"]
+    acceptance:
+      - "POST /orders/{id}/status 的请求体增加可选字段 reason（字符串，1 到 200 个字符）；描述写明 status 为 cancelled 时必须带 reason，否则返回 400"
+      - "GET /orders/{id}/history 的每一项增加可选字段 reason（字符串），只在取消那一项出现"
+      - "现有接口的其他描述不变"
+    body: |
+      只改契约，不改代码。
+
+  - key: be-cancel-reason
+    repo: afk-pilot-backend
+    type: implementation
+    title: 后端：取消订单记录原因
+    modules: ["src/orders/**", "test/**"]
+    blocked_by: [contract]
+    acceptance:
+      - "POST /orders/:id/status 带 { status: \"cancelled\", reason } 时成功，状态记录的取消项带上 reason（去掉首尾空白）"
+      - "status 为 cancelled 但没有 reason、reason 为空或超过 200 个字符时返回 400，错误信息是 \"reason is required to cancel (1-200 characters)\""
+      - "status 不是 cancelled 时忽略 reason，状态记录里不出现 reason"
+      - "契约测试（test/contract.test.ts）覆盖带原因的取消和状态记录"
+      - "每条验收标准都有对应的 HTTP 测试，已有测试不减少、不跳过"
+    body: |
+      按契约（契约 SHA 上的版本）实现，不要修改契约文件。
+
+  - key: fe-status-actions
+    repo: afk-pilot-frontend
+    type: implementation
+    title: 前端：订单详情页的状态操作和取消原因
+    modules: ["src/**", "contract/**"]
+    contract: contract
+    acceptance:
+      - "契约副本 contract/openapi.yaml 更新为这张票的契约，src/api/schema.d.ts 重新生成"
+      - "订单详情页按当前状态显示可用的操作：待支付显示「支付」「取消」，已支付显示「发货」「取消」，已发货和已取消不显示操作"
+      - "点「取消」弹出输入框填原因，原因为空时不能提交；提交后页面显示更新后的订单和状态记录"
+      - "状态记录里取消项显示原因"
+      - "后端返回 400 或 409 时，页面显示后端给的错误信息"
+      - "每条验收标准都有组件测试（openapi-msw 的 mock），已有测试不减少、不跳过"
+    body: |
+      调后端只用生成的 client，mock 只用 openapi-msw。e2e 不在这张票里写，由联调票写。
+
+  - key: e2e
+    repo: afk-pilot-frontend
+    type: integration
+    title: 联调：状态操作和取消原因
+    modules: ["e2e/**"]
+    environment: [afk-pilot-backend]
+    blocked_by: [be-cancel-reason, fe-status-actions]
+    acceptance:
+      - "e2e：打开种子客户乙的订单（待支付），点「支付」后状态显示已支付，状态记录多一项"
+      - "e2e：打开种子客户甲的订单（已支付），填原因「客户要求」取消，状态记录的取消项显示这个原因"
+      - "e2e：已取消的订单不显示任何操作按钮"
+      - "已有的 e2e 不减少、不跳过"
+    body: |
+      在联调环境里写 e2e，对着真后端跑通再提交。种子数据见后端仓库 scripts/seed.ts。
+      所有 e2e 共用同一份种子数据、按任意顺序运行：会改状态的测试先通过 /api 新建自己的订单再操作，不要改动别的测试依赖的种子订单。
