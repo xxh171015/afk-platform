@@ -195,6 +195,158 @@ describe("retry", () => {
   });
 });
 
+describe("editing a ticket", () => {
+  const edit = (id: number, body: unknown) =>
+    call("POST", `/tickets/${id}/edit`, body);
+  const bundleOf = async (job: Claimed) =>
+    (await (
+      await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      )
+    ).json()) as Json;
+  const version = async (id: number) =>
+    (
+      await db.pool.query("SELECT content_version FROM tickets WHERE id = $1", [
+        id,
+      ])
+    ).rows[0].content_version;
+
+  it("changes a blocked ticket's content, keeps it blocked, and the run after a retry reads the new content", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    expect(await row(1)).toMatchObject({ state: "blocked" });
+
+    const edited = await edit(1, {
+      title: "Better title",
+      body: "New details",
+      acceptance: ["it works", "and is fast"],
+      modules: ["src/new/**"],
+      protected_paths_ok: ["openapi/openapi.yaml"],
+    });
+
+    expect(edited).toMatchObject({
+      status: 200,
+      body: { id: 1, contentVersion: 2 },
+    });
+    expect(await row(1)).toMatchObject({
+      state: "blocked",
+      blocked_reason: "agent-gave-up",
+    });
+    expect(
+      (await call("POST", "/tickets/1/retry", { mode: "continue" })).status,
+    ).toBe(200);
+    const job = (await worker.claim()).body.job as Claimed;
+    const bundle = await bundleOf(job);
+    expect(bundle.ticket).toMatchObject({
+      title: "Better title",
+      body: "New details",
+      acceptanceCriteria: ["it works", "and is fast"],
+      modules: ["src/new/**"],
+      contentVersion: 2,
+    });
+    expect(bundle.allowedProtectedPaths).toEqual(["openapi/openapi.yaml"]);
+    const run = await db.pool.query(
+      "SELECT ticket_version FROM runs WHERE job_id = $1",
+      [job.id],
+    );
+    expect(run.rows[0].ticket_version).toBe(2);
+  });
+
+  it("changes a pending ticket, and it starts with the new content", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    expect((await edit(2, { title: "Renamed b" })).body.contentVersion).toBe(2);
+    await stage("implement", DONE);
+    await stage("gate", { outcome: "passed" });
+    await stage("review", { outcome: "pass" });
+    await stage("merge", { outcome: "merged", headSha: "h" });
+    const job = (await worker.claim()).body.job as Claimed;
+    expect(job.payload.ticketId).toBe(2);
+    expect((await bundleOf(job)).ticket.title).toBe("Renamed b");
+  });
+
+  it("refuses to change the repo, type, edges, refs or environment, and says to cancel and append", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    for (const body of [
+      { repo: "frontend" },
+      { type: "contract" },
+      { blocked_by: ["a"] },
+      { contract: "a" },
+      { refs: ["backend"] },
+      { environment: ["backend"] },
+    ]) {
+      const result = await edit(2, body);
+      expect(result.status).toBe(422);
+      expect(result.body.error).toMatch(/cancel.*append/);
+    }
+    expect(await version(2)).toBe(1);
+  });
+
+  it("takes the unchanged repo and type as they are, and refuses an edit that changes nothing", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    expect(
+      (await edit(2, { repo: "backend", type: "implementation", title: "New" }))
+        .status,
+    ).toBe(200);
+    const same = await edit(2, { title: "New" });
+    expect(same.status).toBe(422);
+    expect(same.body.error).toMatch(/nothing/);
+    expect(await version(2)).toBe(2);
+  });
+
+  it("refuses a ticket that is queued, running, merging, done or cancelled", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    for (const state of ["queued", "running", "merging", "done", "cancelled"]) {
+      await db.pool.query("UPDATE tickets SET state = $1 WHERE id = 1", [
+        state,
+      ]);
+      const result = await edit(1, { title: `as ${state}` });
+      expect(result.status).toBe(409);
+      expect(result.body.error).toMatch(new RegExp(state));
+    }
+    expect(await version(1)).toBe(1);
+    expect((await edit(99, { title: "x" })).status).toBe(404);
+  });
+
+  it("lets the snapshot of the current version follow protected paths approved by allow-paths", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    await call("POST", "/tickets/1/allow-paths", {
+      paths: ["openapi/openapi.yaml"],
+    });
+    const snapshot = await db.pool.query(
+      "SELECT allowed_protected_paths FROM ticket_versions WHERE ticket_id = 1 AND version = 1",
+    );
+    expect(snapshot.rows[0].allowed_protected_paths).toEqual([
+      "openapi/openapi.yaml",
+    ]);
+  });
+
+  it("keeps a snapshot of every version, and shows an old one with the history", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await edit(2, { title: "Second", acceptance: ["changed"] });
+    await edit(2, { title: "Third" });
+
+    const current = (await call("GET", "/tickets/2")).body;
+    expect(current.ticket).toMatchObject({ title: "Third", contentVersion: 3 });
+    expect(current.versions.map((v: Json) => v.version)).toEqual([1, 2, 3]);
+
+    const first = (await call("GET", "/tickets/2?version=1")).body;
+    expect(first.ticket).toMatchObject({
+      title: "Ticket b",
+      acceptanceCriteria: ["it works"],
+      contentVersion: 1,
+    });
+    const second = (await call("GET", "/tickets/2?version=2")).body;
+    expect(second.ticket).toMatchObject({
+      title: "Second",
+      acceptanceCriteria: ["changed"],
+      contentVersion: 2,
+    });
+    expect((await call("GET", "/tickets/2?version=9")).status).toBe(404);
+    expect((await call("GET", "/tickets/1")).body.versions).toHaveLength(1);
+  });
+});
+
 describe("approve-protected", () => {
   async function blockedByProtectedPath() {
     await runningSpec([ticket("a")]);

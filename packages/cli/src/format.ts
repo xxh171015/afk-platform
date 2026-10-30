@@ -158,6 +158,7 @@ export function ticketText(view: {
     fixCounts: Record<string, number>;
     contentVersion: number;
   };
+  versions: { version: number; createdAt: string }[];
   upstream: { displayId: string; kind: string; state: string }[];
   downstream: { displayId: string; kind: string; state: string }[];
   runs: {
@@ -175,6 +176,11 @@ export function ticketText(view: {
   return [
     `${ticket.displayId}  ${stateOf(ticket)}  ${ticket.title}`,
     `spec ${ticket.specDisplayId}, repo ${ticket.repo}, version ${ticket.contentVersion}`,
+    ...(view.versions.length > 1
+      ? [
+          `versions: ${view.versions.map((v) => v.version).join(", ")} (shown: ${ticket.contentVersion})`,
+        ]
+      : []),
     ...contextLines(ticket, ""),
     ...briefLines(ticket.brief),
     "acceptance:",

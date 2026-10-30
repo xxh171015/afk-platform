@@ -10,6 +10,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { schedulePass } from "../scheduling/scheduler.ts";
+import { snapshotTicket } from "../tickets/versions.ts";
 
 // Registering projects, repos and specs, and importing a spec's whole ticket graph
 // (docs/specs/m1-platform.md「plat CLI」, docs/design.md「导入格式」).
@@ -308,6 +309,7 @@ export async function importTickets(
         ],
       );
       const id = rows[0].id as number;
+      await snapshotTicket(client, id);
       idByKey.set(ticket.key, id);
       tickets.push({
         key: ticket.key,

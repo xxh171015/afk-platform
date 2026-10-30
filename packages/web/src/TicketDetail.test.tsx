@@ -35,6 +35,7 @@ const run = (
 });
 
 const view = (over: Record<string, unknown> = {}) => ({
+  versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
   ticket: {
     id: 4,
     displayId: "T-4",
@@ -150,6 +151,24 @@ describe("the ticket page", () => {
     renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
 
     expect(await screen.findByText("backend@01234567")).toBeTruthy();
+  });
+
+  it("shows the edit history when the ticket has been edited", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          versions: [
+            { version: 1, createdAt: "2026-10-28T09:00:00.000Z" },
+            { version: 2, createdAt: "2026-10-29T10:00:00.000Z" },
+          ],
+        }),
+      }),
+      ...logs({ 10: "implement log", 11: "gate log" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+
+    expect(await screen.findByText(/Edited 1 time/)).toBeTruthy();
+    expect(screen.getByText(/v2 \(2026-10-29\)/)).toBeTruthy();
   });
 
   it("shows the title, state, type and acceptance criteria", async () => {

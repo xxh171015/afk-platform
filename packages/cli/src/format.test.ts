@@ -18,6 +18,7 @@ const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
     fixCounts: {},
     contentVersion: 1,
   },
+  versions: [],
   upstream: [],
   downstream: [],
   runs,

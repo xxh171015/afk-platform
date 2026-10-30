@@ -443,6 +443,33 @@ describe("plat", () => {
     expect((await plat("spec", "show", "S-1")).stdout).toContain("(appended)");
   });
 
+  it("edits a pending ticket from a file and shows an older version of it", async () => {
+    await register();
+    files["tickets.yaml"] = TICKETS_YAML;
+    await plat("tickets", "import", "S-1", "tickets.yaml");
+    files["edit.yaml"] =
+      "title: A better title\nacceptance:\n  - it is faster\n";
+    const edited = await plat("ticket", "edit", "T-2", "--file", "edit.yaml");
+    expect(edited).toEqual({
+      code: 0,
+      stdout: "T-2 is now at version 2\n",
+      stderr: "",
+    });
+
+    const now = (await plat("ticket", "view", "T-2")).stdout;
+    expect(now).toContain("A better title");
+    expect(now).toContain("versions: 1, 2 (shown: 2)");
+    const first = (await plat("ticket", "view", "T-2", "--version", "1"))
+      .stdout;
+    expect(first).not.toContain("A better title");
+    expect(first).toContain("(shown: 1)");
+
+    files["bad.yaml"] = "repo: frontend\n";
+    const refused = await plat("ticket", "edit", "T-2", "--file", "bad.yaml");
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toMatch(/cancel the ticket and append/);
+  });
+
   it("shows the repo, refs and environment of tickets", async () => {
     await register();
     files["tickets.yaml"] = `tickets:

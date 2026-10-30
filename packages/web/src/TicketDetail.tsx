@@ -37,8 +37,15 @@ export function TicketDetail({
         Could not load the ticket: {view.error.message}
       </p>
     );
-  const { ticket, runs, findings, gateResults, upstream, downstream } =
-    view.data;
+  const {
+    ticket,
+    versions,
+    runs,
+    findings,
+    gateResults,
+    upstream,
+    downstream,
+  } = view.data;
   // by default the newest run, which is the one that is going or that went wrong last
   const shown = picked ?? runs.at(-1)?.id;
 
@@ -55,6 +62,16 @@ export function TicketDetail({
         {ticket.type}, repo {ticket.repo}, version {ticket.contentVersion}
         {ticket.blockedReason ? `, blocked: ${ticket.blockedReason}` : ""}
       </p>
+      {versions.length > 1 ? (
+        <p className="note">
+          Edited {versions.length - 1} time{versions.length === 2 ? "" : "s"}:{" "}
+          {versions.map((v) => (
+            <span key={v.version} className="version">
+              v{v.version} ({v.createdAt.slice(0, 10)}){" "}
+            </span>
+          ))}
+        </p>
+      ) : null}
 
       {ticket.brief ? (
         <div className="brief" role="note">

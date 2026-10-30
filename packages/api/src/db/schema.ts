@@ -174,6 +174,27 @@ export const tickets = pgTable(
   ],
 );
 
+// The content of a ticket at each version, kept whole: an edit does not overwrite what a run was given.
+export const ticketVersions = pgTable(
+  "ticket_versions",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticket_id")
+      .notNull()
+      .references(() => tickets.id),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    acceptanceCriteria: text("acceptance_criteria").array().notNull(),
+    modules: text("modules").array().notNull(),
+    allowedProtectedPaths: text("allowed_protected_paths").array().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("ticket_versions_ticket_version_unique").on(t.ticketId, t.version),
+  ],
+);
+
 export const edges = pgTable(
   "edges",
   {

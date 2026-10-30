@@ -8,6 +8,7 @@ import {
   approveProtected,
   cancelSpec,
   cancelTicket,
+  editTicket,
   resumeSpec,
   retrySpecCleanup,
   retryTicket,
@@ -77,7 +78,13 @@ const EdgeEnd = z.object({
 const ticketRoute = createRoute({
   method: "get",
   path: "/tickets/{id}",
-  request: { params: z.object({ id: PathId }) },
+  request: {
+    params: z.object({ id: PathId }),
+    // an older version of the content, as it was kept when the ticket was edited
+    query: z.object({
+      version: z.coerce.number().int().min(1).max(INT4_MAX).optional(),
+    }),
+  },
   responses: {
     200: reply(
       "The ticket, its runs, findings and gate results",
@@ -92,6 +99,7 @@ const ticketRoute = createRoute({
           fixCounts: z.record(z.string(), Id),
           reviewed: z.boolean(),
         }),
+        versions: z.array(z.object({ version: Id, createdAt: z.string() })),
         upstream: z.array(EdgeEnd),
         downstream: z.array(EdgeEnd),
         runs: z.array(
@@ -299,6 +307,48 @@ const retryRoute = createRoute({
   },
 });
 
+const editRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/edit",
+  request: {
+    params: z.object({ id: PathId }),
+    // One ticket of an import file. Only the content can change; the other fields are accepted to explain why not.
+    body: {
+      content: json(
+        z.strictObject({
+          key: z.string().optional(),
+          title: z.string().min(1).optional(),
+          body: z.string().optional(),
+          acceptance: z.array(z.string().min(1)).min(1).optional(),
+          modules: z.array(z.string().min(1)).min(1).optional(),
+          protected_paths_ok: z.array(z.string().min(1)).optional(),
+          repo: z.string().optional(),
+          type: z.string().optional(),
+          refs: z.array(z.string()).optional(),
+          environment: z.array(z.string()).optional(),
+          blocked_by: z.array(z.string()).optional(),
+          contract: z
+            .union([z.string(), z.array(z.string())])
+            .transform((v) => (typeof v === "string" ? [v] : v))
+            .optional(),
+        }),
+      ),
+    },
+  },
+  responses: {
+    200: reply(
+      "Edited; the content version went up by one",
+      z.object({ id: Id, contentVersion: Id }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply("The ticket is not pending or blocked", ErrorReply),
+    422: reply(
+      "The edit changes something that cannot be changed, or nothing",
+      ErrorReply,
+    ),
+  },
+});
+
 const approveRoute = createRoute({
   method: "post",
   path: "/tickets/{id}/approve-protected",
@@ -448,8 +498,14 @@ export function registerTicketRoutes(
   const { pool } = context;
 
   app.openapi(ticketRoute, async (c) => {
-    const view = await ticketView(pool, c.req.valid("param").id);
-    return view ? c.json(view, 200) : c.json({ error: "no such ticket" }, 404);
+    const view = await ticketView(
+      pool,
+      c.req.valid("param").id,
+      c.req.valid("query").version,
+    );
+    return view
+      ? c.json(view, 200)
+      : c.json({ error: "no such ticket or version" }, 404);
   });
 
   app.openapi(specRoute, async (c) => {
@@ -487,6 +543,18 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ approved: result.approved }, 200);
+  });
+
+  app.openapi(editRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const result = await editTicket(pool, id, c.req.valid("json"));
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    if (result.status === "invalid")
+      return c.json({ error: result.message }, 422);
+    return c.json({ id, contentVersion: result.contentVersion }, 200);
   });
 
   app.openapi(allowPathsRoute, async (c) => {

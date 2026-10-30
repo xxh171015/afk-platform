@@ -24,6 +24,7 @@ const ENTITY_TABLES = [
   "repos",
   "runs",
   "specs",
+  "ticket_versions",
   "tickets",
 ];
 
@@ -36,6 +37,7 @@ const LATER_THAN_REPO_NAMES = [
   "0018_contract_copy_mismatch",
   "0019_run_ref_shas",
   "0020_ticket_appended",
+  "0021_ticket_versions",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

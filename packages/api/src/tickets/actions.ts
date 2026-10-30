@@ -18,6 +18,7 @@ import {
   lockSpec,
   schedulePass,
 } from "../scheduling/scheduler.ts";
+import { followApprovedPaths, snapshotTicket } from "./versions.ts";
 
 // What a person can do with a blocked ticket (docs/design.md「blocked 处理」): try again, approve protected path
 // changes, or cancel. Every action moves the ticket through the shared state machine, then lets the scheduler
@@ -139,6 +140,7 @@ export async function approveProtected(
       "UPDATE tickets SET state = $2, blocked_reason = NULL, allowed_protected_paths = $3,\n         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
       [ticketId, next.state, allowed],
     );
+    await followApprovedPaths(client, ticketId);
     await enqueueStageJob(
       client,
       {
@@ -173,7 +175,113 @@ export async function allowPaths(
       "UPDATE tickets SET allowed_protected_paths = $2 WHERE id = $1",
       [ticketId, allowed],
     );
+    await followApprovedPaths(client, ticketId);
     return { status: "ok", allowed };
+  });
+}
+
+// What a person may change in a ticket that has not started, in the shape of one ticket of an import file. The
+// fields that are not editable are accepted only to say plainly why they cannot be changed.
+export interface TicketEdit {
+  title?: string;
+  body?: string;
+  acceptance?: string[];
+  modules?: string[];
+  protected_paths_ok?: string[];
+  repo?: string;
+  type?: string;
+  refs?: string[];
+  environment?: string[];
+  blocked_by?: string[];
+  contract?: string[];
+}
+
+export type EditResult =
+  | { status: "ok"; contentVersion: number }
+  | { status: "no-ticket" }
+  | { status: "refused"; message: string }
+  | { status: "invalid"; message: string };
+
+const sameSet = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((x) => b.includes(x));
+
+// A pending or blocked ticket gets new content: the version goes up by one, the state stays, and the snapshot of
+// the new version is kept. Whatever starts the ticket afterwards reads the new content.
+export async function editTicket(
+  pool: pg.Pool,
+  ticketId: number,
+  edit: TicketEdit,
+): Promise<EditResult> {
+  return inTransaction(pool, async (client) => {
+    const ticket = await loadLocked(client, ticketId);
+    if (!ticket) return { status: "no-ticket" };
+    if (ticket.state !== "pending" && ticket.state !== "blocked") {
+      return refused(
+        `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a pending or blocked ticket can be edited`,
+      );
+    }
+    const current = await client.query(
+      `SELECT t.title, t.body, t.acceptance_criteria, t.modules, t.allowed_protected_paths, t.type, t.refs,
+              t.environment, r.name AS repo
+       FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
+      [ticketId],
+    );
+    const now = current.rows[0];
+    const cannot = (field: string) => ({
+      status: "invalid" as const,
+      message: `${field} of a ticket cannot be changed; cancel the ticket and append a new one (plat tickets import --append)`,
+    });
+    if (edit.repo !== undefined && edit.repo !== now.repo)
+      return cannot("the repo");
+    if (edit.type !== undefined && edit.type !== now.type)
+      return cannot("the type");
+    if (edit.refs !== undefined && !sameSet(edit.refs, now.refs))
+      return cannot("refs");
+    if (
+      edit.environment !== undefined &&
+      !sameSet(edit.environment, now.environment)
+    ) {
+      return cannot("environment");
+    }
+    if (edit.blocked_by?.length || edit.contract?.length) {
+      return cannot("the dependency edges");
+    }
+
+    const changes: [string, unknown][] = [];
+    const change = (column: string, value: unknown, was: unknown) => {
+      if (
+        value !== undefined &&
+        JSON.stringify(value) !== JSON.stringify(was)
+      ) {
+        changes.push([column, value]);
+      }
+    };
+    change("title", edit.title, now.title);
+    change("body", edit.body, now.body);
+    change("acceptance_criteria", edit.acceptance, now.acceptance_criteria);
+    change("modules", edit.modules, now.modules);
+    change(
+      "allowed_protected_paths",
+      edit.protected_paths_ok,
+      now.allowed_protected_paths,
+    );
+    if (changes.length === 0) {
+      return {
+        status: "invalid",
+        message: "nothing to change: the file says what the ticket already has",
+      };
+    }
+    const assignments = changes.map(([column], i) => `${column} = $${i + 2}`);
+    const updated = await client.query<{ content_version: number }>(
+      `UPDATE tickets SET ${assignments.join(", ")}, content_version = content_version + 1
+       WHERE id = $1 RETURNING content_version`,
+      [ticketId, ...changes.map(([, value]) => value)],
+    );
+    await snapshotTicket(client, ticketId);
+    return {
+      status: "ok",
+      contentVersion: updated.rows[0]?.content_version as number,
+    };
   });
 }
 

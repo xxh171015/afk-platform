@@ -147,7 +147,13 @@ async function summaries(
   );
 }
 
-export async function ticketView(pool: pg.Pool, ticketId: number) {
+// With `version`, the content (title, body, acceptance criteria, modules, approved protected paths) is the one the
+// ticket had at that version; without it, the current one. Undefined when there is no such ticket or version.
+export async function ticketView(
+  pool: pg.Pool,
+  ticketId: number,
+  version?: number,
+) {
   const [summary] = await summaries(pool, "t.id = $1", [ticketId]);
   if (!summary) return undefined;
   const detail = await pool.query(
@@ -156,6 +162,35 @@ export async function ticketView(pool: pg.Pool, ticketId: number) {
     [ticketId],
   );
   const d = detail.rows[0];
+  const versions = await pool.query<{ version: number; created_at: Date }>(
+    "SELECT version, created_at FROM ticket_versions WHERE ticket_id = $1 ORDER BY version",
+    [ticketId],
+  );
+  let content = {
+    title: summary.title,
+    body: d.body as string,
+    acceptanceCriteria: d.acceptance_criteria as string[],
+    modules: d.modules as string[],
+    allowedProtectedPaths: d.allowed_protected_paths as string[],
+    contentVersion: d.content_version as number,
+  };
+  if (version !== undefined && version !== content.contentVersion) {
+    const old = await pool.query(
+      `SELECT title, body, acceptance_criteria, modules, allowed_protected_paths
+       FROM ticket_versions WHERE ticket_id = $1 AND version = $2`,
+      [ticketId, version],
+    );
+    const found = old.rows[0];
+    if (!found) return undefined;
+    content = {
+      title: found.title,
+      body: found.body,
+      acceptanceCriteria: found.acceptance_criteria,
+      modules: found.modules,
+      allowedProtectedPaths: found.allowed_protected_paths,
+      contentVersion: version,
+    };
+  }
   const edges = await pool.query(
     `SELECT e.from_ticket_id, e.to_ticket_id, e.kind, u.state AS from_state, v.state AS to_state
      FROM edges e JOIN tickets u ON u.id = e.from_ticket_id JOIN tickets v ON v.id = e.to_ticket_id
@@ -183,15 +218,15 @@ export async function ticketView(pool: pg.Pool, ticketId: number) {
   return {
     ticket: {
       ...summary,
-      body: d.body as string,
-      acceptanceCriteria: d.acceptance_criteria as string[],
-      modules: d.modules as string[],
-      allowedProtectedPaths: d.allowed_protected_paths as string[],
-      contentVersion: d.content_version as number,
+      ...content,
       contractSha: (d.contract_sha as string | null) ?? null,
       fixCounts: d.fix_counts as Record<string, number>,
       reviewed: d.reviewed as boolean,
     },
+    versions: versions.rows.map((v) => ({
+      version: v.version,
+      createdAt: v.created_at.toISOString(),
+    })),
     upstream: edges.rows
       .filter((e) => e.to_ticket_id === ticketId)
       .map((e) => ({

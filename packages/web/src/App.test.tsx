@@ -114,6 +114,7 @@ describe("the app", () => {
             fixCounts: {},
             reviewed: false,
           },
+          versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
           upstream: [],
           downstream: [],
           runs: [],

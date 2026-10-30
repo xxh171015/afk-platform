@@ -1303,7 +1303,9 @@ export interface paths {
     };
     get: {
       parameters: {
-        query?: never;
+        query?: {
+          version?: number;
+        };
         header?: never;
         path: {
           id: number;
@@ -1361,6 +1363,10 @@ export interface paths {
                 };
                 reviewed: boolean;
               };
+              versions: {
+                version: number;
+                createdAt: string;
+              }[];
               upstream: {
                 id: number;
                 displayId: string;
@@ -1947,6 +1953,96 @@ export interface paths {
         };
         /** @description The ticket is not blocked by protected-path-changed */
         409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/edit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            key?: string;
+            title?: string;
+            body?: string;
+            acceptance?: string[];
+            modules?: string[];
+            protected_paths_ok?: string[];
+            repo?: string;
+            type?: string;
+            refs?: string[];
+            environment?: string[];
+            blocked_by?: string[];
+            contract?: string | string[];
+          };
+        };
+      };
+      responses: {
+        /** @description Edited; the content version went up by one */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              contentVersion: number;
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The ticket is not pending or blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The edit changes something that cannot be changed, or nothing */
+        422: {
           headers: {
             [name: string]: unknown;
           };

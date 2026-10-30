@@ -387,12 +387,50 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description(
       "a ticket with its runs, findings and, when blocked, its brief",
     )
-    .action(async (id: string) => {
+    .option(
+      "--version <n>",
+      "show the content the ticket had at that version",
+      toInt,
+    )
+    .action(async (id: string, options) => {
       const { data, response, error } = await api().GET("/tickets/{id}", {
-        params: { path: { id: ticketIdOf(id) } },
+        params: {
+          path: { id: ticketIdOf(id) },
+          query:
+            options.version === undefined ? {} : { version: options.version },
+        },
       });
       if (!data) throw failureFrom(response, error);
       print(data, ticketText(data));
+    });
+  ticketCommands
+    .command("edit <ticket>")
+    .description(
+      "change the content of a pending or blocked ticket from a file (one ticket in the format of tickets.yaml: title, body, acceptance, modules, protected_paths_ok); the content version goes up by one",
+    )
+    .requiredOption("--file <file>", "YAML with the fields to change")
+    .action(async (id: string, options) => {
+      let document: unknown;
+      try {
+        document = parseYaml(await io.readFile(options.file));
+      } catch (error) {
+        throw new Failure(
+          `cannot read ${options.file}: ${(error as Error).message}`,
+        );
+      }
+      if (
+        typeof document !== "object" ||
+        document === null ||
+        Array.isArray(document)
+      ) {
+        throw new Failure(`${options.file} must be a YAML mapping`);
+      }
+      const { data, response, error } = await api().POST("/tickets/{id}/edit", {
+        params: { path: { id: ticketIdOf(id) } },
+        body: document as Record<string, never>,
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is now at version ${data.contentVersion}`);
     });
   ticketCommands
     .command("retry <ticket>")
