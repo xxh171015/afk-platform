@@ -261,6 +261,8 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 4. 按客户过滤订单列表（和 2、3 都改 `src/orders/`，覆盖模块重叠告警、并行）。
 5. 统计里加按状态分组（依赖 2）。
 
+第二次验收用「订单状态历史」（[m1-acceptance-2/](m1-acceptance-2/)），2026-10-30 跑完，PR 已开出、验收包已生成，中途因 #60 人工重启过一次 worker，记录见该目录 README。
+
 **通过标准**：5 张票从导入到 PR 开出，人只在确认拆分和最后合并时出现；全程每次运行可追溯（Run、日志、GateResult、trailer）；至少一次 fix 或 blocked 被自然触发后处理成功也算通过，只要可追溯；验收包生成。
 
 ### 中断演练清单（手动，由人在 Mac 上用真实 pipeline 和真实 Cursor 跑）
