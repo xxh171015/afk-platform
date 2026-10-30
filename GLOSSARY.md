@@ -9,7 +9,7 @@
 _Avoid_: 产品线、应用
 
 **Repo（仓库）**：
-项目下的一个代码仓库，角色是主仓库（后端，存放契约）或前端仓库。
+项目下的一个代码仓库。一个项目可以有多个后端仓库和前端仓库；其中存放契约的那一个是主仓库。票可以只读参考同一项目里的其他仓库，但只往自己的仓库提交。
 _Avoid_: 代码库、工程
 
 **Spec（需求）**：
@@ -46,6 +46,10 @@ _Avoid_: 接口文档、API 定义
 
 **Contract SHA（契约 SHA）**：
 契约票合并后集成分支的 head；下游票只使用这个提交上的契约。
+
+**Contract copy（契约副本）**：
+前端等非主仓库里提交的一份契约，生成的 client 以它为准。它必须和这个仓库的票所用的 Contract SHA 上的契约一字不差；没有 contract 入边的票不许改它。
+_Avoid_: 契约快照、本地契约
 
 **Skills SHA（skills SHA）**：
 平台固定使用的 [mattpocock/skills](https://github.com/mattpocock/skills) commit；worker 只挂这个提交上的 `skills/engineering`，Run 记下这个 SHA。当前固定为 `59db609eb1e18aaf59b63284d0e52255aff0c63c`。
