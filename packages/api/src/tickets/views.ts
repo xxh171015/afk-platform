@@ -279,7 +279,7 @@ export async function ticketView(
 
 export async function specView(pool: pg.Pool, specId: number) {
   const spec = await pool.query(
-    `SELECT id, slug, title, type, state, pause_reason, integration_branches, import_warnings, body FROM specs WHERE id = $1`,
+    `SELECT id, slug, title, type, state, pause_reason, integration_branches, import_warnings, order_broken, body FROM specs WHERE id = $1`,
     [specId],
   );
   const row = spec.rows[0];
@@ -309,6 +309,7 @@ export async function specView(pool: pg.Pool, specId: number) {
     tickets,
     finalizations: await finalizations(pool, "f.spec_id = $1", [specId]),
     mergeOrder: await mergeOrderOf(pool, specId),
+    orderBroken: row.order_broken as { repo: string; skipped: string[] }[],
     pullRequests: await pullRequestRows(pool, specId),
     acceptancePack: await readAcceptancePack(pool, specId),
     edges: edges.rows.map((e) => ({

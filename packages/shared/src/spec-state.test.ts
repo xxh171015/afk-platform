@@ -7,7 +7,9 @@ describe("specTransition: forward path", () => {
     ["planned", "start", "running"],
     ["running", "all-tickets-done", "finalizing"],
     ["finalizing", "pr-opened", "awaiting-review"],
+    ["awaiting-review", "some-prs-merged", "partially-merged"],
     ["awaiting-review", "all-prs-merged", "merged"],
+    ["partially-merged", "all-prs-merged", "merged"],
   ] as const)("%s --%s--> %s", (from, event, to) => {
     expect(specTransition(from, event)).toEqual({ ok: true, state: to });
   });
@@ -31,6 +33,7 @@ describe("specTransition: pause, resume, cancel", () => {
     "running",
     "finalizing",
     "awaiting-review",
+    "partially-merged", // whether it may be, the open pull requests decide (cancelSpec)
     "paused",
     "reworking",
   ] as const)("cancels from %s", (from) => {
@@ -60,8 +63,8 @@ describe("specTransition: illegal moves", () => {
     ["paused", "all-tickets-done"],
     ["merged", "resume"],
     ["cancelled", "resume"],
-    ["partially-merged", "all-prs-merged"],
-    ["partially-merged", "cancel"], // a pull request of it is merged: a person has taken part of it
+    ["partially-merged", "some-prs-merged"],
+    ["merged", "some-prs-merged"],
     ["reworking", "pr-opened"],
   ] as const)("%s rejects %s", (from, event) => {
     const result = specTransition(from, event);

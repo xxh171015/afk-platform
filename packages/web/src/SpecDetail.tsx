@@ -268,6 +268,7 @@ export function SpecDetail({ specId }: { specId: number }) {
     finalizations,
     pullRequests,
     mergeOrder,
+    orderBroken,
     acceptancePack,
   } = view.data;
 
@@ -312,6 +313,12 @@ export function SpecDetail({ specId }: { specId: number }) {
       {pullRequests.length > 0 ? (
         <>
           <h3>Pull requests</h3>
+          {orderBroken.map((b) => (
+            <p key={b.repo} className="error" data-testid="order-broken">
+              Merge order broken: {b.repo} was merged before{" "}
+              {b.skipped.join(", ")}.
+            </p>
+          ))}
           <p className="note">
             Merge them in this order; the platform never merges.
             {mergeOrder.ordered.length > 0 && mergeOrder.unordered.length > 0

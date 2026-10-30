@@ -17,6 +17,7 @@ export type SpecEvent =
   | "start"
   | "all-tickets-done"
   | "pr-opened"
+  | "some-prs-merged"
   | "all-prs-merged"
   | "pause"
   | "resume"
@@ -33,18 +34,17 @@ const TRANSITIONS: Partial<
   planned: { start: "running" },
   running: { "all-tickets-done": "finalizing", pause: "paused" },
   finalizing: { "pr-opened": "awaiting-review" },
-  "awaiting-review": { "all-prs-merged": "merged" },
+  "awaiting-review": {
+    "some-prs-merged": "partially-merged",
+    "all-prs-merged": "merged",
+  },
+  "partially-merged": { "all-prs-merged": "merged" },
   paused: { resume: "running" },
 };
 
-const TERMINAL_STATES = new Set<SpecState>(["merged", "cancelled"]);
-// A person has already merged part of it: what is merged cannot be taken back by cancelling. Nothing moves a spec
-// into partially-merged yet (a spec with a merged pull request stays in awaiting-review until all are merged), so
-// cancelSpec also refuses a spec that has a merged pull request, which is the check that works today.
-const NOT_CANCELLABLE = new Set<SpecState>([
-  ...TERMINAL_STATES,
-  "partially-merged",
-]);
+// Only a spec that is over cannot be cancelled. Whether a partially merged one may be depends on its pull
+// requests, which the state machine does not know: cancelSpec refuses it while one is merged and another is open.
+const NOT_CANCELLABLE = new Set<SpecState>(["merged", "cancelled"]);
 
 export function specTransition(
   from: SpecState,

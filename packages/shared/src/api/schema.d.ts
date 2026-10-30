@@ -1570,6 +1570,10 @@ export interface paths {
                 };
                 unordered: string[];
               };
+              orderBroken: {
+                repo: string;
+                skipped: string[];
+              }[];
               pullRequests: {
                 order: number;
                 /** @default [] */
@@ -1587,6 +1591,11 @@ export interface paths {
                 syncError: string | null;
               }[];
               acceptancePack: {
+                /** @default [] */
+                orderBroken: {
+                  repo: string;
+                  skipped: string[];
+                }[];
                 generatedAt: string;
                 pullRequests: {
                   order: number;

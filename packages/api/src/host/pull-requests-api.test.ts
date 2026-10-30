@@ -133,6 +133,20 @@ async function settledSpec(
   return { specId: spec.body.id as number, held };
 }
 
+// Answers the next host-sync with the given facts about pull requests, a minute on.
+async function syncWith(pulls: Json[]) {
+  clock.advanceSeconds(61);
+  for (let i = 0; i < 5; i++) {
+    const job = (await worker.claim()).body.job;
+    if (!job) break;
+    if (job.type === "host-sync") {
+      await worker.complete(job.id, job.attempt, { stage: "host-sync", pulls });
+      return;
+    }
+  }
+  throw new Error("no host-sync job");
+}
+
 const specState = async () =>
   (await db.pool.query("SELECT state FROM specs")).rows[0].state as string;
 const pulls = async () =>
@@ -643,7 +657,7 @@ describe("following the pull requests", () => {
       stage: "host-sync",
       pulls: [synced(1, { state: "merged" }), synced(2)],
     });
-    expect(await specState()).toBe("awaiting-review"); // one is still open
+    expect(await specState()).toBe("partially-merged"); // one is merged, one is still open
     clock.advanceSeconds(60);
     const second = await claimOf("host-sync");
     await worker.complete(second.id, second.attempt, {
@@ -701,18 +715,112 @@ describe("following the pull requests", () => {
     expect((await worker.claim()).body.job).toBeNull();
   });
 
-  it("refuses to cancel a spec one of whose pull requests a person has merged", async () => {
+  it("refuses to cancel a spec with a pull request merged and another still open", async () => {
     await awaitingReview(["backend", "frontend"]);
     const job = await claimOf("host-sync");
     await worker.complete(job.id, job.attempt, {
       stage: "host-sync",
       pulls: [synced(1, { state: "merged" }), synced(2)],
     });
-    expect(await specState()).toBe("awaiting-review");
+    expect(await specState()).toBe("partially-merged");
     const refused = await call("POST", "/specs/1/cancel");
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toMatch(/already merged/);
+    expect(refused.body.error).toMatch(/merged.*still open/);
+    expect(await specState()).toBe("partially-merged");
+  });
+
+  it("goes awaiting-review, then partially-merged, then merged as the pull requests are merged, and cleans up only at the end", async () => {
+    await awaitingReview(["backend", "frontend"]);
     expect(await specState()).toBe("awaiting-review");
+    await syncWith([synced(1, { state: "merged" }), synced(2)]);
+    expect(await specState()).toBe("partially-merged");
+    expect(await jobsOf("spec-cleanup")).toEqual([]);
+    await syncWith([synced(2, { state: "merged" })]);
+    expect(await specState()).toBe("merged");
+    expect(await jobsOf("spec-cleanup")).toHaveLength(1);
+  });
+
+  it("can be cancelled when it is partially merged and the pull requests that are left have been closed, and keeps what is merged", async () => {
+    await awaitingReview(["backend", "frontend"]);
+    await syncWith([synced(1, { state: "merged" }), synced(2)]);
+    expect((await call("POST", "/specs/1/cancel")).status).toBe(409);
+    await syncWith([synced(2, { state: "closed" })]);
+    expect(await specState()).toBe("partially-merged");
+    const cancelled = await call("POST", "/specs/1/cancel");
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.state).toBe("cancelled");
+    expect(await jobsOf("spec-cleanup")).toHaveLength(1);
+    const merged = await db.pool.query(
+      "SELECT state FROM pull_requests ORDER BY id",
+    );
+    expect(merged.rows.map((r) => r.state)).toEqual(["merged", "closed"]);
+  });
+
+  describe("when a repo is merged before the repos it waits for", () => {
+    beforeEach(async () => {
+      await settledSpec(["backend", "frontend"], undefined, {
+        contractPaths: { backend: "openapi.yaml" },
+        tickets: [
+          contractTicket("contract", "backend"),
+          ticket("fe", "frontend", undefined, { contract: "contract" }),
+        ],
+      });
+      for (const [n, draft] of [
+        [1, false],
+        [2, true],
+      ] as const) {
+        const job = await claimOf("open-pr");
+        await worker.complete(job.id, job.attempt, opened(n, { draft }));
+      }
+    });
+    const view = async () => (await call("GET", "/specs/1")).body;
+
+    it("marks the order as broken, and goes on as usual, without a place in plat blocked", async () => {
+      expect((await view()).orderBroken).toEqual([]);
+      await syncWith([synced(2, { state: "merged" }), synced(1)]);
+      expect(await specState()).toBe("partially-merged");
+      expect((await view()).orderBroken).toEqual([
+        { repo: "frontend", skipped: ["backend"] },
+      ]);
+      const blocked = (await call("GET", "/blocked")).body;
+      expect(blocked.pullRequests).toEqual([]);
+      expect(blocked.specs).toEqual([]);
+      await syncWith([synced(1, { state: "merged" })]);
+      expect(await specState()).toBe("merged");
+      // merged in the end, but the frontend went first: the fact stays on the spec
+      expect((await view()).orderBroken).toEqual([
+        { repo: "frontend", skipped: ["backend"] },
+      ]);
+    });
+
+    it("is printed by plat spec show", async () => {
+      await syncWith([synced(2, { state: "merged" }), synced(1)]);
+      let out = "";
+      const io: Io = {
+        stdout: (text) => {
+          out += text;
+        },
+        stderr: () => {},
+        env: { AFK_API_URL: api.url },
+        readFile: async () => "",
+      };
+      expect(await run(["spec", "show", "S-1"], io)).toBe(0);
+      expect(out).toContain(
+        "merge order broken: frontend was merged before backend",
+      );
+    });
+
+    it("keeps the draft when the pull request it waits for was closed without merge, and plat blocked lists the closed one", async () => {
+      await syncWith([
+        synced(1, { state: "closed" }),
+        synced(2, { draft: true }),
+      ]);
+      expect(await jobsOf("pr-ready")).toEqual([]);
+      const blocked = (await call("GET", "/blocked")).body;
+      expect(blocked.pullRequests).toMatchObject([
+        { repo: "backend", state: "closed" },
+      ]);
+    });
   });
 
   it("skips a pull request the host could not answer for, and keeps the rest", async () => {

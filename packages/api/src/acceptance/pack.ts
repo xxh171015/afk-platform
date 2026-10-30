@@ -29,6 +29,10 @@ export const PullRequestRow = z.object({
 export type PullRequestRow = z.infer<typeof PullRequestRow>;
 
 export const AcceptancePack = z.object({
+  // read live like the pull requests: repos merged before the ones they waited for
+  orderBroken: z
+    .array(z.object({ repo: z.string(), skipped: z.array(z.string()) }))
+    .default([]),
   generatedAt: z.string(),
   pullRequests: z.array(PullRequestRow),
   tickets: z.array(
@@ -252,6 +256,7 @@ export async function buildAcceptancePack(
 
   return {
     generatedAt: now.toISOString(),
+    orderBroken: [],
     pullRequests: await pullRequestRows(client, specId),
     tickets: ticketRows,
     findings: findings.rows.map((f) => ({
@@ -314,8 +319,12 @@ export async function readAcceptancePack(
     [specId],
   );
   if (!rows[0]) return null;
+  const spec = await pool.query<{
+    order_broken: { repo: string; skipped: string[] }[];
+  }>("SELECT order_broken FROM specs WHERE id = $1", [specId]);
   return {
     ...rows[0].content,
     pullRequests: await pullRequestRows(pool, specId),
+    orderBroken: spec.rows[0]?.order_broken ?? [],
   };
 }

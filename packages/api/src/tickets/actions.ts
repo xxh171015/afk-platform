@@ -455,14 +455,17 @@ export async function cancelSpec(
     const next = specTransition(state, "cancel");
     if (!next.ok)
       return refused(`${next.reason}: a merged or cancelled spec is final`);
-    // A person merged part of it before the host-sync that would say so was recorded: still not cancellable.
-    const merged = await client.query(
-      "SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state = 'merged' LIMIT 1",
+    // What a person has merged stays on main, so a spec with a pull request merged and another still open cannot be
+    // cancelled (that would leave half of it): the open ones are to be merged or closed first. Merged and the rest
+    // closed, it can be, and the clean-up then deletes the branches.
+    const mixed = await client.query(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state = 'merged')
+         AND EXISTS (SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state = 'open')`,
       [specId],
     );
-    if (merged.rowCount)
+    if (mixed.rowCount)
       return refused(
-        "a pull request of this spec is already merged; what is merged cannot be taken back by cancelling",
+        "a pull request of this spec is merged and another is still open; merge the open ones, or close them, before cancelling",
       );
     await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
       specId,

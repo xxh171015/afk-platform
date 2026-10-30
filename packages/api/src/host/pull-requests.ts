@@ -383,24 +383,52 @@ export async function recordOpenPr(
   return { status: "applied" };
 }
 
-// When a person has merged every one of a spec's pull requests, the spec is merged (the spec is locked).
+// What the merges of a spec's pull requests mean for the spec (the spec is locked): the first one makes it
+// partially merged, and when a person has merged every one it is merged and its clean-up is queued. A repo merged
+// before the repos it waits for is noted on the spec, for good: the order was broken, and the spec goes on.
 async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
-  const open = await client.query(
-    "SELECT 1 FROM pull_requests WHERE spec_id = $1 AND state <> 'merged'",
+  const pulls = await client.query<{ name: string; state: string }>(
+    `SELECT r.name, p.state FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.spec_id = $1`,
     [specId],
   );
-  const state = await client.query<{ state: SpecState }>(
-    "SELECT state FROM specs WHERE id = $1",
-    [specId],
+  const state = await client.query<{
+    state: SpecState;
+    order_broken: { repo: string; skipped: string[] }[];
+  }>("SELECT state, order_broken FROM specs WHERE id = $1", [specId]);
+  const spec = state.rows[0];
+  if (!spec || !["awaiting-review", "partially-merged"].includes(spec.state))
+    return;
+  const merged = new Set(
+    pulls.rows.filter((p) => p.state === "merged").map((p) => p.name),
   );
-  if (open.rowCount || state.rows[0]?.state !== "awaiting-review") return;
-  const next = specTransition("awaiting-review", "all-prs-merged");
+  if (merged.size === 0) return;
+
+  const order = await mergeOrderOf(client, specId);
+  const broken = [...spec.order_broken];
+  for (const repo of merged) {
+    const skipped = (order.after[repo] ?? []).filter((r) => !merged.has(r));
+    if (skipped.length > 0 && !broken.some((b) => b.repo === repo))
+      broken.push({ repo, skipped });
+  }
+  if (broken.length !== spec.order_broken.length)
+    await client.query("UPDATE specs SET order_broken = $2 WHERE id = $1", [
+      specId,
+      JSON.stringify(broken),
+    ]);
+
+  const all = pulls.rows.every((p) => p.state === "merged");
+  // still partially merged, and still not all: nothing moves
+  if (spec.state === "partially-merged" && !all) return;
+  const next = specTransition(
+    spec.state,
+    all ? "all-prs-merged" : "some-prs-merged",
+  );
   if (!next.ok) throw new Error(next.reason);
   await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
     specId,
     next.state,
   ]);
-  await enqueueSpecCleanup(client, { specId });
+  if (all) await enqueueSpecCleanup(client, { specId });
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,

@@ -80,7 +80,8 @@ table.specs th {
   background: #d0ebff;
 }
 .spec-finalizing,
-.spec-awaiting-review {
+.spec-awaiting-review,
+.spec-partially-merged {
   background: #e5dbff;
 }
 .spec-merged,

@@ -173,6 +173,9 @@ const specRoute = createRoute({
           after: z.record(z.string(), z.array(z.string())),
           unordered: z.array(z.string()),
         }),
+        orderBroken: z.array(
+          z.object({ repo: z.string(), skipped: z.array(z.string()) }),
+        ),
         pullRequests: z.array(PullRequestRow),
         acceptancePack: AcceptancePack.nullable(),
         edges: z.array(

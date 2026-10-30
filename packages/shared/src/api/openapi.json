@@ -2880,6 +2880,24 @@
                       },
                       "required": ["ordered", "after", "unordered"]
                     },
+                    "orderBroken": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repo": {
+                            "type": "string"
+                          },
+                          "skipped": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": ["repo", "skipped"]
+                      }
+                    },
                     "pullRequests": {
                       "type": "array",
                       "items": {
@@ -2939,6 +2957,25 @@
                     "acceptancePack": {
                       "type": ["object", "null"],
                       "properties": {
+                        "orderBroken": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repo": {
+                                "type": "string"
+                              },
+                              "skipped": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["repo", "skipped"]
+                          },
+                          "default": []
+                        },
                         "generatedAt": {
                           "type": "string"
                         },
@@ -3207,6 +3244,7 @@
                     "tickets",
                     "finalizations",
                     "mergeOrder",
+                    "orderBroken",
                     "pullRequests",
                     "acceptancePack",
                     "edges"

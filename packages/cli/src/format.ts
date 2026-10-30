@@ -247,7 +247,11 @@ interface PullRequestRowLike {
 const pullRequestRow = (p: PullRequestRowLike) =>
   `${p.order}. ${p.repo} #${p.number}  ${pullState(p.state)}${p.draft ? " (draft)" : ""}${p.waitsFor.length > 0 ? `  after ${p.waitsFor.join(", ")}` : ""}  ci ${p.ci}  review ${p.review}  ${p.url}${p.syncError ? `  [could not be read: ${p.syncError}]` : ""}`;
 
+const brokenOrderLine = (b: { repo: string; skipped: string[] }) =>
+  `merge order broken: ${b.repo} was merged before ${b.skipped.join(", ")}`;
+
 interface PackLike {
+  orderBroken?: { repo: string; skipped: string[] }[];
   pullRequests: PullRequestRowLike[];
   tickets: {
     displayId: string;
@@ -288,6 +292,7 @@ export function acceptancePackText(pack: PackLike): string {
     lines.length ? [`  ${title}:`, ...lines] : [];
   return [
     "acceptance pack:",
+    ...(pack.orderBroken ?? []).map((b) => `  ${brokenOrderLine(b)}`),
     ...section(
       "pull requests (merge in this order)",
       pack.pullRequests.map((p) => `    ${pullRequestRow(p)}`),
@@ -341,6 +346,7 @@ export function specText(view: {
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
   edges: { from: string; to: string; kind: string }[];
+  orderBroken?: { repo: string; skipped: string[] }[];
   pullRequests?: PullRequestRowLike[];
   acceptancePack?: PackLike | null;
 }): string {
@@ -362,6 +368,9 @@ export function specText(view: {
           ]),
         ]
       : []),
+    ...(view.acceptancePack
+      ? []
+      : (view.orderBroken ?? []).map(brokenOrderLine)),
     // the pack lists the pull requests itself; until it exists (some repos' are still being opened) they are shown here
     ...(view.acceptancePack
       ? [acceptancePackText(view.acceptancePack)]

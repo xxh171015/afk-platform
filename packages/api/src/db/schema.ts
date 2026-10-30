@@ -105,6 +105,9 @@ export const specs = pgTable(
     branchNamespace: text("branch_namespace"),
     // Warnings from the last tickets import (module overlap), shown when the plan is confirmed.
     importWarnings: jsonb("import_warnings").notNull().default([]),
+    // Repos whose pull request was merged before the ones they wait for: [{ repo, skipped: [repo, ...] }]. Kept for
+    // good once seen; it does not stop anything.
+    orderBroken: jsonb("order_broken").notNull().default([]),
     // Why the platform paused the spec, shown in the blocked queue.
     pauseReason: text("pause_reason"),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.

@@ -61,6 +61,7 @@ const view = (
   ],
   finalizations: over.finalizations ?? [],
   mergeOrder: { ordered: [], after: {}, unordered: [] },
+  orderBroken: [],
   pullRequests: over.pullRequests ?? [],
   acceptancePack: over.acceptancePack ?? null,
 });
@@ -185,6 +186,7 @@ describe("the spec page", () => {
             after: { backend: [], frontend: ["backend"] },
             unordered: ["docs"],
           },
+          orderBroken: [{ repo: "frontend", skipped: ["backend"] }],
         },
       }),
     });
@@ -194,6 +196,9 @@ describe("the spec page", () => {
     expect(frontend?.textContent).toContain("(draft)");
     expect(frontend?.textContent).toContain("after backend");
     expect(screen.getByText(/No order between: docs/)).toBeTruthy();
+    expect(screen.getByTestId("order-broken").textContent).toContain(
+      "frontend was merged before backend",
+    );
   });
 
   it("lists the tickets and their states below the graph", async () => {
