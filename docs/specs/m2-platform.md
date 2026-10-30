@@ -238,9 +238,9 @@ implement（agent，在联调环境里写 e2e 并提交）→ 门禁（本仓库
 
 ### 中断演练清单（手动，在 Mac 上用真实 Cursor）
 
-- [ ] 在联调票的 implement 运行中杀掉 worker：沙箱和 compose 环境都被回收（按 `afk-<run-id>` 找回），这个阶段从头跑。
-- [ ] 在 e2e 阶段杀掉 worker：环境被回收，e2e 重跑，结果一致。
-- [ ] 在 diagnose 中杀掉 worker：同上，修复票不会建两张。
+- [x] 在联调票的 implement 运行中杀掉 worker：沙箱和 compose 环境都被回收（按 `afk-r-<run id>` 找回），这个阶段从头跑。（真实 Cursor 实测：新 worker 删掉了原槽位上的沙箱，implement 从头跑，环境重新起来）
+- [x] 在 e2e 阶段杀掉 worker：环境被回收，e2e 重跑，结果一致。（实测发现重跑沿用了被杀那次留下的环境，里面有上一轮 e2e 建的订单，种子用例因此失败；已改成起环境前先 `down -v` 同名项目，修好后重试 e2e 通过）
+- [x] 在 diagnose 中杀掉 worker：同上，修复票不会建两张。（实测：diagnose 重跑一次，结果 unknown-side，没有建修复票；「同一张联调票的修复票只建一张」由 `diagnosis-api.test.ts` 的并发用例覆盖）
 - [ ] 在 `pr-ready` 时杀掉 worker：重跑后 PR 是 ready，状态一致。
 - [ ] 故意写坏一个 compose 片段：三次失败后进 `integration-environment-failed`，没有残留的网络和容器。
 
