@@ -98,6 +98,56 @@ describe("a stage's credentials", () => {
   });
 });
 
+describe("the other repos a stage reads", () => {
+  const byUrl = (url: string) => ({
+    owner: "me",
+    name: url.split("/").pop()?.replace(".git", "") ?? "",
+  });
+  const PILOT = "https://github.com/me/pilot.git";
+  const BACKEND = "https://github.com/me/backend.git";
+  const header = (store: RepoStore, url: string) =>
+    (store as unknown as { env(url: string): Record<string, string> }).env(url)
+      .GIT_CONFIG_VALUE_0;
+  const basic = (token: string) =>
+    `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+
+  it("each get a token of their own that can only read contents", async () => {
+    const { base } = deps({ credentials: { tokens, repoRef: byUrl } });
+    await withCredentials(base, PILOT, [BACKEND]);
+    expect(asked).toEqual([
+      {
+        repo: { owner: "me", name: "pilot" },
+        permissions: { contents: "write" },
+      },
+      {
+        repo: { owner: "me", name: "backend" },
+        permissions: { contents: "read" },
+      },
+    ]);
+  });
+
+  it("are cloned and fetched with their own token, and the stage's repo with its own", async () => {
+    const { base } = deps({ credentials: { tokens, repoRef: byUrl } });
+    const bound = await withCredentials(base, PILOT, [BACKEND]);
+    expect(header(bound.repos, PILOT)).toBe(basic("token-1"));
+    expect(header(bound.repos, BACKEND)).toBe(basic("token-2"));
+  });
+
+  it("are asked for once when a repo is named twice, and never twice for the stage's own repo", async () => {
+    const { base } = deps({ credentials: { tokens, repoRef: byUrl } });
+    await withCredentials(base, PILOT, [BACKEND, BACKEND, PILOT]);
+    expect(asked).toHaveLength(2);
+  });
+
+  it("are renewed with the stage's own when the stage re-checks its lease", async () => {
+    const { base } = deps({ credentials: { tokens, repoRef: byUrl } });
+    const bound = await withCredentials(base, PILOT, [BACKEND]);
+    await bound.api.prePush({} as never);
+    expect(header(bound.repos, PILOT)).toBe(basic("token-3"));
+    expect(header(bound.repos, BACKEND)).toBe(basic("token-4"));
+  });
+});
+
 describe("a clone reached with a token", () => {
   it("hands the token to git as a header in its environment", () => {
     const store = new RepoStore(root, () => "secret-token");

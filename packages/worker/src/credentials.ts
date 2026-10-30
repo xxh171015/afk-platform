@@ -10,24 +10,51 @@ export interface Credentials {
   repoRef?: (url: string) => RepoRef;
 }
 
+// `others` are the URLs of the other repos the stage reads (the ones a ticket refs, builds its environment from or takes
+// its contract from): each gets a token of its own that can only read, and the clone of each is reached with it.
 export async function withCredentials(
   deps: ExecutorDeps,
   repoUrl: string,
+  others: readonly string[] = [],
 ): Promise<ExecutorDeps> {
   if (!deps.credentials) return deps;
   const { tokens, repoRef = parseRepoUrl } = deps.credentials;
-  const repo = repoRef(repoUrl);
-  const mint = () =>
-    tokens.tokenFor({ repo, permissions: { contents: "write" } });
-  let current = await mint();
+  const readOnly = [...new Set(others)].filter((url) => url !== repoUrl);
+  const mintOwn = () =>
+    tokens.tokenFor({
+      repo: repoRef(repoUrl),
+      permissions: { contents: "write" },
+    });
+  const mintOthers = () =>
+    Promise.all(
+      readOnly.map(
+        async (url) =>
+          [
+            url,
+            await tokens.tokenFor({
+              repo: repoRef(url),
+              permissions: { contents: "read" },
+            }),
+          ] as const,
+      ),
+    );
+  let current = await mintOwn();
+  let read = new Map(await mintOthers());
   return {
     ...deps,
-    repos: deps.repos.withToken(() => current),
+    repos: deps.repos.withToken((url) =>
+      url === undefined || url === repoUrl
+        ? current
+        : (read.get(url) ?? current),
+    ),
     push: (request) => deps.push(request, current),
     api: {
       async prePush(job) {
         const holding = await deps.api.prePush(job);
-        if (holding === "held") current = await mint();
+        if (holding === "held") {
+          current = await mintOwn();
+          read = new Map(await mintOthers());
+        }
         return holding;
       },
     },

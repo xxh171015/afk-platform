@@ -120,7 +120,12 @@ export async function executeStage(
   context: StageContext,
 ): Promise<StageOutcomeBody> {
   const { bundle } = context;
-  const deps = await withCredentials(rawDeps, bundle.repo.url);
+  // the repos a stage reads besides its own are fetched with tokens of their own
+  const deps = await withCredentials(rawDeps, bundle.repo.url, [
+    ...bundle.contracts.map((c) => c.url),
+    ...bundle.refs.map((r) => r.url),
+    ...bundle.environment.map((r) => r.url),
+  ]);
   if (!bundle.integrationBranch)
     throw new InfrastructureError(
       "the spec has no integration branch for this repo",
