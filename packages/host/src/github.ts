@@ -27,7 +27,12 @@ const MAX_PAGES = 50; // a list longer than this is refused, not judged by its f
 
 const OPEN: TokenPermissions = { pull_requests: "write", contents: "read" };
 const CLOSE: TokenPermissions = { pull_requests: "write" };
-const MARK_READY: TokenPermissions = { pull_requests: "write" };
+// GitHub refuses the GraphQL markPullRequestReadyForReview to a token that cannot write contents too (seen on a real
+// pilot repo, #92): "Resource not accessible by integration"
+const MARK_READY: TokenPermissions = {
+  pull_requests: "write",
+  contents: "write",
+};
 const DELETE_BRANCH: TokenPermissions = { contents: "write" };
 const READ: TokenPermissions = {
   pull_requests: "read",

@@ -302,11 +302,12 @@ describe("markReady", () => {
     ).toEqual([]);
   });
 
-  it("asks for a token that can write pull requests", async () => {
+  it("asks for a token that can write pull requests and contents (GitHub refuses the GraphQL mutation without both)", async () => {
     await openDraft();
     await adapter().markReady({ repo, number: 1 });
     expect(github.tokensIssued.at(-1)?.permissions).toMatchObject({
       pull_requests: "write",
+      contents: "write",
     });
   });
 
