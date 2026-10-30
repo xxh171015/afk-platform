@@ -1,0 +1,27 @@
+# 带 contract 边的两张小票：前端 PR 会开成 draft，后端 PR 合并后平台把它转 ready（pr-ready 演练，#89）。
+# 用 `plat tickets import S-4 contract-tickets.yaml` 导入（换了编号就同步改下面的 spec）。
+spec: S-4
+tickets:
+  - key: contract
+    repo: afk-pilot-backend
+    type: contract
+    title: 契约：订单详情的描述提到取消原因
+    modules: ["openapi/**"]
+    protected_paths_ok: ["openapi/openapi.yaml"]
+    acceptance:
+      - "GET /orders/{id}/history 的 description 末尾加一句：已取消的订单，状态记录里带取消原因"
+      - "只改这一处描述，其他不变"
+    body: |
+      只改契约的一处描述，不改代码。
+
+  - key: fe-contract-copy
+    repo: afk-pilot-frontend
+    type: implementation
+    title: 前端：更新契约副本
+    modules: ["contract/**", "src/api/**"]
+    contract: contract
+    acceptance:
+      - "契约副本 contract/openapi.yaml 更新为这张票的契约，src/api/schema.d.ts 重新生成"
+      - "已有测试不减少、不跳过"
+    body: |
+      只更新契约副本并重新生成类型，不改页面。
