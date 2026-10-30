@@ -20,9 +20,17 @@ _Avoid_: 父票、epic、story
 平台里的一张实现票，属于一个 Spec，只改一个 Repo。只指平台里的这个实体；规划过程中 GitHub Issues 上的决策票不叫 Ticket。
 _Avoid_: 任务、issue、子票
 
+**Content version（内容版本）**：
+Ticket 内容（标题、正文、验收标准、模块、已批准的保护路径）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型和依赖边不属于内容，不能改。
+_Avoid_: 修订号、票版本
+
 **Edge（依赖边）**：
-两张 Ticket 之间的依赖，类型是 blocks 或 contract。
+两张 Ticket 之间的依赖，类型是 blocks 或 contract。一张票有多条 contract 入边时，用依赖图里最下游的那张契约票的 Contract SHA。
 _Avoid_: 依赖关系、blocked_by
+
+**Append（追加）**：
+往一个已确认、还没进入收尾的 Spec 里再导入一批 Ticket 和 Edge，立即生效、不再确认拆分。每条新边至少连着一张新票；已经开工或做完的票不能再被新票挡住。改契约、拆票都靠追加，做完的票不重开，要改就追加适配票。
+_Avoid_: 补票、重开
 
 **Serial ID（序号）**：
 库里的自增主键，Spec、Ticket、Run 等实体各有一个，只在库内部用。
