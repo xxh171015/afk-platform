@@ -38,56 +38,69 @@ async function plat(...args: string[]) {
   return { code, stdout, stderr };
 }
 
-const file = fileURLToPath(
-  new URL("../../../../docs/specs/m1-acceptance/tickets.yaml", import.meta.url),
-);
+function ticketFile(dir: string) {
+  return fileURLToPath(
+    new URL(`../../../../docs/specs/${dir}/tickets.yaml`, import.meta.url),
+  );
+}
 
-describe("the M1 acceptance ticket file", () => {
-  it("imports into the first spec: five tickets, and the overlap warnings the README promises", async () => {
-    expect(
-      (
-        await plat(
-          "project",
-          "create",
-          "shop",
-          "--contract-path",
-          "backend:openapi/openapi.yaml",
-        )
-      ).code,
-    ).toBe(0);
-    expect(
-      (
-        await plat(
-          "repo",
-          "add",
-          "--project",
-          "1",
-          "--role",
-          "backend",
-          "--url",
-          "https://github.com/me/afk-pilot-backend.git",
-        )
-      ).code,
-    ).toBe(0);
-    expect(
-      (
-        await plat(
-          "spec",
-          "create",
-          "--project",
-          "1",
-          "--type",
-          "feature",
-          "--title",
-          "订单备注",
-          "--slug",
-          "order-note",
-        )
-      ).code,
-    ).toBe(0);
-    const imported = await plat("tickets", "import", "S-1", file);
-    expect(imported.stderr).toBe("");
-    expect(imported.code).toBe(0);
+// Project, backend repo and a draft spec S-1, then the import; returns what it printed.
+async function importIntoFirstSpec(dir: string, title: string, slug: string) {
+  expect(
+    (
+      await plat(
+        "project",
+        "create",
+        "shop",
+        "--contract-path",
+        "backend:openapi/openapi.yaml",
+      )
+    ).code,
+  ).toBe(0);
+  expect(
+    (
+      await plat(
+        "repo",
+        "add",
+        "--project",
+        "1",
+        "--role",
+        "backend",
+        "--url",
+        "https://github.com/me/afk-pilot-backend.git",
+      )
+    ).code,
+  ).toBe(0);
+  expect(
+    (
+      await plat(
+        "spec",
+        "create",
+        "--project",
+        "1",
+        "--type",
+        "feature",
+        "--title",
+        title,
+        "--slug",
+        slug,
+      )
+    ).code,
+  ).toBe(0);
+  const imported = await plat("tickets", "import", "S-1", ticketFile(dir));
+  expect(imported.stderr).toBe("");
+  expect(imported.code).toBe(0);
+  return imported.stdout;
+}
+
+async function importWarnings() {
+  return (await db.pool.query("SELECT import_warnings FROM specs")).rows[0]
+    .import_warnings as unknown[];
+}
+
+describe("the M1 acceptance ticket files", () => {
+  it("m1-acceptance imports into the first spec: five tickets, and the overlap warnings the README promises", async () => {
+    await importIntoFirstSpec("m1-acceptance", "订单备注", "order-note");
     const tickets = await db.pool.query(
       "SELECT title, acceptance_criteria FROM tickets ORDER BY id",
     );
@@ -96,8 +109,23 @@ describe("the M1 acceptance ticket file", () => {
     expect(patch.acceptance_criteria[0]).toBe(
       'PATCH /orders/:id 请求体 { "note": "..." }，成功返回 200 和更新后的订单',
     );
-    const warnings = (await db.pool.query("SELECT import_warnings FROM specs"))
-      .rows[0].import_warnings as unknown[];
-    expect(warnings.length).toBeGreaterThanOrEqual(2);
+    expect((await importWarnings()).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("m1-acceptance-2 imports into the first spec: five tickets, the contract edge, and the overlap warnings its README promises", async () => {
+    const stdout = await importIntoFirstSpec(
+      "m1-acceptance-2",
+      "订单状态历史",
+      "order-history",
+    );
+    const tickets = await db.pool.query(
+      "SELECT title FROM tickets ORDER BY id",
+    );
+    expect(tickets.rows).toHaveLength(5);
+    const edges = await db.pool.query("SELECT kind FROM edges");
+    expect(edges.rows.map((r) => r.kind).sort()).toContain("contract");
+    // pagination overlaps the other three implementation tickets; history-endpoint overlaps stats-last-updated
+    expect(await importWarnings()).toHaveLength(4);
+    expect(stdout.match(/^warning: /gm)).toHaveLength(4);
   });
 });

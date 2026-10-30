@@ -1,0 +1,86 @@
+# M1 验收需求二：订单状态历史（试点仓库 afk-pilot-backend）
+# 在新库里：plat spec create … --slug order-history --file spec.md 打印出 S-1，再 `plat tickets import S-1 tickets.yaml`。
+# 换了编号就同步改下面的 spec。格式见试点仓库 docs/agents/issue-tracker.md。
+# 有意覆盖：已批准的保护路径、契约 SHA、依赖链、模块重叠告警（pagination 与另三张实现票、history-endpoint 与 stats-last-updated）、并行。
+spec: S-1
+tickets:
+  - key: contract
+    repo: backend
+    type: contract
+    title: 契约：订单 updatedAt 和状态历史接口
+    modules: ["openapi/**"]
+    protected_paths_ok: ["openapi/openapi.yaml"]
+    acceptance:
+      - "openapi.yaml 的 Order 里有必填字段 updatedAt，类型是 string、format 是 date-time，说明是最近一次状态或备注变更的时间，新建时等于 createdAt"
+      - "openapi.yaml 里有 GET /orders/{id}/history，成功返回 { history: [{ status, at }] }（status 是订单状态枚举，at 是 date-time，按时间顺序），订单不存在返回 404"
+      - "GET /orders 增加可选查询参数 limit（整数 1 到 100）和 offset（非负整数），非法时返回 400"
+      - "GET /orders/stats 的响应增加 lastUpdatedAt（date-time，没有订单时为 null）"
+      - "现有接口、字段的描述不变"
+    body: |
+      只改契约，不改代码。test/openapi.test.ts 如果因为契约改动而失败，可以按新契约调整它，但不要删测试。
+
+  - key: updated-at
+    repo: backend
+    type: implementation
+    title: 订单记录 updatedAt 和状态变更
+    modules: ["src/orders/**", "test/**"]
+    blocked_by: [contract]
+    acceptance:
+      - "POST /orders 新建的订单有 updatedAt，等于 createdAt"
+      - "POST /orders/:id/status 成功后，订单的 updatedAt 变成当时的时间，status 不变的字段保持原样"
+      - "PATCH /orders/:id 改备注成功后，updatedAt 变成当时的时间"
+      - "失败的修改（400、404、409）不改变 updatedAt"
+      - "GET /orders 和 GET /orders/:id 返回的订单都带 updatedAt"
+      - "OrderStore 为每个订单按时间顺序记录状态变更：第一条是 { status: pending, at: createdAt }，每次成功的状态变更追加一条，改备注不追加"
+      - "每条验收标准都有对应的测试（HTTP 行为走 startApp()，时间用注入 OrderStore 的时钟控制），已有测试不减少、不跳过"
+    body: |
+      按契约实现，不要修改契约文件。这张票不加 history 接口（另一张票做），只让 store 记下历史并提供读取方法。
+
+  - key: history-endpoint
+    repo: backend
+    type: implementation
+    title: 订单状态历史接口
+    modules: ["src/orders/**", "test/**"]
+    blocked_by: [contract, updated-at]
+    contract: contract
+    acceptance:
+      - "GET /orders/:id/history 返回 200 和 { history: [{ status, at }] }，按时间顺序"
+      - "新建的订单只有一条 { status: pending, at: createdAt }"
+      - "每次成功的状态变更追加一条，at 是变更时的时间"
+      - "被拒绝的状态流转（409）和改备注都不追加记录"
+      - "订单不存在返回 404，错误信息是 \"not found\""
+      - "每条验收标准都有对应的 HTTP 测试"
+    body: |
+      按契约（契约 SHA 上的版本）实现。
+
+  - key: pagination
+    repo: backend
+    type: implementation
+    title: 订单列表分页
+    modules: ["src/orders/**", "test/**"]
+    acceptance:
+      - "GET /orders?limit=2&offset=1 返回过滤后列表里的第 2、3 条，顺序仍按创建顺序"
+      - "limit 和 offset 都可以单独使用；offset 超出范围时返回空列表"
+      - "可以和 status、customer 过滤同时使用：先过滤，再分页"
+      - "limit 不是 1 到 100 之间的整数时返回 400，错误信息是 \"limit must be an integer between 1 and 100\""
+      - "offset 不是非负整数时返回 400，错误信息是 \"offset must be a non-negative integer\""
+      - "不带 limit 和 offset 时行为不变"
+      - "每条验收标准都有对应的 HTTP 测试"
+    body: |
+      在已有的订单列表接口上加两个可选查询参数，响应格式仍是 { orders }。不改契约文件（契约由契约票处理）。
+
+  - key: stats-last-updated
+    repo: backend
+    type: implementation
+    title: 统计里增加最近变动时间
+    modules: ["src/orders/**", "test/**"]
+    blocked_by: [updated-at]
+    acceptance:
+      - "GET /orders/stats 的响应里增加 lastUpdatedAt，是所有订单（包括已取消的）updatedAt 里最晚的那个"
+      - "没有订单时 lastUpdatedAt 是 null"
+      - "原有的 count、total、totalFormatted、byStatus 保持不变"
+      - "每条验收标准都有对应的 HTTP 测试"
+    body: |
+      不改契约文件。
+
+external_blocked_by: []
