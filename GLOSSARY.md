@@ -13,7 +13,7 @@ _Avoid_: 产品线、应用
 _Avoid_: 代码库、工程
 
 **Spec（需求）**：
-一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并的 spec 不能取消。所有票都被取消、没有一张 done 时自动取消。
+一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
 **Ticket（票）**：
@@ -92,3 +92,7 @@ commit 与 Ticket、Spec、PR、缺陷之间的对应关系。
 **Acceptance pack（验收包）**：
 Spec 收尾时给人看的简报，人据此决定是否合并。
 _Avoid_: 报告、总结
+
+**Merge order（合并顺序）**：
+一个 Spec 的各仓库 PR 应当按什么先后合进 main：主仓库先合，其余仓库的 PR 在主仓库的合并之前保持 draft。人违反顺序时只记录，不阻止。
+_Avoid_: 发布顺序、上线顺序
