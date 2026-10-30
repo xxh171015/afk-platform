@@ -62,6 +62,13 @@ const contextLines = (
     : []),
 ];
 
+const shaList = (label: string, shas: Record<string, string> | null) =>
+  shas
+    ? `  ${label} ${Object.entries(shas)
+        .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
+        .join(", ")}`
+    : "";
+
 const stateOf = (t: Pick<TicketLike, "state" | "blockedReason">) =>
   t.blockedReason ? `${t.state} (${t.blockedReason})` : t.state;
 
@@ -159,6 +166,7 @@ export function ticketText(view: {
     result: string | null;
     durationMs: number | null;
     contractShas: Record<string, string> | null;
+    refShas: Record<string, string> | null;
   }[];
   findings: { kind: string; body: string; resolution: string }[];
 }): string {
@@ -192,13 +200,7 @@ export function ticketText(view: {
     "runs:",
     ...view.runs.map(
       (r) =>
-        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${
-          r.contractShas
-            ? `  contracts ${Object.entries(r.contractShas)
-                .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
-                .join(", ")}`
-            : ""
-        }`,
+        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${shaList("contracts", r.contractShas)}${shaList("refs", r.refShas)}`,
     ),
     ...(view.findings.length
       ? [

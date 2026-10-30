@@ -31,9 +31,14 @@ const JOB_LOST_REASON = "job-lost";
 
 export const SKILLS_SANDBOX_PATH = "/home/agent/.cursor/skills";
 export const CONTEXT_SANDBOX_PATH = "/context";
+export const REFS_SANDBOX_PATH = "/refs";
 
 // Read-only mounts: the context the agent reads, and the skills. Nothing else from the host is visible.
-export function sandboxMounts(input: { ctxDir?: string; skillsMount: string }) {
+export function sandboxMounts(input: {
+  ctxDir?: string;
+  skillsMount: string;
+  refs?: readonly { name: string; dir: string }[];
+}) {
   return [
     ...(input.ctxDir
       ? [
@@ -44,6 +49,11 @@ export function sandboxMounts(input: { ctxDir?: string; skillsMount: string }) {
           },
         ]
       : []),
+    ...(input.refs ?? []).map((ref) => ({
+      hostPath: ref.dir,
+      sandboxPath: `${REFS_SANDBOX_PATH}/${ref.name}`,
+      readonly: true,
+    })),
     {
       hostPath: input.skillsMount,
       sandboxPath: SKILLS_SANDBOX_PATH,
@@ -57,10 +67,14 @@ export const agentEnv = (cursorApiKey: string) => ({
   CURSOR_API_KEY: cursorApiKey,
 });
 
-const provider = (config: SandcastleConfig, ctxDir?: string) =>
+const provider = (
+  config: SandcastleConfig,
+  ctxDir?: string,
+  refs?: readonly { name: string; dir: string }[],
+) =>
   docker({
     imageName: config.image,
-    mounts: sandboxMounts({ ctxDir, skillsMount: config.skillsMount }),
+    mounts: sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
   });
 
 export function classifyAgentError(error: unknown): {
@@ -113,7 +127,7 @@ export class SandcastleAgentRunner implements AgentRunner {
         agent: cursor(options.model ?? config.model, {
           env: agentEnv(config.cursorApiKey),
         }),
-        sandbox: provider(config, options.ctxDir),
+        sandbox: provider(config, options.ctxDir, options.refs),
         cwd: config.cwd,
         branchStrategy: {
           type: "branch",

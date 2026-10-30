@@ -156,6 +156,7 @@ function deps(
       isHeld: async () => true,
     }),
     repos: undefined as never,
+    snapshots: undefined as never,
     push: (request) => pushRef(request),
     gateCache: new GateCache(),
     makeAgentRunner: (slotDir) =>

@@ -22,6 +22,32 @@ describe("the mounts", () => {
     ]);
   });
 
+  it("mounts each snapshot of a repo the ticket refs read-only at /refs/<repo>, and nothing when it refs none", () => {
+    const refs = [
+      { name: "backend", dir: "/snap/backend@abc" },
+      { name: "payments", dir: "/snap/payments@def" },
+    ];
+    expect(
+      sandboxMounts({ ctxDir: "/c", skillsMount: "/s", refs }).slice(1, 3),
+    ).toEqual([
+      {
+        hostPath: "/snap/backend@abc",
+        sandboxPath: "/refs/backend",
+        readonly: true,
+      },
+      {
+        hostPath: "/snap/payments@def",
+        sandboxPath: "/refs/payments",
+        readonly: true,
+      },
+    ]);
+    expect(
+      sandboxMounts({ ctxDir: "/c", skillsMount: "/s" }).map(
+        (m) => m.sandboxPath,
+      ),
+    ).toEqual(["/context", "/home/agent/.cursor/skills"]);
+  });
+
   it("gives the gate sandbox no /context", () => {
     expect(sandboxMounts({ skillsMount: "/host/skills" })).toEqual([
       {
@@ -33,7 +59,11 @@ describe("the mounts", () => {
   });
 
   it("never mounts anything writable", () => {
-    for (const mount of sandboxMounts({ ctxDir: "/c", skillsMount: "/s" })) {
+    for (const mount of sandboxMounts({
+      ctxDir: "/c",
+      skillsMount: "/s",
+      refs: [{ name: "backend", dir: "/r" }],
+    })) {
       expect(mount.readonly).toBe(true);
     }
   });

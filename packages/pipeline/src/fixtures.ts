@@ -42,6 +42,7 @@ export function bundleFor(
     protectedPaths: ["openapi/**", ".github/"],
     allowedProtectedPaths: [],
     contracts: [],
+    refs: [],
     failureLog: null,
     review: null,
     gateBaseline: null,

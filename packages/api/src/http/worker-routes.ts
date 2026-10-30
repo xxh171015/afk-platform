@@ -175,6 +175,14 @@ const Bundle = z.object({
       path: z.string(),
     }),
   ),
+  refs: z.array(
+    z.object({
+      name: z.string(),
+      url: z.string(),
+      defaultBranch: z.string(),
+      sha: z.string().nullable(),
+    }),
+  ),
   failureLog: z.string().nullable(),
   review: z.unknown(),
   gateBaseline: z

@@ -795,6 +795,7 @@ describe("the bundle", () => {
       protectedPaths: ["openapi/**", ".github/**"],
       allowedProtectedPaths: ["openapi/openapi.yaml"],
       contracts: [],
+      refs: [],
     });
   });
 
@@ -903,6 +904,55 @@ describe("the bundle", () => {
     expect(run.rows[0].contract_shas).toEqual({ backend: "second-head" });
     const view = await (await fetch(`${api.url}/tickets/3`)).json();
     expect(view.runs[0].contractShas).toEqual({ backend: "second-head" });
+  });
+
+  it("hands over the head of the integration branch of a ref'd repo that has merged work, else says to use its main", async () => {
+    await runningSpec([
+      ticket("fe", { repo: "frontend" }),
+      ticket("be", { refs: ["frontend"], blocked_by: ["fe"] }),
+      ticket("solo", { refs: ["frontend"] }),
+    ]);
+    // nothing has merged in frontend yet: the first claim is for fe itself, and solo (T-3) sees no head
+    const first = (await worker.claim()).body.job as Claimed;
+    const solo = (await worker.claim()).body.job as Claimed;
+    expect(solo.payload.ticketId).toBe(3);
+    expect((await bundle(solo)).body.refs).toEqual([
+      {
+        name: "frontend",
+        url: "git@x:frontend",
+        defaultBranch: "main",
+        sha: null,
+      },
+    ]);
+    // let fe merge
+    await worker.complete(first.id, first.attempt, {
+      stage: "implement",
+      ...IMPLEMENT_DONE,
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", {
+      outcome: "merged",
+      headSha: "fe-head",
+      run: { headSha: "fe-head" },
+    });
+    const be = (await worker.claim()).body.job as Claimed;
+    expect(be.payload.ticketId).toBe(2);
+    expect((await bundle(be)).body.refs).toEqual([
+      expect.objectContaining({ name: "frontend", sha: "fe-head" }),
+    ]);
+  });
+
+  it("records the SHAs the worker snapshotted on the Run, and the ticket page can read them", async () => {
+    await runningSpec([ticket("a", { refs: ["frontend"] })]);
+    const job = (await worker.claim()).body.job as Claimed;
+    await worker.complete(job.id, job.attempt, {
+      stage: "implement",
+      outcome: "done",
+      run: { refShas: { frontend: "abc123" } },
+    });
+    const view = await (await fetch(`${api.url}/tickets/1`)).json();
+    expect(view.runs[0].refShas).toEqual({ frontend: "abc123" });
   });
 
   it("has no contracts for a ticket without a contract edge, and no contract SHAs on its Run", async () => {

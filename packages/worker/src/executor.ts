@@ -33,6 +33,7 @@ import type { PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
 import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
+import type { SnapshotStore } from "./snapshots.ts";
 
 // Runs one stage of one ticket and returns the facts for the API: what the worker is for. Which stage comes next,
 // and whether the ticket is blocked, is the API's decision (docs/specs/m1-platform.md「谁决定下一步」).
@@ -40,6 +41,7 @@ import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
 export interface ExecutorDeps {
   slots: SlotManager;
   repos: RepoStore;
+  snapshots: SnapshotStore;
   push: PushFn;
   credentials?: Credentials; // tokens for the code host; without them git uses whatever it is already set up with
   api: Pick<WorkerApi, "prePush">; // supplied by the worker loop
@@ -245,6 +247,23 @@ function renderFor(
   return dir;
 }
 
+// Snapshots of the repos the ticket refs, taken at the SHA the bundle names (the head of the default branch when it
+// names none), to be mounted read-only at /refs/<name>. The SHAs go on the Run.
+function snapshotRefs(deps: ExecutorDeps, bundle: Bundle) {
+  const refs: { name: string; dir: string }[] = [];
+  const refShas: Record<string, string> = {};
+  for (const ref of bundle.refs) {
+    const clone = deps.repos.ensure(ref.name, ref.url, ref.defaultBranch);
+    const sha = ref.sha ?? tip(clone, ref.defaultBranch);
+    refs.push({
+      name: ref.name,
+      dir: deps.snapshots.ensure(ref.name, clone, sha),
+    });
+    refShas[ref.name] = sha;
+  }
+  return { refs, refShas };
+}
+
 // The commit the ticket branch started from: where it left the integration branch.
 function branchBase(dir: string, integration: string, agent: string): string {
   return exists(dir, agent)
@@ -282,6 +301,7 @@ async function agentChange(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const { refs, refShas } = snapshotRefs(deps, bundle);
     log(`${stage}: running the agent on ${agent}`);
     const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
@@ -290,6 +310,7 @@ async function agentChange(
       baseBranch: integration,
       promptFile: promptFor(stage),
       ctxDir,
+      refs,
       schema: ImplementOutputSchema,
       ...options,
       signal: context.signal,
@@ -315,6 +336,7 @@ async function agentChange(
       commits: run.commits,
       durationMs: run.durationMs,
       ...(options.model ? { model: options.model } : {}),
+      ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
     };
     if (verdict.outcome !== "done")
@@ -396,6 +418,7 @@ async function review(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const { refs, refShas } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
       stage,
@@ -403,6 +426,7 @@ async function review(
       baseBranch: bundle.integrationBranch as string,
       promptFile: promptFor(stage),
       ctxDir,
+      refs,
       schema: ReviewOutputSchema,
       ...options,
       signal: context.signal,
@@ -426,6 +450,7 @@ async function review(
         commits: run.commits,
         durationMs: run.durationMs,
         ...(options.model ? { model: options.model } : {}),
+        ...(refs.length ? { refShas } : {}),
         output: run.output ?? { error: run.error },
       },
       findings: run.output ? reviewFindings(run.output) : [],

@@ -106,6 +106,8 @@ pnpm plat spec confirm S-1     # the scheduler starts; watch it on the page or w
 
 A repo is known by its name (`--role` still works as another word for `--name`); the name is what `repo:` in the ticket file says. The contract path belongs to the repo that owns the contract: set it with `plat repo edit <name> --project <id> --contract-path <path>`, change it the same way, or pass `--contract-path ""` to clear it. Other project settings are edited in place with `pnpm plat project edit 1 --max-concurrency 3`. Only the options given change (`--protected-path` replaces the whole list, `--limit name=value` is merged with the limits already set; `--budget-limit` too). Tickets already made keep what they have; bundles built afterwards use the new values. `plat project create/edit --contract-path` is refused with a pointer to `plat repo edit`.
 
+**Read-only snapshots (`refs:`)**: a ticket that lists `refs: [repo…]` gets each of those repos at `/refs/<repo>/` in the agent's sandbox, read-only, at the head of that repo's integration branch for the spec (the head of its default branch when nothing of the spec has merged there). The worker keeps them under `~/.afk/snapshots/<repo>@<sha>` and deletes the ones unused for 7 days when it starts. Known limits: submodules are not exported, and Git LFS files are not expanded (you get the pointer files).
+
 ## Run the checks
 
 ```sh

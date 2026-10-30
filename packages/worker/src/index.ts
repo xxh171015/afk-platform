@@ -22,5 +22,6 @@ export type {
   SlotTask,
 } from "./slots.ts";
 export { processAlive, retrieveResult, SlotManager } from "./slots.ts";
+export { pruneSnapshots, SnapshotStore } from "./snapshots.ts";
 export type { JobOutcome, WorkerOptions } from "./worker.ts";
 export { processJob, runWorker } from "./worker.ts";

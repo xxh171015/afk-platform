@@ -1495,6 +1495,27 @@
                         ]
                       }
                     },
+                    "refs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "defaultBranch": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": ["name", "url", "defaultBranch", "sha"]
+                      }
+                    },
                     "failureLog": {
                       "type": ["string", "null"]
                     },
@@ -1539,6 +1560,7 @@
                     "protectedPaths",
                     "allowedProtectedPaths",
                     "contracts",
+                    "refs",
                     "failureLog",
                     "gateBaseline",
                     "limits",
@@ -2380,6 +2402,12 @@
                               "type": "string"
                             }
                           },
+                          "refShas": {
+                            "type": ["object", "null"],
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
                           "startedAt": {
                             "type": ["string", "null"]
                           },
@@ -2399,6 +2427,7 @@
                           "skillsSha",
                           "cursorCliVersion",
                           "contractShas",
+                          "refShas",
                           "startedAt",
                           "finishedAt"
                         ]

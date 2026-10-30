@@ -28,6 +28,7 @@ const run = (
   skillsSha: "5beb35b",
   cursorCliVersion: "1.2.3",
   contractShas: null,
+  refShas: null,
   startedAt: "2026-10-28T10:00:00.000Z",
   finishedAt: "2026-10-28T10:02:26.000Z",
   ...over,
@@ -109,7 +110,7 @@ describe("the ticket page", () => {
     const gate = within(rows[2] as HTMLElement);
     expect(gate.getByText("failed")).toBeTruthy();
     expect(gate.getByText("20 s")).toBeTruthy();
-    expect(gate.getAllByText("—")).toHaveLength(3); // a gate run has no model, no skills and no contract
+    expect(gate.getAllByText("—")).toHaveLength(4); // a gate run has no model, no skills, no contract and no refs
   });
 
   it("shows which contract SHA of which repo a run used", async () => {
@@ -133,6 +134,22 @@ describe("the ticket page", () => {
     expect(
       await screen.findByText("backend@01234567, payments@fedcba98"),
     ).toBeTruthy();
+  });
+
+  it("shows which SHA of which repo a run had mounted under /refs", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          runs: [
+            run(10, "implement", { refShas: { backend: "0123456789abcdef" } }),
+          ],
+        }),
+      }),
+      ...logs({ 10: "implement log" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+
+    expect(await screen.findByText("backend@01234567")).toBeTruthy();
   });
 
   it("shows the title, state, type and acceptance criteria", async () => {

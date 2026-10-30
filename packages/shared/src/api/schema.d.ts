@@ -893,6 +893,12 @@ export interface paths {
                 sha: string;
                 path: string;
               }[];
+              refs: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+                sha: string | null;
+              }[];
               failureLog: string | null;
               review?: unknown;
               gateBaseline: {
@@ -1389,6 +1395,9 @@ export interface paths {
                 skillsSha: string | null;
                 cursorCliVersion: string | null;
                 contractShas: {
+                  [key: string]: string;
+                } | null;
+                refShas: {
                   [key: string]: string;
                 } | null;
                 startedAt: string | null;

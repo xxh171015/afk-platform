@@ -38,6 +38,7 @@ const RunFacts = z.object({
   tokenUsage: z.unknown().optional(),
   output: z.unknown().optional(),
   logUrl: z.string().optional(),
+  refShas: z.record(z.string(), z.string()).optional(),
   startedAt: z.iso.datetime().optional(),
   finishedAt: z.iso.datetime().optional(),
 });
@@ -289,6 +290,12 @@ export async function writeFacts(
     );
   }
   const runId = inserted.rows[0]?.id as number;
+  if (run?.refShas) {
+    await client.query("UPDATE runs SET ref_shas = $2 WHERE id = $1", [
+      runId,
+      JSON.stringify(run.refShas),
+    ]);
+  }
 
   if (result?.gate) {
     const gate = result.gate;

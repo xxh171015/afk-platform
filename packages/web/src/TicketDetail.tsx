@@ -98,6 +98,7 @@ export function TicketDetail({
               <th>Model</th>
               <th>Skills</th>
               <th>Contracts</th>
+              <th>Refs</th>
             </tr>
           </thead>
           <tbody>
@@ -125,6 +126,13 @@ export function TicketDetail({
                 <td>
                   {run.contractShas
                     ? Object.entries(run.contractShas)
+                        .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
+                        .join(", ")
+                    : "—"}
+                </td>
+                <td>
+                  {run.refShas
+                    ? Object.entries(run.refShas)
                         .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
                         .join(", ")
                     : "—"}

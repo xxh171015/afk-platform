@@ -7,6 +7,7 @@ import {
 import type pg from "pg";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 import { contractsOf } from "./contracts.ts";
+import { refsOf } from "./refs.ts";
 
 // Everything a worker needs to render /context for a stage job (docs/design.md「Agent 与 skills 对接」).
 // The contract travels as a pointer, a SHA and a path in the repo that holds it: the worker reads the file
@@ -18,6 +19,15 @@ export interface BundleContract {
   defaultBranch: string;
   sha: string;
   path: string;
+}
+
+// A repo the ticket reads (refs:). The worker snapshots it at `sha` and mounts that at /refs/<name>; null means the
+// repo has no merged work in this spec, so the head of its default branch is what the snapshot is taken at.
+export interface BundleRef {
+  name: string;
+  url: string;
+  defaultBranch: string;
+  sha: string | null;
 }
 
 export interface Bundle {
@@ -63,6 +73,7 @@ export interface Bundle {
   allowedProtectedPaths: string[];
   // One per repo that provides a contract this ticket builds against: the file at the newest contract ticket's SHA.
   contracts: BundleContract[];
+  refs: BundleRef[];
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
   review: unknown;
@@ -137,6 +148,7 @@ export async function buildBundle(
     branches.find((b) => b.repoId === row.repo_id)?.branch ?? null;
 
   const contracts = await contractsOf(pool, ticketId);
+  const refs = await refsOf(pool, ticketId);
 
   const run = await pool.query<{ id: number }>(
     "SELECT id FROM runs WHERE job_id = $1",
@@ -199,6 +211,7 @@ export async function buildBundle(
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: row.allowed_protected_paths,
     contracts,
+    refs,
     failureLog: failed.rows[0]?.log ?? null,
     review: reviewed.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
@@ -282,6 +295,7 @@ async function buildFinalBundle(
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: [],
     contracts: [],
+    refs: [],
     failureLog: failed.rows[0]?.log ?? null,
     review: review.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),

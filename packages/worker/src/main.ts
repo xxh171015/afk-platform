@@ -19,6 +19,7 @@ import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
 import { removeSandboxesUnder } from "./sandboxes.ts";
 import { SlotManager } from "./slots.ts";
+import { pruneSnapshots, SnapshotStore } from "./snapshots.ts";
 import { runWorker } from "./worker.ts";
 
 // `pnpm worker`: a worker on this machine, with the real sandbox, the GitHub App and the folders under ~/.afk.
@@ -80,6 +81,7 @@ try {
 const tokens = createAppTokenSource({ credentials });
 const api = createWorkerApi(config.apiUrl, config.workerId);
 const repos = new RepoStore(join(config.home, "repos"));
+const snapshots = new SnapshotStore(join(config.home, "snapshots"));
 const slotsRoot = join(config.home, "slots");
 // Each run writes its raw logs to a folder of its own: two slots at once, or one run after another, never share one.
 const sandcastle = (cwd: string): SandcastleConfig => ({
@@ -111,6 +113,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     stop.abort();
   });
 
+for (const removed of pruneSnapshots(snapshots.root)) {
+  log(`removed the snapshot ${removed}, unused for a week`);
+}
 log(
   `worker ${config.workerId}: ${config.slots} slot(s), api ${config.apiUrl}, home ${config.home}`,
 );
@@ -128,6 +133,7 @@ await runWorker({
       log,
     }),
     repos,
+    snapshots,
     push: pushWithToken,
     credentials: { tokens },
     gateCache: new GateCache(),

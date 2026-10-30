@@ -53,6 +53,7 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   baseBranch: string;
   promptFile: string;
   ctxDir: string; // mounted read-only as /context
+  refs?: { name: string; dir: string }[]; // snapshots of the repos the ticket refs, read-only at /refs/<name>
   schema: Schema;
   idleSeconds: number;
   wallClockMs: number;
