@@ -121,7 +121,7 @@ await runWorker({
     slots: new SlotManager({
       root: slotsRoot,
       count: config.slots,
-      mainCloneFor: (role) => repos.dirFor(role),
+      mainCloneFor: (name) => repos.dirFor(name),
       salvageDir: join(config.home, "salvage"),
       isHeld: (jobId, attempt) => api.isHeld(jobId, attempt),
       removeSandboxes: (dir) => removeSandboxesUnder(dir, undefined, log),

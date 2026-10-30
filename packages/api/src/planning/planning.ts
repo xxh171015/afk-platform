@@ -18,7 +18,6 @@ export interface NewProject {
   name: string;
   defaultAgent?: string;
   defaultModel?: string;
-  contractPath?: string;
   protectedPaths?: string[];
   maxConcurrency?: number;
   budgetLimit?: number;
@@ -31,13 +30,12 @@ export async function createProject(
   project: NewProject,
 ): Promise<{ id: number; name: string }> {
   const { rows } = await pool.query(
-    `INSERT INTO projects (name, default_agent, default_model, contract_path, protected_paths, max_concurrency, budget_limit, merge_policy, limits)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name`,
+    `INSERT INTO projects (name, default_agent, default_model, protected_paths, max_concurrency, budget_limit, merge_policy, limits)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, name`,
     [
       project.name,
       project.defaultAgent ?? null,
       project.defaultModel ?? null,
-      project.contractPath ?? null,
       project.protectedPaths ?? [],
       project.maxConcurrency ?? null,
       project.budgetLimit ?? null,
@@ -52,7 +50,6 @@ export type ProjectEdit = Partial<
   Pick<
     NewProject,
     | "defaultModel"
-    | "contractPath"
     | "protectedPaths"
     | "maxConcurrency"
     | "budgetLimit"
@@ -76,7 +73,6 @@ export async function editProject(
     );
   };
   if (edit.defaultModel !== undefined) set("default_model", edit.defaultModel);
-  if (edit.contractPath !== undefined) set("contract_path", edit.contractPath);
   if (edit.protectedPaths !== undefined)
     set("protected_paths", edit.protectedPaths);
   if (edit.maxConcurrency !== undefined)
@@ -92,17 +88,35 @@ export async function editProject(
   return rowCount === 0 ? { status: "no-project" } : { status: "ok" };
 }
 
+// The repos of the contract tickets that some contract edge starts from.
+function contractUpstreamRepoIds(
+  tickets: { key: string; repoId: number }[],
+  edges: { from: string; kind: string }[],
+): number[] {
+  const upstreams = new Set(
+    edges.filter((edge) => edge.kind === "contract").map((edge) => edge.from),
+  );
+  return [
+    ...new Set(
+      tickets
+        .filter((ticket) => upstreams.has(ticket.key))
+        .map((ticket) => ticket.repoId),
+    ),
+  ];
+}
+
 export interface NewRepo {
   projectId: number;
   url: string;
-  role: string;
+  // How tickets.yaml names the repo; unique within the project.
+  name: string;
   defaultBranch?: string;
 }
 
 export type AddRepoResult =
-  | { status: "ok"; repo: { id: number; role: string } }
+  | { status: "ok"; repo: { id: number; name: string } }
   | { status: "no-project" }
-  | { status: "role-taken" };
+  | { status: "name-taken" };
 
 export async function addRepo(
   pool: pg.Pool,
@@ -114,15 +128,49 @@ export async function addRepo(
   if (project.rowCount === 0) return { status: "no-project" };
   try {
     const { rows } = await pool.query(
-      `INSERT INTO repos (project_id, url, default_branch, role) VALUES ($1, $2, COALESCE($3, 'main'), $4)
-       RETURNING id, role`,
-      [repo.projectId, repo.url, repo.defaultBranch ?? null, repo.role],
+      `INSERT INTO repos (project_id, url, default_branch, name) VALUES ($1, $2, COALESCE($3, 'main'), $4)
+       RETURNING id, name`,
+      [repo.projectId, repo.url, repo.defaultBranch ?? null, repo.name],
     );
     return { status: "ok", repo: rows[0] };
   } catch (error) {
-    if (isUniqueViolation(error)) return { status: "role-taken" };
+    if (isUniqueViolation(error)) return { status: "name-taken" };
     throw error;
   }
+}
+
+export interface RepoEdit {
+  // The path of the repo's contract file in the repo; an empty string says the repo owns none.
+  contractPath?: string;
+}
+
+export type EditRepoResult =
+  | { status: "ok"; repo: { id: number; name: string } }
+  | { status: "no-project" }
+  | { status: "no-repo" };
+
+// Only the fields that are given change. Tickets already made read the path when their bundle is built.
+export async function editRepo(
+  pool: pg.Pool,
+  projectId: number,
+  name: string,
+  edit: RepoEdit,
+): Promise<EditRepoResult> {
+  const project = await pool.query("SELECT 1 FROM projects WHERE id = $1", [
+    projectId,
+  ]);
+  if (project.rowCount === 0) return { status: "no-project" };
+  const { rows } = await pool.query(
+    `UPDATE repos SET contract_path = CASE WHEN $3::boolean THEN NULLIF($4::text, '') ELSE contract_path END
+     WHERE project_id = $1 AND name = $2 RETURNING id, name`,
+    [
+      projectId,
+      name,
+      edit.contractPath !== undefined,
+      edit.contractPath ?? null,
+    ],
+  );
+  return rows[0] ? { status: "ok", repo: rows[0] } : { status: "no-repo" };
 }
 
 export interface NewSpec {
@@ -209,32 +257,35 @@ export async function importTickets(
     }
 
     const repos = await client.query(
-      "SELECT role, id FROM repos WHERE project_id = $1",
+      "SELECT name, id FROM repos WHERE project_id = $1",
       [spec.rows[0].project_id],
     );
     const plan = planImport(
       input,
-      new Map(repos.rows.map((row) => [row.role as string, row.id as number])),
+      new Map(repos.rows.map((row) => [row.name as string, row.id as number])),
       specId,
     );
     if (!plan.ok) {
       return await rollback(client, { status: "invalid", errors: plan.errors });
     }
 
-    // A contract edge hands the pinned contract to the downstream ticket, which needs a path to find it by.
-    if (plan.edges.some((edge) => edge.kind === "contract")) {
-      const project = await client.query(
-        "SELECT contract_path FROM projects WHERE id = $1",
-        [spec.rows[0].project_id],
-      );
-      if (!project.rows[0]?.contract_path) {
-        return await rollback(client, {
-          status: "invalid",
-          errors: [
-            "the tickets have a contract edge, but the project has no contract path; set it with --contract-path <role>:<path> (e.g. backend:openapi/openapi.yaml) on plat project create, or on plat project edit for an existing project",
-          ],
-        });
-      }
+    // A contract edge hands the pinned contract to the downstream ticket, which needs a path to find it by: the
+    // path of the repo that holds the upstream contract ticket.
+    const withoutPath = await client.query<{ name: string }>(
+      "SELECT name FROM repos WHERE project_id = $1 AND contract_path IS NULL AND id = ANY($2)",
+      [
+        spec.rows[0].project_id,
+        contractUpstreamRepoIds(plan.tickets, plan.edges),
+      ],
+    );
+    if (withoutPath.rows.length > 0) {
+      return await rollback(client, {
+        status: "invalid",
+        errors: withoutPath.rows.map(
+          (repo) =>
+            `a contract edge starts from a contract ticket in repo ${repo.name}, which has no contract path; set it with plat repo edit ${repo.name} --project <id> --contract-path <path> (e.g. openapi/openapi.yaml)`,
+        ),
+      });
     }
 
     const idByKey = new Map<string, number>();

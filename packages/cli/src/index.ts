@@ -40,6 +40,11 @@ const collect = (value: string, previous: string[] = []) => [
   value,
 ];
 
+const contractPathMoved = () =>
+  new Failure(
+    "the contract path now belongs to a repo, not the project: use plat repo edit <name> --project <id> --contract-path <path>",
+  );
+
 class Failure extends Error {
   readonly body: unknown;
   constructor(message: string, body: unknown = { error: message }) {
@@ -77,7 +82,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--default-model <model>",
       "the Cursor model for its agent runs (the worker's AFK_MODEL when unset)",
     )
-    .option("--contract-path <path>", "e.g. backend:openapi/openapi.yaml")
+    .option(
+      "--contract-path <path>",
+      "moved to plat repo edit <name> --contract-path",
+    )
     .option("--protected-path <glob>", "repeatable", collect)
     .option("--max-concurrency <n>", "tickets running at once", toInt)
     .option("--budget-limit <n>", "budget limit", toInt)
@@ -88,12 +96,12 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       collect,
     )
     .action(async (name: string, options) => {
+      if (options.contractPath !== undefined) throw contractPathMoved();
       const { data, response, error } = await api().POST("/projects", {
         body: {
           name,
           defaultAgent: options.defaultAgent,
           defaultModel: options.defaultModel,
-          contractPath: options.contractPath,
           protectedPaths: options.protectedPath,
           maxConcurrency: options.maxConcurrency,
           budgetLimit: options.budgetLimit,
@@ -114,7 +122,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--default-model <model>",
       "the Cursor model for its agent runs (the worker's AFK_MODEL when unset)",
     )
-    .option("--contract-path <path>", "e.g. backend:openapi/openapi.yaml")
+    .option(
+      "--contract-path <path>",
+      "moved to plat repo edit <name> --contract-path",
+    )
     .option(
       "--protected-path <glob>",
       "repeatable; replaces the whole list",
@@ -128,9 +139,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       collect,
     )
     .action(async (id: string, options) => {
+      if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
         defaultModel: options.defaultModel,
-        contractPath: options.contractPath,
         protectedPaths: options.protectedPath,
         maxConcurrency: options.maxConcurrency,
         budgetLimit: options.budgetLimit,
@@ -138,7 +149,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-model, --contract-path, --protected-path, --max-concurrency, --budget-limit or --limit",
+          "nothing to change: pass --default-model, --protected-path, --max-concurrency, --budget-limit or --limit",
         );
       }
       const projectId = toInt(id);
@@ -150,29 +161,56 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `project ${data.id} updated`);
     });
 
-  program
-    .command("repo")
-    .description("repos")
+  const repoCommands = program.command("repo").description("repos");
+  repoCommands
     .command("add")
     .description("add a repo to a project")
     .requiredOption("--project <id>", "project id", toInt)
-    .requiredOption("--role <role>", "how tickets.yaml names it, e.g. backend")
+    .option("--name <name>", "how tickets.yaml names it, e.g. backend")
+    .option("--role <role>", "older word for --name; still works")
     .requiredOption("--url <url>", "clone URL")
     .option("--default-branch <branch>", "default: main")
     .action(async (options) => {
+      if ((options.name === undefined) === (options.role === undefined)) {
+        throw new Failure("give the repo's --name (--role is the older word)");
+      }
       const { data, response, error } = await api().POST(
         "/projects/{projectId}/repos",
         {
           params: { path: { projectId: options.project } },
           body: {
             url: options.url,
+            name: options.name,
             role: options.role,
             defaultBranch: options.defaultBranch,
           },
         },
       );
       if (!data) throw failureFrom(response, error);
-      print(data, `repo ${data.id} ${data.role}`);
+      print(data, `repo ${data.id} ${data.name}`);
+    });
+
+  repoCommands
+    .command("edit <name>")
+    .description("change settings of a repo; only the given ones change")
+    .requiredOption("--project <id>", "project id", toInt)
+    .option(
+      "--contract-path <path>",
+      'where the repo keeps its contract file, e.g. openapi/openapi.yaml; pass "" to clear',
+    )
+    .action(async (name: string, options) => {
+      if (options.contractPath === undefined) {
+        throw new Failure("nothing to change: pass --contract-path");
+      }
+      const { data, response, error } = await api().PATCH(
+        "/projects/{projectId}/repos/{name}",
+        {
+          params: { path: { projectId: options.project, name } },
+          body: { contractPath: options.contractPath },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `repo ${data.id} ${data.name} updated`);
     });
 
   const spec = program.command("spec").description("specs");

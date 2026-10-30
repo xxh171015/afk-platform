@@ -26,6 +26,15 @@ interface Reply {
   enqueued: { ticketId: number; displayId: string; jobId: number }[];
 }
 
+async function patch(path: string, body: unknown) {
+  const response = await fetch(`${api.url}${path}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
 async function post(path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method: "POST",
@@ -52,13 +61,15 @@ async function draftSpec(
 ) {
   const project = await post("/projects", {
     name: "shop",
-    contractPath: "backend:openapi.yaml",
     limits,
   });
   const projectId = project.body.id;
-  for (const role of ["backend", "frontend"]) {
-    await post(`/projects/${projectId}/repos`, { url: `git@x:${role}`, role });
+  for (const name of ["backend", "frontend"]) {
+    await post(`/projects/${projectId}/repos`, { url: `git@x:${name}`, name });
   }
+  await patch(`/projects/${projectId}/repos/backend`, {
+    contractPath: "openapi.yaml",
+  });
   const spec = await post("/specs", {
     projectId,
     type: "feature",

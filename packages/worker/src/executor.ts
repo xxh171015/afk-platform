@@ -107,7 +107,7 @@ export async function executeStage(
       "the spec has no integration branch for this repo",
     );
   const mainDir = deps.repos.ensure(
-    bundle.repo.role,
+    bundle.repo.name,
     bundle.repo.url,
     bundle.repo.defaultBranch,
   );
@@ -116,7 +116,7 @@ export async function executeStage(
   const slot = await deps.slots.acquire({
     jobId: context.job.id,
     attempt: context.job.attempt,
-    repo: bundle.repo.role,
+    repo: bundle.repo.name,
     ref: bundle.agentBranch,
     integration: bundle.integrationBranch as string,
   });
@@ -536,7 +536,7 @@ async function merge(
       `${bundle.job.stage}: the integration branch moved, fetching and trying again (${outcome.integrationMoved})`,
     );
     deps.repos.ensure(
-      bundle.repo.role,
+      bundle.repo.name,
       bundle.repo.url,
       bundle.repo.defaultBranch,
     );

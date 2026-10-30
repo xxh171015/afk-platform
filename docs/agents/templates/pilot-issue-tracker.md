@@ -69,7 +69,7 @@ Rules the importer enforces, and mistakes seen in practice:
   list the exact files in `protected_paths_ok`. Without it the agent stops before changing anything and the ticket is
   blocked; fix it with `plat ticket allow-path` and `plat ticket retry`.
 - `type: contract` is for a ticket that only edits the contract file. A ticket using `contract: <key>` must point at a
-  contract ticket. The project needs a contract path (`plat project create --contract-path backend:openapi/openapi.yaml`, or `plat project edit <id> --contract-path …` on an existing project);
+  contract ticket. The repo that holds the contract needs a contract path (`plat repo edit <name> --project <id> --contract-path openapi/openapi.yaml`);
   the import is refused without it.
 - Two tickets that touch overlapping `modules` but do not depend on each other get an overlap warning. That is not an
   error: say so in the ticket if it is intended, otherwise add a `blocked_by`.

@@ -72,28 +72,28 @@ export const AcceptancePack = z.object({
 export type AcceptancePack = z.infer<typeof AcceptancePack>;
 
 // The backend goes first: the frontend depends on it, so its pull request is merged (and deployed) before.
-const mergeOrder = (a: { role: string; id: number }, b: typeof a) =>
-  Number(b.role === "backend") - Number(a.role === "backend") || a.id - b.id;
+const mergeOrder = (a: { name: string; id: number }, b: typeof a) =>
+  Number(b.name === "backend") - Number(a.name === "backend") || a.id - b.id;
 
 export async function pullRequestRows(
   pool: Pick<pg.Pool, "query">,
   specId: number,
 ): Promise<PullRequestRow[]> {
   const { rows } = await pool.query(
-    `SELECT r.id AS repo_id, r.role, p.number, p.url, p.state, p.draft, p.ci, p.review, p.sync_error
+    `SELECT r.id AS repo_id, r.name, p.number, p.url, p.state, p.draft, p.ci, p.review, p.sync_error
      FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.spec_id = $1`,
     [specId],
   );
   return rows
     .sort((a, b) =>
       mergeOrder(
-        { role: a.role, id: a.repo_id },
-        { role: b.role, id: b.repo_id },
+        { name: a.name, id: a.repo_id },
+        { name: b.name, id: b.repo_id },
       ),
     )
     .map((row, index) => ({
       order: index + 1,
-      repo: row.role,
+      repo: row.name,
       number: row.number,
       url: row.url,
       state: row.state,
@@ -161,14 +161,14 @@ export async function buildAcceptancePack(
   // the gate of each repo's integration branch as it was at the last merge
   const gateRows = await client.query<{
     repo_id: number;
-    role: string;
+    name: string;
     commit_sha: string;
     tests_total: number | null;
     tests_skipped: number | null;
     command_results: unknown;
     test_cases: TestCaseRow[] | null;
   }>(
-    `SELECT DISTINCT ON (r.repo_id) r.repo_id, rp.role, g.commit_sha, g.tests_total, g.tests_skipped,
+    `SELECT DISTINCT ON (r.repo_id) r.repo_id, rp.name, g.commit_sha, g.tests_total, g.tests_skipped,
             g.command_results, g.test_cases
      FROM runs r JOIN repos rp ON rp.id = r.repo_id
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
@@ -272,7 +272,7 @@ export async function buildAcceptancePack(
           ms: Number(s.ms),
         }));
       return {
-        repo: g.role,
+        repo: g.name,
         commitSha: g.commit_sha,
         testsTotal: g.tests_total,
         testsSkipped: g.tests_skipped,

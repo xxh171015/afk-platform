@@ -323,7 +323,7 @@ export async function resumeSpec(
 // The whole spec is given up. Every ticket that has not finished is cancelled (one under way too), the jobs of the
 // spec are failed so nothing more is claimed and a worker still holding one learns on its next call that it no
 // longer does, and their Runs are closed. Done tickets and what was already merged stay as they are.
-// A pull request the platform last saw open; the repo is named by its role in the project.
+// A pull request the platform last saw open; the repo is given by its name, which is unique in the project.
 export interface OpenPullRequest {
   repo: string;
   number: number;
@@ -397,7 +397,7 @@ export async function cancelSpec(
     );
     // What the cleanup is going to close, for the person who cancelled.
     const open = await client.query<OpenPullRequest>(
-      `SELECT r.role AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+      `SELECT r.name AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id
        WHERE p.spec_id = $1 AND p.state = 'open' ORDER BY p.id`,
       [specId],
     );

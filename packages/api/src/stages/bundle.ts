@@ -45,7 +45,7 @@ export interface Bundle {
     body: string;
     type: string;
   };
-  repo: { id: number; role: string; url: string; defaultBranch: string };
+  repo: { id: number; name: string; url: string; defaultBranch: string };
   integrationBranch: string | null;
   // The branch the stage's work is made on: the ticket's own, or the one of the spec's overall fix.
   agentBranch: string;
@@ -107,8 +107,8 @@ export async function buildBundle(
             t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths,
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
             s.integration_branches, s.branch_namespace,
-            r.id AS repo_id, r.role, r.url, r.default_branch,
-            p.contract_path, p.protected_paths, p.limits, p.default_model
+            r.id AS repo_id, r.name, r.url, r.default_branch,
+            p.protected_paths, p.limits, p.default_model
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
@@ -126,14 +126,19 @@ export async function buildBundle(
   const integrationBranch =
     branches.find((b) => b.repoId === row.repo_id)?.branch ?? null;
 
-  // The upstream of a contract edge, once it has recorded its SHA. contract_path is "<repo role>:<path>".
-  const upstream = await pool.query<{ contract_sha: string; repo_id: number }>(
-    `SELECT u.contract_sha, u.repo_id FROM edges e JOIN tickets u ON u.id = e.from_ticket_id
+  // The upstream of a contract edge, once it has recorded its SHA; the contract is at the path its repo says.
+  const upstream = await pool.query<{
+    contract_sha: string;
+    repo_id: number;
+    contract_path: string | null;
+  }>(
+    `SELECT u.contract_sha, u.repo_id, ur.contract_path FROM edges e
+     JOIN tickets u ON u.id = e.from_ticket_id JOIN repos ur ON ur.id = u.repo_id
      WHERE e.to_ticket_id = $1 AND e.kind = 'contract' AND u.contract_sha IS NOT NULL LIMIT 1`,
     [ticketId],
   );
   const pointer = upstream.rows[0];
-  const contractPath = row.contract_path as string | null;
+  const contractPath = pointer?.contract_path ?? null;
 
   const run = await pool.query<{ id: number }>(
     "SELECT id FROM runs WHERE job_id = $1",
@@ -185,7 +190,7 @@ export async function buildBundle(
     },
     repo: {
       id: row.repo_id,
-      role: row.role,
+      name: row.name,
       url: row.url,
       defaultBranch: row.default_branch,
     },
@@ -219,7 +224,7 @@ async function buildFinalBundle(
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
-            s.integration_branches, s.branch_namespace, r.id AS repo_id, r.role, r.url, r.default_branch,
+            s.integration_branches, s.branch_namespace, r.id AS repo_id, r.name, r.url, r.default_branch,
             p.protected_paths,
             p.limits, p.default_model
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
@@ -274,7 +279,7 @@ async function buildFinalBundle(
     },
     repo: {
       id: row.repo_id,
-      role: row.role,
+      name: row.name,
       url: row.url,
       defaultBranch: row.default_branch,
     },

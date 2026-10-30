@@ -96,14 +96,15 @@ Branch names carry the database's id (six hex digits, made once by the migration
 **A first spec** (`pnpm plat …` talks to `$AFK_API_URL`; add `--json` for machine output)
 
 ```sh
-pnpm plat project create shop --protected-path ".github/**" --contract-path backend:openapi/openapi.yaml
-pnpm plat repo add --project 1 --role backend --url https://github.com/<owner>/afk-pilot-backend.git
+pnpm plat project create shop --protected-path ".github/**"
+pnpm plat repo add --project 1 --name backend --url https://github.com/<owner>/afk-pilot-backend.git
+pnpm plat repo edit backend --project 1 --contract-path openapi/openapi.yaml
 pnpm plat spec create --project 1 --type feature --title "订单备注" --file spec.md
 pnpm plat tickets import S-1 tickets.yaml
 pnpm plat spec confirm S-1     # the scheduler starts; watch it on the page or with: pnpm plat spec show S-1
 ```
 
-A project made without a contract path, or with other settings to change, is edited in place: `pnpm plat project edit 1 --contract-path backend:openapi/openapi.yaml`. Only the options given change (`--protected-path` replaces the whole list, `--limit name=value` is merged with the limits already set; `--max-concurrency` and `--budget-limit` too). Tickets already made keep what they have; bundles built afterwards use the new values. `--contract-path` must look like `role:path`, on `project create` as well.
+A repo is known by its name (`--role` still works as another word for `--name`); the name is what `repo:` in the ticket file says. The contract path belongs to the repo that owns the contract: set it with `plat repo edit <name> --project <id> --contract-path <path>`, change it the same way, or pass `--contract-path ""` to clear it. Other project settings are edited in place with `pnpm plat project edit 1 --max-concurrency 3`. Only the options given change (`--protected-path` replaces the whole list, `--limit name=value` is merged with the limits already set; `--budget-limit` too). Tickets already made keep what they have; bundles built afterwards use the new values. `plat project create/edit --contract-path` is refused with a pointer to `plat repo edit`.
 
 ## Run the checks
 

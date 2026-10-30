@@ -32,13 +32,13 @@ export class RepoStore {
     };
   }
 
-  dirFor(role: string): string {
-    return join(this.root, `${role}.git`);
+  dirFor(name: string): string {
+    return join(this.root, `${name}.git`);
   }
 
   // Clones on first use, then brings the branches the pipeline cares about up to date.
-  ensure(role: string, url: string, defaultBranch: string): string {
-    const dir = this.dirFor(role);
+  ensure(name: string, url: string, defaultBranch: string): string {
+    const dir = this.dirFor(name);
     if (!existsSync(dir)) {
       mkdirSync(dirname(dir), { recursive: true });
       this.run(this.root, ["clone", "--quiet", "--bare", url, dir]);

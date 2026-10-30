@@ -21,7 +21,6 @@ afterEach(async () => {
 interface Reply {
   id: number;
   name?: string;
-  role?: string;
   displayId?: string;
   tickets: { key: string; id: number; displayId: string }[];
   warnings: { type: string; tickets: string[] }[];
@@ -46,21 +45,21 @@ async function patch(path: string, body: unknown) {
   return { status: response.status, body: (await response.json()) as Reply };
 }
 
-async function setup(contractPath: string | null = "backend:openapi.yaml") {
-  const project = await post("/projects", {
-    name: "shop",
-    ...(contractPath ? { contractPath } : {}),
-  });
+async function setup(contractPath: string | null = "openapi.yaml") {
+  const project = await post("/projects", { name: "shop" });
   const projectId = project.body.id as number;
   await post(`/projects/${projectId}/repos`, {
     url: "git@github.com:acme/backend.git",
-    role: "backend",
+    name: "backend",
   });
   await post(`/projects/${projectId}/repos`, {
     url: "git@github.com:acme/frontend.git",
-    role: "frontend",
+    name: "frontend",
     defaultBranch: "develop",
   });
+  if (contractPath) {
+    await patch(`/projects/${projectId}/repos/backend`, { contractPath });
+  }
   const spec = await post("/specs", {
     projectId,
     type: "feature",
@@ -93,9 +92,9 @@ describe("projects, repos and specs", () => {
     expect(project).toMatchObject({ status: 201, body: { name: "shop" } });
     const repo = await post(`/projects/${project.body.id}/repos`, {
       url: "git@github.com:acme/backend.git",
-      role: "backend",
+      name: "backend",
     });
-    expect(repo).toMatchObject({ status: 201, body: { role: "backend" } });
+    expect(repo).toMatchObject({ status: 201, body: { name: "backend" } });
     const rows = await db.pool.query(
       "SELECT p.protected_paths, p.max_concurrency, r.default_branch FROM projects p JOIN repos r ON r.project_id = p.id",
     );
@@ -106,16 +105,37 @@ describe("projects, repos and specs", () => {
     });
   });
 
-  it("rejects a repo for an unknown project and a second repo with the same role", async () => {
+  it("rejects a repo for an unknown project and a second repo with the same name", async () => {
     expect(
-      (await post("/projects/99/repos", { url: "u", role: "backend" })).status,
+      (await post("/projects/99/repos", { url: "u", name: "backend" })).status,
     ).toBe(404);
     const { projectId } = await setup();
     const again = await post(`/projects/${projectId}/repos`, {
       url: "other",
-      role: "backend",
+      name: "backend",
     });
     expect(again.status).toBe(409);
+  });
+
+  it("still takes role as another word for name, and answers with the name", async () => {
+    const { projectId } = await setup();
+    const repo = await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/worker.git",
+      role: "worker",
+    });
+    expect(repo).toMatchObject({ status: 201, body: { name: "worker" } });
+    expect(
+      (await post(`/projects/${projectId}/repos`, { url: "u" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await post(`/projects/${projectId}/repos`, {
+          url: "u",
+          name: "a",
+          role: "b",
+        })
+      ).status,
+    ).toBe(400);
   });
 
   it("creates a spec and returns its display id; a slug is unique within the project", async () => {
@@ -170,15 +190,17 @@ describe("tickets import", () => {
     ...extra,
   });
 
-  it("refuses a contract edge when the project has no contract path", async () => {
+  it("refuses a contract edge when the upstream's repo has no contract path, and names the repo and the command", async () => {
     const { specId } = await setup(null);
     const result = await post(
       `/specs/${specId}/tickets/import`,
       exportFile({ spec: `S-${specId}` }),
     );
     expect(result.status).toBe(422);
-    expect(result.body.errors.join("\n")).toMatch(/--contract-path/);
-    expect(result.body.errors.join("\n")).toMatch(/plat project edit/);
+    expect(result.body.errors.join("\n")).toMatch(/repo backend/);
+    expect(result.body.errors.join("\n")).toMatch(
+      /plat repo edit backend --project <id> --contract-path/,
+    );
   });
 
   it("writes every ticket and edge, returns display ids, and stores no warnings when there are none", async () => {
@@ -195,26 +217,26 @@ describe("tickets import", () => {
     ]);
     expect(result.body.warnings).toEqual([]);
     const tickets = await db.pool.query(
-      "SELECT t.type, t.state, t.allowed_protected_paths, r.role FROM tickets t JOIN repos r ON r.id = t.repo_id ORDER BY t.id",
+      "SELECT t.type, t.state, t.allowed_protected_paths, r.name FROM tickets t JOIN repos r ON r.id = t.repo_id ORDER BY t.id",
     );
     expect(tickets.rows).toEqual([
       {
         type: "contract",
         state: "pending",
         allowed_protected_paths: ["openapi/openapi.yaml"],
-        role: "backend",
+        name: "backend",
       },
       {
         type: "implementation",
         state: "pending",
         allowed_protected_paths: [],
-        role: "backend",
+        name: "backend",
       },
       {
         type: "implementation",
         state: "pending",
         allowed_protected_paths: [],
-        role: "frontend",
+        name: "frontend",
       },
     ]);
     const edges = await db.pool.query(
@@ -362,22 +384,18 @@ describe("project edit", () => {
   it("changes only the fields that are sent", async () => {
     await post("/projects", {
       name: "shop",
-      contractPath: "backend:old.yaml",
       protectedPaths: [".github/**"],
       maxConcurrency: 2,
       budgetLimit: 100,
       limits: { repoConcurrency: 3 },
     });
-    const result = await patch("/projects/1", {
-      contractPath: "backend:openapi/openapi.yaml",
-    });
+    const result = await patch("/projects/1", { budgetLimit: 50 });
     expect(result.status).toBe(200);
     expect(await projectRow()).toMatchObject({
       name: "shop",
-      contract_path: "backend:openapi/openapi.yaml",
+      budget_limit: 50,
       protected_paths: [".github/**"],
       max_concurrency: 2,
-      budget_limit: 100,
       limits: { repoConcurrency: 3 },
     });
   });
@@ -417,11 +435,9 @@ describe("project edit", () => {
   });
 
   it("validates like project create and changes nothing when it refuses", async () => {
-    await post("/projects", { name: "shop", contractPath: "backend:a.yaml" });
+    await post("/projects", { name: "shop", budgetLimit: 7 });
     for (const body of [
       { contractPath: "openapi.yaml" },
-      { contractPath: ":openapi.yaml" },
-      { contractPath: "backend:" },
       { limits: { nope: 1 } },
       { limits: { repoConcurrency: 0 } },
       { maxConcurrency: 0 },
@@ -430,14 +446,15 @@ describe("project edit", () => {
     ]) {
       expect((await patch("/projects/1", body)).status).toBe(400);
     }
-    expect((await projectRow()).contract_path).toBe("backend:a.yaml");
-    expect(
-      (await post("/projects", { name: "x", contractPath: "openapi.yaml" }))
-        .status,
-    ).toBe(400);
+    expect((await projectRow()).budget_limit).toBe(7);
+    const moved = await post("/projects", {
+      name: "x",
+      contractPath: "openapi.yaml",
+    });
+    expect(moved.status).toBe(400);
   });
 
-  it("lets a project without a contract path import a contract edge once it has one", async () => {
+  it("lets a repo without a contract path serve a contract edge once it has one", async () => {
     const { projectId, specId } = await setup(null);
     const file = {
       spec: `S-${specId}`,
@@ -454,13 +471,55 @@ describe("project edit", () => {
     );
     expect(
       (
-        await patch(`/projects/${projectId}`, {
-          contractPath: "backend:openapi/openapi.yaml",
+        await patch(`/projects/${projectId}/repos/backend`, {
+          contractPath: "openapi/openapi.yaml",
         })
       ).status,
     ).toBe(200);
     expect((await post(`/specs/${specId}/tickets/import`, file)).status).toBe(
       200,
     );
+  });
+});
+
+describe("repo edit", () => {
+  const contractPaths = async () =>
+    (await db.pool.query("SELECT name, contract_path FROM repos ORDER BY id"))
+      .rows;
+
+  it("sets, changes and clears the contract path of one repo", async () => {
+    const { projectId } = await setup(null);
+    const url = `/projects/${projectId}/repos/backend`;
+    expect(
+      await patch(url, { contractPath: "openapi/openapi.yaml" }),
+    ).toMatchObject({ status: 200, body: { name: "backend" } });
+    expect(await contractPaths()).toEqual([
+      { name: "backend", contract_path: "openapi/openapi.yaml" },
+      { name: "frontend", contract_path: null },
+    ]);
+    await patch(url, { contractPath: "api.yaml" });
+    expect((await contractPaths())[0]?.contract_path).toBe("api.yaml");
+    await patch(url, { contractPath: "" });
+    expect((await contractPaths())[0]?.contract_path).toBeNull();
+  });
+
+  it("says plainly when the project or the repo does not exist, and refuses a path that is not a path", async () => {
+    const { projectId } = await setup(null);
+    expect(
+      (await patch("/projects/99/repos/backend", { contractPath: "a" })).status,
+    ).toBe(404);
+    const missing = await patch(`/projects/${projectId}/repos/nope`, {
+      contractPath: "a",
+    });
+    expect(missing).toMatchObject({
+      status: 404,
+      body: { error: "no such repo" },
+    });
+    for (const contractPath of ["backend:openapi.yaml", "/abs.yaml", " "]) {
+      expect(
+        (await patch(`/projects/${projectId}/repos/backend`, { contractPath }))
+          .status,
+      ).toBe(400);
+    }
   });
 });

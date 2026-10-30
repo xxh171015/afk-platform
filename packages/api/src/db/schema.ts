@@ -40,7 +40,6 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   defaultAgent: text("default_agent"),
   defaultModel: text("default_model"),
-  contractPath: text("contract_path"),
   protectedPaths: text("protected_paths").array().notNull().default([]),
   maxConcurrency: integer("max_concurrency"),
   budgetLimit: integer("budget_limit"),
@@ -59,13 +58,15 @@ export const repos = pgTable(
       .references(() => projects.id),
     url: text("url").notNull(),
     defaultBranch: text("default_branch").notNull().default("main"),
-    role: text("role").notNull(),
+    name: text("name").notNull(),
+    // Where the repo keeps its contract file, if it owns one; null for a repo that has none.
+    contractPath: text("contract_path"),
     createdAt: createdAt(),
   },
-  // role (backend, frontend) is how tickets.yaml names a repo, so it is unique within a project.
+  // The name (backend, frontend) is how tickets.yaml names a repo, so it is unique within a project.
   (t) => [
     index("repos_project_idx").on(t.projectId),
-    unique("repos_project_role_unique").on(t.projectId, t.role),
+    unique("repos_project_name_unique").on(t.projectId, t.name),
   ],
 );
 

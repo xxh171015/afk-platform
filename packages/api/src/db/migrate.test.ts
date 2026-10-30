@@ -94,7 +94,9 @@ describe("the id of the database", () => {
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
-        (e: { tag: string }) => e.tag !== "0014_branch_namespace",
+        (e: { tag: string }) =>
+          e.tag !== "0014_branch_namespace" &&
+          e.tag !== "0015_repo_names_and_contracts",
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
@@ -122,6 +124,85 @@ describe("the id of the database", () => {
     await expect(
       db.pool.query("INSERT INTO instance (id) VALUES ('abcdef')"),
     ).rejects.toThrow();
+  });
+});
+
+describe("the contract path", () => {
+  it("moves from the project to the repo it names, and the specs, tickets and repo names stay as they were", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => e.tag !== "0015_repo_names_and_contracts",
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query(
+        "INSERT INTO projects (name, contract_path) VALUES ('shop', 'backend:openapi/openapi.yaml'), ('bare', NULL)",
+      );
+      await db.pool.query(
+        `INSERT INTO repos (project_id, url, role) VALUES (1, 'b', 'backend'), (1, 'f', 'frontend'), (2, 'b2', 'backend')`,
+      );
+      await db.pool.query(
+        "INSERT INTO specs (project_id, type, slug, title) VALUES (1, 'feature', 'export', 'Export')",
+      );
+      await db.pool.query(
+        "INSERT INTO tickets (spec_id, repo_id, type, title) VALUES (1, 2, 'implementation', 'Fe')",
+      );
+
+      await migrate(db.pool);
+      const repos = await db.pool.query(
+        "SELECT project_id, name, contract_path FROM repos ORDER BY id",
+      );
+      expect(repos.rows).toEqual([
+        {
+          project_id: 1,
+          name: "backend",
+          contract_path: "openapi/openapi.yaml",
+        },
+        { project_id: 1, name: "frontend", contract_path: null },
+        { project_id: 2, name: "backend", contract_path: null },
+      ]);
+      const columns = await db.pool.query(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'contract_path'",
+      );
+      expect(columns.rows).toEqual([]);
+      const tickets = await db.pool.query("SELECT title, repo_id FROM tickets");
+      expect(tickets.rows).toEqual([{ title: "Fe", repo_id: 2 }]);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the contract path of a project that names no repo", () => {
+  it("stops the migration rather than lose the path", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => e.tag !== "0015_repo_names_and_contracts",
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query(
+        "INSERT INTO projects (name, contract_path) VALUES ('shop', 'gone:openapi.yaml')",
+      );
+      await db.pool.query(
+        "INSERT INTO repos (project_id, url, role) VALUES (1, 'b', 'backend')",
+      );
+      await expect(migrate(db.pool)).rejects.toThrow();
+      const columns = await db.pool.query(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'contract_path'",
+      );
+      expect(columns.rows).toHaveLength(1);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
   });
 });
 

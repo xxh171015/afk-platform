@@ -46,7 +46,7 @@ async function runningSpec(tickets: Record<string, unknown>[]) {
   const created = await call("POST", "/projects", { name: "shop" });
   await call("POST", `/projects/${created.body.id}/repos`, {
     url: "git@x:backend",
-    role: "backend",
+    name: "backend",
   });
   const spec = await call("POST", "/specs", {
     projectId: created.body.id,
@@ -280,7 +280,7 @@ describe("the overall review and the one fix", () => {
       spec: { displayId: "S-1", slug: "s" },
       integrationBranch: `spec/${id}/s`,
       agentBranch: `agent/${id}/S-1-final`,
-      repo: { role: "backend" },
+      repo: { name: "backend" },
       failureLog: null,
       review: null,
     });

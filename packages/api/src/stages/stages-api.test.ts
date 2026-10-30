@@ -20,6 +20,15 @@ afterEach(async () => {
   await db.drop();
 });
 
+async function patchJson(path: string, body: unknown) {
+  const response = await fetch(`${api.url}${path}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
 async function post(path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method: "POST",
@@ -46,18 +55,18 @@ const ticket = (key: string, extra: Record<string, unknown> = {}) => ({
 async function runningSpec(
   tickets: Record<string, unknown>[],
   project: Record<string, unknown> = {},
+  contractPath = "openapi.yaml",
 ) {
-  const created = await post("/projects", {
-    name: "shop",
-    contractPath: "backend:openapi.yaml",
-    ...project,
-  });
-  for (const role of ["backend", "frontend"]) {
+  const created = await post("/projects", { name: "shop", ...project });
+  for (const name of ["backend", "frontend"]) {
     await post(`/projects/${created.body.id}/repos`, {
-      url: `git@x:${role}`,
-      role,
+      url: `git@x:${name}`,
+      name,
     });
   }
+  await patchJson(`/projects/${created.body.id}/repos/backend`, {
+    contractPath,
+  });
   const spec = await post("/specs", {
     projectId: created.body.id,
     type: "feature",
@@ -750,7 +759,7 @@ describe("the bundle", () => {
         body: "# spec body",
         type: "feature",
       },
-      repo: { role: "backend", url: "git@x:backend", defaultBranch: "main" },
+      repo: { name: "backend", url: "git@x:backend", defaultBranch: "main" },
       integrationBranch: `spec/${id}/order-export`,
       agentBranch: `agent/${id}/T-1`,
       protectedPaths: ["openapi/**", ".github/**"],
@@ -779,13 +788,14 @@ describe("the bundle", () => {
     });
   });
 
-  it("points a downstream ticket at the contract SHA and the project's contract file", async () => {
+  it("points a downstream ticket at the contract SHA and the contract file of the repo that holds it", async () => {
     await runningSpec(
       [
         ticket("c", { type: "contract" }),
         ticket("fe", { repo: "frontend", contract: "c" }),
       ],
-      { contractPath: "backend:openapi/openapi.yaml" },
+      {},
+      "openapi/openapi.yaml",
     );
     await stage("implement", IMPLEMENT_DONE);
     await stage("gate", GATE_PASSED);
@@ -796,7 +806,7 @@ describe("the bundle", () => {
     const reply = await bundle(job);
     expect(reply.body.contract).toEqual({
       sha: "contract-head",
-      path: "backend:openapi/openapi.yaml",
+      path: "openapi/openapi.yaml",
       repoId: 1,
     });
     expect(reply.body.integrationBranch).toBe(
@@ -811,28 +821,27 @@ describe("the bundle", () => {
     expect(reply.body.agentBranch).toBe("agent/T-1");
   });
 
-  it("builds a bundle after a project edit from the project's new contract path", async () => {
+  it("builds a bundle after a repo edit from the repo's new contract path", async () => {
     await runningSpec(
       [
         ticket("c", { type: "contract" }),
         ticket("fe", { repo: "frontend", contract: "c" }),
       ],
-      { contractPath: "backend:old.yaml" },
+      {},
+      "old.yaml",
     );
     await stage("implement", IMPLEMENT_DONE);
     await stage("gate", GATE_PASSED);
     await stage("review", REVIEW_PASS);
     await stage("merge", { outcome: "merged", headSha: "contract-head" });
-    const edited = await fetch(`${api.url}/projects/1`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ contractPath: "backend:openapi/openapi.yaml" }),
+    const edited = await patchJson("/projects/1/repos/backend", {
+      contractPath: "openapi/openapi.yaml",
     });
     expect(edited.status).toBe(200);
     const reply = await bundle((await worker.claim()).body.job as Claimed);
     expect(reply.body.contract).toMatchObject({
       sha: "contract-head",
-      path: "backend:openapi/openapi.yaml",
+      path: "openapi/openapi.yaml",
     });
   });
 

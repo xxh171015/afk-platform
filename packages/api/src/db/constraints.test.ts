@@ -34,7 +34,7 @@ async function insert(sql: string, params: unknown[] = []): Promise<number> {
 async function seed() {
   const projectId = await insert("INSERT INTO projects (name) VALUES ('p')");
   const repoId = await insert(
-    "INSERT INTO repos (project_id, url, role) VALUES ($1, 'u', 'primary')",
+    "INSERT INTO repos (project_id, url, name) VALUES ($1, 'u', 'primary')",
     [projectId],
   );
   const specId = await insert(
@@ -100,7 +100,7 @@ describe("foreign keys", () => {
   it.each([
     [
       "repo -> project",
-      "INSERT INTO repos (project_id, url, role) VALUES ($1, 'u', 'primary')",
+      "INSERT INTO repos (project_id, url, name) VALUES ($1, 'u', 'primary')",
     ],
     [
       "spec -> project",
@@ -225,7 +225,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     const { projectId } = await seed();
     expect(
       await outcome(
-        "INSERT INTO repos (project_id, url, role) VALUES ($1, 'other', 'primary')",
+        "INSERT INTO repos (project_id, url, name) VALUES ($1, 'other', 'primary')",
         [projectId],
       ),
     ).toBe(UNIQUE_VIOLATION);

@@ -6,6 +6,7 @@ import {
   createProject,
   createSpec,
   editProject,
+  editRepo,
   importTickets,
 } from "../planning/planning.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
@@ -21,15 +22,17 @@ const reply = (description: string, schema: z.ZodType) => ({
   content: json(schema),
 });
 
-// "<repo role>:<path in that repo>", as the bundle's contract pointer reads it.
-const ContractPath = Text.regex(
-  /^[^:\s]+:\S.*$/,
-  "must look like role:path, e.g. backend:openapi/openapi.yaml",
-);
+// A path in the repo that owns the contract, e.g. openapi/openapi.yaml; empty clears it.
+const ContractPath = z
+  .string()
+  .max(500)
+  .regex(
+    /^$|^[^\s/:][^\s:]*$/,
+    "must be a path in the repo, like openapi/openapi.yaml, or empty to clear it",
+  );
 
 // The settings both project create and project edit take, checked the same way.
 const projectSettings = {
-  contractPath: ContractPath.optional(),
   protectedPaths: z.array(Text).max(200).optional(),
   maxConcurrency: Id.optional(),
   budgetLimit: Id.optional(),
@@ -42,13 +45,15 @@ const projectRoute = createRoute({
   request: {
     body: {
       content: json(
-        z.object({
-          name: Text,
-          defaultAgent: Text.optional(),
-          defaultModel: Text.optional(),
-          mergePolicy: Text.optional(),
-          ...projectSettings,
-        }),
+        z
+          .object({
+            name: Text,
+            defaultAgent: Text.optional(),
+            defaultModel: Text.optional(),
+            mergePolicy: Text.optional(),
+            ...projectSettings,
+          })
+          .strict(),
       ),
     },
   },
@@ -64,7 +69,9 @@ const projectEditRoute = createRoute({
     }),
     body: {
       content: json(
-        z.object({ defaultModel: Text.optional(), ...projectSettings }),
+        z
+          .object({ defaultModel: Text.optional(), ...projectSettings })
+          .strict(),
       ),
     },
   },
@@ -83,18 +90,47 @@ const repoRoute = createRoute({
     }),
     body: {
       content: json(
-        z.object({
-          url: Text,
-          role: Text,
-          defaultBranch: Text.optional(),
-        }),
+        z
+          .object({
+            url: Text,
+            // How tickets.yaml names the repo. `role` is the older word for it, kept as an alias for a version.
+            name: Text.optional(),
+            role: Text.optional(),
+            defaultBranch: Text.optional(),
+          })
+          .refine(
+            (body) => (body.name === undefined) !== (body.role === undefined),
+            {
+              message: "give the repo's name (role is an older word for it)",
+            },
+          ),
       ),
     },
   },
   responses: {
-    201: reply("Created", z.object({ id: Id, role: z.string() })),
+    201: reply("Created", z.object({ id: Id, name: z.string() })),
     404: reply("No such project", ErrorReply),
-    409: reply("The project already has a repo with this role", ErrorReply),
+    409: reply("The project already has a repo with this name", ErrorReply),
+  },
+});
+
+const repoEditRoute = createRoute({
+  method: "patch",
+  path: "/projects/{projectId}/repos/{name}",
+  request: {
+    params: z.object({
+      projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+      name: Text,
+    }),
+    body: {
+      content: json(
+        z.object({ contractPath: ContractPath.optional() }).strict(),
+      ),
+    },
+  },
+  responses: {
+    200: reply("Updated", z.object({ id: Id, name: z.string() })),
+    404: reply("No such project or repo", ErrorReply),
   },
 });
 
@@ -204,17 +240,35 @@ export function registerPlanningRoutes(
 
   app.openapi(repoRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    const result = await addRepo(pool, { projectId, ...c.req.valid("json") });
+    const { name, role, url, defaultBranch } = c.req.valid("json");
+    const result = await addRepo(pool, {
+      projectId,
+      url,
+      name: (name ?? role) as string,
+      defaultBranch,
+    });
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);
     }
-    if (result.status === "role-taken") {
+    if (result.status === "name-taken") {
       return c.json(
-        { error: "the project already has a repo with this role" },
+        { error: "the project already has a repo with this name" },
         409,
       );
     }
     return c.json(result.repo, 201);
+  });
+
+  app.openapi(repoEditRoute, async (c) => {
+    const { projectId, name } = c.req.valid("param");
+    const result = await editRepo(pool, projectId, name, c.req.valid("json"));
+    if (result.status === "no-project") {
+      return c.json({ error: "no such project" }, 404);
+    }
+    if (result.status === "no-repo") {
+      return c.json({ error: "no such repo" }, 404);
+    }
+    return c.json(result.repo, 200);
   });
 
   app.openapi(specRoute, async (c) => {

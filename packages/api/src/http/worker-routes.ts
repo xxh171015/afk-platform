@@ -157,7 +157,7 @@ const Bundle = z.object({
   }),
   repo: z.object({
     id: z.number().int(),
-    role: z.string(),
+    name: z.string(),
     url: z.string(),
     defaultBranch: z.string(),
   }),

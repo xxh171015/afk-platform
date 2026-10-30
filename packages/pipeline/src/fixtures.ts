@@ -33,7 +33,7 @@ export function bundleFor(
     },
     repo: {
       id: 1,
-      role: "backend",
+      name: "backend",
       url: "git@x:backend",
       defaultBranch: "main",
     },

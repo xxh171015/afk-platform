@@ -77,7 +77,7 @@ async function finalizations(
 ): Promise<FinalizationSummary[]> {
   const { rows } = await pool.query(
     // A review that was not finished when its spec was cancelled is cancelled with it, whatever it was waiting for.
-    `SELECT f.spec_id, f.step, r.role,
+    `SELECT f.spec_id, f.step, r.name AS repo,
             CASE WHEN f.state <> 'done' AND s.state = 'cancelled' THEN 'cancelled' ELSE f.state END AS state,
             CASE WHEN s.state = 'cancelled' THEN NULL ELSE f.blocked_reason END AS blocked_reason
      FROM finalizations f JOIN repos r ON r.id = f.repo_id JOIN specs s ON s.id = f.spec_id
@@ -88,7 +88,7 @@ async function finalizations(
     rows.map(async (row) => ({
       specId: row.spec_id as number,
       specDisplayId: formatDisplayId("spec", row.spec_id),
-      repo: row.role as string,
+      repo: row.repo as string,
       step: row.step as string,
       state: row.state as string,
       blockedReason: (row.blocked_reason as string | null) ?? null,
@@ -117,7 +117,7 @@ async function summaries(
   params: unknown[],
 ): Promise<TicketSummary[]> {
   const { rows } = await pool.query(
-    `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, r.role
+    `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, r.name AS repo
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE ${where} ORDER BY t.id`,
     params,
   );
@@ -131,7 +131,7 @@ async function summaries(
       type: row.type as string,
       state: row.state as TicketState,
       blockedReason: (row.blocked_reason as string | null) ?? null,
-      repo: row.role as string,
+      repo: row.repo as string,
       // an upstream cancel is not the fault of any run, so there is no brief to show
       brief:
         row.state === "blocked" && row.blocked_reason !== "upstream-cancelled"
@@ -387,7 +387,7 @@ async function pullRequestProblems(
   pool: pg.Pool,
 ): Promise<PullRequestProblem[]> {
   const { rows } = await pool.query(
-    `SELECT p.spec_id, r.role, p.number, p.url, p.state, p.sync_error
+    `SELECT p.spec_id, r.name AS repo, p.number, p.url, p.state, p.sync_error
      FROM pull_requests p JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
      WHERE ${FOLLOWED_PULL_REQUESTS} AND (p.state = 'closed' OR p.sync_error IS NOT NULL)
      ORDER BY p.id`,
@@ -395,7 +395,7 @@ async function pullRequestProblems(
   return rows.map((row) => ({
     specId: row.spec_id as number,
     specDisplayId: formatDisplayId("spec", row.spec_id),
-    repo: row.role as string,
+    repo: row.repo as string,
     number: row.number as number,
     url: row.url as string,
     state: row.state as string,

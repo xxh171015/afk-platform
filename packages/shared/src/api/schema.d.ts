@@ -27,7 +27,6 @@ export interface paths {
             defaultAgent?: string;
             defaultModel?: string;
             mergePolicy?: string;
-            contractPath?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -90,7 +89,6 @@ export interface paths {
         content: {
           "application/json": {
             defaultModel?: string;
-            contractPath?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -155,7 +153,8 @@ export interface paths {
         content: {
           "application/json": {
             url: string;
-            role: string;
+            name?: string;
+            role?: string;
             defaultBranch?: string;
           };
         };
@@ -169,7 +168,7 @@ export interface paths {
           content: {
             "application/json": {
               id: number;
-              role: string;
+              name: string;
             };
           };
         };
@@ -184,7 +183,7 @@ export interface paths {
             };
           };
         };
-        /** @description The project already has a repo with this role */
+        /** @description The project already has a repo with this name */
         409: {
           headers: {
             [name: string]: unknown;
@@ -201,6 +200,64 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/repos/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            contractPath?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              name: string;
+            };
+          };
+        };
+        /** @description No such project or repo */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
     trace?: never;
   };
   "/specs": {
@@ -821,7 +878,7 @@ export interface paths {
               };
               repo: {
                 id: number;
-                role: string;
+                name: string;
                 url: string;
                 defaultBranch: string;
               };

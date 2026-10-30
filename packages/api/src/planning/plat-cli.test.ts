@@ -90,29 +90,32 @@ external_blocked_by: []
 `;
 
 async function register() {
-  await plat(
-    "project",
-    "create",
-    "shop",
-    "--contract-path",
-    "backend:openapi.yaml",
-  );
+  await plat("project", "create", "shop");
   await plat(
     "repo",
     "add",
     "--project",
     "1",
-    "--role",
+    "--name",
     "backend",
     "--url",
     "git@github.com:acme/backend.git",
   );
   await plat(
     "repo",
+    "edit",
+    "backend",
+    "--project",
+    "1",
+    "--contract-path",
+    "openapi.yaml",
+  );
+  await plat(
+    "repo",
     "add",
     "--project",
     "1",
-    "--role",
+    "--name",
     "frontend",
     "--url",
     "git@github.com:acme/frontend.git",
@@ -200,8 +203,6 @@ describe("plat", () => {
       "project",
       "edit",
       "1",
-      "--contract-path",
-      "backend:openapi.yaml",
       "--max-concurrency",
       "3",
       "--budget-limit",
@@ -217,11 +218,10 @@ describe("plat", () => {
       stderr: "",
     });
     const row = await db.pool.query(
-      "SELECT default_model, contract_path, protected_paths, max_concurrency, budget_limit, limits FROM projects",
+      "SELECT default_model, protected_paths, max_concurrency, budget_limit, limits FROM projects",
     );
     expect(row.rows[0]).toEqual({
       default_model: "composer-2",
-      contract_path: "backend:openapi.yaml",
       protected_paths: [".github/**"],
       max_concurrency: 3,
       budget_limit: 50,
@@ -235,16 +235,69 @@ describe("plat", () => {
     expect(
       (await plat("project", "edit", "9", "--budget-limit", "5")).stderr,
     ).toBe("error: no such project\n");
+    const moved = await plat(
+      "project",
+      "edit",
+      "1",
+      "--contract-path",
+      "openapi.yaml",
+    );
+    expect(moved.code).toBe(1);
+    expect(moved.stderr).toMatch(/plat repo edit <name>/);
     expect(
-      (await plat("project", "edit", "1", "--contract-path", "openapi.yaml"))
-        .code,
-    ).toBe(1);
+      (await plat("project", "create", "x", "--contract-path", "a.yaml"))
+        .stderr,
+    ).toMatch(/plat repo edit <name>/);
     expect(
       (await plat("project", "edit", "1", "--limit", "oops")).stderr,
     ).toMatch(/name=positive integer/);
     const none = await plat("project", "edit", "1");
     expect(none.code).toBe(1);
     expect(none.stderr).toMatch(/nothing to change/);
+  });
+
+  it("registers a repo by name (role still works) and sets, shows and clears its contract path", async () => {
+    await plat("project", "create", "shop");
+    const add = (...flags: string[]) =>
+      plat("repo", "add", "--project", "1", "--url", "git@x:r", ...flags);
+    expect(await add("--name", "backend")).toEqual({
+      code: 0,
+      stdout: "repo 1 backend\n",
+      stderr: "",
+    });
+    expect((await add("--role", "worker")).stdout).toBe("repo 2 worker\n");
+    expect((await add("--name", "backend")).code).toBe(1);
+    expect((await add()).stderr).toMatch(/--name/);
+
+    const edit = (...flags: string[]) =>
+      plat("repo", "edit", "backend", "--project", "1", ...flags);
+    expect(await edit("--contract-path", "openapi/openapi.yaml")).toEqual({
+      code: 0,
+      stdout: "repo 1 backend updated\n",
+      stderr: "",
+    });
+    const paths = () =>
+      db.pool.query("SELECT contract_path FROM repos ORDER BY id");
+    expect((await paths()).rows).toEqual([
+      { contract_path: "openapi/openapi.yaml" },
+      { contract_path: null },
+    ]);
+    expect((await edit("--contract-path", "")).code).toBe(0);
+    expect((await paths()).rows[0]).toEqual({ contract_path: null });
+    expect((await edit()).stderr).toMatch(/nothing to change/);
+    expect(
+      (
+        await plat(
+          "repo",
+          "edit",
+          "nope",
+          "--project",
+          "1",
+          "--contract-path",
+          "a",
+        )
+      ).stderr,
+    ).toBe("error: no such repo\n");
   });
 
   it("prints a run's log, all of it or from an offset, as text or JSON", async () => {

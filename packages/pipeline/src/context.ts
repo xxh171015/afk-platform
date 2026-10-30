@@ -69,12 +69,8 @@ function runJson(input: ContextInput) {
   };
 }
 
-// The project's contract path is "<repo role>:<path in that repo>".
-const contractPathInRepo = (path: string) => path.slice(path.indexOf(":") + 1);
-
 // The agent sees the contract under /context/contract/.
-const contractFile = (path: string) =>
-  `contract/${basename(contractPathInRepo(path))}`;
+const contractFile = (path: string) => `contract/${basename(path)}`;
 
 export function renderContext(input: ContextInput): void {
   const { dir, bundle } = input;
@@ -114,7 +110,7 @@ export function readContract(
   repoDir: string,
   contract: NonNullable<Bundle["contract"]>,
 ): { path: string; content: string } {
-  const path = contractPathInRepo(contract.path);
+  const { path } = contract;
   const shown = git(repoDir, ["show", `${contract.sha}:${path}`]);
   if (shown.code !== 0) {
     throw new Error(

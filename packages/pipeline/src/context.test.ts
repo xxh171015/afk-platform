@@ -92,7 +92,7 @@ describe("renderContext", () => {
     const bundle = bundleFor({
       contract: {
         sha: "c0ffee",
-        path: "backend:openapi/openapi.yaml",
+        path: "openapi/openapi.yaml",
         repoId: 1,
       },
     });
@@ -123,7 +123,7 @@ describe("readContract", () => {
     );
     const contract = readContract(repo.dir, {
       sha,
-      path: "backend:openapi/openapi.yaml",
+      path: "openapi/openapi.yaml",
       repoId: 1,
     });
     expect(contract).toEqual({
@@ -138,7 +138,7 @@ describe("readContract", () => {
     expect(() =>
       readContract(repo?.dir as string, {
         sha,
-        path: "backend:openapi/openapi.yaml",
+        path: "openapi/openapi.yaml",
         repoId: 1,
       }),
     ).toThrow(/git show/);

@@ -37,11 +37,122 @@
                     "minLength": 1,
                     "maxLength": 500
                   },
-                  "contractPath": {
+                  "protectedPaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "maxItems": 200
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "budgetLimit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "limits": {
+                    "type": "object",
+                    "properties": {
+                      "workerSlots": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "projectConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "repoConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "runIdleSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "runWallclockSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "ticketWallclockSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "specAgentSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "defaultModel": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 500,
-                    "pattern": "^[^:\\s]+:\\S.*$"
+                    "maxLength": 500
                   },
                   "protectedPaths": {
                     "type": "array",
@@ -104,128 +215,7 @@
                     "additionalProperties": false
                   }
                 },
-                "required": ["name"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 2147483647
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["id", "name"]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/projects/{projectId}": {
-      "patch": {
-        "parameters": [
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 2147483647
-            },
-            "required": true,
-            "name": "projectId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "defaultModel": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "contractPath": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500,
-                    "pattern": "^[^:\\s]+:\\S.*$"
-                  },
-                  "protectedPaths": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 500
-                    },
-                    "maxItems": 200
-                  },
-                  "maxConcurrency": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 2147483647
-                  },
-                  "budgetLimit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 2147483647
-                  },
-                  "limits": {
-                    "type": "object",
-                    "properties": {
-                      "workerSlots": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      },
-                      "projectConcurrency": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      },
-                      "repoConcurrency": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      },
-                      "runIdleSeconds": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      },
-                      "runWallclockSeconds": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      },
-                      "ticketWallclockSeconds": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      },
-                      "specAgentSeconds": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 2147483647
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                }
+                "additionalProperties": false
               }
             }
           }
@@ -293,6 +283,11 @@
                     "minLength": 1,
                     "maxLength": 500
                   },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
                   "role": {
                     "type": "string",
                     "minLength": 1,
@@ -304,7 +299,7 @@
                     "maxLength": 500
                   }
                 },
-                "required": ["url", "role"]
+                "required": ["url"]
               }
             }
           }
@@ -322,11 +317,11 @@
                       "minimum": 1,
                       "maximum": 2147483647
                     },
-                    "role": {
+                    "name": {
                       "type": "string"
                     }
                   },
-                  "required": ["id", "role"]
+                  "required": ["id", "name"]
                 }
               }
             }
@@ -348,7 +343,89 @@
             }
           },
           "409": {
-            "description": "The project already has a repo with this role",
+            "description": "The project already has a repo with this name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/repos/{name}": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "contractPath": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "pattern": "^$|^[^\\s/:][^\\s:]*$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "name"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or repo",
             "content": {
               "application/json": {
                 "schema": {
@@ -1358,7 +1435,7 @@
                         "id": {
                           "type": "integer"
                         },
-                        "role": {
+                        "name": {
                           "type": "string"
                         },
                         "url": {
@@ -1368,7 +1445,7 @@
                           "type": "string"
                         }
                       },
-                      "required": ["id", "role", "url", "defaultBranch"]
+                      "required": ["id", "name", "url", "defaultBranch"]
                     },
                     "integrationBranch": {
                       "type": ["string", "null"]
