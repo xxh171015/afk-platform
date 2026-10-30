@@ -14,6 +14,7 @@ import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 const ENTITY_TABLES = [
   "acceptance_packs",
   "edges",
+  "final_e2e",
   "finalizations",
   "findings",
   "gate_results",
@@ -41,6 +42,7 @@ const LATER_THAN_REPO_NAMES = [
   "0022_spec_order_broken",
   "0023_e2e_stage",
   "0024_integration_rounds",
+  "0025_final_e2e",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

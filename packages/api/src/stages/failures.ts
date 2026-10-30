@@ -5,6 +5,10 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import {
+  finalE2eJobFailed,
+  readFinalE2ePayload,
+} from "../finalize/final-e2e.ts";
+import {
   CLEANUP_RETRY_SECONDS,
   enqueueOpenPr,
   enqueuePrReady,
@@ -82,6 +86,8 @@ export async function recordJobFailure(
 ): Promise<FailureOutcome> {
   await finishRun(client, job.id, error);
 
+  const finalE2e = readFinalE2ePayload(job.payload);
+  if (finalE2e) return finalE2eJobFailed(client, finalE2e);
   const stage = readStagePayload(job.payload);
   if (stage) return ticketStageFailed(client, stage);
   const final = readFinalPayload(job.payload);

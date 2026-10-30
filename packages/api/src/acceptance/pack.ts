@@ -2,6 +2,7 @@ import { formatDisplayId } from "@afk/shared";
 import { z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { mergeOrderOf } from "../host/merge-order.ts";
+import { integrationAttempts } from "../tickets/integration-attempts.ts";
 
 // The acceptance pack: what a person needs to decide whether to merge a spec's pull requests
 // (docs/design.md「合并到 main 与信任阶梯」). It is built from what the platform recorded, once, when the
@@ -83,6 +84,57 @@ const RepoSection = z.object({
   ),
 });
 
+// The integration tickets get a section of their own: the result of each one's last e2e (a rerun before the pull
+// requests, if there was one, counts), which repos in the environment at which SHAs, and each criterion checked
+// against that e2e's JUnit. When a person let the pull requests out although the e2e before them failed, it says so
+// here with the evidence.
+const IntegrationSection = z.object({
+  failedBeforePullRequest: z
+    .object({
+      tickets: z.array(
+        z.object({
+          displayId: z.string(),
+          title: z.string(),
+          e2e: z.object({
+            displayId: z.string(),
+            result: z.string().nullable(),
+          }),
+          diagnosis: z
+            .object({
+              failingRepo: z.string().nullable(),
+              evidence: z.string(),
+              failingTests: z.array(z.string()),
+            })
+            .nullable(),
+        }),
+      ),
+    })
+    .nullable(),
+  tickets: z.array(
+    z.object({
+      displayId: z.string(),
+      title: z.string(),
+      repo: z.string(),
+      appended: z.boolean(),
+      result: z.string().nullable(), // passed / failed, or null when no e2e ran
+      runDisplayId: z.string().nullable(),
+      testsTotal: z.number().int().nullable(),
+      testsFailed: z.number().int().nullable(),
+      envUpMs: z.number().int().nullable(),
+      refShas: z.record(z.string(), z.string()).nullable(),
+      headSha: z.string().nullable(),
+      criteria: z.array(
+        z.object({
+          text: z.string(),
+          tests: z.array(z.string()),
+          status: z.enum(["verified", "unverified"]),
+          reason: z.string().nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+
 // The pack of a spec (made once, when its pull requests are all open): the order to merge in, a section per repo,
 // the tickets that were cancelled. The pull requests, the merge order and whether it was broken are read live.
 // A section for the integration environment will join the repos when integration tickets bring their results; a
@@ -92,6 +144,7 @@ export const AcceptancePack = z.object({
   mergeOrder: MergeOrderView,
   orderBroken: OrderBroken,
   repos: z.array(RepoSection),
+  integration: IntegrationSection.nullable().optional(), // none for a spec without integration tickets
   cancelledTickets: z.array(
     z.object({ displayId: z.string(), title: z.string(), repo: z.string() }),
   ),
@@ -225,6 +278,7 @@ export async function buildAcceptancePack(
 
   const tickets = await client.query<{
     id: number;
+    type: string;
     repo_id: number;
     repo: string;
     title: string;
@@ -233,7 +287,7 @@ export async function buildAcceptancePack(
     acceptance_criteria: string[];
     allowed_protected_paths: string[];
   }>(
-    `SELECT t.id, t.repo_id, r.name AS repo, t.title, t.state, t.appended, t.acceptance_criteria,
+    `SELECT t.id, t.type, t.repo_id, r.name AS repo, t.title, t.state, t.appended, t.acceptance_criteria,
             t.allowed_protected_paths
      FROM tickets t JOIN repos r ON r.id = t.repo_id
      WHERE t.spec_id = $1 AND t.state IN ('done', 'cancelled') ORDER BY t.id`,
@@ -257,6 +311,11 @@ export async function buildAcceptancePack(
     return section;
   };
   const cancelledTickets: AcceptancePack["cancelledTickets"] = [];
+  // integration tickets are shown in their own section, with the tests the agent named for each criterion
+  const integrationTickets: {
+    ticket: (typeof tickets.rows)[number];
+    named: Map<string, string[]>;
+  }[] = [];
   for (const ticket of tickets.rows) {
     const display = formatDisplayId("ticket", ticket.id);
     if (ticket.state === "cancelled") {
@@ -285,19 +344,23 @@ export async function buildAcceptancePack(
     );
     for (const text of strings(record(review.rows[0]?.output).uncertainties))
       section.uncertainties.push({ source: `${display} review`, text });
-    section.tickets.push({
-      displayId: display,
-      title: ticket.title,
-      appended: ticket.appended,
-      criteria: ticket.acceptance_criteria.map((text) => {
-        const tests = named.get(text.trim()) ?? [];
-        return {
-          text,
-          tests,
-          ...checkCriterion(tests, casesOf.get(ticket.repo_id) ?? undefined),
-        };
-      }),
-    });
+    if (ticket.type === "integration") {
+      integrationTickets.push({ ticket, named });
+    } else {
+      section.tickets.push({
+        displayId: display,
+        title: ticket.title,
+        appended: ticket.appended,
+        criteria: ticket.acceptance_criteria.map((text) => {
+          const tests = named.get(text.trim()) ?? [];
+          return {
+            text,
+            tests,
+            ...checkCriterion(tests, casesOf.get(ticket.repo_id) ?? undefined),
+          };
+        }),
+      });
+    }
     if (ticket.allowed_protected_paths.length > 0)
       section.protectedPathApprovals.push({
         ticket: display,
@@ -378,12 +441,107 @@ export async function buildAcceptancePack(
     mergeOrder: { ordered: [], after: {}, unordered: [] },
     orderBroken: [],
     repos: [...sections.values()],
+    integration: await integrationSection(client, specId, integrationTickets),
     cancelledTickets,
     agentSeconds: Math.round(Number(agent.rows[0]?.ms) / 1000),
   });
 }
 
 type Section = AcceptancePack["repos"][number];
+
+async function integrationSection(
+  client: Pick<pg.PoolClient, "query">,
+  specId: number,
+  found: {
+    ticket: {
+      id: number;
+      repo_id: number;
+      repo: string;
+      title: string;
+      appended: boolean;
+      acceptance_criteria: string[];
+    };
+    named: Map<string, string[]>;
+  }[],
+): Promise<AcceptancePack["integration"]> {
+  if (found.length === 0) return null;
+  const waived = await client.query(
+    "SELECT 1 FROM final_e2e WHERE spec_id = $1 AND state = 'waived'",
+    [specId],
+  );
+  const failed: NonNullable<
+    NonNullable<AcceptancePack["integration"]>["failedBeforePullRequest"]
+  >["tickets"] = [];
+  const tickets: NonNullable<AcceptancePack["integration"]>["tickets"] = [];
+  for (const { ticket, named } of found) {
+    const display = formatDisplayId("ticket", ticket.id);
+    // the last e2e of the ticket decides: a rerun before the pull requests is the last one
+    const last = (
+      await client.query<{
+        id: number;
+        result: string | null;
+        tests_total: number | null;
+        tests_failed: number | null;
+        env_up_ms: number | null;
+        ref_shas: Record<string, string> | null;
+        head_sha: string | null;
+      }>(
+        `SELECT id, result, tests_total, tests_failed, env_up_ms, ref_shas, head_sha FROM runs
+         WHERE ticket_id = $1 AND stage = 'e2e' AND result IS NOT NULL ORDER BY id DESC LIMIT 1`,
+        [ticket.id],
+      )
+    ).rows[0];
+    const gate = last?.head_sha
+      ? (
+          await client.query<{ test_cases: TestCaseRow[] | null }>(
+            "SELECT test_cases FROM gate_results WHERE repo_id = $1 AND commit_sha = $2 AND kind = 'e2e'",
+            [ticket.repo_id, last.head_sha],
+          )
+        ).rows[0]
+      : undefined;
+    tickets.push({
+      displayId: display,
+      title: ticket.title,
+      repo: ticket.repo,
+      appended: ticket.appended,
+      result: last?.result ?? null,
+      runDisplayId: last ? formatDisplayId("run", last.id) : null,
+      testsTotal: last?.tests_total ?? null,
+      testsFailed: last?.tests_failed ?? null,
+      envUpMs: last?.env_up_ms ?? null,
+      refShas: last?.ref_shas ?? null,
+      headSha: last?.head_sha ?? null,
+      criteria: ticket.acceptance_criteria.map((text) => {
+        const tests = named.get(text.trim()) ?? [];
+        // the e2e's own JUnit is what verifies an integration ticket, not the repo's unit gate
+        return {
+          text,
+          tests,
+          ...checkCriterion(
+            tests,
+            gate ? (gate.test_cases ?? undefined) : undefined,
+          ),
+        };
+      }),
+    });
+    if (waived.rowCount && last?.result !== "passed") {
+      const attempt = (await integrationAttempts(client, ticket.id)).at(-1);
+      failed.push({
+        displayId: display,
+        title: ticket.title,
+        e2e: {
+          displayId: last ? formatDisplayId("run", last.id) : "",
+          result: last?.result ?? null,
+        },
+        diagnosis: attempt?.diagnosis ?? null,
+      });
+    }
+  }
+  return {
+    failedBeforePullRequest: waived.rowCount ? { tickets: failed } : null,
+    tickets,
+  };
+}
 
 // What changes after the pack is made, and is read again each time it is shown: the pull requests, the merge
 // order they follow, and whether a person broke it. The repo sections come out in merge order.
@@ -436,6 +594,7 @@ export async function readAcceptancePack(
   );
   if (!rows[0]) return null;
   let pack = rows[0].content;
+  pack = { ...pack, integration: pack.integration ?? null };
   if (!Array.isArray(pack.repos)) {
     pack = await buildAcceptancePack(pool, specId, new Date(pack.generatedAt));
     await pool.query(

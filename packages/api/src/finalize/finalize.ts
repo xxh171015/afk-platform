@@ -11,11 +11,11 @@ import {
 import type pg from "pg";
 import { z } from "zod";
 import { enqueueOpenPr } from "../host/host-jobs.ts";
-import { startOpeningPullRequests } from "../host/pull-requests.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
 import type { ActionResult } from "../tickets/actions.ts";
+import { retryFinalE2e, settleFinalization } from "./final-e2e.ts";
 
 const refused = (message: string) => ({ status: "refused", message }) as const;
 
@@ -114,8 +114,9 @@ export async function recordFinalResult(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",
       [fin.id],
     );
-    // the last repo to settle sends all of the spec's pull requests out
-    await startOpeningPullRequests(client, read.specId);
+    // the last repo to settle sends all of the spec's pull requests out, after the e2e that comes first when a
+    // final fix changed a branch
+    await settleFinalization(client, read.specId);
   } else {
     await client.query(
       "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
@@ -172,13 +173,15 @@ export async function retryFinalization(
       "SELECT id, repo_id, step FROM finalizations WHERE spec_id = $1 AND state = 'blocked' ORDER BY id",
       [specId],
     );
-    if (blocked.rows.length === 0) {
+    const retried: string[] = [];
+    // the e2e before the pull requests is a step of the spec's finalization too
+    if (await retryFinalE2e(client, specId)) retried.push("final-e2e");
+    if (blocked.rows.length === 0 && retried.length === 0) {
       return {
         status: "refused",
         message: `${formatDisplayId("spec", specId)} has no blocked finalization`,
       };
     }
-    const retried: string[] = [];
     for (const row of blocked.rows) {
       await client.query(
         "UPDATE finalizations SET state = 'active', blocked_reason = NULL,\n           job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",

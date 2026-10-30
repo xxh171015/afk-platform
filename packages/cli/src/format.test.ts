@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ticketText } from "./format.ts";
+import { acceptancePackText, blockedText, ticketText } from "./format.ts";
 
 const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
   ticket: {
@@ -111,5 +111,91 @@ describe("an integration ticket", () => {
     expect(text).toContain("failing: downloads the export");
     expect(text).toContain("fix ticket: T-7 (done, backend)");
     expect(text).toContain("e2e 2: passed in R-9, 0 of 3 tests failed");
+  });
+});
+
+describe("the e2e before the pull requests", () => {
+  it("is a blocked step with the two ways forward", () => {
+    const text = blockedText({
+      tickets: [],
+      finalizations: [
+        {
+          specDisplayId: "S-1",
+          repo: "(integration)",
+          step: "final-e2e",
+          state: "blocked",
+          blockedReason: "final-e2e-failed",
+          brief: null,
+        },
+      ],
+      pullRequests: [],
+      cleanups: [],
+      readyFailures: [],
+      specs: [],
+    } as never);
+    expect(text).toContain("S-1  e2e before the pull requests");
+    expect(text).toContain("plat spec retry-final S-1");
+    expect(text).toContain("plat spec waive-final S-1");
+  });
+
+  it("is the first thing in an acceptance pack whose pull requests were opened after it failed", () => {
+    const pack = {
+      mergeOrder: { ordered: [], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [],
+      cancelledTickets: [],
+      integration: {
+        failedBeforePullRequest: {
+          tickets: [
+            {
+              displayId: "T-2",
+              title: "Export e2e",
+              e2e: { displayId: "R-9", result: "failed" },
+              diagnosis: {
+                failingRepo: "backend",
+                evidence: "GET /orders/export answers 404",
+                failingTests: ["exports"],
+              },
+            },
+          ],
+        },
+        tickets: [
+          {
+            displayId: "T-2",
+            title: "Export e2e",
+            repo: "frontend",
+            appended: false,
+            result: "failed",
+            runDisplayId: "R-9",
+            testsTotal: 3,
+            testsFailed: 1,
+            envUpMs: 4000,
+            refShas: { backend: "0123456789abcdef" },
+            headSha: "fedcba9876543210",
+            criteria: [
+              {
+                text: "it downloads",
+                tests: ["exports"],
+                status: "unverified",
+                reason: "failed: exports",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const lines = acceptancePackText(pack as never).split("\n");
+    expect(lines[0]).toBe("acceptance pack:");
+    expect(lines[1]).toContain("the e2e before the pull requests failed");
+    expect(lines.join("\n")).toContain(
+      "diagnosis: backend: GET /orders/export answers 404",
+    );
+    expect(lines.join("\n")).toContain(
+      "T-2  Export e2e  [frontend]  e2e failed in R-9, 1 of 3 tests failed, environment up in 4.0 s",
+    );
+    expect(lines.join("\n")).toContain(
+      "environment: backend@01234567, frontend@fedcba98",
+    );
+    expect(lines.join("\n")).toContain("[unverified] it downloads");
   });
 });

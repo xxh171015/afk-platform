@@ -206,11 +206,19 @@ export function blockedText(queue: {
       `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}  ${t.title}`,
       ...briefLines(t.brief, "    "),
     ]),
-    ...queue.finalizations.flatMap((f) => [
-      `${f.specDisplayId}  overall review of ${f.repo}: ${finalState(f)}`,
-      ...briefLines(f.brief, "    "),
-      `    then: plat spec retry-final ${f.specDisplayId}`,
-    ]),
+    ...queue.finalizations.flatMap((f) =>
+      f.step === "final-e2e"
+        ? [
+            `${f.specDisplayId}  e2e before the pull requests: ${finalState(f)}`,
+            ...briefLines(f.brief, "    "),
+            `    then: plat spec retry-final ${f.specDisplayId} (run it again), or plat spec waive-final ${f.specDisplayId} (open the pull requests anyway; the acceptance pack will say the e2e failed)`,
+          ]
+        : [
+            `${f.specDisplayId}  overall review of ${f.repo}: ${finalState(f)}`,
+            ...briefLines(f.brief, "    "),
+            `    then: plat spec retry-final ${f.specDisplayId}`,
+          ],
+    ),
     ...queue.pullRequests.flatMap(pullRequestProblemLines),
     ...queue.cleanups.flatMap((c) => [
       `${c.specDisplayId}  clean-up of the spec did not finish: ${c.error}`,
@@ -314,8 +322,26 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 // approved exceptions), and the tickets that were cancelled.
 export function acceptancePackText(pack: AcceptancePackView): string {
   const order = pack.mergeOrder;
+  const integration = pack.integration;
   return [
     "acceptance pack:",
+    // what a person must not miss: the e2e before the pull requests failed and they were let through
+    ...(integration?.failedBeforePullRequest
+      ? [
+          "  !! the e2e before the pull requests failed; the pull requests were opened anyway",
+          ...integration.failedBeforePullRequest.tickets.flatMap((t) => [
+            `     ${t.displayId}  ${t.title}: ${t.e2e.displayId} ${t.e2e.result ?? "?"}`,
+            ...(t.diagnosis
+              ? [
+                  `       diagnosis: ${t.diagnosis.failingRepo ?? "no repo"}: ${t.diagnosis.evidence}`,
+                  ...(t.diagnosis.failingTests.length
+                    ? [`       failing: ${t.diagnosis.failingTests.join(", ")}`]
+                    : []),
+                ]
+              : []),
+          ]),
+        ]
+      : []),
     ...pack.orderBroken.map((b) => `  ${brokenOrderLine(b)}`),
     order.ordered.length > 0
       ? `  merge order: ${order.ordered.join(" -> ")}${order.unordered.length ? `  (no order: ${order.unordered.join(", ")})` : ""}`
@@ -365,6 +391,27 @@ export function acceptancePackText(pack: AcceptancePackView): string {
         ),
       ];
     }),
+    ...(integration
+      ? [
+          "  integration:",
+          ...integration.tickets.flatMap((t) => [
+            `    ${t.displayId}  ${t.title}  [${t.repo}]${t.appended ? "  (appended)" : ""}  e2e ${t.result ?? "did not run"}${t.runDisplayId ? ` in ${t.runDisplayId}` : ""}${t.testsTotal === null ? "" : `, ${t.testsFailed ?? 0} of ${t.testsTotal} tests failed`}${t.envUpMs === null ? "" : `, environment up in ${seconds(t.envUpMs)}`}`,
+            ...(t.refShas && Object.keys(t.refShas).length
+              ? [
+                  `      environment: ${Object.entries(t.refShas)
+                    .map(([name, sha]) => `${name}@${sha.slice(0, 8)}`)
+                    .join(
+                      ", ",
+                    )}${t.headSha ? `, ${t.repo}@${t.headSha.slice(0, 8)}` : ""}`,
+                ]
+              : []),
+            ...t.criteria.map(
+              (c) =>
+                `      [${c.status}] ${c.text}${c.tests.length ? `  (${c.tests.join(", ")})` : ""}${c.reason ? `  -- ${c.reason}` : ""}`,
+            ),
+          ]),
+        ]
+      : []),
     ...(pack.cancelledTickets.length
       ? [
           "  cancelled tickets:",

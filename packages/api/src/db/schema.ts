@@ -306,6 +306,39 @@ export const finalizations = pgTable(
   ],
 );
 
+// The e2e of every integration ticket, run once more before the pull requests are opened when a repo's final fix
+// changed its branch (docs/specs/m2-platform.md「收尾、PR 与合并」). One per spec; it belongs to no ticket.
+export const finalE2e = pgTable(
+  "final_e2e",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    // active: jobs are out; blocked: a person decides (retry, or let it through); done: every e2e passed; waived: a
+    // person let the pull requests out although it failed
+    state: text("state").notNull().default("active"),
+    blockedReason: text("blocked_reason"),
+    // which time it is run: a retry starts the next round, and a result of an earlier one changes nothing
+    round: integer("round").notNull().default(1),
+    // integration ticket id -> e2e | diagnosing | passed | failed, for the current round
+    tickets: jsonb("tickets").notNull().default({}),
+    jobFloor: integer("job_floor").notNull().default(0), // as on tickets
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("final_e2e_spec_unique").on(t.specId),
+    check(
+      "final_e2e_state_check",
+      oneOf(t.state, ["active", "blocked", "done", "waived"]),
+    ),
+    check(
+      "final_e2e_blocked_reason_check",
+      sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
+    ),
+  ],
+);
+
 // A spec's pull request in one repo, as the code host last reported it (the platform records it, a person merges).
 export const pullRequests = pgTable(
   "pull_requests",

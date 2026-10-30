@@ -1811,6 +1811,45 @@ export interface paths {
                     paths: string[];
                   }[];
                 }[];
+                integration?: {
+                  failedBeforePullRequest: {
+                    tickets: {
+                      displayId: string;
+                      title: string;
+                      e2e: {
+                        displayId: string;
+                        result: string | null;
+                      };
+                      diagnosis: {
+                        failingRepo: string | null;
+                        evidence: string;
+                        failingTests: string[];
+                      } | null;
+                    }[];
+                  } | null;
+                  tickets: {
+                    displayId: string;
+                    title: string;
+                    repo: string;
+                    appended: boolean;
+                    result: string | null;
+                    runDisplayId: string | null;
+                    testsTotal: number | null;
+                    testsFailed: number | null;
+                    envUpMs: number | null;
+                    refShas: {
+                      [key: string]: string;
+                    } | null;
+                    headSha: string | null;
+                    criteria: {
+                      text: string;
+                      tests: string[];
+                      /** @enum {string} */
+                      status: "verified" | "unverified";
+                      reason: string | null;
+                    }[];
+                  }[];
+                } | null;
                 cancelledTickets: {
                   displayId: string;
                   title: string;
@@ -2665,6 +2704,68 @@ export interface paths {
           };
         };
         /** @description Nothing is blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/final/waive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The pull requests go out although the e2e before them failed; the acceptance pack says so */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              waived: true;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description No e2e is blocked */
         409: {
           headers: {
             [name: string]: unknown;

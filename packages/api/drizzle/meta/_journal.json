@@ -176,6 +176,13 @@
       "when": 1793374294496,
       "tag": "0024_integration_rounds",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793378294496,
+      "tag": "0025_final_e2e",
+      "breakpoints": true
     }
   ]
 }

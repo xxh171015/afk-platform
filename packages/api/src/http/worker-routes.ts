@@ -1,5 +1,9 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
+import {
+  readFinalE2ePayload,
+  recordFinalE2eResult,
+} from "../finalize/final-e2e.ts";
 import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import {
   readHostSyncPayload,
@@ -421,7 +425,12 @@ export function registerWorkerRoutes(
           "SELECT id, type, payload FROM jobs WHERE id = $1",
           [id],
         );
-        const recorded = await recordStageResult(client, job.rows[0], result);
+        // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
+        const recorded = readFinalE2ePayload(job.rows[0].payload)
+          ? await recordFinalE2eResult(client, job.rows[0], result).then(
+              () => ({ status: "final-e2e" }) as const,
+            )
+          : await recordStageResult(client, job.rows[0], result);
         // not a ticket stage: it may be a step of a finalization, or a job for the code host
         if (recorded.status === "no-ticket") {
           const final = await recordFinalResult(client, job.rows[0], result);

@@ -7,6 +7,7 @@ import {
   PullRequestRow,
 } from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
+import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
   allowPaths,
@@ -528,6 +529,20 @@ const retryFinalRoute = createRoute({
   },
 });
 
+const waiveFinalRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/final/waive",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The pull requests go out although the e2e before them failed; the acceptance pack says so",
+      z.object({ waived: z.literal(true) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("No e2e is blocked", ErrorReply),
+  },
+});
+
 const retryCleanupRoute = createRoute({
   method: "post",
   path: "/specs/{id}/cleanup",
@@ -684,6 +699,15 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ retried: result.retried }, 200);
+  });
+
+  app.openapi(waiveFinalRoute, async (c) => {
+    const result = await waiveFinalE2e(pool, c.req.valid("param").id);
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ waived: true as const }, 200);
   });
 
   app.openapi(retryCleanupRoute, async (c) => {

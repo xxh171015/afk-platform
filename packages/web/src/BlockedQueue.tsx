@@ -274,14 +274,23 @@ function BlockedFinalization({
     });
     if (!data) throw new Error(describeError(error));
   });
+  const waive = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/final/waive", {
+      params: { path: { id: item.specId } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
+  const beforePullRequests = item.step === "final-e2e";
   return (
     <li
       className="blocked-card"
       data-testid={`final-${item.specDisplayId}-${item.repo}`}
     >
       <h3>
-        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a> overall
-        review of {item.repo}
+        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>{" "}
+        {beforePullRequests
+          ? "e2e before the pull requests"
+          : `overall review of ${item.repo}`}
       </h3>
       <p>
         {item.step}{" "}
@@ -296,8 +305,18 @@ function BlockedFinalization({
         >
           Run {item.step} again
         </button>
+        {beforePullRequests ? (
+          <button
+            type="button"
+            disabled={waive.isPending}
+            onClick={() => waive.mutate()}
+          >
+            Open the pull requests anyway
+          </button>
+        ) : null}
       </div>
       <Problem error={retry.error} />
+      <Problem error={waive.error} />
     </li>
   );
 }

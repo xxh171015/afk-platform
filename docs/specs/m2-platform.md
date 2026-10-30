@@ -147,6 +147,13 @@ implement（agent，在联调环境里写 e2e 并提交）→ 门禁（本仓库
 - **异常**：提供契约的仓库的 PR 关闭未合并时，其余 PR 保持 draft，照 M1 进 `plat blocked`，人重开 PR 或取消 spec。**取消规则改为**「有 PR 已合并、又还有开着的 PR 时不能取消」：`partially-merged` 且其余 PR 都已关闭的 spec 可以取消，已合并的部分留在 main 上，随后清理。
 - **验收包**：每个 spec 一份；开头写合并顺序，按仓库分节，联调单独一节（有重跑就写重跑的结果）。每条验收标准用它那张票所在仓库的门禁 JUnit 核验，联调票的标准用 e2e 的 GateResult 核验。测试名取这张票所有 implement 和 fix 运行的输出（每条标准以最后一次为准）；列出已取消的票（标「已取消」）和追加进来的票（标「追加」）；仍然只生成一次。
 
+- 实现时定下的约定（开 PR 前的重跑联调 `final-e2e`）：
+  - 它是 spec 级的一行 `final_e2e`（一个 spec 一行，状态 active / blocked / done / waived，`round` 记第几次），不属于任何票也不占仓库的 `finalizations`。各仓库的收尾都 done 后，没有这一行、且 spec 里跑过 `final-fix`（有 `final-fix` 的 Run 结果是 done）、且有 done 的联调票时才建；否则照常开 PR。
+  - 每张联调票一个 e2e 作业（payload 带 `finalE2e: true` 和 `round`），Run 记在联调票名下（阶段还是 `e2e` / `diagnose`），所以票详情页和验收包读到的「最后一次 e2e」自然就是重跑的。环境里各仓库的 SHA 取收尾后集成分支的 head：取 SHA 的查询把 `final-merge` 的 Run 也算进去。
+  - e2e 过了就是 passed；失败的票再跑一次 diagnose（只为给简报证据，不建修复票）。所有票都有结果后，全 passed → done 并开 PR；有失败 → blocked，原因 `final-e2e-failed`（它不是票的原因码，只写在 `final_e2e` 上）。作业连续三次失败（环境起不来）→ blocked，原因 `integration-environment-failed`。
+  - 人在 `plat blocked` 和页面上选：`plat spec retry-final`（再跑一次，`round` 加一，旧一轮的结果不再生效）或 `plat spec waive-final`（放行：照常开 PR），也可以取消 spec。
+  - 验收包的 `integration` 一节（没有联调票时为 null）：每张联调票最后一次 e2e 的结果、环境里各仓库的 SHA、联调票自己的 SHA，联调票的验收标准用那次 e2e 的 JUnit（`gate_results` 的 `kind = e2e`）核验；联调票不再列在它所在仓库的那一节里。放行时 `failedBeforePullRequest` 写着失败的 e2e 和诊断证据，命令行里排在验收包最前面。
+
 ### 状态机与原因码
 
 - Spec：实现 `awaiting-review → partially-merged → merged` 的流转；`reworking` 仍只有枚举。

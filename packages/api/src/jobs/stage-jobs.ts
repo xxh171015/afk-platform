@@ -43,6 +43,8 @@ export async function enqueueStageJob(
   client: pg.PoolClient,
   ticket: StageTicket,
   stage: Stage,
+  // more for the payload: the final e2e's jobs say so, and which round they belong to
+  extra: Record<string, unknown> = {},
 ): Promise<Job> {
   const prefix = ticketJobKeyPrefix({
     ticketId: ticket.id,
@@ -70,6 +72,7 @@ export async function enqueueStageJob(
       specId: ticket.specId,
       repoId: ticket.repoId,
       contentVersion: ticket.contentVersion,
+      ...extra,
     },
     idempotencyKey: ticketJobKey({
       ticketId: ticket.id,

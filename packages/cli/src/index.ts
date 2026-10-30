@@ -331,6 +331,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("waive-final <spec>")
+    .description(
+      "open a spec's pull requests although the e2e before them failed (the acceptance pack says so)",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/final/waive",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: the pull requests are being opened`);
+    });
+
+  spec
     .command("cleanup <spec>")
     .description(
       "close the open pull requests and delete the branches of a cancelled or merged spec again (after plat blocked said the clean-up did not finish)",

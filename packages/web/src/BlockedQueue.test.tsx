@@ -525,6 +525,53 @@ describe("paused specs and stopped overall reviews", () => {
     expect(fake.calls).toContain("POST /specs/1/final/retry");
   });
 
+  it("shows the e2e before the pull requests, and lets a person run it again or open the pull requests anyway", async () => {
+    let current = queue({
+      finalizations: [
+        {
+          ...stopped,
+          repo: "(integration)",
+          step: "final-e2e",
+          blockedReason: "final-e2e-failed",
+        },
+      ],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/final/waive": () => {
+        current = queue();
+        return { json: { waived: true } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const item = within(await screen.findByTestId("final-S-1-(integration)"));
+    expect(item.getByText("final-e2e-failed")).toBeTruthy();
+    expect(item.getByText(/e2e before the pull requests/)).toBeTruthy();
+    expect(
+      item.getByRole("button", { name: "Run final-e2e again" }),
+    ).toBeTruthy();
+    fireEvent.click(
+      item.getByRole("button", { name: "Open the pull requests anyway" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("final-S-1-(integration)")).toBeNull(),
+    );
+    expect(fake.calls).toContain("POST /specs/1/final/waive");
+  });
+
+  it("offers no way past an overall review of a repo", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({ json: queue({ finalizations: [stopped] }) }),
+      }),
+    );
+    const item = within(await screen.findByTestId("final-S-1-backend"));
+    expect(
+      item.queryByRole("button", { name: "Open the pull requests anyway" }),
+    ).toBeNull();
+  });
+
   it("shows a resume refusal", async () => {
     const fake = fakeServer({
       "GET /blocked": () => ({ json: queue({ specs: [paused] }) }),

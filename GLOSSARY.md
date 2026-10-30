@@ -38,6 +38,9 @@ _Avoid_: bug 票、返工票
 **Integration round（联调轮）**：
 一次失败的 e2e 加随后建出的修复票算一轮，最多两轮；第三次 e2e 失败就进 blocked。人「重新跑 e2e」时轮数清零。每次 e2e（不论成败）叫一次联调运行（attempt）。
 
+**Final e2e（开 PR 前的联调）**：
+各仓库收尾完成后、开 PR 之前，如果有仓库跑过 final-fix，spec 里每张联调票再跑一次 e2e（失败的再诊断一次，只为给简报证据）。全过才开 PR；有失败收尾就 blocked，人可以再跑一次，或放行（验收包「联调」一节最前面写明开 PR 前的联调失败）。
+
 **Integration environment（联调环境）**：
 一次联调临时起的一组服务：联调票声明的各仓库，各自从本 Spec 的集成分支（没有就用 main）构建，放在同一个网络里；联调票所在仓库的沙箱加入这个网络：agent 写 e2e（implement 和各种 fix）时、agent 诊断失败的 e2e 时，以及平台跑 e2e 时。每次运行都新起一个，用完即拆。
 _Avoid_: 测试环境、staging

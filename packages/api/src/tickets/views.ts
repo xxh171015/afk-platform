@@ -3,6 +3,10 @@ import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
+import {
+  type IntegrationAttempt,
+  integrationAttempts,
+} from "./integration-attempts.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -16,98 +20,6 @@ export interface Brief {
   logPath: string; // GET this to read the run's log
   // An integration ticket that has run its e2e: every try, with what the diagnosis said and the fix ticket it made.
   attempts?: IntegrationAttempt[];
-}
-
-export interface IntegrationAttempt {
-  e2e: {
-    id: number;
-    displayId: string;
-    result: string | null;
-    testsTotal: number | null;
-    testsFailed: number | null;
-    envUpMs: number | null;
-    refShas: Record<string, string> | null;
-    headSha: string | null;
-  };
-  // the diagnosis that followed a failed e2e (not the one before the pull request, which makes no fix ticket)
-  diagnosis: {
-    result: string | null;
-    failingRepo: string | null;
-    evidence: string;
-    failingTests: string[];
-  } | null;
-  fixTicket: {
-    id: number;
-    displayId: string;
-    state: TicketState;
-    repo: string;
-  } | null;
-}
-
-// Each e2e of an integration ticket in the order they ran, with the diagnosis that came after it and the fix
-// ticket that diagnosis made (the k-th diagnosed one belongs to the k-th fix ticket). Empty for a ticket that has
-// not run an e2e.
-export async function integrationAttempts(
-  pool: pg.Pool,
-  ticketId: number,
-): Promise<IntegrationAttempt[]> {
-  const { rows } = await pool.query(
-    `SELECT id, stage, result, output, tests_total, tests_failed, env_up_ms, ref_shas, head_sha FROM runs
-     WHERE ticket_id = $1 AND stage IN ('e2e', 'diagnose') ORDER BY id`,
-    [ticketId],
-  );
-  const fixes = await pool.query(
-    `SELECT t.id, t.state, r.name AS repo FROM tickets t JOIN repos r ON r.id = t.repo_id
-     WHERE t.fix_for_ticket_id = $1 ORDER BY t.fix_round`,
-    [ticketId],
-  );
-  const attempts: IntegrationAttempt[] = [];
-  let diagnosed = 0;
-  for (const row of rows) {
-    if (row.stage === "e2e") {
-      attempts.push({
-        e2e: {
-          id: row.id,
-          displayId: formatDisplayId("run", row.id),
-          result: row.result ?? null,
-          testsTotal: row.tests_total ?? null,
-          testsFailed: row.tests_failed ?? null,
-          envUpMs: row.env_up_ms ?? null,
-          refShas: row.ref_shas ?? null,
-          headSha: row.head_sha ?? null,
-        },
-        diagnosis: null,
-        fixTicket: null,
-      });
-      continue;
-    }
-    const attempt = attempts.at(-1);
-    if (!attempt || attempt.diagnosis) continue;
-    const said = (row.output ?? {}) as {
-      result?: string;
-      failingRepo?: string | null;
-      evidence?: string;
-      failingTests?: string[];
-    };
-    attempt.diagnosis = {
-      result: said.result ?? null,
-      failingRepo: said.failingRepo ?? null,
-      evidence: said.evidence ?? "",
-      failingTests: said.failingTests ?? [],
-    };
-    if (row.result === "diagnosed") {
-      const fix = fixes.rows[diagnosed];
-      diagnosed += 1;
-      if (fix)
-        attempt.fixTicket = {
-          id: fix.id,
-          displayId: formatDisplayId("ticket", fix.id),
-          state: fix.state,
-          repo: fix.repo,
-        };
-    }
-  }
-  return attempts;
 }
 
 const GOOD_RESULTS = ["done", "passed", "pass", "merged"];
@@ -192,6 +104,53 @@ async function finalizations(
       brief:
         row.state === "blocked" ? await finalBrief(pool, row.spec_id) : null,
     })),
+  );
+}
+
+// The e2e before the pull requests, as a step of the spec's finalization that belongs to no repo (the repo column
+// says so). Its brief is the last e2e or diagnosis of an integration ticket that went wrong.
+async function finalE2eSteps(
+  pool: pg.Pool,
+  where: string,
+  params: unknown[],
+): Promise<FinalizationSummary[]> {
+  const { rows } = await pool.query(
+    `SELECT e.spec_id, e.state, e.blocked_reason FROM final_e2e e JOIN specs s ON s.id = e.spec_id
+     WHERE ${where} ORDER BY e.id`,
+    params,
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+      const bad = await pool.query(
+        `SELECT r.id, r.ticket_id, r.stage, r.result, r.output FROM runs r JOIN tickets t ON t.id = r.ticket_id
+         WHERE t.spec_id = $1 AND t.type = 'integration' AND r.stage IN ('e2e', 'diagnose')
+           AND r.result IS NOT NULL AND NOT (r.result = ANY($2)) ORDER BY r.id DESC LIMIT 1`,
+        [row.spec_id, GOOD_RESULTS],
+      );
+      const run = bad.rows[0];
+      const attempts = run
+        ? await integrationAttempts(pool, run.ticket_id)
+        : [];
+      return {
+        specId: row.spec_id as number,
+        specDisplayId: formatDisplayId("spec", row.spec_id),
+        repo: "(integration)",
+        step: "final-e2e",
+        state: row.state as string,
+        blockedReason: (row.blocked_reason as string | null) ?? null,
+        brief:
+          row.state === "blocked" && run
+            ? {
+                run: { id: run.id, displayId: formatDisplayId("run", run.id) },
+                stage: run.stage,
+                result: run.result,
+                output: run.output,
+                logPath: `/runs/${run.id}/logs`,
+                ...(attempts.length > 0 ? { attempts } : {}),
+              }
+            : null,
+      };
+    }),
   );
 }
 
@@ -412,7 +371,10 @@ export async function specView(pool: pg.Pool, specId: number) {
       warnings: row.import_warnings as unknown[],
     },
     tickets,
-    finalizations: await finalizations(pool, "f.spec_id = $1", [specId]),
+    finalizations: [
+      ...(await finalizations(pool, "f.spec_id = $1", [specId])),
+      ...(await finalE2eSteps(pool, "e.spec_id = $1", [specId])),
+    ],
     mergeOrder: await mergeOrderOf(pool, specId),
     orderBroken: row.order_broken as { repo: string; skipped: string[] }[],
     pullRequests: await pullRequestRows(pool, specId),
@@ -607,11 +569,18 @@ export async function blockedQueue(pool: pg.Pool) {
   );
   return {
     tickets,
-    finalizations: await finalizations(
-      pool,
-      "f.state = 'blocked' AND f.spec_id NOT IN (SELECT id FROM specs WHERE state = 'cancelled')",
-      [],
-    ),
+    finalizations: [
+      ...(await finalizations(
+        pool,
+        "f.state = 'blocked' AND f.spec_id NOT IN (SELECT id FROM specs WHERE state = 'cancelled')",
+        [],
+      )),
+      ...(await finalE2eSteps(
+        pool,
+        "e.state = 'blocked' AND s.state <> 'cancelled'",
+        [],
+      )),
+    ],
     pullRequests: await pullRequestProblems(pool),
     cleanups: await cleanupProblems(pool),
     readyFailures: await readyFailures(pool),

@@ -3734,6 +3734,160 @@
                             ]
                           }
                         },
+                        "integration": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "failedBeforePullRequest": {
+                              "type": ["object", "null"],
+                              "properties": {
+                                "tickets": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "displayId": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "e2e": {
+                                        "type": "object",
+                                        "properties": {
+                                          "displayId": {
+                                            "type": "string"
+                                          },
+                                          "result": {
+                                            "type": ["string", "null"]
+                                          }
+                                        },
+                                        "required": ["displayId", "result"]
+                                      },
+                                      "diagnosis": {
+                                        "type": ["object", "null"],
+                                        "properties": {
+                                          "failingRepo": {
+                                            "type": ["string", "null"]
+                                          },
+                                          "evidence": {
+                                            "type": "string"
+                                          },
+                                          "failingTests": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "required": [
+                                          "failingRepo",
+                                          "evidence",
+                                          "failingTests"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "displayId",
+                                      "title",
+                                      "e2e",
+                                      "diagnosis"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": ["tickets"]
+                            },
+                            "tickets": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "displayId": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "repo": {
+                                    "type": "string"
+                                  },
+                                  "appended": {
+                                    "type": "boolean"
+                                  },
+                                  "result": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "runDisplayId": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "testsTotal": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "testsFailed": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "envUpMs": {
+                                    "type": ["integer", "null"]
+                                  },
+                                  "refShas": {
+                                    "type": ["object", "null"],
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "headSha": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "criteria": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "text": {
+                                          "type": "string"
+                                        },
+                                        "tests": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "status": {
+                                          "type": "string",
+                                          "enum": ["verified", "unverified"]
+                                        },
+                                        "reason": {
+                                          "type": ["string", "null"]
+                                        }
+                                      },
+                                      "required": [
+                                        "text",
+                                        "tests",
+                                        "status",
+                                        "reason"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "displayId",
+                                  "title",
+                                  "repo",
+                                  "appended",
+                                  "result",
+                                  "runDisplayId",
+                                  "testsTotal",
+                                  "testsFailed",
+                                  "envUpMs",
+                                  "refShas",
+                                  "headSha",
+                                  "criteria"
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["failedBeforePullRequest", "tickets"]
+                        },
                         "cancelledTickets": {
                           "type": "array",
                           "items": {
@@ -5226,6 +5380,73 @@
           },
           "409": {
             "description": "Nothing is blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/final/waive": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pull requests go out although the e2e before them failed; the acceptance pack says so",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "waived": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["waived"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No e2e is blocked",
             "content": {
               "application/json": {
                 "schema": {
