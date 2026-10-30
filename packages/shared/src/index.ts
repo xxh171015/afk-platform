@@ -74,6 +74,7 @@ export {
   tryFix,
 } from "./ticket-fixes.ts";
 export type {
+  ExistingGraph,
   ImportFile,
   ImportPlan,
   ImportWarning,

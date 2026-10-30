@@ -1,11 +1,15 @@
 import {
+  branchNames,
+  type ExistingGraph,
   formatDisplayId,
   type ImportWarning,
   type LimitOverrides,
+  parseDisplayId,
   planImport,
   type SPEC_TYPES,
 } from "@afk/shared";
 import type pg from "pg";
+import { schedulePass } from "../scheduling/scheduler.ts";
 
 // Registering projects, repos and specs, and importing a spec's whole ticket graph
 // (docs/specs/m1-platform.md「plat CLI」, docs/design.md「导入格式」).
@@ -206,42 +210,64 @@ export type ImportResult =
   | { status: "not-importable"; message: string }
   | { status: "invalid"; errors: string[] };
 
+const APPENDABLE_STATES = ["planned", "running", "paused"];
+
 // All or nothing: the file is validated first, then written in one transaction. The spec row is locked, so
-// two imports of the same spec cannot both pass the "no tickets yet" check.
+// two imports of the same spec cannot both pass the "no tickets yet" check. With `append` the file is added to a
+// spec that is already confirmed: the new tickets are scheduled at once.
 export async function importTickets(
   pool: pg.Pool,
   specId: number,
   input: unknown,
+  options: { append?: boolean } = {},
 ): Promise<ImportResult> {
+  const append = options.append === true;
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const spec = await client.query(
-      "SELECT project_id, state FROM specs WHERE id = $1 FOR UPDATE",
+      "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings FROM specs WHERE id = $1 FOR UPDATE",
       [specId],
     );
     if (spec.rowCount === 0)
       return await rollback(client, { status: "no-spec" });
-    if (spec.rows[0].state !== "draft") {
-      return await rollback(client, {
-        status: "not-importable",
-        message: `${formatDisplayId("spec", specId)} is ${spec.rows[0].state}; tickets can only be imported while it is a draft`,
-      });
-    }
-    const existing = await client.query(
-      "SELECT 1 FROM tickets WHERE spec_id = $1 LIMIT 1",
-      [specId],
-    );
-    if (existing.rowCount !== 0) {
-      return await rollback(client, {
-        status: "not-importable",
-        message: `${formatDisplayId("spec", specId)} already has tickets; the import is all at once`,
-      });
+    const specRow = spec.rows[0];
+    const shownId = formatDisplayId("spec", specId);
+    if (append) {
+      if (specRow.state === "draft") {
+        return await rollback(client, {
+          status: "not-importable",
+          message: `${shownId} is a draft; import its tickets without --append`,
+        });
+      }
+      if (!APPENDABLE_STATES.includes(specRow.state)) {
+        return await rollback(client, {
+          status: "not-importable",
+          message: `${shownId} is ${specRow.state}; tickets can only be appended while it is planned, running or paused`,
+        });
+      }
+    } else {
+      if (specRow.state !== "draft") {
+        return await rollback(client, {
+          status: "not-importable",
+          message: `${shownId} is ${specRow.state}; tickets can only be imported while it is a draft (to add to a confirmed spec use --append)`,
+        });
+      }
+      const existing = await client.query(
+        "SELECT 1 FROM tickets WHERE spec_id = $1 LIMIT 1",
+        [specId],
+      );
+      if (existing.rowCount !== 0) {
+        return await rollback(client, {
+          status: "not-importable",
+          message: `${shownId} already has tickets; the import is all at once`,
+        });
+      }
     }
 
     const repos = await client.query(
       "SELECT name, id, contract_path FROM repos WHERE project_id = $1",
-      [spec.rows[0].project_id],
+      [specRow.project_id],
     );
     const plan = planImport(
       input,
@@ -255,6 +281,7 @@ export async function importTickets(
         ]),
       ),
       specId,
+      append ? await existingGraph(client, specId) : undefined,
     );
     if (!plan.ok) {
       return await rollback(client, { status: "invalid", errors: plan.errors });
@@ -264,8 +291,8 @@ export async function importTickets(
     const tickets: ImportedTicket[] = [];
     for (const ticket of plan.tickets) {
       const { rows } = await client.query(
-        `INSERT INTO tickets (spec_id, repo_id, type, title, body, acceptance_criteria, modules, allowed_protected_paths, refs, environment)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        `INSERT INTO tickets (spec_id, repo_id, type, title, body, acceptance_criteria, modules, allowed_protected_paths, refs, environment, appended)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
         [
           specId,
           ticket.repoId,
@@ -277,6 +304,7 @@ export async function importTickets(
           ticket.allowedProtectedPaths,
           ticket.refs,
           ticket.environment,
+          append,
         ],
       );
       const id = rows[0].id as number;
@@ -287,24 +315,113 @@ export async function importTickets(
         displayId: formatDisplayId("ticket", id),
       });
     }
+    // an end of an edge is a key of the file, or the T-<n> of a ticket the spec already had
+    const idOf = (key: string): number => {
+      const id = idByKey.get(key) ?? parseDisplayId(key)?.id;
+      if (id === undefined)
+        throw new Error(`no ticket for the edge end ${key}`);
+      return id;
+    };
     for (const edge of plan.edges) {
       await client.query(
         "INSERT INTO edges (from_ticket_id, to_ticket_id, kind) VALUES ($1, $2, $3)",
-        [idByKey.get(edge.from), idByKey.get(edge.to), edge.kind],
+        [idOf(edge.from), idOf(edge.to), edge.kind],
       );
     }
+
+    // A plain import's warnings name tickets by the keys of the file the author just wrote. An appended file
+    // mixes its keys with ids of tickets that exist, so there the warnings name tickets by the id people will see.
+    const shown = (key: string) =>
+      append && idByKey.has(key)
+        ? formatDisplayId("ticket", idByKey.get(key) as number)
+        : key;
+    const warnings: ImportWarning[] = plan.warnings.map((w) => ({
+      type: w.type,
+      tickets: [shown(w.tickets[0]), shown(w.tickets[1])],
+      repoId: w.repoId,
+      message: w.describe(shown),
+    }));
     await client.query("UPDATE specs SET import_warnings = $2 WHERE id = $1", [
       specId,
-      JSON.stringify(plan.warnings),
+      JSON.stringify(
+        append
+          ? [...(specRow.import_warnings as unknown[]), ...warnings]
+          : warnings,
+      ),
     ]);
+
+    if (append) {
+      // a repo the spec had not touched yet needs its integration branch before its first ticket runs
+      const branches = specRow.integration_branches as {
+        repoId: number;
+        branch: string;
+      }[];
+      const missing = [...new Set(plan.tickets.map((t) => t.repoId))].filter(
+        (repoId) => !branches.some((b) => b.repoId === repoId),
+      );
+      if (missing.length > 0) {
+        const branch = branchNames(specRow.branch_namespace).integration(
+          specRow.slug,
+        );
+        await client.query(
+          "UPDATE specs SET integration_branches = $2 WHERE id = $1",
+          [
+            specId,
+            JSON.stringify([
+              ...branches,
+              ...missing.map((repoId) => ({ repoId, branch })),
+            ]),
+          ],
+        );
+      }
+      await schedulePass(client, specId);
+    }
     await client.query("COMMIT");
-    return { status: "ok", tickets, warnings: plan.warnings };
+    return { status: "ok", tickets, warnings };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+// The spec's tickets and edges as the append rules see them: cancelled tickets are named but not part of the graph.
+async function existingGraph(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<ExistingGraph> {
+  const rows = await client.query(
+    `SELECT t.id, t.type, t.state, t.modules, t.repo_id, r.name AS repo
+     FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.spec_id = $1 ORDER BY t.id FOR UPDATE OF t`,
+    [specId],
+  );
+  const key = (id: number) => formatDisplayId("ticket", id);
+  const alive = rows.rows.filter((t) => t.state !== "cancelled");
+  const edges = await client.query(
+    `SELECT e.from_ticket_id, e.to_ticket_id, e.kind FROM edges e
+     JOIN tickets a ON a.id = e.from_ticket_id JOIN tickets b ON b.id = e.to_ticket_id
+     WHERE b.spec_id = $1 AND a.state <> 'cancelled' AND b.state <> 'cancelled' ORDER BY e.id`,
+    [specId],
+  );
+  return {
+    tickets: alive.map((t) => ({
+      key: key(t.id),
+      repo: t.repo,
+      repoId: t.repo_id,
+      type: t.type,
+      state: t.state,
+      modules: t.modules,
+    })),
+    cancelled: rows.rows
+      .filter((t) => t.state === "cancelled")
+      .map((t) => key(t.id)),
+    edges: edges.rows.map((e) => ({
+      from: key(e.from_ticket_id),
+      to: key(e.to_ticket_id),
+      kind: e.kind,
+    })),
+  };
 }
 
 async function rollback<T>(client: pg.PoolClient, result: T): Promise<T> {

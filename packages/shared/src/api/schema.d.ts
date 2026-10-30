@@ -391,7 +391,9 @@ export interface paths {
     put?: never;
     post: {
       parameters: {
-        query?: never;
+        query?: {
+          append?: "true" | "false";
+        };
         header?: never;
         path: {
           specId: number;
@@ -420,7 +422,10 @@ export interface paths {
               }[];
               warnings: {
                 /** @enum {string} */
-                type: "module-overlap";
+                type:
+                  | "module-overlap"
+                  | "old-contract-pending"
+                  | "old-contract-started";
                 tickets: [string, string];
                 repoId: number;
                 message: string;
@@ -439,7 +444,7 @@ export interface paths {
             };
           };
         };
-        /** @description The spec is not a draft or already has tickets */
+        /** @description The spec cannot take this import (not a draft, already has tickets, or not appendable) */
         409: {
           headers: {
             [name: string]: unknown;
@@ -1334,6 +1339,7 @@ export interface paths {
                 repo: string;
                 refs: string[];
                 environment: string[];
+                appended: boolean;
                 brief: {
                   run: {
                     id: number;
@@ -1512,6 +1518,7 @@ export interface paths {
                 repo: string;
                 refs: string[];
                 environment: string[];
+                appended: boolean;
                 brief: {
                   run: {
                     id: number;
@@ -1757,6 +1764,7 @@ export interface paths {
                 repo: string;
                 refs: string[];
                 environment: string[];
+                appended: boolean;
                 brief: {
                   run: {
                     id: number;

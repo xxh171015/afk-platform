@@ -265,7 +265,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description("tickets")
     .command("import <spec> <file>")
     .description("import a whole tickets.yaml into a spec, or nothing at all")
-    .action(async (spec: string, file: string) => {
+    .option(
+      "--append",
+      "add the file's tickets and edges to a confirmed spec (planned, running or paused); they take effect at once. The file may name existing tickets as T-<n> and carry an edges list",
+    )
+    .action(async (spec: string, file: string, options) => {
       const specId = specIdOf(spec);
       let document: unknown;
       try {
@@ -283,13 +287,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const { data, response, error } = await api().POST(
         "/specs/{specId}/tickets/import",
         {
-          params: { path: { specId } },
+          params: {
+            path: { specId },
+            query: options.append ? { append: "true" } : {},
+          },
           body: document as Record<string, unknown>,
         },
       );
       if (!data) throw failureFrom(response, error);
       const lines = [
-        `imported ${data.tickets.length} tickets into ${spec}`,
+        `${options.append ? "appended" : "imported"} ${data.tickets.length} tickets ${options.append ? "to" : "into"} ${spec}`,
         ...data.tickets.map((t) => `  ${t.displayId}  ${t.key}`),
         ...data.warnings.map((w) => `warning: ${w.message}`),
       ];

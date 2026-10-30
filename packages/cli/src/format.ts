@@ -48,6 +48,7 @@ interface TicketLike {
   repo: string;
   refs: string[];
   environment: string[];
+  appended: boolean;
   brief: BriefLike | null;
 }
 
@@ -330,7 +331,7 @@ export function specText(view: {
     ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
     "tickets:",
     ...view.tickets.flatMap((t) => [
-      `  ${t.displayId}  ${stateOf(t)}  [${t.repo}]  ${t.title}`,
+      `  ${t.displayId}  ${stateOf(t)}  [${t.repo}]  ${t.title}${t.appended ? "  (appended)" : ""}`,
       ...contextLines(t, "      "),
       ...briefLines(t.brief, "      "),
     ]),

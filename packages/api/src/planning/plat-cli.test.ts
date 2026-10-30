@@ -406,6 +406,43 @@ describe("plat", () => {
     expect((await plat("blocked")).stdout).toBe("nothing is waiting for you\n");
   });
 
+  it("appends tickets to a confirmed spec with --append, and says so when the spec is still a draft", async () => {
+    await register();
+    files["tickets.yaml"] = TICKETS_YAML;
+    await plat("tickets", "import", "S-1", "tickets.yaml");
+    files["more.yaml"] = `tickets:
+  - key: extra
+    repo: backend
+    type: implementation
+    title: Extra
+    modules: [extra/**]
+    blocked_by: [T-1]
+    acceptance: [it works]
+`;
+    const early = await plat(
+      "tickets",
+      "import",
+      "S-1",
+      "more.yaml",
+      "--append",
+    );
+    expect(early.code).toBe(1);
+    expect(early.stderr).toMatch(/without --append/);
+
+    await plat("spec", "confirm", "S-1");
+    const appended = await plat(
+      "tickets",
+      "import",
+      "S-1",
+      "more.yaml",
+      "--append",
+    );
+    expect(appended.code).toBe(0);
+    expect(appended.stdout).toContain("appended 1 tickets to S-1");
+    expect(appended.stdout).toMatch(/T-\d+ {2}extra/);
+    expect((await plat("spec", "show", "S-1")).stdout).toContain("(appended)");
+  });
+
   it("shows the repo, refs and environment of tickets", async () => {
     await register();
     files["tickets.yaml"] = `tickets:

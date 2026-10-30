@@ -395,3 +395,184 @@ describe("tickets across repos", () => {
     ]);
   });
 });
+
+describe("appending to a spec that already has tickets", () => {
+  const existing = {
+    tickets: [
+      {
+        key: "T-1",
+        repo: "backend",
+        repoId: 1,
+        type: "contract",
+        state: "done",
+        modules: ["api/**"],
+      },
+      {
+        key: "T-2",
+        repo: "frontend",
+        repoId: 2,
+        type: "implementation",
+        state: "pending",
+        modules: ["web/**"],
+      },
+      {
+        key: "T-3",
+        repo: "backend",
+        repoId: 1,
+        type: "implementation",
+        state: "running",
+        modules: ["lib/**"],
+      },
+      {
+        key: "T-5",
+        repo: "frontend",
+        repoId: 2,
+        type: "implementation",
+        state: "blocked",
+        modules: ["web2/**"],
+      },
+    ],
+    cancelled: ["T-4"],
+    edges: [{ from: "T-1", to: "T-2", kind: "contract" as const }],
+  };
+  const appendPlan = (input: unknown) => planImport(input, repos, 12, existing);
+  const appendErrors = (input: unknown) => {
+    const result = appendPlan(input);
+    if (result.ok) throw new Error("expected the append to be rejected");
+    return result.errors;
+  };
+
+  it("lets new tickets name existing ones by T-n in blocked_by and contract, and returns only the new edges", () => {
+    const result = appendPlan(
+      file(
+        ticket("adapt", {
+          repo: "frontend",
+          blocked_by: ["T-3"],
+          contract: ["T-1"],
+        }),
+      ),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      tickets: [{ key: "adapt" }],
+      edges: [
+        { from: "T-3", to: "adapt", kind: "blocks" },
+        { from: "T-1", to: "adapt", kind: "contract" },
+      ],
+    });
+  });
+
+  it("takes an edge from a new ticket to an existing pending or blocked one, and refuses one to a running ticket", () => {
+    const ok = appendPlan({
+      tickets: [ticket("c2", { type: "contract", blocked_by: ["T-1"] })],
+      edges: [
+        { from: "c2", to: "T-2", kind: "contract" },
+        { from: "c2", to: "T-5", kind: "contract" },
+      ],
+    });
+    expect(ok).toMatchObject({
+      ok: true,
+      edges: expect.arrayContaining([
+        { from: "c2", to: "T-2", kind: "contract" },
+        { from: "c2", to: "T-5", kind: "contract" },
+      ]),
+    });
+    expect(
+      appendErrors({
+        tickets: [ticket("n")],
+        edges: [{ from: "n", to: "T-3" }],
+      }),
+    ).toEqual([expect.stringMatching(/T-3 is running.*cannot be blocked/)]);
+  });
+
+  it("refuses an edge between two existing tickets", () => {
+    expect(
+      appendErrors({
+        tickets: [ticket("n")],
+        edges: [{ from: "T-3", to: "T-5" }],
+      }),
+    ).toEqual([expect.stringMatching(/T-3 -> T-5.*two existing tickets/)]);
+  });
+
+  it("refuses a cancelled ticket on either end, and unknown T-n", () => {
+    expect(appendErrors(file(ticket("n", { blocked_by: ["T-4"] })))).toEqual([
+      expect.stringMatching(/ticket n: T-4 is cancelled/),
+    ]);
+    expect(appendErrors(file(ticket("n", { blocked_by: ["T-99"] })))).toEqual([
+      expect.stringMatching(/ticket n: unknown ticket T-99/),
+    ]);
+  });
+
+  it("refuses a new key that looks like a ticket id", () => {
+    expect(appendErrors(file(ticket("T-7")))).toEqual([
+      expect.stringMatching(/key T-7 .*T-<n>/),
+    ]);
+  });
+
+  it("checks the whole merged graph: a cycle through existing tickets is refused", () => {
+    expect(
+      appendErrors({
+        tickets: [ticket("n", { blocked_by: ["T-2"] })],
+        edges: [{ from: "n", to: "T-2" }],
+      }).join("\n"),
+    ).toMatch(/dependency cycle/);
+  });
+
+  it("applies the cross-repo rules to the merged graph: contract chain", () => {
+    // T-1 is a done contract in backend; a second backend contract not chained after it, used by a new ticket with T-1
+    expect(
+      appendErrors(
+        file(
+          ticket("c2", { type: "contract" }),
+          ticket("fe", { repo: "frontend", contract: ["T-1", "c2"] }),
+        ),
+      ).join("\n"),
+    ).toMatch(/chain/);
+  });
+
+  it("rejects edges in a file that is not an append", () => {
+    expect(
+      errorsOf({
+        tickets: [ticket("a"), ticket("b")],
+        edges: [{ from: "a", to: "b" }],
+      }),
+    ).toEqual([expect.stringMatching(/edges.*--append/)]);
+  });
+
+  it("warns, for a new contract ticket, about tickets of the old one that it does not feed, by their state", () => {
+    const result = appendPlan(
+      file(ticket("c2", { type: "contract", blocked_by: ["T-1"] })),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      warnings: [{ type: "old-contract-pending", tickets: ["T-2", "c2"] }],
+    });
+    const started = planImport(
+      file(ticket("c2", { type: "contract", blocked_by: ["T-1"] })),
+      repos,
+      12,
+      {
+        ...existing,
+        tickets: existing.tickets.map((t) =>
+          t.key === "T-2" ? { ...t, state: "running" } : t,
+        ),
+      },
+    );
+    expect(started).toMatchObject({
+      ok: true,
+      warnings: [{ type: "old-contract-started", tickets: ["T-2", "c2"] }],
+    });
+  });
+
+  it("does not warn when the new contract ticket feeds the old downstream, or when no contract ticket is added", () => {
+    const fed = appendPlan({
+      tickets: [ticket("c2", { type: "contract", blocked_by: ["T-1"] })],
+      edges: [{ from: "c2", to: "T-2", kind: "contract" }],
+    });
+    expect(fed).toMatchObject({ ok: true, warnings: [] });
+    expect(appendPlan(file(ticket("plain")))).toMatchObject({
+      ok: true,
+      warnings: [],
+    });
+  });
+});

@@ -161,7 +161,11 @@ const specRoute = createRoute({
 });
 
 const ImportWarning = z.object({
-  type: z.literal("module-overlap"),
+  type: z.enum([
+    "module-overlap",
+    "old-contract-pending",
+    "old-contract-started",
+  ]),
   tickets: z.tuple([z.string(), z.string()]),
   repoId: Id,
   message: z.string(),
@@ -172,6 +176,8 @@ const importRoute = createRoute({
   path: "/specs/{specId}/tickets/import",
   request: {
     params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    // append=true adds the file to a confirmed spec, and the new tickets are scheduled at once
+    query: z.object({ append: z.enum(["true", "false"]).optional() }),
     // The parsed tickets.yaml. Validated by planImport, which reports every problem, not by this schema.
     body: { content: json(z.record(z.string(), z.unknown())) },
   },
@@ -186,7 +192,10 @@ const importRoute = createRoute({
       }),
     ),
     404: reply("No such spec", ErrorReply),
-    409: reply("The spec is not a draft or already has tickets", ErrorReply),
+    409: reply(
+      "The spec cannot take this import (not a draft, already has tickets, or not appendable)",
+      ErrorReply,
+    ),
     422: reply(
       "Rejected; nothing was written",
       z.object({ errors: z.array(z.string()) }),
@@ -287,7 +296,9 @@ export function registerPlanningRoutes(
 
   app.openapi(importRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    const result = await importTickets(pool, specId, c.req.valid("json"));
+    const result = await importTickets(pool, specId, c.req.valid("json"), {
+      append: c.req.valid("query").append === "true",
+    });
     switch (result.status) {
       case "no-spec":
         return c.json({ error: "no such spec" }, 404);

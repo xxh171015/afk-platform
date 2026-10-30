@@ -11,6 +11,7 @@ const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
     repo: "frontend",
     refs: [],
     environment: [],
+    appended: false,
     brief: null,
     acceptanceCriteria: [],
     allowedProtectedPaths: [],

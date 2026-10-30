@@ -22,6 +22,7 @@ const ticket = (
   repo: "backend",
   refs: [],
   environment: [],
+  appended: false,
   brief: null,
   ...over,
 });
@@ -114,6 +115,25 @@ describe("the spec page", () => {
     await screen.findByTestId("node-T-1");
     expect(node("T-1").textContent).toContain("backend");
     expect(node("T-2").textContent).toContain("payments");
+  });
+
+  it("marks the tickets that were appended after the plan was confirmed", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          tickets: [
+            ticket(1, "done"),
+            ticket(2, "pending", { appended: true }),
+          ],
+          edges: [],
+        }),
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+
+    await screen.findByTestId("node-T-1");
+    expect(node("T-1").textContent).not.toContain("appended");
+    expect(node("T-2").textContent).toContain("appended");
   });
 
   it("lists the tickets and their states below the graph", async () => {

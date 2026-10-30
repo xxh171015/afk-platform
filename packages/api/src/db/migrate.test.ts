@@ -35,6 +35,7 @@ const LATER_THAN_REPO_NAMES = [
   "0017_run_contract_shas",
   "0018_contract_copy_mismatch",
   "0019_run_ref_shas",
+  "0020_ticket_appended",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

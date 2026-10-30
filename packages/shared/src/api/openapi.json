@@ -652,6 +652,15 @@
             "required": true,
             "name": "specId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false,
+            "name": "append",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -699,7 +708,11 @@
                         "properties": {
                           "type": {
                             "type": "string",
-                            "enum": ["module-overlap"]
+                            "enum": [
+                              "module-overlap",
+                              "old-contract-pending",
+                              "old-contract-started"
+                            ]
                           },
                           "tickets": {
                             "type": "array",
@@ -747,7 +760,7 @@
             }
           },
           "409": {
-            "description": "The spec is not a draft or already has tickets",
+            "description": "The spec cannot take this import (not a draft, already has tickets, or not appendable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2213,6 +2226,9 @@
                             "type": "string"
                           }
                         },
+                        "appended": {
+                          "type": "boolean"
+                        },
                         "brief": {
                           "type": ["object", "null"],
                           "properties": {
@@ -2290,6 +2306,7 @@
                         "repo",
                         "refs",
                         "environment",
+                        "appended",
                         "brief",
                         "body",
                         "acceptanceCriteria",
@@ -2673,6 +2690,9 @@
                               "type": "string"
                             }
                           },
+                          "appended": {
+                            "type": "boolean"
+                          },
                           "brief": {
                             "type": ["object", "null"],
                             "properties": {
@@ -2714,6 +2734,7 @@
                           "repo",
                           "refs",
                           "environment",
+                          "appended",
                           "brief"
                         ]
                       }
@@ -3311,6 +3332,9 @@
                               "type": "string"
                             }
                           },
+                          "appended": {
+                            "type": "boolean"
+                          },
                           "brief": {
                             "type": ["object", "null"],
                             "properties": {
@@ -3352,6 +3376,7 @@
                           "repo",
                           "refs",
                           "environment",
+                          "appended",
                           "brief"
                         ]
                       }

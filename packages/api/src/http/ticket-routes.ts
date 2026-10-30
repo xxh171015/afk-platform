@@ -53,6 +53,7 @@ const TicketSummary = z.object({
   repo: z.string(),
   refs: z.array(z.string()),
   environment: z.array(z.string()),
+  appended: z.boolean(),
   brief: Brief,
 });
 

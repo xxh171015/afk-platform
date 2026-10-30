@@ -541,6 +541,204 @@ describe("tickets across repos", () => {
   });
 });
 
+describe("appending tickets to a confirmed spec", () => {
+  const exportFile = {
+    tickets: [
+      ticket("contract", { type: "contract" }),
+      ticket("be", { blocked_by: ["contract"] }),
+      ticket("fe", { repo: "frontend", contract: "contract" }),
+    ],
+  };
+
+  async function confirmed() {
+    const { projectId, specId } = await setup();
+    await post(`/projects/${projectId}/repos`, { url: "u", name: "payments" });
+    expect(
+      (await post(`/specs/${specId}/tickets/import`, exportFile)).status,
+    ).toBe(200);
+    expect((await post(`/specs/${specId}/confirm`, {})).status).toBe(200);
+    return { projectId, specId };
+  }
+  const append = (specId: number, body: unknown) =>
+    post(`/specs/${specId}/tickets/import?append=true`, body);
+  const states = async () =>
+    (await db.pool.query("SELECT id, state, appended FROM tickets ORDER BY id"))
+      .rows;
+
+  it("adds the tickets and edges at once, and the scheduler starts a new ticket that nothing blocks", async () => {
+    const { specId } = await confirmed();
+    expect((await states())[0]).toMatchObject({ state: "queued" });
+
+    const result = await append(specId, {
+      tickets: [
+        ticket("extra", { repo: "payments", modules: ["pay/**"] }),
+        ticket("after", { blocked_by: ["T-1", "extra"] }),
+      ],
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body.tickets).toEqual([
+      { key: "extra", id: 4, displayId: "T-4" },
+      { key: "after", id: 5, displayId: "T-5" },
+    ]);
+    expect(await states()).toEqual([
+      { id: 1, state: "queued", appended: false },
+      { id: 2, state: "pending", appended: false },
+      { id: 3, state: "pending", appended: false },
+      { id: 4, state: "queued", appended: true },
+      { id: 5, state: "pending", appended: true },
+    ]);
+    const edges = await db.pool.query(
+      "SELECT from_ticket_id AS f, to_ticket_id AS t, kind FROM edges WHERE to_ticket_id = 5 ORDER BY id",
+    );
+    expect(edges.rows).toEqual([
+      { f: 1, t: 5, kind: "blocks" },
+      { f: 4, t: 5, kind: "blocks" },
+    ]);
+    // payments had no ticket yet: it now has its integration branch, and the job can be built
+    const branches = await db.pool.query(
+      "SELECT integration_branches FROM specs WHERE id = $1",
+      [specId],
+    );
+    expect(branches.rows[0].integration_branches).toHaveLength(3);
+    const view = await (await fetch(`${api.url}/specs/${specId}`)).json();
+    expect(view.tickets.map((t: { appended: boolean }) => t.appended)).toEqual([
+      false,
+      false,
+      false,
+      true,
+      true,
+    ]);
+  });
+
+  it("refuses a draft (use the plain import) and a spec that has gone on to its review, writing nothing", async () => {
+    const { specId: draftId } = await setup();
+    const draft = await append(draftId, { tickets: [ticket("a")] });
+    expect(draft.status).toBe(409);
+    expect(JSON.stringify(draft.body)).toMatch(/without --append/);
+
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE specs SET state = 'finalizing' WHERE id = $1", [
+      specId,
+    ]);
+    const late = await append(specId, { tickets: [ticket("a")] });
+    expect(late.status).toBe(409);
+    expect(JSON.stringify(late.body)).toMatch(/finalizing/);
+    expect(await count("tickets")).toBe(3);
+  });
+
+  it("refuses an edge between two existing tickets, one that blocks a running ticket, and a cycle, and writes nothing", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'running' WHERE id = 1");
+    const cases: [unknown, RegExp][] = [
+      [
+        { tickets: [ticket("a")], edges: [{ from: "T-2", to: "T-3" }] },
+        /two existing tickets/,
+      ],
+      [
+        { tickets: [ticket("a")], edges: [{ from: "a", to: "T-1" }] },
+        /T-1 is running/,
+      ],
+      [
+        {
+          tickets: [ticket("a", { blocked_by: ["T-2"] })],
+          edges: [{ from: "a", to: "T-2" }],
+        },
+        /cycle/,
+      ],
+    ];
+    for (const [body, pattern] of cases) {
+      const result = await append(specId, body);
+      expect(result.status).toBe(422);
+      expect(result.body.errors.join("\n")).toMatch(pattern);
+    }
+    expect(await count("tickets")).toBe(3);
+    expect(await count("edges")).toBe(2);
+  });
+
+  it("applies the import rules to the merged graph: a contract upstream must be a contract ticket, and two in one repo must chain", async () => {
+    const { specId } = await confirmed();
+    const notContract = await append(specId, {
+      tickets: [ticket("a", { contract: ["T-2"] })],
+    });
+    expect(notContract.body.errors.join("\n")).toMatch(/not a contract ticket/);
+    const apart = await append(specId, {
+      tickets: [
+        ticket("c2", { type: "contract" }),
+        ticket("fe2", { repo: "frontend", contract: ["T-1", "c2"] }),
+      ],
+    });
+    expect(apart.body.errors.join("\n")).toMatch(/chain/);
+    expect(await count("tickets")).toBe(3);
+  });
+
+  it("warns about tickets on the old contract only when a contract ticket is appended, by the state of those tickets", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'running' WHERE id = 3");
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    const plain = await append(specId, {
+      tickets: [ticket("plain", { repo: "payments", modules: ["p/**"] })],
+    });
+    expect(plain.body.warnings).toEqual([]);
+
+    const result = await append(specId, {
+      tickets: [
+        ticket("c2", {
+          type: "contract",
+          blocked_by: ["T-1"],
+          modules: ["api2/**"],
+        }),
+      ],
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.warnings).toEqual([
+      expect.objectContaining({
+        type: "old-contract-started",
+        tickets: ["T-3", "T-5"],
+        message: expect.stringMatching(/T-3 is running.*old contract T-1.*T-5/),
+      }),
+    ]);
+    const stored = await db.pool.query(
+      "SELECT import_warnings FROM specs WHERE id = $1",
+      [specId],
+    );
+    expect(stored.rows[0].import_warnings).toHaveLength(1);
+  });
+
+  it("leaves a ticket that reported contract-change-needed blocked when the new contract ticket is wired under it", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query(
+      "UPDATE tickets SET state = 'blocked', blocked_reason = 'contract-change-needed' WHERE id = 3",
+    );
+    const result = await append(specId, {
+      tickets: [
+        ticket("c2", {
+          type: "contract",
+          blocked_by: ["T-1"],
+          modules: ["api2/**"],
+        }),
+      ],
+      edges: [{ from: "c2", to: "T-3", kind: "contract" }],
+    });
+    expect(result.status).toBe(200);
+    expect((await states())[2]).toMatchObject({ id: 3, state: "blocked" });
+    const reason = await db.pool.query(
+      "SELECT blocked_reason FROM tickets WHERE id = 3",
+    );
+    expect(reason.rows[0].blocked_reason).toBe("contract-change-needed");
+  });
+
+  it("splits a ticket by appending new ones and cancelling the old: a cancelled ticket is no longer a valid end", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'cancelled' WHERE id = 3");
+    const result = await append(specId, {
+      tickets: [ticket("half", { repo: "frontend", blocked_by: ["T-3"] })],
+    });
+    expect(result.status).toBe(422);
+    expect(result.body.errors.join("\n")).toMatch(/T-3 is cancelled/);
+  });
+});
+
 describe("repo edit", () => {
   const contractPaths = async () =>
     (await db.pool.query("SELECT name, contract_path FROM repos ORDER BY id"))
