@@ -42,8 +42,12 @@ const JOB_FAILED: BlockedReason = "job-failed";
 
 // The e2e stage only fails as a job when its environment cannot be brought up (an e2e that runs and fails is a
 // result, not a failed job), and the diagnosis runs in a fresh environment too: three failures of either name it.
-const reasonOfFailed = (stage: string): BlockedReason =>
-  stage === "e2e" || stage === "diagnose"
+// So does the implement of an integration ticket, whose agent works in the environment: the error in its brief
+// says what failed.
+const reasonOfFailed = (stage: string, type: string): BlockedReason =>
+  stage === "e2e" ||
+  stage === "diagnose" ||
+  (stage === "implement" && type === "integration")
     ? "integration-environment-failed"
     : JOB_FAILED;
 
@@ -115,11 +119,12 @@ async function ticketStageFailed(
     await client.query<{
       spec_id: number;
       repo_id: number;
+      type: string;
       state: TicketState;
       content_version: number;
       job_floor: number;
     }>(
-      "SELECT spec_id, repo_id, state, content_version, job_floor FROM tickets WHERE id = $1",
+      "SELECT spec_id, repo_id, type, state, content_version, job_floor FROM tickets WHERE id = $1",
       [read.ticketId],
     )
   ).rows[0];
@@ -153,7 +158,7 @@ async function ticketStageFailed(
   }
   // A ticket that never got to start counts as running now, so that the state machine can block it.
   const from: TicketState = row.state === "queued" ? "running" : row.state;
-  const reason = reasonOfFailed(read.stage);
+  const reason = reasonOfFailed(read.stage, row.type);
   const blocked = ticketTransition(from, { type: "block", reason });
   if (!blocked.ok) throw new Error(blocked.reason);
   await client.query(

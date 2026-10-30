@@ -277,6 +277,23 @@ describe("the e2e job", () => {
     expect(await claim()).toBeNull();
   });
 
+  it("ends the implement of an integration ticket in integration-environment-failed too: its agent works in the environment", async () => {
+    await runningSpec();
+    for (let failures = 1; failures <= 3; failures++) {
+      const job = await claim();
+      expect(job?.payload.stage).toBe("implement");
+      await worker.fail(
+        (job as Claimed).id,
+        (job as Claimed).attempt,
+        "compose up failed",
+      );
+    }
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "integration-environment-failed",
+    });
+  });
+
   it("carries the environment repos and the environment limit in its bundle", async () => {
     await runningSpec({ limits: { maxIntegrationEnvironments: 2 } });
     await mergeIntegrationTicket();

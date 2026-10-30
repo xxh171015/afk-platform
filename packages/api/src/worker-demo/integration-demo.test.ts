@@ -340,8 +340,10 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
           [stage],
         )
       ).rows[0].id;
+    // the orphans of other workers go first, then what an earlier attempt of this run left, then the environment
     const lifecycle = (project: string) => [
       "afk-r-77:down",
+      `${project}:down`,
       `${project}:up`,
       `${project}:run`,
       `${project}:down`,
