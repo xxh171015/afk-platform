@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Bundle } from "@afk/shared";
 import { git } from "./exec.ts";
 
@@ -18,7 +18,7 @@ export interface ContextInput {
   run: RunFacts;
   failureLog?: string; // gate-fix and merge-fix: the tail of the failing gate
   review?: unknown; // review-fix: the review's structured result
-  contract?: { path: string; content: string }; // the contract file at the recorded SHA
+  contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
 }
 
 function ticketMarkdown(bundle: Bundle): string {
@@ -63,14 +63,17 @@ function runJson(input: ContextInput) {
     integrationBranch: bundle.integrationBranch,
     allowedProtectedPaths: bundle.allowedProtectedPaths,
     fixCounts: bundle.ticket?.fixCounts ?? null,
-    contract: bundle.contract
-      ? { sha: bundle.contract.sha, file: contractFile(bundle.contract.path) }
-      : null,
+    contracts: bundle.contracts.map((c) => ({
+      repo: c.repo,
+      sha: c.sha,
+      file: contractFile(c.repo, c.path),
+    })),
   };
 }
 
-// The agent sees the contract under /context/contract/.
-const contractFile = (path: string) => `contract/${basename(path)}`;
+// The agent sees each contract under /context/contract/<repo>/.
+const contractFile = (repo: string, path: string) =>
+  `contract/${repo}/${basename(path)}`;
 
 export function renderContext(input: ContextInput): void {
   const { dir, bundle } = input;
@@ -96,19 +99,17 @@ export function renderContext(input: ContextInput): void {
       JSON.stringify(input.review, null, 2),
     );
   }
-  if (input.contract && bundle.contract) {
-    mkdirSync(join(dir, "contract"), { recursive: true });
-    writeFileSync(
-      join(dir, contractFile(bundle.contract.path)),
-      input.contract.content,
-    );
+  for (const contract of input.contracts ?? []) {
+    const file = join(dir, contractFile(contract.repo, contract.path));
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, contract.content);
   }
 }
 
 // The contract as it was when its ticket merged: `git show <sha>:<path>` in the clone of the repo that holds it.
 export function readContract(
   repoDir: string,
-  contract: NonNullable<Bundle["contract"]>,
+  contract: { sha: string; path: string },
 ): { path: string; content: string } {
   const { path } = contract;
   const shown = git(repoDir, ["show", `${contract.sha}:${path}`]);

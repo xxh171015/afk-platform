@@ -886,11 +886,13 @@ export interface paths {
               agentBranch: string;
               protectedPaths: string[];
               allowedProtectedPaths: string[];
-              contract: {
+              contracts: {
+                repo: string;
+                url: string;
+                defaultBranch: string;
                 sha: string;
                 path: string;
-                repoId: number;
-              } | null;
+              }[];
               failureLog: string | null;
               review?: unknown;
               gateBaseline: {
@@ -1386,6 +1388,9 @@ export interface paths {
                 model: string | null;
                 skillsSha: string | null;
                 cursorCliVersion: string | null;
+                contractShas: {
+                  [key: string]: string;
+                } | null;
                 startedAt: string | null;
                 finishedAt: string | null;
               }[];

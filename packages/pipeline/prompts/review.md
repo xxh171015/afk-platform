@@ -4,7 +4,7 @@
 
 1. /context/ticket.md：这张票的验收标准
 2. /context/run.json：baseSha 是对比的基准提交
-3. /context/contract/（如果有）：这张票依赖的契约，改动必须符合它
+3. /context/contract/<仓库名>/（如果有）：这张票依赖的契约（每个提供契约的仓库一个目录），改动必须符合它
 4. 仓库根目录的 AGENTS.md：编码规范和保护路径
 
 ## 做

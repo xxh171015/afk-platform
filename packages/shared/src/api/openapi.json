@@ -1465,20 +1465,35 @@
                         "type": "string"
                       }
                     },
-                    "contract": {
-                      "type": ["object", "null"],
-                      "properties": {
-                        "sha": {
-                          "type": "string"
+                    "contracts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repo": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "defaultBranch": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
                         },
-                        "path": {
-                          "type": "string"
-                        },
-                        "repoId": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": ["sha", "path", "repoId"]
+                        "required": [
+                          "repo",
+                          "url",
+                          "defaultBranch",
+                          "sha",
+                          "path"
+                        ]
+                      }
                     },
                     "failureLog": {
                       "type": ["string", "null"]
@@ -1523,7 +1538,7 @@
                     "agentBranch",
                     "protectedPaths",
                     "allowedProtectedPaths",
-                    "contract",
+                    "contracts",
                     "failureLog",
                     "gateBaseline",
                     "limits",
@@ -2359,6 +2374,12 @@
                           "cursorCliVersion": {
                             "type": ["string", "null"]
                           },
+                          "contractShas": {
+                            "type": ["object", "null"],
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
                           "startedAt": {
                             "type": ["string", "null"]
                           },
@@ -2377,6 +2398,7 @@
                           "model",
                           "skillsSha",
                           "cursorCliVersion",
+                          "contractShas",
                           "startedAt",
                           "finishedAt"
                         ]

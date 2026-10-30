@@ -6,10 +6,19 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
+import { contractsOf } from "./contracts.ts";
 
 // Everything a worker needs to render /context for a stage job (docs/design.md「Agent 与 skills 对接」).
 // The contract travels as a pointer, a SHA and a path in the repo that holds it: the worker reads the file
 // with `git show <sha>:<path>`, so the platform never stores contract text.
+
+export interface BundleContract {
+  repo: string;
+  url: string;
+  defaultBranch: string;
+  sha: string;
+  path: string;
+}
 
 export interface Bundle {
   job: { id: number; stage: string; attempt: number };
@@ -52,7 +61,8 @@ export interface Bundle {
   // The project's protected path globs, and the subset of changes to them this ticket may make.
   protectedPaths: string[];
   allowedProtectedPaths: string[];
-  contract: { sha: string; path: string; repoId: number } | null;
+  // One per repo that provides a contract this ticket builds against: the file at the newest contract ticket's SHA.
+  contracts: BundleContract[];
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
   review: unknown;
@@ -126,19 +136,7 @@ export async function buildBundle(
   const integrationBranch =
     branches.find((b) => b.repoId === row.repo_id)?.branch ?? null;
 
-  // The upstream of a contract edge, once it has recorded its SHA; the contract is at the path its repo says.
-  const upstream = await pool.query<{
-    contract_sha: string;
-    repo_id: number;
-    contract_path: string | null;
-  }>(
-    `SELECT u.contract_sha, u.repo_id, ur.contract_path FROM edges e
-     JOIN tickets u ON u.id = e.from_ticket_id JOIN repos ur ON ur.id = u.repo_id
-     WHERE e.to_ticket_id = $1 AND e.kind = 'contract' AND u.contract_sha IS NOT NULL LIMIT 1`,
-    [ticketId],
-  );
-  const pointer = upstream.rows[0];
-  const contractPath = pointer?.contract_path ?? null;
+  const contracts = await contractsOf(pool, ticketId);
 
   const run = await pool.query<{ id: number }>(
     "SELECT id FROM runs WHERE job_id = $1",
@@ -200,14 +198,7 @@ export async function buildBundle(
     ),
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: row.allowed_protected_paths,
-    contract:
-      pointer && contractPath
-        ? {
-            sha: pointer.contract_sha,
-            path: contractPath,
-            repoId: pointer.repo_id,
-          }
-        : null,
+    contracts,
     failureLog: failed.rows[0]?.log ?? null,
     review: reviewed.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
@@ -290,7 +281,7 @@ async function buildFinalBundle(
     ),
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: [],
-    contract: null,
+    contracts: [],
     failureLog: failed.rows[0]?.log ?? null,
     review: review.rows[0]?.output ?? null,
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),

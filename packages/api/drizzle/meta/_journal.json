@@ -120,6 +120,13 @@
       "when": 1793357129488,
       "tag": "0016_ticket_refs_and_environment",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793358382166,
+      "tag": "0017_run_contract_shas",
+      "breakpoints": true
     }
   ]
 }

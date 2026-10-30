@@ -166,9 +166,15 @@ const Bundle = z.object({
   agentBranch: z.string(),
   protectedPaths: z.array(z.string()),
   allowedProtectedPaths: z.array(z.string()),
-  contract: z
-    .object({ sha: z.string(), path: z.string(), repoId: z.number().int() })
-    .nullable(),
+  contracts: z.array(
+    z.object({
+      repo: z.string(),
+      url: z.string(),
+      defaultBranch: z.string(),
+      sha: z.string(),
+      path: z.string(),
+    }),
+  ),
   failureLog: z.string().nullable(),
   review: z.unknown(),
   gateBaseline: z

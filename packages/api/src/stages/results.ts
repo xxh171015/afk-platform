@@ -19,6 +19,7 @@ import {
   lockSpec,
   schedulePass,
 } from "../scheduling/scheduler.ts";
+import { contractsOf } from "./contracts.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -421,12 +422,22 @@ async function startRun(
   jobId: number,
   stage: Stage,
 ): Promise<void> {
+  const contracts = await contractsOf(pool, ticketId);
   await pool.query(
-    `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, started_at)
+    `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, contract_shas, started_at)
      SELECT t.spec_id, t.repo_id, t.id, t.content_version, $2, $3,
-       (SELECT count(*) FROM runs r WHERE r.ticket_id = t.id AND r.stage = $3) + 1, now()
+       (SELECT count(*) FROM runs r WHERE r.ticket_id = t.id AND r.stage = $3) + 1, $4::jsonb, now()
      FROM tickets t WHERE t.id = $1
      ON CONFLICT (job_id) DO NOTHING`,
-    [ticketId, jobId, stage],
+    [
+      ticketId,
+      jobId,
+      stage,
+      contracts.length
+        ? JSON.stringify(
+            Object.fromEntries(contracts.map((c) => [c.repo, c.sha])),
+          )
+        : null,
+    ],
   );
 }

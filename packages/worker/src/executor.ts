@@ -18,7 +18,6 @@ import {
   mergeCandidate,
   promptFor,
   ReviewOutputSchema,
-  readContract,
   renderContext,
   reviewFindings,
   runGate,
@@ -27,6 +26,7 @@ import {
 } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
+import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
 import type { PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
@@ -220,8 +220,8 @@ const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
 
 function renderFor(
+  deps: ExecutorDeps,
   context: StageContext,
-  mainDir: string,
   baseSha: string,
   ctxRoot: string,
 ) {
@@ -237,8 +237,8 @@ function renderFor(
     },
     ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
     ...(bundle.review ? { review: bundle.review } : {}),
-    ...(bundle.contract
-      ? { contract: readContract(mainDir, bundle.contract) }
+    ...(bundle.contracts.length
+      ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
       : {}),
   });
   return dir;
@@ -280,7 +280,7 @@ async function agentChange(
       : before;
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(context, mainDir, baseSha, tmp);
+    const ctxDir = renderFor(deps, context, baseSha, tmp);
     log(`${stage}: running the agent on ${agent}`);
     const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
@@ -394,7 +394,7 @@ async function review(
       : branchBase(mainDir, bundle.integrationBranch as string, agent);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(context, mainDir, baseSha, tmp);
+    const ctxDir = renderFor(deps, context, baseSha, tmp);
     const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
       stage,

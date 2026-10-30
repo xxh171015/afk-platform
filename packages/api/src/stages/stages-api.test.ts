@@ -764,7 +764,7 @@ describe("the bundle", () => {
       agentBranch: `agent/${id}/T-1`,
       protectedPaths: ["openapi/**", ".github/**"],
       allowedProtectedPaths: ["openapi/openapi.yaml"],
-      contract: null,
+      contracts: [],
     });
   });
 
@@ -804,11 +804,15 @@ describe("the bundle", () => {
     const job = (await worker.claim()).body.job as Claimed;
     expect(job.payload.ticketId).toBe(2);
     const reply = await bundle(job);
-    expect(reply.body.contract).toEqual({
-      sha: "contract-head",
-      path: "openapi/openapi.yaml",
-      repoId: 1,
-    });
+    expect(reply.body.contracts).toEqual([
+      {
+        repo: "backend",
+        url: "git@x:backend",
+        defaultBranch: "main",
+        sha: "contract-head",
+        path: "openapi/openapi.yaml",
+      },
+    ]);
     expect(reply.body.integrationBranch).toBe(
       `spec/${await instanceId()}/order-export`,
     );
@@ -839,10 +843,44 @@ describe("the bundle", () => {
     });
     expect(edited.status).toBe(200);
     const reply = await bundle((await worker.claim()).body.job as Claimed);
-    expect(reply.body.contract).toMatchObject({
-      sha: "contract-head",
-      path: "openapi/openapi.yaml",
-    });
+    expect(reply.body.contracts).toMatchObject([
+      { sha: "contract-head", path: "openapi/openapi.yaml" },
+    ]);
+  });
+
+  it("gives the SHA of the later contract ticket when two in one repo are upstreams, and the Run records it per repo", async () => {
+    await runningSpec([
+      ticket("c1", { type: "contract" }),
+      ticket("c2", { type: "contract", blocked_by: ["c1"] }),
+      ticket("fe", { repo: "frontend", contract: ["c1", "c2"] }),
+    ]);
+    for (const head of ["first-head", "second-head"]) {
+      await stage("implement", IMPLEMENT_DONE);
+      await stage("gate", GATE_PASSED);
+      await stage("review", REVIEW_PASS);
+      await stage("merge", { outcome: "merged", headSha: head });
+    }
+    const job = (await worker.claim()).body.job as Claimed;
+    expect(job.payload.ticketId).toBe(3);
+    const reply = await bundle(job);
+    expect(reply.body.contracts).toMatchObject([
+      { repo: "backend", sha: "second-head" },
+    ]);
+    const run = await db.pool.query(
+      "SELECT contract_shas FROM runs WHERE job_id = $1",
+      [job.id],
+    );
+    expect(run.rows[0].contract_shas).toEqual({ backend: "second-head" });
+    const view = await (await fetch(`${api.url}/tickets/3`)).json();
+    expect(view.runs[0].contractShas).toEqual({ backend: "second-head" });
+  });
+
+  it("has no contracts for a ticket without a contract edge, and no contract SHAs on its Run", async () => {
+    await runningSpec([ticket("a")]);
+    const job = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(job)).body.contracts).toEqual([]);
+    const run = await db.pool.query("SELECT contract_shas FROM runs");
+    expect(run.rows[0].contract_shas).toBeNull();
   });
 
   it("names the Run the job started, so logs and commit trailers have somewhere to point", async () => {

@@ -97,6 +97,7 @@ export function TicketDetail({
               <th>Time</th>
               <th>Model</th>
               <th>Skills</th>
+              <th>Contracts</th>
             </tr>
           </thead>
           <tbody>
@@ -121,6 +122,13 @@ export function TicketDetail({
                 <td>{seconds(run.durationMs)}</td>
                 <td>{run.model ?? "—"}</td>
                 <td>{run.skillsSha ?? "—"}</td>
+                <td>
+                  {run.contractShas
+                    ? Object.entries(run.contractShas)
+                        .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
+                        .join(", ")
+                    : "—"}
+                </td>
               </tr>
             ))}
           </tbody>

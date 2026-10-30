@@ -41,7 +41,7 @@ export function bundleFor(
     agentBranch: "agent/T-123",
     protectedPaths: ["openapi/**", ".github/"],
     allowedProtectedPaths: [],
-    contract: null,
+    contracts: [],
     failureLog: null,
     review: null,
     gateBaseline: null,

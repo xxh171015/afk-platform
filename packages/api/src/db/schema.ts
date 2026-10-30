@@ -344,6 +344,8 @@ export const runs = pgTable(
     result: text("result"),
     output: jsonb("output"),
     logUrl: text("log_url"),
+    // The contract SHA used for each providing repo (name -> sha); null when the ticket had no contract edge.
+    contractShas: jsonb("contract_shas"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },

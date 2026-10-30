@@ -105,6 +105,7 @@ const ticketRoute = createRoute({
             model: z.string().nullable(),
             skillsSha: z.string().nullable(),
             cursorCliVersion: z.string().nullable(),
+            contractShas: z.record(z.string(), z.string()).nullable(),
             startedAt: z.string().nullable(),
             finishedAt: z.string().nullable(),
           }),

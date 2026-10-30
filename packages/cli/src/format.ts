@@ -158,6 +158,7 @@ export function ticketText(view: {
     attempt: number;
     result: string | null;
     durationMs: number | null;
+    contractShas: Record<string, string> | null;
   }[];
   findings: { kind: string; body: string; resolution: string }[];
 }): string {
@@ -191,7 +192,13 @@ export function ticketText(view: {
     "runs:",
     ...view.runs.map(
       (r) =>
-        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}`,
+        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${
+          r.contractShas
+            ? `  contracts ${Object.entries(r.contractShas)
+                .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
+                .join(", ")}`
+            : ""
+        }`,
     ),
     ...(view.findings.length
       ? [

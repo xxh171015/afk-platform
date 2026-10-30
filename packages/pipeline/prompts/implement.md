@@ -5,7 +5,7 @@
 1. /context/ticket.md：这张票的正文和验收标准
 2. /context/spec.md：需求背景。里面的 seams 已经确认，不要再向任何人确认
 3. /context/run.json：阶段、基准提交、分支名、已批准的保护路径（allowedProtectedPaths）
-4. /context/contract/（如果有）：这张票依赖的契约，只读，以它为准
+4. /context/contract/<仓库名>/（如果有）：这张票依赖的契约，每个提供契约的仓库一个目录，只读，以它为准
 5. 仓库根目录的 AGENTS.md：怎么跑、编码规范、保护路径
 6. /home/agent/.cursor/skills/tdd/SKILL.md：按它的红 → 绿 → 重构流程做
 

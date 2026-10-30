@@ -4,7 +4,7 @@
 
 1. /context/run.json：看 stage 字段，它决定你要修什么
 2. /context/ticket.md 和 /context/spec.md：这张票原本要做什么
-3. /context/contract/（如果有）：契约，只读
+3. /context/contract/<仓库名>/（如果有）：契约（每个提供契约的仓库一个目录），只读
 4. 仓库根目录的 AGENTS.md：怎么跑、编码规范、保护路径
 
 ## 按 stage 做

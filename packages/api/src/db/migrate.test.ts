@@ -32,6 +32,7 @@ const ENTITY_TABLES = [
 const LATER_THAN_REPO_NAMES = [
   "0015_repo_names_and_contracts",
   "0016_ticket_refs_and_environment",
+  "0017_run_contract_shas",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

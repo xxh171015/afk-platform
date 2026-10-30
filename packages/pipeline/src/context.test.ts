@@ -43,7 +43,7 @@ describe("renderContext", () => {
       integrationBranch: "spec/order-export",
       allowedProtectedPaths: [],
       fixCounts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
-      contract: null,
+      contracts: [],
     });
   });
 
@@ -87,26 +87,49 @@ describe("renderContext", () => {
     expect(existsSync(join(dir, "contract"))).toBe(false);
   });
 
-  it("writes the contract file under contract/ and points run.json at it", () => {
+  it("writes each contract under contract/<repo>/ and points run.json at them", () => {
     const dir = ctxDir();
     const bundle = bundleFor({
-      contract: {
-        sha: "c0ffee",
-        path: "openapi/openapi.yaml",
-        repoId: 1,
-      },
+      contracts: [
+        {
+          repo: "backend",
+          url: "git@x:backend",
+          defaultBranch: "main",
+          sha: "c0ffee",
+          path: "openapi/openapi.yaml",
+        },
+        {
+          repo: "payments",
+          url: "git@x:payments",
+          defaultBranch: "main",
+          sha: "beef",
+          path: "api/openapi.yaml",
+        },
+      ],
     });
     renderContext({
       dir,
       bundle,
       run,
-      contract: { path: "openapi/openapi.yaml", content: "openapi: 3.1.0\n" },
+      contracts: [
+        {
+          repo: "backend",
+          path: "openapi/openapi.yaml",
+          content: "backend: 1\n",
+        },
+        {
+          repo: "payments",
+          path: "api/openapi.yaml",
+          content: "payments: 1\n",
+        },
+      ],
     });
-    expect(read(dir, "contract/openapi.yaml")).toBe("openapi: 3.1.0\n");
-    expect(JSON.parse(read(dir, "run.json")).contract).toEqual({
-      sha: "c0ffee",
-      file: "contract/openapi.yaml",
-    });
+    expect(read(dir, "contract/backend/openapi.yaml")).toBe("backend: 1\n");
+    expect(read(dir, "contract/payments/openapi.yaml")).toBe("payments: 1\n");
+    expect(JSON.parse(read(dir, "run.json")).contracts).toEqual([
+      { repo: "backend", sha: "c0ffee", file: "contract/backend/openapi.yaml" },
+      { repo: "payments", sha: "beef", file: "contract/payments/openapi.yaml" },
+    ]);
   });
 });
 
@@ -124,7 +147,6 @@ describe("readContract", () => {
     const contract = readContract(repo.dir, {
       sha,
       path: "openapi/openapi.yaml",
-      repoId: 1,
     });
     expect(contract).toEqual({
       path: "openapi/openapi.yaml",
@@ -139,7 +161,6 @@ describe("readContract", () => {
       readContract(repo?.dir as string, {
         sha,
         path: "openapi/openapi.yaml",
-        repoId: 1,
       }),
     ).toThrow(/git show/);
   });
