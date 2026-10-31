@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command for the four processes of "Run it on this machine (Mac)" in the README:
 # Postgres (compose), migrations, the API, the page and one worker, with their output on one terminal.
-# Usage: AFK_MODEL=<cursor model> scripts/up.sh      (Ctrl-C stops everything; Ctrl-C twice: exit at once)
+# Usage: AFK_MODEL=<cursor model> scripts/up.sh      (Ctrl-C stops everything; Ctrl-C twice: stop them at once)
 # Env: AFK_MODEL (required), DATABASE_URL (default the compose database), PORT (API, default 3000),
 #      AFK_SKILLS_DIR (default ~/.afk/skills/skills/engineering), WEB=0 or WORKER=0 to leave that one out.
 # The worker's own settings (AFK_HOME, AFK_SLOTS, AFK_SANDBOX_IMAGE, ...) are passed through as they are.
@@ -25,6 +25,17 @@ if [ "${WORKER:-1}" != 0 ]; then
   fi
 fi
 
+# a server of this checkout (or anything else) already on a port would make the new one die while the
+# readiness check below still sees the old one answer, and a second worker would join the first
+busy=()
+for port in "$PORT" $([ "${WEB:-1}" = 0 ] || echo 5173); do
+  if [ -n "$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)" ]; then busy+=("$port"); fi
+done
+if [ "${#busy[@]}" -gt 0 ]; then
+  echo "cannot start: port ${busy[*]} already in use (is the stack already running? stop it first)" >&2
+  exit 1
+fi
+
 pgids=() # process groups, started order
 names=()
 
@@ -41,8 +52,7 @@ stopping=0
 stop_all() {
   [ "$stopping" = 0 ] || return 0
   stopping=1
-  trap - INT TERM
-  echo "stopping (the worker aborts the runs in hand first)..."
+  echo "stopping (the worker aborts the runs in hand first; Ctrl-C again stops them at once)..."
   local i
   # reverse order: worker, then page, then API
   for ((i = ${#pgids[@]} - 1; i >= 0; i--)); do
@@ -53,6 +63,22 @@ stop_all() {
   wait 2>/dev/null || true
 }
 
+# bash does not run a signal's trap inside that same trap, so the handler only counts: the first signal
+# makes the loops below exit (the EXIT trap then stops everything), a second one, which can arrive while
+# the worker is still being waited for, TERMs every group at once and leaves
+sigs=0
+on_signal() {
+  sigs=$((sigs + 1))
+  if [ "$sigs" -ge 2 ]; then force_stop; fi
+}
+check_signal() { if [ "$sigs" -gt 0 ]; then exit 130; fi; }
+
+force_stop() {
+  local g
+  for g in ${pgids[@]+"${pgids[@]}"}; do kill -TERM -- "-$g" 2>/dev/null || true; done
+  exit 130
+}
+
 wait_group() {
   local n=0
   while kill -0 -- "-$1" 2>/dev/null && [ "$n" -lt 120 ]; do
@@ -60,13 +86,15 @@ wait_group() {
     n=$((n + 1))
   done
 }
-trap stop_all INT TERM EXIT
+trap on_signal INT TERM HUP
+trap stop_all EXIT
 
 docker compose up -d --wait postgres
 pnpm db:migrate
 
 start api pnpm api
 until curl -s -o /dev/null "$AFK_API_URL/"; do
+  check_signal
   if ! kill -0 -- "-${pgids[0]}" 2>/dev/null; then
     echo "the API stopped before it came up" >&2
     exit 1
@@ -81,6 +109,7 @@ echo "up: API $AFK_API_URL, page http://127.0.0.1:5173 (Postgres stays up when y
 
 # leave as soon as any process dies, then stop the rest (macOS bash 3.2 has no `wait -n`)
 while :; do
+  check_signal
   for i in "${!pgids[@]}"; do
     if ! kill -0 -- "-${pgids[i]}" 2>/dev/null; then
       echo "${names[i]} exited; stopping the rest" >&2
