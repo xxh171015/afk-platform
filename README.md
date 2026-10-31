@@ -65,7 +65,7 @@ git clone https://github.com/mattpocock/skills.git ~/.afk/skills
 git -C ~/.afk/skills switch --detach 59db609eb1e18aaf59b63284d0e52255aff0c63c
 ```
 
-**Each time** (one terminal each)
+**Each time**: `AFK_MODEL=<cursor model> scripts/up.sh` starts all of the below in one terminal (output prefixed `[api]`, `[web]`, `[worker]`; Ctrl-C stops them; `WEB=0` / `WORKER=0` leave one out). Or by hand, one terminal each:
 
 ```sh
 docker compose up -d --wait postgres
