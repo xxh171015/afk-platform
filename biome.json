@@ -7,7 +7,8 @@
       "*.json",
       "*.ts",
       "!**/node_modules",
-      "!**/dist"
+      "!**/dist",
+      "!packages/shared/skills-snapshot"
     ]
   },
   "formatter": { "indentStyle": "space", "indentWidth": 2 }

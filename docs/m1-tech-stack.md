@@ -18,7 +18,7 @@
 | 测试数据库 | 用真 Postgres，不 mock；沙箱镜像里装 PostgreSQL，门禁的 `setup` 在一次性目录里起临时实例；本机开发用同一个脚本或 docker compose，都通过连接串指向 | 沙箱里没有 Docker，而 M1 的票以后可能由 AFK 流水线在沙箱里实现；租约和 `SKIP LOCKED` 的并发语义必须用真库测。不用 PGlite：单连接，测不了并发                                                        |
 | 日志       | pino（JSON）                                                                                                                                      |                                                                                                                                                                                                     |
 
-固定的版本在 M1 第一周的脚手架里用锁文件确定；Sandcastle `0.12.0`、Cursor CLI（`.sandcastle/Dockerfile` 的 `CURSOR_CLI_VERSION`）、skills `59db609eb1e18aaf59b63284d0e52255aff0c63c` 仍锁精确版本（见 design.md）。
+固定的版本在 M1 第一周的脚手架里用锁文件确定；Sandcastle `0.12.0`、Cursor CLI（`.sandcastle/Dockerfile` 的 `CURSOR_CLI_VERSION`）、skills（`SKILLS_SHA`）仍锁精确版本（见 design.md）。
 
 ## 仓库布局
 

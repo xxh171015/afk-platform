@@ -238,6 +238,18 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | 前后端起了不同的名字 / 并行改了同一文件 | to-spec 里把共享名字写死；to-tickets 给会改同一文件的票加依赖边 |
 | 转 ready 失败 | GitHub App 缺 `contents: write`；手动转 ready |
 
+## 9. 升级 skills SHA
+
+固定的 skills SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`）；`up.sh` 从它读取，别处不写。平台依赖的 skill 文件以快照存在 `packages/shared/skills-snapshot/`，每个文件头写明它取自哪个 SHA，守卫测试保证两者一致。升级时在**一个提交**里做完下面几步：
+
+1. 把 `SKILLS_SHA` 改成新的 commit（在 mattpocock/skills 的 checkout 里 `git fetch` 后确认它存在）。
+2. 跑刷新脚本：`node scripts/refresh-skills-snapshot.ts <skills checkout 路径>`。它从那个 commit 取出五个 `SKILL.md` 和两份 tracker 种子模板，覆盖快照。对当前 SHA 重跑，快照不会有变化。
+3. 看快照的 `git diff`：matt 改了什么；按需要改覆盖层引用的步骤和 tracker 文档模板。
+4. 改覆盖层声明的 SHA，让它和新常量一致。
+5. `pnpm check`：快照头的 SHA 和常量不一致时，守卫测试会失败。
+
+升级后，各台机器上的 skills checkout 也要切到新 SHA（`up.sh` 会提示）。
+
 ## 附录 A：场景 A 的 `tickets.yaml`
 
 ```yaml

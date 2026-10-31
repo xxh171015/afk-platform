@@ -60,11 +60,11 @@ Four processes: Postgres, the API, the page and one worker. All of them listen o
 1. Docker Desktop running, and the sandbox image built: `scripts/verify-sandbox-image.sh` (tags `sandcastle:afk-platform`).
 2. GitHub App credentials in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
 3. The Cursor key in `~/.afk/env` as `CURSOR_API_KEY=…` (or exported). The worker reads nothing else from that file.
-4. A checkout of [mattpocock/skills](https://github.com/mattpocock/skills) at the pinned commit `59db609eb1e18aaf59b63284d0e52255aff0c63c`; the worker mounts its `skills/engineering` directory read-only:
+4. A checkout of [mattpocock/skills](https://github.com/mattpocock/skills) at the pinned skills SHA (`SKILLS_SHA` in `packages/shared/src/skills-sha.ts`); the worker mounts its `skills/engineering` directory read-only:
 
 ```sh
 git clone https://github.com/mattpocock/skills.git ~/.afk/skills
-git -C ~/.afk/skills switch --detach 59db609eb1e18aaf59b63284d0e52255aff0c63c
+git -C ~/.afk/skills switch --detach "$(sed -n 's/^export const SKILLS_SHA = "\(.*\)";$/\1/p' packages/shared/src/skills-sha.ts)"
 ```
 
 **Each time**: `AFK_MODEL=<cursor model> scripts/up.sh` starts all of the below in one terminal (output prefixed `[api]`, `[web]`, `[worker]`; Ctrl-C stops them; `WEB=0` / `WORKER=0` leave one out). Or by hand, one terminal each:

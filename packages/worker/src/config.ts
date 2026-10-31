@@ -11,7 +11,7 @@ export interface WorkerConfig {
   slots: number;
   image: string; // the sandbox image
   model: string;
-  skillsDir: string; // pinned skills (mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c skills/engineering), mounted read-only into the sandbox
+  skillsDir: string; // pinned skills (mattpocock/skills at SKILLS_SHA, skills/engineering), mounted read-only into the sandbox
   cursorApiKey: string;
   credentialsDir: string; // the GitHub App's key and ids
 }

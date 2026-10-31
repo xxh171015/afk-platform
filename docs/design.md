@@ -920,7 +920,7 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 | `/context/review.json`        | review 的 mustFix 列表                                                                                                                                                               | review-fix          |
 | `/context/pr-comments.md`     | PR 上人写的评论                                                                                                                                                                      | rework              |
 | `/refs/<仓库名>/`             | 另一个仓库的只读快照（SHA：本需求有集成分支用它的 head，否则 main，由 API 每次运行定）                                                                                                                                                          | 跨仓库参考时        |
-| `/home/agent/.cursor/skills/` | skills，只读。源是 [mattpocock/skills](https://github.com/mattpocock/skills) 固定 commit `59db609eb1e18aaf59b63284d0e52255aff0c63c` 的 `skills/engineering` 目录；Run 上记下这个 SHA | 总是                |
+| `/home/agent/.cursor/skills/` | skills，只读。源是 [mattpocock/skills](https://github.com/mattpocock/skills) 固定 commit（`SKILLS_SHA`）的 `skills/engineering` 目录；Run 上记下这个 SHA | 总是                |
 
 skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自动发现位置），不再用 `/skills`。M0 实测：agent 不读文件就能列出挂进去的技能，按绝对路径读 `SKILL.md` 也能照做。prompt 里仍写明绝对路径作为兜底。
 
@@ -1240,9 +1240,9 @@ M0 第一天先做这几个验证，任何一个不通都要先换方案：
 
 ## 参考资料
 
-skills 仓库固定 `59db609eb1e18aaf59b63284d0e52255aff0c63c`；Sandcastle 固定 `0.12.0`。
+skills 仓库固定在 `SKILLS_SHA`（`packages/shared/src/skills-sha.ts`）；Sandcastle 固定 `0.12.0`。
 
-[mattpocock/skills](https://github.com/mattpocock/skills) @ `59db609eb1e18aaf59b63284d0e52255aff0c63c`：
+[mattpocock/skills](https://github.com/mattpocock/skills) @ `SKILLS_SHA`：
 
 - `skills/engineering/to-spec/SKILL.md`、`to-tickets/SKILL.md`、`implement/SKILL.md`、`implement-spec/SKILL.md`、`tdd/SKILL.md`、`triage/SKILL.md`
 - `skills/engineering/setup-matt-pocock-skills/issue-tracker-github.md`、`issue-tracker-gitlab.md`、`issue-tracker-local.md`

@@ -37,7 +37,8 @@ afk_home="${AFK_HOME:-$HOME/.afk}"
 env_file="$afk_home/env"
 image="${AFK_SANDBOX_IMAGE:-sandcastle:afk-platform}"
 skills_repo=https://github.com/mattpocock/skills.git
-skills_commit=59db609eb1e18aaf59b63284d0e52255aff0c63c # the pinned commit of the README
+skills_commit=$(sed -n 's/^export const SKILLS_SHA = "\([0-9a-f]\{40\}\)";$/\1/p' packages/shared/src/skills-sha.ts) # the pinned skills SHA, written down only there
+[ -n "$skills_commit" ] || { echo "up.sh: no SKILLS_SHA in packages/shared/src/skills-sha.ts" >&2; exit 1; }
 
 interactive=0
 if [ -t 0 ] && [ -t 1 ]; then interactive=1; fi

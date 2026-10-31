@@ -143,7 +143,7 @@ Spec 和 Ticket 的状态机照 design.md：Spec 的 draft → planned → runni
 
 照 [design.md「Git 操作规范」](../design.md#git-操作规范)：槽位数等于 worker 并发上限；每个任务 `git clone --no-hardlinks` 主 clone 到 `~/.afk/slots/<n>/<repo>`，用 Sandcastle 的 `cwd` 选项指向它；成功即删，失败保留到下次占用；`O_EXCL` 槽位锁；取回结果只 `fetch` 回 `agent/<ticket-id>` 一个 ref 并开 `transfer.fsckObjects`；回收僵尸槽位按"取回 commits → 存 diff → 重建"。连续性的单位是分支，不是 worktree。
 
-Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（zod 校验，`<result>` 标签）；门禁另起新沙箱用 `sandbox.exec`，命令用 `timeout` 包住。沙箱里只有 `CURSOR_API_KEY`，通过 `cursor(model, { env })` 传入；`/context` 和 skills 只读挂载，skills 挂 `/home/agent/.cursor/skills`（[mattpocock/skills](https://github.com/mattpocock/skills) 固定 `59db609eb1e18aaf59b63284d0e52255aff0c63c` 的 `skills/engineering`）。
+Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（zod 校验，`<result>` 标签）；门禁另起新沙箱用 `sandbox.exec`，命令用 `timeout` 包住。沙箱里只有 `CURSOR_API_KEY`，通过 `cursor(model, { env })` 传入；`/context` 和 skills 只读挂载，skills 挂 `/home/agent/.cursor/skills`（[mattpocock/skills](https://github.com/mattpocock/skills) 固定 commit（`SKILLS_SHA`）的 `skills/engineering`）。
 
 ### 门禁
 

@@ -77,7 +77,7 @@ _Avoid_: 契约快照、本地契约
 _Avoid_: tracker 配置、issue-tracker 模板
 
 **Skills SHA（skills SHA）**：
-平台固定使用的 [mattpocock/skills](https://github.com/mattpocock/skills) commit；worker 只挂这个提交上的 `skills/engineering`，Run 记下这个 SHA。当前固定为 `59db609eb1e18aaf59b63284d0e52255aff0c63c`。
+平台固定使用的 [mattpocock/skills](https://github.com/mattpocock/skills) commit；worker 只挂这个提交上的 `skills/engineering`，Run 记下这个 SHA。常量 `SKILLS_SHA`（`packages/shared/src/skills-sha.ts`）是它唯一的写法，别处只引用；平台依赖的 skill 文件按这个 SHA 存成快照（`packages/shared/skills-snapshot/`）。
 
 ## 执行
 
