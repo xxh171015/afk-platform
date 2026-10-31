@@ -72,6 +72,10 @@ _Avoid_: 接口文档、API 定义
 使用方仓库里提交的一份别的仓库的契约，生成的 client 以它为准。它必须和这个仓库的票所用的 Contract SHA 上的契约一字不差；没有 contract 入边的票不许改它。
 _Avoid_: 契约快照、本地契约
 
+**Tracker doc（tracker 文档）**：
+规划仓库里告诉 matt skills 去哪里、怎么发布内容的文档：Spec 和 Ticket 发布到平台，其余（地图、分诊）留在代码托管上。由平台按项目生成，不手改。
+_Avoid_: tracker 配置、issue-tracker 模板
+
 **Skills SHA（skills SHA）**：
 平台固定使用的 [mattpocock/skills](https://github.com/mattpocock/skills) commit；worker 只挂这个提交上的 `skills/engineering`，Run 记下这个 SHA。当前固定为 `59db609eb1e18aaf59b63284d0e52255aff0c63c`。
 
