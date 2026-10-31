@@ -1,0 +1,6 @@
+--- tool calls:
+  shellToolCall: PATH=/opt/plat/bin:$PATH plat spec confirm S-7
+--- answer:
+S-7 is confirmed (`draft` → `planned`). The worker will start the tickets.
+
+From here you only wait for the acceptance pack, merge the pull requests, and look at `plat blocked`.

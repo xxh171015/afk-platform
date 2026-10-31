@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Read(**)", "Write(**)", "Shell(plat)", "Shell(ls)", "Shell(cat)", "Shell(mkdir)", "Shell(git)"],
+    "deny": []
+  }
+}

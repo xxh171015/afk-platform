@@ -1,0 +1,23 @@
+#!/bin/bash
+# plat: the afk-platform CLI, a thin client of the platform API ($AFK_API_URL).
+api="${AFK_API_URL:-http://127.0.0.1:3000}"
+exec python3 - "$api" "$@" <<'EOF'
+import json, os, sys, urllib.request
+
+api, args = sys.argv[1], sys.argv[2:]
+files = {}
+if len(args) >= 4 and args[0] == "tickets" and args[1] == "import" and os.path.isdir(args[3]):
+    for name in sorted(os.listdir(args[3])):
+        if name.endswith(".md"):
+            files[name] = open(os.path.join(args[3], name), encoding="utf-8").read()
+payload = json.dumps({"args": args, "files": files}).encode()
+req = urllib.request.Request(api + "/cli", data=payload, headers={"content-type": "application/json"})
+try:
+    body = json.loads(urllib.request.urlopen(req, timeout=60).read())
+except Exception as e:
+    print(f"plat: cannot reach the platform API at {api}: {e}", file=sys.stderr)
+    sys.exit(1)
+sys.stdout.write(body.get("stdout", ""))
+sys.stderr.write(body.get("stderr", ""))
+sys.exit(body.get("code", 0))
+EOF

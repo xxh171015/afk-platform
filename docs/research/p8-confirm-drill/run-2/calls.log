@@ -1,0 +1,17 @@
+=== run 2 turn 1: /to-tickets S-7
+00:18:45	plat spec show S-7	-> 0
+00:19:03	plat --help	-> 0
+00:19:03	plat spec show S-7 --json	-> 0
+=== run 2 turn 2: 批准，按这个拆。
+00:21:49	plat tickets import S-7 tickets/	-> 0
+00:21:58	plat spec show S-7	-> 0
+00:21:58	plat spec show S-7 --json	-> 0
+00:22:05	plat ticket view T-41 --md	-> 0
+00:22:05	plat ticket view T-40 --md	-> 0
+00:22:05	plat ticket view T-42 --md	-> 0
+00:22:05	plat blocked	-> 0
+00:22:24	plat ticket view T-42 --json	-> 0
+00:22:24	plat ticket view T-41 --json	-> 0
+00:22:24	plat ticket view T-40 --json	-> 0
+=== run 2 turn 3: 是
+00:23:41	plat spec confirm S-7	-> 0

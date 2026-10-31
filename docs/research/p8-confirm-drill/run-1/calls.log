@@ -1,0 +1,7 @@
+=== run 1 turn 1: /to-tickets S-7
+00:12:36	plat spec show S-7	-> 0
+00:12:54	plat --help	-> 0
+00:13:26	plat spec show S-7 --json	-> 0
+00:14:52	plat tickets import S-7 tickets/	-> 0
+=== run 1 turn 2: 是
+00:15:43	plat spec confirm S-7	-> 0

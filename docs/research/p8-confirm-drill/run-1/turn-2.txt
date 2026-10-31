@@ -1,0 +1,6 @@
+--- tool calls:
+  shellToolCall: PATH=/opt/plat/bin:$PATH plat spec confirm S-7
+--- answer:
+S-7 is confirmed (`draft` → `planned`). The worker will pick up T-40, then T-41.
+
+From here you only need to wait for the acceptance pack, merge the pull requests, and check `plat blocked` if something is waiting on you.
