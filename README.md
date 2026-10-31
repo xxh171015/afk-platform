@@ -53,6 +53,8 @@ Jobs live in the `jobs` table; `packages/api/src/jobs/queue.ts` holds the queue 
 
 Four processes: Postgres, the API, the page and one worker. All of them listen on 127.0.0.1 only (compose binds Postgres there too).
 
+**The first time, just run `scripts/up.sh`.** It checks everything under "Once" below (Docker, Node, dependencies, the sandbox image, the skills checkout, `AFK_MODEL`, the Cursor key, the GitHub App files) and, in a terminal, offers to do each missing step for you: it saves the model and the key to `~/.afk/env` (mode 600) and checks the skills out at the pinned commit. The GitHub App cannot be made for you; the script points at it and starts without. `scripts/up.sh --check` only checks. Settings come from the environment first, then `~/.afk/env`. The steps below are what it does, for doing them by hand.
+
 **Once**
 
 1. Docker Desktop running, and the sandbox image built: `scripts/verify-sandbox-image.sh` (tags `sandcastle:afk-platform`).
