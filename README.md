@@ -21,6 +21,8 @@ docker compose up -d --wait postgres
 export DATABASE_URL=postgres://afk:afk@localhost:5432/afk   # see .env.example
 ```
 
+Postgres keeps its data in the named volume `afk-platform_pgdata`, so removing the container does not lose it (`docker compose down -v` still does). A container made before the volume existed keeps its data in an anonymous volume; `docker compose up` would start the new one empty. To move over: `pg_dump` the database first (`docker compose exec -T postgres pg_dump -U afk afk > afk.sql`), recreate the container, and load the dump into it.
+
 **No Docker (sandbox, CI)** — starts a throwaway instance from an installed PostgreSQL (`/tmp/afk-pg`, port 54329):
 
 ```sh

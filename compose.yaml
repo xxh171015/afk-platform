@@ -7,7 +7,14 @@ services:
       POSTGRES_DB: afk
     ports:
       - "127.0.0.1:5432:5432"
+    # a named volume: removing the container (compose down, a stray cleanup) leaves the data; only `down -v` or
+    # `docker volume rm afk-platform_pgdata` takes it
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U afk"]
       interval: 2s
       retries: 15
+
+volumes:
+  pgdata:
