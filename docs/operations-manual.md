@@ -248,7 +248,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 4. 改覆盖层声明的 SHA，让它和新常量一致。
 5. `pnpm check`：快照头的 SHA 和常量不一致时，守卫测试会失败。
 
-升级后，各台机器上的 skills checkout 也要切到新 SHA（`up.sh` 会提示）。
+升级后，各台机器上的 skills checkout 也要手动切到新 SHA（`up.sh` 只在没有 checkout 时才提示）。
 
 ## 附录 A：场景 A 的 `tickets.yaml`
 

@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SKILLS_SHA } from "./skills-sha.ts";
-import { readSkillSnapshot, SNAPSHOT_FILES } from "./skills-snapshot.ts";
+import {
+  readSkillSnapshot,
+  SNAPSHOT_FILES,
+  snapshotHeader,
+} from "./skills-snapshot.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -30,6 +34,14 @@ describe("the skills snapshot", () => {
     expect(toSpec.startsWith("---\nname: to-spec\n")).toBe(true);
     expect(toSpec).toContain("## Problem Statement");
   });
+});
+
+it("reads back the SHA that snapshotHeader wrote", () => {
+  const header = snapshotHeader(SKILLS_SHA, "tdd/SKILL.md");
+  expect(header).toBe(
+    `<!-- mattpocock/skills@${SKILLS_SHA} skills/engineering/tdd/SKILL.md -->\n`,
+  );
+  expect(header).toMatch(/^<!-- mattpocock\/skills@[0-9a-f]{40} \S+ -->\n$/);
 });
 
 describe("the pinned SHA", () => {

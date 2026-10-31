@@ -19,9 +19,9 @@ export const SNAPSHOT_DIR = fileURLToPath(
   new URL("../skills-snapshot/", import.meta.url),
 );
 
-const HEADER = /^<!-- mattpocock\/skills@([0-9a-f]{40}) (\S+) -->\n/;
+const HEADER = /^<!-- mattpocock\/skills@([0-9a-f]{40}) \S+ -->\n/;
 
-export function snapshotHeader(sha: string, file: string): string {
+export function snapshotHeader(sha: string, file: SnapshotFile): string {
   return `<!-- mattpocock/skills@${sha} skills/engineering/${file} -->\n`;
 }
 
