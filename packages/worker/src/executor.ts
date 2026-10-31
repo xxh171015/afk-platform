@@ -66,6 +66,7 @@ export interface ExecutorDeps {
   makeGateSandbox(slotDir: string): GateSandbox;
   tmpRoot?: string;
   model?: string; // the worker's own model: what a project that sets none gets
+  skillsSha?: string; // the skills version the worker checked at start-up; recorded on every agent Run
   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
 }
 
@@ -87,6 +88,14 @@ function runOptions(deps: ExecutorDeps, context: StageContext) {
     ...(model ? { model } : {}),
     onRawLine: (line: string) =>
       context.logRaw(sanitizeRawLine(line, deps.secrets ?? [])),
+  };
+}
+
+// What a Run records about the agent that ran: its model and the skills it ran with. Gates run no agent and record neither.
+function agentFacts(deps: ExecutorDeps, options: { model?: string }) {
+  return {
+    ...(options.model ? { model: options.model } : {}),
+    ...(deps.skillsSha ? { skillsSha: deps.skillsSha } : {}),
   };
 }
 
@@ -376,7 +385,7 @@ async function agentChange(
       baseSha,
       commits: run.commits,
       durationMs: run.durationMs,
-      ...(options.model ? { model: options.model } : {}),
+      ...agentFacts(deps, options),
       ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
     };
@@ -490,7 +499,7 @@ async function review(
         baseSha,
         commits: run.commits,
         durationMs: run.durationMs,
-        ...(options.model ? { model: options.model } : {}),
+        ...agentFacts(deps, options),
         ...(refs.length ? { refShas } : {}),
         output: run.output ?? { error: run.error },
       },
@@ -1039,7 +1048,7 @@ async function diagnose(
           refShas: run.environment.shas,
           envUpMs: run.environment.upMs,
           durationMs: run.run.durationMs,
-          ...(options.model ? { model: options.model } : {}),
+          ...agentFacts(deps, options),
           output: output ?? { error: run.run.error },
         },
         // a repo is only named when the outcome is "diagnosed"

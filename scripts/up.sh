@@ -93,6 +93,12 @@ clone_skills() {
   git clone -q "$skills_repo" "$afk_home/skills" && git -C "$afk_home/skills" switch --detach "$skills_commit"
 }
 
+# Put a skills checkout on the pinned commit (fetching it first if the checkout has not got it yet).
+switch_skills() {
+  { git -C "$1" cat-file -e "$skills_commit^{commit}" 2>/dev/null || git -C "$1" fetch -q origin; } &&
+    git -C "$1" switch -q --detach "$skills_commit"
+}
+
 echo "Checking this machine..."
 
 docker_ok=0
@@ -164,7 +170,13 @@ if [ "${WORKER:-1}" != 0 ]; then
     problem "AFK_SKILLS_DIR $skills_dir is not a directory (it should be the skills/engineering folder of a mattpocock/skills checkout)."
   else
     export AFK_SKILLS_DIR="$skills_dir"
-    good "skills: $skills_dir"
+    skills_head="$(git -C "$skills_dir" rev-parse HEAD 2>/dev/null || true)"
+    if [ "$skills_head" != "$skills_commit" ] &&
+      ! offer "The skills checkout of $skills_dir is at ${skills_head:-no git checkout}, not the pinned $skills_commit. Switch it?" switch_skills "$skills_dir"; then
+      problem "The skills checkout of $skills_dir is at ${skills_head:-no git checkout}, not the pinned $skills_commit (the worker refuses to start on it). Run: git -C $skills_dir switch --detach $skills_commit"
+    else
+      good "skills: $skills_dir at the pinned commit"
+    fi
   fi
 
   model="$(setting AFK_MODEL)"

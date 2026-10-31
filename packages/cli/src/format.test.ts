@@ -26,7 +26,7 @@ const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
 });
 
 describe("ticketText runs", () => {
-  it("ends a run line with the contract and ref SHAs it used, and with nothing else when it used none", () => {
+  it("ends a run line with the skills, contract and ref SHAs it used, and with nothing else when it used none", () => {
     const text = ticketText(
       view([
         {
@@ -35,6 +35,7 @@ describe("ticketText runs", () => {
           attempt: 1,
           result: "done",
           durationMs: 5000,
+          skillsSha: "5beb35b0123456789abcdef0123456789abcdef0",
           contractShas: { backend: "0123456789abcdef" },
           refShas: { backend: "fedcba9876543210", payments: "aaaaaaaabbbb" },
         },
@@ -44,13 +45,14 @@ describe("ticketText runs", () => {
           attempt: 1,
           result: "passed",
           durationMs: 1000,
+          skillsSha: null,
           contractShas: null,
           refShas: null,
         },
       ]),
     );
     expect(text).toContain(
-      "  R-1  implement #1  done  5s  contracts backend@01234567  refs backend@fedcba98, payments@aaaaaaaa\n",
+      "  R-1  implement #1  done  5s  skills 5beb35b0  contracts backend@01234567  refs backend@fedcba98, payments@aaaaaaaa\n",
     );
     expect(text).toMatch(/ {2}R-2 {2}gate #1 {2}passed {2}1s$/m);
   });

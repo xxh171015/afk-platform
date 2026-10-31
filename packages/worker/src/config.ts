@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { SKILLS_SHA } from "@afk/shared";
 
 // What `pnpm worker` needs to know, from the environment. Everything that is wrong is reported at once, in one
 // sentence each, before anything starts.
@@ -14,6 +15,19 @@ export interface WorkerConfig {
   skillsDir: string; // pinned skills (mattpocock/skills at SKILLS_SHA, skills/engineering), mounted read-only into the sandbox
   cursorApiKey: string;
   credentialsDir: string; // the GitHub App's key and ids
+}
+
+// `head` is the HEAD of the git checkout that holds the skills directory, undefined when it is in none. A worker
+// that ran tickets with other skills than the pinned ones would record a version it did not use.
+export function checkSkillsVersion(
+  skillsDir: string,
+  head: string | undefined,
+): string | undefined {
+  if (head === SKILLS_SHA) return undefined;
+  const fix = `git -C ${skillsDir} switch --detach ${SKILLS_SHA}`;
+  return head === undefined
+    ? `AFK_SKILLS_DIR ${skillsDir} is not inside a git checkout of mattpocock/skills; clone it and run: ${fix}`
+    : `the skills checkout of ${skillsDir} is at ${head}, not the pinned ${SKILLS_SHA}; run: ${fix}`;
 }
 
 export class ConfigError extends Error {

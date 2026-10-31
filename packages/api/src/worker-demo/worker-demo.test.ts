@@ -1089,6 +1089,25 @@ describe("what the project says about a run", () => {
     expect(models.rows).toEqual([{ model: "worker-model" }]);
   });
 
+  it("records the skills SHA the worker runs on every agent Run, and none on a gate", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: { ...deps({}), skillsSha: "abc1234" },
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const agent = await db.pool.query(
+      "SELECT DISTINCT skills_sha FROM runs WHERE stage IN ('implement', 'review', 'final-review')",
+    );
+    expect(agent.rows).toEqual([{ skills_sha: "abc1234" }]);
+    const gates = await db.pool.query(
+      "SELECT DISTINCT skills_sha FROM runs WHERE stage NOT IN ('implement', 'review', 'final-review', 'fix', 'rework', 'diagnose')",
+    );
+    expect(gates.rows.every((r) => r.skills_sha === null)).toBe(true);
+    expect(gates.rows.length).toBeGreaterThan(0);
+  });
+
   it("prefers the project's model to the worker's own", async () => {
     await confirmedSpec([ticket("a")], { defaultModel: "project-model" });
     const seen: (string | undefined)[] = [];

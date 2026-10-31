@@ -15,7 +15,12 @@ import {
   SandcastleGateSandbox,
 } from "@afk/pipeline";
 import { createWorkerApi } from "./api.ts";
-import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
+import {
+  ConfigError,
+  checkSkillsVersion,
+  loadConfig,
+  type WorkerConfig,
+} from "./config.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
@@ -69,6 +74,18 @@ if (image.status !== 0)
   fail(
     `the sandbox image ${config.image} is not built: run scripts/verify-sandbox-image.sh, or set AFK_SANDBOX_IMAGE`,
   );
+
+// The skills it mounts must be the pinned ones, or the Runs would name a version that was not used.
+const skillsHead = spawnSync(
+  "git",
+  ["-C", config.skillsDir, "rev-parse", "HEAD"],
+  { encoding: "utf8" },
+);
+const skillsProblem = checkSkillsVersion(
+  config.skillsDir,
+  skillsHead.status === 0 ? skillsHead.stdout.trim() : undefined,
+);
+if (skillsProblem) fail(skillsProblem);
 
 // An API that is not there is the commonest mistake: say so now instead of failing at the first claim.
 try {
@@ -146,6 +163,7 @@ await runWorker({
     makeGateSandbox: (slotDir) =>
       new SandcastleGateSandbox(sandcastle(slotDir)),
     model: config.model,
+    skillsSha: skillsHead.stdout.trim(), // equal to the pinned SHA: the check above refused anything else
     secrets: [config.cursorApiKey],
   },
   concurrency: config.slots,

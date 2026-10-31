@@ -48,6 +48,7 @@ export {
   TICKET_TYPES,
   TicketSchema,
 } from "./schemas.ts";
+export { SKILLS_SHA } from "./skills-sha.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specTransition } from "./spec-state.ts";
 export type {

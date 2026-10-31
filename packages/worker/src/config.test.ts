@@ -3,8 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SKILLS_SHA } from "@afk/shared";
 import { describe, expect, it } from "vitest";
-import { ConfigError, loadConfig, parseEnvFile } from "./config.ts";
+import {
+  ConfigError,
+  checkSkillsVersion,
+  loadConfig,
+  parseEnvFile,
+} from "./config.ts";
 
 const sources = (
   env: Record<string, string>,
@@ -93,6 +99,27 @@ describe("the worker's configuration", () => {
         loadConfig(sources({ ...complete, AFK_SKILLS_DIR: "/nope" })),
       ),
     ).toEqual(["AFK_SKILLS_DIR /nope is not a directory"]);
+  });
+});
+
+describe("the skills checkout", () => {
+  const other = "0123456789abcdef0123456789abcdef01234567";
+
+  it("is accepted when its HEAD is the pinned SHA", () => {
+    expect(checkSkillsVersion("/skills", SKILLS_SHA)).toBeUndefined();
+  });
+
+  it("is refused at any other HEAD, with the command that switches it", () => {
+    const problem = checkSkillsVersion("/skills", other);
+    expect(problem).toContain(other);
+    expect(problem).toContain(SKILLS_SHA);
+    expect(problem).toContain(`git -C /skills switch --detach ${SKILLS_SHA}`);
+  });
+
+  it("is refused when it is not a git checkout", () => {
+    expect(checkSkillsVersion("/skills", undefined)).toContain(
+      "not inside a git checkout",
+    );
   });
 });
 
