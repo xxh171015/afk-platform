@@ -17,11 +17,11 @@ _Avoid_: 代码库、工程、主仓库、角色
 _Avoid_: 父票、epic、story
 
 **Ticket（票）**：
-平台里的一张实现票，属于一个 Spec，只改一个 Repo。只指平台里的这个实体；规划过程中 GitHub Issues 上的决策票不叫 Ticket。
+平台里的一张实现票，属于一个 Spec，只改一个 Repo。只指平台里的这个实体；规划过程中 GitHub Issues 上的决策票不叫 Ticket。正文和 to-tickets 的 issue 模板原文一字不差，验收标准就是正文里 Acceptance criteria 一节的各条，不另写一份。
 _Avoid_: 任务、issue、子票
 
 **Content version（内容版本）**：
-Ticket 内容（标题、正文、验收标准、模块、已批准的保护路径）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型和依赖边不属于内容，不能改。
+Ticket 内容（标题、正文（含验收标准）、模块、已批准的保护路径）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型和依赖边不属于内容，不能改。
 _Avoid_: 修订号、票版本
 
 **Integration ticket（联调票）**：
