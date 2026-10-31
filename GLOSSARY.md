@@ -81,6 +81,10 @@ _Avoid_: 契约快照、本地契约
 一次 agent 运行或一次确定性步骤的尝试记录，每次尝试新增一条，不覆盖。
 _Avoid_: 执行、任务
 
+**Overlay（覆盖层）**：
+平台叠在 matt skill 之上的规则，让 skill 原样在无人值守的 Run 里跑：替 skill 回答它本来要问人的问题，并加上平台的约束。和它对应的 Skills SHA 绑定。
+_Avoid_: 补丁、包装 prompt、fork
+
 **Integration branch（集成分支）**：
 一个 Spec 在一个 Repo 里的分支 `spec/<id>/<slug>`（`<id>` 是数据库的标识，六位十六进制；标识出现之前建的 spec 是 `spec/<slug>`），票合并到这里，最后以 PR 的形式合进 main。票的分支是 `agent/<id>/T-<n>`，总览修复的是 `agent/<id>/S-<n>-final`。
 _Avoid_: 特性分支、feature branch
@@ -110,6 +114,10 @@ _Avoid_: 白名单、豁免路径
 **Finding（意见）**：
 review 意见或门禁失败，以及它的处理结果。
 _Avoid_: 评论、issue
+
+**Review axis（审查轴）**：
+审查的两个互相独立的角度：Standards（是否符合仓库写明的规范）和 Spec（是否做了票或需求要求的事）。每条 review 意见属于一轴，两轴分开记，不跨轴排名。
+_Avoid_: 维度、审查类型
 
 **Link（追溯链接）**：
 commit 与 Ticket、Spec、PR、缺陷之间的对应关系。
