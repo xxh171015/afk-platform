@@ -127,10 +127,12 @@ const contextLines = (
     : []),
 ];
 
+const shortSha = (sha: string) => sha.slice(0, 8);
+
 const shaList = (label: string, shas: Record<string, string> | null) =>
   shas
     ? `  ${label} ${Object.entries(shas)
-        .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
+        .map(([repo, sha]) => `${repo}@${shortSha(sha)}`)
         .join(", ")}`
     : "";
 
@@ -297,7 +299,7 @@ export function ticketText(view: {
     "runs:",
     ...view.runs.map(
       (r) =>
-        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${r.skillsSha ? `  skills ${r.skillsSha.slice(0, 8)}` : ""}${shaList("contracts", r.contractShas)}${shaList("refs", r.refShas)}`,
+        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${r.skillsSha ? `  skills ${shortSha(r.skillsSha)}` : ""}${shaList("contracts", r.contractShas)}${shaList("refs", r.refShas)}`,
     ),
     ...(view.findings.length
       ? [

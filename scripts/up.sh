@@ -171,9 +171,10 @@ if [ "${WORKER:-1}" != 0 ]; then
   else
     export AFK_SKILLS_DIR="$skills_dir"
     skills_head="$(git -C "$skills_dir" rev-parse HEAD 2>/dev/null || true)"
+    skills_wrong="The skills checkout of $skills_dir is at ${skills_head:-no git checkout}, not the pinned $skills_commit"
     if [ "$skills_head" != "$skills_commit" ] &&
-      ! offer "The skills checkout of $skills_dir is at ${skills_head:-no git checkout}, not the pinned $skills_commit. Switch it?" switch_skills "$skills_dir"; then
-      problem "The skills checkout of $skills_dir is at ${skills_head:-no git checkout}, not the pinned $skills_commit (the worker refuses to start on it). Run: git -C $skills_dir switch --detach $skills_commit"
+      ! offer "$skills_wrong. Switch it?" switch_skills "$skills_dir"; then
+      problem "$skills_wrong (the worker refuses to start on it). Run: git -C $skills_dir switch --detach $skills_commit"
     else
       good "skills: $skills_dir at the pinned commit"
     fi

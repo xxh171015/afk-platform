@@ -14,6 +14,7 @@ import {
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
+import { SKILLS_SHA } from "@afk/shared";
 import { createWorkerApi } from "./api.ts";
 import {
   ConfigError,
@@ -163,7 +164,7 @@ await runWorker({
     makeGateSandbox: (slotDir) =>
       new SandcastleGateSandbox(sandcastle(slotDir)),
     model: config.model,
-    skillsSha: skillsHead.stdout.trim(), // equal to the pinned SHA: the check above refused anything else
+    skillsSha: SKILLS_SHA, // the checkout is at it: the check above refused anything else
     secrets: [config.cursorApiKey],
   },
   concurrency: config.slots,
