@@ -13,6 +13,7 @@ import "@xyflow/react/dist/style.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { SpecLayout } from "./prototype/Layouts.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
 import { pullStateLabel } from "./pull-request.ts";
 
@@ -318,8 +319,8 @@ export function SpecDetail({ specId }: { specId: number }) {
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;
 
-  return (
-    <section className="spec-detail">
+  const header = (
+    <>
       <p>
         <a href="#/">← all specs</a>
       </p>
@@ -330,7 +331,10 @@ export function SpecDetail({ specId }: { specId: number }) {
       {spec.pauseReason ? (
         <p className="error">Paused: {spec.pauseReason}</p>
       ) : null}
-
+    </>
+  );
+  const confirmBlock = (
+    <>
       {spec.state === "draft" ? (
         <div className="confirm">
           <button
@@ -353,7 +357,10 @@ export function SpecDetail({ specId }: { specId: number }) {
           ) : null}
         </div>
       ) : null}
-
+    </>
+  );
+  const prs = (
+    <>
       {pullRequests.length > 0 ? (
         <>
           <h3>Pull requests</h3>
@@ -397,8 +404,13 @@ export function SpecDetail({ specId }: { specId: number }) {
           </ol>
         </>
       ) : null}
-      {acceptancePack ? <AcceptancePackSection pack={acceptancePack} /> : null}
-
+    </>
+  );
+  const pack = acceptancePack ? (
+    <AcceptancePackSection pack={acceptancePack} />
+  ) : null;
+  const warnings = (
+    <>
       <h3>Warnings from the import</h3>
       {spec.warnings.length === 0 ? (
         <p className="note">No warnings.</p>
@@ -413,14 +425,20 @@ export function SpecDetail({ specId }: { specId: number }) {
           ))}
         </ul>
       )}
-
+    </>
+  );
+  const graph = (
+    <>
       <h3>Dependency graph</h3>
       {tickets.length === 0 ? (
         <p className="note">No tickets imported.</p>
       ) : (
         <DependencyGraph tickets={tickets} edges={edges} />
       )}
-
+    </>
+  );
+  const ticketList = (
+    <>
       <h3>Tickets</h3>
       <ul className="tickets">
         {tickets.map((ticket) => (
@@ -437,7 +455,10 @@ export function SpecDetail({ specId }: { specId: number }) {
           </li>
         ))}
       </ul>
-
+    </>
+  );
+  const overall = (
+    <>
       {finalizations.length > 0 ? (
         <>
           <h3>Overall review</h3>
@@ -451,6 +472,24 @@ export function SpecDetail({ specId }: { specId: number }) {
           </ul>
         </>
       ) : null}
-    </section>
+    </>
+  );
+  // PROTOTYPE (prototype/spec-ticket-body-display): the page's parts, arranged by the picked variant
+  return (
+    <SpecLayout
+      spec={spec}
+      tickets={tickets}
+      edges={edges}
+      parts={{
+        header,
+        confirmBlock,
+        prs,
+        pack,
+        warnings,
+        graph,
+        ticketList,
+        overall,
+      }}
+    />
   );
 }

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { TicketLayout } from "./prototype/Layouts.tsx";
 import { RunLog } from "./RunLog.tsx";
 
 // One ticket, for finding out what happened to it: its runs (stage, result, time, model and skills version), the
@@ -50,8 +51,8 @@ export function TicketDetail({
   // by default the newest run, which is the one that is going or that went wrong last
   const shown = picked ?? runs.at(-1)?.id;
 
-  return (
-    <section className="ticket-detail">
+  const header = (
+    <>
       <p>
         <a href={`#/specs/${ticket.specId}`}>← {ticket.specDisplayId}</a>
       </p>
@@ -83,7 +84,10 @@ export function TicketDetail({
           <pre>{JSON.stringify(ticket.brief.output, null, 2)}</pre>
         </div>
       ) : null}
-
+    </>
+  );
+  const e2e = (
+    <>
       {integration ? (
         <>
           <h3>E2E tries</h3>
@@ -130,7 +134,10 @@ export function TicketDetail({
           </ol>
         </>
       ) : null}
-
+    </>
+  );
+  const acceptance = (
+    <>
       <h3>Acceptance criteria</h3>
       <ul>
         {ticket.acceptanceCriteria.map((criterion) => (
@@ -148,7 +155,10 @@ export function TicketDetail({
             : ""}
         </p>
       ) : null}
-
+    </>
+  );
+  const runsBlock = (
+    <>
       <h3>Runs</h3>
       {runs.length === 0 ? (
         <p className="note">No runs yet.</p>
@@ -214,7 +224,10 @@ export function TicketDetail({
           <RunLog key={shown} runId={shown} pollMs={logPollMs} />
         </>
       ) : null}
-
+    </>
+  );
+  const gates = (
+    <>
       <h3>Gate results</h3>
       {gateResults.length === 0 ? (
         <p className="note">No gate has run on this ticket.</p>
@@ -240,7 +253,10 @@ export function TicketDetail({
           ))}
         </ul>
       )}
-
+    </>
+  );
+  const findingsBlock = (
+    <>
       <h3>Findings</h3>
       {findings.length === 0 ? (
         <p className="note">No findings.</p>
@@ -254,6 +270,16 @@ export function TicketDetail({
           ))}
         </ul>
       )}
-    </section>
+    </>
+  );
+  // PROTOTYPE (prototype/spec-ticket-body-display): the page's parts, arranged by the picked variant
+  return (
+    <TicketLayout
+      ticket={ticket}
+      upstream={upstream}
+      downstream={downstream}
+      versions={versions}
+      parts={{ header, e2e, acceptance, runsBlock, gates, findingsBlock }}
+    />
   );
 }
