@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { RunLog } from "./RunLog.tsx";
 
 // One ticket, for finding out what happened to it: its runs (stage, result, time, model and skills version), the
@@ -18,6 +19,9 @@ export function TicketDetail({
 }) {
   const api = useApi();
   const [picked, setPicked] = useState<number | undefined>();
+  // the content version shown in the left column; undefined is the newest
+  const [version, setVersion] = useState<number | undefined>();
+  const [showAgentText, setShowAgentText] = useState(false);
   const view = useQuery({
     queryKey: ["ticket", ticketId],
     queryFn: async () => {
@@ -28,6 +32,33 @@ export function TicketDetail({
       return data;
     },
     refetchInterval: 3_000,
+  });
+  const current = view.data?.ticket.contentVersion;
+  const older = version !== undefined && version !== current;
+  // the content of an older version: its body and the text the agent read then
+  const past = useQuery({
+    queryKey: ["ticket", ticketId, "version", version],
+    enabled: older,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/tickets/{id}", {
+        params: { path: { id: ticketId }, query: { version } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+  });
+  // the other tickets of the same spec, for the side column
+  const specId = view.data?.ticket.specId;
+  const spec = useQuery({
+    queryKey: ["spec", specId],
+    enabled: specId !== undefined,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/specs/{id}", {
+        params: { path: { id: specId as number } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
   });
 
   if (view.isPending) return <p className="note">Loading the ticket…</p>;
@@ -49,6 +80,7 @@ export function TicketDetail({
   } = view.data;
   // by default the newest run, which is the one that is going or that went wrong last
   const shown = picked ?? runs.at(-1)?.id;
+  const shownTicket = older && past.data ? past.data.ticket : ticket;
 
   return (
     <section className="ticket-detail">
@@ -63,17 +95,6 @@ export function TicketDetail({
         {ticket.type}, repo {ticket.repo}, version {ticket.contentVersion}
         {ticket.blockedReason ? `, blocked: ${ticket.blockedReason}` : ""}
       </p>
-      {versions.length > 1 ? (
-        <p className="note">
-          Edited {versions.length - 1} time{versions.length === 2 ? "" : "s"}:{" "}
-          {versions.map((v) => (
-            <span key={v.version} className="version">
-              v{v.version} ({v.createdAt.slice(0, 10)}){" "}
-            </span>
-          ))}
-        </p>
-      ) : null}
-
       {ticket.brief ? (
         <div className="brief" role="note">
           <strong>
@@ -83,6 +104,91 @@ export function TicketDetail({
           <pre>{JSON.stringify(ticket.brief.output, null, 2)}</pre>
         </div>
       ) : null}
+
+      <div className="two-columns">
+        <div className="main-column">
+          <div className="body-controls">
+            {versions.length > 1 ? (
+              <label>
+                Version{" "}
+                <select
+                  value={version ?? ticket.contentVersion}
+                  onChange={(event) => setVersion(Number(event.target.value))}
+                >
+                  {versions.map((v) => (
+                    <option key={v.version} value={v.version}>
+                      v{v.version} ({v.createdAt.slice(0, 10)})
+                      {v.version === ticket.contentVersion ? " · current" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}{" "}
+            <label>
+              <input
+                type="checkbox"
+                checked={showAgentText}
+                onChange={(event) => setShowAgentText(event.target.checked)}
+              />{" "}
+              agent 读到的原文
+            </label>
+          </div>
+          {older && past.isError ? (
+            <p className="error" role="alert">
+              Could not load version {version}: {past.error.message}
+            </p>
+          ) : older && !past.data ? (
+            <p className="note">Loading version {version}…</p>
+          ) : showAgentText ? (
+            <pre className="ticket-original" data-testid="ticket-original">
+              {shownTicket.file}
+            </pre>
+          ) : (
+            <Markdown source={shownTicket.body} />
+          )}
+        </div>
+
+        <aside className="side-column">
+          <h3>Spec</h3>
+          <p>
+            <a href={`#/specs/${ticket.specId}`}>{ticket.specDisplayId}</a>
+            {spec.data ? ` ${spec.data.spec.title}` : ""}
+          </p>
+          {(
+            [
+              ["Waits for", upstream],
+              ["Blocks", downstream],
+            ] as const
+          ).map(([heading, related]) =>
+            related.length > 0 ? (
+              <div key={heading}>
+                <h3>{heading}</h3>
+                <ul className="related">
+                  {related.map((e) => (
+                    <li key={e.id}>
+                      <a href={`#/tickets/${e.id}`}>{e.displayId}</a> ({e.kind},{" "}
+                      {e.state})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null,
+          )}
+          {spec.data ? (
+            <>
+              <h3>Tickets of {ticket.specDisplayId}</h3>
+              <ul className="related spec-tickets">
+                {spec.data.tickets.map((t) => (
+                  <li key={t.id} className={t.id === ticket.id ? "picked" : ""}>
+                    <span className={`badge ticket-${t.state}`}>{t.state}</span>{" "}
+                    <a href={`#/tickets/${t.id}`}>{t.displayId}</a> {t.title}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </aside>
+      </div>
 
       {integration ? (
         <>
@@ -129,24 +235,6 @@ export function TicketDetail({
             ))}
           </ol>
         </>
-      ) : null}
-
-      <h3>Acceptance criteria</h3>
-      <ul>
-        {ticket.acceptanceCriteria.map((criterion) => (
-          <li key={criterion}>{criterion}</li>
-        ))}
-      </ul>
-
-      {upstream.length + downstream.length > 0 ? (
-        <p className="note">
-          {upstream.length > 0
-            ? `Waits for ${upstream.map((e) => `${e.displayId} (${e.state})`).join(", ")}. `
-            : ""}
-          {downstream.length > 0
-            ? `Blocks ${downstream.map((e) => `${e.displayId} (${e.state})`).join(", ")}.`
-            : ""}
-        </p>
       ) : null}
 
       <h3>Runs</h3>

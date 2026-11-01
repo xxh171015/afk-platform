@@ -49,7 +49,7 @@ export function App() {
       ) : spec ? (
         <SpecDetail specId={Number(spec[1])} />
       ) : ticket ? (
-        <TicketDetail ticketId={Number(ticket[1])} />
+        <TicketDetail key={ticket[1]} ticketId={Number(ticket[1])} />
       ) : (
         <SpecList />
       )}

@@ -47,7 +47,8 @@ const view = (over: Record<string, unknown> = {}) => ({
     blockedReason: null,
     repo: "backend",
     brief: null,
-    body: "",
+    body: "## Parent\n\nS-1\n\n## What to build\n\nExport **orders**.\n\n## Acceptance criteria\n\n- [ ] returns text/csv\n- [ ] has a header row\n",
+    file: "---\nid: T-4\nversion: 1\ntitle: Export orders as CSV\n---\n## Parent\n\nS-1\n",
     acceptanceCriteria: ["returns text/csv", "has a header row"],
     modules: ["src/orders/**"],
     allowedProtectedPaths: [],
@@ -153,25 +154,46 @@ describe("the ticket page", () => {
     expect(await screen.findByText("backend@01234567")).toBeTruthy();
   });
 
-  it("shows the edit history when the ticket has been edited", async () => {
+  it("shows an older version of the body and of the original text from the version list", async () => {
+    const edited = view({
+      versions: [
+        { version: 1, createdAt: "2026-10-28T09:00:00.000Z" },
+        { version: 2, createdAt: "2026-10-29T10:00:00.000Z" },
+      ],
+    });
+    edited.ticket.contentVersion = 2;
     const server = fakeServer({
-      "GET /tickets/4": () => ({
-        json: view({
-          versions: [
-            { version: 1, createdAt: "2026-10-28T09:00:00.000Z" },
-            { version: 2, createdAt: "2026-10-29T10:00:00.000Z" },
-          ],
-        }),
-      }),
+      "GET /tickets/4": ({ url }) =>
+        url.searchParams.get("version") === "1"
+          ? {
+              json: {
+                ...view(),
+                ticket: {
+                  ...view().ticket,
+                  body: "## What to build\n\nthe first wording\n",
+                  file: "---\nversion: 1\n---\nthe first file\n",
+                },
+              },
+            }
+          : { json: edited },
       ...logs({ 10: "implement log", 11: "gate log" }),
     });
     renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
 
-    expect(await screen.findByText(/Edited 1 time/)).toBeTruthy();
-    expect(screen.getByText(/v2 \(2026-10-29\)/)).toBeTruthy();
+    const select = (await screen.findByLabelText(
+      /Version/,
+    )) as HTMLSelectElement;
+    expect(select.value).toBe("2");
+    expect(screen.getByText(/v2 \(2026-10-29\) · current/)).toBeTruthy();
+    fireEvent.change(select, { target: { value: "1" } });
+    expect(await screen.findByText("the first wording")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/agent 读到的原文/));
+    expect(screen.getByTestId("ticket-original").textContent).toBe(
+      "---\nversion: 1\n---\nthe first file\n",
+    );
   });
 
-  it("shows the title, state, type and acceptance criteria", async () => {
+  it("shows the title, state, type and the body as markdown, with its checkboxes", async () => {
     renderWithApp(
       <TicketDetail ticketId={4} logPollMs={20} />,
       fakeServer({
@@ -179,17 +201,25 @@ describe("the ticket page", () => {
         ...logs({ 10: "x", 11: "y" }),
       }),
     );
-    const heading = await screen.findByRole("heading", { level: 2 });
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: /T-4/,
+    });
     expect(heading.textContent).toContain("T-4 Export orders as CSV");
     expect(heading.textContent).toContain("running");
     expect(screen.getByText("returns text/csv")).toBeTruthy();
     expect(screen.getByText("has a header row")).toBeTruthy();
     expect(
+      document.querySelectorAll('input[type="checkbox"][disabled]'),
+    ).toHaveLength(2);
+    expect(document.querySelector(".markdown strong")?.textContent).toBe(
+      "orders",
+    );
+    expect(
       screen.getByText(/implementation, repo backend, version 1/),
     ).toBeTruthy();
-    expect(screen.getByRole("link", { name: /S-1/ }).getAttribute("href")).toBe(
-      "#/specs/1",
-    );
+    for (const link of screen.getAllByRole("link", { name: /S-1/ }))
+      expect(link.getAttribute("href")).toBe("#/specs/1");
   });
 
   it("shows the log of the newest run, and of another one when it is picked", async () => {
@@ -390,7 +420,7 @@ describe("the ticket page", () => {
     expect(screen.getByText(/R-24 passed/)).toBeTruthy();
   });
 
-  it("names the tickets it waits for and the ones waiting for it", async () => {
+  it("shows the spec, what the ticket waits for, what it blocks and the other tickets of the spec in the side column", async () => {
     const server = fakeServer({
       "GET /tickets/4": () => ({
         json: view({
@@ -402,14 +432,36 @@ describe("the ticket page", () => {
           ],
         }),
       }),
+      "GET /specs/1": () => ({
+        json: {
+          spec: { id: 1, displayId: "S-1", title: "Order export" },
+          tickets: [
+            { id: 2, displayId: "T-2", title: "Contract", state: "done" },
+            { id: 4, displayId: "T-4", title: "Export", state: "running" },
+            { id: 6, displayId: "T-6", title: "Button", state: "pending" },
+          ],
+        },
+      }),
       ...logs({ 10: "a", 11: "b" }),
     });
     renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    const side = (await screen.findByText("Waits for")).closest("aside");
+    if (!side) throw new Error("no side column");
+    await within(side).findByText(/Order export/);
     expect(
-      await screen.findByText(
-        /Waits for T-2 \(done\)\. Blocks T-6 \(pending\)\./,
-      ),
-    ).toBeTruthy();
+      within(side).getByRole("link", { name: "S-1" }).getAttribute("href"),
+    ).toBe("#/specs/1");
+    const waits = within(side).getAllByRole("link", { name: "T-2" });
+    expect(waits.map((l) => l.getAttribute("href"))).toEqual([
+      "#/tickets/2",
+      "#/tickets/2",
+    ]);
+    expect(side.textContent).toMatch(/T-2.*\(blocks, done\)/);
+    expect(side.textContent).toMatch(/Blocks.*T-6.*\(contract, pending\)/);
+    expect(within(side).getByText("Tickets of S-1")).toBeTruthy();
+    expect(
+      within(side).getByRole("link", { name: "T-4" }).closest("li")?.className,
+    ).toBe("picked");
   });
 
   it("says it is loading, and says when the ticket is not there", async () => {
