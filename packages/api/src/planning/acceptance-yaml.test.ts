@@ -22,6 +22,27 @@ afterEach(async () => {
   await db.drop();
 });
 
+// The tracker doc a developer who ran `plat tracker-doc` for the project's first repo would have committed, so that
+// these tests see no tracker doc warning on stderr.
+async function committedTrackerDoc(apiUrl: string): Promise<string> {
+  const project = (await (await fetch(`${apiUrl}/projects/1`)).json()) as {
+    repos?: { name: string }[];
+  };
+  const repo = project.repos?.[0]?.name;
+  if (!repo) throw new Error("ENOENT docs/agents/issue-tracker.md");
+  let doc = "";
+  await run(["tracker-doc", "--project", "1", "--repo", repo], {
+    stdout: (text) => {
+      doc += text;
+    },
+    stderr: () => {},
+    env: { AFK_API_URL: apiUrl },
+    readFile: async () => "",
+    readDirectory: async () => [],
+  });
+  return doc;
+}
+
 async function plat(...args: string[]) {
   let stdout = "";
   let stderr = "";
@@ -33,7 +54,10 @@ async function plat(...args: string[]) {
       stderr += text;
     },
     env: { AFK_API_URL: api.url },
-    readFile: async (path) => readFileSync(path, "utf8"),
+    readFile: async (path) =>
+      path === "docs/agents/issue-tracker.md"
+        ? await committedTrackerDoc(api.url)
+        : readFileSync(path, "utf8"),
     readDirectory: async (path) =>
       readdirSync(path).map((name) => ({
         name,

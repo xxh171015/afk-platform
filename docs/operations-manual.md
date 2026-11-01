@@ -75,6 +75,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写
 
    `plat tracker-doc` 只打印，不写文件、不碰 git。文档第一行是版本标记（平台版本和 skills SHA）；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
 2. 把 `docs/agents/issue-tracker.md` 提交并推到 `main`。平台或项目配置变了以后，重新运行同一条命令，再提交。
+3. 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及本机用户级 skills 目录（`~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）里的 to-spec、to-tickets 是否和快照逐字一致。告警里会写出更新命令，或怎么把 skills 链到固定 SHA 的 checkout。
 
 前端仓库**不需要**装 tracker 文档（只在规划仓库里跑 skills）。
 

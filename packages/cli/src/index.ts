@@ -7,6 +7,7 @@ import {
 } from "@afk/shared/spec-template";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { blockedText, specText, ticketText } from "./format.ts";
+import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
 import { renderTrackerDoc } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -235,6 +236,29 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `repo ${data.id} ${data.name} updated`);
     });
 
+  // The warnings `spec create` and `tickets import` print about this planning machine; they never change the exit code.
+  const warnAboutPlanningMachine = async (project?: number) => {
+    try {
+      const warnings = [
+        ...(await trackerDocWarnings(
+          io.readFile,
+          async (id) => {
+            const { data } = await api().GET("/projects/{projectId}", {
+              params: { path: { projectId: id } },
+            });
+            if (!data) throw new Error("no such project");
+            return data;
+          },
+          project,
+        )),
+        ...(io.env.HOME ? await skillsWarnings(io.readFile, io.env.HOME) : []),
+      ];
+      for (const warning of warnings) io.stderr(`${warning}\n`);
+    } catch {
+      // A check that cannot run is not worth failing a command that worked.
+    }
+  };
+
   program
     .command("tracker-doc")
     .description(
@@ -287,6 +311,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         : specTemplateWarnings(body))
         io.stderr(`warning: ${warning}\n`);
       print(data, data.displayId);
+      await warnAboutPlanningMachine(options.project);
     });
 
   spec
@@ -353,6 +378,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ...data.warnings.map((w) => `warning: ${w.message}`),
       ];
       print(data, lines.join("\n"));
+      await warnAboutPlanningMachine();
     });
 
   spec

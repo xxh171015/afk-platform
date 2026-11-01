@@ -78,11 +78,24 @@ export function renderTrackerDoc(
   const crossRepo =
     project.repos.length > 1 && project.repos.some((r) => r.contractPath);
   const parts = [
-    `<!-- plat tracker-doc ${pkg.version} skills mattpocock/skills@${SKILLS_SHA} -->`,
+    `<!-- plat tracker-doc ${pkg.version} skills mattpocock/skills@${SKILLS_SHA} project ${project.id} repo ${repo.name} -->`,
     fill(template("routing"), values).trim(),
     fill(template("platform"), values).trim(),
     ...(crossRepo ? [fill(template("multi-repo"), values).trim()] : []),
     `## On ${host.name} (\`${host.cli}\`)\n\n${readSkillSnapshot(host.seed).content.trim()}`,
   ];
   return `${parts.join("\n\n")}\n`;
+}
+
+// The project and repo a document was generated for, read from its first line; null when it has no such line.
+export function trackerDocTarget(
+  doc: string,
+): { project: number; repo: string } | null {
+  const match =
+    /^<!-- plat tracker-doc \S+ skills \S+ project (\d+) repo (\S+) -->/.exec(
+      doc,
+    );
+  return match?.[1] && match[2]
+    ? { project: Number(match[1]), repo: match[2] }
+    : null;
 }

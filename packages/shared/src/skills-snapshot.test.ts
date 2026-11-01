@@ -53,10 +53,11 @@ describe("the pinned SHA", () => {
       .trim()
       .split("\n")
       // the snapshot headers, and the overlay, which says which skills it was written for (a test in the pipeline
-      // package holds that SHA to the constant)
+      // package holds that SHA to the constant), and the tracker-doc templates (a test in the cli package does the same)
       .filter(
         (file) =>
           !file.startsWith("packages/shared/skills-snapshot/") &&
+          !file.startsWith("packages/cli/templates/") &&
           file !== "packages/pipeline/prompts/overlay.md",
       );
     expect(tracked).toEqual(["packages/shared/src/skills-sha.ts"]);
