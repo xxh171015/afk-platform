@@ -32,6 +32,13 @@ export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
 export { redactSecrets } from "./redact.ts";
 export type {
+  AxisReview,
+  CombinedReview,
+  ReviewAxis,
+  ReviewItem,
+} from "./review-axes.ts";
+export { combinedReview, REVIEW_AXES } from "./review-axes.ts";
+export type {
   Capacity,
   IncomingEdge,
   NotRunnableReason,

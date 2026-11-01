@@ -1,4 +1,4 @@
-import { SPEC_STATES, TICKET_STATES } from "@afk/shared";
+import { REVIEW_AXES, SPEC_STATES, TICKET_STATES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   AcceptancePack,
@@ -157,6 +157,7 @@ const ticketRoute = createRoute({
             agent: z.string().nullable(),
             model: z.string().nullable(),
             skillsSha: z.string().nullable(),
+            axis: z.enum(REVIEW_AXES).nullable(),
             cursorCliVersion: z.string().nullable(),
             contractShas: z.record(z.string(), z.string()).nullable(),
             refShas: z.record(z.string(), z.string()).nullable(),
@@ -171,6 +172,7 @@ const ticketRoute = createRoute({
             kind: z.string(),
             body: z.string(),
             resolution: z.string(),
+            axis: z.enum(REVIEW_AXES).nullable(),
           }),
         ),
         gateResults: z.array(

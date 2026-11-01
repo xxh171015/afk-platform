@@ -253,10 +253,16 @@ export function ticketText(view: {
     result: string | null;
     durationMs: number | null;
     skillsSha: string | null;
+    axis?: string | null;
     contractShas: Record<string, string> | null;
     refShas: Record<string, string> | null;
   }[];
-  findings: { kind: string; body: string; resolution: string }[];
+  findings: {
+    kind: string;
+    body: string;
+    resolution: string;
+    axis?: string | null;
+  }[];
   integration?: { rounds: number } | null;
 }): string {
   const { ticket } = view;
@@ -300,13 +306,14 @@ export function ticketText(view: {
     "runs:",
     ...view.runs.map(
       (r) =>
-        `  ${r.displayId}  ${r.stage} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${r.skillsSha ? `  skills ${shortSha(r.skillsSha)}` : ""}${shaList("contracts", r.contractShas)}${shaList("refs", r.refShas)}`,
+        `  ${r.displayId}  ${r.stage}${r.axis ? ` (${r.axis})` : ""} #${r.attempt}  ${r.result ?? "running"}${r.durationMs === null ? "" : `  ${Math.round(r.durationMs / 1000)}s`}${r.skillsSha ? `  skills ${shortSha(r.skillsSha)}` : ""}${shaList("contracts", r.contractShas)}${shaList("refs", r.refShas)}`,
     ),
     ...(view.findings.length
       ? [
           "findings:",
           ...view.findings.map(
-            (f) => `  [${f.resolution}] ${f.kind}: ${f.body}`,
+            (f) =>
+              `  [${f.resolution}] ${f.axis ? `${f.axis} ` : ""}${f.kind}: ${f.body}`,
           ),
         ]
       : []),
@@ -372,7 +379,13 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           "findings",
           repo.findings.map(
             (f) =>
-              `      [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage} ${f.kind}: ${f.body}`,
+              `      [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage}${f.axis ? ` (${f.axis})` : ""} ${f.kind}: ${f.body}`,
+          ),
+        ),
+        ...section(
+          "scope creep (not asked for)",
+          repo.scopeCreep.map(
+            (s) => `      ${s.ticket ?? "spec"} ${s.run}: ${s.body}`,
           ),
         ),
         ...section(

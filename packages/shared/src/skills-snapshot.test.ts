@@ -52,7 +52,13 @@ describe("the pinned SHA", () => {
     })
       .trim()
       .split("\n")
-      .filter((file) => !file.startsWith("packages/shared/skills-snapshot/"));
+      // the snapshot headers, and the overlay, which says which skills it was written for (a test in the pipeline
+      // package holds that SHA to the constant)
+      .filter(
+        (file) =>
+          !file.startsWith("packages/shared/skills-snapshot/") &&
+          file !== "packages/pipeline/prompts/overlay.md",
+      );
     expect(tracked).toEqual(["packages/shared/src/skills-sha.ts"]);
   });
 

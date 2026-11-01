@@ -9,6 +9,7 @@ import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 import { ticketFileOf } from "../tickets/ticket-file.ts";
 import { contractsOf } from "./contracts.ts";
 import { environmentOf, refsOf } from "./refs.ts";
+import { reviewJsonOf } from "./review-json.ts";
 
 // Everything a worker needs to render /context for a stage job (docs/design.md「Agent 与 skills 对接」).
 // The contract travels as a pointer, a SHA and a path in the repo that holds it: the worker reads the file
@@ -174,11 +175,6 @@ export async function buildBundle(
        AND result IN ('failed', 'gate-failed', 'conflict')`,
     [ticketId],
   );
-  const reviewed = await pool.query<{ output: unknown }>(
-    "SELECT output FROM runs WHERE ticket_id = $1 AND stage = 'review' AND output IS NOT NULL ORDER BY id DESC LIMIT 1",
-    [ticketId],
-  );
-
   return {
     job: { id: job.id, stage, attempt: job.attempt },
     run: run.rows[0]
@@ -227,7 +223,9 @@ export async function buildBundle(
     refs,
     environment,
     failureLog: failed.rows[0]?.log ?? null,
-    review: reviewed.rows[0]?.output ?? null,
+    review: await reviewJsonOf(pool, "ticket_id = $1 AND stage = 'review'", [
+      ticketId,
+    ]),
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
     ...runSettings(row.limits, row.default_model),
   };
@@ -259,10 +257,6 @@ async function buildFinalBundle(
     [job.id],
   );
   // the review that asked for the fix, and the log of the merge or gate that failed last
-  const review = await pool.query<{ output: unknown }>(
-    "SELECT output FROM runs WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'final-review' AND output IS NOT NULL ORDER BY id DESC LIMIT 1",
-    [final.specId],
-  );
   const failed = await pool.query<{ log: string | null }>(
     `SELECT output->>'failureLog' AS log FROM runs
      WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'final-merge' AND result IN ('conflict', 'gate-failed')
@@ -312,7 +306,11 @@ async function buildFinalBundle(
     refs: [],
     environment: [],
     failureLog: failed.rows[0]?.log ?? null,
-    review: review.rows[0]?.output ?? null,
+    review: await reviewJsonOf(
+      pool,
+      "spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-review'",
+      [final.specId, final.repoId],
+    ),
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
     ...runSettings(row.limits, row.default_model),
   };

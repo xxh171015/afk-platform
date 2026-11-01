@@ -1,7 +1,15 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AGENT_FAILURES, FinalStep, Stage } from "@afk/shared";
+import {
+  type AGENT_FAILURES,
+  type CombinedReview,
+  combinedReview,
+  type FinalStep,
+  REVIEW_AXES,
+  type ReviewAxis,
+  type Stage,
+} from "@afk/shared";
 import { z } from "zod";
 import type { SandboxPlacement } from "./gate.ts";
 
@@ -42,6 +50,8 @@ export const ReviewOutputSchema = z
       }),
     ),
     suggestions: z.array(z.string()),
+    // the Spec axis's (b): behaviour nobody asked for. It goes to the acceptance pack, never to a fix.
+    scopeCreep: z.array(z.string()).default([]),
     uncertainties: z.array(z.string()),
   })
   .refine((review) => review.mustFix.length === 0 || review.verdict === "fix", {
@@ -98,7 +108,7 @@ export type Classification<Outcome> =
   | { kind: "infrastructure-failure"; error: string };
 
 type AgentOutcome = "done" | (typeof AGENT_FAILURES)[number];
-type ReviewOutcome = "pass" | "fix" | "invalid-output" | "timeout";
+export type ReviewOutcome = "pass" | "fix" | "invalid-output" | "timeout";
 
 function failureOf(
   result: AgentRunResult<unknown>,
@@ -178,10 +188,11 @@ export function classifyReviewRun(
   return { kind: "outcome", outcome: result.output.verdict };
 }
 
-// The review's findings as the API records them: must-fix problems, and suggestions that go to the acceptance pack.
+// The review's findings as the API records them: must-fix problems, and suggestions and scope creep that go to the
+// acceptance pack.
 export function reviewFindings(
   output: ReviewOutput,
-): { kind: "must-fix" | "suggestion"; body: string }[] {
+): { kind: "must-fix" | "suggestion" | "scope-creep"; body: string }[] {
   return [
     ...output.mustFix.map((item) => ({
       kind: "must-fix" as const,
@@ -191,7 +202,47 @@ export function reviewFindings(
       kind: "suggestion" as const,
       body,
     })),
+    ...output.scopeCreep.map((body) => ({
+      kind: "scope-creep" as const,
+      body,
+    })),
   ];
+}
+
+/**
+ * The two axes' runs of one review as one outcome, after step 5 of code-review: side by side, not merged or re-ranked.
+ * Any axis that failed makes the whole review that failure (the first one, Standards before Spec); otherwise a must-fix
+ * on either axis is a fix. `combined` is what a review-fix reads as review.json: every must-fix with its axis.
+ */
+export function combineReviewRuns(
+  runs: Record<ReviewAxis, AgentRunResult<ReviewOutput>>,
+): {
+  classification: Classification<ReviewOutcome>;
+  combined: CombinedReview | undefined;
+} {
+  const verdicts = REVIEW_AXES.map((axis) => ({
+    axis,
+    verdict: classifyReviewRun(runs[axis]),
+  }));
+  for (const { verdict } of verdicts) {
+    if (
+      verdict.kind === "infrastructure-failure" ||
+      (verdict.outcome !== "pass" && verdict.outcome !== "fix")
+    )
+      return { classification: verdict, combined: undefined };
+  }
+  const outputs = {
+    standards: runs.standards.output as ReviewOutput,
+    spec: runs.spec.output as ReviewOutput,
+  };
+  const combined = combinedReview(outputs);
+  return {
+    classification: {
+      kind: "outcome",
+      outcome: combined.verdict,
+    },
+    combined,
+  };
 }
 
 // What an agent is told is two texts put together: the overlay, which is the same for every stage (ADR 0002: nobody
@@ -210,8 +261,10 @@ export const PROMPTS = {
   gateFix: join(PROMPT_DIR, "gate-fix.md"),
   reviewFix: join(PROMPT_DIR, "review-fix.md"),
   mergeFix: join(PROMPT_DIR, "merge-fix.md"),
-  review: join(PROMPT_DIR, "review.md"),
-  finalReview: join(PROMPT_DIR, "final-review.md"),
+  reviewStandards: join(PROMPT_DIR, "review-standards.md"),
+  reviewSpec: join(PROMPT_DIR, "review-spec.md"),
+  finalReviewStandards: join(PROMPT_DIR, "final-review-standards.md"),
+  finalReviewSpec: join(PROMPT_DIR, "final-review-spec.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
 } as const;
 
@@ -234,6 +287,7 @@ export function writePrompt(
 ): { promptFile: string; prompt: string } {
   const prompt = composePrompt(stageFile);
   const promptFile = join(dir, "prompt.md");
+  mkdirSync(dir, { recursive: true });
   writeFileSync(promptFile, prompt);
   return { promptFile, prompt };
 }
@@ -250,11 +304,13 @@ export function promptFor(
     | "final-review"
     | "final-fix"
     | "diagnose",
-  options: { integration?: boolean } = {},
+  options: { integration?: boolean; axis?: ReviewAxis } = {},
 ): string {
   switch (stage) {
     case "final-review":
-      return PROMPTS.finalReview;
+      return options.axis === "spec"
+        ? PROMPTS.finalReviewSpec
+        : PROMPTS.finalReviewStandards;
     case "final-fix":
       return PROMPTS.finalFix;
     case "diagnose":
@@ -264,7 +320,9 @@ export function promptFor(
         ? PROMPTS.integrationImplement
         : PROMPTS.implement;
     case "review":
-      return PROMPTS.review;
+      return options.axis === "spec"
+        ? PROMPTS.reviewSpec
+        : PROMPTS.reviewStandards;
     case "gate-fix":
       return PROMPTS.gateFix;
     case "review-fix":

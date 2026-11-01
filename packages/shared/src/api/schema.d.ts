@@ -1499,6 +1499,8 @@ export interface paths {
                 agent: string | null;
                 model: string | null;
                 skillsSha: string | null;
+                /** @enum {string|null} */
+                axis: "standards" | "spec" | null;
                 cursorCliVersion: string | null;
                 contractShas: {
                   [key: string]: string;
@@ -1515,6 +1517,8 @@ export interface paths {
                 kind: string;
                 body: string;
                 resolution: string;
+                /** @enum {string|null} */
+                axis: "standards" | "spec" | null;
               }[];
               gateResults: {
                 /** @enum {string} */
@@ -1806,6 +1810,13 @@ export interface paths {
                     kind: string;
                     body: string;
                     resolution: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
+                  }[];
+                  scopeCreep: {
+                    ticket: string | null;
+                    run: string;
+                    body: string;
                   }[];
                   uncertainties: {
                     source: string;

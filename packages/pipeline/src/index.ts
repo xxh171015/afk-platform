@@ -13,6 +13,7 @@ export {
   classifyAgentRun,
   classifyDiagnoseRun,
   classifyReviewRun,
+  combineReviewRuns,
   composePrompt,
   DiagnoseOutputSchema,
   ImplementOutputSchema,

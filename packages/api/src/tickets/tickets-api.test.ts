@@ -423,6 +423,126 @@ describe("editing a ticket", () => {
   });
 });
 
+describe("a review of two axes", () => {
+  const axisOutput = (
+    verdict: "pass" | "fix",
+    over: Record<string, unknown> = {},
+  ) => ({
+    verdict,
+    mustFix: [],
+    suggestions: [],
+    scopeCreep: [],
+    uncertainties: [],
+    ...over,
+  });
+  // The worker's report of a review: the Standards run is the job's own, the Spec run comes beside it.
+  async function reviewed(
+    standards: ReturnType<typeof axisOutput>,
+    spec: ReturnType<typeof axisOutput>,
+    outcome: "pass" | "fix",
+  ) {
+    await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", { outcome: "passed" });
+    const findingsOf = (o: ReturnType<typeof axisOutput>) => [
+      ...(o.mustFix as { file: string; problem: string }[]).map((m) => ({
+        kind: "must-fix",
+        body: `${m.file} ${m.problem}`,
+      })),
+      ...(o.suggestions as string[]).map((body) => ({
+        kind: "suggestion",
+        body,
+      })),
+      ...(o.scopeCreep as string[]).map((body) => ({
+        kind: "scope-creep",
+        body,
+      })),
+    ];
+    await stage("review", {
+      outcome,
+      run: { axis: "standards", output: standards },
+      findings: findingsOf(standards),
+      extraRuns: [
+        {
+          run: { axis: "spec", output: spec },
+          findings: findingsOf(spec),
+        },
+      ],
+    });
+  }
+
+  it("records a Run for each axis, and a finding with the axis of the Run it came from", async () => {
+    await reviewed(
+      axisOutput("fix", {
+        mustFix: [{ file: "a.ts", problem: "naming" }],
+        suggestions: ["a smell"],
+      }),
+      axisOutput("pass", { scopeCreep: ["an extra flag"] }),
+      "fix",
+    );
+    const runs = await db.pool.query(
+      "SELECT stage, axis, attempt, result FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(runs.rows).toEqual([
+      { stage: "review", axis: "standards", attempt: 1, result: "fix" },
+      { stage: "review", axis: "spec", attempt: 1, result: "fix" },
+    ]);
+    const view = (await call("GET", "/tickets/1")).body;
+    expect(
+      view.runs
+        .filter((r: Json) => r.stage === "review")
+        .map((r: Json) => r.axis),
+    ).toEqual(["standards", "spec"]);
+    expect(
+      view.findings.map((f: Json) => `${f.axis}:${f.kind}:${f.resolution}`),
+    ).toEqual([
+      "standards:must-fix:unhandled",
+      "standards:suggestion:acceptance-pack",
+      "spec:scope-creep:acceptance-pack",
+    ]);
+  });
+
+  it("gives a review-fix the must-fix of both axes in review.json, each with its axis", async () => {
+    await reviewed(
+      axisOutput("fix", { mustFix: [{ file: "s.ts", problem: "style" }] }),
+      axisOutput("fix", { mustFix: [{ file: "t.ts", problem: "missing" }] }),
+      "fix",
+    );
+    const job = (await worker.claim()).body.job as Claimed;
+    expect(job.payload.stage).toBe("review-fix");
+    const bundle = (await (
+      await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      )
+    ).json()) as Json;
+    expect(bundle.review).toMatchObject({
+      verdict: "fix",
+      mustFix: [
+        { axis: "standards", file: "s.ts", problem: "style" },
+        { axis: "spec", file: "t.ts", problem: "missing" },
+      ],
+    });
+    expect(bundle.review.standards.mustFix).toHaveLength(1);
+    expect(bundle.review.spec.mustFix).toHaveLength(1);
+  });
+
+  it("keeps scope creep as a finding of the Spec axis that no fix is asked to handle", async () => {
+    await reviewed(
+      axisOutput("pass"),
+      axisOutput("pass", { scopeCreep: ["an extra flag"] }),
+      "pass",
+    );
+    const view = (await call("GET", "/tickets/1")).body;
+    expect(
+      view.findings.map((f: Json) => `${f.axis}:${f.kind}:${f.resolution}`),
+    ).toEqual(["spec:scope-creep:acceptance-pack"]);
+    // the review passed: the next step is the merge, not a fix
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+});
+
 describe("approve-protected", () => {
   async function blockedByProtectedPath() {
     await runningSpec([ticket("a")]);
@@ -1098,6 +1218,7 @@ describe("what a person sees", () => {
         kind: "suggestion",
         body: "rename x",
         resolution: "acceptance-pack",
+        axis: null,
       },
     ]);
     expect(view.body.gateResults).toEqual([

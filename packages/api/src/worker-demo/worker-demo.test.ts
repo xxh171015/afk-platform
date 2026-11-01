@@ -244,7 +244,7 @@ describe("a whole spec with a fake agent", () => {
     // the ticket branches were pushed, with the traceability trailers on the agent's commits
     for (const [id, run] of [
       ["T-1", "R-1"],
-      ["T-2", "R-5"],
+      ["T-2", "R-6"], // a review is two Runs, one per axis
     ]) {
       const body = gitOut(origin, [
         "log",
@@ -278,15 +278,30 @@ describe("a whole spec with a fake agent", () => {
       heartbeatMs: 50,
     });
 
-    expect(seen.map((s) => s.stage)).toEqual([
+    // a review is two agent runs, one per axis, each with the prompt of its axis
+    expect(seen.map((s) => s.stage).sort()).toEqual([
+      "final-review",
+      "final-review",
       "implement",
       "review",
-      "final-review",
+      "review",
     ]);
     for (const s of seen) {
-      expect(s.prompt).toBe(composePrompt(promptFor(s.stage as "implement")));
+      const stage = s.stage as "implement" | "review" | "final-review";
+      const allowed = (["standards", "spec"] as const).map((axis) =>
+        composePrompt(promptFor(stage, { axis })),
+      );
+      expect(allowed).toContain(s.prompt);
       expect(s.prompt).toContain("没有人会回答你");
     }
+    expect(
+      seen.filter((s) => s.stage === "review").map((s) => s.prompt),
+    ).toEqual(
+      expect.arrayContaining([
+        composePrompt(promptFor("review", { axis: "standards" })),
+        composePrompt(promptFor("review", { axis: "spec" })),
+      ]),
+    );
     // the agent reads the ticket file the API shows, byte for byte
     const shown = (await fetch(`${api.url}/tickets/1`).then((r) => r.json()))
       .ticket.file;
@@ -299,6 +314,8 @@ describe("a whole spec with a fake agent", () => {
     expect(runs.rows.filter((r) => r.prompt).map((r) => r.stage)).toEqual([
       "implement",
       "review",
+      "review",
+      "final-review",
       "final-review",
     ]);
     expect(runs.rows.find((r) => r.stage === "implement")?.prompt).toBe(
@@ -309,6 +326,96 @@ describe("a whole spec with a fake agent", () => {
         .filter((r) => r.stage === "gate")
         .every((r) => r.prompt === null),
     ).toBe(true);
+  });
+
+  const MUST_FIX = {
+    verdict: "fix",
+    mustFix: [
+      { file: "src/a.ts", line: 2, problem: "the ticket asked for more" },
+    ],
+    suggestions: [],
+    scopeCreep: ["an extra flag"],
+    uncertainties: [],
+  };
+  const isSpecAxis = (prompt: string) =>
+    prompt.includes("阶段：review，Spec 轴");
+
+  it("reviews a ticket on two axes at once, fixes what the Spec axis asks for with both results at hand", async () => {
+    await confirmedSpec([ticket("a")]);
+    let fixSaw: unknown;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "review" && isSpecAxis(ctx.prompt)) {
+          return { output: MUST_FIX };
+        }
+        if (ctx.stage === "review-fix") {
+          fixSaw = JSON.parse(ctx.context("review.json") as string);
+          return {
+            files: { "src/more.ts": "export const more = 1;\n" },
+            message: "do what the ticket asked",
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+
+    expect(await stateOf()).toEqual(["1:done"]);
+    const reviews = await db.pool.query(
+      "SELECT axis, attempt, result FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    // one review, a Run per axis; the fix goes on through the gate to the merge, it is not reviewed again
+    expect(reviews.rows).toEqual([
+      { axis: "standards", attempt: 1, result: "pass" },
+      { axis: "spec", attempt: 1, result: "fix" },
+    ]);
+    // the fix saw the must-fix of the axis that asked, with its axis, and both results as they were
+    expect(fixSaw).toMatchObject({
+      verdict: "fix",
+      mustFix: [{ axis: "spec", file: "src/a.ts" }],
+      standards: { verdict: "pass" },
+      spec: { scopeCreep: ["an extra flag"] },
+    });
+    // the scope creep went to the acceptance pack, not to a fix
+    const creep = await db.pool.query(
+      "SELECT f.resolution, r.axis FROM findings f JOIN runs r ON r.id = f.run_id WHERE f.kind = 'scope-creep'",
+    );
+    expect(creep.rows).toEqual([
+      { resolution: "acceptance-pack", axis: "spec" },
+    ]);
+  });
+
+  it("takes the failure of one axis as the failure of the whole review, and leaves no branch of the axes behind", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({
+      script: (ctx) =>
+        ctx.stage === "review" && isSpecAxis(ctx.prompt)
+          ? { error: { kind: "invalid-output", message: "no result" } }
+          : undefined,
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/invalid-output"]);
+    const reviews = await db.pool.query(
+      "SELECT axis, result FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    // each Run says what its own axis came to; the ticket is blocked by the review as a whole
+    expect(reviews.rows).toEqual([
+      { axis: "standards", result: "pass" },
+      { axis: "spec", result: "invalid-output" },
+    ]);
+    const branches = gitOut(origin, ["branch", "--list", "review-*"]);
+    expect(branches).toBe("");
   });
 
   it("works a spec made before the databases had ids on the flat branch names, start to end", async () => {
@@ -353,8 +460,10 @@ describe("a whole spec with a fake agent", () => {
     expect(runs.rows.map((r) => [r.stage, r.result])).toEqual([
       ["implement", "done"],
       ["gate", "passed"],
-      ["review", "pass"],
+      ["review", "pass"], // Standards
+      ["review", "pass"], // Spec
       ["merge", "merged"],
+      ["final-review", "pass"],
       ["final-review", "pass"],
     ]);
     expect(runs.rows.every((r) => r.finished_at !== null)).toBe(true);
@@ -373,11 +482,10 @@ describe("a whole spec with a fake agent", () => {
     const findings = await db.pool.query(
       "SELECT kind, resolution FROM findings",
     );
-    // the ticket's review and the overall review each left a suggestion for the acceptance pack
-    expect(findings.rows).toEqual([
-      { kind: "suggestion", resolution: "acceptance-pack" },
-      { kind: "suggestion", resolution: "acceptance-pack" },
-    ]);
+    // each axis of the ticket's review and of the overall review left a suggestion for the acceptance pack
+    expect(findings.rows).toEqual(
+      Array(4).fill({ kind: "suggestion", resolution: "acceptance-pack" }),
+    );
   });
 
   it("frees every slot afterwards: no clone is left behind after a clean run", async () => {
@@ -428,7 +536,9 @@ describe("a whole spec with a fake agent", () => {
       "gate-fix:done",
       "gate:passed",
       "review:pass",
+      "review:pass",
       "merge:merged",
+      "final-review:pass",
       "final-review:pass",
     ]);
   });
@@ -895,6 +1005,7 @@ describe("the overall review of the integration branch", () => {
       "SELECT stage FROM runs WHERE ticket_id IS NULL ORDER BY id",
     );
     expect(stages.rows.map((r) => r.stage)).toEqual([
+      "final-review",
       "final-review",
       "final-fix",
       "final-merge",

@@ -2750,6 +2750,10 @@
                           "skillsSha": {
                             "type": ["string", "null"]
                           },
+                          "axis": {
+                            "type": ["string", "null"],
+                            "enum": ["standards", "spec", null]
+                          },
                           "cursorCliVersion": {
                             "type": ["string", "null"]
                           },
@@ -2782,6 +2786,7 @@
                           "agent",
                           "model",
                           "skillsSha",
+                          "axis",
                           "cursorCliVersion",
                           "contractShas",
                           "refShas",
@@ -2809,6 +2814,10 @@
                           },
                           "resolution": {
                             "type": "string"
+                          },
+                          "axis": {
+                            "type": ["string", "null"],
+                            "enum": ["standards", "spec", null]
                           }
                         },
                         "required": [
@@ -2816,7 +2825,8 @@
                           "runId",
                           "kind",
                           "body",
-                          "resolution"
+                          "resolution",
+                          "axis"
                         ]
                       }
                     },
@@ -3706,6 +3716,10 @@
                                     },
                                     "resolution": {
                                       "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
                                     }
                                   },
                                   "required": [
@@ -3714,8 +3728,27 @@
                                     "stage",
                                     "kind",
                                     "body",
-                                    "resolution"
+                                    "resolution",
+                                    "axis"
                                   ]
+                                }
+                              },
+                              "scopeCreep": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["ticket", "run", "body"]
                                 }
                               },
                               "uncertainties": {
@@ -3758,6 +3791,7 @@
                               "gate",
                               "tickets",
                               "findings",
+                              "scopeCreep",
                               "uncertainties",
                               "protectedPathApprovals"
                             ]

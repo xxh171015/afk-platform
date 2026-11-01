@@ -270,7 +270,8 @@ export function TicketDetail({
                   </button>
                 </td>
                 <td>
-                  {run.stage} #{run.attempt}
+                  {run.stage}
+                  {run.axis ? ` (${run.axis})` : ""} #{run.attempt}
                 </td>
                 <td>{run.result ?? "running"}</td>
                 <td>{seconds(run.durationMs)}</td>
@@ -336,8 +337,13 @@ export function TicketDetail({
         <ul className="findings">
           {findings.map((finding) => (
             <li key={finding.id}>
-              <span className="badge">{finding.resolution}</span> {finding.kind}
-              : {finding.body}
+              <span className="badge">{finding.resolution}</span>{" "}
+              {finding.axis ? (
+                <span className={`badge axis-${finding.axis}`}>
+                  {finding.axis}
+                </span>
+              ) : null}{" "}
+              {finding.kind}: {finding.body}
             </li>
           ))}
         </ul>

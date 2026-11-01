@@ -1,4 +1,4 @@
-import { formatDisplayId } from "@afk/shared";
+import { formatDisplayId, REVIEW_AXES, type ReviewAxis } from "@afk/shared";
 import { z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { mergeOrderOf } from "../host/merge-order.ts";
@@ -76,6 +76,15 @@ const RepoSection = z.object({
       kind: z.string(),
       body: z.string(),
       resolution: z.string(),
+      axis: z.enum(REVIEW_AXES).nullable(), // which axis of a review found it
+    }),
+  ),
+  // The Spec axis's (b): behaviour nobody asked for, listed apart from the other findings.
+  scopeCreep: z.array(
+    z.object({
+      ticket: z.string().nullable(),
+      run: z.string(),
+      body: z.string(),
     }),
   ),
   uncertainties: z.array(z.object({ source: z.string(), text: z.string() })),
@@ -303,6 +312,7 @@ export async function buildAcceptancePack(
         gate: null,
         tickets: [],
         findings: [],
+        scopeCreep: [],
         uncertainties: [],
         protectedPathApprovals: [],
       };
@@ -338,12 +348,15 @@ export async function buildAcceptancePack(
       .at(-1);
     for (const text of strings(record(lastImplement?.output).uncertainties))
       section.uncertainties.push({ source: `${display} implement`, text });
+    // both axes of the newest review (a review made before there were axes has one Run without an axis)
     const review = await client.query<{ output: unknown }>(
-      "SELECT output FROM runs WHERE ticket_id = $1 AND stage = 'review' ORDER BY id DESC LIMIT 1",
+      `SELECT DISTINCT ON (axis) output FROM runs
+       WHERE ticket_id = $1 AND stage = 'review' AND output IS NOT NULL ORDER BY axis DESC, id DESC`,
       [ticket.id],
     );
-    for (const text of strings(record(review.rows[0]?.output).uncertainties))
-      section.uncertainties.push({ source: `${display} review`, text });
+    for (const row of review.rows)
+      for (const text of strings(record(row.output).uncertainties))
+        section.uncertainties.push({ source: `${display} review`, text });
     if (ticket.type === "integration") {
       integrationTickets.push({ ticket, named });
     } else {
@@ -372,8 +385,9 @@ export async function buildAcceptancePack(
     name: string;
     output: unknown;
   }>(
-    `SELECT r.repo_id, rp.name, r.output FROM runs r JOIN repos rp ON rp.id = r.repo_id
-     WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = 'final-review' ORDER BY r.id`,
+    `SELECT DISTINCT ON (r.repo_id, r.axis) r.repo_id, rp.name, r.output FROM runs r JOIN repos rp ON rp.id = r.repo_id
+     WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = 'final-review' AND r.output IS NOT NULL
+     ORDER BY r.repo_id, r.axis DESC, r.id DESC`,
     [specId],
   );
   for (const row of finalReviews.rows)
@@ -392,24 +406,38 @@ export async function buildAcceptancePack(
     kind: string;
     body: string;
     resolution: string;
+    axis: ReviewAxis | null;
   }>(
-    `SELECT r.ticket_id, r.repo_id, rp.name AS repo, r.id AS run_id, r.stage, f.kind, f.body, f.resolution
+    `SELECT r.ticket_id, r.repo_id, rp.name AS repo, r.id AS run_id, r.stage, r.axis, f.kind, f.body, f.resolution
      FROM findings f JOIN runs r ON r.id = f.run_id JOIN repos rp ON rp.id = r.repo_id
      WHERE r.spec_id = $1
        AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id = r.ticket_id AND t.state = 'cancelled')
      ORDER BY f.id`,
     [specId],
   );
-  for (const f of findings.rows)
+  for (const f of findings.rows) {
+    const ticket =
+      f.ticket_id === null ? null : formatDisplayId("ticket", f.ticket_id);
+    const run = formatDisplayId("run", f.run_id);
+    // scope creep has a list of its own in the pack: it is the part of a review a person has to look at
+    if (f.kind === "scope-creep") {
+      sectionOf(f.repo_id, f.repo).scopeCreep.push({
+        ticket,
+        run,
+        body: f.body,
+      });
+      continue;
+    }
     sectionOf(f.repo_id, f.repo).findings.push({
-      ticket:
-        f.ticket_id === null ? null : formatDisplayId("ticket", f.ticket_id),
-      run: formatDisplayId("run", f.run_id),
+      ticket,
+      run,
       stage: f.stage,
       kind: f.kind,
       body: f.body,
       resolution: f.resolution,
+      axis: f.axis,
     });
+  }
 
   for (const g of gateRows.rows) {
     const section = [...sections.entries()].find(

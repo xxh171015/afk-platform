@@ -214,11 +214,29 @@ function AcceptancePackSection({
               {repo.findings.map((finding) => (
                 <li key={`${finding.run}-${finding.kind}-${finding.body}`}>
                   <span className="badge">{finding.resolution}</span>{" "}
+                  {finding.axis ? (
+                    <span className={`badge axis-${finding.axis}`}>
+                      {finding.axis}
+                    </span>
+                  ) : null}{" "}
                   {finding.ticket ?? "spec"} {finding.stage} {finding.kind}:{" "}
                   {finding.body}
                 </li>
               ))}
             </ul>
+          ) : null}
+
+          {repo.scopeCreep.length > 0 ? (
+            <>
+              <p className="note">Scope creep: not asked for</p>
+              <ul className="scope-creep">
+                {repo.scopeCreep.map((item) => (
+                  <li key={`${item.run}-${item.body}`}>
+                    {item.ticket ?? "spec"} {item.run}: {item.body}
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
 
           {repo.uncertainties.length > 0 ? (

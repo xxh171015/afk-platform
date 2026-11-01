@@ -410,6 +410,8 @@ export const runs = pgTable(
     agent: text("agent"),
     model: text("model"),
     skillsSha: text("skills_sha"),
+    // Which axis of a review this Run reviewed (standards | spec); null for every other Run
+    axis: text("axis"),
     prompt: text("prompt"), // the whole prompt the agent was given: the overlay and the stage's own
     cursorCliVersion: text("cursor_cli_version"),
     branch: text("branch"),

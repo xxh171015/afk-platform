@@ -300,6 +300,14 @@ describe("the spec page", () => {
               kind: "suggestion",
               body: "rename x",
               resolution: "acceptance-pack",
+              axis: "standards",
+            },
+          ],
+          scopeCreep: [
+            {
+              ticket: "T-1",
+              run: "R-4",
+              body: "an export flag nobody asked for",
             },
           ],
           uncertainties: [{ source: "T-1 implement", text: "date format?" }],
@@ -320,6 +328,7 @@ describe("the spec page", () => {
             },
           ],
           findings: [],
+          scopeCreep: [],
           uncertainties: [],
           protectedPathApprovals: [],
         },
@@ -365,6 +374,13 @@ describe("the spec page", () => {
       "the agent named no test",
     );
     expect(screen.getByText(/rename x/)).toBeTruthy();
+    expect(screen.getByText("standards").className).toContain("axis-standards");
+    // scope creep is listed apart from the findings
+    expect(screen.getByText("Scope creep: not asked for")).toBeTruthy();
+    expect(
+      screen.getByText(/an export flag nobody asked for/).closest("ul")
+        ?.className,
+    ).toBe("scope-creep");
     expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
     expect(
       screen.getByText(/Gate: 01234567: 3 tests, 1 skipped, 4.0 s/),

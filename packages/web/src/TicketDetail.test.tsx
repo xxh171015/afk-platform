@@ -323,6 +323,43 @@ describe("the ticket page", () => {
     expect(screen.queryByTestId("run-log")).toBeNull();
   });
 
+  it("shows which axis of the review each review run and finding belongs to", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          runs: [
+            run(10, "review", { axis: "standards" }),
+            run(11, "review", { axis: "spec" }),
+          ],
+          findings: [
+            {
+              id: 1,
+              runId: 10,
+              kind: "must-fix",
+              body: "a.ts naming",
+              resolution: "unhandled",
+              axis: "standards",
+            },
+            {
+              id: 2,
+              runId: 11,
+              kind: "scope-creep",
+              body: "an extra flag",
+              resolution: "acceptance-pack",
+              axis: "spec",
+            },
+          ],
+        }),
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    expect(await screen.findByText(/review \(standards\) #1/)).toBeTruthy();
+    expect(screen.getByText(/review \(spec\) #1/)).toBeTruthy();
+    expect(screen.getByText("standards").className).toContain("axis-standards");
+    expect(screen.getByText("spec").className).toContain("axis-spec");
+  });
+
   it("shows why a blocked ticket is blocked", async () => {
     const brief = {
       run: { id: 11, displayId: "R-11" },

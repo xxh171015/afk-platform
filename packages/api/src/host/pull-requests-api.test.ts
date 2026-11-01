@@ -1077,14 +1077,34 @@ describe("the acceptance pack", () => {
     review: {
       outcome: "pass",
       run: {
+        axis: "standards",
         output: {
           verdict: "pass",
           mustFix: [],
           suggestions: ["rename x"],
+          scopeCreep: [],
           uncertainties: ["the review could not run the export"],
         },
       },
       findings: [{ kind: "suggestion", body: "rename x" }],
+      // the Spec axis, a Run of its own
+      extraRuns: [
+        {
+          run: {
+            axis: "spec",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              scopeCreep: ["an export flag nobody asked for"],
+              uncertainties: ["the ticket does not say the date format"],
+            },
+          },
+          findings: [
+            { kind: "scope-creep", body: "an export flag nobody asked for" },
+          ],
+        },
+      ],
     },
     merge: {
       outcome: "merged",
@@ -1192,11 +1212,21 @@ describe("the acceptance pack", () => {
         kind: "suggestion",
         body: "rename x",
         resolution: "acceptance-pack",
+        axis: "standards",
+      },
+    ]);
+    // scope creep has a list of its own, apart from the other findings
+    expect(acceptancePack.repos[0].scopeCreep).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        body: "an export flag nobody asked for",
       },
     ]);
     expect(acceptancePack.repos[0].uncertainties).toEqual([
       { source: "T-1 implement", text: "not sure the date format is right" },
       { source: "T-1 review", text: "the review could not run the export" },
+      { source: "T-1 review", text: "the ticket does not say the date format" },
       { source: "S-1 final review", text: "migration order" },
     ]);
   });
@@ -1391,7 +1421,11 @@ describe("the acceptance pack", () => {
     expect(out).toContain(
       "[unverified] empty range is refused  (orders rejects an empty range)  -- failed: orders rejects an empty range",
     );
-    expect(out).toContain("[acceptance-pack] T-1 review suggestion: rename x");
+    expect(out).toContain(
+      "[acceptance-pack] T-1 review (standards) suggestion: rename x",
+    );
+    expect(out).toContain("scope creep (not asked for)");
+    expect(out).toMatch(/T-1 R-\d+: an export flag nobody asked for/);
     expect(out).toContain("T-1 implement: not sure the date format is right");
     expect(out).toContain(
       "backend @ head: 3 tests, 1 skipped, 4.0 s (setup 1.5 s, test 2.5 s)",

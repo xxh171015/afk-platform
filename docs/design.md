@@ -940,7 +940,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 - 公共覆盖层把 skill 里每个"去问人"的地方写死成答案：implement 的"reference 不明确就问"，票就是 `/context/ticket.md`；tdd 的"和用户确认 seams"，spec 里的 seams 已经确认；code-review 的"问固定点"，是 `run.json` 的 `baseSha`，按 skill 原文用三点 diff；code-review 的"问 spec 在哪"，由阶段 prompt 给出。没列到的提问，能撤回的小事自己决定，需要人决定的输出 `cannot-proceed`。覆盖层第一行写明它对应的 skills SHA，守卫测试要求它等于固定的 `SKILLS_SHA` 和快照的 SHA；升级 SHA 时必须回头核对覆盖层。
 - implement：按绝对路径读 `/home/agent/.cursor/skills/implement/SKILL.md` 照做（它是 `disable-model-invocation: true`，模型不会自己调用；agent 也没有 Skill 工具，所以按文件读），**跳过它最后调用 `code-review` 的那一步**，平台另有 review 阶段。tdd 只做红 → 绿，不在循环里重构；每条验收标准都要有测试，结果里带验收对照表。
 - gate-fix、review-fix、final-fix：读 tdd，先写会失败的测试再修；review-fix 和 final-fix 把两个审查轴的 `mustFix` 一起修；不用 `diagnosing-bugs`。merge-fix 不读 skill，只用覆盖层。
-- review、final-review：跑 `code-review`，固定点是 `baseSha`；把它拆成 Standards 和 Spec 两次运行，是下一步的事（见 ADR 0002）。
+- review、final-review：跑 `code-review`，固定点是 `baseSha`，diff 用三点 diff。skill 要求 Standards 和 Spec 两个轴用并行子 agent 互相隔离，平台不让 agent 自己开子 agent，而是在这个阶段里**并行跑两次 agent 运行**（各开新沙箱、各用一条自己的临时分支，各记一条 Run，Run 上标明审查轴 `axis`），每次运行扮演一个轴的子 agent，prompt 写“第 1–3 步已替你做完；你就是第 4 步里这一轴的子 agent”。worker 再按第 5 步把两份结果并排拼起来，不合并也不重排。任一轴 invalid-output 或超时，整个阶段按这个结果处理，重试时两轴一起重跑；任一轴有 `mustFix` 就判 fix。Spec 轴在单票审查里对照 `/context/ticket.md` 和契约（`spec.md` 只是背景），在 final-review 里对照 `spec.md` 和 `tickets.md`。映射：`mustFix` 收文档写明的硬性违规、Spec 轴的缺失或做了一半、做错了；`suggestions` 收所有坏味道；Spec 轴的 scope creep 另记为 `scopeCreep`（意见 `scope-creep`），只进验收包并单独列出，从不触发修复。每条意见带它那次运行的审查轴；review-fix 和 final-fix 读到的 `review.json` 是两轴并排的结果加上带轴的全部 `mustFix`，一次处理完。
 - 联调票的 implement 和诊断：只接公共覆盖层，不跑 skill，因为 e2e 是对着已经实现好的服务写的，套不上 tdd 的红 → 绿。
 - **rework**（处理 PR 评论）平台还没有实现；实现时按 review-fix 的方式：读 tdd，先写会失败的测试再改，覆盖层照用。
 - 结构化输出的 `<result>` 格式按阶段写在阶段 prompt 里。

@@ -1,4 +1,9 @@
-import { formatDisplayId, type SpecState, type TicketState } from "@afk/shared";
+import {
+  formatDisplayId,
+  type ReviewAxis,
+  type SpecState,
+  type TicketState,
+} from "@afk/shared";
 import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
@@ -255,12 +260,12 @@ export async function ticketView(
     [ticketId],
   );
   const runs = await pool.query(
-    `SELECT id, stage, attempt, result, duration_ms, started_at, finished_at, head_sha, agent, model, skills_sha, cursor_cli_version, contract_shas, ref_shas FROM runs
+    `SELECT id, stage, attempt, result, duration_ms, started_at, finished_at, head_sha, agent, model, skills_sha, axis, cursor_cli_version, contract_shas, ref_shas FROM runs
      WHERE ticket_id = $1 ORDER BY id`,
     [ticketId],
   );
   const findings = await pool.query(
-    `SELECT f.id, f.run_id, f.kind, f.body, f.resolution FROM findings f JOIN runs r ON r.id = f.run_id
+    `SELECT f.id, f.run_id, f.kind, f.body, f.resolution, r.axis FROM findings f JOIN runs r ON r.id = f.run_id
      WHERE r.ticket_id = $1 ORDER BY f.id`,
     [ticketId],
   );
@@ -319,6 +324,7 @@ export async function ticketView(
       agent: (r.agent as string | null) ?? null,
       model: (r.model as string | null) ?? null,
       skillsSha: (r.skills_sha as string | null) ?? null,
+      axis: (r.axis as ReviewAxis | null) ?? null,
       cursorCliVersion: (r.cursor_cli_version as string | null) ?? null,
       contractShas: (r.contract_shas as Record<string, string> | null) ?? null,
       refShas: (r.ref_shas as Record<string, string> | null) ?? null,
@@ -331,6 +337,7 @@ export async function ticketView(
       kind: f.kind as string,
       body: f.body as string,
       resolution: f.resolution as string,
+      axis: (f.axis as ReviewAxis | null) ?? null,
     })),
     gateResults: gates.rows.map((g) => ({
       kind: g.kind as "gate" | "e2e",

@@ -5,6 +5,7 @@ import {
   type BlockedReason,
   FINDING_RESOLUTIONS,
   type Progress,
+  REVIEW_AXES,
   type Stage,
   type StageDecision,
   type StageReport,
@@ -30,8 +31,12 @@ const RunFacts = z.object({
   agent: z.string().optional(),
   model: z.string().optional(),
   skillsSha: z.string().optional(),
+  // which axis of a review this Run is (standards | spec)
+  axis: z.enum(REVIEW_AXES).optional(),
   // the whole prompt the agent was given
   prompt: z.string().optional(),
+  // what this Run itself came to, when that is not the stage's outcome (one axis of a review)
+  result: z.string().optional(),
   cursorCliVersion: z.string().optional(),
   branch: z.string().optional(),
   baseSha: z.string().optional(),
@@ -82,6 +87,16 @@ export const commonFields = {
   run: RunFacts.optional(),
   gate: GateFacts.optional(),
   findings: z.array(FindingFacts).max(200).default([]),
+  // A review is one Run per axis. `run` is the job's own; the others are recorded beside it, each with its findings.
+  extraRuns: z
+    .array(
+      z.object({
+        run: RunFacts,
+        findings: z.array(FindingFacts).max(200).default([]),
+      }),
+    )
+    .max(8)
+    .default([]),
 };
 
 export const StageResultSchema = z.discriminatedUnion("stage", [
@@ -283,7 +298,7 @@ export interface RunOwner {
 
 export type ResultFacts = Pick<
   StageResult,
-  "outcome" | "run" | "gate" | "findings"
+  "outcome" | "run" | "gate" | "findings" | "extraRuns"
 >;
 
 export async function writeFacts(
@@ -296,13 +311,14 @@ export async function writeFacts(
 ): Promise<void> {
   const run = result?.run;
   const tries = await client.query<{ n: string }>(
-    "SELECT count(*) AS n FROM runs WHERE spec_id = $1 AND ticket_id IS NOT DISTINCT FROM $2 AND stage = $3",
-    [owner.spec_id, owner.ticket_id, stage],
+    "SELECT count(*) AS n FROM runs WHERE spec_id = $1 AND ticket_id IS NOT DISTINCT FROM $2 AND stage = $3 AND axis IS NOT DISTINCT FROM $4",
+    [owner.spec_id, owner.ticket_id, stage, run?.axis ?? null],
   );
   const facts = [
     run?.agent ?? null,
     run?.model ?? null,
     run?.skillsSha ?? null,
+    run?.axis ?? null,
     run?.prompt ?? null,
     run?.cursorCliVersion ?? null,
     run?.branch ?? null,
@@ -312,7 +328,7 @@ export async function writeFacts(
     run?.durationMs ?? null,
     run?.durationApiMs ?? null,
     run?.tokenUsage === undefined ? null : JSON.stringify(run.tokenUsage),
-    result?.outcome ?? "invalid-output",
+    run?.result ?? result?.outcome ?? "invalid-output",
     // what the agent said; for an unusable result, the raw payload so the problem can be seen
     JSON.stringify(result ? (run?.output ?? null) : (raw ?? null)),
     run?.logUrl ?? null,
@@ -322,19 +338,19 @@ export async function writeFacts(
   // The Run was started when the job was claimed: fill it in. (An UPDATE first, because an INSERT that runs
   // into the unique job id still uses up a serial number, and display ids should not have holes.)
   let inserted = await client.query<{ id: number }>(
-    `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, prompt = $5, cursor_cli_version = $6, branch = $7,
-       base_sha = $8, head_sha = $9, commits = $10, duration_ms = $11, duration_api_ms = $12, token_usage = $13,
-       result = $14, output = $15, log_url = $16, started_at = COALESCE($17, started_at),
-       finished_at = COALESCE($18, now())
+    `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, axis = $5, prompt = $6, cursor_cli_version = $7,
+       branch = $8, base_sha = $9, head_sha = $10, commits = $11, duration_ms = $12, duration_api_ms = $13,
+       token_usage = $14, result = $15, output = $16, log_url = $17, started_at = COALESCE($18, started_at),
+       finished_at = COALESCE($19, now())
      WHERE job_id = $1 RETURNING id`,
     [job.id, ...facts],
   );
   if (!inserted.rows[0]) {
     inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
-         prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage,
-         result, output, log_url, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, COALESCE($24, now()))
+         axis, prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms,
+         token_usage, result, output, log_url, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, COALESCE($25, now()))
        RETURNING id`,
       [
         owner.spec_id,
@@ -401,11 +417,67 @@ export async function writeFacts(
       [owner.ticket_id],
     );
   }
-  for (const finding of result?.findings ?? []) {
-    // A review's suggestions do not trigger a fix; they travel to the acceptance pack.
+  await insertFindings(client, runId, result?.findings ?? []);
+  // the other axes of a review: a Run each, which belongs to no job of its own
+  for (const extra of result?.extraRuns ?? []) {
+    const extraTries = await client.query<{ n: string }>(
+      "SELECT count(*) AS n FROM runs WHERE spec_id = $1 AND ticket_id IS NOT DISTINCT FROM $2 AND stage = $3 AND axis IS NOT DISTINCT FROM $4",
+      [owner.spec_id, owner.ticket_id, stage, extra.run.axis ?? null],
+    );
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, stage, attempt, agent, model, skills_sha, axis,
+         prompt, branch, base_sha, head_sha, commits, duration_ms, result, output, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, COALESCE($20, now()))
+       RETURNING id`,
+      [
+        owner.spec_id,
+        owner.repo_id,
+        owner.ticket_id,
+        owner.content_version,
+        stage,
+        Number(extraTries.rows[0]?.n) + 1,
+        extra.run.agent ?? null,
+        extra.run.model ?? null,
+        extra.run.skillsSha ?? null,
+        extra.run.axis ?? null,
+        extra.run.prompt ?? null,
+        extra.run.branch ?? null,
+        extra.run.baseSha ?? null,
+        extra.run.headSha ?? null,
+        extra.run.commits ?? [],
+        extra.run.durationMs ?? null,
+        extra.run.result ?? result?.outcome ?? "invalid-output",
+        JSON.stringify(extra.run.output ?? null),
+        extra.run.startedAt ?? null,
+        extra.run.finishedAt ?? null,
+      ],
+    );
+    if (extra.run.refShas) {
+      await client.query("UPDATE runs SET ref_shas = $2 WHERE id = $1", [
+        inserted.rows[0]?.id,
+        JSON.stringify(extra.run.refShas),
+      ]);
+    }
+    await insertFindings(
+      client,
+      inserted.rows[0]?.id as number,
+      extra.findings,
+    );
+  }
+}
+
+async function insertFindings(
+  client: pg.PoolClient,
+  runId: number,
+  found: { kind: string; body: string; resolution?: string }[],
+): Promise<void> {
+  for (const finding of found) {
+    // A review's suggestions and scope creep do not trigger a fix; they travel to the acceptance pack.
     const resolution =
       finding.resolution ??
-      (finding.kind === "suggestion" ? "acceptance-pack" : "unhandled");
+      (finding.kind === "suggestion" || finding.kind === "scope-creep"
+        ? "acceptance-pack"
+        : "unhandled");
     await client.query(
       "INSERT INTO findings (run_id, kind, body, resolution) VALUES ($1, $2, $3, $4)",
       [runId, finding.kind, finding.body, resolution],

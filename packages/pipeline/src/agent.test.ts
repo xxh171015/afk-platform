@@ -10,6 +10,7 @@ import {
   classifyAgentRun,
   classifyDiagnoseRun,
   classifyReviewRun,
+  combineReviewRuns,
   composePrompt,
   DiagnoseOutputSchema,
   type ImplementOutput,
@@ -186,6 +187,7 @@ describe("classifying a review run", () => {
         ? [{ file: "a.ts", line: 3, problem: "null check" }]
         : [],
     suggestions: ["rename x"],
+    scopeCreep: [],
     uncertainties: [],
   });
 
@@ -219,10 +221,16 @@ describe("classifying a review run", () => {
     ).toMatchObject({ kind: "infrastructure-failure" });
   });
 
-  it("turns must-fix items and suggestions into findings", () => {
+  it("turns must-fix items, suggestions and scope creep into findings", () => {
     expect(reviewFindings(output("fix"))).toEqual([
       { kind: "must-fix", body: "a.ts:3 null check" },
       { kind: "suggestion", body: "rename x" },
+    ]);
+    expect(
+      reviewFindings({ ...output("pass"), scopeCreep: ["an extra flag"] }),
+    ).toEqual([
+      { kind: "suggestion", body: "rename x" },
+      { kind: "scope-creep", body: "an extra flag" },
     ]);
     expect(
       reviewFindings({
@@ -231,6 +239,119 @@ describe("classifying a review run", () => {
         suggestions: [],
       }),
     ).toEqual([{ kind: "must-fix", body: "b.ts p" }]);
+  });
+});
+
+describe("the two axes of a review", () => {
+  const out = (
+    verdict: "pass" | "fix",
+    over: Partial<ReviewOutput> = {},
+  ): ReviewOutput => ({
+    verdict,
+    mustFix: verdict === "fix" ? [{ file: "a.ts", problem: "p" }] : [],
+    suggestions: [],
+    scopeCreep: [],
+    uncertainties: [],
+    ...over,
+  });
+  const ran = (output?: ReviewOutput, extra: Record<string, unknown> = {}) =>
+    ({
+      ...(output ? { output } : {}),
+      commits: [],
+      durationMs: 1,
+      ...extra,
+    }) as AgentRunResult<ReviewOutput>;
+
+  it("is a pass only when both axes pass, and a fix when either has a must-fix", () => {
+    expect(
+      combineReviewRuns({
+        standards: ran(out("pass")),
+        spec: ran(out("pass")),
+      }).classification,
+    ).toEqual({ kind: "outcome", outcome: "pass" });
+    for (const [standards, spec] of [
+      [out("fix"), out("pass")],
+      [out("pass"), out("fix")],
+      [out("fix"), out("fix")],
+    ] as const) {
+      expect(
+        combineReviewRuns({ standards: ran(standards), spec: ran(spec) })
+          .classification,
+      ).toEqual({ kind: "outcome", outcome: "fix" });
+    }
+  });
+
+  it("hands a review-fix every must-fix of both axes, each with its axis, and the two results side by side", () => {
+    const standards = out("fix", {
+      mustFix: [{ file: "s.ts", line: 1, problem: "style" }],
+    });
+    const spec = out("fix", {
+      mustFix: [{ file: "t.ts", problem: "missing" }],
+      scopeCreep: ["extra"],
+    });
+    const { combined } = combineReviewRuns({
+      standards: ran(standards),
+      spec: ran(spec),
+    });
+    expect(combined).toEqual({
+      verdict: "fix",
+      mustFix: [
+        { axis: "standards", file: "s.ts", line: 1, problem: "style" },
+        { axis: "spec", file: "t.ts", problem: "missing" },
+      ],
+      standards,
+      spec,
+    });
+  });
+
+  it("takes the failure of either axis as the outcome of the whole review, Standards first", () => {
+    const bad = ran(undefined, { error: "junk", errorKind: "invalid-output" });
+    const slow = ran(undefined, { error: "idle", errorKind: "timeout" });
+    expect(
+      combineReviewRuns({ standards: ran(out("pass")), spec: bad })
+        .classification,
+    ).toMatchObject({ outcome: "invalid-output" });
+    expect(
+      combineReviewRuns({ standards: slow, spec: bad }).classification,
+    ).toMatchObject({ outcome: "timeout" });
+    expect(
+      combineReviewRuns({
+        standards: ran(out("fix")),
+        spec: ran(undefined, { error: "x", errorKind: "other" }),
+      }).classification,
+    ).toMatchObject({ kind: "infrastructure-failure" });
+    expect(
+      combineReviewRuns({ standards: slow, spec: ran(out("pass")) }).combined,
+    ).toBeUndefined();
+  });
+
+  it("points each axis at its own prompt: the ticket and the contract for Spec, with spec.md as background only", () => {
+    expect(promptFor("review", { axis: "standards" })).toBe(
+      PROMPTS.reviewStandards,
+    );
+    expect(promptFor("review", { axis: "spec" })).toBe(PROMPTS.reviewSpec);
+    expect(promptFor("final-review", { axis: "spec" })).toBe(
+      PROMPTS.finalReviewSpec,
+    );
+    const spec = readFileSync(PROMPTS.reviewSpec, "utf8");
+    expect(spec).toContain("/context/ticket.md");
+    expect(spec).toContain("/context/contract/");
+    expect(spec).toMatch(/spec\.md`? 只是背景/);
+    expect(spec).toContain("每条验收标准都有测试");
+    const finalSpec = readFileSync(PROMPTS.finalReviewSpec, "utf8");
+    expect(finalSpec).toContain("/context/spec.md");
+    expect(finalSpec).toContain("/context/tickets.md");
+    expect(finalSpec).toContain("重点看票与票之间");
+    for (const file of [PROMPTS.reviewSpec, PROMPTS.reviewStandards]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("按第 4 步给");
+      expect(prompt).toContain("不要再开子 agent");
+      expect(prompt).toContain("git diff <baseSha>...HEAD");
+    }
+    // the documented norms the Standards axis reviews against are the overlay's
+    expect(readFileSync(PROMPTS.reviewStandards, "utf8")).toContain(
+      "不许删除或跳过测试",
+    );
   });
 });
 
@@ -345,9 +466,9 @@ describe("the prompts", () => {
     }
     const dir = mkdtempSync(join(tmpdir(), "afk-prompt-"));
     dirs.push(dir);
-    const written = writePrompt(dir, PROMPTS.review);
+    const written = writePrompt(dir, PROMPTS.reviewStandards);
     expect(readFileSync(written.promptFile, "utf8")).toBe(written.prompt);
-    expect(written.prompt).toBe(whole("review"));
+    expect(written.prompt).toBe(composePrompt(PROMPTS.reviewStandards));
   });
 
   it("never says red, green, refactor: the loop is red → green only", () => {
@@ -444,7 +565,7 @@ describe("the prompts", () => {
 
   it("picks the prompt by stage", () => {
     expect(promptFor("implement")).toBe(PROMPTS.implement);
-    expect(promptFor("review")).toBe(PROMPTS.review);
+    expect(promptFor("review")).toBe(PROMPTS.reviewStandards);
     expect(promptFor("gate-fix")).toBe(PROMPTS.gateFix);
     expect(promptFor("review-fix")).toBe(PROMPTS.reviewFix);
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
