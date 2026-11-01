@@ -81,6 +81,9 @@ export function renderContext(input: ContextInput): void {
     `# ${bundle.spec.displayId} ${bundle.spec.title}\n\n${bundle.spec.body}\n`,
   );
   writeFileSync(join(dir, "run.json"), JSON.stringify(runJson(input), null, 2));
+  if (bundle.note) {
+    writeFileSync(join(dir, "note.md"), bundle.note);
+  }
   if (input.failureLog !== undefined) {
     mkdirSync(join(dir, "failure"), { recursive: true });
     writeFileSync(join(dir, "failure", "gate.log"), input.failureLog);

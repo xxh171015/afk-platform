@@ -205,6 +205,43 @@ describe("retry", () => {
   });
 });
 
+describe("retry note", () => {
+  async function nextBundle() {
+    const job = (await worker.claim()).body.job as Claimed;
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json());
+    return { job, bundle };
+  }
+
+  it("goes on the next Run's bundle, does not bump the content version, and is gone on a later retry that has none", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    expect((await call("GET", "/tickets/1")).body.ticket.contentVersion).toBe(
+      1,
+    );
+
+    const note = "use the helper in src/orders/csv.ts";
+    await call("POST", "/tickets/1/retry", { mode: "continue", note });
+    expect((await call("GET", "/tickets/1")).body.ticket.contentVersion).toBe(
+      1,
+    );
+
+    const first = await nextBundle();
+    expect(first.bundle.note).toBe(note);
+    expect(first.bundle.ticket.file).not.toContain(note);
+    expect(first.bundle.ticket.contentVersion).toBe(1);
+
+    await worker.complete(first.job.id, first.job.attempt, {
+      stage: "implement",
+      ...GAVE_UP,
+    });
+    await call("POST", "/tickets/1/retry", { mode: "continue", note: "   " });
+    const second = await nextBundle();
+    expect(second.bundle.note).toBeNull();
+  });
+});
+
 describe("editing a ticket", () => {
   const fileOf = async (id: number, query = "") =>
     (await call("GET", `/tickets/${id}${query}`)).body.ticket.file as string;

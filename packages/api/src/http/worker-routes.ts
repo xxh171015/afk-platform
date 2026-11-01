@@ -214,6 +214,7 @@ const Bundle = z.object({
       sha: z.string().nullable(),
     }),
   ),
+  note: z.string().nullable(),
   failureLog: z.string().nullable(),
   review: z.unknown(),
   gateBaseline: z

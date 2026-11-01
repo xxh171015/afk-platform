@@ -192,27 +192,92 @@ describe("the queue of what waits for a person", () => {
 });
 
 describe("retrying", () => {
-  it.each([
-    ["Retry, keep the work", "continue"],
-    ["Retry from scratch", "restart"],
-  ])(
-    "%s asks the API for mode %s, and the ticket leaves the list",
-    async (label, mode) => {
-      const { fake, bodies } = server(
-        queue({
-          tickets: [ticket(1, "gate-failed"), ticket(3, "agent-gave-up")],
-        }),
-      );
-      renderWithApp(<BlockedQueue />, fake);
-      await screen.findByTestId("blocked-T-1");
-      fireEvent.click(card("T-1").getByRole("button", { name: label }));
-      await waitFor(() =>
-        expect(screen.queryByTestId("blocked-T-1")).toBeNull(),
-      );
-      expect(bodies["POST /tickets/1/retry"]).toEqual({ mode });
-      expect(screen.getByTestId("blocked-T-3")).toBeTruthy(); // the others stay
-    },
-  );
+  it("Retry, keep the work asks the API for continue, and the ticket leaves the list", async () => {
+    const { fake, bodies } = server(
+      queue({
+        tickets: [ticket(1, "gate-failed"), ticket(3, "agent-gave-up")],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
+    expect(bodies["POST /tickets/1/retry"]).toEqual({ mode: "continue" });
+    expect(screen.getByTestId("blocked-T-3")).toBeTruthy(); // the others stay
+  });
+
+  it("Retry from scratch asks twice, then posts restart", async () => {
+    const { fake, bodies } = server(
+      queue({ tickets: [ticket(1, "gate-failed")] }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Retry from scratch" }),
+    );
+    expect(bodies["POST /tickets/1/retry"]).toBeUndefined();
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Retry T-1 from scratch" }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
+    expect(bodies["POST /tickets/1/retry"]).toEqual({ mode: "restart" });
+  });
+
+  it("sends the Retry note with continue when one is written", async () => {
+    const { fake, bodies } = server(
+      queue({ tickets: [ticket(1, "gate-failed")] }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.change(card("T-1").getByLabelText("这一次 Run 的说明"), {
+      target: { value: "use the helper in src/orders/csv.ts" },
+    });
+    fireEvent.click(
+      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
+    expect(bodies["POST /tickets/1/retry"]).toEqual({
+      mode: "continue",
+      note: "use the helper in src/orders/csv.ts",
+    });
+  });
+
+  it("lets a blocked ticket's file be edited from the waiting card", async () => {
+    const file = "---\nid: T-1\n---\n## What to build\n\nExport.\n";
+    const bodies: Record<string, unknown> = {};
+    const fake = fakeServer({
+      "GET /blocked": () => ({
+        json: queue({ tickets: [ticket(1, "gate-failed")] }),
+      }),
+      "GET /tickets/1": () => ({
+        json: {
+          ticket: { id: 1, file, contentVersion: 1 },
+          versions: [],
+          runs: [],
+          findings: [],
+          gateResults: [],
+          upstream: [],
+          downstream: [],
+        },
+      }),
+      "POST /tickets/1/edit": ({ body }) => {
+        bodies.edit = body;
+        return { json: { id: 1, contentVersion: 1, changed: true } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    fireEvent.click(card("T-1").getByRole("button", { name: "改正文" }));
+    fireEvent.change(await card("T-1").findByLabelText("票正文"), {
+      target: { value: `${file}\nmore\n` },
+    });
+    fireEvent.click(card("T-1").getByRole("button", { name: "保存正文" }));
+    await waitFor(() =>
+      expect(bodies.edit).toEqual({ file: `${file}\nmore\n` }),
+    );
+  });
 
   it("shows what the API said when it refuses, and keeps the ticket", async () => {
     const { fake } = server(queue({ tickets: [ticket(1, "gate-failed")] }), {
@@ -461,6 +526,7 @@ describe("paused specs and stopped overall reviews", () => {
     expect(
       spec.getByText(/the agent time limit of the spec was reached/),
     ).toBeTruthy();
+    expect(spec.queryByLabelText("这一次 Run 的说明")).toBeNull();
     fireEvent.change(spec.getByLabelText("extra agent hours for S-1"), {
       target: { value: "2.5" },
     });
@@ -516,9 +582,11 @@ describe("paused specs and stopped overall reviews", () => {
 
   it("shows a stopped overall review and runs its step again", async () => {
     let current = queue({ finalizations: [stopped] });
+    let posted: unknown;
     const fake = fakeServer({
       "GET /blocked": () => ({ json: current }),
-      "POST /specs/1/final/retry": () => {
+      "POST /specs/1/final/retry": ({ body }) => {
+        posted = body;
         current = queue();
         return { json: { retried: ["final-merge"] } };
       },
@@ -529,6 +597,9 @@ describe("paused specs and stopped overall reviews", () => {
       "合并后门禁失败",
     );
     expect(item.getByRole("note").textContent).toContain("# test failed");
+    fireEvent.change(item.getByLabelText("这一次 Run 的说明"), {
+      target: { value: "take theirs on src/a.ts" },
+    });
     fireEvent.click(
       item.getByRole("button", { name: "Run final-merge again" }),
     );
@@ -536,6 +607,7 @@ describe("paused specs and stopped overall reviews", () => {
       expect(screen.queryByTestId("final-S-1-backend")).toBeNull(),
     );
     expect(fake.calls).toContain("POST /specs/1/final/retry");
+    expect(posted).toEqual({ note: "take theirs on src/a.ts" });
   });
 
   it("shows the e2e before the pull requests, and lets a person run it again or open the pull requests anyway", async () => {

@@ -989,6 +989,7 @@ export interface paths {
                 defaultBranch: string;
                 sha: string | null;
               }[];
+              note: string | null;
               failureLog: string | null;
               review?: unknown;
               gateBaseline: {
@@ -2673,6 +2674,7 @@ export interface paths {
           "application/json": {
             /** @enum {string} */
             mode: "continue" | "restart";
+            note?: string;
           };
         };
       };
@@ -3178,7 +3180,13 @@ export interface paths {
         };
         cookie?: never;
       };
-      requestBody?: never;
+      requestBody?: {
+        content: {
+          "application/json": {
+            note?: string;
+          };
+        };
+      };
       responses: {
         /** @description The blocked steps of the overall review are queued again */
         200: {

@@ -438,6 +438,23 @@ ul.blocked-list {
   background: #f5f5f5;
   padding: 0.6rem;
 }
+.retry-note,
+.ticket-edit label {
+  display: block;
+  margin: 8px 0;
+  font-size: 0.9rem;
+}
+.retry-note textarea,
+.ticket-edit textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
 ul.related {
   list-style: none;
   padding: 0;

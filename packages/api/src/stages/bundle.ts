@@ -89,6 +89,8 @@ export interface Bundle {
   // For an integration ticket: the repos whose services make up its integration environment, in the order their
   // seed services run.
   environment: BundleRef[];
+  // The Retry note of this Run, if the person wrote one; null when they did not.
+  note: string | null;
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
   review: unknown;
@@ -196,8 +198,8 @@ export async function buildBundle(
   const refs = await refsOf(pool, ticketId);
   const environment = await environmentOf(pool, ticketId);
 
-  const run = await pool.query<{ id: number }>(
-    "SELECT id FROM runs WHERE job_id = $1",
+  const run = await pool.query<{ id: number; retry_note: string | null }>(
+    "SELECT id, retry_note FROM runs WHERE job_id = $1",
     [job.id],
   );
   // What the previous stages found, kept in the output of their Runs, so a worker needs no memory of its own.
@@ -256,6 +258,7 @@ export async function buildBundle(
     contracts,
     refs,
     environment,
+    note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
     review: await reviewJsonOf(pool, "ticket_id = $1 AND stage = 'review'", [
       ticketId,
@@ -291,8 +294,8 @@ async function buildFinalBundle(
     `SELECT id, title, acceptance_criteria FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
     [final.specId, final.repoId],
   );
-  const run = await pool.query<{ id: number }>(
-    "SELECT id FROM runs WHERE job_id = $1",
+  const run = await pool.query<{ id: number; retry_note: string | null }>(
+    "SELECT id, retry_note FROM runs WHERE job_id = $1",
     [job.id],
   );
   // the review that asked for the fix, and the log of the merge or gate that failed last
@@ -345,6 +348,7 @@ async function buildFinalBundle(
     contracts: [],
     refs: [],
     environment: [],
+    note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
     review: await reviewJsonOf(
       pool,

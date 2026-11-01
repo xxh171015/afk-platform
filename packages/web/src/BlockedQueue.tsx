@@ -10,9 +10,15 @@ import { describeError, useApi } from "./api.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
 import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
+import {
+  RetryNoteField,
+  retryFinalBody,
+  retryTicketBody,
+} from "./RetryNote.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { structuredBrief } from "./structured-brief.ts";
+import { WaitingTicketEdit } from "./TicketEdit.tsx";
 import { WORKBENCH_KEY } from "./Workbench.tsx";
 
 // Everything that waits for a person: blocked tickets with the reason and what went wrong, specs the platform
@@ -88,7 +94,9 @@ type TicketAction =
 function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
   const api = useApi();
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [cascade, setCascade] = useState(false);
+  const [note, setNote] = useState("");
   const id = ticket.id;
 
   // One mutation for the card: only one action at a time, and the message shown is that of the latest one.
@@ -97,7 +105,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
       action.kind === "retry"
         ? await api.POST("/tickets/{id}/retry", {
             params: { path: { id } },
-            body: { mode: action.mode },
+            body: retryTicketBody(action.mode, note),
           })
         : action.kind === "approve"
           ? await api.POST("/tickets/{id}/approve-protected", {
@@ -126,6 +134,14 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
         <StatusBadge kind="blocked" code={ticket.blockedReason ?? "blocked"} />
       </p>
       <Brief reason={ticket.blockedReason} brief={ticket.brief} />
+      <WaitingTicketEdit ticketId={id} />
+      {canRetry ? (
+        <RetryNoteField
+          id={`retry-note-${ticket.displayId}`}
+          value={note}
+          onChange={setNote}
+        />
+      ) : null}
       {canRetry ? null : (
         <p className="note">
           A ticket it waited for was cancelled, so trying again would only wait
@@ -143,13 +159,33 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
             >
               Retry, keep the work
             </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => act.mutate({ kind: "retry", mode: "restart" })}
-            >
-              Retry from scratch
-            </button>
+            {confirmRestart ? (
+              <>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={busy}
+                  onClick={() => act.mutate({ kind: "retry", mode: "restart" })}
+                >
+                  Retry {ticket.displayId} from scratch
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmRestart(false)}
+                >
+                  Keep the work
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmRestart(true)}
+              >
+                Retry from scratch
+              </button>
+            )}
           </>
         ) : null}
         {ticket.blockedReason === "protected-path-changed" ? (
@@ -265,9 +301,11 @@ function BlockedFinalization({
   item: Queue["finalizations"][number];
 }) {
   const api = useApi();
+  const [note, setNote] = useState("");
   const retry = useAction(async () => {
     const { data, error } = await api.POST("/specs/{id}/final/retry", {
       params: { path: { id: item.specId } },
+      body: retryFinalBody(note),
     });
     if (!data) throw new Error(describeError(error));
   });
@@ -294,6 +332,11 @@ function BlockedFinalization({
         <StatusBadge kind="blocked" code={item.blockedReason ?? "blocked"} />
       </p>
       <Brief reason={item.blockedReason} brief={item.brief} />
+      <RetryNoteField
+        id={`retry-note-final-${item.specDisplayId}-${item.repo}`}
+        value={note}
+        onChange={setNote}
+      />
       <div className="actions">
         <button
           type="button"

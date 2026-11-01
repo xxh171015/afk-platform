@@ -86,6 +86,17 @@ describe("renderContext", () => {
     expect(existsSync(join(dir, "review.json"))).toBe(false);
     expect(existsSync(join(dir, "contract"))).toBe(false);
     expect(existsSync(join(dir, "domain"))).toBe(false);
+    expect(existsSync(join(dir, "note.md"))).toBe(false);
+  });
+
+  it("writes note.md when the Run has a Retry note, and never puts it in ticket.md", () => {
+    const dir = ctxDir();
+    const note = "use the helper in src/orders/csv.ts";
+    const bundle = bundleFor({ note });
+    renderContext({ dir, bundle, run });
+    expect(read(dir, "note.md")).toBe(note);
+    expect(read(dir, "ticket.md")).not.toContain(note);
+    expect(read(dir, "ticket.md")).toBe(bundle.ticket?.file);
   });
 
   it("writes GLOSSARY and ADRs under domain/, never AGENTS.md", () => {

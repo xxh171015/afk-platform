@@ -883,6 +883,31 @@ describe("plat", () => {
     ).toMatch(/not allowed in queued/);
   });
 
+  it("retries with a note that the next Run reads", async () => {
+    const worker = await blockedContract();
+    const note = "use the helper in src/orders/csv.ts";
+    expect(
+      await plat(
+        "ticket",
+        "retry",
+        "T-1",
+        "--mode",
+        "continue",
+        "--note",
+        note,
+      ),
+    ).toMatchObject({ code: 0 });
+    const job = (await worker.claim()).body.job;
+    const bundle = (await fetch(
+      `${api.url}/worker/jobs/${job?.id}/bundle?workerId=w1&attempt=${job?.attempt}`,
+    ).then((r) => r.json())) as {
+      note: string | null;
+      ticket: { file: string };
+    };
+    expect(bundle.note).toBe(note);
+    expect(bundle.ticket.file).not.toContain(note);
+  });
+
   it("resumes a paused spec with more agent time", async () => {
     await blockedContract();
     await db.pool.query(

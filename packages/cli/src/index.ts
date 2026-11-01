@@ -471,11 +471,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("retry-final <spec>")
     .description("run the blocked step of a spec's overall review again")
-    .action(async (id: string) => {
+    .option(
+      "--note <text>",
+      "Retry note for the next Run only; not a ticket edit",
+    )
+    .action(async (id: string, options) => {
       const { data, response, error } = await api().POST(
         "/specs/{id}/final/retry",
         {
           params: { path: { id: specIdOf(id) } },
+          body: options.note === undefined ? {} : { note: options.note },
         },
       );
       if (!data) throw failureFrom(response, error);
@@ -608,6 +613,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--mode <mode>",
       "continue (keep the branch) or restart (start from the integration branch)",
     )
+    .option(
+      "--note <text>",
+      "Retry note for the next Run only; not a ticket edit",
+    )
     .action(async (id: string, options) => {
       if (options.mode !== "continue" && options.mode !== "restart") {
         throw new Failure("--mode must be continue or restart");
@@ -616,7 +625,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         "/tickets/{id}/retry",
         {
           params: { path: { id: ticketIdOf(id) } },
-          body: { mode: options.mode },
+          body: {
+            mode: options.mode,
+            ...(options.note === undefined ? {} : { note: options.note }),
+          },
         },
       );
       if (!data) throw failureFrom(response, error);

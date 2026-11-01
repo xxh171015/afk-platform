@@ -506,4 +506,85 @@ describe("the ticket page", () => {
     expect(screen.getByText(/Export orders as CSV/)).toBeTruthy();
     expect(screen.queryByText(/Could not load the ticket/)).toBeNull();
   });
+
+  it("lets a pending or blocked ticket be edited, and a blocked one retried with a note", async () => {
+    const bodies: Record<string, unknown> = {};
+    const blocked = view({
+      ticket: {
+        ...view().ticket,
+        state: "blocked",
+        blockedReason: "gate-failed",
+        brief: {
+          run: { id: 11, displayId: "R-11" },
+          stage: "gate",
+          result: "failed",
+          output: { failureLog: "# test failed" },
+          logPath: "/runs/11/logs",
+        },
+      },
+    });
+    const server = fakeServer({
+      "GET /tickets/4": () => ({ json: blocked }),
+      "POST /tickets/4/edit": ({ body }) => {
+        bodies.edit = body;
+        return { json: { id: 4, contentVersion: 1, changed: false } };
+      },
+      "POST /tickets/4/retry": ({ body }) => {
+        bodies.retry = body;
+        return { json: { state: "queued" } };
+      },
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    await screen.findByLabelText("票正文");
+    expect(screen.queryByRole("button", { name: /append/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /取消需求/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText("票正文"), {
+      target: { value: `${blocked.ticket.file}\nmore\n` },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存正文" }));
+    await waitFor(() =>
+      expect(bodies.edit).toEqual({
+        file: `${blocked.ticket.file}\nmore\n`,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("这一次 Run 的说明"), {
+      target: { value: "use the helper in src/orders/csv.ts" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry, keep the work" }),
+    );
+    await waitFor(() =>
+      expect(bodies.retry).toEqual({
+        mode: "continue",
+        note: "use the helper in src/orders/csv.ts",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry from scratch" }));
+    expect(bodies.retry).toEqual({
+      mode: "continue",
+      note: "use the helper in src/orders/csv.ts",
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry T-4 from scratch" }),
+    );
+    await waitFor(() =>
+      expect(bodies.retry).toEqual({
+        mode: "restart",
+        note: "use the helper in src/orders/csv.ts",
+      }),
+    );
+  });
+
+  it("does not offer retry or edit on a running ticket", async () => {
+    renderWithApp(
+      <TicketDetail ticketId={4} />,
+      fakeServer({ "GET /tickets/4": () => ({ json: view() }) }),
+    );
+    await screen.findByText(/Export orders as CSV/);
+    expect(screen.queryByLabelText("票正文")).toBeNull();
+    expect(screen.queryByLabelText("这一次 Run 的说明")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Retry, keep the work" }),
+    ).toBeNull();
+  });
 });

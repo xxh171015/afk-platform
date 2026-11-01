@@ -74,6 +74,7 @@ export function bundleFor(
     contracts: [],
     refs: [],
     environment: [],
+    note: null,
     failureLog: null,
     review: null,
     gateBaseline: null,

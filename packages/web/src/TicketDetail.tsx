@@ -1,4 +1,9 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
@@ -6,10 +11,12 @@ import { DETAIL_POLL_MS } from "./live.ts";
 import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
+import { RetryNoteField, retryTicketBody } from "./RetryNote.tsx";
 import { Sha } from "./Sha.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { structuredBrief } from "./structured-brief.ts";
+import { TicketEdit } from "./TicketEdit.tsx";
 
 // One ticket: its runs as a thin table into /runs/:id, what the gates measured, and what the reviews found.
 
@@ -34,7 +41,7 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
     refetchInterval: poll,
     placeholderData: keepPreviousData,
   });
-  const current = view.data?.ticket.contentVersion;
+  const current = view.data?.ticket?.contentVersion;
   const older = version !== undefined && version !== current;
   // the content of an older version: its body and the text the agent read then
   const past = useQuery({
@@ -109,6 +116,16 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
         <StructuredBriefView
           brief={structuredBrief(ticket.blockedReason, ticket.brief)}
           runId={ticket.brief.run.id}
+        />
+      ) : null}
+      {!older && (ticket.state === "pending" || ticket.state === "blocked") ? (
+        <TicketEdit ticketId={ticket.id} file={ticket.file} />
+      ) : null}
+      {!older && ticket.state === "blocked" ? (
+        <TicketRetry
+          ticketId={ticket.id}
+          displayId={ticket.displayId}
+          blockedReason={ticket.blockedReason}
         />
       ) : null}
 
@@ -332,5 +349,89 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
         </ul>
       )}
     </section>
+  );
+}
+
+function TicketRetry({
+  ticketId,
+  displayId,
+  blockedReason,
+}: {
+  ticketId: number;
+  displayId: string;
+  blockedReason: string | null;
+}) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const [note, setNote] = useState("");
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const retry = useMutation({
+    mutationFn: async (mode: "continue" | "restart") => {
+      const { data, error } = await api.POST("/tickets/{id}/retry", {
+        params: { path: { id: ticketId } },
+        body: retryTicketBody(mode, note),
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["ticket", ticketId] }),
+        queryClient.invalidateQueries({ queryKey: ["blocked"] }),
+        queryClient.invalidateQueries({ queryKey: ["workbench"] }),
+      ]),
+  });
+  // retrying cannot help a ticket that waits for one that was cancelled
+  if (blockedReason === "upstream-cancelled") return null;
+  const busy = retry.isPending;
+  return (
+    <div className="ticket-retry">
+      <RetryNoteField
+        id={`retry-note-ticket-${displayId}`}
+        value={note}
+        onChange={setNote}
+      />
+      <div className="actions">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => retry.mutate("continue")}
+        >
+          Retry, keep the work
+        </button>
+        {confirmRestart ? (
+          <>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => retry.mutate("restart")}
+            >
+              Retry {displayId} from scratch
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmRestart(false)}
+            >
+              Keep the work
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirmRestart(true)}
+          >
+            Retry from scratch
+          </button>
+        )}
+      </div>
+      {retry.error ? (
+        <p className="error" role="alert">
+          {retry.error.message}
+        </p>
+      ) : null}
+    </div>
   );
 }

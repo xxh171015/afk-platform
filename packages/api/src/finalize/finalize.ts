@@ -14,7 +14,7 @@ import { enqueueOpenPr } from "../host/host-jobs.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
-import type { ActionResult } from "../tickets/actions.ts";
+import { type ActionResult, parkedRetryNote } from "../tickets/actions.ts";
 import { retryFinalE2e, settleFinalization } from "./final-e2e.ts";
 
 const refused = (message: string) => ({ status: "refused", message }) as const;
@@ -134,12 +134,17 @@ export async function markFinalClaimed(
   const read = readFinalPayload(job.payload);
   if (!read) return;
   await pool.query(
-    `INSERT INTO runs (spec_id, repo_id, job_id, stage, attempt, started_at)
-     VALUES ($1, $2, $3, $4,
-       (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = $4) + 1, now())
+    `INSERT INTO runs (spec_id, repo_id, job_id, stage, attempt, retry_note, started_at)
+     SELECT $1, $2, $3, $4,
+       (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = $4) + 1,
+       s.retry_note, now()
+     FROM specs s WHERE s.id = $1
      ON CONFLICT (job_id) DO NOTHING`,
     [read.specId, read.repoId, job.id, read.step],
   );
+  await pool.query("UPDATE specs SET retry_note = NULL WHERE id = $1", [
+    read.specId,
+  ]);
 }
 
 // Note that retrying a final-fix that failed runs the fix again: a person has decided to, so "once" holds for the
@@ -149,6 +154,7 @@ export async function markFinalClaimed(
 export async function retryFinalization(
   pool: pg.Pool,
   specId: number,
+  note: string | null = null,
 ): Promise<ActionResult<{ retried: string[] }>> {
   return inTransaction(pool, async (client) => {
     const exists = await client.query("SELECT 1 FROM specs WHERE id = $1", [
@@ -182,6 +188,10 @@ export async function retryFinalization(
         message: `${formatDisplayId("spec", specId)} has no blocked finalization`,
       };
     }
+    await client.query("UPDATE specs SET retry_note = $2 WHERE id = $1", [
+      specId,
+      parkedRetryNote(note),
+    ]);
     for (const row of blocked.rows) {
       await client.query(
         "UPDATE finalizations SET state = 'active', blocked_reason = NULL,\n           job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",

@@ -1746,6 +1746,9 @@
                         "required": ["name", "url", "defaultBranch", "sha"]
                       }
                     },
+                    "note": {
+                      "type": ["string", "null"]
+                    },
                     "failureLog": {
                       "type": ["string", "null"]
                     },
@@ -1800,6 +1803,7 @@
                     "contracts",
                     "refs",
                     "environment",
+                    "note",
                     "failureLog",
                     "gateBaseline",
                     "limits",
@@ -6031,6 +6035,9 @@
                   "mode": {
                     "type": "string",
                     "enum": ["continue", "restart"]
+                  },
+                  "note": {
+                    "type": "string"
                   }
                 },
                 "required": ["mode"]
@@ -6668,6 +6675,21 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The blocked steps of the overall review are queued again",

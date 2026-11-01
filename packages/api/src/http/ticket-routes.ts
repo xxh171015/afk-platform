@@ -16,6 +16,7 @@ import {
   cancelSpec,
   cancelTicket,
   editTicket,
+  parkedRetryNote,
   resumeSpec,
   retrySpecCleanup,
   retryTicket,
@@ -438,13 +439,20 @@ const workbenchRoute = createRoute({
   },
 });
 
+const RetryNote = z.string().optional();
+
 const retryRoute = createRoute({
   method: "post",
   path: "/tickets/{id}/retry",
   request: {
     params: z.object({ id: PathId }),
     body: {
-      content: json(z.object({ mode: z.enum(["continue", "restart"]) })),
+      content: json(
+        z.object({
+          mode: z.enum(["continue", "restart"]),
+          note: RetryNote,
+        }),
+      ),
     },
   },
   responses: {
@@ -594,7 +602,13 @@ const cancelSpecRoute = createRoute({
 const retryFinalRoute = createRoute({
   method: "post",
   path: "/specs/{id}/final/retry",
-  request: { params: z.object({ id: PathId }) },
+  request: {
+    params: z.object({ id: PathId }),
+    body: {
+      content: json(z.object({ note: RetryNote })),
+      required: false,
+    },
+  },
   responses: {
     200: reply(
       "The blocked steps of the overall review are queued again",
@@ -678,8 +692,10 @@ export function registerTicketRoutes(
   );
 
   app.openapi(retryRoute, async (c) => {
-    const result = await aroundTicket(context, c.req.valid("param").id, () =>
-      retryTicket(pool, c.req.valid("param").id, c.req.valid("json").mode),
+    const { id } = c.req.valid("param");
+    const { mode, note } = c.req.valid("json");
+    const result = await aroundTicket(context, id, () =>
+      retryTicket(pool, id, mode, note),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -779,8 +795,15 @@ export function registerTicketRoutes(
   });
 
   app.openapi(retryFinalRoute, async (c) => {
-    const result = await aroundSpec(context, c.req.valid("param").id, () =>
-      retryFinalization(pool, c.req.valid("param").id),
+    const { id } = c.req.valid("param");
+    let note: string | undefined;
+    try {
+      note = c.req.valid("json")?.note;
+    } catch {
+      note = undefined;
+    }
+    const result = await aroundSpec(context, id, () =>
+      retryFinalization(pool, id, parkedRetryNote(note)),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);

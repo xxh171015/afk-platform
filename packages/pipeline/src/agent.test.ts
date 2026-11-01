@@ -495,6 +495,8 @@ describe("the prompts", () => {
       "不要 push",
       "保护路径",
       "/context/domain/",
+      "/context/note.md",
+      "不当成改票",
     ])
       expect(overlay).toContain(word);
   });

@@ -120,6 +120,8 @@ export const specs = pgTable(
     // The planning commit (GLOSSARY / ADR / AGENTS.md) this spec's planning-repo integration branch starts from.
     planningSha: text("planning_sha"),
     planningRepoId: integer("planning_repo_id").references(() => repos.id),
+    // Parked until the next final Run is claimed, then copied onto that Run and cleared.
+    retryNote: text("retry_note"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -180,6 +182,8 @@ export const tickets = pgTable(
     contractSha: text("contract_sha"),
     // An integration ticket: the e2e failures that were followed by a fix ticket (at most two, then it is blocked).
     integrationRounds: integer("integration_rounds").notNull().default(0),
+    // Parked until the next Run is claimed, then copied onto that Run and cleared. Not ticket content.
+    retryNote: text("retry_note"),
     // Where a pending ticket starts: null is the beginning (implement); "e2e" for a ticket that is merged already.
     resumeStage: text("resume_stage"),
     // A fix ticket the platform made for a failed e2e: the integration ticket it is for, and the round of it. One
@@ -438,6 +442,8 @@ export const runs = pgTable(
     tokenUsage: jsonb("token_usage"),
     result: text("result"),
     output: jsonb("output"),
+    // The Retry note this Run was given, if any; null when the retry had none.
+    retryNote: text("retry_note"),
     logUrl: text("log_url"),
     // The contract SHA used for each providing repo (name -> sha); null when the ticket had no contract edge.
     contractShas: jsonb("contract_shas"),
