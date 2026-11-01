@@ -206,6 +206,53 @@ async function register() {
 }
 
 describe("plat", () => {
+  it("registers and changes the host kind of a repo, and tracker-doc follows it", async () => {
+    await plat("project", "create", "shop");
+    const add = await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "backend",
+      "--url",
+      "https://git.example.org/acme/backend.git",
+      "--host-kind",
+      "gitlab",
+    );
+    expect(add.code).toBe(0);
+    const doc = () =>
+      plat("tracker-doc", "--project", "1", "--repo", "backend");
+    expect((await doc()).stdout).toContain("## On GitLab");
+
+    const edit = await plat(
+      "repo",
+      "edit",
+      "backend",
+      "--project",
+      "1",
+      "--host-kind",
+      "github",
+    );
+    expect(edit.code).toBe(0);
+    expect((await doc()).stdout).toContain("## On GitHub");
+
+    const bad = await plat(
+      "repo",
+      "edit",
+      "backend",
+      "--project",
+      "1",
+      "--host-kind",
+      "gitea",
+    );
+    expect(bad.code).not.toBe(0);
+    expect(bad.stderr).toContain("github, gitlab");
+    expect(
+      (await plat("repo", "edit", "backend", "--project", "1")).stderr,
+    ).toMatch(/nothing to change/);
+  });
+
   async function createSpecFrom(text: string) {
     await plat("project", "create", "shop");
     await plat(

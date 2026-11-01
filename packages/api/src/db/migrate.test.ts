@@ -46,6 +46,7 @@ const LATER_THAN_REPO_NAMES = [
   "0026_ticket_template_bodies",
   "0027_run_prompt",
   "0028_run_axis",
+  "0029_repo_host_kind",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -242,6 +243,7 @@ describe("migrating ticket bodies to the issue template", () => {
           "0026_ticket_template_bodies",
           "0027_run_prompt",
           "0028_run_axis",
+          "0029_repo_host_kind",
         ].includes(e.tag),
     );
     writeFileSync(journalPath, JSON.stringify(journal));
@@ -362,6 +364,44 @@ describe("assertMigrated", () => {
       );
     } finally {
       rmSync(folder, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the host kind of a repo", () => {
+  it("is read once from the address of the repos that exist, and later ones are checked", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => e.tag !== "0029_repo_host_kind",
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+      await db.pool.query(
+        `INSERT INTO repos (project_id, url, name) VALUES
+           (1, 'https://github.com/acme/a.git', 'a'),
+           (1, 'git@gitlab.example.org:acme/b.git', 'b'),
+           (1, 'https://git.example.org/acme/c.git', 'c')`,
+      );
+
+      await migrate(db.pool);
+      const repos = await db.pool.query(
+        "SELECT name, host_kind FROM repos ORDER BY id",
+      );
+      expect(repos.rows).toEqual([
+        { name: "a", host_kind: "github" },
+        { name: "b", host_kind: "gitlab" },
+        { name: "c", host_kind: "github" },
+      ]);
+      await expect(
+        db.pool.query("UPDATE repos SET host_kind = 'gitea'"),
+      ).rejects.toThrow(/repos_host_kind_check/);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
     }
   });
 });

@@ -12,6 +12,7 @@ const project = {
       url: "https://github.com/acme/backend",
       defaultBranch: "main",
       contractPath: null,
+      hostKind: "github" as const,
     },
   ],
 };

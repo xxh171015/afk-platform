@@ -3,6 +3,7 @@ import {
   EDGE_KINDS,
   FINAL_STEPS,
   FINDING_RESOLUTIONS,
+  HOST_KINDS,
   JOB_STATES,
   SPEC_STATES,
   SPEC_TYPES,
@@ -62,12 +63,15 @@ export const repos = pgTable(
     name: text("name").notNull(),
     // Where the repo keeps its contract file, if it owns one; null for a repo that has none.
     contractPath: text("contract_path"),
+    // Which code host the repo is on: github or gitlab. It picks the seed template of the tracker doc.
+    hostKind: text("host_kind").notNull().default("github"),
     createdAt: createdAt(),
   },
   // The name (backend, frontend) is how a ticket file names a repo (its `repo` field), so it is unique within a project.
   (t) => [
     index("repos_project_idx").on(t.projectId),
     unique("repos_project_name_unique").on(t.projectId, t.name),
+    check("repos_host_kind_check", oneOf(t.hostKind, HOST_KINDS)),
   ],
 );
 

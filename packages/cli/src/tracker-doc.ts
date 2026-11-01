@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
+import type { HostKind } from "@afk/shared";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
-import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
+import {
+  readSkillSnapshot,
+  type SnapshotFile,
+} from "@afk/shared/skills-snapshot";
 import pkg from "../package.json" with { type: "json" };
 
 // The planning repo's docs/agents/issue-tracker.md, generated per project and repo from the templates under
@@ -15,10 +19,14 @@ export interface TrackerDocProject {
     url: string;
     defaultBranch: string;
     contractPath: string | null;
+    hostKind: HostKind;
   }[];
 }
 
-const HOSTS = {
+const HOSTS: Record<
+  HostKind,
+  { name: string; cli: string; seed: SnapshotFile }
+> = {
   github: {
     name: "GitHub",
     cli: "gh",
@@ -29,11 +37,7 @@ const HOSTS = {
     cli: "glab",
     seed: "setup-matt-pocock-skills/issue-tracker-gitlab.md",
   },
-} as const;
-
-// The platform registers no host kind yet; a repo address on a gitlab host means GitLab, anything else GitHub.
-const hostOf = (url: string) =>
-  /gitlab/i.test(url) ? HOSTS.gitlab : HOSTS.github;
+};
 
 // A template's first line is the comment naming the skills SHA it was written for (a test holds it to the constant);
 // it is not part of the document.
@@ -66,7 +70,7 @@ export function renderTrackerDoc(
       `project ${project.id} has no repo ${repoName} (it has: ${have})`,
     );
   }
-  const host = hostOf(repo.url);
+  const host = HOSTS[repo.hostKind];
   const values = {
     PROJECT: String(project.id),
     REPO: repo.name,

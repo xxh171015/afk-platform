@@ -47,6 +47,7 @@ plat repo edit backend --project <P> --contract-path openapi/openapi.yaml    # �
 plat repo add --project <P> --name frontend --url https://github.com/<owner>/<前端仓库>.git
 ```
 
+- **代码托管类型**：`--host-kind github|gitlab`（`plat repo add` 和 `plat repo edit` 都可以）。不写时按地址推断一次（地址里有 `gitlab` 就是 GitLab，否则 GitHub）并存下来；自建 GitLab 的地址不含 `gitlab` 时要显式写 `--host-kind gitlab`。`plat tracker-doc` 按它选 GitHub 或 GitLab 的种子模板。
 - **仓库名是你起的**，它就是票文件里 `repo:`、`refs:`、`environment:` 要写的名字（试点用的是 `afk-pilot-backend` / `afk-pilot-frontend`）。
 - 契约路径只设在**出契约的仓库**上。没设就导入含契约票的文件，会被拒绝。
 - `--protected-path` 是 agent 默认不能改的路径（再加上契约文件）。要改就在票里写 `protected_paths_ok`。

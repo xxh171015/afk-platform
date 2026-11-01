@@ -10,11 +10,13 @@ const repo = (
   name: string,
   url: string,
   contractPath: string | null = null,
+  hostKind: "github" | "gitlab" = "github",
 ) => ({
   name,
   url,
   defaultBranch: "main",
   contractPath,
+  hostKind,
 });
 
 const single = {
@@ -67,6 +69,21 @@ describe("renderTrackerDoc", () => {
     expect(renderTrackerDoc(single, "backend")).toContain(seed);
   });
 
+  it("takes the host from what the repo is registered as, not from its address", () => {
+    const doc = renderTrackerDoc(
+      {
+        id: 5,
+        name: "shop",
+        repos: [
+          repo("backend", "https://gitlab.com/acme/backend", null, "github"),
+        ],
+      },
+      "backend",
+    );
+    expect(doc).toContain("## On GitHub");
+    expect(doc).not.toContain("## On GitLab");
+  });
+
   it("puts the GitLab seed template in, and routes to glab, for a GitLab repo", () => {
     const seed = readSkillSnapshot(
       "setup-matt-pocock-skills/issue-tracker-gitlab.md",
@@ -75,7 +92,14 @@ describe("renderTrackerDoc", () => {
       {
         id: 5,
         name: "shop",
-        repos: [repo("backend", "https://gitlab.com/acme/backend.git")],
+        repos: [
+          repo(
+            "backend",
+            "https://git.example.org/acme/backend.git",
+            null,
+            "gitlab",
+          ),
+        ],
       },
       "backend",
     );

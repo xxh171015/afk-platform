@@ -1,6 +1,8 @@
 import {
   type ExistingGraph,
   formatDisplayId,
+  type HostKind,
+  hostKindOfUrl,
   type ImportWarning,
   type LimitOverrides,
   parseDisplayId,
@@ -100,6 +102,8 @@ export interface NewRepo {
   // How a ticket file names the repo; unique within the project.
   name: string;
   defaultBranch?: string;
+  // Default: worked out from the address.
+  hostKind?: HostKind;
 }
 
 export type AddRepoResult =
@@ -117,9 +121,15 @@ export async function addRepo(
   if (project.rowCount === 0) return { status: "no-project" };
   try {
     const { rows } = await pool.query(
-      `INSERT INTO repos (project_id, url, default_branch, name) VALUES ($1, $2, COALESCE($3, 'main'), $4)
+      `INSERT INTO repos (project_id, url, default_branch, name, host_kind) VALUES ($1, $2, COALESCE($3, 'main'), $4, $5)
        RETURNING id, name`,
-      [repo.projectId, repo.url, repo.defaultBranch ?? null, repo.name],
+      [
+        repo.projectId,
+        repo.url,
+        repo.defaultBranch ?? null,
+        repo.name,
+        repo.hostKind ?? hostKindOfUrl(repo.url),
+      ],
     );
     return { status: "ok", repo: rows[0] };
   } catch (error) {
@@ -131,6 +141,7 @@ export async function addRepo(
 export interface RepoEdit {
   // The path of the repo's contract file in the repo; an empty string says the repo owns none.
   contractPath?: string;
+  hostKind?: HostKind;
 }
 
 export type EditRepoResult =
@@ -150,13 +161,15 @@ export async function editRepo(
   ]);
   if (project.rowCount === 0) return { status: "no-project" };
   const { rows } = await pool.query(
-    `UPDATE repos SET contract_path = CASE WHEN $3::boolean THEN NULLIF($4::text, '') ELSE contract_path END
+    `UPDATE repos SET contract_path = CASE WHEN $3::boolean THEN NULLIF($4::text, '') ELSE contract_path END,
+       host_kind = COALESCE($5, host_kind)
      WHERE project_id = $1 AND name = $2 RETURNING id, name`,
     [
       projectId,
       name,
       edit.contractPath !== undefined,
       edit.contractPath ?? null,
+      edit.hostKind ?? null,
     ],
   );
   return rows[0] ? { status: "ok", repo: rows[0] } : { status: "no-repo" };

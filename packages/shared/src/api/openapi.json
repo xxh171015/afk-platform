@@ -180,13 +180,18 @@
                           },
                           "contractPath": {
                             "type": ["string", "null"]
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           }
                         },
                         "required": [
                           "name",
                           "url",
                           "defaultBranch",
-                          "contractPath"
+                          "contractPath",
+                          "hostKind"
                         ]
                       }
                     }
@@ -386,6 +391,10 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500
+                  },
+                  "hostKind": {
+                    "type": "string",
+                    "enum": ["github", "gitlab"]
                   }
                 },
                 "required": ["url"]
@@ -484,6 +493,10 @@
                     "type": "string",
                     "maxLength": 500,
                     "pattern": "^$|^[^\\s/:][^\\s:]*$"
+                  },
+                  "hostKind": {
+                    "type": "string",
+                    "enum": ["github", "gitlab"]
                   }
                 },
                 "additionalProperties": false

@@ -96,6 +96,8 @@ export interface paths {
                 url: string;
                 defaultBranch: string;
                 contractPath: string | null;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
               }[];
             };
           };
@@ -199,6 +201,8 @@ export interface paths {
             name?: string;
             role?: string;
             defaultBranch?: string;
+            /** @enum {string} */
+            hostKind?: "github" | "gitlab";
           };
         };
       };
@@ -272,6 +276,8 @@ export interface paths {
         content: {
           "application/json": {
             contractPath?: string;
+            /** @enum {string} */
+            hostKind?: "github" | "gitlab";
           };
         };
       };

@@ -1,11 +1,21 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { type ApiClient, createApiClient, parseDisplayId } from "@afk/shared";
+import {
+  type ApiClient,
+  createApiClient,
+  HOST_KINDS,
+  parseDisplayId,
+} from "@afk/shared";
 import {
   normalizeSpecBody,
   specTemplateWarnings,
 } from "@afk/shared/spec-template";
-import { Command, CommanderError, InvalidArgumentError } from "commander";
+import {
+  Command,
+  CommanderError,
+  InvalidArgumentError,
+  Option,
+} from "commander";
 import { blockedText, specText, ticketText } from "./format.ts";
 import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
 import { renderTrackerDoc } from "./tracker-doc.ts";
@@ -59,6 +69,12 @@ const collect = (value: string, previous: string[] = []) => [
   ...previous,
   value,
 ];
+
+const hostKindOption = () =>
+  new Option(
+    "--host-kind <kind>",
+    "the code host: github or gitlab (default when adding: from the url)",
+  ).choices(HOST_KINDS);
 
 const contractPathMoved = () =>
   new Failure(
@@ -193,6 +209,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--role <role>", "older word for --name; still works")
     .requiredOption("--url <url>", "clone URL")
     .option("--default-branch <branch>", "default: main")
+    .addOption(hostKindOption())
     .action(async (options) => {
       if ((options.name === undefined) === (options.role === undefined)) {
         throw new Failure("give the repo's --name (--role is the older word)");
@@ -206,6 +223,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             name: options.name,
             role: options.role,
             defaultBranch: options.defaultBranch,
+            hostKind: options.hostKind,
           },
         },
       );
@@ -221,15 +239,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--contract-path <path>",
       'where the repo keeps its contract file, e.g. openapi/openapi.yaml; pass "" to clear',
     )
+    .addOption(hostKindOption())
     .action(async (name: string, options) => {
-      if (options.contractPath === undefined) {
-        throw new Failure("nothing to change: pass --contract-path");
+      if (
+        options.contractPath === undefined &&
+        options.hostKind === undefined
+      ) {
+        throw new Failure(
+          "nothing to change: pass --contract-path or --host-kind",
+        );
       }
       const { data, response, error } = await api().PATCH(
         "/projects/{projectId}/repos/{name}",
         {
           params: { path: { projectId: options.project, name } },
-          body: { contractPath: options.contractPath },
+          body: {
+            contractPath: options.contractPath,
+            hostKind: options.hostKind,
+          },
         },
       );
       if (!data) throw failureFrom(response, error);

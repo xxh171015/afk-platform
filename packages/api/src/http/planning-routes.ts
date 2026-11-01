@@ -1,4 +1,10 @@
-import { LimitOverridesSchema, SPEC_STATES, SPEC_TYPES } from "@afk/shared";
+import {
+  HOST_KINDS,
+  type HostKind,
+  LimitOverridesSchema,
+  SPEC_STATES,
+  SPEC_TYPES,
+} from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import {
@@ -80,6 +86,7 @@ const projectViewRoute = createRoute({
             url: z.string(),
             defaultBranch: z.string(),
             contractPath: z.string().nullable(),
+            hostKind: z.enum(HOST_KINDS),
           }),
         ),
       }),
@@ -125,6 +132,8 @@ const repoRoute = createRoute({
             name: Text.optional(),
             role: Text.optional(),
             defaultBranch: Text.optional(),
+            // Default: worked out from the url.
+            hostKind: z.enum(HOST_KINDS).optional(),
           })
           .refine(
             (body) => (body.name === undefined) !== (body.role === undefined),
@@ -152,7 +161,12 @@ const repoEditRoute = createRoute({
     }),
     body: {
       content: json(
-        z.object({ contractPath: ContractPath.optional() }).strict(),
+        z
+          .object({
+            contractPath: ContractPath.optional(),
+            hostKind: z.enum(HOST_KINDS).optional(),
+          })
+          .strict(),
       ),
     },
   },
@@ -287,7 +301,7 @@ export function registerPlanningRoutes(
     );
     if (!project.rows[0]) return c.json({ error: "no such project" }, 404);
     const repos = await pool.query(
-      "SELECT name, url, default_branch, contract_path FROM repos WHERE project_id = $1 ORDER BY id",
+      "SELECT name, url, default_branch, contract_path, host_kind FROM repos WHERE project_id = $1 ORDER BY id",
       [projectId],
     );
     return c.json(
@@ -299,6 +313,7 @@ export function registerPlanningRoutes(
           url: r.url as string,
           defaultBranch: r.default_branch as string,
           contractPath: (r.contract_path as string | null) ?? null,
+          hostKind: r.host_kind as HostKind,
         })),
       },
       200,
@@ -316,12 +331,13 @@ export function registerPlanningRoutes(
 
   app.openapi(repoRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    const { name, role, url, defaultBranch } = c.req.valid("json");
+    const { name, role, url, defaultBranch, hostKind } = c.req.valid("json");
     const result = await addRepo(pool, {
       projectId,
       url,
       name: (name ?? role) as string,
       defaultBranch,
+      hostKind,
     });
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);

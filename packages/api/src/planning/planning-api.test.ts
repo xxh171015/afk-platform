@@ -511,15 +511,73 @@ describe("project view", () => {
           url: "git@github.com:acme/backend.git",
           defaultBranch: "main",
           contractPath: "openapi.yaml",
+          hostKind: "github",
         },
         {
           name: "frontend",
           url: "git@github.com:acme/frontend.git",
           defaultBranch: "develop",
           contractPath: null,
+          hostKind: "github",
         },
       ],
     });
+  });
+
+  const hostKinds = async (projectId: number) =>
+    (
+      (await (await fetch(`${api.url}/projects/${projectId}`)).json()) as {
+        repos: { name: string; hostKind: string }[];
+      }
+    ).repos.map((r) => `${r.name}:${r.hostKind}`);
+
+  it("registers the host kind a repo is given, and works it out from the address when none is given", async () => {
+    const project = await post("/projects", { name: "shop" });
+    const id = project.body.id as number;
+    await post(`/projects/${id}/repos`, {
+      url: "https://gitlab.com/acme/api.git",
+      name: "api",
+    });
+    await post(`/projects/${id}/repos`, {
+      url: "https://git.example.org/acme/web.git",
+      name: "web",
+      hostKind: "gitlab",
+    });
+    await post(`/projects/${id}/repos`, {
+      url: "https://git.example.org/acme/app.git",
+      name: "app",
+    });
+    expect(await hostKinds(id)).toEqual([
+      "api:gitlab",
+      "web:gitlab",
+      "app:github",
+    ]);
+  });
+
+  it("changes a repo's host kind, and refuses a kind that does not exist", async () => {
+    const project = await post("/projects", { name: "shop" });
+    const id = project.body.id as number;
+    await post(`/projects/${id}/repos`, {
+      url: "https://git.example.org/acme/web.git",
+      name: "web",
+    });
+    expect(
+      (await patch(`/projects/${id}/repos/web`, { hostKind: "gitlab" })).status,
+    ).toBe(200);
+    expect(await hostKinds(id)).toEqual(["web:gitlab"]);
+    expect(
+      (await patch(`/projects/${id}/repos/web`, { hostKind: "gitea" })).status,
+    ).toBe(400);
+    expect(
+      (
+        await post(`/projects/${id}/repos`, {
+          url: "https://git.example.org/acme/x.git",
+          name: "x",
+          hostKind: "gitea",
+        })
+      ).status,
+    ).toBe(400);
+    expect(await hostKinds(id)).toEqual(["web:gitlab"]);
   });
 
   it("says plainly when the project does not exist", async () => {
