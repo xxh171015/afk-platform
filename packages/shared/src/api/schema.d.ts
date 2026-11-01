@@ -1968,6 +1968,35 @@ export interface paths {
                 to: string;
                 kind: string;
               }[];
+              timeline: {
+                /** @enum {string} */
+                kind:
+                  | "confirm-plan"
+                  | "ticket-start"
+                  | "gate"
+                  | "review"
+                  | "ticket-merge"
+                  | "ticket-blocked"
+                  | "finalization"
+                  | "pr-opened"
+                  | "pr-ready"
+                  | "pack"
+                  | "ticket-appended"
+                  | "pause"
+                  | "resume"
+                  | "merged";
+                at: string;
+                text: string;
+                runId?: number;
+                ticketId?: number;
+              }[];
+              finalRuns: {
+                id: number;
+                displayId: string;
+                repo: string;
+                stage: string;
+                result: string | null;
+              }[];
             };
           };
         };

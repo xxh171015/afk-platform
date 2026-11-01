@@ -19,6 +19,7 @@ import {
   retrySpecCleanup,
   retryTicket,
 } from "../tickets/actions.ts";
+import { TIMELINE_KINDS } from "../tickets/timeline.ts";
 import {
   blockedQueue,
   search,
@@ -232,6 +233,24 @@ const specRoute = createRoute({
         acceptancePack: AcceptancePack.nullable(),
         edges: z.array(
           z.object({ from: z.string(), to: z.string(), kind: z.string() }),
+        ),
+        timeline: z.array(
+          z.object({
+            kind: z.enum(TIMELINE_KINDS),
+            at: z.string(),
+            text: z.string(),
+            runId: Id.optional(),
+            ticketId: Id.optional(),
+          }),
+        ),
+        finalRuns: z.array(
+          z.object({
+            id: Id,
+            displayId: z.string(),
+            repo: z.string(),
+            stage: z.string(),
+            result: z.string().nullable(),
+          }),
         ),
       }),
     ),

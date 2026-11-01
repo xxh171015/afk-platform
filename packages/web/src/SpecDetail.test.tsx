@@ -35,6 +35,8 @@ const view = (
     finalizations?: unknown[];
     pullRequests?: unknown[];
     acceptancePack?: unknown;
+    timeline?: unknown[];
+    finalRuns?: unknown[];
   } = {},
 ) => ({
   spec: {
@@ -64,6 +66,8 @@ const view = (
   orderBroken: [],
   pullRequests: over.pullRequests ?? [],
   acceptancePack: over.acceptancePack ?? null,
+  timeline: over.timeline ?? [],
+  finalRuns: over.finalRuns ?? [],
 });
 
 const node = (id: string) => screen.getByTestId(`node-${id}`);
@@ -191,8 +195,7 @@ describe("the spec page", () => {
         },
       }),
     });
-    renderWithApp(<SpecDetail specId={1} />, server);
-    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
+    renderWithApp(<SpecDetail specId={1} section="delivery" />, server);
 
     const frontend = (await screen.findByText(/frontend #8/)).closest("li");
     expect(frontend?.textContent).toContain("(草稿)");
@@ -205,7 +208,7 @@ describe("the spec page", () => {
 
   it("lists the tickets and their states beside the text", async () => {
     renderWithApp(
-      <SpecDetail specId={1} />,
+      <SpecDetail specId={1} section="tickets" />,
       fakeServer({
         "GET /specs/1": () => ({
           json: view({
@@ -338,7 +341,7 @@ describe("the spec page", () => {
       agentSeconds: 12,
     };
     renderWithApp(
-      <SpecDetail specId={1} />,
+      <SpecDetail specId={1} section="delivery" />,
       fakeServer({
         "GET /specs/1": () => ({
           json: view({
@@ -351,7 +354,6 @@ describe("the spec page", () => {
         }),
       }),
     );
-    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     const prs = (await screen.findAllByText(/CI /)).map((e) => e.textContent);
     expect(prs[0]).toContain("CI success, review approved");
     expect(prs[1]).toContain("CI pending, review none");
@@ -417,14 +419,13 @@ describe("the spec page", () => {
       },
     ];
     renderWithApp(
-      <SpecDetail specId={1} />,
+      <SpecDetail specId={1} section="delivery" />,
       fakeServer({
         "GET /specs/1": () => ({
           json: view({ spec: { state: "awaiting-review" }, pullRequests }),
         }),
       }),
     );
-    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     expect(await screen.findByText("关闭未合并")).toBeTruthy();
   });
 
@@ -433,7 +434,7 @@ describe("the spec page", () => {
       <SpecDetail specId={1} />,
       fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
     );
-    await screen.findByText("Tickets");
+    await screen.findByText("确认前预检");
     expect(screen.queryByText("Acceptance pack")).toBeNull();
     expect(screen.queryByText("Pull requests")).toBeNull();
   });
@@ -480,11 +481,29 @@ describe("the spec page", () => {
       }),
     );
     await screen.findByTestId("node-T-2");
-    const links = screen.getAllByRole("link", { name: "T-2" });
-    expect(links.map((l) => l.getAttribute("href"))).toEqual([
-      "/tickets/2",
-      "/tickets/2",
-    ]);
+    expect(
+      screen
+        .getAllByRole("link", { name: "T-2" })
+        .map((l) => l.getAttribute("href")),
+    ).toEqual(["/tickets/2"]);
+    cleanup();
+    renderWithApp(
+      <SpecDetail specId={1} section="tickets" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "done"), ticket(2, "pending")],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    await screen.findByRole("link", { name: "T-2" });
+    expect(
+      screen
+        .getAllByRole("link", { name: "T-2" })
+        .map((l) => l.getAttribute("href")),
+    ).toEqual(["/tickets/2"]);
   });
 
   it("shows the title, the state, and why a spec was paused", async () => {
@@ -509,13 +528,13 @@ describe("the spec page", () => {
       "已暂停",
     );
     expect(
-      screen.getByText(/Paused: the agent time limit of the spec was reached/),
+      screen.getByText(/已暂停: the agent time limit of the spec was reached/),
     ).toBeTruthy();
   });
 
   it("shows the overall review of a finalizing spec", async () => {
     renderWithApp(
-      <SpecDetail specId={1} />,
+      <SpecDetail specId={1} section="delivery" />,
       fakeServer({
         "GET /specs/1": () => ({
           json: view({
@@ -535,7 +554,6 @@ describe("the spec page", () => {
         }),
       }),
     );
-    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     expect(
       await screen.findByText(
         (_, element) =>
@@ -580,7 +598,7 @@ describe("the body of the spec", () => {
   ].join("\n");
   const open = (body: string, over: Record<string, unknown> = {}) =>
     renderWithApp(
-      <SpecDetail specId={1} />,
+      <SpecDetail specId={1} section="description" />,
       fakeServer({
         "GET /specs/1": () => ({
           json: view({ spec: { body, state: "running" }, ...over }),
@@ -622,7 +640,7 @@ describe("the body of the spec", () => {
     expect(await screen.findByText("这份需求没有正文")).toBeTruthy();
   });
 
-  it("keeps the delivery apart on its own tab", async () => {
+  it("keeps the delivery on its own nested page", async () => {
     open(BODY, {
       pullRequests: [
         {
@@ -641,7 +659,31 @@ describe("the body of the spec", () => {
     });
     await screen.findByText("Problem Statement", { selector: "h2" });
     expect(screen.queryByText("Pull requests")).toBeNull();
-    fireEvent.click(screen.getByRole("tab", { name: "交付" }));
+    cleanup();
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { body: BODY, state: "running" },
+            pullRequests: [
+              {
+                order: 1,
+                waitsFor: [],
+                repo: "backend",
+                number: 7,
+                url: "https://github.com/me/shop/pull/7",
+                state: "open",
+                draft: false,
+                ci: "success",
+                review: "none",
+                syncError: null,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
     expect(await screen.findByText("Pull requests")).toBeTruthy();
     expect(
       screen.queryByText("Problem Statement", { selector: "h2" }),
@@ -649,10 +691,10 @@ describe("the body of the spec", () => {
   });
 });
 
-describe("the side column", () => {
-  it("lists every ticket with its state, repo and what it waits for, and keeps the graph and warnings below", async () => {
+describe("the tickets page", () => {
+  it("lists every ticket with its state, repo and what it waits for", async () => {
     renderWithApp(
-      <SpecDetail specId={1} />,
+      <SpecDetail specId={1} section="tickets" />,
       fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
     );
     const item = await screen.findByText(
@@ -662,11 +704,29 @@ describe("the side column", () => {
         /waits for T-1 \(contract\)/.test(el.textContent ?? ""),
     );
     expect(item).toBeTruthy();
-    expect(screen.getByText("确认前预检")).toBeTruthy();
-    expect(screen.getByText("Dependency graph")).toBeTruthy();
-    // the confirm button of a draft is in the side column
-    const side = item.closest("aside");
-    expect(side?.textContent).toContain("Confirm split");
+  });
+
+  it("filters the table by repo and state", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="tickets" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [
+              ticket(1, "done", { repo: "backend" }),
+              ticket(2, "pending", { repo: "frontend" }),
+            ],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    await screen.findByText("T-1");
+    fireEvent.change(screen.getByLabelText("仓库"), {
+      target: { value: "frontend" },
+    });
+    expect(screen.queryByText("T-1")).toBeNull();
+    expect(screen.getByText("T-2")).toBeTruthy();
   });
 });
 
@@ -816,6 +876,137 @@ describe("when the spec cannot be shown", () => {
     expect(screen.getByText("Loading the spec…")).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Could not load the spec: no such spec",
+    );
+  });
+});
+
+describe("the six-step bar and nested pages", () => {
+  it("names the human steps and live ticket progress, current step marked", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [
+              ticket(1, "done"),
+              ticket(2, "running"),
+              ticket(3, "cancelled"),
+            ],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("flow-bar");
+    expect(bar.textContent).toContain(
+      "草稿 → 确认 → 运行 → 收尾 → 开 PR → 验收合并",
+    );
+    expect(bar.textContent).toContain("票 1/2");
+    expect(bar.querySelector('[data-current="true"]')?.textContent).toContain(
+      "运行",
+    );
+  });
+
+  it("links the five nested spec pages from the bar", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    await screen.findByRole("navigation", { name: "需求页" });
+    expect(
+      screen.getByRole("link", { name: "概览" }).getAttribute("href"),
+    ).toBe("/specs/1");
+    expect(
+      screen.getByRole("link", { name: "需求说明" }).getAttribute("href"),
+    ).toBe("/specs/1/description");
+    expect(
+      screen.getByRole("link", { name: "票与依赖" }).getAttribute("href"),
+    ).toBe("/specs/1/tickets");
+    expect(
+      screen.getByRole("link", { name: "交付" }).getAttribute("href"),
+    ).toBe("/specs/1/delivery");
+    expect(
+      screen.getByRole("link", { name: "时间线" }).getAttribute("href"),
+    ).toBe("/specs/1/timeline");
+  });
+
+  it("shows listed timeline events and drops anything else", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timeline: [
+              {
+                kind: "confirm-plan",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "确认拆分",
+              },
+              {
+                kind: "job-heartbeat",
+                at: "2026-11-01T10:01:00.000Z",
+                text: "still going",
+              },
+              {
+                kind: "gate",
+                at: "2026-11-01T10:02:00.000Z",
+                text: "T-1 门禁通过",
+                runId: 4,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("确认拆分")).toBeTruthy();
+    expect(screen.getByText("门禁")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "R-4" }).getAttribute("href")).toBe(
+      "/runs/4",
+    );
+    expect(screen.queryByText("still going")).toBeNull();
+    expect(screen.queryByText("job-heartbeat")).toBeNull();
+  });
+
+  it("links each finishing run from delivery", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "finalizing" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            finalizations: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "backend",
+                step: "final-review",
+                state: "running",
+                blockedReason: null,
+                brief: null,
+              },
+            ],
+            finalRuns: [
+              {
+                id: 12,
+                displayId: "R-12",
+                repo: "backend",
+                stage: "final-review",
+                result: null,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByTestId("delivery-backend")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "R-12" }).getAttribute("href"),
+    ).toBe("/runs/12");
+    expect(screen.getByTestId("delivery-backend").textContent).toMatch(
+      /final-review/,
     );
   });
 });

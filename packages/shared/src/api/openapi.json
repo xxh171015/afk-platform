@@ -4221,6 +4221,76 @@
                         },
                         "required": ["from", "to", "kind"]
                       }
+                    },
+                    "timeline": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "confirm-plan",
+                              "ticket-start",
+                              "gate",
+                              "review",
+                              "ticket-merge",
+                              "ticket-blocked",
+                              "finalization",
+                              "pr-opened",
+                              "pr-ready",
+                              "pack",
+                              "ticket-appended",
+                              "pause",
+                              "resume",
+                              "merged"
+                            ]
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": "integer"
+                          },
+                          "ticketId": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["kind", "at", "text"]
+                      }
+                    },
+                    "finalRuns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "repo",
+                          "stage",
+                          "result"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -4231,7 +4301,9 @@
                     "orderBroken",
                     "pullRequests",
                     "acceptancePack",
-                    "edges"
+                    "edges",
+                    "timeline",
+                    "finalRuns"
                   ]
                 }
               }

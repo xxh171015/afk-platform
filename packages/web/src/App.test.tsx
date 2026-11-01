@@ -80,9 +80,13 @@ const server = () =>
         edges: [],
         finalizations: [],
         pullRequests: [],
+        mergeOrder: { ordered: [], after: {}, unordered: [] },
+        orderBroken: [],
         cleanups: [],
         readyFailures: [],
         acceptancePack: null,
+        timeline: [],
+        finalRuns: [],
       },
     }),
     "GET /tickets/9": () => ({
@@ -129,6 +133,26 @@ describe("the app", () => {
     expect(await screen.findByTestId("node-T-9")).toBeTruthy();
     await router.navigate({ to: "/specs" });
     expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
+  });
+
+  it("opens nested spec pages at shareable addresses", async () => {
+    const { router } = renderApp(server(), "/specs/3/delivery");
+    expect(await screen.findByText("还没有可交付的内容")).toBeTruthy();
+    await router.navigate({
+      to: "/specs/$specId/description",
+      params: { specId: "3" },
+    });
+    expect(await screen.findByText("这份需求没有正文")).toBeTruthy();
+    await router.navigate({
+      to: "/specs/$specId/tickets",
+      params: { specId: "3" },
+    });
+    expect(await screen.findByRole("link", { name: "T-9" })).toBeTruthy();
+    await router.navigate({
+      to: "/specs/$specId/timeline",
+      params: { specId: "3" },
+    });
+    expect(await screen.findByText("还没有时间线事件")).toBeTruthy();
   });
 
   it("opens a ticket at /tickets/<id>", async () => {

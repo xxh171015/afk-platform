@@ -1269,6 +1269,48 @@ describe("what a person sees", () => {
     expect((await call("GET", "/specs/99")).status).toBe(404);
   });
 
+  it("reconstructs the listed timeline events and finishing runs", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", {
+      outcome: "passed",
+      run: { headSha: "abc" },
+      gate: {
+        commitSha: "abc",
+        configSha: "cfg",
+        commandResults: [{ name: "test", exitCode: 0 }],
+        testsTotal: 1,
+        testsSkipped: 0,
+      },
+    });
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, finished_at)
+       VALUES ($1, 1, 'final-review', 'passed', now())`,
+      [specId],
+    );
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.timeline.map((e: Json) => e.kind)).toEqual([
+      "confirm-plan",
+      "ticket-start",
+      "gate",
+      "finalization",
+    ]);
+    expect(view.body.timeline[2]).toMatchObject({
+      kind: "gate",
+      text: "T-1 门禁通过",
+    });
+    expect(view.body.finalRuns).toEqual([
+      {
+        id: expect.any(Number),
+        displayId: expect.stringMatching(/^R-\d+$/),
+        repo: "backend",
+        stage: "final-review",
+        result: "passed",
+      },
+    ]);
+  });
+
   it("a spec view carries the brief of every blocked ticket", async () => {
     const specId = await runningSpec([ticket("a")]);
     await stage("implement", GAVE_UP);

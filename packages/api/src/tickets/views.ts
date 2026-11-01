@@ -13,6 +13,7 @@ import {
   integrationAttempts,
 } from "./integration-attempts.ts";
 import { ticketFileOf } from "./ticket-file.ts";
+import { specTimeline } from "./timeline.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -382,6 +383,29 @@ function prechecksOf(
   ];
 }
 
+async function finalRunsOf(pool: pg.Pool, specId: number) {
+  const { rows } = await pool.query<{
+    id: number;
+    stage: string;
+    result: string | null;
+    repo: string;
+  }>(
+    `SELECT r.id, r.stage, r.result, repo.name AS repo
+     FROM runs r JOIN repos repo ON repo.id = r.repo_id
+     WHERE r.spec_id = $1 AND r.ticket_id IS NULL
+       AND r.stage IN ('final-review', 'final-fix', 'final-merge', 'final-e2e')
+     ORDER BY r.id`,
+    [specId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    displayId: formatDisplayId("run", row.id),
+    repo: row.repo,
+    stage: row.stage,
+    result: row.result,
+  }));
+}
+
 export async function specView(pool: pg.Pool, specId: number) {
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
@@ -428,6 +452,8 @@ export async function specView(pool: pg.Pool, specId: number) {
     orderBroken: row.order_broken as { repo: string; skipped: string[] }[],
     pullRequests: await pullRequestRows(pool, specId),
     acceptancePack: await readAcceptancePack(pool, specId),
+    timeline: await specTimeline(pool, specId),
+    finalRuns: await finalRunsOf(pool, specId),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),

@@ -14,6 +14,11 @@ import { Route as WaitingRouteImport } from './routes/waiting'
 import { Route as SpecsIndexRouteImport } from './routes/specs/index'
 import { Route as SpecsSpecIdRouteImport } from './routes/specs/$specId'
 import { Route as TicketsTicketIdRouteImport } from './routes/tickets/$ticketId'
+import { Route as SpecsSpecIdIndexRouteImport } from './routes/specs/$specId/index'
+import { Route as SpecsSpecIdDeliveryRouteImport } from './routes/specs/$specId/delivery'
+import { Route as SpecsSpecIdDescriptionRouteImport } from './routes/specs/$specId/description'
+import { Route as SpecsSpecIdTicketsRouteImport } from './routes/specs/$specId/tickets'
+import { Route as SpecsSpecIdTimelineRouteImport } from './routes/specs/$specId/timeline'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,35 +45,92 @@ const TicketsTicketIdRoute = TicketsTicketIdRouteImport.update({
   path: '/tickets/$ticketId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SpecsSpecIdIndexRoute = SpecsSpecIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
+const SpecsSpecIdDeliveryRoute = SpecsSpecIdDeliveryRouteImport.update({
+  id: '/delivery',
+  path: '/delivery',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
+const SpecsSpecIdDescriptionRoute = SpecsSpecIdDescriptionRouteImport.update({
+  id: '/description',
+  path: '/description',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
+const SpecsSpecIdTicketsRoute = SpecsSpecIdTicketsRouteImport.update({
+  id: '/tickets',
+  path: '/tickets',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
+const SpecsSpecIdTimelineRoute = SpecsSpecIdTimelineRouteImport.update({
+  id: '/timeline',
+  path: '/timeline',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/waiting': typeof WaitingRoute
-  '/specs/$specId': typeof SpecsSpecIdRoute
+  '/specs/$specId': typeof SpecsSpecIdRouteWithChildren
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs/': typeof SpecsIndexRoute
+  '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
+  '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
+  '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
+  '/specs/$specId/': typeof SpecsSpecIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/waiting': typeof WaitingRoute
-  '/specs/$specId': typeof SpecsSpecIdRoute
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs': typeof SpecsIndexRoute
+  '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
+  '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
+  '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
+  '/specs/$specId': typeof SpecsSpecIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/waiting': typeof WaitingRoute
-  '/specs/$specId': typeof SpecsSpecIdRoute
+  '/specs/$specId': typeof SpecsSpecIdRouteWithChildren
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs/': typeof SpecsIndexRoute
+  '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
+  '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
+  '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
+  '/specs/$specId/': typeof SpecsSpecIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/waiting' | '/specs/$specId' | '/tickets/$ticketId' | '/specs/'
+    | '/'
+    | '/waiting'
+    | '/specs/$specId'
+    | '/tickets/$ticketId'
+    | '/specs/'
+    | '/specs/$specId/delivery'
+    | '/specs/$specId/description'
+    | '/specs/$specId/tickets'
+    | '/specs/$specId/timeline'
+    | '/specs/$specId/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/waiting' | '/specs/$specId' | '/tickets/$ticketId' | '/specs'
+  to:
+    | '/'
+    | '/waiting'
+    | '/tickets/$ticketId'
+    | '/specs'
+    | '/specs/$specId/delivery'
+    | '/specs/$specId/description'
+    | '/specs/$specId/tickets'
+    | '/specs/$specId/timeline'
+    | '/specs/$specId'
   id:
     | '__root__'
     | '/'
@@ -76,12 +138,17 @@ export interface FileRouteTypes {
     | '/specs/$specId'
     | '/tickets/$ticketId'
     | '/specs/'
+    | '/specs/$specId/delivery'
+    | '/specs/$specId/description'
+    | '/specs/$specId/tickets'
+    | '/specs/$specId/timeline'
+    | '/specs/$specId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   WaitingRoute: typeof WaitingRoute
-  SpecsSpecIdRoute: typeof SpecsSpecIdRoute
+  SpecsSpecIdRoute: typeof SpecsSpecIdRouteWithChildren
   TicketsTicketIdRoute: typeof TicketsTicketIdRoute
   SpecsIndexRoute: typeof SpecsIndexRoute
 }
@@ -123,13 +190,68 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TicketsTicketIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/specs/$specId/': {
+      id: '/specs/$specId/'
+      path: '/'
+      fullPath: '/specs/$specId/'
+      preLoaderRoute: typeof SpecsSpecIdIndexRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
+    '/specs/$specId/delivery': {
+      id: '/specs/$specId/delivery'
+      path: '/delivery'
+      fullPath: '/specs/$specId/delivery'
+      preLoaderRoute: typeof SpecsSpecIdDeliveryRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
+    '/specs/$specId/description': {
+      id: '/specs/$specId/description'
+      path: '/description'
+      fullPath: '/specs/$specId/description'
+      preLoaderRoute: typeof SpecsSpecIdDescriptionRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
+    '/specs/$specId/tickets': {
+      id: '/specs/$specId/tickets'
+      path: '/tickets'
+      fullPath: '/specs/$specId/tickets'
+      preLoaderRoute: typeof SpecsSpecIdTicketsRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
+    '/specs/$specId/timeline': {
+      id: '/specs/$specId/timeline'
+      path: '/timeline'
+      fullPath: '/specs/$specId/timeline'
+      preLoaderRoute: typeof SpecsSpecIdTimelineRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
   }
 }
+
+interface SpecsSpecIdRouteChildren {
+  SpecsSpecIdDeliveryRoute: typeof SpecsSpecIdDeliveryRoute
+  SpecsSpecIdDescriptionRoute: typeof SpecsSpecIdDescriptionRoute
+  SpecsSpecIdTicketsRoute: typeof SpecsSpecIdTicketsRoute
+  SpecsSpecIdTimelineRoute: typeof SpecsSpecIdTimelineRoute
+  SpecsSpecIdIndexRoute: typeof SpecsSpecIdIndexRoute
+}
+
+const SpecsSpecIdRouteChildren: SpecsSpecIdRouteChildren = {
+  SpecsSpecIdDeliveryRoute: SpecsSpecIdDeliveryRoute,
+  SpecsSpecIdDescriptionRoute: SpecsSpecIdDescriptionRoute,
+  SpecsSpecIdTicketsRoute: SpecsSpecIdTicketsRoute,
+  SpecsSpecIdTimelineRoute: SpecsSpecIdTimelineRoute,
+  SpecsSpecIdIndexRoute: SpecsSpecIdIndexRoute,
+}
+
+const SpecsSpecIdRouteWithChildren = SpecsSpecIdRoute._addFileChildren(
+  SpecsSpecIdRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   WaitingRoute: WaitingRoute,
-  SpecsSpecIdRoute: SpecsSpecIdRoute,
+  SpecsSpecIdRoute: SpecsSpecIdRouteWithChildren,
   TicketsTicketIdRoute: TicketsTicketIdRoute,
   SpecsIndexRoute: SpecsIndexRoute,
 }
