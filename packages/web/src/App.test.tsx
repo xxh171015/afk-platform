@@ -119,6 +119,39 @@ const server = () =>
         gateResults: [],
       },
     }),
+    "GET /runs/4": () => ({
+      json: {
+        id: 4,
+        displayId: "R-4",
+        specId: 3,
+        specDisplayId: "S-3",
+        ticketId: 9,
+        ticketDisplayId: "T-9",
+        stage: "implement",
+        attempt: 1,
+        result: "done",
+        durationMs: 1000,
+        agent: null,
+        model: null,
+        skillsSha: null,
+        axis: null,
+        cursorCliVersion: null,
+        contractShas: null,
+        refShas: null,
+        startedAt: "2026-10-28T10:00:00.000Z",
+        finishedAt: "2026-10-28T10:00:01.000Z",
+      },
+    }),
+    "GET /runs/4/logs": () => ({
+      json: {
+        attempt: 1,
+        offset: 0,
+        nextOffset: 0,
+        size: 0,
+        text: "",
+        finished: true,
+      },
+    }),
   });
 
 describe("the app", () => {
@@ -160,6 +193,24 @@ describe("the app", () => {
     expect(
       (await screen.findByRole("heading", { level: 2 })).textContent,
     ).toContain("T-9 Only ticket");
+  });
+
+  it("opens a run at /runs/<id>", async () => {
+    renderApp(server(), "/runs/4");
+    expect(await screen.findByRole("heading", { name: "R-4" })).toBeTruthy();
+    expect(screen.getByText("implement")).toBeTruthy();
+    expect(screen.getByText("次数")).toBeTruthy();
+  });
+
+  it("opens a run from ⌘K when you type R-n", async () => {
+    const { router } = renderApp(server(), "/");
+    await screen.findByRole("heading", { name: "工作台" });
+    fireEvent.click(screen.getByRole("button", { name: "搜索需求与票" }));
+    const box = await screen.findByPlaceholderText("搜索需求与票");
+    fireEvent.change(box, { target: { value: "R-4" } });
+    fireEvent.click(await screen.findByRole("option", { name: "R-4" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/4"));
+    expect(await screen.findByRole("heading", { name: "R-4" })).toBeTruthy();
   });
 
   it("shows the queue at /waiting and counts it in the menu", async () => {

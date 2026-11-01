@@ -23,6 +23,7 @@ import {
 import { TIMELINE_KINDS } from "../tickets/timeline.ts";
 import {
   blockedQueue,
+  runView,
   search,
   specList,
   specView,
@@ -114,6 +115,31 @@ const EdgeEnd = z.object({
   state: z.enum(TICKET_STATES),
 });
 
+const RunRow = z.object({
+  id: Id,
+  displayId: z.string(),
+  stage: z.string(),
+  attempt: Id,
+  result: z.string().nullable(),
+  durationMs: Id.nullable(),
+  agent: z.string().nullable(),
+  model: z.string().nullable(),
+  skillsSha: z.string().nullable(),
+  axis: z.enum(REVIEW_AXES).nullable(),
+  cursorCliVersion: z.string().nullable(),
+  contractShas: z.record(z.string(), z.string()).nullable(),
+  refShas: z.record(z.string(), z.string()).nullable(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+
+const RunView = RunRow.extend({
+  specId: Id,
+  specDisplayId: z.string(),
+  ticketId: Id.nullable(),
+  ticketDisplayId: z.string().nullable(),
+});
+
 const ticketRoute = createRoute({
   method: "get",
   path: "/tickets/{id}",
@@ -149,25 +175,7 @@ const ticketRoute = createRoute({
         versions: z.array(z.object({ version: Id, createdAt: z.string() })),
         upstream: z.array(EdgeEnd),
         downstream: z.array(EdgeEnd),
-        runs: z.array(
-          z.object({
-            id: Id,
-            displayId: z.string(),
-            stage: z.string(),
-            attempt: Id,
-            result: z.string().nullable(),
-            durationMs: Id.nullable(),
-            agent: z.string().nullable(),
-            model: z.string().nullable(),
-            skillsSha: z.string().nullable(),
-            axis: z.enum(REVIEW_AXES).nullable(),
-            cursorCliVersion: z.string().nullable(),
-            contractShas: z.record(z.string(), z.string()).nullable(),
-            refShas: z.record(z.string(), z.string()).nullable(),
-            startedAt: z.string().nullable(),
-            finishedAt: z.string().nullable(),
-          }),
-        ),
+        runs: z.array(RunRow),
         findings: z.array(
           z.object({
             id: Id,
@@ -191,6 +199,16 @@ const ticketRoute = createRoute({
       }),
     ),
     404: reply("No such ticket", ErrorReply),
+  },
+});
+
+const runRoute = createRoute({
+  method: "get",
+  path: "/runs/{id}",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply("The run: stage, attempt, result and duration", RunView),
+    404: reply("No such run", ErrorReply),
   },
 });
 
@@ -633,6 +651,11 @@ export function registerTicketRoutes(
     return view
       ? c.json(view, 200)
       : c.json({ error: "no such ticket or version" }, 404);
+  });
+
+  app.openapi(runRoute, async (c) => {
+    const view = await runView(pool, c.req.valid("param").id);
+    return view ? c.json(view, 200) : c.json({ error: "no such run" }, 404);
   });
 
   app.openapi(specRoute, async (c) => {

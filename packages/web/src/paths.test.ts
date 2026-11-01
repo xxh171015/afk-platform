@@ -13,6 +13,7 @@ describe("shareable addresses", () => {
       "/specs/$specId/delivery",
       "/specs/$specId/timeline",
       "/tickets/$ticketId",
+      "/runs/$runId",
     ]);
     expect(paths.spec(3)).toBe("/specs/3");
     expect(paths.specDescription(3)).toBe("/specs/3/description");

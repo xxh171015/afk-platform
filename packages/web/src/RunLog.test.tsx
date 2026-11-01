@@ -49,16 +49,22 @@ describe("the log of a run", () => {
   it("shows what has been written", async () => {
     const { server } = growingLog("compiling…\nall tests passed\n");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
-    await waitFor(() => expect(log()).toBe("compiling…\nall tests passed\n"));
+    await waitFor(() => {
+      expect(log()).toContain("compiling…");
+      expect(log()).toContain("all tests passed");
+    });
   });
 
   it("picks up what is written later, asking from where it stopped (within a few polls)", async () => {
     const { state, server, write } = growingLog("first line\n");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
-    await waitFor(() => expect(log()).toBe("first line\n"));
+    await waitFor(() => expect(log()).toContain("first line"));
 
     write("second line\n");
-    await waitFor(() => expect(log()).toBe("first line\nsecond line\n"));
+    await waitFor(() => {
+      expect(log()).toContain("first line");
+      expect(log()).toContain("second line");
+    });
     // it did not read the first line again
     expect(state.asked.some((q) => q.offset === "first line\n".length)).toBe(
       true,
@@ -76,14 +82,14 @@ describe("the log of a run", () => {
     const before = state.asked.length;
     await waitFor(() => expect(state.asked.length).toBeGreaterThan(before + 1));
     write("now there is something\n");
-    await waitFor(() => expect(log()).toBe("now there is something\n"));
+    await waitFor(() => expect(log()).toContain("now there is something"));
   });
 
   it("stops polling once the run is finished and everything has been read", async () => {
     const { state, server } = growingLog("done\n");
     state.finished = true;
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
-    await waitFor(() => expect(log()).toBe("done\n"));
+    await waitFor(() => expect(log()).toContain("done"));
     await new Promise((resolve) => setTimeout(resolve, 150));
     const settled = state.asked.length;
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -93,11 +99,14 @@ describe("the log of a run", () => {
   it("starts the text over when the job moved to a new attempt", async () => {
     const { state, server, write } = growingLog("old attempt\n");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
-    await waitFor(() => expect(log()).toBe("old attempt\n"));
+    await waitFor(() => expect(log()).toContain("old attempt"));
 
     state.attempt = 2; // the job was handed to another worker; its log is a new file
     write("new attempt\n");
-    await waitFor(() => expect(log()).toBe("new attempt\n"));
+    await waitFor(() => {
+      expect(log()).toContain("new attempt");
+      expect(log()).not.toContain("old attempt");
+    });
     // and the page never pinned the old attempt, which would have kept it on the first log for ever
     expect(state.asked.every((q) => q.attempt === null)).toBe(true);
   });
@@ -142,7 +151,7 @@ describe("the log of a run", () => {
       <RunLog runId={5} pollMs={20} />,
       server,
     );
-    await waitFor(() => expect(log()).toBe(whole));
+    await waitFor(() => expect(log()).toContain("still here"));
     failing = true;
     await queryClient.refetchQueries({ queryKey: ["log", 5] });
     await waitFor(() =>
@@ -152,7 +161,18 @@ describe("the log of a run", () => {
         ),
       ).toBe(true),
     );
-    expect(log()).toBe(whole);
+    expect(log()).toContain("still here");
     expect(screen.queryByText(/Could not load the log/)).toBeNull();
+  });
+
+  it("splits JSON events by action and keeps the original JSON collapsed", async () => {
+    const line = JSON.stringify({
+      tool_call: { editToolCall: { args: { path: "src/a.ts" } } },
+    });
+    const { server } = growingLog(`${line}\n`);
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() => expect(screen.getByText("修改")).toBeTruthy());
+    expect(screen.getByText("src/a.ts")).toBeTruthy();
+    expect(screen.getByText(line).closest("details")?.open).toBe(false);
   });
 });

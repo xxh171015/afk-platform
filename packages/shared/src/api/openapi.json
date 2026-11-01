@@ -3090,6 +3090,137 @@
         }
       }
     },
+    "/runs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run: stage, attempt, result and duration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "displayId": {
+                      "type": "string"
+                    },
+                    "stage": {
+                      "type": "string"
+                    },
+                    "attempt": {
+                      "type": "integer"
+                    },
+                    "result": {
+                      "type": ["string", "null"]
+                    },
+                    "durationMs": {
+                      "type": ["integer", "null"]
+                    },
+                    "agent": {
+                      "type": ["string", "null"]
+                    },
+                    "model": {
+                      "type": ["string", "null"]
+                    },
+                    "skillsSha": {
+                      "type": ["string", "null"]
+                    },
+                    "axis": {
+                      "type": ["string", "null"],
+                      "enum": ["standards", "spec", null]
+                    },
+                    "cursorCliVersion": {
+                      "type": ["string", "null"]
+                    },
+                    "contractShas": {
+                      "type": ["object", "null"],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "refShas": {
+                      "type": ["object", "null"],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "startedAt": {
+                      "type": ["string", "null"]
+                    },
+                    "finishedAt": {
+                      "type": ["string", "null"]
+                    },
+                    "specId": {
+                      "type": "integer"
+                    },
+                    "specDisplayId": {
+                      "type": "string"
+                    },
+                    "ticketId": {
+                      "type": ["integer", "null"]
+                    },
+                    "ticketDisplayId": {
+                      "type": ["string", "null"]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "displayId",
+                    "stage",
+                    "attempt",
+                    "result",
+                    "durationMs",
+                    "agent",
+                    "model",
+                    "skillsSha",
+                    "axis",
+                    "cursorCliVersion",
+                    "contractShas",
+                    "refShas",
+                    "startedAt",
+                    "finishedAt",
+                    "specId",
+                    "specDisplayId",
+                    "ticketId",
+                    "ticketDisplayId"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/specs/{id}": {
       "get": {
         "parameters": [

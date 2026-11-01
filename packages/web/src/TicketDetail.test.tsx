@@ -93,64 +93,33 @@ const logs = (texts: Record<number, string>) =>
   );
 
 describe("the ticket page", () => {
-  it("lists the runs with stage, result, time, model and skills version", async () => {
+  it("lists the runs with number, stage, result, duration and start time, each linking to the run page", async () => {
     const server = fakeServer({
       "GET /tickets/4": () => ({ json: view() }),
-      ...logs({ 10: "implement log", 11: "gate log" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
 
     const rows = await screen.findAllByRole("row");
     expect(rows).toHaveLength(3);
+    expect(within(rows[0] as HTMLElement).getByText("编号")).toBeTruthy();
+    expect(within(rows[0] as HTMLElement).getByText("开始时间")).toBeTruthy();
     const implement = within(rows[1] as HTMLElement);
-    expect(implement.getByText("R-10")).toBeTruthy();
+    expect(
+      implement.getByRole("link", { name: "R-10" }).getAttribute("href"),
+    ).toBe("/runs/10");
     expect(implement.getByText("implement #1")).toBeTruthy();
     expect(implement.getByText("done")).toBeTruthy();
     expect(implement.getByText("146 s")).toBeTruthy();
-    expect(implement.getByText("auto")).toBeTruthy();
-    expect(implement.getByText("5beb35b")).toBeTruthy();
+    expect(implement.getByRole("time").getAttribute("dateTime")).toBe(
+      "2026-10-28T10:00:00.000Z",
+    );
+    expect(implement.queryByText("auto")).toBeNull();
     const gate = within(rows[2] as HTMLElement);
+    expect(gate.getByRole("link", { name: "R-11" }).getAttribute("href")).toBe(
+      "/runs/11",
+    );
     expect(gate.getByText("failed")).toBeTruthy();
     expect(gate.getByText("20 s")).toBeTruthy();
-    expect(gate.getAllByText("—")).toHaveLength(4); // a gate run has no model, no skills, no contract and no refs
-  });
-
-  it("shows which contract SHA of which repo a run used", async () => {
-    const server = fakeServer({
-      "GET /tickets/4": () => ({
-        json: view({
-          runs: [
-            run(10, "implement", {
-              contractShas: {
-                backend: "0123456789abcdef",
-                payments: "fedcba9876",
-              },
-            }),
-          ],
-        }),
-      }),
-      ...logs({ 10: "implement log" }),
-    });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
-
-    expect(await screen.findByRole("button", { name: "0123456" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "fedcba9" })).toBeTruthy();
-  });
-
-  it("shows which SHA of which repo a run had mounted under /refs", async () => {
-    const server = fakeServer({
-      "GET /tickets/4": () => ({
-        json: view({
-          runs: [
-            run(10, "implement", { refShas: { backend: "0123456789abcdef" } }),
-          ],
-        }),
-      }),
-      ...logs({ 10: "implement log" }),
-    });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
-
-    expect(await screen.findByRole("button", { name: "0123456" })).toBeTruthy();
   });
 
   it("shows an older version of the body and of the original text from the version list", async () => {
@@ -177,7 +146,7 @@ describe("the ticket page", () => {
           : { json: edited },
       ...logs({ 10: "implement log", 11: "gate log" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
 
     const select = (await screen.findByLabelText(
       /Version/,
@@ -194,7 +163,7 @@ describe("the ticket page", () => {
 
   it("shows the title, state, type and the body as markdown, with its checkboxes", async () => {
     renderWithApp(
-      <TicketDetail ticketId={4} logPollMs={20} />,
+      <TicketDetail ticketId={4} />,
       fakeServer({
         "GET /tickets/4": () => ({ json: view() }),
         ...logs({ 10: "x", 11: "y" }),
@@ -221,26 +190,17 @@ describe("the ticket page", () => {
       expect(link.getAttribute("href")).toBe("/specs/1");
   });
 
-  it("shows the log of the newest run, and of another one when it is picked", async () => {
-    const server = fakeServer({
-      "GET /tickets/4": () => ({ json: view() }),
-      ...logs({ 10: "log of the implement run", 11: "log of the gate run" }),
-    });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
-    await waitFor(() =>
-      expect(screen.getByTestId("run-log").textContent).toBe(
-        "log of the gate run",
-      ),
+  it("does not show a log on the ticket; the run number is a link", async () => {
+    renderWithApp(
+      <TicketDetail ticketId={4} />,
+      fakeServer({ "GET /tickets/4": () => ({ json: view() }) }),
     );
-    expect(screen.getByRole("heading", { name: "Log of R-11" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "R-10" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("run-log").textContent).toBe(
-        "log of the implement run",
-      ),
-    );
-    expect(screen.getByRole("heading", { name: "Log of R-10" })).toBeTruthy();
+    const link = await screen.findByRole("link", { name: "R-10" });
+    expect(link.getAttribute("href")).toBe("/runs/10");
+    expect(link.closest("tr")?.className).toContain("relative");
+    expect(link.className).toContain("after:inset-0");
+    expect(screen.queryByTestId("run-log")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Log of/ })).toBeNull();
   });
 
   it("shows gate results with their commands and the tests counted", async () => {
@@ -270,7 +230,7 @@ describe("the ticket page", () => {
       }),
       ...logs({ 10: "a", 11: "b" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(await screen.findByText("abcdef1")).toBeTruthy();
     expect(screen.getByText(/12 tests, 1 skipped/)).toBeTruthy();
     expect(screen.getByText("typecheck: exit 0")).toBeTruthy();
@@ -302,7 +262,7 @@ describe("the ticket page", () => {
       }),
       ...logs({ 10: "a", 11: "b" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(
       await screen.findByText(/must-fix: src\/a.ts:3 null check/),
     ).toBeTruthy();
@@ -352,7 +312,7 @@ describe("the ticket page", () => {
       }),
       ...logs({ 10: "a", 11: "b" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(await screen.findByText(/review \(standards\) #1/)).toBeTruthy();
     expect(screen.getByText(/review \(spec\) #1/)).toBeTruthy();
     expect(screen.getByText("standards").className).toContain("axis-standards");
@@ -380,7 +340,7 @@ describe("the ticket page", () => {
       }),
       ...logs({ 10: "a", 11: "b" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
     const note = await screen.findByRole("note");
     expect(note.textContent).toContain("gate ended failed");
     expect(note.textContent).toContain("R-11");
@@ -440,7 +400,7 @@ describe("the ticket page", () => {
       }),
       ...logs({ 10: "a", 11: "b" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(await screen.findByText("E2E tries")).toBeTruthy();
     expect(screen.getByText(/1 of 2 fix rounds used/)).toBeTruthy();
     expect(screen.getByText(/R-20 failed/)).toBeTruthy();
@@ -487,7 +447,7 @@ describe("the ticket page", () => {
       }),
       ...logs({ 10: "a", 11: "b" }),
     });
-    renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
+    renderWithApp(<TicketDetail ticketId={4} />, server);
     const side = (await screen.findByText("Waits for")).closest("aside");
     if (!side) throw new Error("no side column");
     await within(side).findByText(/Order export/);
@@ -529,7 +489,10 @@ describe("the ticket page", () => {
           ? { status: 500, json: { error: "database is down" } }
           : { json: view() },
     });
-    const { queryClient } = renderWithApp(<TicketDetail ticketId={4} />, server);
+    const { queryClient } = renderWithApp(
+      <TicketDetail ticketId={4} />,
+      server,
+    );
     await screen.findByText(/Export orders as CSV/);
     failing = true;
     await queryClient.refetchQueries({ queryKey: ["ticket", 4] });

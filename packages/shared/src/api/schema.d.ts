@@ -1634,6 +1634,79 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/runs/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The run: stage, attempt, result and duration */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              displayId: string;
+              stage: string;
+              attempt: number;
+              result: string | null;
+              durationMs: number | null;
+              agent: string | null;
+              model: string | null;
+              skillsSha: string | null;
+              /** @enum {string|null} */
+              axis: "standards" | "spec" | null;
+              cursorCliVersion: string | null;
+              contractShas: {
+                [key: string]: string;
+              } | null;
+              refShas: {
+                [key: string]: string;
+              } | null;
+              startedAt: string | null;
+              finishedAt: string | null;
+              specId: number;
+              specDisplayId: string;
+              ticketId: number | null;
+              ticketDisplayId: string | null;
+            };
+          };
+        };
+        /** @description No such run */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs/{id}": {
     parameters: {
       query?: never;

@@ -5,40 +5,18 @@ import { useResourcePoll } from "./EventsProvider.tsx";
 import { DETAIL_POLL_MS } from "./live.ts";
 import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
-import { RunLog } from "./RunLog.tsx";
+import { RelativeTime } from "./RelativeTime.tsx";
 import { Sha } from "./Sha.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 
-// One ticket, for finding out what happened to it: its runs (stage, result, time, model and skills version), the
-// log of the one you pick, what the gates measured, and what the reviews found.
+// One ticket: its runs as a thin table into /runs/:id, what the gates measured, and what the reviews found.
 
 const seconds = (ms: number | null) =>
   ms === null ? "—" : `${Math.round(ms / 1000)} s`;
 
-function ShaPairs({ pairs }: { pairs: Record<string, string> }) {
-  return (
-    <>
-      {Object.entries(pairs).map(([name, sha], index) => (
-        <span key={name}>
-          {index > 0 ? ", " : ""}
-          {name}@
-          <Sha value={sha} />
-        </span>
-      ))}
-    </>
-  );
-}
-
-export function TicketDetail({
-  ticketId,
-  logPollMs,
-}: {
-  ticketId: number;
-  logPollMs?: number;
-}) {
+export function TicketDetail({ ticketId }: { ticketId: number }) {
   const api = useApi();
   const poll = useResourcePoll(DETAIL_POLL_MS);
-  const [picked, setPicked] = useState<number | undefined>();
   // the content version shown in the left column; undefined is the newest
   const [version, setVersion] = useState<number | undefined>();
   const [showAgentText, setShowAgentText] = useState(false);
@@ -103,8 +81,6 @@ export function TicketDetail({
     downstream,
     integration,
   } = loaded;
-  // by default the newest run, which is the one that is going or that went wrong last
-  const shown = picked ?? runs.at(-1)?.id;
   const shownTicket = older && past.data ? past.data.ticket : ticket;
 
   return (
@@ -279,30 +255,23 @@ export function TicketDetail({
         <table className="runs">
           <thead>
             <tr>
-              <th>Run</th>
-              <th>Stage</th>
-              <th>Result</th>
-              <th>Time</th>
-              <th>Model</th>
-              <th>Skills</th>
-              <th>Contracts</th>
-              <th>Refs</th>
+              <th>编号</th>
+              <th>阶段</th>
+              <th>结果</th>
+              <th>耗时</th>
+              <th>开始时间</th>
             </tr>
           </thead>
           <tbody>
             {runs.map((run) => (
-              <tr
-                key={run.id}
-                className={run.id === shown ? "picked" : undefined}
-              >
+              <tr key={run.id} className="relative">
                 <td>
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => setPicked(run.id)}
+                  <a
+                    href={paths.run(run.id)}
+                    className="after:absolute after:inset-0"
                   >
                     {run.displayId}
-                  </button>
+                  </a>
                 </td>
                 <td>
                   {run.stage}
@@ -310,28 +279,14 @@ export function TicketDetail({
                 </td>
                 <td>{run.result ?? "running"}</td>
                 <td>{seconds(run.durationMs)}</td>
-                <td>{run.model ?? "—"}</td>
-                <td>{run.skillsSha ? <Sha value={run.skillsSha} /> : "—"}</td>
                 <td>
-                  {run.contractShas ? (
-                    <ShaPairs pairs={run.contractShas} />
-                  ) : (
-                    "—"
-                  )}
+                  {run.startedAt ? <RelativeTime iso={run.startedAt} /> : "—"}
                 </td>
-                <td>{run.refShas ? <ShaPairs pairs={run.refShas} /> : "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-
-      {shown !== undefined ? (
-        <>
-          <h3>Log of {runs.find((r) => r.id === shown)?.displayId}</h3>
-          <RunLog key={shown} runId={shown} pollMs={logPollMs} />
-        </>
-      ) : null}
 
       <h3>Gate results</h3>
       {gateResults.length === 0 ? (

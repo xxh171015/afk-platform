@@ -10,6 +10,7 @@ export const PAGE_PATHS = [
   "/specs/$specId/delivery",
   "/specs/$specId/timeline",
   "/tickets/$ticketId",
+  "/runs/$runId",
 ] as const;
 
 export const paths = {

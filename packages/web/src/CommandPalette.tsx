@@ -1,3 +1,4 @@
+import { parseDisplayId } from "@afk/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -13,7 +14,7 @@ import {
 import { SEARCH_DEBOUNCE_MS } from "./SearchBox.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 
-// ⌘K: search specs and tickets without leaving the keyboard.
+// ⌘K: search specs and tickets, or jump to a Run by typing R-n.
 
 export function CommandPalette({
   open,
@@ -41,9 +42,11 @@ export function CommandPalette({
     return () => clearTimeout(timer);
   }, [typed, open]);
 
+  const parsed = parseDisplayId(asked.toUpperCase());
+
   const results = useQuery({
     queryKey: ["search", asked],
-    enabled: open && asked !== "",
+    enabled: open && asked !== "" && parsed?.kind !== "run",
     queryFn: async () => {
       const { data, error } = await api.GET("/search", {
         params: { query: { q: asked } },
@@ -53,7 +56,11 @@ export function CommandPalette({
     },
   });
 
-  const go = (params: { specId?: string; ticketId?: string }) => {
+  const go = (params: {
+    specId?: string;
+    ticketId?: string;
+    runId?: string;
+  }) => {
     onOpenChange(false);
     if (params.specId)
       void navigate({
@@ -64,6 +71,11 @@ export function CommandPalette({
       void navigate({
         to: "/tickets/$ticketId",
         params: { ticketId: params.ticketId },
+      });
+    else if (params.runId)
+      void navigate({
+        to: "/runs/$runId",
+        params: { runId: params.runId },
       });
   };
 
@@ -78,6 +90,15 @@ export function CommandPalette({
       <CommandList>
         {asked === "" ? (
           <CommandEmpty>输入编号、标题或正文</CommandEmpty>
+        ) : parsed?.kind === "run" ? (
+          <CommandGroup heading="Run">
+            <CommandItem
+              value={`R-${parsed.id}`}
+              onSelect={() => go({ runId: String(parsed.id) })}
+            >
+              R-{parsed.id}
+            </CommandItem>
+          </CommandGroup>
         ) : results.isPending ? (
           <CommandEmpty>搜索中…</CommandEmpty>
         ) : results.isError ? (

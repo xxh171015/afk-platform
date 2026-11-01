@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { classifyLog } from "./log-actions.ts";
 
 // The log of one run (render it with key={runId}: a different run starts a log of its own), read in slices from where the last one ended. While the run is going it asks again every
 // few seconds; once the run is finished and everything is read it stops. A new attempt of the job starts a new
@@ -79,9 +80,29 @@ export function RunLog({
       </p>
     );
   }
+  const lines = classifyLog(position.text);
   return (
-    <pre className="run-log" data-testid="run-log">
-      {position.text}
-    </pre>
+    <ol className="run-log grid gap-1 font-mono text-sm" data-testid="run-log">
+      {lines.map((line) => (
+        <li key={line.seq}>
+          {line.raw ? (
+            <details>
+              <summary>
+                <span className="mr-2 font-sans text-xs">{line.action}</span>
+                {line.text}
+              </summary>
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap">
+                {line.raw}
+              </pre>
+            </details>
+          ) : (
+            <>
+              <span className="mr-2 font-sans text-xs">{line.action}</span>
+              {line.text}
+            </>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }

@@ -315,23 +315,7 @@ export async function ticketView(
         kind: e.kind as string,
         state: e.to_state as TicketState,
       })),
-    runs: runs.rows.map((r) => ({
-      id: r.id as number,
-      displayId: formatDisplayId("run", r.id),
-      stage: r.stage as string,
-      attempt: r.attempt as number,
-      result: (r.result as string | null) ?? null,
-      durationMs: (r.duration_ms as number | null) ?? null,
-      agent: (r.agent as string | null) ?? null,
-      model: (r.model as string | null) ?? null,
-      skillsSha: (r.skills_sha as string | null) ?? null,
-      axis: (r.axis as ReviewAxis | null) ?? null,
-      cursorCliVersion: (r.cursor_cli_version as string | null) ?? null,
-      contractShas: (r.contract_shas as Record<string, string> | null) ?? null,
-      refShas: (r.ref_shas as Record<string, string> | null) ?? null,
-      startedAt: r.started_at ? (r.started_at as Date).toISOString() : null,
-      finishedAt: r.finished_at ? (r.finished_at as Date).toISOString() : null,
-    })),
+    runs: runs.rows.map((r) => runRow(r)),
     findings: findings.rows.map((f) => ({
       id: f.id as number,
       runId: f.run_id as number,
@@ -381,6 +365,65 @@ function prechecksOf(
         : [],
     ),
   ];
+}
+
+interface RunRecord {
+  id: number;
+  stage: string;
+  attempt: number;
+  result: string | null;
+  duration_ms: number | null;
+  started_at: Date | null;
+  finished_at: Date | null;
+  agent: string | null;
+  model: string | null;
+  skills_sha: string | null;
+  axis: ReviewAxis | null;
+  cursor_cli_version: string | null;
+  contract_shas: Record<string, string> | null;
+  ref_shas: Record<string, string> | null;
+}
+
+function runRow(r: RunRecord) {
+  return {
+    id: r.id,
+    displayId: formatDisplayId("run", r.id),
+    stage: r.stage,
+    attempt: r.attempt,
+    result: r.result,
+    durationMs: r.duration_ms,
+    agent: r.agent,
+    model: r.model,
+    skillsSha: r.skills_sha,
+    axis: r.axis,
+    cursorCliVersion: r.cursor_cli_version,
+    contractShas: r.contract_shas,
+    refShas: r.ref_shas,
+    startedAt: r.started_at ? r.started_at.toISOString() : null,
+    finishedAt: r.finished_at ? r.finished_at.toISOString() : null,
+  };
+}
+
+export async function runView(pool: pg.Pool, runId: number) {
+  const { rows } = await pool.query<
+    RunRecord & { spec_id: number; ticket_id: number | null }
+  >(
+    `SELECT id, spec_id, ticket_id, stage, attempt, result, duration_ms, started_at, finished_at,
+            agent, model, skills_sha, axis, cursor_cli_version, contract_shas, ref_shas
+     FROM runs WHERE id = $1`,
+    [runId],
+  );
+  const r = rows[0];
+  if (!r) return undefined;
+  return {
+    ...runRow(r),
+    specId: r.spec_id,
+    specDisplayId: formatDisplayId("spec", r.spec_id),
+    ticketId: r.ticket_id,
+    ticketDisplayId: r.ticket_id
+      ? formatDisplayId("ticket", r.ticket_id)
+      : null,
+  };
 }
 
 async function finalRunsOf(pool: pg.Pool, specId: number) {

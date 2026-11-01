@@ -1320,6 +1320,44 @@ describe("what a person sees", () => {
       result: "agent-gave-up",
     });
   });
+
+  it("shows one run by itself, including a finishing run with no ticket", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: { durationMs: 146000 },
+    });
+    const ticketRun = await call("GET", "/runs/1");
+    expect(ticketRun.status).toBe(200);
+    expect(ticketRun.body).toMatchObject({
+      id: 1,
+      displayId: "R-1",
+      specId,
+      specDisplayId: "S-1",
+      ticketId: 1,
+      ticketDisplayId: "T-1",
+      stage: "implement",
+      attempt: 1,
+      result: "done",
+      durationMs: 146000,
+    });
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result)
+       VALUES ($1, 1, 'final-review', 'passed')`,
+      [specId],
+    );
+    const finishing = await call("GET", "/runs/2");
+    expect(finishing.status).toBe(200);
+    expect(finishing.body).toMatchObject({
+      displayId: "R-2",
+      specId,
+      ticketId: null,
+      ticketDisplayId: null,
+      stage: "final-review",
+      result: "passed",
+    });
+    expect((await call("GET", "/runs/99")).status).toBe(404);
+  });
 });
 
 describe("search", () => {
