@@ -164,6 +164,7 @@ const repoEditRoute = createRoute({
         z
           .object({
             contractPath: ContractPath.optional(),
+            // Which code host the repo is on; it picks the seed template of the tracker doc.
             hostKind: z.enum(HOST_KINDS).optional(),
           })
           .strict(),

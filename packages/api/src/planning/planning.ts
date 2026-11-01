@@ -141,6 +141,7 @@ export async function addRepo(
 export interface RepoEdit {
   // The path of the repo's contract file in the repo; an empty string says the repo owns none.
   contractPath?: string;
+  // The code host the repo is on; it picks the seed template of the tracker doc.
   hostKind?: HostKind;
 }
 
