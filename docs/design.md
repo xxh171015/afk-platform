@@ -8,6 +8,8 @@
 
 修订：2026-10-30 按 M2 地图（#62）修订：仓库不再分前后端、契约属于提供接口的仓库、一个需求可以改任意几个仓库（「领域模型与状态机」「跨仓库需求」重写）；联调票由平台在联调环境里验证、失败自动建修复票；合并顺序由契约关系推出，`partially-merged` 和新的取消规则；需求确认后可以追加票、改票，做完的票不重开（「blocked 处理」「`plat` CLI 与票的导入」）；上下文注入按仓库放契约、`/refs` 快照的 SHA 规则；新原因码。M2 的详细设计见 [M2 spec](specs/m2-platform.md)。
 
+修订：2026-11-01 在「总体架构」加两张架构图：一张按现有代码（M0–M2），一张叠加 M3–M5。
+
 ## 背景与目标
 
 目标是让实现阶段无人值守：人只在规划（grill → spec → tickets）和最终合并时出现，中间由平台调度 Sandcastle，在沙箱里逐张票实现。
@@ -133,6 +135,209 @@ flowchart LR
     classDef ro fill:#f3f3f3,stroke:#999,stroke-dasharray:4 3
     class mctx,mref,msk ro
 ```
+
+### 按现有代码的架构（M0–M2）
+
+下图按 `main` 上的代码画，节点后面是包名或目录，都在 `packages/` 下。只画已经实现的部分：update-branch、trial-merge、rework、GitLab 适配器（目前只登记 host kind）、webhook、MinIO、多 worker、Link 表、`plat context`、事件与插件、信任阶梯、登录与权限都还没有，不在图里。
+
+```mermaid
+flowchart TB
+    subgraph L1["交互层 · 人参与"]
+        direction LR
+        cursor["Cursor + skills<br/>grill → to-spec → to-tickets<br/>tracker 文档由 plat tracker-doc 生成"]
+        cli["plat CLI · @afk/cli<br/>project / repo / spec / tickets / ticket<br/>blocked / logs / tracker-doc<br/>导入前核对 tracker 文档和 skills 快照"]
+        web["平台页面 · @afk/web<br/>React + React Query + React Flow<br/>需求列表、依赖图、票详情<br/>运行日志、blocked 队列、搜索"]
+    end
+
+    subgraph L2["控制面 · @afk/api（Hono + zod-openapi + Drizzle）"]
+        rest["REST + OpenAPI<br/>planning / ticket / log / worker 路由<br/>只监听 localhost，不做登录"]
+        subgraph core["领域模块"]
+            plan["规划 planning/、tickets/<br/>建 spec、导入票目录、追加<br/>改票留版本、确认拆分<br/>建集成分支 spec/id/slug"]
+            sched["调度器 scheduling/<br/>按依赖边实时算可开工<br/>全局 / 项目 / 仓库并发和预算"]
+            queue["作业队列 jobs/（自研）<br/>租约 120s、fencing attempt<br/>幂等键、lock_key、能力标签"]
+            stages["阶段推进 stages/<br/>bundle：context 数据、契约 SHA、refs SHA<br/>结果 → 下一阶段或 blocked<br/>联调失败建修复票，最多 2 轮"]
+            fin["收尾与验收 finalize/、acceptance/<br/>final-review / final-fix / final-e2e<br/>验收包"]
+            hostjobs["托管编排 host/<br/>open-pr、host-sync（每分钟轮询）<br/>spec-cleanup、pr-ready<br/>按契约关系定合并顺序、draft"]
+        end
+        logs["运行日志 logs/<br/>~/.afk/logs/实例号/run-n/attempt-n.log"]
+        pg[("Postgres 15 · docker compose<br/>projects、repos、instance、specs<br/>tickets、ticket_versions、edges、jobs<br/>runs、findings、gate_results<br/>pull_requests、finalizations、final_e2e<br/>acceptance_packs")]
+    end
+
+    shared["@afk/shared · 各包共用<br/>状态机：spec / ticket / job / stage / finalize<br/>runnable、分支命名、导入校验、合并顺序<br/>zod schema、OpenAPI 客户端、SKILLS_SHA"]
+
+    subgraph L3["执行层 · 本机 Worker（无人值守）"]
+        wloop["Worker 循环 · @afk/worker<br/>claim → bundle → 执行一个阶段 → 回传<br/>30s 心跳，被拒即 AbortSignal 中止"]
+        wgit["Git 与本地目录 · @afk/worker<br/>主 clone ~/.afk/repos、槽位 ~/.afk/slots<br/>O_EXCL 槽位锁、僵尸回收、salvage<br/>git archive 快照、推送只放行 agent/* spec/*"]
+        pipe["流水线 · @afk/pipeline<br/>渲染 /context、Sandcastle 封装、结构化输出<br/>门禁 gates.yaml + JUnit、保护路径<br/>契约副本核对、trailer、merge-tree<br/>联调环境 compose、e2e"]
+        prompts["prompts/<br/>overlay.md + 各阶段薄 prompt<br/>review 分 Standards / Spec 两轴并行"]
+        hostpkg["代码托管适配器 · @afk/host<br/>GitHub App installation token<br/>开 PR、读 PR 状态、关 PR、删分支"]
+        subgraph box["Docker 沙箱 · Sandcastle 0.12.0"]
+            agent["Cursor Agent CLI<br/>workspace 读写<br/>/context、/refs、skills 只读<br/>不连平台、无 git 凭据"]
+        end
+        env["联调环境<br/>compose 项目 afk-run-id<br/>各仓库快照 docker build、seed"]
+    end
+
+    gh["GitHub<br/>PR、main 推送检测工作流<br/>人在这里合并"]
+    cur["Cursor 模型 API"]
+
+    cursor -->|"plat spec create、tickets import"| cli
+    cli -->|HTTP| rest
+    web -->|HTTP| rest
+    rest --> core
+    rest --> logs
+    plan -->|spec planned| sched
+    sched -->|写作业| queue
+    stages -->|下一阶段入队| queue
+    fin --> queue
+    hostjobs --> queue
+    core --> pg
+    wloop <-->|"claim、lease、bundle、结果带 attempt、日志"| rest
+    wloop --> wgit
+    wloop --> pipe
+    wloop --> hostpkg
+    pipe -.-> prompts
+    pipe -->|"run()、sandbox.exec"| agent
+    pipe -->|compose up| env
+    agent -.->|联调票加入网络| env
+    agent -->|"公网，CURSOR_API_KEY"| cur
+    wgit -->|"push agent/*、spec/*"| gh
+    hostpkg -->|REST| gh
+    shared -.-> L2
+    shared -.-> L3
+
+    classDef done fill:#eef2f6,stroke:#7d8b99,color:#18212b
+    classDef store fill:#e6ecf2,stroke:#5c6b7a,color:#18212b
+    classDef outside fill:#ffffff,stroke:#7d8b99,color:#18212b,stroke-dasharray:4 3
+    classDef sand fill:#e7f1fb,stroke:#5b8fd6,color:#18212b
+    class cursor,cli,web,rest,plan,sched,queue,stages,fin,hostjobs,logs,wloop,wgit,pipe,prompts,hostpkg,env,shared done
+    class pg store
+    class gh,cur outside
+    class agent sand
+```
+
+| 包              | 层     | 在图里对应                                                                                                                                                         |
+| --------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@afk/cli`      | 交互层 | `plat` 命令；`planning-checks.ts` 在建 spec、导入前核对 tracker 文档和 skills 快照                                                                                 |
+| `@afk/web`      | 交互层 | `SpecList`、`SpecDetail`（React Flow 依赖图）、`TicketDetail`、`RunLog`、`BlockedQueue`、`SearchBox`                                                               |
+| `@afk/api`      | 控制面 | `http/` 四组路由；`planning/`、`tickets/`、`scheduling/`、`jobs/`、`stages/`、`finalize/`、`host/`、`acceptance/`、`logs/`；`db/schema.ts` 15 张表                 |
+| `@afk/shared`   | 共用   | 状态机和流转（`spec-state`、`ticket-state`、`stage-flow`、`finalize-flow`）、`runnable`、`branches`、`ticket-import`、OpenAPI 客户端                               |
+| `@afk/worker`   | 执行层 | 循环 `worker.ts`、`executor.ts`；`slots`、`repos`、`snapshots`、`contracts`、`environments`、`push`、`host`                                                        |
+| `@afk/pipeline` | 执行层 | `sandcastle`、`agent`、`context`、`gate`、`protected-paths`、`contract-copy`、`trailers`、`merge`、`integration-env`、`e2e`；`prompts/` 里 12 份 prompt            |
+| `@afk/host`     | 执行层 | `github-app.ts` 换 installation token，`github.ts` 实现 `types.ts` 里的托管接口                                                                                    |
+
+### 加上 M3–M5 的目标架构
+
+在上图的基础上叠加「落地路线」的 M3、M4、M5。灰色是已有、不变的；灰底蓝色虚线框是已有、要扩展的，扩展项用“＋（Mx）”标出；蓝、绿、橙分别是 M3、M4、M5 新增的。
+
+```mermaid
+flowchart TB
+    subgraph L1["交互层 · 人参与"]
+        direction LR
+        cursor["Cursor + skills<br/>规划：grill → to-spec → to-tickets<br/>缺陷：diagnosing-bugs → triage（M4）"]
+        cli["plat CLI<br/>规划、处理 blocked、看日志<br/>＋ plat context --files（M4）"]
+        web["平台页面<br/>需求、依赖图、日志、blocked<br/>＋ 潜在冲突、PR / MR 状态（M3）<br/>＋ 追溯视图、指标（M4）"]
+        im["IM 与外部 tracker（M5）<br/>飞书、钉钉、企微、Slack<br/>飞书项目、Jira、Linear"]
+    end
+
+    subgraph SRV["平台服务器 · 公司内网（M3 迁入）"]
+        auth["登录与权限（M5）"]
+        rest["REST + OpenAPI<br/>CLI、页面、worker 共用<br/>＋ GitLab webhook 入口（M3）"]
+        subgraph core["领域核心"]
+            plan["规划<br/>导入、追加、改票、确认<br/>＋ 跨 spec 依赖边（M3）<br/>＋ bug spec 指向原 spec（M4）"]
+            sched["调度器<br/>可开工实时计算、并发和预算"]
+            queue["作业队列<br/>租约、fencing、幂等、lock_key<br/>＋ 按仓库的能力标签、多 worker（M3）"]
+            stages["阶段推进<br/>单票流水线、联调修复票"]
+            fin["收尾与验收<br/>final-review / fix / e2e、验收包"]
+            hostjobs["托管编排<br/>open-pr、host-sync、spec-cleanup、pr-ready"]
+            par["多需求并行（M3）<br/>main 前进 → 各集成分支 update-branch<br/>集成分支前移 → trial-merge 报潜在冲突<br/>update-branch 失败 → spec paused"]
+            rework["PR 评论返工（M3）<br/>awaiting-review → reworking<br/>rework 作业，适配器逐条回复"]
+        end
+        subgraph trace["追溯与上下文（M4）"]
+            link["Link 索引<br/>commit ↔ ticket ↔ spec ↔ PR ↔ bug<br/>以 commit trailer 为准"]
+            ctxq["上下文查询<br/>blame → trailer → ticket → spec<br/>决策、review 意见、不做的范围"]
+            know["领域知识索引<br/>GLOSSARY、ADR、契约，只存指针<br/>pgvector 补充检索"]
+            metric["指标与复盘<br/>返工率、PR 意见数<br/>合并后缺陷数、门禁失败率"]
+        end
+        subgraph ext["事件与插件（M5）"]
+            bus["事件总线<br/>spec.planned、ticket.ready、run.finished<br/>ticket.blocked、spec.paused<br/>spec.merged、bug.reported"]
+            wf["工作流注册表<br/>按 spec 类型选流程<br/>feature / bug / 大重构"]
+            plug["插件<br/>通知、外部 tracker 同步<br/>门禁扩展（安全扫描）、上下文来源"]
+            trust["信任阶梯与合并策略<br/>L0 人合并 → L1 低风险 bot 合并 → L2"]
+        end
+        pg[("Postgres<br/>现有表<br/>＋ links、pgvector（M4）<br/>＋ 用户、角色、插件配置（M5）")]
+    end
+
+    shared["@afk/shared<br/>状态机、分支命名、校验、schema<br/>＋ 阶段流转改由工作流定义（M5）"]
+    minio[("MinIO（M3）<br/>运行日志、上下文目录<br/>会话记录（M5，换能采集的 agent 后）")]
+
+    subgraph WK["构建机 1..n（M3）· Worker + Docker，只出站"]
+        wloop["Worker 循环<br/>claim → bundle → 执行 → 回传<br/>＋ 注册时带能力标签（M3）"]
+        wgit["Git 与本地目录<br/>主 clone、槽位、快照、受限推送<br/>＋ update-branch、trial-merge、rework（M3）"]
+        pipe["流水线 @afk/pipeline<br/>context、门禁、保护路径、trailer<br/>merge-tree、联调环境、e2e<br/>＋ 按工作流组装阶段（M5）"]
+        hostpkg["代码托管适配器 @afk/host<br/>GitHub<br/>＋ GitLab CE 适配器（M3）"]
+        subgraph box["Docker 沙箱 · ＋ 出网白名单、容器加固（M3）"]
+            agent["AFK agent · Cursor Agent CLI<br/>＋ 按项目换 provider：Claude Code、Codex…（M5）"]
+        end
+        env["联调环境 compose"]
+    end
+
+    gl["GitLab CE 17.3.1（M3）<br/>受保护分支：bot 只有 Developer<br/>MR、Pipeline、评论"]
+    gh["GitHub<br/>PoC 仓库"]
+    model["模型 API<br/>按合规结论定"]
+
+    cursor --> cli
+    cli --> auth
+    web --> auth
+    auth --> rest
+    rest --> core
+    rest --> trace
+    core --> pg
+    trace --> pg
+    core -->|发事件| bus
+    bus --> plug
+    plug --> im
+    wf -.->|定义阶段| stages
+    trust -.->|决定谁合进 main| fin
+    hostjobs -->|同步到的合并提交| link
+    link --> ctxq
+    know --> ctxq
+    ctxq -->|bug spec 预填指针| plan
+    link --> metric
+    wloop <-->|出站 HTTPS| rest
+    wloop --> wgit
+    wloop --> pipe
+    wloop --> hostpkg
+    wloop -->|日志、上下文| minio
+    pipe --> agent
+    pipe --> env
+    agent -->|出网白名单| model
+    wgit -->|"push agent/*、spec/*"| gl
+    wgit --> gh
+    hostpkg --> gl
+    hostpkg --> gh
+    gl -->|"webhook：MR、Comments、Pipeline"| rest
+    shared -.-> SRV
+    shared -.-> WK
+
+    classDef done fill:#eef2f6,stroke:#7d8b99,color:#18212b
+    classDef grown fill:#eef2f6,stroke:#2f6fd6,color:#18212b,stroke-width:2px,stroke-dasharray:5 3
+    classDef m3 fill:#d9e7fb,stroke:#2f6fd6,color:#18212b
+    classDef m4 fill:#d9f0dc,stroke:#3d8b4a,color:#18212b
+    classDef m5 fill:#fbe8c6,stroke:#b7791f,color:#18212b
+    classDef outside fill:#ffffff,stroke:#7d8b99,color:#18212b,stroke-dasharray:4 3
+    class sched,stages,fin,env done
+    class cursor,cli,web,rest,plan,queue,hostjobs,wloop,wgit,pipe,hostpkg,agent,shared,pg grown
+    class par,rework,minio,gl m3
+    class link,ctxq,know,metric m4
+    class auth,im,bus,wf,plug,trust m5
+    class gh,model outside
+```
+
+- **M3**（验收：两个需求同时跑完）：平台服务器加构建机 1..n，worker 只出站拉作业、注册时带能力标签；`@afk/host` 加 GitLab CE 适配器，状态改走 webhook；update-branch、trial-merge、跨 spec 依赖边，页面显示潜在冲突；PR / MR 评论返工；日志和上下文目录换 MinIO；沙箱出网白名单、容器加固。
+- **M4**（验收：bug 一步定位到原需求）：Link 表从合并提交的 trailer 建 commit ↔ ticket ↔ spec ↔ PR ↔ bug；`plat context --files`；bug 类型 spec 指向原 spec、预填指针后走同一条流水线；GLOSSARY、ADR、契约建索引，pgvector 只做补充；返工率等四个指标。
+- **M5**（验收：加工作流不改核心代码）：事件总线和插件（通知、外部 tracker 同步、门禁扩展、上下文来源）；工作流按 spec 类型配置，取代写死的阶段流转；agent、模型、沙箱按项目换 provider；信任阶梯；登录与权限。
+
+M2 spec 的 Out of Scope 把 rework、update-branch、trial-merge、多需求并行、跨 spec 边写成“M3 / M4”，这里都归到 M3，因为 M3 的验收要靠它们。登录与权限按 M2 spec 放在 M5，「部署：本机 PoC 到公司服务器」一节写的是上服务器时加，到 M3 时再定。
 
 ## 领域模型与状态机
 
