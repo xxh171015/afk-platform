@@ -405,7 +405,10 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
-            [key: string]: unknown;
+            files: {
+              name: string;
+              text: string;
+            }[];
           };
         };
       };

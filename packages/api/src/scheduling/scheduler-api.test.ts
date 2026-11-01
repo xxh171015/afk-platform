@@ -3,6 +3,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 import { completeTicket, scheduleSpec } from "./scheduler.ts";
 
 let db: TestDatabase;
@@ -76,9 +77,12 @@ async function draftSpec(
     slug: "order-export",
     title: "Order export",
   });
-  const imported = await post(`/specs/${spec.body.id}/tickets/import`, {
-    tickets,
-  });
+  const imported = await post(
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, {
+      tickets,
+    }),
+  );
   expect(imported.status).toBe(200);
   return { projectId, specId: spec.body.id };
 }
@@ -372,9 +376,12 @@ describe("concurrency limits", () => {
       slug: "other",
       title: "Other",
     });
-    await post(`/specs/${other.body.id}/tickets/import`, {
-      tickets: independent(3),
-    });
+    await post(
+      `/specs/${other.body.id}/tickets/import`,
+      importBody(other.body.id, {
+        tickets: independent(3),
+      }),
+    );
     await post(`/specs/${other.body.id}/confirm`);
     expect(await ticketStates()).toEqual([
       "1:pending",
@@ -394,9 +401,12 @@ describe("concurrency limits", () => {
       slug: "other",
       title: "Other",
     });
-    await post(`/specs/${other.body.id}/tickets/import`, {
-      tickets: independent(2),
-    });
+    await post(
+      `/specs/${other.body.id}/tickets/import`,
+      importBody(other.body.id, {
+        tickets: independent(2),
+      }),
+    );
     await db.pool.query("UPDATE specs SET state = 'running'");
     await Promise.all([
       scheduleSpec(db.pool, 1),
@@ -416,9 +426,12 @@ describe("concurrency limits", () => {
       slug: "other",
       title: "Other",
     });
-    await post(`/specs/${other.body.id}/tickets/import`, {
-      tickets: [ticket("x")],
-    });
+    await post(
+      `/specs/${other.body.id}/tickets/import`,
+      importBody(other.body.id, {
+        tickets: [ticket("x")],
+      }),
+    );
     await db.pool.query(
       "INSERT INTO edges (from_ticket_id, to_ticket_id, kind) VALUES (2, 1, 'blocks')",
     );

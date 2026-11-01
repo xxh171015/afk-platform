@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,7 +8,7 @@ import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { listen, type RunningApi } from "../test/fake-worker.ts";
 
-// The M1 acceptance spec's own ticket file must import as written (docs/specs/m1-acceptance/tickets.yaml).
+// The M1 acceptance spec's own ticket files must import as written (docs/specs/m1-acceptance/tickets/).
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -33,16 +34,21 @@ async function plat(...args: string[]) {
     },
     env: { AFK_API_URL: api.url },
     readFile: async (path) => readFileSync(path, "utf8"),
+    readDirectory: async (path) =>
+      readdirSync(path).map((name) => ({
+        name,
+        text: readFileSync(join(path, name), "utf8"),
+      })),
   };
   const code = await run(args, io);
   return { code, stdout, stderr };
 }
 
 const file = fileURLToPath(
-  new URL("../../../../docs/specs/m1-acceptance/tickets.yaml", import.meta.url),
+  new URL("../../../../docs/specs/m1-acceptance/tickets", import.meta.url),
 );
 
-describe("the M1 acceptance ticket file", () => {
+describe("the M1 acceptance ticket files", () => {
   it("imports into the first spec: five tickets, and the overlap warnings the README promises", async () => {
     expect((await plat("project", "create", "shop")).code).toBe(0);
     expect(

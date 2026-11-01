@@ -10,6 +10,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import { type TestTicket, ticketFile } from "../test/ticket-files.ts";
 
 // The plat commands against the real HTTP API and a real Postgres.
 
@@ -47,47 +48,82 @@ async function plat(...args: string[]) {
       if (content === undefined) throw new Error(`ENOENT ${path}`);
       return content;
     },
+    readDirectory: async (path) => {
+      const entries = Object.entries(files).filter(([name]) =>
+        name.startsWith(`${path}/`),
+      );
+      if (entries.length === 0) throw new Error(`ENOENT ${path}`);
+      return entries.map(([name, text]) => ({
+        name: name.slice(path.length + 1),
+        text,
+      }));
+    },
   };
   const code = await run(args, io);
   return { code, stdout, stderr };
 }
 
-const TICKETS_YAML = `
-spec: S-1
-tickets:
-  - key: contract
-    repo: backend
-    type: contract
-    title: Define the export endpoint
-    modules: ["openapi/**"]
-    protected_paths_ok: ["openapi/openapi.yaml"]
-    acceptance:
-      - openapi.yaml has GET /orders/export
-    body: |
-      details
-  - key: be
-    repo: backend
-    type: implementation
-    title: Implement the export
-    modules: ["src/orders/**"]
-    blocked_by: [contract]
-    acceptance: [returns CSV]
-  - key: be2
-    repo: backend
-    type: implementation
-    title: Export filters
-    modules: ["src/orders/filters.ts"]
-    blocked_by: [contract]
-    acceptance: [filters by customer]
-  - key: fe
-    repo: frontend
-    type: implementation
-    title: Export button
-    modules: ["src/pages/orders/**"]
-    contract: contract
-    acceptance: [button downloads the file]
-external_blocked_by: []
-`;
+const TICKETS: TestTicket[] = [
+  {
+    key: "contract",
+    repo: "backend",
+    type: "contract",
+    title: "Define the export endpoint",
+    modules: ["openapi/**"],
+    protected_paths_ok: ["openapi/openapi.yaml"],
+    acceptance: ["openapi.yaml has GET /orders/export"],
+    body: "details",
+  },
+  {
+    key: "be",
+    repo: "backend",
+    type: "implementation",
+    title: "Implement the export",
+    modules: ["src/orders/**"],
+    blocked_by: ["contract"],
+    acceptance: ["returns CSV"],
+  },
+  {
+    key: "be2",
+    repo: "backend",
+    type: "implementation",
+    title: "Export filters",
+    modules: ["src/orders/filters.ts"],
+    blocked_by: ["contract"],
+    acceptance: ["filters by customer"],
+  },
+  {
+    key: "fe",
+    repo: "frontend",
+    type: "implementation",
+    title: "Export button",
+    modules: ["src/pages/orders/**"],
+    contract: "contract",
+    acceptance: ["button downloads the file"],
+  },
+];
+
+// Writes the tickets as the files of a directory, the way plat reads them: numbered in the order given, which is
+// the order the tickets are created in. Keys become "01-contract", "02-be", ...
+function putTickets(directory: string, tickets: TestTicket[], specId = 1) {
+  const keyOf = new Map(
+    tickets.map((t, i) => [
+      t.key,
+      `${String(i + 1).padStart(2, "0")}-${t.key}`,
+    ]),
+  );
+  const rename = (keys: string[] | undefined) =>
+    keys?.map((k) => keyOf.get(k) ?? k);
+  for (const ticket of tickets) {
+    const file = ticketFile(specId, {
+      ...ticket,
+      key: keyOf.get(ticket.key) as string,
+      blocked_by: rename(ticket.blocked_by),
+      contract: rename([ticket.contract ?? []].flat()),
+    });
+    files[`${directory}/${file.name}`] = file.text;
+  }
+}
 
 async function register() {
   await plat("project", "create", "shop");
@@ -145,12 +181,12 @@ describe("plat", () => {
       body: "# Order export\n",
     });
 
-    files["tickets.yaml"] = TICKETS_YAML;
-    const imported = await plat("tickets", "import", "S-1", "tickets.yaml");
+    putTickets("tickets", TICKETS);
+    const imported = await plat("tickets", "import", "S-1", "tickets");
     expect(imported.code).toBe(0);
     expect(imported.stdout).toContain("imported 4 tickets into S-1");
-    expect(imported.stdout).toContain("T-1  contract");
-    expect(imported.stdout).toContain("warning: tickets be and be2");
+    expect(imported.stdout).toContain("T-1  01-contract");
+    expect(imported.stdout).toContain("warning: tickets 02-be and 03-be2");
     expect(
       Number((await db.pool.query("SELECT count(*) FROM edges")).rows[0].count),
     ).toBe(3);
@@ -158,8 +194,8 @@ describe("plat", () => {
 
   it("confirms the split and says what was queued", async () => {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
-    await plat("tickets", "import", "S-1", "tickets.yaml");
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
     const confirmed = await plat("spec", "confirm", "S-1");
     expect(confirmed.code).toBe(0);
     expect(confirmed.stdout).toContain("S-1 is running");
@@ -302,8 +338,8 @@ describe("plat", () => {
 
   it("prints a run's log, all of it or from an offset, as text or JSON", async () => {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
-    await plat("tickets", "import", "S-1", "tickets.yaml");
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
     await plat("spec", "confirm", "S-1");
     const worker = new FakeWorker(api.url, "w1", []);
     const job = (await worker.claim()).body.job;
@@ -362,8 +398,8 @@ describe("plat", () => {
   // T-1 (the contract ticket) is claimed and its agent gives up: blocked, with a brief.
   async function blockedContract() {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
-    await plat("tickets", "import", "S-1", "tickets.yaml");
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
     await plat("spec", "confirm", "S-1");
     const worker = new FakeWorker(api.url, "w1", []);
     const job = (await worker.claim()).body.job;
@@ -408,45 +444,35 @@ describe("plat", () => {
 
   it("appends tickets to a confirmed spec with --append, and says so when the spec is still a draft", async () => {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
-    await plat("tickets", "import", "S-1", "tickets.yaml");
-    files["more.yaml"] = `tickets:
-  - key: extra
-    repo: backend
-    type: implementation
-    title: Extra
-    modules: [extra/**]
-    blocked_by: [T-1]
-    acceptance: [it works]
-`;
-    const early = await plat(
-      "tickets",
-      "import",
-      "S-1",
-      "more.yaml",
-      "--append",
-    );
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    putTickets("more", [
+      {
+        key: "extra",
+        repo: "backend",
+        type: "implementation",
+        title: "Extra",
+        modules: ["extra/**"],
+        blocked_by: ["T-1"],
+        acceptance: ["it works"],
+      },
+    ]);
+    const early = await plat("tickets", "import", "S-1", "more", "--append");
     expect(early.code).toBe(1);
     expect(early.stderr).toMatch(/without --append/);
 
     await plat("spec", "confirm", "S-1");
-    const appended = await plat(
-      "tickets",
-      "import",
-      "S-1",
-      "more.yaml",
-      "--append",
-    );
+    const appended = await plat("tickets", "import", "S-1", "more", "--append");
     expect(appended.code).toBe(0);
     expect(appended.stdout).toContain("appended 1 tickets to S-1");
-    expect(appended.stdout).toMatch(/T-\d+ {2}extra/);
+    expect(appended.stdout).toMatch(/T-\d+ {2}01-extra/);
     expect((await plat("spec", "show", "S-1")).stdout).toContain("(appended)");
   });
 
   it("edits a pending ticket from a file and shows an older version of it", async () => {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
-    await plat("tickets", "import", "S-1", "tickets.yaml");
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
     files["edit.yaml"] =
       "title: A better title\nacceptance:\n  - it is faster\n";
     const edited = await plat("ticket", "edit", "T-2", "--file", "edit.yaml");
@@ -472,26 +498,28 @@ describe("plat", () => {
 
   it("shows the repo, refs and environment of tickets", async () => {
     await register();
-    files["tickets.yaml"] = `tickets:
-  - key: fe
-    repo: frontend
-    type: implementation
-    title: Button
-    modules: [src/**]
-    refs: [backend]
-    acceptance: [it works]
-  - key: e2e
-    repo: frontend
-    type: integration
-    title: E2E
-    modules: [e2e/**]
-    environment: [backend]
-    blocked_by: [fe]
-    acceptance: [it works]
-`;
-    expect((await plat("tickets", "import", "S-1", "tickets.yaml")).code).toBe(
-      0,
-    );
+    putTickets("tickets", [
+      {
+        key: "fe",
+        repo: "frontend",
+        type: "implementation",
+        title: "Button",
+        modules: ["src/**"],
+        refs: ["backend"],
+        acceptance: ["it works"],
+      },
+      {
+        key: "e2e",
+        repo: "frontend",
+        type: "integration",
+        title: "E2E",
+        modules: ["e2e/**"],
+        environment: ["backend"],
+        blocked_by: ["fe"],
+        acceptance: ["it works"],
+      },
+    ]);
+    expect((await plat("tickets", "import", "S-1", "tickets")).code).toBe(0);
     const spec = (await plat("spec", "show", "S-1")).stdout;
     expect(spec).toContain("[frontend]  Button");
     expect(spec).toContain("refs: backend");
@@ -559,8 +587,8 @@ describe("plat", () => {
 
   it("cancels a spec: its tickets go with it, spec show says cancelled, and a second cancel is refused", async () => {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
-    await plat("tickets", "import", "S-1", "tickets.yaml");
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
     await plat("spec", "confirm", "S-1");
     const cancelled = await plat("spec", "cancel", "S-1");
     expect(cancelled).toEqual({
@@ -675,13 +703,13 @@ describe("plat", () => {
 
   it("prints one JSON document with --json", async () => {
     await register();
-    files["tickets.yaml"] = TICKETS_YAML;
+    putTickets("tickets", TICKETS);
     const imported = await plat(
       "--json",
       "tickets",
       "import",
       "S-1",
-      "tickets.yaml",
+      "tickets",
     );
     const body = JSON.parse(imported.stdout);
     expect(body.tickets.map((t: { displayId: string }) => t.displayId)).toEqual(
@@ -713,40 +741,52 @@ describe("plat", () => {
 
   it("lists every problem and exits 1 when the import is rejected, writing nothing", async () => {
     await register();
-    files["bad.yaml"] = `
-tickets:
-  - {key: a, repo: mobile, type: implementation, title: A, modules: [x], acceptance: [ok], blocked_by: [b]}
-  - {key: b, repo: backend, type: implementation, title: B, modules: [y], acceptance: [ok], blocked_by: [a]}
-external_blocked_by: [T-9]
-`;
-    const result = await plat("tickets", "import", "S-1", "bad.yaml");
+    putTickets("bad", [
+      {
+        key: "a",
+        repo: "mobile",
+        type: "implementation",
+        title: "A",
+        modules: ["x"],
+        acceptance: ["ok"],
+        blocked_by: ["b"],
+      },
+      {
+        key: "b",
+        repo: "backend",
+        type: "implementation",
+        title: "B",
+        modules: ["y"],
+        acceptance: ["ok"],
+        blocked_by: ["a"],
+      },
+    ]);
+    const result = await plat("tickets", "import", "S-1", "bad");
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toMatch(/mobile/);
     expect(result.stderr).toMatch(/cycle/);
-    expect(result.stderr).toMatch(/external_blocked_by/);
     expect(
       Number(
         (await db.pool.query("SELECT count(*) FROM tickets")).rows[0].count,
       ),
     ).toBe(0);
 
-    const asJson = await plat("--json", "tickets", "import", "S-1", "bad.yaml");
+    const asJson = await plat("--json", "tickets", "import", "S-1", "bad");
     expect(asJson.code).toBe(1);
-    expect(JSON.parse(asJson.stdout).errors).toHaveLength(3);
+    expect(JSON.parse(asJson.stdout).errors).toHaveLength(2);
   });
 
   it("explains usage mistakes without calling the API", async () => {
-    expect((await plat("tickets", "import", "T-1", "x.yaml")).stderr).toMatch(
+    expect((await plat("tickets", "import", "T-1", "x")).stderr).toMatch(
       /not a spec id/,
     );
+    expect((await plat("tickets", "import", "S-1", "missing")).stderr).toMatch(
+      /cannot read the directory missing/,
+    );
     expect(
-      (await plat("tickets", "import", "S-1", "missing.yaml")).stderr,
-    ).toMatch(/cannot read missing.yaml/);
-    files["list.yaml"] = "- a\n- b\n";
-    expect(
-      (await plat("tickets", "import", "S-1", "list.yaml")).stderr,
-    ).toMatch(/YAML mapping/);
+      (await plat("tickets", "import", "S-1", "tickets.yaml")).stderr,
+    ).toMatch(/tickets\.yaml is no longer accepted/);
     const notANumber = await plat(
       "repo",
       "add",
@@ -812,6 +852,7 @@ external_blocked_by: [T-9]
       },
       env: { AFK_API_URL: "http://127.0.0.1:1" },
       readFile: async () => "",
+      readDirectory: async () => [],
     });
     expect(code).toBe(1);
     expect(errors).toMatch(/^error: cannot reach the API/);

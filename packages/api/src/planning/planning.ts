@@ -7,6 +7,7 @@ import {
   planImport,
   type SPEC_TYPES,
 } from "@afk/shared";
+import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import { schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
@@ -96,7 +97,7 @@ export async function editProject(
 export interface NewRepo {
   projectId: number;
   url: string;
-  // How tickets.yaml names the repo; unique within the project.
+  // How a ticket file names the repo; unique within the project.
   name: string;
   defaultBranch?: string;
 }
@@ -219,7 +220,7 @@ const APPENDABLE_STATES = ["planned", "running", "paused"];
 export async function importTickets(
   pool: pg.Pool,
   specId: number,
-  input: unknown,
+  files: readonly TicketFile[],
   options: { append?: boolean } = {},
 ): Promise<ImportResult> {
   const append = options.append === true;
@@ -266,12 +267,17 @@ export async function importTickets(
       }
     }
 
+    const read = readTicketFiles(files, specId);
+    if (!read.ok) {
+      return await rollback(client, { status: "invalid", errors: read.errors });
+    }
+
     const repos = await client.query(
       "SELECT name, id, contract_path FROM repos WHERE project_id = $1",
       [specRow.project_id],
     );
     const plan = planImport(
-      input,
+      read.input,
       new Map(
         repos.rows.map((row) => [
           row.name as string,

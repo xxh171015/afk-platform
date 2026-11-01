@@ -8,6 +8,7 @@ import {
   listen,
   type RunningApi,
 } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 import type { Bundle } from "./bundle.ts";
 
 // The last stage of an integration ticket: after its merge the worker runs the e2e in a fresh integration
@@ -65,9 +66,12 @@ async function runningSpec(project: Record<string, unknown> = {}) {
     slug: "order-export",
     title: "Order export",
   });
-  const imported = await post(`/specs/${spec.body.id}/tickets/import`, {
-    tickets: [integrationTicket],
-  });
+  const imported = await post(
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, {
+      tickets: [integrationTicket],
+    }),
+  );
   expect(imported.status).toBe(200);
   await post(`/specs/${spec.body.id}/confirm`);
   return spec.body.id as number;
@@ -138,18 +142,21 @@ describe("the e2e stage", () => {
       slug: "plain",
       title: "Plain",
     });
-    await post(`/specs/${spec.body.id}/tickets/import`, {
-      tickets: [
-        {
-          key: "a",
-          repo: "backend",
-          type: "implementation",
-          title: "A",
-          modules: ["src/a/**"],
-          acceptance: ["it works"],
-        },
-      ],
-    });
+    await post(
+      `/specs/${spec.body.id}/tickets/import`,
+      importBody(spec.body.id, {
+        tickets: [
+          {
+            key: "a",
+            repo: "backend",
+            type: "implementation",
+            title: "A",
+            modules: ["src/a/**"],
+            acceptance: ["it works"],
+          },
+        ],
+      }),
+    );
     await post(`/specs/${spec.body.id}/confirm`);
     for (const name of ["implement", "gate", "review"])
       await stage(name, {

@@ -9,6 +9,7 @@ import {
   listen,
   type RunningApi,
 } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -94,9 +95,13 @@ async function settledSpec(
     slug: "export",
     title: "Export orders",
   });
-  await call("POST", `/specs/${spec.body.id}/tickets/import`, {
-    tickets: options.tickets ?? repos.map((role) => ticket(role, role)),
-  });
+  await call(
+    "POST",
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, {
+      tickets: options.tickets ?? repos.map((role) => ticket(role, role)),
+    }),
+  );
   await call("POST", `/specs/${spec.body.id}/confirm`);
   const stages: StageResults = {
     implement: { outcome: "done" },
@@ -813,6 +818,7 @@ describe("following the pull requests", () => {
         stderr: () => {},
         env: { AFK_API_URL: api.url },
         readFile: async () => "",
+        readDirectory: async () => [],
       };
       expect(await run(["spec", "show", "S-1"], io)).toBe(0);
       expect(out).toContain(
@@ -979,6 +985,7 @@ describe("what waits for a person among the pull requests", () => {
       stderr: () => {},
       env: { AFK_API_URL: api.url },
       readFile: async () => "",
+      readDirectory: async () => [],
     };
     expect(await run(args, io)).toBe(0);
     return out;
@@ -1375,6 +1382,7 @@ describe("the acceptance pack", () => {
       stderr: () => {},
       env: { AFK_API_URL: api.url },
       readFile: async () => "",
+      readDirectory: async () => [],
     };
     expect(await run(["spec", "show", "S-1"], io)).toBe(0);
     expect(out).toContain("acceptance pack:");
@@ -1626,6 +1634,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
       stderr: () => {},
       env: { AFK_API_URL: api.url },
       readFile: async () => "",
+      readDirectory: async () => [],
     };
     expect(await run(["blocked"], io)).toBe(0);
     expect(out).toBe(

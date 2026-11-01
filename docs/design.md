@@ -967,7 +967,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | -------------------------------------------------- | ------------------------------------------- |
 | `plat spec create --type feature --file spec.md`   | 建 spec，返回 `S-12`                        |
 | `plat repo add --name <名字> --url … [--contract-path …]` / `plat repo edit <名字>` | 登记仓库（只有名字，不分前后端）、设契约路径 |
-| `plat tickets import S-12 tickets.yaml`            | 一次性导入整张依赖图，校验通过才写入        |
+| `plat tickets import S-12 <目录>`                  | 一次性导入整张依赖图（一张票一个 md 文件），校验通过才写入 |
 | `plat tickets import S-12 more.yaml --append`      | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
 | `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做） |
 | `plat spec show S-12` / `plat ticket view T-123`   | 查看                                        |
@@ -981,41 +981,40 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat blocked`                                     | 列出待处理的 blocked 票、paused 的 spec，关闭未合并或读不出来的 PR，以及三次都没做完的清理 |
 | `plat context --files a.ts b.ts`                   | 缺陷回流时查上下文                          |
 
-导入格式（to-tickets 产出）：
+导入格式（to-tickets 产出，ADR 0001）：一个目录，一张票一个 markdown 文件。文件名（不含 `.md`）就是文件内的局部 key，导入后换成 T-xxx；to-tickets 按依赖顺序给文件编号（`01-contract.md`、`02-be-export.md`……），票按文件名顺序建。文件由 front matter 和正文两部分组成，正文是 to-tickets 的 issue 模板原文：
 
-```yaml
-spec: S-12
-tickets:
-  - key: contract # 文件内的局部 id，导入后换成 T-xxx
-    repo: afk-pilot-backend
-    type: contract
-    title: 定义订单导出接口
-    modules: ["openapi/**"]
-    protected_paths_ok: ["openapi/openapi.yaml"]
-    acceptance:
-      - openapi.yaml 中有 GET /orders/export，返回 CSV
-    body: |
-      …
-  - key: be-export
-    repo: afk-pilot-backend
-    type: implementation
-    modules: ["src/orders/**"]
-    blocked_by: [contract]
-    acceptance: […]
-  - key: fe-export
-    repo: afk-pilot-frontend
-    type: implementation
-    modules: ["src/pages/orders/**"]
-    contract: contract # contract 类型的边，可以跨仓库
-    refs: [afk-pilot-backend] # 可选：只读参考的仓库，挂到 /refs/<仓库名>/
-    acceptance: […]
-  - key: e2e
-    repo: afk-pilot-frontend
-    type: integration
-    environment: [afk-pilot-backend] # 联调环境里起哪些仓库的服务
-    blocked_by: [be-export, fe-export]
-external_blocked_by: [] # 跨 spec 的边，写 T-xxx
+```markdown
+---
+title: 定义订单导出接口
+repo: afk-pilot-backend
+type: contract # contract / implementation / integration
+modules: ["openapi/**"]
+protected_paths_ok: ["openapi/openapi.yaml"]
+contract: 01-contract # 可选：contract 类型的边，可以跨仓库；一个或一组 key
+blocked_by: [01-contract] # 可选：blocks 类型的边，写文件名（key）；追加时可写已有票的 T-n
+refs: [afk-pilot-backend] # 可选：只读参考的仓库，挂到 /refs/<仓库名>/
+environment: [afk-pilot-backend] # 可选：联调票里起哪些仓库的服务
+blocks: [T-5] # 只在追加时用：这张新票挡住已有的票
+---
+## Parent
+
+S-12
+
+## What to build
+
+…
+
+## Acceptance criteria
+
+- [ ] openapi.yaml 中有 GET /orders/export，返回 CSV
 ```
+
+- 正文就是 `---` 结束行之后的全部内容，存进库里的和文件里的一字不差；只有 CRLF 统一成 LF、末尾的空行压成一个换行。front matter 之后不写空行（有的话它就是正文的一部分）。
+- 验收标准不单独写，从正文的 `## Acceptance criteria` 一节解析：每条必须是单行 `- [ ] 文字`；这一节缺失、为空或夹着别的内容，整个导入被拒绝，错误里写明哪张票的哪一行。节名取自快照里 to-tickets 的 issue 模板。
+- `## Parent` 必须存在且等于被导入的 spec；正文里有 `## Blocked by` 就拒绝，依赖只写在 front matter。
+- 代码块里的 `## ` 不算节标题。
+- `front matter` 里不写 key，也不写 spec；`tickets.yaml` 不再接受，传它会得到明确的错误。
+- 整个目录要么全成功，要么全不写；文件内容的错误（front matter、验收一节、Parent）一次列出，通过之后再做下面的图校验，图校验的错误也一次列出。
 
 导入校验：
 

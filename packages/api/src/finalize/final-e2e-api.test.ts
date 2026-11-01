@@ -3,6 +3,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 // Before the pull requests are opened, each integration ticket runs its e2e once more when a repo's final fix
 // changed its branch (docs/specs/m2-platform.md「收尾、PR 与合并」).
@@ -50,32 +51,36 @@ async function runningSpec(withIntegration = true) {
     slug: "export",
     title: "Export orders",
   });
-  const imported = await call("POST", `/specs/${spec.body.id}/tickets/import`, {
-    tickets: [
-      {
-        key: "be",
-        repo: "backend",
-        type: "implementation",
-        title: "Export endpoint",
-        modules: ["src/export/**"],
-        acceptance: ["it exports"],
-      },
-      ...(withIntegration
-        ? [
-            {
-              key: "e2e",
-              repo: "frontend",
-              type: "integration",
-              title: "Export e2e",
-              modules: ["e2e/**"],
-              acceptance: [CRITERION],
-              environment: ["backend"],
-              blocked_by: ["be"],
-            },
-          ]
-        : []),
-    ],
-  });
+  const imported = await call(
+    "POST",
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, {
+      tickets: [
+        {
+          key: "be",
+          repo: "backend",
+          type: "implementation",
+          title: "Export endpoint",
+          modules: ["src/export/**"],
+          acceptance: ["it exports"],
+        },
+        ...(withIntegration
+          ? [
+              {
+                key: "e2e",
+                repo: "frontend",
+                type: "integration",
+                title: "Export e2e",
+                modules: ["e2e/**"],
+                acceptance: [CRITERION],
+                environment: ["backend"],
+                blocked_by: ["be"],
+              },
+            ]
+          : []),
+      ],
+    }),
+  );
   expect(imported.status).toBe(200);
   await call("POST", `/specs/${spec.body.id}/confirm`);
 }

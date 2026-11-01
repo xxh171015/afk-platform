@@ -3,6 +3,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -61,8 +62,13 @@ async function runningSpec(
     title: "Spec",
   });
   expect(
-    (await call("POST", `/specs/${spec.body.id}/tickets/import`, { tickets }))
-      .status,
+    (
+      await call(
+        "POST",
+        `/specs/${spec.body.id}/tickets/import`,
+        importBody(spec.body.id, { tickets }),
+      )
+    ).status,
   ).toBe(200);
   expect((await call("POST", `/specs/${spec.body.id}/confirm`)).status).toBe(
     200,
@@ -1100,9 +1106,13 @@ describe("search", () => {
       title: "Refund bug",
       body: "Refunds over 100% are rejected.",
     });
-    await call("POST", `/specs/${second.body.id}/tickets/import`, {
-      tickets: [ticket("refund", { title: "Fix the refund_total rounding" })],
-    });
+    await call(
+      "POST",
+      `/specs/${second.body.id}/tickets/import`,
+      importBody(second.body.id, {
+        tickets: [ticket("refund", { title: "Fix the refund_total rounding" })],
+      }),
+    );
   }
   const find = async (q: string) =>
     (await call("GET", `/search?q=${encodeURIComponent(q)}`)).body as Json;

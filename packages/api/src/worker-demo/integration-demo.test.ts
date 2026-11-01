@@ -32,6 +32,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeClock, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 // An integration ticket from import to done, with a real Postgres, the HTTP API, real git, slots and snapshots,
 // and a worker with a fake agent, a fake gate sandbox and a fake docker: the e2e stage after the merge
@@ -168,7 +169,12 @@ async function confirmedSpec(
     })),
   ];
   expect(
-    (await post(`/specs/${spec.body.id}/tickets/import`, { tickets })).status,
+    (
+      await post(
+        `/specs/${spec.body.id}/tickets/import`,
+        importBody(spec.body.id, { tickets }),
+      )
+    ).status,
   ).toBe(200);
   expect((await post(`/specs/${spec.body.id}/confirm`)).status).toBe(200);
 }

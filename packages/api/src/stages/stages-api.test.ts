@@ -3,6 +3,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 import type { Bundle } from "./bundle.ts";
 
 let db: TestDatabase;
@@ -75,7 +76,12 @@ async function runningSpec(
     body: "# spec body",
   });
   expect(
-    (await post(`/specs/${spec.body.id}/tickets/import`, { tickets })).status,
+    (
+      await post(
+        `/specs/${spec.body.id}/tickets/import`,
+        importBody(spec.body.id, { tickets }),
+      )
+    ).status,
   ).toBe(200);
   expect((await post(`/specs/${spec.body.id}/confirm`)).status).toBe(200);
   return spec.body.id;
@@ -775,7 +781,7 @@ describe("the bundle", () => {
         displayId: "T-1",
         type: "implementation",
         title: "Ticket a",
-        body: "do the thing",
+        body: expect.stringContaining("## What to build\n\ndo the thing\n"),
         acceptanceCriteria: ["one", "two"],
         modules: ["src/a/**"],
         contentVersion: 1,

@@ -93,7 +93,7 @@ const repoRoute = createRoute({
         z
           .object({
             url: Text,
-            // How tickets.yaml names the repo. `role` is the older word for it, kept as an alias for a version.
+            // How a ticket file names the repo. `role` is the older word for it, kept as an alias for a version.
             name: Text.optional(),
             role: Text.optional(),
             defaultBranch: Text.optional(),
@@ -178,8 +178,21 @@ const importRoute = createRoute({
     params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
     // append=true adds the file to a confirmed spec, and the new tickets are scheduled at once
     query: z.object({ append: z.enum(["true", "false"]).optional() }),
-    // The parsed tickets.yaml. Validated by planImport, which reports every problem, not by this schema.
-    body: { content: json(z.record(z.string(), z.unknown())) },
+    // The ticket files of a directory, as written. readTicketFiles and planImport report every problem, not this schema.
+    body: {
+      content: json(
+        z.object({
+          files: z
+            .array(
+              z.object({
+                name: z.string().min(1).max(255),
+                text: z.string().max(1_000_000),
+              }),
+            )
+            .max(500),
+        }),
+      ),
+    },
   },
   responses: {
     200: reply(
@@ -296,9 +309,14 @@ export function registerPlanningRoutes(
 
   app.openapi(importRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    const result = await importTickets(pool, specId, c.req.valid("json"), {
-      append: c.req.valid("query").append === "true",
-    });
+    const result = await importTickets(
+      pool,
+      specId,
+      c.req.valid("json").files,
+      {
+        append: c.req.valid("query").append === "true",
+      },
+    );
     switch (result.status) {
       case "no-spec":
         return c.json({ error: "no such spec" }, 404);

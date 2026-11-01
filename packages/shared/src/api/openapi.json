@@ -678,7 +678,28 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": {}
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        },
+                        "text": {
+                          "type": "string",
+                          "maxLength": 1000000
+                        }
+                      },
+                      "required": ["name", "text"]
+                    },
+                    "maxItems": 500
+                  }
+                },
+                "required": ["files"]
               }
             }
           }

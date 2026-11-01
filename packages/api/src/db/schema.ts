@@ -64,7 +64,7 @@ export const repos = pgTable(
     contractPath: text("contract_path"),
     createdAt: createdAt(),
   },
-  // The name (backend, frontend) is how tickets.yaml names a repo, so it is unique within a project.
+  // The name (backend, frontend) is how a ticket file names a repo (its `repo` field), so it is unique within a project.
   (t) => [
     index("repos_project_idx").on(t.projectId),
     unique("repos_project_name_unique").on(t.projectId, t.name),

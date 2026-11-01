@@ -27,6 +27,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeClock, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 // A whole spec from import to done, with a real Postgres, the HTTP API, real git and slots, and a worker that has
 // a fake agent and a fake gate sandbox: no Cursor, no GitHub, no Docker.
@@ -118,7 +119,12 @@ async function confirmedSpec(
     title: "Order export",
   });
   expect(
-    (await post(`/specs/${spec.body.id}/tickets/import`, { tickets })).status,
+    (
+      await post(
+        `/specs/${spec.body.id}/tickets/import`,
+        importBody(spec.body.id, { tickets }),
+      )
+    ).status,
   ).toBe(200);
   // a spec made before the databases had ids: its branches have the flat names
   if (flatNames)

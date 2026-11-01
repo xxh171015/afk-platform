@@ -25,7 +25,7 @@ M0 已经证明单张票的链路可行（在 Mac 上，Sandcastle 加 Cursor Ag
 
 1. As a 开发者, I want 用 `plat project create` 和 `plat repo add` 登记项目和仓库，so that 平台知道我有哪些仓库、默认分支、保护路径和并发上限，不用另外做配置页面。
 2. As a 开发者, I want 用 `plat spec create` 建一个需求并拿到 `S-12` 这样的编号, so that 后面所有票和运行都能追溯到它。
-3. As a Cursor 里的 agent, I want 用 `plat tickets import S-12 tickets.yaml` 一次性导入整张依赖图, so that 不会出现只导进一半的票。
+3. As a Cursor 里的 agent, I want 用 `plat tickets import S-12 <票目录>` 一次性导入整张依赖图, so that 不会出现只导进一半的票。
 4. As a 开发者, I want 导入时平台校验依赖无环、仓库属于项目、每张票有验收标准和非空模块范围、contract 边的上游必须是契约票, so that 有问题的拆分在开工前就被拒绝。
 5. As a 开发者, I want 同一仓库里模块范围重叠但没有依赖关系的票被告警, so that 我能决定加依赖还是放行。
 6. As a 开发者, I want 在页面上看到依赖图和所有告警后点"确认拆分"（或 `plat spec confirm`）, so that 只有我确认过的拆分才会开始无人值守执行。

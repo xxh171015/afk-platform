@@ -3,6 +3,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -54,7 +55,11 @@ async function runningSpec(tickets: Record<string, unknown>[]) {
     slug: "s",
     title: "Spec",
   });
-  await call("POST", `/specs/${spec.body.id}/tickets/import`, { tickets });
+  await call(
+    "POST",
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, { tickets }),
+  );
   await call("POST", `/specs/${spec.body.id}/confirm`);
   return spec.body.id as number;
 }

@@ -8,6 +8,7 @@ import {
   listen,
   type RunningApi,
 } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 // After a failed e2e an agent diagnoses which repo is at fault, the platform makes a fix ticket there, and the
 // integration ticket runs its e2e again once the fix is done: at most two rounds (docs/specs/m2-platform.md「联调」).
@@ -51,19 +52,22 @@ async function runningSpec() {
     slug: "order-export",
     title: "Order export",
   });
-  const imported = await post(`/specs/${spec.body.id}/tickets/import`, {
-    tickets: [
-      {
-        key: "e2e",
-        repo: "frontend",
-        type: "integration",
-        title: "Order export e2e",
-        modules: ["e2e/**"],
-        acceptance: ["the export button downloads a file"],
-        environment: ["backend"],
-      },
-    ],
-  });
+  const imported = await post(
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, {
+      tickets: [
+        {
+          key: "e2e",
+          repo: "frontend",
+          type: "integration",
+          title: "Order export e2e",
+          modules: ["e2e/**"],
+          acceptance: ["the export button downloads a file"],
+          environment: ["backend"],
+        },
+      ],
+    }),
+  );
   expect(imported.status).toBe(200);
   await post(`/specs/${spec.body.id}/confirm`);
 }

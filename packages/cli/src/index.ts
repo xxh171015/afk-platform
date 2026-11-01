@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { type ApiClient, createApiClient, parseDisplayId } from "@afk/shared";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { parse as parseYaml } from "yaml";
@@ -12,6 +13,8 @@ export interface Io {
   stderr: (text: string) => void;
   env: Record<string, string | undefined>;
   readFile: (path: string) => Promise<string>;
+  // The regular files of a directory (not the hidden ones), with their text. Rejects when it is not a directory.
+  readDirectory: (path: string) => Promise<{ name: string; text: string }[]>;
 }
 
 export const defaultIo: Io = {
@@ -19,6 +22,18 @@ export const defaultIo: Io = {
   stderr: (text) => process.stderr.write(text),
   env: process.env,
   readFile: (path) => readFile(path, "utf8"),
+  readDirectory: async (path) => {
+    if (!(await stat(path)).isDirectory()) throw new Error("not a directory");
+    const entries = await readdir(path, { withFileTypes: true });
+    return await Promise.all(
+      entries
+        .filter((e) => e.isFile() && !e.name.startsWith("."))
+        .map(async (e) => ({
+          name: e.name,
+          text: await readFile(join(path, e.name), "utf8"),
+        })),
+    );
+  },
 };
 
 const DEFAULT_API_URL = "http://127.0.0.1:3000";
@@ -166,7 +181,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .command("add")
     .description("add a repo to a project")
     .requiredOption("--project <id>", "project id", toInt)
-    .option("--name <name>", "how tickets.yaml names it, e.g. backend")
+    .option(
+      "--name <name>",
+      "how a ticket file names it (its repo field), e.g. backend",
+    )
     .option("--role <role>", "older word for --name; still works")
     .requiredOption("--url <url>", "clone URL")
     .option("--default-branch <branch>", "default: main")
@@ -263,26 +281,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   program
     .command("tickets")
     .description("tickets")
-    .command("import <spec> <file>")
-    .description("import a whole tickets.yaml into a spec, or nothing at all")
+    .command("import <spec> <directory>")
+    .description(
+      "import a directory of ticket files (one .md per ticket: a front matter, then the to-tickets issue template) into a spec, or nothing at all",
+    )
     .option(
       "--append",
-      "add the file's tickets and edges to a confirmed spec (planned, running or paused); they take effect at once. The file may name existing tickets as T-<n> and carry an edges list",
+      "add the directory's tickets to a confirmed spec (planned, running or paused); they take effect at once. Their blocked_by and contract may name existing tickets as T-<n>, and blocks: [T-<n>] makes a new ticket block an existing one",
     )
-    .action(async (spec: string, file: string, options) => {
+    .action(async (spec: string, directory: string, options) => {
       const specId = specIdOf(spec);
-      let document: unknown;
+      let files: { name: string; text: string }[];
       try {
-        document = parseYaml(await io.readFile(file));
+        files = (await io.readDirectory(directory)).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
       } catch (error) {
-        throw new Failure(`cannot read ${file}: ${(error as Error).message}`);
-      }
-      if (
-        typeof document !== "object" ||
-        document === null ||
-        Array.isArray(document)
-      ) {
-        throw new Failure(`${file} must be a YAML mapping with a tickets list`);
+        throw new Failure(
+          /\.ya?ml$/i.test(directory)
+            ? `${directory}: tickets.yaml is no longer accepted; import a directory with one markdown file per ticket`
+            : `cannot read the directory ${directory}: ${(error as Error).message}`,
+        );
       }
       const { data, response, error } = await api().POST(
         "/specs/{specId}/tickets/import",
@@ -291,7 +310,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             path: { specId },
             query: options.append ? { append: "true" } : {},
           },
-          body: document as Record<string, unknown>,
+          body: { files },
         },
       );
       if (!data) throw failureFrom(response, error);

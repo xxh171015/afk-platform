@@ -1,6 +1,6 @@
 # M1 验收需求：订单备注
 
-M1 的验收用这个需求在试点仓库 `afk-pilot-backend` 上跑一遍。票文件：[tickets.yaml](tickets.yaml)。
+M1 的验收用这个需求在试点仓库 `afk-pilot-backend` 上跑一遍。票文件：目录 [tickets/](tickets/)，一张票一个 markdown 文件。
 
 ## 依赖图
 

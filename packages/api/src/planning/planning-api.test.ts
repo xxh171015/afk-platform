@@ -3,6 +3,7 @@ import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { listen, type RunningApi } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -194,7 +195,7 @@ describe("tickets import", () => {
     const { specId } = await setup(null);
     const result = await post(
       `/specs/${specId}/tickets/import`,
-      exportFile({ spec: `S-${specId}` }),
+      importBody(specId, exportFile({ spec: `S-${specId}` })),
     );
     expect(result.status).toBe(422);
     expect(result.body.errors.join("\n")).toMatch(/repo backend/);
@@ -207,7 +208,7 @@ describe("tickets import", () => {
     const { specId } = await setup();
     const result = await post(
       `/specs/${specId}/tickets/import`,
-      exportFile({ spec: `S-${specId}` }),
+      importBody(specId, exportFile({ spec: `S-${specId}` })),
     );
     expect(result.status).toBe(200);
     expect(result.body.tickets).toEqual([
@@ -250,12 +251,15 @@ describe("tickets import", () => {
 
   it("saves module overlap warnings with the spec and still imports", async () => {
     const { specId } = await setup();
-    const result = await post(`/specs/${specId}/tickets/import`, {
-      tickets: [
-        ticket("a", { modules: ["src/orders/**"] }),
-        ticket("b", { modules: ["src/orders/export.ts"] }),
-      ],
-    });
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [
+          ticket("a", { modules: ["src/orders/**"] }),
+          ticket("b", { modules: ["src/orders/export.ts"] }),
+        ],
+      }),
+    );
     expect(result.status).toBe(200);
     expect(result.body.warnings).toHaveLength(1);
     expect(result.body.warnings[0]).toMatchObject({
@@ -289,7 +293,7 @@ describe("tickets import", () => {
     [
       "a ticket without acceptance criteria",
       () => ({ tickets: [ticket("a", { acceptance: [] })] }),
-      /acceptance/,
+      /Acceptance criteria/,
     ],
     [
       "a ticket with no module glob",
@@ -301,16 +305,6 @@ describe("tickets import", () => {
       () => ({ tickets: [ticket("a"), ticket("b", { contract: "a" })] }),
       /contract ticket/,
     ],
-    [
-      "a non-empty external_blocked_by",
-      () => ({ tickets: [ticket("a")], external_blocked_by: ["T-9"] }),
-      /external_blocked_by/,
-    ],
-    [
-      "a file that names another spec",
-      (specId) => ({ spec: `S-${specId + 1}`, tickets: [ticket("a")] }),
-      /S-/,
-    ],
   ];
   it.each(rejected)(
     "rejects the whole file for %s and writes nothing",
@@ -318,7 +312,7 @@ describe("tickets import", () => {
       const { specId } = await setup();
       const result = await post(
         `/specs/${specId}/tickets/import`,
-        build(specId),
+        importBody(specId, build(specId) as never),
       );
       expect(result.status).toBe(422);
       expect(result.body.errors.join("\n")).toMatch(message);
@@ -334,21 +328,122 @@ describe("tickets import", () => {
 
   it("rejects a file with one bad ticket among good ones without importing the good ones", async () => {
     const { specId } = await setup();
-    const result = await post(`/specs/${specId}/tickets/import`, {
-      tickets: [ticket("good"), ticket("bad", { acceptance: [] })],
-    });
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("good"), ticket("bad", { acceptance: [] })],
+      }),
+    );
     expect(result.status).toBe(422);
     expect(await count("tickets")).toBe(0);
+  });
+
+  describe("ticket files as written", () => {
+    const front = `---
+title: 导出按钮
+repo: backend
+type: implementation
+modules: ["src/orders/**"]
+---
+`;
+    const body = (specId: number, extra = "") =>
+      [
+        "## Parent",
+        "",
+        `S-${specId}`,
+        "",
+        "## What to build",
+        "",
+        "导出订单为 CSV。  ",
+        "",
+        "```md",
+        "## Blocked by",
+        "```",
+        "",
+        "| 列 | 说明 |",
+        "| --- | --- |",
+        "| id | 订单号 |",
+        "",
+        "- 外层",
+        "  - 内层",
+        "",
+        "## Acceptance criteria",
+        "",
+        "- [ ] 下载的文件有表头",
+        "- [ ] 中文 `代码`",
+        extra,
+      ].join("\n");
+
+    it("stores the body as written, apart from CRLF and the blank lines at the end, and reads the acceptance criteria out of it", async () => {
+      const { specId } = await setup();
+      const text = `${front}${body(specId)}\n\n\n`;
+      const result = await post(`/specs/${specId}/tickets/import`, {
+        files: [{ name: "01-export.md", text: text.replace(/\n/g, "\r\n") }],
+      });
+      expect(result.status).toBe(200);
+      const stored = await db.pool.query(
+        "SELECT body, acceptance_criteria FROM tickets",
+      );
+      expect(stored.rows).toEqual([
+        {
+          body: body(specId),
+          acceptance_criteria: ["下载的文件有表头", "中文 `代码`"],
+        },
+      ]);
+    });
+
+    it("refuses a Parent that is another spec and a Blocked by section, naming the file and the line, and writes nothing", async () => {
+      const { specId } = await setup();
+      const result = await post(`/specs/${specId}/tickets/import`, {
+        files: [
+          {
+            name: "01-a.md",
+            text: front + body(specId + 1),
+          },
+          {
+            name: "02-b.md",
+            text: `${front}${body(specId, "\n## Blocked by\n\n- #3\n")}`,
+          },
+        ],
+      });
+      expect(result.status).toBe(422);
+      expect(result.body.errors).toEqual([
+        expect.stringMatching(
+          new RegExp(`^01-a\\.md:\\d+: .*must be S-${specId}`),
+        ),
+        expect.stringMatching(/^02-b\.md:\d+: .*Blocked by.*is not allowed/),
+      ]);
+      expect(await count("tickets")).toBe(0);
+    });
+
+    it("says tickets.yaml is no longer accepted", async () => {
+      const { specId } = await setup();
+      const result = await post(`/specs/${specId}/tickets/import`, {
+        files: [{ name: "tickets.yaml", text: "tickets: []" }],
+      });
+      expect(result.status).toBe(422);
+      expect(result.body.errors).toEqual([
+        expect.stringContaining("tickets.yaml is no longer accepted"),
+      ]);
+    });
   });
 
   it("is all at once: a second import into the same spec is refused", async () => {
     const { specId } = await setup();
     expect(
-      (await post(`/specs/${specId}/tickets/import`, exportFile())).status,
+      (
+        await post(
+          `/specs/${specId}/tickets/import`,
+          importBody(specId, exportFile()),
+        )
+      ).status,
     ).toBe(200);
-    const again = await post(`/specs/${specId}/tickets/import`, {
-      tickets: [ticket("x")],
-    });
+    const again = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("x")],
+      }),
+    );
     expect(again.status).toBe(409);
     expect(await count("tickets")).toBe(3);
   });
@@ -359,18 +454,24 @@ describe("tickets import", () => {
       specId,
     ]);
     expect(
-      (await post(`/specs/${specId}/tickets/import`, exportFile())).status,
+      (
+        await post(
+          `/specs/${specId}/tickets/import`,
+          importBody(specId, exportFile()),
+        )
+      ).status,
     ).toBe(409);
-    expect((await post("/specs/999/tickets/import", exportFile())).status).toBe(
-      404,
-    );
+    expect(
+      (await post("/specs/999/tickets/import", importBody(999, exportFile())))
+        .status,
+    ).toBe(404);
   });
 
   it("lets only one of two concurrent imports win", async () => {
     const { specId } = await setup();
     const results = await Promise.all([
-      post(`/specs/${specId}/tickets/import`, exportFile()),
-      post(`/specs/${specId}/tickets/import`, exportFile()),
+      post(`/specs/${specId}/tickets/import`, importBody(specId, exportFile())),
+      post(`/specs/${specId}/tickets/import`, importBody(specId, exportFile())),
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
     expect(await count("tickets")).toBe(3);
@@ -466,9 +567,10 @@ describe("project edit", () => {
         ticket("fe", { repo: "frontend", contract: "contract" }),
       ],
     };
-    expect((await post(`/specs/${specId}/tickets/import`, file)).status).toBe(
-      422,
-    );
+    expect(
+      (await post(`/specs/${specId}/tickets/import`, importBody(specId, file)))
+        .status,
+    ).toBe(422);
     expect(
       (
         await patch(`/projects/${projectId}/repos/backend`, {
@@ -476,26 +578,30 @@ describe("project edit", () => {
         })
       ).status,
     ).toBe(200);
-    expect((await post(`/specs/${specId}/tickets/import`, file)).status).toBe(
-      200,
-    );
+    expect(
+      (await post(`/specs/${specId}/tickets/import`, importBody(specId, file)))
+        .status,
+    ).toBe(200);
   });
 });
 
 describe("tickets across repos", () => {
   it("stores refs and environment, and reads them back in the ticket and spec views", async () => {
     const { specId } = await setup();
-    const result = await post(`/specs/${specId}/tickets/import`, {
-      tickets: [
-        ticket("fe", { repo: "frontend", refs: ["backend"] }),
-        ticket("e2e", {
-          repo: "frontend",
-          type: "integration",
-          environment: ["backend"],
-          blocked_by: ["fe"],
-        }),
-      ],
-    });
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [
+          ticket("fe", { repo: "frontend", refs: ["backend"] }),
+          ticket("e2e", {
+            repo: "frontend",
+            type: "integration",
+            environment: ["backend"],
+            blocked_by: ["fe"],
+          }),
+        ],
+      }),
+    );
     expect(result.status).toBe(200);
     const view = await (await fetch(`${api.url}/tickets/2`)).json();
     expect(view.ticket).toMatchObject({
@@ -519,18 +625,21 @@ describe("tickets across repos", () => {
     await patch(`/projects/${projectId}/repos/payments`, {
       contractPath: "pay.yaml",
     });
-    const bad = await post(`/specs/${specId}/tickets/import`, {
-      tickets: [
-        ticket("a", { refs: ["nope"] }),
-        ticket("b", { environment: ["frontend"] }),
-        ticket("cb", { type: "contract" }),
-        ticket("cf", { type: "contract", repo: "frontend" }),
-        ticket("cp", { type: "contract", repo: "payments" }),
-        ticket("p", { repo: "payments", contract: "cb" }),
-        ticket("be", { repo: "backend", contract: "cf" }),
-        ticket("f", { repo: "frontend", contract: "cp" }),
-      ],
-    });
+    const bad = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [
+          ticket("a", { refs: ["nope"] }),
+          ticket("b", { environment: ["frontend"] }),
+          ticket("cb", { type: "contract" }),
+          ticket("cf", { type: "contract", repo: "frontend" }),
+          ticket("cp", { type: "contract", repo: "payments" }),
+          ticket("p", { repo: "payments", contract: "cb" }),
+          ticket("be", { repo: "backend", contract: "cf" }),
+          ticket("f", { repo: "frontend", contract: "cp" }),
+        ],
+      }),
+    );
     expect(bad.status).toBe(422);
     expect(bad.body.errors).toEqual([
       expect.stringMatching(/ticket a: refs nope/),
@@ -554,13 +663,21 @@ describe("appending tickets to a confirmed spec", () => {
     const { projectId, specId } = await setup();
     await post(`/projects/${projectId}/repos`, { url: "u", name: "payments" });
     expect(
-      (await post(`/specs/${specId}/tickets/import`, exportFile)).status,
+      (
+        await post(
+          `/specs/${specId}/tickets/import`,
+          importBody(specId, exportFile),
+        )
+      ).status,
     ).toBe(200);
     expect((await post(`/specs/${specId}/confirm`, {})).status).toBe(200);
     return { projectId, specId };
   }
   const append = (specId: number, body: unknown) =>
-    post(`/specs/${specId}/tickets/import?append=true`, body);
+    post(
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, body as never),
+    );
   const states = async () =>
     (await db.pool.query("SELECT id, state, appended FROM tickets ORDER BY id"))
       .rows;
@@ -627,14 +744,10 @@ describe("appending tickets to a confirmed spec", () => {
     expect(await count("tickets")).toBe(3);
   });
 
-  it("refuses an edge between two existing tickets, one that blocks a running ticket, and a cycle, and writes nothing", async () => {
+  it("refuses a ticket that blocks a running ticket, and a cycle, and writes nothing", async () => {
     const { specId } = await confirmed();
     await db.pool.query("UPDATE tickets SET state = 'running' WHERE id = 1");
     const cases: [unknown, RegExp][] = [
-      [
-        { tickets: [ticket("a")], edges: [{ from: "T-2", to: "T-3" }] },
-        /two existing tickets/,
-      ],
       [
         { tickets: [ticket("a")], edges: [{ from: "a", to: "T-1" }] },
         /T-1 is running/,
@@ -705,7 +818,7 @@ describe("appending tickets to a confirmed spec", () => {
     expect(stored.rows[0].import_warnings).toHaveLength(1);
   });
 
-  it("leaves a ticket that reported contract-change-needed blocked when the new contract ticket is wired under it", async () => {
+  it("leaves a ticket that reported contract-change-needed blocked when a new ticket is made to block it", async () => {
     const { specId } = await confirmed();
     await db.pool.query(
       "UPDATE tickets SET state = 'blocked', blocked_reason = 'contract-change-needed' WHERE id = 3",
@@ -718,7 +831,7 @@ describe("appending tickets to a confirmed spec", () => {
           modules: ["api2/**"],
         }),
       ],
-      edges: [{ from: "c2", to: "T-3", kind: "contract" }],
+      edges: [{ from: "c2", to: "T-3" }],
     });
     expect(result.status).toBe(200);
     expect((await states())[2]).toMatchObject({ id: 3, state: "blocked" });

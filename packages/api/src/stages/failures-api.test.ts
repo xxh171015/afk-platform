@@ -8,6 +8,7 @@ import {
   listen,
   type RunningApi,
 } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -59,7 +60,11 @@ async function runningSpec(tickets: Record<string, unknown>[]) {
     slug: "s",
     title: "Spec",
   });
-  await call("POST", `/specs/${spec.body.id}/tickets/import`, { tickets });
+  await call(
+    "POST",
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, { tickets }),
+  );
   await call("POST", `/specs/${spec.body.id}/confirm`);
   return spec.body.id as number;
 }
@@ -256,9 +261,13 @@ describe("a job the worker could not carry out", () => {
       slug: "s",
       title: "S",
     });
-    await call("POST", `/specs/${spec.body.id}/tickets/import`, {
-      tickets: [ticket("a"), ticket("b")],
-    });
+    await call(
+      "POST",
+      `/specs/${spec.body.id}/tickets/import`,
+      importBody(spec.body.id, {
+        tickets: [ticket("a"), ticket("b")],
+      }),
+    );
     await call("POST", `/specs/${spec.body.id}/confirm`);
     expect((await state(2)).state).toBe("pending");
     for (let i = 0; i < 3; i++) await failNext();

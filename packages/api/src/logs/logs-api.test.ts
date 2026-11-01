@@ -11,6 +11,7 @@ import {
   listen,
   type RunningApi,
 } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 import { LogStore } from "./log-store.ts";
 
 let db: TestDatabase;
@@ -86,18 +87,21 @@ async function claimedRun(worker: FakeWorker) {
     slug: "s",
     title: "S",
   });
-  await post(`/specs/${spec.body.id}/tickets/import`, {
-    tickets: [
-      {
-        key: "a",
-        repo: "backend",
-        type: "implementation",
-        title: "A",
-        modules: ["src/**"],
-        acceptance: ["ok"],
-      },
-    ],
-  });
+  await post(
+    `/specs/${spec.body.id}/tickets/import`,
+    importBody(spec.body.id, {
+      tickets: [
+        {
+          key: "a",
+          repo: "backend",
+          type: "implementation",
+          title: "A",
+          modules: ["src/**"],
+          acceptance: ["ok"],
+        },
+      ],
+    }),
+  );
   await post(`/specs/${spec.body.id}/confirm`);
   const job = (await worker.claim()).body.job;
   if (!job) throw new Error("no job");

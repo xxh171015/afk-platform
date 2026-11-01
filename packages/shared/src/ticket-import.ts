@@ -2,7 +2,8 @@ import { z } from "zod";
 import { formatDisplayId } from "./display-id.ts";
 import type { EdgeKind } from "./schemas.ts";
 
-// The tickets.yaml that to-tickets produces (docs/design.md「导入格式」). Keys are snake_case as in the file.
+// What planImport checks: the tickets of a directory of ticket files, as readTicketFiles (ticket-files.ts) turns
+// them (docs/design.md「导入格式」). Keys are snake_case as in the front matter.
 // A planner may write only contract, implementation and integration tickets; the platform makes fix and system ones.
 const ImportTicketSchema = z.strictObject({
   key: z.string().min(1),
