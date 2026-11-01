@@ -222,6 +222,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 - [ ] 规划仓库里的 `docs/agents/issue-tracker.md` 已推到 `main`。
 - [ ] 你知道怎么看 `plat blocked` 并处理（第 6 节练过一次）。
 - [ ] 清楚平台当前的边界：**没有认证**，只监听 127.0.0.1；只有一个 worker，同时只跑一个需求；PR 评论返工、页面上改票/追加票、多个需求并行都还没有。
+- [ ] **升级平台前先确认没有在跑的作业**（`plat blocked` 和页面上都没有 running 的票）：迁移随重启执行，没跑完的作业重跑时，前后阶段可能读到两种拼法的票正文。
 - [ ] 停机方式：Ctrl-C；正在跑的 run 会在 worker 租约到期后重新派发，不会丢。
 
 ## 8. 常见问题
@@ -235,6 +236,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | 导入被拒：没有契约路径 | `plat repo edit <名字> --project <P> --contract-path openapi/openapi.yaml` |
 | 导入报 spec 不是 draft | 一个 spec 只能导入一次；追加用 `--append` |
 | agent 卡在提问 | 说明 spec 里的 seams 没写清；在 spec 里补，或改票的 `body` |
+| 升级后 `pnpm db:migrate` 失败，写着某张票 `cannot be migrated` | 迁移把所有票的正文改写成 issue 模板（Parent / What to build / Acceptance criteria），并核对验收标准能原样解析回来；不能的票会让整个迁移回滚，错误里写明是哪张票和哪个版本。按提示改那张票的旧正文或验收标准（不要有 `## Acceptance criteria`、`## Parent`、`## Blocked by` 小节，代码围栏要成对），再迁移一次 |
 | 前后端起了不同的名字 / 并行改了同一文件 | to-spec 里把共享名字写死；to-tickets 给会改同一文件的票加依赖边 |
 | 转 ready 失败 | GitHub App 缺 `contents: write`；手动转 ready |
 

@@ -13,7 +13,17 @@ export async function migrate(
   pool: pg.Pool,
   migrationsFolder = MIGRATIONS_FOLDER,
 ): Promise<void> {
-  await runMigrations(drizzle(pool), { migrationsFolder });
+  try {
+    await runMigrations(drizzle(pool), { migrationsFolder });
+  } catch (error) {
+    // drizzle's own message is the whole failed statement; what the database said (a migration that names the ticket
+    // it cannot convert) is in the cause
+    const cause = (error as { cause?: unknown }).cause;
+    if (cause instanceof Error) {
+      throw new Error(`migration failed: ${cause.message}`, { cause: error });
+    }
+    throw error;
+  }
 }
 
 interface JournalEntry {

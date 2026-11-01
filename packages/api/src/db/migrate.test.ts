@@ -43,6 +43,7 @@ const LATER_THAN_REPO_NAMES = [
   "0023_e2e_stage",
   "0024_integration_rounds",
   "0025_final_e2e",
+  "0026_ticket_template_bodies",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -220,6 +221,100 @@ describe("the contract path of a project that names no repo", () => {
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'contract_path'",
       );
       expect(columns.rows).toHaveLength(1);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("migrating ticket bodies to the issue template", () => {
+  // The database as it was before 0026, with a project, a repo and a spec.
+  async function before0026(): Promise<string> {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+    const journalPath = join(before, "meta", "_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+    journal.entries = journal.entries.filter(
+      (e: { tag: string }) => e.tag !== "0026_ticket_template_bodies",
+    );
+    writeFileSync(journalPath, JSON.stringify(journal));
+    await migrate(db.pool, before);
+    await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+    await db.pool.query(
+      "INSERT INTO repos (project_id, url, name) VALUES (1, 'b', 'backend')",
+    );
+    await db.pool.query(
+      "INSERT INTO specs (project_id, type, slug, title, body) VALUES (1, 'feature', 'export', 'Export', E'# spec\\n')",
+    );
+    return before;
+  }
+  const addTicket = (body: string, criteria: string[], version = 1) =>
+    db.pool.query(
+      `INSERT INTO tickets (spec_id, repo_id, type, title, body, acceptance_criteria, content_version)
+       VALUES (1, 1, 'implementation', 'T', $1, $2, $3)`,
+      [body, criteria, version],
+    );
+
+  it("rewrites every ticket and every kept version, keeps the old body under What to build, and changes no version or spec", async () => {
+    const before = await before0026();
+    try {
+      await addTicket("Old details.\n", ["it works", "is fast"], 2);
+      await db.pool.query(
+        `INSERT INTO ticket_versions (ticket_id, version, title, body, acceptance_criteria, modules, allowed_protected_paths)
+         VALUES (1, 1, 'T', 'First details', ARRAY['it works'], ARRAY['**'], ARRAY[]::text[]),
+                (1, 2, 'T', 'Old details.', ARRAY['it works', 'is fast'], ARRAY['**'], ARRAY[]::text[])`,
+      );
+      await migrate(db.pool);
+
+      const ticket = await db.pool.query(
+        "SELECT body, acceptance_criteria, content_version FROM tickets",
+      );
+      expect(ticket.rows[0]).toEqual({
+        body: "## Parent\n\nS-1\n\n## What to build\n\nOld details.\n\n## Acceptance criteria\n\n- [ ] it works\n- [ ] is fast\n",
+        acceptance_criteria: ["it works", "is fast"],
+        content_version: 2,
+      });
+      const versions = await db.pool.query(
+        "SELECT version, body FROM ticket_versions ORDER BY version",
+      );
+      expect(versions.rows).toEqual([
+        {
+          version: 1,
+          body: "## Parent\n\nS-1\n\n## What to build\n\nFirst details\n\n## Acceptance criteria\n\n- [ ] it works\n",
+        },
+        { version: 2, body: ticket.rows[0].body },
+      ]);
+      expect((await db.pool.query("SELECT body FROM specs")).rows[0].body).toBe(
+        "# spec\n",
+      );
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+
+  it("stops the whole migration and names the ticket when its criteria do not read back", async () => {
+    const before = await before0026();
+    try {
+      await addTicket("fine", ["ok"]);
+      await addTicket("two\nlines", ["first\nsecond"]);
+      await expect(migrate(db.pool)).rejects.toThrow(/T-2 \(version 1\)/);
+      const bodies = await db.pool.query(
+        "SELECT body FROM tickets ORDER BY id",
+      );
+      expect(bodies.rows.map((r) => r.body)).toEqual(["fine", "two\nlines"]);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an old body that would swallow or repeat the template's sections", async () => {
+    const before = await before0026();
+    try {
+      await addTicket("```\nnever closed", ["ok"]);
+      await expect(migrate(db.pool)).rejects.toThrow(/unclosed code fence/);
+      await db.pool.query("DELETE FROM tickets");
+      await addTicket("## Acceptance criteria\n\n- [ ] other", ["ok"]);
+      await expect(migrate(db.pool)).rejects.toThrow(/T-\d+ \(version 1\)/);
     } finally {
       rmSync(before, { recursive: true, force: true });
     }

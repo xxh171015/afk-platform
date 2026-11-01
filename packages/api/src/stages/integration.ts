@@ -1,4 +1,5 @@
 import { formatDisplayId } from "@afk/shared";
+import { acceptanceOfBody } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import { ensureIntegrationBranches } from "../planning/integration-branches.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
@@ -26,6 +27,16 @@ const issueLine = (evidence: string) => {
   return first.length > 200 ? `${first.slice(0, 200)}…` : first;
 };
 
+// The evidence is text from a diagnosis and may hold headings or code fences, which would end a section early or
+// swallow the ones after it. As a block quote it is only text to the ticket file parser.
+const quoted = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => `> ${line}`.trimEnd())
+    .join("\n");
+
+// The body is to-tickets' issue template, like every other ticket's: Parent, What to build and Acceptance criteria.
+// The criteria are read out of it by the rules of any ticket file, so what is stored is what the body says.
 export function fixTicketContent(
   ticket: IntegrationTicket,
   diagnosis: Diagnosis,
@@ -33,29 +44,39 @@ export function fixTicketContent(
   const shown = formatDisplayId("ticket", ticket.id);
   const lines = (items: string[]) =>
     items.map((item) => `- ${item}`).join("\n");
+  const body = [
+    "## Parent",
+    "",
+    formatDisplayId("spec", ticket.spec_id),
+    "",
+    "## What to build",
+    "",
+    `联调票 ${shown}（${ticket.title}）的 e2e 失败，诊断指出问题在 ${diagnosis.failingRepo}，在这个仓库里修好它。`,
+    "",
+    "### 证据",
+    "",
+    quoted(diagnosis.evidence.trim()),
+    "",
+    "### 失败用例",
+    "",
+    diagnosis.failingTests.length
+      ? lines(diagnosis.failingTests.map((t) => t.replace(/\s+/g, " ").trim()))
+      : "（诊断没有列出）",
+    "",
+    `### 联调票 ${shown} 的验收标准`,
+    "",
+    lines(ticket.acceptance_criteria),
+    "",
+    "## Acceptance criteria",
+    "",
+    `- [ ] 联调票 ${shown} 的 e2e 通过`,
+    `- [ ] 诊断指出的问题已修好：${issueLine(diagnosis.evidence)}`,
+    "",
+  ].join("\n");
   return {
     title: `修复联调：${ticket.title}`,
-    body: [
-      `联调票 ${shown}（${ticket.title}）的 e2e 失败，诊断指出问题在 ${diagnosis.failingRepo}。`,
-      "",
-      "## 证据",
-      "",
-      diagnosis.evidence.trim(),
-      "",
-      "## 失败用例",
-      "",
-      diagnosis.failingTests.length
-        ? lines(diagnosis.failingTests)
-        : "（诊断没有列出）",
-      "",
-      `## 联调票 ${shown} 的验收标准`,
-      "",
-      lines(ticket.acceptance_criteria),
-    ].join("\n"),
-    acceptanceCriteria: [
-      `联调票 ${shown} 的 e2e 通过`,
-      `诊断指出的问题已修好：${issueLine(diagnosis.evidence)}`,
-    ],
+    body,
+    acceptanceCriteria: acceptanceOfBody(body, ticket.spec_id),
   };
 }
 

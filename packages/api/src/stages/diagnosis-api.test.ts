@@ -175,6 +175,10 @@ describe("a diagnosis that names a repo", () => {
     expect(fix.body).toContain("the export button downloads a file");
     expect(fix.acceptance_criteria[0]).toBe("联调票 T-1 的 e2e 通过");
     expect(fix.acceptance_criteria[1]).toContain("GET /orders/1/export");
+    // the body is the issue template, and the stored criteria are what it says
+    expect(fix.body).toMatch(
+      /^## Parent\n\nS-1\n\n## What to build\n\n[\s\S]*\n## Acceptance criteria\n\n- \[ \] 联调票 T-1 的 e2e 通过\n- \[ \] 诊断指出的问题已修好：GET \/orders\/1\/export[^\n]*\n$/,
+    );
 
     const edges = await db.pool.query(
       "SELECT from_ticket_id, to_ticket_id, kind FROM edges",

@@ -357,3 +357,19 @@ export function renderTicketFile(ticket: TicketFileView): string {
   });
   return `---\n${front}---\n${ticket.body}`;
 }
+
+// The acceptance criteria of a body written by the platform itself (a fix ticket), read by the same rules as an
+// imported or edited one. Throws when the body does not follow the template: that is a mistake in the platform.
+export function acceptanceOfBody(body: string, specId: number): string[] {
+  const errors: string[] = [];
+  const acceptance = readBody(
+    "the ticket body",
+    body,
+    1,
+    formatDisplayId("spec", specId),
+    templateSections(),
+    errors,
+  );
+  if (errors.length > 0) throw new Error(errors.join("\n"));
+  return acceptance;
+}
