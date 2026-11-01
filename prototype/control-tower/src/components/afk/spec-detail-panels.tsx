@@ -1,0 +1,33 @@
+import { Link } from "@tanstack/react-router";
+import { Clock3, ExternalLink, GitPullRequest } from "lucide-react";
+import type { FinalizationState, SpecDetailResponse, TicketState } from "@/api/types";
+import { stageLabel, ticketTypeLabel } from "@/lib/labels";
+import { IdChip, Mono, Pill, ReasonBadge, RepoTag, StateBadge } from "./badges";
+import { EmptyState } from "./states";
+import { SegmentedProgress } from "./progress-bar";
+import { runDuration } from "./spec-ticket-drawer";
+import { formatDuration } from "@/lib/time";
+
+export const ticketStates: TicketState[] = ["pending", "queued", "running", "merging", "done", "blocked", "cancelled"];
+const finalTone: Record<FinalizationState, "neutral" | "running" | "done" | "blocked" | "paused"> = { pending: "neutral", running: "running", done: "done", blocked: "blocked", waived: "paused" };
+export function SpecOverview({ detail }: { detail: SpecDetailResponse }) {
+  const { spec, tickets, finalizations, pullRequests } = detail;
+  return <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
+    <div className="space-y-8"><section><h2 className="mb-3 text-sm font-semibold">需求说明</h2><p className="whitespace-pre-wrap text-[13px] leading-7 text-muted-foreground">{spec.body}</p></section>
+    <section className="border-t pt-5"><div className="mb-4 flex items-center justify-between"><h2 className="text-sm font-semibold">票进度</h2><span className="font-mono text-sm">{spec.progress.done}<span className="text-muted-foreground"> / {spec.progress.total}</span></span></div><SegmentedProgress progress={spec.progress} className="h-2.5" /><div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">{ticketStates.map(s => <div key={s} className="flex items-center justify-between gap-2"><StateBadge kind="ticket" state={s} /><Mono>{tickets.filter(t => t.state === s).length}</Mono></div>)}</div></section>
+    <section className="flex items-center gap-3 border-y py-5"><Clock3 className="size-5 text-muted-foreground" /><div className="flex-1"><h2 className="text-sm font-medium">agent 已用时间</h2><p className="mt-1 text-xs text-muted-foreground">实现、审查与修复运行的累计时间</p></div><span className="font-mono text-lg">{formatDuration(detail.agentUsedSeconds * 1000)}</span></section>
+    <div className="space-y-2 text-xs text-muted-foreground"><p>集成分支 <Mono className="break-all">{spec.integrationBranch}</Mono></p><p>内容由 <Mono>plat</Mono> 管理</p></div></div>
+    <div className="space-y-6"><section><div className="mb-3 flex justify-between"><h2 className="text-sm font-semibold">收尾</h2><Mono>{finalizations.length} steps</Mono></div>{finalizations.length ? <div className="divide-y rounded-md border bg-card">{finalizations.map(f => <div key={f.id} className="space-y-2 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{f.repo ? <RepoTag name={f.repo} /> : "跨仓库联调"}</span><Pill tone={finalTone[f.state]}>{f.state}</Pill></div><div className="flex flex-wrap items-center gap-2"><Mono title={stageLabel[f.step]}>{f.step}</Mono><span className="text-xs text-muted-foreground">{stageLabel[f.step]}</span></div>{f.blockedReason && <ReasonBadge reason={f.blockedReason} detail={f.blockedDetail} />}{f.blockedDetail && <p className="line-clamp-2 text-xs text-muted-foreground">{f.blockedDetail}</p>}</div>)}</div> : <EmptyState title="尚未开始收尾" description="票执行完成后进入收尾" />}</section>
+    <section><h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><GitPullRequest className="size-4" />PR 摘要</h2>{pullRequests.length ? <div className="space-y-3">{pullRequests.map(pr => <article key={pr.id} className="rounded-md border bg-card p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><RepoTag name={pr.repo} /><a href={pr.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-mono text-xs text-primary hover:underline">#{pr.number}<ExternalLink className="size-3" /></a></div><p className="mb-3 text-[13px]">{pr.title}</p><div className="flex flex-wrap gap-2"><Pill tone={pr.state === "merged" ? "done" : pr.state === "closed" ? "blocked" : "review"}>{pr.state}<span className="font-sans">{pr.state === "closed" ? "关闭未合并" : ""}</span></Pill>{pr.draft && <Pill tone="draft">draft</Pill>}<Mono>ci: {pr.ci}</Mono><Mono>review: {pr.review}</Mono></div></article>)}</div> : <EmptyState title="尚未创建 PR" />}</section></div>
+  </div>;
+}
+export function SpecTickets({ detail, state, repo: selectedRepo = "" }: { detail: SpecDetailResponse; state: string; repo?: string }) {
+  const repos = [...new Set(detail.tickets.map(t => t.repo))];
+  const filtered = detail.tickets.filter(t => (!state || t.state === state) && (!selectedRepo || t.repo === selectedRepo));
+  if (!filtered.length) return <EmptyState title={detail.tickets.length ? "没有符合筛选条件的票" : "还没有票"} />;
+  return <div className="space-y-7">{repos.map(repo => {
+    const tickets = filtered.filter(t => t.repo === repo);
+    if (!tickets.length) return null;
+    return <section key={repo}><div className="mb-3 flex items-center gap-2"><RepoTag name={repo} /><Mono>{tickets.length} tickets</Mono></div><div className="overflow-x-auto rounded-md border"><table className="w-full min-w-[780px] text-left text-[12px]"><thead className="border-b bg-surface text-muted-foreground"><tr>{["状态", "编号", "标题", "类型", "追加", "原因码", "最近 Run"].map(h => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead><tbody className="divide-y">{tickets.map(t => { const run = detail.runs.find(r => r.ticketId === t.id); return <tr key={t.id} className="bg-card hover:bg-accent/50"><td className="px-3 py-3"><StateBadge kind="ticket" state={t.state} /></td><td className="px-3 py-3"><IdChip id={t.id} displayId={t.displayId} /></td><td className="min-w-44 px-3 py-3"><Link to="/tickets/$id" params={{ id: t.id }} className="hover:underline">{t.title}</Link></td><td className="px-3 py-3"><Mono title={ticketTypeLabel[t.type]}>{t.type}</Mono></td><td className="px-3 py-3 text-muted-foreground">{t.appended ? <span className="rounded-sm border border-dashed px-1 text-[10px]">追加</span> : "—"}</td><td className="px-3 py-3">{t.blockedReason ? <ReasonBadge reason={t.blockedReason} /> : <span className="text-subtle-foreground">—</span>}</td><td className="px-3 py-3">{run ? <div className="space-y-1 whitespace-nowrap"><Mono title={stageLabel[run.stage]}>{run.stage}</Mono><p className="text-[11px] text-muted-foreground">{runDuration(run.startedAt, run.finishedAt)}</p></div> : <span className="text-subtle-foreground">—</span>}</td></tr>; })}</tbody></table></div></section>;
+  })}</div>;
+}
