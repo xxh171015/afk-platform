@@ -18,7 +18,14 @@ export interface TicketFile {
 
 export type TicketFilesResult =
   | { ok: true; input: Pick<ImportFile, "tickets" | "edges"> }
-  | { ok: false; errors: string[] };
+  // `parsed` is what the readable files make, and `failed` the keys of the ones that were not: the caller can check
+  // the rest of the graph and list its problems with the files' own.
+  | {
+      ok: false;
+      errors: string[];
+      parsed: Pick<ImportFile, "tickets" | "edges">;
+      failed: string[];
+    };
 
 const FrontMatter = z.strictObject({
   title: z.string().min(1),
@@ -199,6 +206,7 @@ export function readTicketFiles(
   specId: number,
 ): TicketFilesResult {
   const errors: string[] = [];
+  const failed: string[] = [];
   const names = templateSections();
   const specShown = formatDisplayId("spec", specId);
   const tickets: ImportFile["tickets"] = [];
@@ -217,6 +225,7 @@ export function readTicketFiles(
     const read = readTicket(file, specShown, names);
     if (Array.isArray(read)) {
       errors.push(...read);
+      failed.push(file.name.replace(/\.md$/, ""));
       continue;
     }
     tickets.push(read.ticket);
@@ -225,6 +234,6 @@ export function readTicketFiles(
   }
   if (files.length === 0) errors.push("the directory has no ticket file (.md)");
   return errors.length > 0
-    ? { ok: false, errors }
+    ? { ok: false, errors, parsed: { tickets, edges }, failed }
     : { ok: true, input: { tickets, edges } };
 }

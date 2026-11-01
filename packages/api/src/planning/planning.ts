@@ -267,29 +267,43 @@ export async function importTickets(
       }
     }
 
-    const read = readTicketFiles(files, specId);
-    if (!read.ok) {
-      return await rollback(client, { status: "invalid", errors: read.errors });
-    }
-
     const repos = await client.query(
       "SELECT name, id, contract_path FROM repos WHERE project_id = $1",
       [specRow.project_id],
     );
-    const plan = planImport(
-      read.input,
-      new Map(
-        repos.rows.map((row) => [
-          row.name as string,
-          {
-            id: row.id as number,
-            contractPath: row.contract_path as string | null,
-          },
-        ]),
-      ),
-      specId,
-      append ? await existingGraph(client, specId) : undefined,
-    );
+    const read = readTicketFiles(files, specId);
+    const plan =
+      !read.ok && read.parsed.tickets.length === 0
+        ? undefined
+        : planImport(
+            read.ok ? read.input : read.parsed,
+            new Map(
+              repos.rows.map((row) => [
+                row.name as string,
+                {
+                  id: row.id as number,
+                  contractPath: row.contract_path as string | null,
+                },
+              ]),
+            ),
+            specId,
+            append ? await existingGraph(client, specId) : undefined,
+          );
+    if (!read.ok) {
+      // The files that could be read are checked as a graph too, so every problem comes back at once. What only
+      // follows from a file that could not be read (a blocker that is not there) is left out.
+      const graph =
+        plan && !plan.ok
+          ? plan.errors.filter(
+              (e) => !read.failed.some((key) => e.includes(key)),
+            )
+          : [];
+      return await rollback(client, {
+        status: "invalid",
+        errors: [...read.errors, ...graph],
+      });
+    }
+    if (!plan) throw new Error("unreachable: a readable import has a plan");
     if (!plan.ok) {
       return await rollback(client, { status: "invalid", errors: plan.errors });
     }

@@ -530,13 +530,13 @@ describe("appending to a spec that already has tickets", () => {
     ).toMatch(/chain/);
   });
 
-  it("rejects edges in a file that is not an append", () => {
+  it("rejects blocks in a file that is not an append", () => {
     expect(
       errorsOf({
         tickets: [ticket("a"), ticket("b")],
         edges: [{ from: "a", to: "b" }],
       }),
-    ).toEqual([expect.stringMatching(/edges.*--append/)]);
+    ).toEqual([expect.stringMatching(/blocks.*--append/)]);
   });
 
   it("warns, for a new contract ticket, about tickets of the old one that it does not feed, by their state", () => {

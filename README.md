@@ -104,7 +104,7 @@ pnpm plat project create shop --protected-path ".github/**"
 pnpm plat repo add --project 1 --name backend --url https://github.com/<owner>/afk-pilot-backend.git
 pnpm plat repo edit backend --project 1 --contract-path openapi/openapi.yaml
 pnpm plat spec create --project 1 --type feature --title "订单备注" --file spec.md
-pnpm plat tickets import S-1 tickets.yaml
+pnpm plat tickets import S-1 docs/specs/m1-acceptance/tickets
 pnpm plat spec confirm S-1     # the scheduler starts; watch it on the page or with: pnpm plat spec show S-1
 ```
 

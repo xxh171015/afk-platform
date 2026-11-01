@@ -294,7 +294,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       let files: { name: string; text: string }[];
       try {
         files = (await io.readDirectory(directory)).sort((a, b) =>
-          a.name.localeCompare(b.name),
+          a.name.localeCompare(b.name, undefined, { numeric: true }),
         );
       } catch (error) {
         throw new Failure(

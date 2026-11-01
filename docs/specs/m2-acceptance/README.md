@@ -1,6 +1,6 @@
 # M2 验收需求：订单状态操作与取消原因
 
-M2 的验收用这个需求在两个试点仓库 `afk-pilot-backend`、`afk-pilot-frontend` 上跑一遍。票文件：[tickets.yaml](tickets.yaml)。
+M2 的验收用这个需求在两个试点仓库 `afk-pilot-backend`、`afk-pilot-frontend` 上跑一遍。票文件：目录 [tickets/](tickets/)，一张票一个 markdown 文件。
 
 ## 依赖图
 

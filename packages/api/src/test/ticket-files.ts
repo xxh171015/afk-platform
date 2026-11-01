@@ -50,7 +50,6 @@ export function ticketFile(
     `blocked_by: ${list([...(ticket.blocked_by ?? []), ...(extra.blocked_by ?? [])])}`,
     `blocks: ${list(extra.blocks)}`,
     "---",
-    "",
   ].join("\n");
   const body = [
     "## Parent",
@@ -66,7 +65,7 @@ export function ticketFile(
     ...ticket.acceptance.map((line) => `- [ ] ${line}`),
     "",
   ].join("\n");
-  return { name: `${ticket.key}.md`, text: front + body };
+  return { name: `${ticket.key}.md`, text: `${front}\n${body}` };
 }
 
 export function importBody(

@@ -154,7 +154,7 @@ export function planImport(
   }
 
   if (!existing && file.edges.length > 0) {
-    errors.push("edges can only be written in a file imported with --append");
+    errors.push("blocks can only be written in a file imported with --append");
   }
 
   const byKey = new Map<string, ImportFile["tickets"][number]>();

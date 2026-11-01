@@ -416,6 +416,25 @@ modules: ["src/orders/**"]
       expect(await count("tickets")).toBe(0);
     });
 
+    it("lists the problems of the files and of the graph of the readable ones together, and writes nothing", async () => {
+      const { specId } = await setup();
+      const { files } = importBody(specId, {
+        tickets: [
+          ticket("a", { blocked_by: ["b"] }),
+          ticket("b", { blocked_by: ["a"] }),
+        ],
+      });
+      const result = await post(`/specs/${specId}/tickets/import`, {
+        files: [...files, { name: "03-broken.md", text: "no front matter" }],
+      });
+      expect(result.status).toBe(422);
+      expect(result.body.errors).toEqual([
+        expect.stringMatching(/^03-broken\.md: the file must start/),
+        expect.stringMatching(/cycle/),
+      ]);
+      expect(await count("tickets")).toBe(0);
+    });
+
     it("says tickets.yaml is no longer accepted", async () => {
       const { specId } = await setup();
       const result = await post(`/specs/${specId}/tickets/import`, {
