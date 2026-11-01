@@ -111,8 +111,14 @@ describe("the queue of what waits for a person", () => {
       "模型放弃",
     );
     const note = card("T-1").getByRole("note");
-    expect(note.textContent).toContain("implement ended agent-gave-up in R-7");
+    expect(note.textContent).toContain("模型放弃");
+    expect(note.textContent).toContain("implement");
     expect(note.textContent).toContain("needs a decision");
+    expect(note.textContent).toContain("带一句话说明后继续");
+    expect(note.textContent).not.toContain("cannot-proceed");
+    expect(
+      card("T-1").getByRole("link", { name: "R-7" }).getAttribute("href"),
+    ).toBe("/runs/7");
     expect(
       card("T-1").getByRole("link", { name: "T-1" }).getAttribute("href"),
     ).toBe("/tickets/1");
@@ -145,7 +151,10 @@ describe("the queue of what waits for a person", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-2");
     expect(card("T-2").getByRole("note").textContent).toContain(
-      "Protected paths: .github/ci.yml",
+      ".github/ci.yml",
+    );
+    expect(card("T-2").getByRole("note").textContent).not.toContain(
+      "Protected paths:",
     );
     expect(card("T-4").getByRole("note").textContent).toContain(
       "# test failed",
@@ -549,7 +558,7 @@ describe("paused specs and stopped overall reviews", () => {
     });
     renderWithApp(<BlockedQueue />, fake);
     const item = within(await screen.findByTestId("final-S-1-(integration)"));
-    expect(item.getByText("final-e2e-failed")).toBeTruthy();
+    expect(item.getByTitle("final-e2e-failed")).toBeTruthy();
     expect(item.getByText(/e2e before the pull requests/)).toBeTruthy();
     expect(
       item.getByRole("button", { name: "Run final-e2e again" }),

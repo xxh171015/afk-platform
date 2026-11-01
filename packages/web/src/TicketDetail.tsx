@@ -8,6 +8,8 @@ import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 import { Sha } from "./Sha.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
+import { StructuredBriefView } from "./StructuredBriefView.tsx";
+import { structuredBrief } from "./structured-brief.ts";
 
 // One ticket: its runs as a thin table into /runs/:id, what the gates measured, and what the reviews found.
 
@@ -103,14 +105,11 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
           ""
         )}
       </p>
-      {ticket.brief ? (
-        <div className="brief" role="note">
-          <strong>
-            {ticket.brief.stage} ended {ticket.brief.result ?? "?"}
-          </strong>{" "}
-          in {ticket.brief.run.displayId}
-          <pre>{JSON.stringify(ticket.brief.output, null, 2)}</pre>
-        </div>
+      {ticket.brief && ticket.blockedReason ? (
+        <StructuredBriefView
+          brief={structuredBrief(ticket.blockedReason, ticket.brief)}
+          runId={ticket.brief.run.id}
+        />
       ) : null}
 
       <div className="two-columns">

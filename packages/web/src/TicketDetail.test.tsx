@@ -342,9 +342,13 @@ describe("the ticket page", () => {
     });
     renderWithApp(<TicketDetail ticketId={4} />, server);
     const note = await screen.findByRole("note");
-    expect(note.textContent).toContain("gate ended failed");
-    expect(note.textContent).toContain("R-11");
+    expect(note.textContent).toContain("门禁失败");
+    expect(note.textContent).toContain("gate");
     expect(note.textContent).toContain("# test failed");
+    expect(note.textContent).not.toContain("failureLog");
+    expect(
+      within(note).getByRole("link", { name: "R-11" }).getAttribute("href"),
+    ).toBe("/runs/11");
     expect(screen.getByTitle("gate-failed").textContent).toBe("门禁失败");
   });
 

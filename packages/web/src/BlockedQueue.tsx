@@ -11,6 +11,8 @@ import { useResourcePoll } from "./EventsProvider.tsx";
 import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
+import { StructuredBriefView } from "./StructuredBriefView.tsx";
+import { structuredBrief } from "./structured-brief.ts";
 import { WORKBENCH_KEY } from "./Workbench.tsx";
 
 // Everything that waits for a person: blocked tickets with the reason and what went wrong, specs the platform
@@ -54,31 +56,19 @@ function useAction<Action>(run: (action: Action) => Promise<unknown>) {
   });
 }
 
-function Brief({ brief }: { brief: Queue["tickets"][number]["brief"] }) {
-  if (!brief) return null;
-  const output = brief.output as {
-    detail?: unknown;
-    failureLog?: unknown;
-    unapproved?: unknown;
-  } | null;
-  const detail =
-    typeof output?.detail === "string"
-      ? output.detail
-      : Array.isArray(output?.unapproved)
-        ? `Protected paths: ${output.unapproved.join(", ")}`
-        : typeof output?.failureLog === "string"
-          ? output.failureLog
-          : output
-            ? JSON.stringify(output)
-            : "";
+function Brief({
+  reason,
+  brief,
+}: {
+  reason: string | null;
+  brief: Queue["tickets"][number]["brief"];
+}) {
+  if (!brief || !reason) return null;
   return (
-    <div className="brief" role="note">
-      <strong>
-        {brief.stage} ended {brief.result ?? "?"}
-      </strong>{" "}
-      in {brief.run.displayId}
-      {detail ? <pre>{detail}</pre> : null}
-    </div>
+    <StructuredBriefView
+      brief={structuredBrief(reason, brief)}
+      runId={brief.run.id}
+    />
   );
 }
 
@@ -135,7 +125,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
       <p>
         <StatusBadge kind="blocked" code={ticket.blockedReason ?? "blocked"} />
       </p>
-      <Brief brief={ticket.brief} />
+      <Brief reason={ticket.blockedReason} brief={ticket.brief} />
       {canRetry ? null : (
         <p className="note">
           A ticket it waited for was cancelled, so trying again would only wait
@@ -303,7 +293,7 @@ function BlockedFinalization({
         {item.step}{" "}
         <StatusBadge kind="blocked" code={item.blockedReason ?? "blocked"} />
       </p>
-      <Brief brief={item.brief} />
+      <Brief reason={item.blockedReason} brief={item.brief} />
       <div className="actions">
         <button
           type="button"
