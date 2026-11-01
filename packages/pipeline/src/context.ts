@@ -21,24 +21,6 @@ export interface ContextInput {
   contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
 }
 
-function ticketMarkdown(bundle: Bundle): string {
-  const { ticket } = bundle;
-  if (!ticket) return "";
-  return [
-    `# ${ticket.displayId} ${ticket.title}`,
-    "",
-    `Type: ${ticket.type}`,
-    "",
-    "## Acceptance criteria",
-    ...ticket.acceptanceCriteria.map((item) => `- ${item}`),
-    "",
-    "## Modules",
-    ...ticket.modules.map((glob) => `- ${glob}`),
-    "",
-    ticket.body ? `## Details\n\n${ticket.body}` : "",
-  ].join("\n");
-}
-
 function specTicketsMarkdown(bundle: Bundle): string {
   return [
     `# Tickets of ${bundle.spec.displayId}`,
@@ -79,7 +61,7 @@ export function renderContext(input: ContextInput): void {
   const { dir, bundle } = input;
   mkdirSync(dir, { recursive: true });
   if (bundle.ticket) {
-    writeFileSync(join(dir, "ticket.md"), ticketMarkdown(bundle));
+    writeFileSync(join(dir, "ticket.md"), bundle.ticket.file);
   } else {
     // a finalization has no ticket of its own: it is given what all the tickets set out to do
     writeFileSync(join(dir, "tickets.md"), specTicketsMarkdown(bundle));

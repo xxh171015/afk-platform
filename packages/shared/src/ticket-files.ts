@@ -1,4 +1,4 @@
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { formatDisplayId } from "./display-id.ts";
 import { readSkillSnapshot } from "./skills-snapshot.ts";
@@ -100,13 +100,12 @@ function sectionsOf(body: string, firstLine: number): Section[] {
   return sections;
 }
 
-function readTicket(
-  file: TicketFile,
-  specShown: string,
-  names: ReturnType<typeof templateSections>,
-): { ticket: ImportFile["tickets"][number]; blocks: string[] } | string[] {
-  const where = file.name;
-  const text = file.text.replace(/\r\n/g, "\n");
+// The front matter and the body of a ticket file, with the line the body starts on.
+function splitFile(
+  where: string,
+  rawText: string,
+): { front: string; body: string; firstBodyLine: number } | string[] {
+  const text = rawText.replace(/\r\n/g, "\n");
   const opening = /^---\n/.exec(text);
   if (!opening)
     return [`${where}: the file must start with a --- front matter`];
@@ -122,30 +121,44 @@ function readTicket(
   const bodyStart = text[afterFront] === "\n" ? afterFront + 1 : afterFront;
   const firstBodyLine = text.slice(0, bodyStart).split("\n").length;
   const body = `${text.slice(bodyStart).replace(/\n+$/, "")}\n`;
+  return { front, body, firstBodyLine };
+}
 
+function parseFront<T extends z.ZodType>(
+  where: string,
+  front: string,
+  schema: T,
+): { value: z.output<T> } | { errors: string[] } {
   let raw: unknown;
   try {
     raw = parseYaml(front);
   } catch (error) {
-    return [
-      `${where}: the front matter is not valid YAML: ${(error as Error).message}`,
-    ];
+    return {
+      errors: [
+        `${where}: the front matter is not valid YAML: ${(error as Error).message}`,
+      ],
+    };
   }
-  const parsed = FrontMatter.safeParse(raw ?? {});
-  const errors: string[] = [];
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      errors.push(
+  const parsed = schema.safeParse(raw ?? {});
+  if (parsed.success) return { value: parsed.data };
+  return {
+    errors: parsed.error.issues.map(
+      (issue) =>
         `${where}: front matter ${issue.path.join(".") || "(whole)"}: ${issue.message}`,
-      );
-    }
-  }
-  const key = file.name.replace(/\.md$/, "");
-  if (!KEY.test(key))
-    errors.push(
-      `${where}: the file name (without .md) is the ticket's key, and may only hold letters, digits, . _ -`,
-    );
+    ),
+  };
+}
 
+// The checks on a body that hold for an imported ticket and an edited one alike: it names the spec as its parent,
+// has no Blocked by section, and its acceptance criteria are single-line checkboxes. Returns the criteria.
+function readBody(
+  where: string,
+  body: string,
+  firstBodyLine: number,
+  specShown: string,
+  names: ReturnType<typeof templateSections>,
+  errors: string[],
+): string[] {
   const sections = sectionsOf(body, firstBodyLine);
   const section = (name: string) => sections.find((s) => s.name === name);
   const parent = section(names.parent);
@@ -190,9 +203,35 @@ function readTicket(
         `${where}:${criteria.line}: \`## ${names.acceptance}\` is empty`,
       );
   }
+  return acceptance;
+}
 
-  if (errors.length > 0 || !parsed.success) return errors;
-  const { blocks, ...fields } = parsed.data;
+function readTicket(
+  file: TicketFile,
+  specShown: string,
+  names: ReturnType<typeof templateSections>,
+): { ticket: ImportFile["tickets"][number]; blocks: string[] } | string[] {
+  const where = file.name;
+  const split = splitFile(where, file.text);
+  if (Array.isArray(split)) return split;
+  const { front, body, firstBodyLine } = split;
+  const parsed = parseFront(where, front, FrontMatter);
+  const errors: string[] = "errors" in parsed ? [...parsed.errors] : [];
+  const key = file.name.replace(/\.md$/, "");
+  if (!KEY.test(key))
+    errors.push(
+      `${where}: the file name (without .md) is the ticket's key, and may only hold letters, digits, . _ -`,
+    );
+  const acceptance = readBody(
+    where,
+    body,
+    firstBodyLine,
+    specShown,
+    names,
+    errors,
+  );
+  if (errors.length > 0 || !("value" in parsed)) return errors;
+  const { blocks, ...fields } = parsed.value;
   return {
     ticket: { key, ...fields, body, acceptance },
     blocks,
@@ -236,4 +275,85 @@ export function readTicketFiles(
   return errors.length > 0
     ? { ok: false, errors, parsed: { tickets, edges }, failed }
     : { ok: true, input: { tickets, edges } };
+}
+
+// What `plat ticket edit --file` reads: the file `plat ticket view --md` prints. Title, body and modules can be
+// changed; the fields that cannot are optional, and compared with the ticket by the caller.
+const EditFront = z.strictObject({
+  id: z.string().optional(),
+  version: z.number().int().optional(),
+  title: z.string().min(1),
+  modules: z.array(z.string().min(1)).min(1),
+  protected_paths_ok: z.array(z.string().min(1)).optional(),
+  repo: z.string().optional(),
+  type: z.string().optional(),
+  contract: z
+    .union([z.string(), z.array(z.string())])
+    .transform((value) => (typeof value === "string" ? [value] : value))
+    .optional(),
+  refs: z.array(z.string()).optional(),
+  environment: z.array(z.string()).optional(),
+  blocked_by: z.array(z.string()).optional(),
+});
+
+export type TicketEditFile = Omit<z.output<typeof EditFront>, "version"> & {
+  body: string;
+  acceptance: string[];
+};
+
+export function readTicketEditFile(
+  text: string,
+  specId: number,
+): { ok: true; edit: TicketEditFile } | { ok: false; errors: string[] } {
+  const where = "the ticket file";
+  const split = splitFile(where, text);
+  if (Array.isArray(split)) return { ok: false, errors: split };
+  const parsed = parseFront(where, split.front, EditFront);
+  const errors: string[] = "errors" in parsed ? [...parsed.errors] : [];
+  const acceptance = readBody(
+    where,
+    split.body,
+    split.firstBodyLine,
+    formatDisplayId("spec", specId),
+    templateSections(),
+    errors,
+  );
+  if (errors.length > 0 || !("value" in parsed)) return { ok: false, errors };
+  // the version the file was printed at is only there to be read: an edit applies to the ticket as it is now
+  const { version: _version, ...fields } = parsed.value;
+  return { ok: true, edit: { ...fields, body: split.body, acceptance } };
+}
+
+// The file of a ticket as an agent reads it, `plat ticket view --md` prints it and `plat ticket edit --file` takes
+// it back: the front matter, then the body exactly as stored. Dependencies are named by T-<n>.
+export interface TicketFileView {
+  id: string;
+  version: number;
+  title: string;
+  repo: string;
+  type: string;
+  modules: string[];
+  protectedPathsOk: string[];
+  contract: string[];
+  refs: string[];
+  environment: string[];
+  blockedBy: string[];
+  body: string;
+}
+
+export function renderTicketFile(ticket: TicketFileView): string {
+  const front = stringifyYaml({
+    id: ticket.id,
+    version: ticket.version,
+    title: ticket.title,
+    repo: ticket.repo,
+    type: ticket.type,
+    modules: ticket.modules,
+    protected_paths_ok: ticket.protectedPathsOk,
+    contract: ticket.contract,
+    refs: ticket.refs,
+    environment: ticket.environment,
+    blocked_by: ticket.blockedBy,
+  });
+  return `---\n${front}---\n${ticket.body}`;
 }

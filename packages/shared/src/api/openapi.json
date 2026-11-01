@@ -1404,6 +1404,9 @@
                         },
                         "restart": {
                           "type": "boolean"
+                        },
+                        "file": {
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -1418,7 +1421,8 @@
                         "contentVersion",
                         "fixCounts",
                         "reviewed",
-                        "restart"
+                        "restart",
+                        "file"
                       ]
                     },
                     "specTickets": {
@@ -2485,6 +2489,9 @@
                         "contentVersion": {
                           "type": "integer"
                         },
+                        "file": {
+                          "type": "string"
+                        },
                         "contractSha": {
                           "type": ["string", "null"]
                         },
@@ -2517,6 +2524,7 @@
                         "modules",
                         "allowedProtectedPaths",
                         "contentVersion",
+                        "file",
                         "contractSha",
                         "fixCounts",
                         "reviewed"
@@ -4820,77 +4828,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "key": {
+                  "file": {
                     "type": "string"
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "body": {
-                    "type": "string"
-                  },
-                  "acceptance": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "minItems": 1
-                  },
-                  "modules": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "minItems": 1
-                  },
-                  "protected_paths_ok": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "repo": {
-                    "type": "string"
-                  },
-                  "type": {
-                    "type": "string"
-                  },
-                  "refs": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "environment": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "blocked_by": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "contract": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
-                    ]
                   }
                 },
+                "required": ["file"],
                 "additionalProperties": false
               }
             }
@@ -4898,7 +4840,7 @@
         },
         "responses": {
           "200": {
-            "description": "Edited; the content version went up by one",
+            "description": "Edited (the content version went up by one), or the file said what the ticket already has (changed: false)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4909,9 +4851,12 @@
                     },
                     "contentVersion": {
                       "type": "integer"
+                    },
+                    "changed": {
+                      "type": "boolean"
                     }
                   },
-                  "required": ["id", "contentVersion"]
+                  "required": ["id", "contentVersion", "changed"]
                 }
               }
             }
@@ -4949,7 +4894,7 @@
             }
           },
           "422": {
-            "description": "The edit changes something that cannot be changed, or nothing",
+            "description": "The file is not a valid ticket file, or changes something that cannot be changed",
             "content": {
               "application/json": {
                 "schema": {

@@ -535,31 +535,60 @@ describe("plat", () => {
     expect((await plat("spec", "show", "S-1")).stdout).toContain("(appended)");
   });
 
-  it("edits a pending ticket from a file and shows an older version of it", async () => {
+  it("prints a ticket's file with --md, edits the ticket from such a file and shows an older version of it", async () => {
     await register();
     putTickets("tickets", TICKETS);
     await plat("tickets", "import", "S-1", "tickets");
-    files["edit.yaml"] =
-      "title: A better title\nacceptance:\n  - it is faster\n";
-    const edited = await plat("ticket", "edit", "T-2", "--file", "edit.yaml");
+
+    const md = await plat("ticket", "view", "T-2", "--md");
+    expect(md.code).toBe(0);
+    expect(md.stdout).toMatch(/^---\nid: T-2\nversion: 1\ntitle: /);
+    expect(md.stdout).toContain("blocked_by:\n  - T-1\n");
+    expect(md.stdout).toContain("## Acceptance criteria");
+    // byte for byte what the API hands the agent
+    const viewed = JSON.parse(
+      (await plat("--json", "ticket", "view", "T-2")).stdout,
+    );
+    expect(md.stdout).toBe(viewed.ticket.file);
+    // the text view carries the body as well
+    expect((await plat("ticket", "view", "T-2")).stdout).toContain(
+      "- [ ] returns CSV",
+    );
+
+    files["edit.md"] = md.stdout
+      .replace("Implement the export", "A better title")
+      .replace("- [ ] returns CSV", "- [ ] it is faster");
+    const edited = await plat("ticket", "edit", "T-2", "--file", "edit.md");
     expect(edited).toEqual({
       code: 0,
       stdout: "T-2 is now at version 2\n",
       stderr: "",
     });
+    const again = await plat("ticket", "edit", "T-2", "--file", "edit.md");
+    expect(again.stdout).toBe("T-2 is unchanged (version 2)\n");
 
     const now = (await plat("ticket", "view", "T-2")).stdout;
     expect(now).toContain("A better title");
+    expect(now).toContain("- [ ] it is faster");
     expect(now).toContain("versions: 1, 2 (shown: 2)");
     const first = (await plat("ticket", "view", "T-2", "--version", "1"))
       .stdout;
     expect(first).not.toContain("A better title");
     expect(first).toContain("(shown: 1)");
+    const firstMd = await plat(
+      "ticket",
+      "view",
+      "T-2",
+      "--md",
+      "--version",
+      "1",
+    );
+    expect(firstMd.stdout).toBe(md.stdout);
 
-    files["bad.yaml"] = "repo: frontend\n";
-    const refused = await plat("ticket", "edit", "T-2", "--file", "bad.yaml");
+    files["bad.md"] = md.stdout.replace("repo: backend", "repo: frontend");
+    const refused = await plat("ticket", "edit", "T-2", "--file", "bad.md");
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toMatch(/cancel the ticket and append/);
+    expect(refused.stderr).toMatch(/repo: .*cancel the ticket and append/);
   });
 
   it("shows the repo, refs and environment of tickets", async () => {

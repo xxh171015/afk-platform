@@ -6,6 +6,7 @@ import {
   type TicketState,
   ticketTransition,
 } from "@afk/shared";
+import { readTicketEditFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import {
   CLEANUP_GRACE_SECONDS,
@@ -181,24 +182,8 @@ export async function allowPaths(
   });
 }
 
-// What a person may change in a ticket that has not started, in the shape of one ticket of an import file. The
-// fields that are not editable are accepted only to say plainly why they cannot be changed.
-export interface TicketEdit {
-  title?: string;
-  body?: string;
-  acceptance?: string[];
-  modules?: string[];
-  protected_paths_ok?: string[];
-  repo?: string;
-  type?: string;
-  refs?: string[];
-  environment?: string[];
-  blocked_by?: string[];
-  contract?: string[];
-}
-
 export type EditResult =
-  | { status: "ok"; contentVersion: number }
+  | { status: "ok"; contentVersion: number; changed: boolean }
   | { status: "no-ticket" }
   | { status: "refused"; message: string }
   | { status: "invalid"; message: string };
@@ -206,12 +191,13 @@ export type EditResult =
 const sameSet = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((x) => b.includes(x));
 
-// A pending or blocked ticket gets new content: the version goes up by one, the state stays, and the snapshot of
-// the new version is kept. Whatever starts the ticket afterwards reads the new content.
+// A pending or blocked ticket gets new content from a ticket file (what `plat ticket view --md` prints): only the
+// title, body, modules and approved protected paths can change. The acceptance criteria are read out of the new
+// body. The version goes up by one, and the snapshot of the new version is kept, only when something changed.
 export async function editTicket(
   pool: pg.Pool,
   ticketId: number,
-  edit: TicketEdit,
+  fileText: string,
 ): Promise<EditResult> {
   return inTransaction(pool, async (client) => {
     const ticket = await loadLocked(client, ticketId);
@@ -222,30 +208,50 @@ export async function editTicket(
       );
     }
     const current = await client.query(
-      `SELECT t.title, t.body, t.acceptance_criteria, t.modules, t.allowed_protected_paths, t.type, t.refs,
-              t.environment, r.name AS repo
+      `SELECT t.spec_id, t.title, t.body, t.acceptance_criteria, t.modules, t.allowed_protected_paths, t.type,
+              t.refs, t.environment, t.content_version, r.name AS repo
        FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
       [ticketId],
     );
     const now = current.rows[0];
-    const cannot = (field: string) => ({
-      status: "invalid" as const,
-      message: `${field} of a ticket cannot be changed; cancel the ticket and append a new one (plat tickets import --append)`,
-    });
-    if (edit.repo !== undefined && edit.repo !== now.repo)
-      return cannot("the repo");
-    if (edit.type !== undefined && edit.type !== now.type)
-      return cannot("the type");
-    if (edit.refs !== undefined && !sameSet(edit.refs, now.refs))
-      return cannot("refs");
-    if (
-      edit.environment !== undefined &&
-      !sameSet(edit.environment, now.environment)
-    ) {
-      return cannot("environment");
+    const read = readTicketEditFile(fileText, now.spec_id as number);
+    if (!read.ok) return { status: "invalid", message: read.errors.join("\n") };
+    const edit = read.edit;
+    const shown = formatDisplayId("ticket", ticketId);
+    if (edit.id !== undefined && edit.id !== shown) {
+      return {
+        status: "invalid",
+        message: `id: the file is of ${edit.id}, not ${shown}`,
+      };
     }
-    if (edit.blocked_by?.length || edit.contract?.length) {
-      return cannot("the dependency edges");
+    const edges = await client.query<{ from_ticket_id: number; kind: string }>(
+      "SELECT from_ticket_id, kind FROM edges WHERE to_ticket_id = $1",
+      [ticketId],
+    );
+    const upstream = (kind: string) =>
+      edges.rows
+        .filter((e) => e.kind === kind)
+        .map((e) => formatDisplayId("ticket", e.from_ticket_id));
+    // fields that cannot change may be left out; written, they must say what the ticket has
+    const fixed: [string, string | string[] | undefined, string | string[]][] =
+      [
+        ["repo", edit.repo, now.repo],
+        ["type", edit.type, now.type],
+        ["contract", edit.contract, upstream("contract")],
+        ["refs", edit.refs, now.refs],
+        ["environment", edit.environment, now.environment],
+        ["blocked_by", edit.blocked_by, upstream("blocks")],
+      ];
+    for (const [field, written, has] of fixed) {
+      const differs = Array.isArray(written)
+        ? !sameSet(written, has as string[])
+        : written !== undefined && written !== has;
+      if (differs) {
+        return {
+          status: "invalid",
+          message: `${field}: a ticket's ${field} cannot be changed (the file has ${JSON.stringify(written)}, the ticket ${JSON.stringify(has)}); cancel the ticket and append a new one (plat tickets import --append)`,
+        };
+      }
     }
 
     const changes: [string, unknown][] = [];
@@ -268,8 +274,9 @@ export async function editTicket(
     );
     if (changes.length === 0) {
       return {
-        status: "invalid",
-        message: "nothing to change: the file says what the ticket already has",
+        status: "ok",
+        contentVersion: now.content_version as number,
+        changed: false,
       };
     }
     const assignments = changes.map(([column], i) => `${column} = $${i + 2}`);
@@ -282,6 +289,7 @@ export async function editTicket(
     return {
       status: "ok",
       contentVersion: updated.rows[0]?.content_version as number,
+      changed: true,
     };
   });
 }

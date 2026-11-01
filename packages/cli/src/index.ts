@@ -6,7 +6,6 @@ import {
   specTemplateWarnings,
 } from "@afk/shared/spec-template";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
-import { parse as parseYaml } from "yaml";
 import { blockedText, specText, ticketText } from "./format.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -428,12 +427,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   ticketCommands
     .command("view <ticket>")
     .description(
-      "a ticket with its runs, findings and, when blocked, its brief",
+      "a ticket with its body, runs, findings and, when blocked, its brief",
     )
     .option(
       "--version <n>",
       "show the content the ticket had at that version",
       toInt,
+    )
+    .option(
+      "--md",
+      "print the ticket file an agent reads (the same text plat ticket edit --file takes)",
     )
     .action(async (id: string, options) => {
       const { data, response, error } = await api().GET("/tickets/{id}", {
@@ -444,36 +447,35 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         },
       });
       if (!data) throw failureFrom(response, error);
-      print(data, ticketText(data));
+      if (options.md) io.stdout(data.ticket.file);
+      else print(data, ticketText(data));
     });
   ticketCommands
     .command("edit <ticket>")
     .description(
-      "change the content of a pending or blocked ticket from a file (one ticket in the format of tickets.yaml: title, body, acceptance, modules, protected_paths_ok); the content version goes up by one",
+      "change a pending or blocked ticket from a ticket file (what plat ticket view --md prints): its title, body, modules and approved protected paths; the acceptance criteria are read from the body. The content version goes up by one if anything changed",
     )
-    .requiredOption("--file <file>", "YAML with the fields to change")
+    .requiredOption("--file <file>", "the ticket file")
     .action(async (id: string, options) => {
-      let document: unknown;
+      let file: string;
       try {
-        document = parseYaml(await io.readFile(options.file));
+        file = await io.readFile(options.file);
       } catch (error) {
         throw new Failure(
           `cannot read ${options.file}: ${(error as Error).message}`,
         );
       }
-      if (
-        typeof document !== "object" ||
-        document === null ||
-        Array.isArray(document)
-      ) {
-        throw new Failure(`${options.file} must be a YAML mapping`);
-      }
       const { data, response, error } = await api().POST("/tickets/{id}/edit", {
         params: { path: { id: ticketIdOf(id) } },
-        body: document as Record<string, never>,
+        body: { file },
       });
       if (!data) throw failureFrom(response, error);
-      print(data, `${id} is now at version ${data.contentVersion}`);
+      print(
+        data,
+        data.changed
+          ? `${id} is now at version ${data.contentVersion}`
+          : `${id} is unchanged (version ${data.contentVersion})`,
+      );
     });
   ticketCommands
     .command("retry <ticket>")

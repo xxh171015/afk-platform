@@ -238,7 +238,7 @@ export function blockedText(queue: {
 
 export function ticketText(view: {
   ticket: TicketLike & {
-    acceptanceCriteria: string[];
+    body: string;
     allowedProtectedPaths: string[];
     fixCounts: Record<string, number>;
     contentVersion: number;
@@ -275,8 +275,9 @@ export function ticketText(view: {
           `integration: ${view.integration.rounds} of ${MAX_INTEGRATION_ROUNDS} fix rounds used`,
         ]
       : []),
-    "acceptance:",
-    ...ticket.acceptanceCriteria.map((c) => `  - ${c}`),
+    "",
+    ticket.body.trimEnd(),
+    "",
     ...(ticket.allowedProtectedPaths.length
       ? [`approved protected paths: ${ticket.allowedProtectedPaths.join(", ")}`]
       : []),

@@ -872,6 +872,7 @@ export interface paths {
                 };
                 reviewed: boolean;
                 restart: boolean;
+                file: string;
               } | null;
               specTickets: {
                 displayId: string;
@@ -1412,6 +1413,7 @@ export interface paths {
                 modules: string[];
                 allowedProtectedPaths: string[];
                 contentVersion: number;
+                file: string;
                 contractSha: string | null;
                 fixCounts: {
                   [key: string]: number;
@@ -2302,23 +2304,12 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
-            key?: string;
-            title?: string;
-            body?: string;
-            acceptance?: string[];
-            modules?: string[];
-            protected_paths_ok?: string[];
-            repo?: string;
-            type?: string;
-            refs?: string[];
-            environment?: string[];
-            blocked_by?: string[];
-            contract?: string | string[];
+            file: string;
           };
         };
       };
       responses: {
-        /** @description Edited; the content version went up by one */
+        /** @description Edited (the content version went up by one), or the file said what the ticket already has (changed: false) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2327,6 +2318,7 @@ export interface paths {
             "application/json": {
               id: number;
               contentVersion: number;
+              changed: boolean;
             };
           };
         };
@@ -2352,7 +2344,7 @@ export interface paths {
             };
           };
         };
-        /** @description The edit changes something that cannot be changed, or nothing */
+        /** @description The file is not a valid ticket file, or changes something that cannot be changed */
         422: {
           headers: {
             [name: string]: unknown;

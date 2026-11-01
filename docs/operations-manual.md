@@ -206,7 +206,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | 票 blocked，想让它再试一次 | `plat ticket retry T-n`（可加 `--mode continue` 接着做 / `--mode restart` 重来） |
 | 门禁发现改了保护路径，且你同意 | `plat ticket approve-protected T-n`，再 retry |
 | 票需要改某个保护路径但文件里没批准 | `plat ticket allow-path T-n <路径>`，再 retry |
-| 票的描述有问题 | `plat ticket edit T-n --file t.yaml`（只对 pending / blocked 的票，可改标题、正文、验收标准、模块；改仓库、类型、依赖边要取消后追加） |
+| 票的描述有问题 | `plat ticket view T-n --md > t.md`，改完 `plat ticket edit T-n --file t.md`（只对 pending / blocked 的票，可改标题、正文、模块、已批准的保护路径，验收标准从正文重新解析；改仓库、类型、依赖要取消后追加） |
 | 漏了票或要拆票 | `plat tickets import S-n more.yaml --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
 | 不要这张票了 | `plat ticket cancel T-n`（`--cascade` 一并取消下游） |
 | spec 暂停（超出 agent 时长） | `plat spec resume S-n`（可给更多时间） |

@@ -6,6 +6,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
+import { ticketFileOf } from "../tickets/ticket-file.ts";
 import { contractsOf } from "./contracts.ts";
 import { environmentOf, refsOf } from "./refs.ts";
 
@@ -47,6 +48,8 @@ export interface Bundle {
     contentVersion: number;
     fixCounts: Record<string, number>;
     reviewed: boolean;
+    // The ticket as one markdown file (the same as GET /tickets/{id}'s file): /context/ticket.md.
+    file: string;
     // A restart-retry: the implement run starts from the integration branch, not from the old ticket branch.
     restart: boolean;
   } | null;
@@ -197,6 +200,7 @@ export async function buildBundle(
       fixCounts: row.fix_counts,
       reviewed: row.reviewed,
       restart: row.restart,
+      file: (await ticketFileOf(pool, row.id)) as string,
     },
     specTickets: [],
     spec: {

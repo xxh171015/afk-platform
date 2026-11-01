@@ -131,6 +131,8 @@ const ticketRoute = createRoute({
           modules: z.array(z.string()),
           allowedProtectedPaths: z.array(z.string()),
           contentVersion: Id,
+          // The ticket as one markdown file, as the agent reads it (also /context/ticket.md).
+          file: z.string(),
           contractSha: z.string().nullable(),
           fixCounts: z.record(z.string(), Id),
           reviewed: z.boolean(),
@@ -367,38 +369,19 @@ const editRoute = createRoute({
   path: "/tickets/{id}/edit",
   request: {
     params: z.object({ id: PathId }),
-    // One ticket of an import file. Only the content can change; the other fields are accepted to explain why not.
-    body: {
-      content: json(
-        z.strictObject({
-          key: z.string().optional(),
-          title: z.string().min(1).optional(),
-          body: z.string().optional(),
-          acceptance: z.array(z.string().min(1)).min(1).optional(),
-          modules: z.array(z.string().min(1)).min(1).optional(),
-          protected_paths_ok: z.array(z.string().min(1)).optional(),
-          repo: z.string().optional(),
-          type: z.string().optional(),
-          refs: z.array(z.string()).optional(),
-          environment: z.array(z.string()).optional(),
-          blocked_by: z.array(z.string()).optional(),
-          contract: z
-            .union([z.string(), z.array(z.string())])
-            .transform((v) => (typeof v === "string" ? [v] : v))
-            .optional(),
-        }),
-      ),
-    },
+    // A ticket file, as `plat ticket view --md` prints it: only the title, body, modules and approved protected
+    // paths can change; the other fields may be left out, and written must say what the ticket has.
+    body: { content: json(z.strictObject({ file: z.string() })) },
   },
   responses: {
     200: reply(
-      "Edited; the content version went up by one",
-      z.object({ id: Id, contentVersion: Id }),
+      "Edited (the content version went up by one), or the file said what the ticket already has (changed: false)",
+      z.object({ id: Id, contentVersion: Id, changed: z.boolean() }),
     ),
     404: reply("No such ticket", ErrorReply),
     409: reply("The ticket is not pending or blocked", ErrorReply),
     422: reply(
-      "The edit changes something that cannot be changed, or nothing",
+      "The file is not a valid ticket file, or changes something that cannot be changed",
       ErrorReply,
     ),
   },
@@ -616,14 +599,17 @@ export function registerTicketRoutes(
 
   app.openapi(editRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const result = await editTicket(pool, id, c.req.valid("json"));
+    const result = await editTicket(pool, id, c.req.valid("json").file);
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     if (result.status === "invalid")
       return c.json({ error: result.message }, 422);
-    return c.json({ id, contentVersion: result.contentVersion }, 200);
+    return c.json(
+      { id, contentVersion: result.contentVersion, changed: result.changed },
+      200,
+    );
   });
 
   app.openapi(allowPathsRoute, async (c) => {

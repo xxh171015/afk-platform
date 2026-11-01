@@ -27,9 +27,8 @@ describe("renderContext", () => {
   it("writes ticket.md, spec.md and run.json", () => {
     const dir = ctxDir();
     renderContext({ dir, bundle: bundleFor(), run });
-    expect(read(dir, "ticket.md")).toContain("# T-123 Export orders as CSV");
-    expect(read(dir, "ticket.md")).toContain("- returns text/csv");
-    expect(read(dir, "ticket.md")).toContain("- src/orders/**");
+    // the ticket file of the bundle, byte for byte
+    expect(read(dir, "ticket.md")).toBe(bundleFor().ticket?.file);
     expect(read(dir, "ticket.md")).toContain("Add GET /orders/export.");
     expect(read(dir, "spec.md")).toContain("# S-12 Order export");
     expect(read(dir, "spec.md")).toContain("Customers want CSV.");

@@ -7,6 +7,7 @@ import {
   type IntegrationAttempt,
   integrationAttempts,
 } from "./integration-attempts.ts";
+import { ticketFileOf } from "./ticket-file.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -283,6 +284,7 @@ export async function ticketView(
     ticket: {
       ...summary,
       ...content,
+      file: (await ticketFileOf(pool, ticketId, version)) as string,
       contractSha: (d.contract_sha as string | null) ?? null,
       fixCounts: d.fix_counts as Record<string, number>,
       reviewed: d.reviewed as boolean,

@@ -13,7 +13,7 @@ const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
     environment: [],
     appended: false,
     brief: null,
-    acceptanceCriteria: [],
+    body: "## Acceptance criteria\n\n- [ ] a\n",
     allowedProtectedPaths: [],
     fixCounts: {},
     contentVersion: 1,

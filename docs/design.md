@@ -912,7 +912,7 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 
 | 路径                          | 内容                                                                                                                                                                                 | 何时有              |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- |
-| `/context/ticket.md`          | 票正文、验收标准、模块、目标仓库、内容版本                                                                                                                                           | 总是                |
+| `/context/ticket.md`          | 这张票的文件：front matter（`id`、`version`、标题、仓库、模块…）加导入时的正文原文，与 `plat ticket view --md` 一致                                                                                                                                           | 总是                |
 | `/context/spec.md`            | spec 正文，包括已确认的 seams 和共享名字                                                                                                                                             | 总是                |
 | `/context/run.json`           | 阶段、基准提交（fixed point）、分支名、集成分支名、上限、`allowedProtectedPaths`（这张票已批准可以改的保护路径，没有则为空数组）                                                     | 总是                |
 | `/context/contract/<仓库名>/` | 固定 SHA 上的契约文件，按提供契约的仓库分开                                                                                                                                                          | 有契约边时          |
@@ -971,7 +971,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat tickets import S-12 more.yaml --append`      | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
 | `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做） |
 | `plat spec show S-12` / `plat ticket view T-123`   | 查看                                        |
-| `plat ticket edit T-123 --file t.yaml`             | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版） |
+| `plat ticket edit T-123 --file t.md`               | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版） |
 | `plat ticket retry T-123 --mode continue\|restart` | 处理 blocked                                |
 | `plat ticket approve-protected T-123`              | 批准保护路径改动                            |
 | `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |

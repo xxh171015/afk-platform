@@ -144,6 +144,8 @@ const Bundle = z.object({
       fixCounts: z.record(z.string(), z.number().int()),
       reviewed: z.boolean(),
       restart: z.boolean(),
+      // The ticket as one markdown file: what the agent reads as /context/ticket.md.
+      file: z.string(),
     })
     .nullable(),
   specTickets: z.array(
