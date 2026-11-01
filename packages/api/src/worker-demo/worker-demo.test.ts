@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAppTokenSource, createGitHubAdapter } from "@afk/host";
 import { FakeGitHub } from "@afk/host/testing";
-import { GateCache, git, gitOut } from "@afk/pipeline";
+import {
+  composePrompt,
+  GateCache,
+  git,
+  gitOut,
+  promptFor,
+} from "@afk/pipeline";
 import {
   type FakeAgentContext,
   FakeAgentRunner,
@@ -250,6 +256,59 @@ describe("a whole spec with a fake agent", () => {
       expect(body).toContain(`Ticket: ${id}`);
       expect(body).toContain(`Run: ${run}`);
     }
+  });
+
+  it("gives every agent the overlay and its stage's prompt and the ticket file, and records the whole prompt on the Run", async () => {
+    await confirmedSpec([ticket("a")]);
+    const seen: { stage: string; prompt: string; ticket?: string }[] = [];
+    const executor = deps({
+      script: (ctx) => {
+        seen.push({
+          stage: ctx.stage,
+          prompt: ctx.prompt,
+          ticket: ctx.context("ticket.md"),
+        });
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+
+    expect(seen.map((s) => s.stage)).toEqual([
+      "implement",
+      "review",
+      "final-review",
+    ]);
+    for (const s of seen) {
+      expect(s.prompt).toBe(composePrompt(promptFor(s.stage as "implement")));
+      expect(s.prompt).toContain("没有人会回答你");
+    }
+    // the agent reads the ticket file the API shows, byte for byte
+    const shown = (await fetch(`${api.url}/tickets/1`).then((r) => r.json()))
+      .ticket.file;
+    expect(seen[0]?.ticket).toBe(shown);
+    expect(shown).toContain("id: T-1\nversion: 1\n");
+    // and the Run keeps what it was given; gates and merges run no agent and have none
+    const runs = await db.pool.query(
+      "SELECT stage, prompt FROM runs ORDER BY id",
+    );
+    expect(runs.rows.filter((r) => r.prompt).map((r) => r.stage)).toEqual([
+      "implement",
+      "review",
+      "final-review",
+    ]);
+    expect(runs.rows.find((r) => r.stage === "implement")?.prompt).toBe(
+      seen[0]?.prompt,
+    );
+    expect(
+      runs.rows
+        .filter((r) => r.stage === "gate")
+        .every((r) => r.prompt === null),
+    ).toBe(true);
   });
 
   it("works a spec made before the databases had ids on the flat branch names, start to end", async () => {

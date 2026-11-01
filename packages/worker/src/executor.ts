@@ -36,6 +36,7 @@ import {
   stampTrailers,
   startEnvironment,
   type TestCounts,
+  writePrompt,
 } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
@@ -92,8 +93,13 @@ function runOptions(deps: ExecutorDeps, context: StageContext) {
 }
 
 // What a Run records about the agent that ran: its model and the skills it ran with. Gates run no agent and record neither.
-function agentFacts(deps: ExecutorDeps, options: { model?: string }) {
+function agentFacts(
+  deps: ExecutorDeps,
+  options: { model?: string },
+  prompt: string,
+) {
   return {
+    prompt,
     ...(options.model ? { model: options.model } : {}),
     ...(deps.skillsSha ? { skillsSha: deps.skillsSha } : {}),
   };
@@ -340,19 +346,23 @@ async function agentChange(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const inEnvironment =
+      bundle.ticket?.type === "integration" && bundle.environment.length > 0;
+    const given = writePrompt(
+      tmp,
+      promptFor(stage, { integration: inEnvironment }),
+    );
     const { refs, refShas } = snapshotRefs(deps, bundle);
     log(`${stage}: running the agent on ${agent}`);
     const options = runOptions(deps, context);
     // An integration ticket's agent works in its integration environment: it writes the e2e against real services,
     // and a fix reproduces the failure there. The environment is gone again when the run is over.
-    const inEnvironment =
-      bundle.ticket?.type === "integration" && bundle.environment.length > 0;
     const runAgent = (placement?: SandboxPlacement) =>
       deps.makeAgentRunner(slot.dir).run({
         stage,
         branch: agent,
         baseBranch: integration,
-        promptFile: promptFor(stage, { integration: inEnvironment }),
+        promptFile: given.promptFile,
         ctxDir,
         refs,
         schema: ImplementOutputSchema,
@@ -385,7 +395,7 @@ async function agentChange(
       baseSha,
       commits: run.commits,
       durationMs: run.durationMs,
-      ...agentFacts(deps, options),
+      ...agentFacts(deps, options, given.prompt),
       ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
     };
@@ -468,13 +478,14 @@ async function review(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const given = writePrompt(tmp, promptFor(stage));
     const { refs, refShas } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     const run = await deps.makeAgentRunner(slot.dir).run({
       stage,
       branch: agent,
       baseBranch: bundle.integrationBranch as string,
-      promptFile: promptFor(stage),
+      promptFile: given.promptFile,
       ctxDir,
       refs,
       schema: ReviewOutputSchema,
@@ -499,7 +510,7 @@ async function review(
         baseSha,
         commits: run.commits,
         durationMs: run.durationMs,
-        ...agentFacts(deps, options),
+        ...agentFacts(deps, options, given.prompt),
         ...(refs.length ? { refShas } : {}),
         output: run.output ?? { error: run.error },
       },
@@ -998,6 +1009,7 @@ async function diagnose(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(deps, context, head, tmp);
+    const given = writePrompt(tmp, promptFor("diagnose"));
     const { refs } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     // on a branch of its own that is gone again afterwards, like the e2e's
@@ -1015,7 +1027,7 @@ async function diagnose(
             stage: "diagnose",
             branch,
             baseBranch: integration,
-            promptFile: promptFor("diagnose"),
+            promptFile: given.promptFile,
             ctxDir,
             refs,
             schema: DiagnoseOutputSchema,
@@ -1048,7 +1060,7 @@ async function diagnose(
           refShas: run.environment.shas,
           envUpMs: run.environment.upMs,
           durationMs: run.run.durationMs,
-          ...agentFacts(deps, options),
+          ...agentFacts(deps, options, given.prompt),
           output: output ?? { error: run.run.error },
         },
         // a repo is only named when the outcome is "diagnosed"

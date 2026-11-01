@@ -402,10 +402,10 @@ flowchart TD
 | #   | 阶段       | 做什么                                                                                                                                                                                                                | 成功                                                  | 失败                                                                                                                                                                                                                        |
 | --- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | 准备       | 取一个空闲槽位并克隆主 clone（见「Git 操作规范」的“槽位”），在槽位里从分支 `agent/<ticket-id>`（不存在则从集成分支切出，即 Sandcastle 的 `baseBranch`）建 worktree；渲染 `/context`。是否回收僵尸槽位见「作业与恢复」 | → 2                                                   | —                                                                                                                                                                                                                           |
-| 2   | implement  | agent 按 `afk-implement.md` 实现并 commit，最后输出 implement 结构化结果                                                                                                                                              | → 3                                                   | 输出不合法 → `invalid-output`；`cannot-proceed` 时按结构化输出里的 `blockedReason` 枚举直接映射为 `agent-gave-up` 或 `contract-change-needed`，不解析自由文本；0 个 commit → `no-commits`；超时 → `timeout`。都直接 blocked |
+| 2   | implement  | agent 按 `implement.md`（加公共覆盖层）实现并 commit，最后输出 implement 结构化结果                                                                                                                                              | → 3                                                   | 输出不合法 → `invalid-output`；`cannot-proceed` 时按结构化输出里的 `blockedReason` 枚举直接映射为 `agent-gave-up` 或 `contract-change-needed`，不解析自由文本；0 个 commit → `no-commits`；超时 → `timeout`。都直接 blocked |
 | 3   | 盖章并推送 | worker 给本次新增的 commits 补 trailer（见「Git 操作规范」），把 `agent/<ticket-id>` 推到 origin                                                                                                                      | → 4                                                   | 推送失败重试，仍失败则作业失败、等重派                                                                                                                                                                                      |
 | 4   | 门禁       | 先查保护路径（已批准的除外），再跑门禁命令，见「门禁」                                                                                                                                                                | → 5                                                   | 碰到未批准的保护路径 → `protected-path-changed`，直接 blocked；门禁失败且还没 fix 过 → gate-fix 运行（prompt 指向失败日志）→ 3 → 4；再失败 → `gate-failed`                                                                  |
-| 5   | review     | 新会话按 `afk-review.md` 审查 `merge-base..HEAD`，输出 review 结构化结果                                                                                                                                              | verdict 为 pass → 6                                   | verdict 为 fix → review-fix 运行处理 mustFix → 3 → 4 → 6。不再跑第二次 review，修复情况记进 Finding 和验收包                                                                                                                |
+| 5   | review     | 新会话按 `review.md`（加公共覆盖层） 审查 `merge-base..HEAD`，输出 review 结构化结果                                                                                                                                              | verdict 为 pass → 6                                   | verdict 为 fix → review-fix 运行处理 mustFix → 3 → 4 → 6。不再跑第二次 review，修复情况记进 Finding 和验收包                                                                                                                |
 | 6   | 合并       | 这一步起是独立的 `merge` 阶段作业，带 `lock_key`（见「作业与恢复」），领取时与同一集成分支上的其他合并类作业互斥：用 `git merge-tree --write-tree` 生成候选合并提交                                                   | 无冲突 → 7                                            | 有冲突 → 释放锁，跑 merge-fix 运行（把集成分支合进 agent 分支并解决冲突）→ 3 → 4 → 6；再冲突 → `merge-conflict`                                                                                                             |
 | 7   | 合并后门禁 | 仍在锁内：在候选提交上跑门禁                                                                                                                                                                                          | 通过 → 用 `--force-with-lease` 前移并推送集成分支 → 8 | 不前移集成分支，释放锁，跑 merge-fix 运行（把集成分支合进 agent 分支后修复）→ 3 → 4 → 6；再失败 → `post-merge-gate-failed`                                                                                                  |
 | 8   | 完成       | 票标 done；契约票记下契约 SHA；写 Link；重新计算可开工的票                                                                                                                                                            | —                                                     | —                                                                                                                                                                                                                           |
@@ -934,15 +934,17 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 
 `cannot-proceed` 给 agent 一个正当的出口：遇到需要人回答的问题时，输出原因然后结束，而不是停下来等提问被回答。
 
-**AFK prompt 的写法**：
+**AFK prompt 的写法**（ADR 0002）：agent 收到的 prompt 是两段拼成的一份：**公共覆盖层**（`packages/pipeline/prompts/overlay.md`，所有阶段一样）加**这个阶段的薄 prompt**。worker 把拼出的全文写进临时文件交给 Sandcastle，同一份全文记在 Run 的 `prompt` 上。阶段 prompt 只放指针和这个阶段特有的东西，不重写 skill 已经有的步骤，控制在 120KB 以内。
 
-- prompt 文件：`afk-implement.md`、`afk-fix.md`、`afk-review.md`、`afk-integration.md`，只放指针，控制在 120KB 以内。M0 已有 implement、fix（用 `run.json` 里的 `stage` 区分 gate-fix / review-fix / merge-fix）、review 三份可用的初稿，在原型分支 `prototype/m0-pipeline` 的 `m0/prompts/` 下，M1 直接拿来用。
-- prompt 里直接写“先读 `/context/ticket.md`、`/context/spec.md`、`/context/run.json` 和仓库的 `AGENTS.md`，再读 `/home/agent/.cursor/skills/tdd/SKILL.md`，按它做”。
-- 写明“spec 里的 seams 已经确认，不要提问；遇到必须由人决定的问题，输出 `cannot-proceed` 并结束”。tdd skill 要求先和用户确认 seams，AFK 时没人回答，不写就会卡住。
-- 写明“保护路径一律不改，`/context/run.json` 的 `allowedProtectedPaths` 里列出的除外”；没批准却必须改，或契约有问题时，输出 `cannot-proceed`，`blockedReason` 写 `contract-change-needed`。契约票和普通票用同一份 prompt，靠 `allowedProtectedPaths` 区分。
-- 写明不要 push、不要切换或新建分支、不要自己加 `Spec` / `Ticket` / `Run` trailer（worker 事后补）。
-- review 只审查不改代码，不提交；code-review 直接给出对比的基准提交（来自 `/context/run.json`），否则它会反问。
-- 不依赖 implement skill：它只能由人调用（`disable-model-invocation: true`），步骤直接写进 AFK prompt。
+- 公共覆盖层写明：没有人回答问题，遇到小事自己决定并写进 `uncertainties`，必须由人决定的输出 `cannot-proceed`；`/context` 就是 tracker，不读 `docs/agents/issue-tracker.md`、不调 `plat`、不运行 setup；不 push、不切换或新建分支、不自己加 `Spec` / `Ticket` / `Run` trailer（worker 事后补）；保护路径一律不改，`/context/run.json` 的 `allowedProtectedPaths` 里列出的除外，没批准却必须改、或契约有问题时输出 `cannot-proceed`，`blockedReason` 写 `contract-change-needed`（契约票和普通票用同一份 prompt，靠 `allowedProtectedPaths` 区分）。
+- 公共覆盖层把 skill 里每个"去问人"的地方写死成答案：implement 的"reference 不明确就问"，票就是 `/context/ticket.md`；tdd 的"和用户确认 seams"，spec 里的 seams 已经确认；code-review 的"问固定点"，是 `run.json` 的 `baseSha`，按 skill 原文用三点 diff；code-review 的"问 spec 在哪"，由阶段 prompt 给出。没列到的提问，能撤回的小事自己决定，需要人决定的输出 `cannot-proceed`。覆盖层第一行写明它对应的 skills SHA，守卫测试要求它等于固定的 `SKILLS_SHA` 和快照的 SHA；升级 SHA 时必须回头核对覆盖层。
+- implement：按绝对路径读 `/home/agent/.cursor/skills/implement/SKILL.md` 照做（它是 `disable-model-invocation: true`，模型不会自己调用；agent 也没有 Skill 工具，所以按文件读），**跳过它最后调用 `code-review` 的那一步**，平台另有 review 阶段。tdd 只做红 → 绿，不在循环里重构；每条验收标准都要有测试，结果里带验收对照表。
+- gate-fix、review-fix、final-fix：读 tdd，先写会失败的测试再修；review-fix 和 final-fix 把两个审查轴的 `mustFix` 一起修；不用 `diagnosing-bugs`。merge-fix 不读 skill，只用覆盖层。
+- review、final-review：跑 `code-review`，固定点是 `baseSha`；把它拆成 Standards 和 Spec 两次运行，是下一步的事（见 ADR 0002）。
+- 联调票的 implement 和诊断：只接公共覆盖层，不跑 skill，因为 e2e 是对着已经实现好的服务写的，套不上 tdd 的红 → 绿。
+- **rework**（处理 PR 评论）平台还没有实现；实现时按 review-fix 的方式：读 tdd，先写会失败的测试再改，覆盖层照用。
+- 结构化输出的 `<result>` 格式按阶段写在阶段 prompt 里。
+- prompt 文件在 `packages/pipeline/prompts/`：`overlay.md`、`implement.md`、`integration-implement.md`、`gate-fix.md`、`review-fix.md`、`merge-fix.md`、`final-fix.md`、`review.md`、`final-review.md`、`afk-integration.md`（诊断）。
 
 **密钥**：
 
@@ -1206,7 +1208,7 @@ M0 第一天先做这几个验证，任何一个不通都要先换方案：
 | skills 对接 | 后端仓库的 `docs/agents/issue-tracker.md` 指向 `plat`，写清导入格式                                                 |
 | Worker      | 租约拉作业 → 把 M0 脚本拆成 `ticket-stage` 作业 → 回传结果（带 fencing）→ 推分支                                    |
 | 收尾        | 全部票完成后跑 finalize，用 GitHub API（bot 账号）开 PR，轮询状态显示在页面上，由人合并                             |
-| Prompts     | `afk-implement.md`、`afk-fix.md`、`afk-review.md`，只放指针，按路径读 SKILL.md                                      |
+| Prompts     | 公共覆盖层 `overlay.md` 加各阶段的薄 prompt，只放指针，按路径读 SKILL.md                                      |
 | 中断测试    | 在 implement、门禁、合并三个阶段各手动杀一次 worker，确认重启后结果一致                                             |
 
 ## 待验证事项与开放问题

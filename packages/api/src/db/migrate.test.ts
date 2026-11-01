@@ -44,6 +44,7 @@ const LATER_THAN_REPO_NAMES = [
   "0024_integration_rounds",
   "0025_final_e2e",
   "0026_ticket_template_bodies",
+  "0027_run_prompt",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -235,7 +236,8 @@ describe("migrating ticket bodies to the issue template", () => {
     const journalPath = join(before, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
     journal.entries = journal.entries.filter(
-      (e: { tag: string }) => e.tag !== "0026_ticket_template_bodies",
+      (e: { tag: string }) =>
+        e.tag !== "0026_ticket_template_bodies" && e.tag !== "0027_run_prompt",
     );
     writeFileSync(journalPath, JSON.stringify(journal));
     await migrate(db.pool, before);

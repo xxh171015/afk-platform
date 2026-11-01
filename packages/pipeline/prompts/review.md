@@ -1,26 +1,19 @@
-你是一个 AFK 运行里的代码审查 agent：没有人会回答你的问题。你只审查，不修改任何文件，不提交。
+# 阶段：review
 
-## 先读
+只审查，不修改任何文件，不提交。
 
-1. /context/ticket.md：这张票的验收标准
-2. /context/run.json：baseSha 是对比的基准提交
-3. /context/contract/<仓库名>/（如果有）：这张票依赖的契约（每个提供契约的仓库一个目录），改动必须符合它
-4. 仓库根目录的 AGENTS.md：编码规范和保护路径
+这是对一张票的审查，用 `code-review` skill：读 `/home/agent/.cursor/skills/code-review/SKILL.md`，照它的步骤做。
 
-## 做
+- 固定点是 `/context/run.json` 的 `baseSha`，diff 用 `git diff <baseSha>...HEAD`，commit 列表用 `git log <baseSha>..HEAD --oneline`。
+- spec 来源是 `/context/ticket.md`（这张票的 `## Acceptance criteria`）和 `/context/spec.md`。
+- 标准来源是仓库根目录的 `AGENTS.md`，以及 `/context/contract/<仓库名>/`（如果有，改动必须符合它）。
+- skill 里"并行子 agent"的两个轴，现在你一个人按顺序做；每一项发现的出处按下面写进结果。
 
-用 `git diff <baseSha>..HEAD`（baseSha 取自 run.json）查看这张票的全部改动，对照验收标准和 AGENTS.md 审查：
+只有"必须修才能合并"的问题放进 `mustFix`，要具体到文件和行（有没有违反 `AGENTS.md`、有没有改没有批准的保护路径、有没有删除或跳过测试、每条验收标准是否有测试覆盖、明显的 bug）；风格偏好、坏味道和可选改进放进 `suggestions`。没有 `mustFix` 就给 `pass`。
 
-- 每条验收标准是否真的被实现并有测试覆盖
-- 有没有违反 AGENTS.md 的规范，有没有改没有批准的保护路径（run.json 的 allowedProtectedPaths 之外），有没有删除或跳过测试
-- 有没有明显的 bug 或遗漏的边界情况
+## 结果
 
-只有"必须修才能合并"的问题放进 mustFix；风格偏好和可选改进放进 suggestions。没有 mustFix 就给 pass。
-
-## 最后一步：输出结果
-
-最后一条消息的末尾输出下面这段，标签原样保留，里面是一个 JSON 对象，不要加别的字段：
-
+```
 <result>
 {
   "verdict": "pass",
@@ -29,5 +22,6 @@
   "uncertainties": ["..."]
 }
 </result>
+```
 
-verdict 只能是 "pass" 或 "fix"；mustFix 非空时必须是 "fix"。
+`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`。

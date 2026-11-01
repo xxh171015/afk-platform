@@ -33,6 +33,7 @@ export interface FakeAgentContext {
   branch: string;
   dir: string; // the worktree the agent works in
   context: (file: string) => string | undefined; // reads /context/<file>
+  prompt: string; // the whole prompt the run was given
   signal?: AbortSignal; // aborted when the job is lost
   idleSeconds: number; // the limits and the model the run was asked for
   wallClockMs: number;
@@ -85,6 +86,7 @@ export class FakeAgentRunner implements AgentRunner {
         idleSeconds: options.idleSeconds,
         wallClockMs: options.wallClockMs,
         ...(options.model ? { model: options.model } : {}),
+        prompt: readFileSync(options.promptFile, "utf8"),
         context: (file) => {
           const path = join(options.ctxDir, file);
           return existsSync(path) ? readFileSync(path, "utf8") : undefined;

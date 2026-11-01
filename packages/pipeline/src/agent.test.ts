@@ -1,7 +1,8 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Stage } from "@afk/shared";
+import { SKILLS_SHA, type Stage } from "@afk/shared";
+import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { afterEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -9,14 +10,18 @@ import {
   classifyAgentRun,
   classifyDiagnoseRun,
   classifyReviewRun,
+  composePrompt,
   DiagnoseOutputSchema,
   type ImplementOutput,
   ImplementOutputSchema,
+  OVERLAY_FILE,
+  overlaySkillsSha,
   PROMPTS,
   promptFor,
   type ReviewOutput,
   ReviewOutputSchema,
   reviewFindings,
+  writePrompt,
 } from "./agent.ts";
 import { renderContext } from "./context.ts";
 import { git, gitOut } from "./exec.ts";
@@ -290,14 +295,32 @@ describe("classifyDiagnoseRun", () => {
   });
 });
 
+const STAGES_OF_A_TICKET = [
+  "implement",
+  "review",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+  "final-review",
+  "final-fix",
+  "diagnose",
+] as const;
+
 describe("the prompts", () => {
+  const whole = (stage: (typeof STAGES_OF_A_TICKET)[number]) =>
+    composePrompt(promptFor(stage));
+
   it("exist, and ask for the structured output the schemas accept", () => {
-    for (const path of Object.values(PROMPTS))
+    for (const path of [OVERLAY_FILE, ...Object.values(PROMPTS)])
       expect(existsSync(path)).toBe(true);
-    const implement = readFileSync(PROMPTS.implement, "utf8");
-    const fix = readFileSync(PROMPTS.fix, "utf8");
-    const review = readFileSync(PROMPTS.review, "utf8");
-    for (const prompt of [implement, fix]) {
+    for (const stage of [
+      "implement",
+      "gate-fix",
+      "review-fix",
+      "merge-fix",
+      "final-fix",
+    ] as const) {
+      const prompt = whole(stage);
       expect(prompt).toContain("cannot-proceed");
       expect(prompt).toContain("blockedReason");
       expect(prompt).toContain("detail");
@@ -305,8 +328,102 @@ describe("the prompts", () => {
       expect(prompt).toContain("contract-change-needed");
       expect(prompt).toContain("<result>");
     }
-    expect(review).toContain("verdict");
-    expect(review).toContain("mustFix");
+    for (const stage of ["review", "final-review"] as const) {
+      expect(whole(stage)).toContain("verdict");
+      expect(whole(stage)).toContain("mustFix");
+    }
+  });
+
+  it("is the overlay and then the stage's own prompt, for every stage", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8").trimEnd();
+    for (const stage of STAGES_OF_A_TICKET) {
+      const prompt = whole(stage);
+      expect(prompt.startsWith(overlay)).toBe(true);
+      expect(prompt.endsWith(readFileSync(promptFor(stage), "utf8"))).toBe(
+        true,
+      );
+    }
+    const dir = mkdtempSync(join(tmpdir(), "afk-prompt-"));
+    dirs.push(dir);
+    const written = writePrompt(dir, PROMPTS.review);
+    expect(readFileSync(written.promptFile, "utf8")).toBe(written.prompt);
+    expect(written.prompt).toBe(whole("review"));
+  });
+
+  it("never says red, green, refactor: the loop is red → green only", () => {
+    for (const stage of STAGES_OF_A_TICKET)
+      expect(whole(stage)).not.toMatch(/红 → 绿 → 重构|red.green.refactor/i);
+    expect(whole("implement")).toContain("只做红 → 绿");
+  });
+
+  it("tells the agent that /context is the tracker, and answers the questions the skills ask", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    for (const word of [
+      "没有人会回答你",
+      "/context 就是 tracker",
+      "docs/agents/issue-tracker.md",
+      "plat",
+      "setup-matt-pocock-skills",
+      "reference 不明确就问",
+      "seams",
+      "baseSha",
+      "git diff <baseSha>...HEAD",
+      "spec 在哪",
+      "uncertainties",
+      "cannot-proceed",
+      "不要 push",
+      "保护路径",
+    ])
+      expect(overlay).toContain(word);
+  });
+
+  it("is written for the skills SHA the platform pins, and for the snapshot", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    expect(overlaySkillsSha(overlay)).toBe(SKILLS_SHA);
+    expect(readSkillSnapshot("implement/SKILL.md").sha).toBe(
+      overlaySkillsSha(overlay),
+    );
+    // a different SHA is not read as the overlay's
+    expect(overlaySkillsSha(overlay.replace(SKILLS_SHA, "0".repeat(40)))).toBe(
+      "0".repeat(40),
+    );
+    expect(overlaySkillsSha("no header")).toBeUndefined();
+  });
+
+  it("makes implement read the implement skill by its absolute path and skip its code-review step", () => {
+    const implement = readFileSync(PROMPTS.implement, "utf8");
+    expect(implement).toContain(
+      "/home/agent/.cursor/skills/implement/SKILL.md",
+    );
+    expect(implement).toContain("/home/agent/.cursor/skills/tdd/SKILL.md");
+    expect(implement).toMatch(/跳过.*code-review/);
+  });
+
+  it("makes the three tdd fixes read tdd, and leaves merge-fix, integration implement and diagnosis to the overlay", () => {
+    for (const stage of ["gate-fix", "review-fix", "final-fix"] as const) {
+      expect(whole(stage)).toContain("/home/agent/.cursor/skills/tdd/SKILL.md");
+      expect(whole(stage)).toContain("会失败的测试");
+    }
+    expect(whole("review-fix")).toContain("Standards 或 Spec");
+    expect(whole("final-fix")).toContain("不论来自哪一轴");
+    for (const file of [
+      PROMPTS.mergeFix,
+      PROMPTS.integrationImplement,
+      PROMPTS.diagnose,
+    ])
+      expect(readFileSync(file, "utf8")).not.toContain(
+        "/home/agent/.cursor/skills/",
+      );
+    expect(readFileSync(PROMPTS.mergeFix, "utf8")).toContain("不读 skill");
+  });
+
+  it("makes the reviews run code-review from the fixed point in run.json", () => {
+    for (const stage of ["review", "final-review"] as const) {
+      expect(whole(stage)).toContain(
+        "/home/agent/.cursor/skills/code-review/SKILL.md",
+      );
+      expect(whole(stage)).toContain("git diff <baseSha>...HEAD");
+    }
   });
 
   it("only point at /context files rather than carrying the ticket", () => {
@@ -315,20 +432,22 @@ describe("the prompts", () => {
       "/context/ticket.md",
       "/context/spec.md",
       "/context/run.json",
-    ]) {
+    ])
       expect(implement).toContain(file);
-    }
-    expect(readFileSync(PROMPTS.fix, "utf8")).toContain(
+    expect(readFileSync(PROMPTS.gateFix, "utf8")).toContain(
       "/context/failure/gate.log",
     );
-    expect(readFileSync(PROMPTS.fix, "utf8")).toContain("/context/review.json");
+    expect(readFileSync(PROMPTS.reviewFix, "utf8")).toContain(
+      "/context/review.json",
+    );
   });
 
-  it("picks the prompt by stage: one for implement, one for review, one for the three fixes", () => {
+  it("picks the prompt by stage", () => {
     expect(promptFor("implement")).toBe(PROMPTS.implement);
     expect(promptFor("review")).toBe(PROMPTS.review);
-    for (const stage of ["gate-fix", "review-fix", "merge-fix"] as const)
-      expect(promptFor(stage)).toBe(PROMPTS.fix);
+    expect(promptFor("gate-fix")).toBe(PROMPTS.gateFix);
+    expect(promptFor("review-fix")).toBe(PROMPTS.reviewFix);
+    expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
   });
 
   it("gives an integration ticket's implement its own prompt, which says to write the e2e against the real services", () => {
@@ -336,7 +455,7 @@ describe("the prompts", () => {
       PROMPTS.integrationImplement,
     );
     // the fixes keep their prompt: the environment is the only difference
-    expect(promptFor("gate-fix", { integration: true })).toBe(PROMPTS.fix);
+    expect(promptFor("gate-fix", { integration: true })).toBe(PROMPTS.gateFix);
     const prompt = readFileSync(PROMPTS.integrationImplement, "utf8");
     for (const word of [
       "cannot-proceed",
@@ -349,7 +468,7 @@ describe("the prompts", () => {
       expect(prompt).toContain(word);
     // does not give up on a fault in another repo, and does not touch the other repos
     expect(prompt).toContain("不要因此输出 cannot-proceed");
-    expect(prompt).toContain("不改");
+    expect(prompt).toContain("不要改别的仓库");
   });
 });
 

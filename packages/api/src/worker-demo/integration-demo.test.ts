@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRunOptions, AgentRunResult } from "@afk/pipeline";
 import {
+  composePrompt,
   GateCache,
   git,
   gitOut,
@@ -186,7 +187,7 @@ class RecordingAgentRunner extends FakeAgentRunner {
   ): Promise<AgentRunResult<z.infer<Schema>>> {
     agentRuns.push({
       stage: options.stage,
-      prompt: options.promptFile,
+      prompt: readFileSync(options.promptFile, "utf8"),
       placement: options.placement,
       environmentsUp: docker.active,
     });
@@ -371,12 +372,12 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
       (r) => r.stage === "implement",
     );
     expect(backend).toMatchObject({
-      prompt: PROMPTS.implement,
+      prompt: composePrompt(PROMPTS.implement),
       placement: undefined,
       environmentsUp: 0,
     });
     expect(integration).toMatchObject({
-      prompt: PROMPTS.integrationImplement,
+      prompt: composePrompt(PROMPTS.integrationImplement),
       placement: {
         network: expect.stringMatching(/^afk-r-\d+_default$/),
         env: { BACKEND_URL: "http://backend:8080" },
@@ -444,7 +445,7 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
     expect(diagnoses).toHaveLength(2);
     for (const run of diagnoses)
       expect(run).toMatchObject({
-        prompt: PROMPTS.diagnose,
+        prompt: composePrompt(PROMPTS.diagnose),
         placement: { env: { BACKEND_URL: "http://backend:8080" } },
         environmentsUp: 1,
       });

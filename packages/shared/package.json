@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./db": "./src/db.ts",
+    "./skills-snapshot": "./src/skills-snapshot.ts",
     "./spec-template": "./src/spec-template.ts",
     "./ticket-files": "./src/ticket-files.ts"
   },

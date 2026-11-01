@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AGENT_FAILURES, FinalStep, Stage } from "@afk/shared";
@@ -193,24 +194,52 @@ export function reviewFindings(
   ];
 }
 
-// The prompts only point at files in /context.
+// What an agent is told is two texts put together: the overlay, which is the same for every stage (ADR 0002: nobody
+// answers, /context is the tracker, the answers to the questions the skills ask), and the prompt of the stage. The
+// prompts only point at files in /context and at the skills; they hold no steps of their own that a skill has.
 export const PROMPT_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "prompts",
 );
+export const OVERLAY_FILE = join(PROMPT_DIR, "overlay.md");
 export const PROMPTS = {
   implement: join(PROMPT_DIR, "implement.md"),
   integrationImplement: join(PROMPT_DIR, "integration-implement.md"),
   diagnose: join(PROMPT_DIR, "afk-integration.md"),
-  fix: join(PROMPT_DIR, "fix.md"),
+  gateFix: join(PROMPT_DIR, "gate-fix.md"),
+  reviewFix: join(PROMPT_DIR, "review-fix.md"),
+  mergeFix: join(PROMPT_DIR, "merge-fix.md"),
   review: join(PROMPT_DIR, "review.md"),
   finalReview: join(PROMPT_DIR, "final-review.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
 } as const;
 
-// Only the stages that run an agent have a prompt; the three fixes share one. An integration ticket's implement
-// writes e2e against real services and has a prompt of its own; its fixes are the ordinary ones.
+// The skills version the overlay was written against, from its first line.
+export function overlaySkillsSha(overlay: string): string | undefined {
+  return /^<!-- overlay for mattpocock\/skills@([0-9a-f]{40}) -->/.exec(
+    overlay,
+  )?.[1];
+}
+
+/** The whole prompt of a stage: the overlay, then the stage's own prompt. This is also what the Run records. */
+export function composePrompt(stageFile: string): string {
+  return `${readFileSync(OVERLAY_FILE, "utf8").trimEnd()}\n\n---\n\n${readFileSync(stageFile, "utf8")}`;
+}
+
+/** Writes the whole prompt of a stage into `dir` for the runner, and returns where and what it says. */
+export function writePrompt(
+  dir: string,
+  stageFile: string,
+): { promptFile: string; prompt: string } {
+  const prompt = composePrompt(stageFile);
+  const promptFile = join(dir, "prompt.md");
+  writeFileSync(promptFile, prompt);
+  return { promptFile, prompt };
+}
+
+// Only the stages that run an agent have a prompt. An integration ticket's implement writes e2e against real
+// services and has a prompt of its own; its fixes are the ordinary ones.
 export function promptFor(
   stage:
     | "implement"
@@ -237,8 +266,10 @@ export function promptFor(
     case "review":
       return PROMPTS.review;
     case "gate-fix":
+      return PROMPTS.gateFix;
     case "review-fix":
+      return PROMPTS.reviewFix;
     case "merge-fix":
-      return PROMPTS.fix;
+      return PROMPTS.mergeFix;
   }
 }

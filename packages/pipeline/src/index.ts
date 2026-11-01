@@ -13,12 +13,16 @@ export {
   classifyAgentRun,
   classifyDiagnoseRun,
   classifyReviewRun,
+  composePrompt,
   DiagnoseOutputSchema,
   ImplementOutputSchema,
+  OVERLAY_FILE,
+  overlaySkillsSha,
   PROMPTS,
   promptFor,
   ReviewOutputSchema,
   reviewFindings,
+  writePrompt,
 } from "./agent.ts";
 export type { ContextInput, RunFacts } from "./context.ts";
 export { readContract, renderContext } from "./context.ts";

@@ -30,6 +30,8 @@ const RunFacts = z.object({
   agent: z.string().optional(),
   model: z.string().optional(),
   skillsSha: z.string().optional(),
+  // the whole prompt the agent was given
+  prompt: z.string().optional(),
   cursorCliVersion: z.string().optional(),
   branch: z.string().optional(),
   baseSha: z.string().optional(),
@@ -301,6 +303,7 @@ export async function writeFacts(
     run?.agent ?? null,
     run?.model ?? null,
     run?.skillsSha ?? null,
+    run?.prompt ?? null,
     run?.cursorCliVersion ?? null,
     run?.branch ?? null,
     run?.baseSha ?? null,
@@ -319,18 +322,19 @@ export async function writeFacts(
   // The Run was started when the job was claimed: fill it in. (An UPDATE first, because an INSERT that runs
   // into the unique job id still uses up a serial number, and display ids should not have holes.)
   let inserted = await client.query<{ id: number }>(
-    `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, cursor_cli_version = $5, branch = $6, base_sha = $7,
-       head_sha = $8, commits = $9, duration_ms = $10, duration_api_ms = $11, token_usage = $12, result = $13,
-       output = $14, log_url = $15, started_at = COALESCE($16, started_at), finished_at = COALESCE($17, now())
+    `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, prompt = $5, cursor_cli_version = $6, branch = $7,
+       base_sha = $8, head_sha = $9, commits = $10, duration_ms = $11, duration_api_ms = $12, token_usage = $13,
+       result = $14, output = $15, log_url = $16, started_at = COALESCE($17, started_at),
+       finished_at = COALESCE($18, now())
      WHERE job_id = $1 RETURNING id`,
     [job.id, ...facts],
   );
   if (!inserted.rows[0]) {
     inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
-         cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage, result,
-         output, log_url, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE($23, now()))
+         prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage,
+         result, output, log_url, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, COALESCE($24, now()))
        RETURNING id`,
       [
         owner.spec_id,
