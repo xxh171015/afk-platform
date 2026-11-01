@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   type QueryClient,
   useMutation,
   useQuery,
@@ -6,6 +7,8 @@ import {
 } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { useResourcePoll } from "./EventsProvider.tsx";
+import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { WORKBENCH_KEY } from "./Workbench.tsx";
@@ -29,6 +32,7 @@ type Queue = NonNullable<ReturnType<typeof useBlocked>["data"]>;
 
 export function useBlocked() {
   const api = useApi();
+  const poll = useResourcePoll(LIST_POLL_MS);
   return useQuery({
     queryKey: BLOCKED_KEY,
     queryFn: async () => {
@@ -36,7 +40,8 @@ export function useBlocked() {
       if (!data) throw new Error(describeError(error));
       return data;
     },
-    refetchInterval: 5_000,
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
   });
 }
 

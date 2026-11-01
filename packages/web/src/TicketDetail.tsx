@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { useResourcePoll } from "./EventsProvider.tsx";
+import { DETAIL_POLL_MS } from "./live.ts";
 import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
@@ -35,6 +37,7 @@ export function TicketDetail({
   logPollMs?: number;
 }) {
   const api = useApi();
+  const poll = useResourcePoll(DETAIL_POLL_MS);
   const [picked, setPicked] = useState<number | undefined>();
   // the content version shown in the left column; undefined is the newest
   const [version, setVersion] = useState<number | undefined>();
@@ -48,7 +51,8 @@ export function TicketDetail({
       if (!data) throw new Error(describeError(error));
       return data;
     },
-    refetchInterval: 3_000,
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
   });
   const current = view.data?.ticket.contentVersion;
   const older = version !== undefined && version !== current;
@@ -76,15 +80,19 @@ export function TicketDetail({
       if (!data) throw new Error(describeError(error));
       return data;
     },
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
   });
 
   if (view.isPending) return <p className="note">Loading the ticket…</p>;
-  if (view.isError)
+  if (view.isError && !view.data)
     return (
       <p className="error" role="alert">
         Could not load the ticket: {view.error.message}
       </p>
     );
+  const loaded = view.data;
+  if (!loaded) return null;
   const {
     ticket,
     versions,
@@ -94,7 +102,7 @@ export function TicketDetail({
     upstream,
     downstream,
     integration,
-  } = view.data;
+  } = loaded;
   // by default the newest run, which is the one that is going or that went wrong last
   const shown = picked ?? runs.at(-1)?.id;
   const shownTicket = older && past.data ? past.data.ticket : ticket;
@@ -176,7 +184,7 @@ export function TicketDetail({
           <h3>Spec</h3>
           <p>
             <a href={paths.spec(ticket.specId)}>{ticket.specDisplayId}</a>
-            {spec.data ? ` ${spec.data.spec.title}` : ""}
+            {spec.data?.spec ? ` ${spec.data.spec.title}` : ""}
           </p>
           {(
             [

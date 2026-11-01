@@ -22,6 +22,7 @@ export { FINDING_RESOLUTIONS } from "./findings.ts";
 export { HOST_CAPABILITY, HOST_JOB_TYPES } from "./host-jobs.ts";
 export type { HostKind } from "./host-kinds.ts";
 export { HOST_KINDS, hostKindOfUrl } from "./host-kinds.ts";
+export type { InvalidatePayload } from "./invalidate.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
 export type { LimitOverrides, Limits } from "./limits.ts";

@@ -878,6 +878,25 @@ describe("when the spec cannot be shown", () => {
       "Could not load the spec: no such spec",
     );
   });
+
+  it("keeps showing the spec when a later GET fails", async () => {
+    let failing = false;
+    const server = fakeServer({
+      "GET /specs/1": () =>
+        failing
+          ? { status: 500, json: { error: "database is down" } }
+          : { json: view({ spec: { state: "running" } }) },
+    });
+    const { queryClient } = renderWithApp(<SpecDetail specId={1} />, server);
+    await screen.findByText(/Order export/);
+    failing = true;
+    await queryClient.refetchQueries({ queryKey: ["spec", 1] });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["spec", 1])?.status).toBe("error"),
+    );
+    expect(screen.getByText(/Order export/)).toBeTruthy();
+    expect(screen.queryByText(/Could not load the spec/)).toBeNull();
+  });
 });
 
 describe("the six-step bar and nested pages", () => {

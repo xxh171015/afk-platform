@@ -115,4 +115,44 @@ describe("the log of a run", () => {
       "Could not load the log: no such run",
     );
   });
+
+  it("keeps the log it already has when a later read fails", async () => {
+    let failing = false;
+    const whole = "still here\n";
+    const server = fakeServer({
+      "GET /runs/5/logs": ({ url }) => {
+        if (failing) {
+          return { status: 500, json: { error: "database is down" } };
+        }
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const text = whole.slice(offset);
+        return {
+          json: {
+            attempt: 1,
+            offset,
+            nextOffset: offset + text.length,
+            size: whole.length,
+            text,
+            finished: false,
+          },
+        };
+      },
+    });
+    const { queryClient } = renderWithApp(
+      <RunLog runId={5} pollMs={20} />,
+      server,
+    );
+    await waitFor(() => expect(log()).toBe(whole));
+    failing = true;
+    await queryClient.refetchQueries({ queryKey: ["log", 5] });
+    await waitFor(() =>
+      expect(
+        [...queryClient.getQueryCache().findAll({ queryKey: ["log", 5] })].some(
+          (query) => query.state.status === "error",
+        ),
+      ).toBe(true),
+    );
+    expect(log()).toBe(whole);
+    expect(screen.queryByText(/Could not load the log/)).toBeNull();
+  });
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { SpecList } from "./SpecList.tsx";
 import { fakeServer, renderWithApp } from "./test-utils.tsx";
@@ -129,5 +129,24 @@ describe("the spec list", () => {
     expect(alert.textContent).toContain(
       "Could not load the specs: database is down",
     );
+  });
+
+  it("keeps showing the list when a later GET fails", async () => {
+    let failing = false;
+    const server = fakeServer({
+      "GET /specs": () =>
+        failing
+          ? { status: 500, json: { error: "database is down" } }
+          : { json: { specs: [spec()] } },
+    });
+    const { queryClient } = renderWithApp(<SpecList />, server);
+    await screen.findByText("Order export");
+    failing = true;
+    await queryClient.refetchQueries({ queryKey: ["specs"] });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["specs"])?.status).toBe("error"),
+    );
+    expect(screen.getByText("Order export")).toBeTruthy();
+    expect(screen.queryByText(/Could not load the specs/)).toBeNull();
   });
 });

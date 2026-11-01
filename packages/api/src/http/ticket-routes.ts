@@ -7,6 +7,7 @@ import {
   PullRequestRow,
 } from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
+import { aroundSpec, aroundTicket } from "../events/announce.ts";
 import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
@@ -654,10 +655,8 @@ export function registerTicketRoutes(
   );
 
   app.openapi(retryRoute, async (c) => {
-    const result = await retryTicket(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").mode,
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      retryTicket(pool, c.req.valid("param").id, c.req.valid("json").mode),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -667,7 +666,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(approveRoute, async (c) => {
-    const result = await approveProtected(pool, c.req.valid("param").id);
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      approveProtected(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
     if (result.status === "refused")
@@ -677,7 +678,9 @@ export function registerTicketRoutes(
 
   app.openapi(editRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const result = await editTicket(pool, id, c.req.valid("json").file);
+    const result = await aroundTicket(context, id, () =>
+      editTicket(pool, id, c.req.valid("json").file),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
     if (result.status === "refused")
@@ -691,10 +694,8 @@ export function registerTicketRoutes(
   });
 
   app.openapi(allowPathsRoute, async (c) => {
-    const result = await allowPaths(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").paths,
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      allowPaths(pool, c.req.valid("param").id, c.req.valid("json").paths),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -704,10 +705,8 @@ export function registerTicketRoutes(
   });
 
   app.openapi(cancelRoute, async (c) => {
-    const result = await cancelTicket(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").cascade,
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      cancelTicket(pool, c.req.valid("param").id, c.req.valid("json").cascade),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -724,10 +723,12 @@ export function registerTicketRoutes(
   });
 
   app.openapi(resumeRoute, async (c) => {
-    const result = await resumeSpec(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").extraSeconds,
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      resumeSpec(
+        pool,
+        c.req.valid("param").id,
+        c.req.valid("json").extraSeconds,
+      ),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
@@ -737,10 +738,8 @@ export function registerTicketRoutes(
   });
 
   app.openapi(cancelSpecRoute, async (c) => {
-    const result = await cancelSpec(
-      pool,
-      c.req.valid("param").id,
-      context.clock(),
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      cancelSpec(pool, c.req.valid("param").id, context.clock()),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
@@ -757,7 +756,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(retryFinalRoute, async (c) => {
-    const result = await retryFinalization(pool, c.req.valid("param").id);
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      retryFinalization(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")
@@ -766,7 +767,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(waiveFinalRoute, async (c) => {
-    const result = await waiveFinalE2e(pool, c.req.valid("param").id);
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      waiveFinalE2e(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")
@@ -775,7 +778,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(retryCleanupRoute, async (c) => {
-    const result = await retrySpecCleanup(pool, c.req.valid("param").id);
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      retrySpecCleanup(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")

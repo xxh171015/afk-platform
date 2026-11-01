@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { describeError, useApi } from "./api.tsx";
+import { useResourcePoll } from "./EventsProvider.tsx";
+import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { StatusBadge } from "./StatusBadge.tsx";
 
@@ -7,6 +9,7 @@ import { StatusBadge } from "./StatusBadge.tsx";
 
 export function SpecList() {
   const api = useApi();
+  const poll = useResourcePoll(LIST_POLL_MS);
   const specs = useQuery({
     queryKey: ["specs"],
     queryFn: async () => {
@@ -14,17 +17,20 @@ export function SpecList() {
       if (!data) throw new Error(describeError(error));
       return data.specs;
     },
-    refetchInterval: 5_000,
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
   });
 
   if (specs.isPending) return <p className="note">Loading specs…</p>;
-  if (specs.isError)
+  if (specs.isError && !specs.data)
     return (
       <p className="error" role="alert">
         Could not load the specs: {specs.error.message}
       </p>
     );
-  if (specs.data.length === 0)
+  const rows = specs.data;
+  if (!rows) return null;
+  if (rows.length === 0)
     return (
       <p className="note">
         No specs yet. Create one with <code>plat spec create</code>.
@@ -43,7 +49,7 @@ export function SpecList() {
         </tr>
       </thead>
       <tbody>
-        {specs.data.map((spec) => {
+        {rows.map((spec) => {
           const { progress } = spec;
           const percent =
             progress.total === 0

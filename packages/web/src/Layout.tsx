@@ -5,6 +5,7 @@ import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Separator } from "./components/ui/separator.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
+import { EventsProvider } from "./EventsProvider.tsx";
 import { HelpDialog } from "./HelpDialog.tsx";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
 import { waitingCount } from "./waiting.ts";
@@ -13,6 +14,14 @@ import { waitingCount } from "./waiting.ts";
 // Pages still render ordinary <a href> so isolated tests need no router; clicks are pushed into history.
 
 export function Layout() {
+  return (
+    <EventsProvider>
+      <Chrome />
+    </EventsProvider>
+  );
+}
+
+function Chrome() {
   const queue = useBlocked();
   const navigate = useNavigate();
   const router = useRouter();

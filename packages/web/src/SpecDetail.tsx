@@ -10,10 +10,17 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { useResourcePoll } from "./EventsProvider.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
+import { DETAIL_POLL_MS } from "./live.ts";
 import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
@@ -81,6 +88,7 @@ const NODE_HEIGHT = 80;
 
 function useSpecView(specId: number) {
   const api = useApi();
+  const poll = useResourcePoll(DETAIL_POLL_MS);
   return useQuery({
     queryKey: ["spec", specId],
     queryFn: async () => {
@@ -90,7 +98,8 @@ function useSpecView(specId: number) {
       if (!data) throw new Error(describeError(error));
       return data;
     },
-    refetchInterval: 3_000,
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -343,12 +352,14 @@ export function SpecDetail({
   });
 
   if (view.isPending) return <p className="note">Loading the spec…</p>;
-  if (view.isError)
+  if (view.isError && !view.data)
     return (
       <p className="error" role="alert">
         Could not load the spec: {view.error.message}
       </p>
     );
+  const data = view.data;
+  if (!data) return null;
   const {
     spec,
     tickets,
@@ -360,7 +371,7 @@ export function SpecDetail({
     acceptancePack,
     timeline: timelineEvents,
     finalRuns,
-  } = view.data;
+  } = data;
   const timeline = visibleTimeline(timelineEvents);
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;

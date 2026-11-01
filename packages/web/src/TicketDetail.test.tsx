@@ -520,4 +520,23 @@ describe("the ticket page", () => {
       "Could not load the ticket: no such ticket",
     );
   });
+
+  it("keeps showing the ticket when a later GET fails", async () => {
+    let failing = false;
+    const server = fakeServer({
+      "GET /tickets/4": () =>
+        failing
+          ? { status: 500, json: { error: "database is down" } }
+          : { json: view() },
+    });
+    const { queryClient } = renderWithApp(<TicketDetail ticketId={4} />, server);
+    await screen.findByText(/Export orders as CSV/);
+    failing = true;
+    await queryClient.refetchQueries({ queryKey: ["ticket", 4] });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["ticket", 4])?.status).toBe("error"),
+    );
+    expect(screen.getByText(/Export orders as CSV/)).toBeTruthy();
+    expect(screen.queryByText(/Could not load the ticket/)).toBeNull();
+  });
 });

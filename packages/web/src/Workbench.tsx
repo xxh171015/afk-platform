@@ -1,7 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { Skeleton } from "./components/ui/skeleton.tsx";
+import { useResourcePoll } from "./EventsProvider.tsx";
+import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
@@ -22,6 +24,7 @@ export const WORKBENCH_KEY = ["workbench"] as const;
 
 export function useWorkbench() {
   const api = useApi();
+  const poll = useResourcePoll(LIST_POLL_MS);
   return useQuery({
     queryKey: WORKBENCH_KEY,
     queryFn: async () => {
@@ -29,7 +32,8 @@ export function useWorkbench() {
       if (!data) throw new Error(describeError(error));
       return data;
     },
-    refetchInterval: 5_000,
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
   });
 }
 

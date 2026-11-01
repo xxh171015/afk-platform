@@ -1,4 +1,5 @@
 import { formatDisplayId } from "@afk/shared";
+import { pageUrl } from "../page-url.ts";
 import type { AcceptancePack } from "./pack.ts";
 
 // Markdown for one repo's pull request: merge order, that repo's section, integration (waived failures first),
@@ -6,11 +7,7 @@ import type { AcceptancePack } from "./pack.ts";
 // (docs/specs/experience-platform.md「验收包进 PR」).
 
 export function specDeliveryUrl(specId: number): string {
-  const base = (process.env.AFK_PAGE_URL ?? "http://127.0.0.1:5173").replace(
-    /\/+$/,
-    "",
-  );
-  return `${base}/specs/${specId}/delivery`;
+  return pageUrl(`/specs/${specId}/delivery`);
 }
 
 export function renderPackSection(

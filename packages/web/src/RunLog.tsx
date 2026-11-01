@@ -66,7 +66,7 @@ export function RunLog({
     });
   }, [data]);
 
-  if (slice.isError)
+  if (slice.isError && position.text === "")
     return (
       <p className="error" role="alert">
         Could not load the log: {slice.error.message}

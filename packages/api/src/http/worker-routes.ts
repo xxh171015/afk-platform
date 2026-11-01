@@ -1,6 +1,12 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import {
+  aroundJob,
+  emitTransition,
+  snapshotSpecs,
+  specIdsOfJob,
+} from "../events/announce.ts";
+import {
   readFinalE2ePayload,
   recordFinalE2eResult,
 } from "../finalize/final-e2e.ts";
@@ -368,8 +374,23 @@ export function registerWorkerRoutes(
       leaseSeconds: context.leaseSeconds,
     });
     if (!job) return c.json({ job: null }, 200);
+    const specIds = await specIdsOfJob(context.pool, job.id);
+    const before = await snapshotSpecs(context.pool, specIds);
     await markClaimed(context.pool, job);
     await markFinalClaimed(context.pool, job);
+    const run = await context.pool.query<{ id: number }>(
+      "SELECT id FROM runs WHERE job_id = $1 ORDER BY id DESC LIMIT 1",
+      [job.id],
+    );
+    await emitTransition(context, before, {
+      ...(typeof job.payload.specId === "number"
+        ? { specId: job.payload.specId }
+        : {}),
+      ...(typeof job.payload.ticketId === "number"
+        ? { ticketId: job.payload.ticketId }
+        : {}),
+      ...(run.rows[0] ? { runId: run.rows[0].id } : {}),
+    });
     return c.json(
       {
         job: {
@@ -432,42 +453,45 @@ export function registerWorkerRoutes(
     const { id } = c.req.valid("param");
     const { workerId, attempt, result } = c.req.valid("json");
     // The job finishing and the ticket moving on happen together or not at all.
-    const outcome = await inTransaction(context.pool, async (client) => {
-      const finished = await completeJob(
-        client,
-        { jobId: id, workerId, attempt, now: context.clock() },
-        result,
-      );
-      if (finished.status === "ok") {
-        const job = await client.query(
-          "SELECT id, type, payload FROM jobs WHERE id = $1",
-          [id],
+    const outcome = await aroundJob(context, id, () =>
+      inTransaction(context.pool, async (client) => {
+        const finished = await completeJob(
+          client,
+          { jobId: id, workerId, attempt, now: context.clock() },
+          result,
         );
-        // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
-        const recorded = readFinalE2ePayload(job.rows[0].payload)
-          ? await recordFinalE2eResult(client, job.rows[0], result).then(
-              () => ({ status: "final-e2e" }) as const,
-            )
-          : await recordStageResult(client, job.rows[0], result);
-        // not a ticket stage: it may be a step of a finalization, or a job for the code host
-        if (recorded.status === "no-ticket") {
-          const final = await recordFinalResult(client, job.rows[0], result);
-          if (final.status === "not-final") {
-            const openPr = readOpenPrPayload(job.rows[0]);
-            const sync = readHostSyncPayload(job.rows[0]);
-            const cleanup = readSpecCleanupPayload(job.rows[0]);
-            const ready = readPrReadyPayload(job.rows[0]);
-            if (openPr)
-              await recordOpenPr(client, openPr, result, context.clock());
-            else if (sync)
-              await recordHostSync(client, sync, result, context.clock());
-            else if (cleanup) await recordSpecCleanup(client, cleanup, result);
-            else if (ready) await recordPrReady(client, ready, result);
+        if (finished.status === "ok") {
+          const job = await client.query(
+            "SELECT id, type, payload FROM jobs WHERE id = $1",
+            [id],
+          );
+          // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
+          const recorded = readFinalE2ePayload(job.rows[0].payload)
+            ? await recordFinalE2eResult(client, job.rows[0], result).then(
+                () => ({ status: "final-e2e" }) as const,
+              )
+            : await recordStageResult(client, job.rows[0], result);
+          // not a ticket stage: it may be a step of a finalization, or a job for the code host
+          if (recorded.status === "no-ticket") {
+            const final = await recordFinalResult(client, job.rows[0], result);
+            if (final.status === "not-final") {
+              const openPr = readOpenPrPayload(job.rows[0]);
+              const sync = readHostSyncPayload(job.rows[0]);
+              const cleanup = readSpecCleanupPayload(job.rows[0]);
+              const ready = readPrReadyPayload(job.rows[0]);
+              if (openPr)
+                await recordOpenPr(client, openPr, result, context.clock());
+              else if (sync)
+                await recordHostSync(client, sync, result, context.clock());
+              else if (cleanup)
+                await recordSpecCleanup(client, cleanup, result);
+              else if (ready) await recordPrReady(client, ready, result);
+            }
           }
         }
-      }
-      return finished;
-    });
+        return finished;
+      }),
+    );
     if (outcome.status !== "ok") {
       const { body, status } = refusal(outcome);
       return c.json(body, status);
@@ -544,29 +568,31 @@ export function registerWorkerRoutes(
     const { id } = c.req.valid("param");
     const { workerId, attempt, error } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
-    const outcome = await inTransaction(context.pool, async (client) => {
-      const failed = await failJob(
-        client,
-        { jobId: id, workerId, attempt, now: context.clock() },
-        error,
-      );
-      if (failed.status === "ok") {
-        const job = await client.query(
-          "SELECT id, type, payload FROM jobs WHERE id = $1",
-          [id],
-        );
-        const failure = await recordJobFailure(
+    const outcome = await aroundJob(context, id, () =>
+      inTransaction(context.pool, async (client) => {
+        const failed = await failJob(
           client,
-          job.rows[0],
+          { jobId: id, workerId, attempt, now: context.clock() },
           error,
-          context.clock(),
         );
-        const sync = readHostSyncPayload(job.rows[0]);
-        if (failure.status === "not-a-stage" && sync)
-          await hostSyncFailed(client, sync.projectId, context.clock());
-      }
-      return failed;
-    });
+        if (failed.status === "ok") {
+          const job = await client.query(
+            "SELECT id, type, payload FROM jobs WHERE id = $1",
+            [id],
+          );
+          const failure = await recordJobFailure(
+            client,
+            job.rows[0],
+            error,
+            context.clock(),
+          );
+          const sync = readHostSyncPayload(job.rows[0]);
+          if (failure.status === "not-a-stage" && sync)
+            await hostSyncFailed(client, sync.projectId, context.clock());
+        }
+        return failed;
+      }),
+    );
     if (outcome.status !== "ok") {
       const { body, status } = refusal(outcome);
       return c.json(body, status);

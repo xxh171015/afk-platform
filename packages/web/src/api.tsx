@@ -6,8 +6,11 @@ import { createContext, type ReactNode, useContext } from "react";
 // test can hand them a client that talks to a fake server.
 const DEFAULT_API = "http://127.0.0.1:3000";
 
-export const defaultClient = (): ApiClient =>
-  createApiClient(import.meta.env.VITE_API_URL ?? DEFAULT_API);
+export function apiBase(): string {
+  return import.meta.env.VITE_API_URL ?? DEFAULT_API;
+}
+
+export const defaultClient = (): ApiClient => createApiClient(apiBase());
 
 const Context = createContext<ApiClient | undefined>(undefined);
 

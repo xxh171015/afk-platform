@@ -7,6 +7,7 @@ import {
 } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
+import { aroundSpec } from "../events/announce.ts";
 import {
   addRepo,
   createProject,
@@ -261,10 +262,7 @@ const importRoute = createRoute({
 
 const PlanningSha = z
   .string()
-  .regex(
-    /^[0-9a-f]{40}$/,
-    "must be a 40-character lowercase hex git SHA",
-  );
+  .regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex git SHA");
 
 const ConfirmBody = z
   .object({
@@ -300,7 +298,10 @@ const confirmRoute = createRoute({
     ),
     404: reply("No such spec", ErrorReply),
     409: reply("The spec is not a draft, or has no tickets", ErrorReply),
-    422: reply("The planning commit is incomplete or names no such repo", ErrorReply),
+    422: reply(
+      "The planning commit is incomplete or names no such repo",
+      ErrorReply,
+    ),
   },
 });
 
@@ -396,18 +397,16 @@ export function registerPlanningRoutes(
         409,
       );
     }
+    context.events.publish({ specId: result.spec.id });
     return c.json(result.spec, 201);
   });
 
   app.openapi(importRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    const result = await importTickets(
-      pool,
-      specId,
-      c.req.valid("json").files,
-      {
+    const result = await aroundSpec(context, specId, () =>
+      importTickets(pool, specId, c.req.valid("json").files, {
         append: c.req.valid("query").append === "true",
-      },
+      }),
     );
     switch (result.status) {
       case "no-spec":
@@ -439,7 +438,9 @@ export function registerPlanningRoutes(
             repoName: body.planningRepo as string,
           }
         : undefined;
-    const result = await confirmSpec(pool, specId, planning);
+    const result = await aroundSpec(context, specId, () =>
+      confirmSpec(pool, specId, planning),
+    );
     if (result.status === "no-spec")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "not-confirmable") {

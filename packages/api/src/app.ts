@@ -4,11 +4,17 @@ import { join } from "node:path";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
+import { EventsHub } from "./events/hub.ts";
+import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
 import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
 import { LogStore } from "./logs/log-store.ts";
+import {
+  type NotificationChannel,
+  silentNotifications,
+} from "./notify/channel.ts";
 
 export interface AppOptions {
   pool: pg.Pool;
@@ -16,6 +22,9 @@ export interface AppOptions {
   leaseSeconds?: number;
   // Where run logs are kept; startServer fills in $AFK_LOG_DIR or ~/.afk/logs/<instance id>.
   logDir?: string;
+  events?: EventsHub;
+  notifications?: NotificationChannel;
+  sseKeepaliveMs?: number;
 }
 
 export interface AppContext {
@@ -23,6 +32,9 @@ export interface AppContext {
   clock: () => Date;
   leaseSeconds: number;
   logs: LogStore;
+  events: EventsHub;
+  notifications: NotificationChannel;
+  sseKeepaliveMs: number;
 }
 
 export const LEASE_SECONDS = 120;
@@ -38,6 +50,9 @@ export function createApp(options: AppOptions): OpenAPIHono {
     logs: new LogStore(
       options.logDir ?? mkdtempSync(join(tmpdir(), "afk-logs-")),
     ),
+    events: options.events ?? new EventsHub(),
+    notifications: options.notifications ?? silentNotifications,
+    sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,
   };
   const app = new OpenAPIHono();
   // The API starts agents and has no login, so it only talks to this machine. CORS alone would only stop a foreign
@@ -65,5 +80,6 @@ export function createApp(options: AppOptions): OpenAPIHono {
   registerWorkerRoutes(app, context);
   registerLogRoutes(app, context);
   registerTicketRoutes(app, context);
+  registerEventRoutes(app, context);
   return app;
 }
