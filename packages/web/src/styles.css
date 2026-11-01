@@ -311,3 +311,71 @@ ul.blocked-list {
   color: var(--muted);
   font-style: italic;
 }
+
+/* The spec page: the text on the left, the tickets beside it, the graph and warnings under both. */
+.two-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.side-column {
+  position: sticky;
+  top: 1rem;
+}
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 1rem;
+}
+.tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+.tab.selected {
+  border-color: #ccc;
+  background: #fff;
+  font-weight: 600;
+}
+.contents ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+.markdown {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.markdown pre {
+  overflow-x: auto;
+  background: #f5f5f5;
+  padding: 0.6rem;
+}
+.markdown table {
+  border-collapse: collapse;
+}
+.markdown table th,
+.markdown table td {
+  border: 1px solid #ccc;
+  padding: 0.25rem 0.6rem;
+}
+.markdown li.task-list-item {
+  list-style: none;
+}
+.markdown ul:has(> li.task-list-item) {
+  padding-left: 0.5rem;
+}
+@media (max-width: 800px) {
+  .two-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .side-column {
+    position: static;
+  }
+}

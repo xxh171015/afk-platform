@@ -11,9 +11,10 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
+import { Markdown } from "./Markdown.tsx";
 import { pullStateLabel } from "./pull-request.ts";
 
 // One spec: the dependency graph with a node per ticket coloured by its state, the warnings the import left, and
@@ -284,6 +285,7 @@ export function SpecDetail({ specId }: { specId: number }) {
   const api = useApi();
   const queryClient = useQueryClient();
   const view = useSpecView(specId);
+  const [tab, setTab] = useState<"spec" | "delivery">("spec");
   const confirm = useMutation({
     mutationFn: async () => {
       const { data, error } = await api.POST("/specs/{specId}/confirm", {
@@ -317,6 +319,9 @@ export function SpecDetail({ specId }: { specId: number }) {
   } = view.data;
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;
+  // what each ticket waits for: the tickets with an edge into it, and the kind of the edge
+  const waitsFor = (displayId: string) =>
+    edges.filter((e) => e.to === displayId);
 
   return (
     <section className="spec-detail">
@@ -331,29 +336,143 @@ export function SpecDetail({ specId }: { specId: number }) {
         <p className="error">Paused: {spec.pauseReason}</p>
       ) : null}
 
-      {spec.state === "draft" ? (
-        <div className="confirm">
-          <button
-            type="button"
-            onClick={() => confirm.mutate()}
-            disabled={!canConfirm || confirm.isPending}
-          >
-            {confirm.isPending ? "Confirming…" : "Confirm split"}
-          </button>
-          {tickets.length === 0 ? (
-            <span className="note">
-              {" "}
-              Import tickets first (plat tickets import).
-            </span>
-          ) : null}
-          {confirm.isError ? (
-            <p className="error" role="alert">
-              {confirm.error.message}
-            </p>
-          ) : null}
+      <div className="two-columns">
+        <div className="main-column">
+          <div className="tabs" role="tablist">
+            {(
+              [
+                ["spec", "需求说明"],
+                ["delivery", "交付"],
+              ] as const
+            ).map(([name, label]) => (
+              <button
+                key={name}
+                type="button"
+                role="tab"
+                aria-selected={tab === name}
+                className={tab === name ? "tab selected" : "tab"}
+                onClick={() => setTab(name)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {tab === "spec" ? (
+            spec.body.trim() === "" ? (
+              <p className="note" data-testid="empty-body">
+                这份需求没有正文
+              </p>
+            ) : (
+              <Markdown source={spec.body} contents />
+            )
+          ) : (
+            <Delivery
+              pullRequests={pullRequests}
+              orderBroken={orderBroken}
+              mergeOrder={mergeOrder}
+              acceptancePack={acceptancePack}
+              finalizations={finalizations}
+            />
+          )}
         </div>
-      ) : null}
 
+        <aside className="side-column">
+          {spec.state === "draft" ? (
+            <div className="confirm">
+              <button
+                type="button"
+                onClick={() => confirm.mutate()}
+                disabled={!canConfirm || confirm.isPending}
+              >
+                {confirm.isPending ? "Confirming…" : "Confirm split"}
+              </button>
+              {tickets.length === 0 ? (
+                <span className="note">
+                  {" "}
+                  Import tickets first (plat tickets import).
+                </span>
+              ) : null}
+              {confirm.isError ? (
+                <p className="error" role="alert">
+                  {confirm.error.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <h3>Tickets</h3>
+          <ul className="tickets">
+            {tickets.map((ticket) => {
+              const waits = waitsFor(ticket.displayId);
+              return (
+                <li key={ticket.id}>
+                  <span className={`badge ticket-${ticket.state}`}>
+                    {ticket.state}
+                  </span>{" "}
+                  <a href={`#/tickets/${ticket.id}`}>{ticket.displayId}</a>{" "}
+                  {ticket.title} <span className="note">[{ticket.repo}]</span>
+                  {ticket.appended ? (
+                    <span className="badge appended"> appended</span>
+                  ) : null}
+                  {ticket.blockedReason ? ` — ${ticket.blockedReason}` : ""}
+                  {waits.length > 0 ? (
+                    <div className="note waits-for">
+                      waits for{" "}
+                      {waits.map((e) => `${e.from} (${e.kind})`).join(", ")}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+      </div>
+
+      <h3>Warnings from the import</h3>
+      {spec.warnings.length === 0 ? (
+        <p className="note">No warnings.</p>
+      ) : (
+        <ul className="warnings">
+          {spec.warnings.map((warning, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: warnings have no id of their own
+            <li key={index}>
+              {(warning as { message?: string }).message ??
+                JSON.stringify(warning)}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3>Dependency graph</h3>
+      {tickets.length === 0 ? (
+        <p className="note">No tickets imported.</p>
+      ) : (
+        <DependencyGraph tickets={tickets} edges={edges} />
+      )}
+    </section>
+  );
+}
+
+// The "交付" tab: the pull requests in the order to merge them, the acceptance pack and the overall review.
+function Delivery({
+  pullRequests,
+  orderBroken,
+  mergeOrder,
+  acceptancePack,
+  finalizations,
+}: Pick<
+  SpecView,
+  | "pullRequests"
+  | "orderBroken"
+  | "mergeOrder"
+  | "acceptancePack"
+  | "finalizations"
+>) {
+  const nothing =
+    pullRequests.length === 0 && !acceptancePack && finalizations.length === 0;
+  return (
+    <>
+      {nothing ? <p className="note">还没有可交付的内容</p> : null}
       {pullRequests.length > 0 ? (
         <>
           <h3>Pull requests</h3>
@@ -398,46 +517,6 @@ export function SpecDetail({ specId }: { specId: number }) {
         </>
       ) : null}
       {acceptancePack ? <AcceptancePackSection pack={acceptancePack} /> : null}
-
-      <h3>Warnings from the import</h3>
-      {spec.warnings.length === 0 ? (
-        <p className="note">No warnings.</p>
-      ) : (
-        <ul className="warnings">
-          {spec.warnings.map((warning, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: warnings have no id of their own
-            <li key={index}>
-              {(warning as { message?: string }).message ??
-                JSON.stringify(warning)}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3>Dependency graph</h3>
-      {tickets.length === 0 ? (
-        <p className="note">No tickets imported.</p>
-      ) : (
-        <DependencyGraph tickets={tickets} edges={edges} />
-      )}
-
-      <h3>Tickets</h3>
-      <ul className="tickets">
-        {tickets.map((ticket) => (
-          <li key={ticket.id}>
-            <span className={`badge ticket-${ticket.state}`}>
-              {ticket.state}
-            </span>{" "}
-            <a href={`#/tickets/${ticket.id}`}>{ticket.displayId}</a>{" "}
-            {ticket.title}
-            {ticket.appended ? (
-              <span className="badge appended"> appended</span>
-            ) : null}
-            {ticket.blockedReason ? ` — ${ticket.blockedReason}` : ""}
-          </li>
-        ))}
-      </ul>
-
       {finalizations.length > 0 ? (
         <>
           <h3>Overall review</h3>
@@ -451,6 +530,6 @@ export function SpecDetail({ specId }: { specId: number }) {
           </ul>
         </>
       ) : null}
-    </section>
+    </>
   );
 }

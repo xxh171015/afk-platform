@@ -191,6 +191,7 @@ describe("the spec page", () => {
       }),
     });
     renderWithApp(<SpecDetail specId={1} />, server);
+    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
 
     const frontend = (await screen.findByText(/frontend #8/)).closest("li");
     expect(frontend?.textContent).toContain("(draft)");
@@ -201,7 +202,7 @@ describe("the spec page", () => {
     );
   });
 
-  it("lists the tickets and their states below the graph", async () => {
+  it("lists the tickets and their states beside the text", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,
       fakeServer({
@@ -217,7 +218,9 @@ describe("the spec page", () => {
       await screen.findByText(
         (_, element) =>
           element?.tagName === "LI" &&
-          /T-1 Ticket 1 — gate-failed/.test(element.textContent ?? ""),
+          /T-1 Ticket 1 \[backend\] — gate-failed/.test(
+            element.textContent ?? "",
+          ),
       ),
     ).toBeTruthy();
   });
@@ -340,6 +343,7 @@ describe("the spec page", () => {
         }),
       }),
     );
+    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     const prs = (await screen.findAllByText(/CI /)).map((e) => e.textContent);
     expect(prs[0]).toContain("CI success, review approved");
     expect(prs[1]).toContain("CI pending, review none");
@@ -405,6 +409,7 @@ describe("the spec page", () => {
         }),
       }),
     );
+    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     expect(await screen.findByText("closed without merge")).toBeTruthy();
   });
 
@@ -515,6 +520,7 @@ describe("the spec page", () => {
         }),
       }),
     );
+    fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     expect(
       await screen.findByText("backend: final-merge blocked (merge-conflict)"),
     ).toBeTruthy();
@@ -527,6 +533,119 @@ describe("the spec page", () => {
     );
     const back = await screen.findByRole("link", { name: /all specs/ });
     expect(back.getAttribute("href")).toBe("#/");
+  });
+});
+
+describe("the body of the spec", () => {
+  const BODY = [
+    "## Problem Statement",
+    "",
+    "Customers want **CSV**.",
+    "",
+    "## Testing Decisions",
+    "",
+    "- [x] a done thing",
+    "- [ ] an open thing",
+    "",
+    "```ts",
+    "## not a section",
+    "```",
+    "",
+    "| a | b |",
+    "| - | - |",
+    "| 1 | 2 |",
+    "",
+    "<script>alert(1)</script>",
+  ].join("\n");
+  const open = (body: string, over: Record<string, unknown> = {}) =>
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({ spec: { body, state: "running" }, ...over }),
+        }),
+      }),
+    );
+
+  it("is rendered as markdown: task list boxes, a code block, a table, and no raw html", async () => {
+    const { container } = open(BODY);
+    await screen.findByText("Customers want", { exact: false });
+    expect(container.querySelector("strong")?.textContent).toBe("CSV");
+    const boxes = container.querySelectorAll<HTMLInputElement>(
+      'li.task-list-item input[type="checkbox"]',
+    );
+    expect([...boxes].map((b) => b.checked)).toEqual([true, false]);
+    expect(container.querySelector("pre code")?.textContent).toContain(
+      "## not a section",
+    );
+    expect(container.querySelectorAll("table td")).toHaveLength(2);
+    expect(container.querySelector("script")).toBeNull();
+  });
+
+  it("has a table of contents of the ## sections that jumps to them", async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.textContent ?? "");
+    };
+    open(BODY);
+    const nav = await screen.findByRole("navigation", { name: "Contents" });
+    const links = [...nav.querySelectorAll("button")].map((b) => b.textContent);
+    // the heading inside the code fence is not a section
+    expect(links).toEqual(["Problem Statement", "Testing Decisions"]);
+    fireEvent.click(screen.getByRole("button", { name: "Testing Decisions" }));
+    expect(scrolled).toEqual(["Testing Decisions"]);
+  });
+
+  it("says so when the spec has no body", async () => {
+    open("  \n");
+    expect(await screen.findByText("这份需求没有正文")).toBeTruthy();
+  });
+
+  it("keeps the delivery apart on its own tab", async () => {
+    open(BODY, {
+      pullRequests: [
+        {
+          order: 1,
+          waitsFor: [],
+          repo: "backend",
+          number: 7,
+          url: "https://github.com/me/shop/pull/7",
+          state: "open",
+          draft: false,
+          ci: "success",
+          review: "none",
+          syncError: null,
+        },
+      ],
+    });
+    await screen.findByText("Problem Statement", { selector: "h2" });
+    expect(screen.queryByText("Pull requests")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "交付" }));
+    expect(await screen.findByText("Pull requests")).toBeTruthy();
+    expect(
+      screen.queryByText("Problem Statement", { selector: "h2" }),
+    ).toBeNull();
+  });
+});
+
+describe("the side column", () => {
+  it("lists every ticket with its state, repo and what it waits for, and keeps the graph and warnings below", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    const item = await screen.findByText(
+      (_, el) =>
+        el?.tagName === "LI" &&
+        /T-3 Ticket 3 \[backend\]/.test(el.textContent ?? "") &&
+        /waits for T-1 \(contract\)/.test(el.textContent ?? ""),
+    );
+    expect(item).toBeTruthy();
+    expect(screen.getByText("Warnings from the import")).toBeTruthy();
+    expect(screen.getByText("Dependency graph")).toBeTruthy();
+    // the confirm button of a draft is in the side column
+    const side = item.closest("aside");
+    expect(side?.textContent).toContain("Confirm split");
   });
 });
 
