@@ -21,8 +21,12 @@ _Avoid_: 父票、epic、story
 _Avoid_: 任务、issue、子票
 
 **Content version（内容版本）**：
-Ticket 内容（标题、正文（含验收标准）、模块、已批准的保护路径）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型和依赖边不属于内容，不能改。
+Ticket 内容（标题、正文（含验收标准）、模块、已批准的保护路径）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型、依赖边和 Retry note 都不属于内容，不能靠它们加版本。
 _Avoid_: 修订号、票版本
+
+**Retry note（重试说明）**：
+人在重试 blocked 的票或收尾时写下的一段话，只对紧接着那一次 Run 有效。不是 Ticket 内容，不加 Content version。
+_Avoid_: 备注、评论、简报
 
 **Integration ticket（联调票）**：
 在使用方仓库（比如前端）里、对着真实运行的其他仓库验证端到端行为的 Ticket。它的 agent 在联调环境里写 e2e 测试、对着真服务跑通，合并之后由平台在新起的联调环境里再跑；跑不通就由平台诊断出错的仓库并建修复票，修好后再跑，最多两轮。
@@ -72,6 +76,14 @@ _Avoid_: 接口文档、API 定义
 使用方仓库里提交的一份别的仓库的契约，生成的 client 以它为准。它必须和这个仓库的票所用的 Contract SHA 上的契约一字不差；没有 contract 入边的票不许改它。
 _Avoid_: 契约快照、本地契约
 
+**Planning repo（规划仓库）**：
+项目里跑 grill、to-spec、to-tickets 的那个仓库；Tracker doc 装在这里。一个 Spec 的规划提交记在这个仓库上。
+_Avoid_: 主仓库、后端仓库
+
+**Planning commit（规划提交）**：
+规划阶段写进规划仓库的那次提交（GLOSSARY.md、ADR、该仓库的 AGENTS.md），作为该仓库这个 Spec 集成分支的起点。身份是 SHA，不是分支名。
+_Avoid_: 规划分支
+
 **Tracker doc（tracker 文档）**：
 规划仓库里告诉 matt skills 去哪里、怎么发布内容的文档：Spec 和 Ticket 发布到平台，其余（地图、分诊）留在代码托管上。由平台按项目和仓库生成（第一行写平台版本、skills SHA、项目和仓库），不手改。
 _Avoid_: tracker 配置、issue-tracker 模板
@@ -115,6 +127,10 @@ _Avoid_: 白名单、豁免路径
 **Blocked reason（blocked 原因码）**：
 票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。
 
+**Notification（通知）**：
+平台在需要人回来、或流程可以往下走时，发到人眼前的一条短消息。标题是事件类型，正文是显示编号、标题和一句原因，并带对应页面的链接。不是票卡住时页面上那份结构化说明，也不是验收包。
+_Avoid_: 推送、提醒
+
 **Finding（意见）**：
 review 意见或门禁失败，以及它的处理结果。
 _Avoid_: 评论、issue
@@ -127,7 +143,7 @@ _Avoid_: 维度、审查类型
 commit 与 Ticket、Spec、PR、缺陷之间的对应关系。
 
 **Acceptance pack（验收包）**：
-Spec 收尾时给人看的简报，人据此决定是否合并。
+Spec 收尾时给人看的简报，人据此决定是否合并。出现在平台上，并写入各仓库 PR 的描述（该仓库那一节，外加合并顺序和联调）。
 _Avoid_: 报告、总结
 
 **Merge order（合并顺序）**：

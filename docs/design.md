@@ -8,6 +8,8 @@
 
 修订：2026-10-30 按 M2 地图（#62）修订：仓库不再分前后端、契约属于提供接口的仓库、一个需求可以改任意几个仓库（「领域模型与状态机」「跨仓库需求」重写）；联调票由平台在联调环境里验证、失败自动建修复票；合并顺序由契约关系推出，`partially-merged` 和新的取消规则；需求确认后可以追加票、改票，做完的票不重开（「blocked 处理」「`plat` CLI 与票的导入」）；上下文注入按仓库放契约、`/refs` 快照的 SHA 规则；新原因码。M2 的详细设计见 [M2 spec](specs/m2-platform.md)。
 
+修订：2026-11-01 按操作体验地图（#125）修订：原则第 4 条改表述不改精神（规划提交、`/context/domain/`）；上下文表补 domain 和 Retry note；确认拆分登记规划 SHA；retry 可带说明。详细设计见 [操作体验 spec](specs/experience-platform.md)。
+
 修订：2026-11-01 在「总体架构」加两张架构图：一张按现有代码（M0–M2），一张叠加 M3–M5。
 
 ## 背景与目标
@@ -48,7 +50,7 @@
 1. **调度是确定性的，不交给 LLM。** to-tickets 已经写好票之间的依赖边，平台直接按边算出可以开工的票。skills 仓库的 `docs/engineering/implement-spec.md` 也说：真正 AFK 的场景，确定性循环更快、更便宜、更可靠。
 2. **Agent 只写代码和 commit，状态全由平台改。** Agent 不 push、不关票、不改标签、不开 PR，和 Sandcastle 仓库自己的 implement prompt 一致。沙箱不连平台 API，也没有 git 凭据；agent 需要的上下文由 worker 渲染成文件只读挂进去。失败时状态不会乱。
 3. **一次运行只往一个仓库提交。** 需要参考另一个仓库时，只读挂载它在固定 SHA 上的快照。
-4. **存指针，不复制。** GLOSSARY.md、ADR、契约留在仓库里，平台只存链接和索引；prompt 里也只放指针，让 agent 自己去读。
+4. **存指针，不复制。** 原文只在仓库里（GLOSSARY.md、ADR、契约）。平台只存链接、索引和 SHA；prompt 只放路径。agent 读到的 `/context/contract/` 和 `/context/domain/` 是该指针在沙箱里按 SHA 的只读挂载，不是平台库里的第二份正文。规划阶段的术语和 ADR 作为规划提交成为规划仓库集成分支的起点，不先推 main。
 5. **按“每次全新会话”设计。** 会话续接（resume）只在 agent 支持时当优化用，这样换 agent 只改配置。
 6. **人工检查点尽量后移。** 人只出现三次：确认拆分、处理 blocked、最终验收。每次拿到的是整理好的简报，不是原始输出。
 7. **不信任 agent 自己的产出，只信任平台验证过的事实。** 门禁配置从基准提交读，不从 agent 分支读；agent 的输出必须是通过 schema 校验的结构化结果；合并后的集成分支要再跑一次门禁才算数。
@@ -1121,6 +1123,8 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 | `/context/spec.md`            | spec 正文，包括已确认的 seams 和共享名字                                                                                                                                             | 总是                |
 | `/context/run.json`           | 阶段、基准提交（fixed point）、分支名、集成分支名、上限、`allowedProtectedPaths`（这张票已批准可以改的保护路径，没有则为空数组）                                                     | 总是                |
 | `/context/contract/<仓库名>/` | 固定 SHA 上的契约文件，按提供契约的仓库分开                                                                                                                                                          | 有契约边时          |
+| `/context/domain/`            | 规划提交上规划仓库的 `GLOSSARY.md` 和 `docs/adr/`，只读                                                                                                                              | 非规划仓库的票      |
+| `/context/note.md`            | 人对紧接着这一次 Run 的 Retry note                                                                                                                                                   | 这次重试带了说明    |
 | `/context/failure/gate.log`   | 上一次门禁失败命令输出的最后 200 行，加门禁结论；merge-fix 时是 `merge-tree` 的冲突说明或候选门禁的失败日志                                                                          | gate-fix、merge-fix |
 | `/context/review.json`        | review 的 mustFix 列表                                                                                                                                                               | review-fix          |
 | `/context/pr-comments.md`     | PR 上人写的评论                                                                                                                                                                      | rework              |
@@ -1141,7 +1145,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 
 **AFK prompt 的写法**（ADR 0002）：agent 收到的 prompt 是两段拼成的一份：**公共覆盖层**（`packages/pipeline/prompts/overlay.md`，所有阶段一样）加**这个阶段的薄 prompt**。worker 把拼出的全文写进临时文件交给 Sandcastle，同一份全文记在 Run 的 `prompt` 上。阶段 prompt 只放指针和这个阶段特有的东西，不重写 skill 已经有的步骤，控制在 120KB 以内。
 
-- 公共覆盖层写明：没有人回答问题，遇到小事自己决定并写进 `uncertainties`，必须由人决定的输出 `cannot-proceed`；`/context` 就是 tracker，不读 `docs/agents/issue-tracker.md`、不调 `plat`、不运行 setup；不 push、不切换或新建分支、不自己加 `Spec` / `Ticket` / `Run` trailer（worker 事后补）；保护路径一律不改，`/context/run.json` 的 `allowedProtectedPaths` 里列出的除外，没批准却必须改、或契约有问题时输出 `cannot-proceed`，`blockedReason` 写 `contract-change-needed`（契约票和普通票用同一份 prompt，靠 `allowedProtectedPaths` 区分）。
+- 公共覆盖层写明：没有人回答问题，遇到小事自己决定并写进 `uncertainties`，必须由人决定的输出 `cannot-proceed`；`/context` 就是 tracker，不读 `docs/agents/issue-tracker.md`、不调 `plat`、不运行 setup；不 push、不切换或新建分支、不自己加 `Spec` / `Ticket` / `Run` trailer（worker 事后补）；保护路径一律不改，`/context/run.json` 的 `allowedProtectedPaths` 里列出的除外，没批准却必须改、或契约有问题时输出 `cannot-proceed`，`blockedReason` 写 `contract-change-needed`（契约票和普通票用同一份 prompt，靠 `allowedProtectedPaths` 区分）。有 `/context/note.md` 时读它，当成人对这一次 Run 的指示，不当成改票。
 - 公共覆盖层把 skill 里每个"去问人"的地方写死成答案：implement 的"reference 不明确就问"，票就是 `/context/ticket.md`；tdd 的"和用户确认 seams"，spec 里的 seams 已经确认；code-review 的"问固定点"，是 `run.json` 的 `baseSha`，按 skill 原文用三点 diff；code-review 的"问 spec 在哪"，由阶段 prompt 给出。没列到的提问，能撤回的小事自己决定，需要人决定的输出 `cannot-proceed`。覆盖层第一行写明它对应的 skills SHA，守卫测试要求它等于固定的 `SKILLS_SHA` 和快照的 SHA；升级 SHA 时必须回头核对覆盖层。
 - implement：按绝对路径读 `/home/agent/.cursor/skills/implement/SKILL.md` 照做（它是 `disable-model-invocation: true`，模型不会自己调用；agent 也没有 Skill 工具，所以按文件读），**跳过它最后调用 `code-review` 的那一步**，平台另有 review 阶段。tdd 只做红 → 绿，不在循环里重构；每条验收标准都要有测试，结果里带验收对照表。
 - gate-fix、review-fix、final-fix：读 tdd，先写会失败的测试再修；review-fix 和 final-fix 把两个审查轴的 `mustFix` 一起修；不用 `diagnosing-bugs`。merge-fix 不读 skill，只用覆盖层。
@@ -1176,10 +1180,10 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat repo add --name <名字> --url … [--host-kind github\|gitlab]` / `plat repo edit <名字> [--contract-path …] [--host-kind …]` | 登记仓库（只有名字，不分前后端）、设契约路径和代码托管类型（不写时按地址推断一次） |
 | `plat tickets import S-12 <目录>`                  | 一次性导入整张依赖图（一张票一个 md 文件），校验通过才写入 |
 | `plat tickets import S-12 <目录> --append`        | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
-| `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做） |
+| `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做）。在规划仓库里核并登记规划提交 SHA；页面确认不读本地 git |
 | `plat spec show S-12` / `plat ticket view T-123`   | 查看                                        |
 | `plat ticket edit T-123 --file t.md`               | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版） |
-| `plat ticket retry T-123 --mode continue\|restart` | 处理 blocked                                |
+| `plat ticket retry T-123 --mode continue\|restart` | 处理 blocked；可选带 Retry note，只对下一次 Run 有效 |
 | `plat ticket approve-protected T-123`              | 批准保护路径改动                            |
 | `plat ticket allow-path T-123 <path>...`           | 给已阻塞的票追加批准的保护路径（再 retry）  |
 | `plat ticket cancel T-123 [--cascade]`             | 取消，可选一并取消下游                      |
@@ -1358,7 +1362,7 @@ flowchart LR
 
 ## 落地路线
 
-分六个阶段：M0 不建平台，只验证单票链路；M1 和 M2 在本机完成 PoC；M3 起搬到公司服务器。PoC 的真正验收在 M2：一个真实的前后端需求，人只在开头和结尾出现。
+分六个阶段：M0 不建平台，只验证单票链路；M1 和 M2 在本机完成 PoC；M2 之后、M3 之前补操作体验（控制塔、通知、规划提交），见 [操作体验 spec](specs/experience-platform.md)。M3 起搬到公司服务器。PoC 的真正验收在 M2：一个真实的前后端需求，人只在开头和结尾出现。
 
 ```mermaid
 flowchart TB
