@@ -2,13 +2,30 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
+import { Sha } from "./Sha.tsx";
+import { StatusBadge } from "./StatusBadge.tsx";
 
 // One ticket, for finding out what happened to it: its runs (stage, result, time, model and skills version), the
 // log of the one you pick, what the gates measured, and what the reviews found.
 
 const seconds = (ms: number | null) =>
   ms === null ? "—" : `${Math.round(ms / 1000)} s`;
+
+function ShaPairs({ pairs }: { pairs: Record<string, string> }) {
+  return (
+    <>
+      {Object.entries(pairs).map(([name, sha], index) => (
+        <span key={name}>
+          {index > 0 ? ", " : ""}
+          {name}@
+          <Sha value={sha} />
+        </span>
+      ))}
+    </>
+  );
+}
 
 export function TicketDetail({
   ticketId,
@@ -85,15 +102,22 @@ export function TicketDetail({
   return (
     <section className="ticket-detail">
       <p>
-        <a href={`#/specs/${ticket.specId}`}>← {ticket.specDisplayId}</a>
+        <a href={paths.spec(ticket.specId)}>← {ticket.specDisplayId}</a>
       </p>
       <h2>
         {ticket.displayId} {ticket.title}{" "}
-        <span className={`badge ticket-${ticket.state}`}>{ticket.state}</span>
+        <StatusBadge kind="ticket" code={ticket.state} />
       </h2>
       <p className="note">
         {ticket.type}, repo {ticket.repo}, version {ticket.contentVersion}
-        {ticket.blockedReason ? `, blocked: ${ticket.blockedReason}` : ""}
+        {ticket.blockedReason ? (
+          <>
+            {", "}
+            <StatusBadge kind="blocked" code={ticket.blockedReason} />
+          </>
+        ) : (
+          ""
+        )}
       </p>
       {ticket.brief ? (
         <div className="brief" role="note">
@@ -151,7 +175,7 @@ export function TicketDetail({
         <aside className="side-column">
           <h3>Spec</h3>
           <p>
-            <a href={`#/specs/${ticket.specId}`}>{ticket.specDisplayId}</a>
+            <a href={paths.spec(ticket.specId)}>{ticket.specDisplayId}</a>
             {spec.data ? ` ${spec.data.spec.title}` : ""}
           </p>
           {(
@@ -166,7 +190,7 @@ export function TicketDetail({
                 <ul className="related">
                   {related.map((e) => (
                     <li key={e.id}>
-                      <a href={`#/tickets/${e.id}`}>{e.displayId}</a> ({e.kind},{" "}
+                      <a href={paths.ticket(e.id)}>{e.displayId}</a> ({e.kind},{" "}
                       {e.state})
                     </li>
                   ))}
@@ -180,8 +204,8 @@ export function TicketDetail({
               <ul className="related spec-tickets">
                 {spec.data.tickets.map((t) => (
                   <li key={t.id} className={t.id === ticket.id ? "picked" : ""}>
-                    <span className={`badge ticket-${t.state}`}>{t.state}</span>{" "}
-                    <a href={`#/tickets/${t.id}`}>{t.displayId}</a> {t.title}
+                    <StatusBadge kind="ticket" code={t.state} />{" "}
+                    <a href={paths.ticket(t.id)}>{t.displayId}</a> {t.title}
                   </li>
                 ))}
               </ul>
@@ -207,9 +231,12 @@ export function TicketDetail({
                   ? ""
                   : `, ${attempt.e2e.testsFailed ?? 0} of ${attempt.e2e.testsTotal} tests failed`}
                 {attempt.e2e.refShas
-                  ? `, built from ${Object.entries(attempt.e2e.refShas)
-                      .map(([name, sha]) => `${name}@${sha.slice(0, 8)}`)
-                      .join(", ")}`
+                  ? Object.entries(attempt.e2e.refShas).map(([name, sha]) => (
+                      <span key={name}>
+                        {`, built from ${name}@`}
+                        <Sha value={sha} />
+                      </span>
+                    ))
                   : ""}
                 {attempt.diagnosis ? (
                   <div className="diagnosis">
@@ -225,7 +252,7 @@ export function TicketDetail({
                 {attempt.fixTicket ? (
                   <p className="note">
                     Fix ticket{" "}
-                    <a href={`#/tickets/${attempt.fixTicket.id}`}>
+                    <a href={paths.ticket(attempt.fixTicket.id)}>
                       {attempt.fixTicket.displayId}
                     </a>{" "}
                     ({attempt.fixTicket.state}, {attempt.fixTicket.repo})
@@ -276,21 +303,15 @@ export function TicketDetail({
                 <td>{run.result ?? "running"}</td>
                 <td>{seconds(run.durationMs)}</td>
                 <td>{run.model ?? "—"}</td>
-                <td>{run.skillsSha ?? "—"}</td>
+                <td>{run.skillsSha ? <Sha value={run.skillsSha} /> : "—"}</td>
                 <td>
-                  {run.contractShas
-                    ? Object.entries(run.contractShas)
-                        .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
-                        .join(", ")
-                    : "—"}
+                  {run.contractShas ? (
+                    <ShaPairs pairs={run.contractShas} />
+                  ) : (
+                    "—"
+                  )}
                 </td>
-                <td>
-                  {run.refShas
-                    ? Object.entries(run.refShas)
-                        .map(([repo, sha]) => `${repo}@${sha.slice(0, 8)}`)
-                        .join(", ")
-                    : "—"}
-                </td>
+                <td>{run.refShas ? <ShaPairs pairs={run.refShas} /> : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -311,7 +332,7 @@ export function TicketDetail({
         <ul className="gates">
           {gateResults.map((gate) => (
             <li key={gate.commitSha}>
-              <code>{gate.commitSha.slice(0, 7)}</code>{" "}
+              <Sha value={gate.commitSha} />{" "}
               {gate.testsTotal === null
                 ? "no JUnit"
                 : `${gate.testsTotal} tests, ${gate.testsSkipped ?? 0} skipped`}

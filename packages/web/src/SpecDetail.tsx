@@ -15,7 +15,10 @@ import { useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
 import { Markdown } from "./Markdown.tsx";
-import { pullStateLabel } from "./pull-request.ts";
+import { paths } from "./paths.ts";
+import { Sha } from "./Sha.tsx";
+import { StatusBadge } from "./StatusBadge.tsx";
+import { blockedReasonLabel, ticketStateLabel } from "./status.ts";
 
 // One spec: the dependency graph with a node per ticket coloured by its state, the yellow prechecks before
 // confirm, and the button that confirms the split so that the platform starts working on it.
@@ -40,7 +43,7 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
       style={{ background: colors.fill, borderColor: colors.border }}
     >
       <Handle type="target" position={Position.Left} />
-      <a href={`#/tickets/${data.id}`}>
+      <a href={paths.ticket(data.id)}>
         <strong>{data.displayId}</strong>
       </a>{" "}
       {data.title}
@@ -49,8 +52,13 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
         {data.appended ? " · appended" : ""}
       </div>
       <div className="ticket-node-state">
-        {data.state}
-        {data.blockedReason ? ` (${data.blockedReason})` : ""}
+        <span title={data.state}>{ticketStateLabel(data.state)}</span>
+        {data.blockedReason ? (
+          <span title={data.blockedReason}>
+            {" "}
+            ({blockedReasonLabel(data.blockedReason)})
+          </span>
+        ) : null}
       </div>
       <Handle type="source" position={Position.Right} />
     </div>
@@ -175,11 +183,9 @@ function AcceptancePackSection({
               <a href={repo.pullRequest.url}>
                 Pull request #{repo.pullRequest.number}
               </a>{" "}
-              <span className={`badge pr-${repo.pullRequest.state}`}>
-                {pullStateLabel(repo.pullRequest.state)}
-                {repo.pullRequest.draft ? " (draft)" : ""}
-              </span>{" "}
-              CI {repo.pullRequest.ci}, review {repo.pullRequest.review}
+              <StatusBadge kind="pr" code={repo.pullRequest.state} />
+              {repo.pullRequest.draft ? " (草稿)" : ""} CI {repo.pullRequest.ci}
+              , review {repo.pullRequest.review}
             </p>
           ) : null}
           {repo.tickets.map((ticket) => (
@@ -254,7 +260,7 @@ function AcceptancePackSection({
 
           {repo.gate ? (
             <p className="gates">
-              Gate: {repo.gate.commitSha.slice(0, 8)}:{" "}
+              Gate: <Sha value={repo.gate.commitSha} />:{" "}
               {repo.gate.testsTotal ?? "?"} tests,{" "}
               {repo.gate.testsSkipped ?? "?"} skipped,{" "}
               {seconds(repo.gate.durationMs)} (
@@ -353,11 +359,11 @@ export function SpecDetail({ specId }: { specId: number }) {
   return (
     <section className="spec-detail">
       <p>
-        <a href="#/">← all specs</a>
+        <a href={paths.specs}>← 全部需求</a>
       </p>
       <h2>
         {spec.displayId} {spec.title}{" "}
-        <span className={`badge spec-${spec.state}`}>{spec.state}</span>
+        <StatusBadge kind="spec" code={spec.state} />
       </h2>
       {spec.pauseReason ? (
         <p className="error">Paused: {spec.pauseReason}</p>
@@ -433,15 +439,20 @@ export function SpecDetail({ specId }: { specId: number }) {
               const waits = waitsFor(ticket.displayId);
               return (
                 <li key={ticket.id}>
-                  <span className={`badge ticket-${ticket.state}`}>
-                    {ticket.state}
-                  </span>{" "}
-                  <a href={`#/tickets/${ticket.id}`}>{ticket.displayId}</a>{" "}
+                  <StatusBadge kind="ticket" code={ticket.state} />{" "}
+                  <a href={paths.ticket(ticket.id)}>{ticket.displayId}</a>{" "}
                   {ticket.title} <span className="note">[{ticket.repo}]</span>
                   {ticket.appended ? (
                     <span className="badge appended"> appended</span>
                   ) : null}
-                  {ticket.blockedReason ? ` — ${ticket.blockedReason}` : ""}
+                  {ticket.blockedReason ? (
+                    <>
+                      {" — "}
+                      <StatusBadge kind="blocked" code={ticket.blockedReason} />
+                    </>
+                  ) : (
+                    ""
+                  )}
                   {waits.length > 0 ? (
                     <div className="note waits-for">
                       waits for{" "}
@@ -519,10 +530,8 @@ function Delivery({
                 <a href={pr.url}>
                   {pr.repo} #{pr.number}
                 </a>{" "}
-                <span className={`badge pr-${pr.state}`}>
-                  {pullStateLabel(pr.state)}
-                  {pr.draft ? " (draft)" : ""}
-                </span>{" "}
+                <StatusBadge kind="pr" code={pr.state} />
+                {pr.draft ? " (草稿)" : ""}{" "}
                 {pr.waitsFor.length > 0 ? (
                   <span className="note">
                     after {pr.waitsFor.join(", ")}
@@ -549,7 +558,15 @@ function Delivery({
             {finalizations.map((f) => (
               <li key={f.repo}>
                 {f.repo}: {f.step} {f.state}
-                {f.blockedReason ? ` (${f.blockedReason})` : ""}
+                {f.blockedReason ? (
+                  <>
+                    {" ("}
+                    <StatusBadge kind="blocked" code={f.blockedReason} />
+                    {")"}
+                  </>
+                ) : (
+                  ""
+                )}
               </li>
             ))}
           </ul>

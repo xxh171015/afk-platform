@@ -91,7 +91,8 @@ describe("the spec page", () => {
     expect(node("T-2").getAttribute("data-state")).toBe("blocked");
     expect(node("T-3").getAttribute("data-state")).toBe("running");
     expect(node("T-4").getAttribute("data-state")).toBe("pending");
-    expect(node("T-2").textContent).toContain("blocked (agent-gave-up)");
+    expect(node("T-2").textContent).toContain("已卡住");
+    expect(node("T-2").textContent).toContain("模型放弃");
     expect(node("T-1").textContent).toContain("Ticket 1");
     // each state has its own look: a blocked node is not drawn like a done one
     const borders = ["T-1", "T-2", "T-3", "T-4"].map(
@@ -194,7 +195,7 @@ describe("the spec page", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
 
     const frontend = (await screen.findByText(/frontend #8/)).closest("li");
-    expect(frontend?.textContent).toContain("(draft)");
+    expect(frontend?.textContent).toContain("(草稿)");
     expect(frontend?.textContent).toContain("after backend");
     expect(screen.getByText(/No order between: docs/)).toBeTruthy();
     expect(screen.getByTestId("order-broken").textContent).toContain(
@@ -218,9 +219,7 @@ describe("the spec page", () => {
       await screen.findByText(
         (_, element) =>
           element?.tagName === "LI" &&
-          /T-1 Ticket 1 \[backend\] — gate-failed/.test(
-            element.textContent ?? "",
-          ),
+          /T-1 Ticket 1 \[backend\] — 门禁失败/.test(element.textContent ?? ""),
       ),
     ).toBeTruthy();
   });
@@ -382,9 +381,9 @@ describe("the spec page", () => {
         ?.className,
     ).toBe("scope-creep");
     expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
-    expect(
-      screen.getByText(/Gate: 01234567: 3 tests, 1 skipped, 4.0 s/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Gate:/));
+    expect(screen.getByRole("button", { name: "0123456" })).toBeTruthy();
+    expect(screen.getByText(/3 tests, 1 skipped, 4.0 s/)).toBeTruthy();
     expect(screen.getByText(/\.github\/ci.yml/)).toBeTruthy();
     // the pack opens with the merge order and has a section for each repo, in that order
     expect(screen.getByTestId("pack-merge-order").textContent).toContain(
@@ -426,7 +425,7 @@ describe("the spec page", () => {
       }),
     );
     fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
-    expect(await screen.findByText("closed without merge")).toBeTruthy();
+    expect(await screen.findByText("关闭未合并")).toBeTruthy();
   });
 
   it("has no pull request or pack section before there is one", async () => {
@@ -483,8 +482,8 @@ describe("the spec page", () => {
     await screen.findByTestId("node-T-2");
     const links = screen.getAllByRole("link", { name: "T-2" });
     expect(links.map((l) => l.getAttribute("href"))).toEqual([
-      "#/tickets/2",
-      "#/tickets/2",
+      "/tickets/2",
+      "/tickets/2",
     ]);
   });
 
@@ -507,7 +506,7 @@ describe("the spec page", () => {
       "S-1 Order export",
     );
     expect(screen.getByRole("heading", { level: 2 }).textContent).toContain(
-      "paused",
+      "已暂停",
     );
     expect(
       screen.getByText(/Paused: the agent time limit of the spec was reached/),
@@ -538,7 +537,13 @@ describe("the spec page", () => {
     );
     fireEvent.click(await screen.findByRole("tab", { name: "交付" }));
     expect(
-      await screen.findByText("backend: final-merge blocked (merge-conflict)"),
+      await screen.findByText(
+        (_, element) =>
+          element?.tagName === "LI" &&
+          /backend: final-merge blocked \(合并冲突\)/.test(
+            element.textContent ?? "",
+          ),
+      ),
     ).toBeTruthy();
   });
 
@@ -547,8 +552,8 @@ describe("the spec page", () => {
       <SpecDetail specId={1} />,
       fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
     );
-    const back = await screen.findByRole("link", { name: /all specs/ });
-    expect(back.getAttribute("href")).toBe("#/");
+    const back = await screen.findByRole("link", { name: /全部需求/ });
+    expect(back.getAttribute("href")).toBe("/specs");
   });
 });
 
@@ -717,7 +722,7 @@ describe("confirming the split", () => {
       expect(node("T-1").getAttribute("data-state")).toBe("queued"),
     );
     expect(screen.getByRole("heading", { level: 2 }).textContent).toContain(
-      "running",
+      "运行中",
     );
   });
 

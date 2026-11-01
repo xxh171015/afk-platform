@@ -10,7 +10,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SearchBox } from "./SearchBox.tsx";
 import { fakeServer, renderWithApp } from "./test-utils.tsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.replaceState(null, "", "/");
+});
 
 const result = {
   specs: [
@@ -77,20 +80,20 @@ describe("the search box", () => {
     expect(panel.getByText("Tickets")).toBeTruthy();
     expect(
       panel.getByRole("link", { name: "S-2 Refund bug" }).getAttribute("href"),
-    ).toBe("#/specs/2");
+    ).toBe("/specs/2");
     expect(
       panel
         .getByRole("link", { name: "T-7 Fix the refund rounding" })
         .getAttribute("href"),
-    ).toBe("#/tickets/7");
+    ).toBe("/tickets/7");
     expect(
       panel
         .getByRole("link", { name: "T-3 Refund email" })
         .getAttribute("href"),
-    ).toBe("#/tickets/3");
+    ).toBe("/tickets/3");
     expect(panel.getByText("in title")).toBeTruthy();
     expect(panel.getByText("of S-2, in title, body")).toBeTruthy();
-    expect(panel.getByText("blocked")).toBeTruthy();
+    expect(panel.getByTitle("blocked").textContent).toBe("已卡住");
   });
 
   it("waits for the typing to pause: one request for a burst of keys", async () => {
@@ -155,11 +158,10 @@ describe("the search box", () => {
     type("refund");
     await screen.findByRole("link", { name: "S-2 Refund bug" });
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
-    expect(window.location.hash).toBe("#/specs/2");
+    expect(window.location.pathname).toBe("/specs/2");
     await waitFor(() =>
       expect(screen.queryByTestId("search-results")).toBeNull(),
     );
-    window.location.hash = "";
   });
 
   it("opens the first ticket on Enter when no spec matched, and does nothing before there are results", async () => {
@@ -167,11 +169,10 @@ describe("the search box", () => {
     renderWithApp(<SearchBox debounceMs={10} />, fake);
     type("rounding");
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" }); // nothing has come back yet
-    expect(window.location.hash).toBe("");
+    expect(window.location.pathname).toBe("/");
     await screen.findByRole("link", { name: /T-7/ });
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
-    expect(window.location.hash).toBe("#/tickets/7");
-    window.location.hash = "";
+    expect(window.location.pathname).toBe("/tickets/7");
   });
 
   it("cannot take more text than the API accepts", () => {

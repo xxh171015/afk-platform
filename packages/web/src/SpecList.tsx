@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { describeError, useApi } from "./api.tsx";
+import { paths } from "./paths.ts";
+import { StatusBadge } from "./StatusBadge.tsx";
 
-// The front page: every spec, its state, and how far its tickets have got.
+// Every spec in the project, its state, and how far its tickets have got. The control-tower home is the workbench.
 
 export function SpecList() {
   const api = useApi();
@@ -50,12 +52,12 @@ export function SpecList() {
           return (
             <tr key={spec.id}>
               <td>
-                <a href={`#/specs/${spec.id}`}>{spec.displayId}</a>
+                <a href={paths.spec(spec.id)}>{spec.displayId}</a>
               </td>
               <td>{spec.title}</td>
               <td>{spec.project}</td>
               <td>
-                <span className={`badge spec-${spec.state}`}>{spec.state}</span>
+                <StatusBadge kind="spec" code={spec.state} />
               </td>
               <td>
                 <div

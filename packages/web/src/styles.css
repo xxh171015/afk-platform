@@ -1,13 +1,62 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
 :root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
   --text: #212529;
-  --muted: #6c757d;
-  --border: #dee2e6;
+  --note: #6c757d;
+  --line: #dee2e6;
   --bg: #ffffff;
-  --accent: #1c7ed6;
+  --link: #1c7ed6;
   --danger: #c92a2a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
 }
 
 body {
@@ -19,7 +68,7 @@ main {
   padding: 16px 24px 48px;
 }
 a {
-  color: var(--accent);
+  color: var(--link);
 }
 h1 {
   font-size: 1.3rem;
@@ -43,7 +92,7 @@ code {
 }
 
 .note {
-  color: var(--muted);
+  color: var(--note);
 }
 .error {
   color: var(--danger);
@@ -57,12 +106,12 @@ table.specs th,
 table.specs td {
   text-align: left;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
 table.specs th {
   font-weight: 600;
-  color: var(--muted);
+  color: var(--note);
   font-size: 0.85rem;
 }
 
@@ -122,7 +171,7 @@ table.specs th {
 .progress-text {
   margin-left: 8px;
   font-size: 0.85rem;
-  color: var(--muted);
+  color: var(--note);
 }
 
 .confirm {
@@ -132,8 +181,8 @@ table.specs th {
   font: inherit;
   padding: 6px 16px;
   border-radius: 6px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid var(--link);
+  background: var(--link);
   color: #fff;
   cursor: pointer;
 }
@@ -147,7 +196,7 @@ table.specs th {
 }
 .graph {
   height: 420px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 6px;
 }
 .ticket-node {
@@ -161,7 +210,7 @@ table.specs th {
 }
 .ticket-node-state {
   margin-top: 4px;
-  color: var(--muted);
+  color: var(--note);
 }
 ul.tickets,
 ul.finalizations {
@@ -190,7 +239,7 @@ table.runs th,
 table.runs td {
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 table.runs tr.picked {
   background: #f1f8ff;
@@ -200,7 +249,7 @@ button.link {
   background: none;
   border: 0;
   padding: 0;
-  color: var(--accent);
+  color: var(--link);
   cursor: pointer;
   text-decoration: underline;
 }
@@ -238,7 +287,7 @@ ul.blocked-list {
   gap: 12px;
 }
 .blocked-card {
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 4px 16px 12px;
 }
@@ -256,7 +305,7 @@ ul.blocked-list {
   font: inherit;
   padding: 4px 12px;
   border-radius: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   background: #fff;
   cursor: pointer;
 }
@@ -281,7 +330,7 @@ ul.blocked-list {
   box-sizing: border-box;
   font: inherit;
   padding: 6px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 6px;
 }
 .search-results {
@@ -290,7 +339,7 @@ ul.blocked-list {
   left: 0;
   right: 0;
   background: #fff;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 4px 12px 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -300,7 +349,7 @@ ul.blocked-list {
 .search-results h4 {
   margin: 8px 0 4px;
   font-size: 0.8rem;
-  color: var(--muted);
+  color: var(--note);
   text-transform: uppercase;
 }
 .search-results ul {
@@ -308,7 +357,7 @@ ul.blocked-list {
   padding-left: 16px;
 }
 .ticket-node-repo {
-  color: var(--muted);
+  color: var(--note);
   font-style: italic;
 }
 

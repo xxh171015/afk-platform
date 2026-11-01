@@ -2239,6 +2239,307 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/workbench": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The four workbench quadrants: waiting, running, awaiting acceptance, recently merged */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              waiting: {
+                tickets: {
+                  id: number;
+                  displayId: string;
+                  specId: number;
+                  specDisplayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "pending"
+                    | "queued"
+                    | "running"
+                    | "merging"
+                    | "done"
+                    | "blocked"
+                    | "cancelled";
+                  blockedReason: string | null;
+                  repo: string;
+                  refs: string[];
+                  environment: string[];
+                  appended: boolean;
+                  brief: {
+                    run: {
+                      id: number;
+                      displayId: string;
+                    };
+                    stage: string;
+                    result: string | null;
+                    output?: unknown;
+                    logPath: string;
+                    attempts?: {
+                      e2e: {
+                        id: number;
+                        displayId: string;
+                        result: string | null;
+                        testsTotal: number | null;
+                        testsFailed: number | null;
+                        envUpMs: number | null;
+                        refShas: {
+                          [key: string]: string;
+                        } | null;
+                        headSha: string | null;
+                      };
+                      diagnosis: {
+                        result: string | null;
+                        failingRepo: string | null;
+                        evidence: string;
+                        failingTests: string[];
+                      } | null;
+                      fixTicket: {
+                        id: number;
+                        displayId: string;
+                        /** @enum {string} */
+                        state:
+                          | "pending"
+                          | "queued"
+                          | "running"
+                          | "merging"
+                          | "done"
+                          | "blocked"
+                          | "cancelled";
+                        repo: string;
+                      } | null;
+                    }[];
+                  } | null;
+                }[];
+                finalizations: {
+                  specId: number;
+                  specDisplayId: string;
+                  repo: string;
+                  step: string;
+                  state: string;
+                  blockedReason: string | null;
+                  brief: {
+                    run: {
+                      id: number;
+                      displayId: string;
+                    };
+                    stage: string;
+                    result: string | null;
+                    output?: unknown;
+                    logPath: string;
+                    attempts?: {
+                      e2e: {
+                        id: number;
+                        displayId: string;
+                        result: string | null;
+                        testsTotal: number | null;
+                        testsFailed: number | null;
+                        envUpMs: number | null;
+                        refShas: {
+                          [key: string]: string;
+                        } | null;
+                        headSha: string | null;
+                      };
+                      diagnosis: {
+                        result: string | null;
+                        failingRepo: string | null;
+                        evidence: string;
+                        failingTests: string[];
+                      } | null;
+                      fixTicket: {
+                        id: number;
+                        displayId: string;
+                        /** @enum {string} */
+                        state:
+                          | "pending"
+                          | "queued"
+                          | "running"
+                          | "merging"
+                          | "done"
+                          | "blocked"
+                          | "cancelled";
+                        repo: string;
+                      } | null;
+                    }[];
+                  } | null;
+                }[];
+                pullRequests: {
+                  specId: number;
+                  specDisplayId: string;
+                  repo: string;
+                  number: number;
+                  url: string;
+                  state: string;
+                  syncError: string | null;
+                }[];
+                cleanups: {
+                  specId: number;
+                  specDisplayId: string;
+                  error: string;
+                }[];
+                readyFailures: {
+                  specId: number;
+                  specDisplayId: string;
+                  repo: string;
+                  number: number;
+                  url: string;
+                  error: string;
+                }[];
+                specs: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  reason: string;
+                }[];
+              };
+              running: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  slug: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  pauseReason: string | null;
+                  project: string;
+                  progress: {
+                    total: number;
+                    done: number;
+                    active: number;
+                    blocked: number;
+                    pending: number;
+                    cancelled: number;
+                  };
+                };
+                tickets: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  /** @enum {string} */
+                  state:
+                    | "pending"
+                    | "queued"
+                    | "running"
+                    | "merging"
+                    | "done"
+                    | "blocked"
+                    | "cancelled";
+                  repo: string;
+                  stage: string | null;
+                  startedAt: string | null;
+                  elapsedMs: number | null;
+                  meanMs: number | null;
+                  slow: boolean;
+                }[];
+              }[];
+              awaitingAcceptance: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  slug: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  pauseReason: string | null;
+                  project: string;
+                  progress: {
+                    total: number;
+                    done: number;
+                    active: number;
+                    blocked: number;
+                    pending: number;
+                    cancelled: number;
+                  };
+                };
+                pullRequestCount: number;
+                verifiedCriteria: number;
+                totalCriteria: number;
+              }[];
+              recentlyCompleted: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  slug: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  pauseReason: string | null;
+                  project: string;
+                  progress: {
+                    total: number;
+                    done: number;
+                    active: number;
+                    blocked: number;
+                    pending: number;
+                    cancelled: number;
+                  };
+                };
+                completedAt: string;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/tickets/{id}/retry": {
     parameters: {
       query?: never;

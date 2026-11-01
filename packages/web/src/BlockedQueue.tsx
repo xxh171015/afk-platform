@@ -6,7 +6,9 @@ import {
 } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
-import { pullStateLabel } from "./pull-request.ts";
+import { paths } from "./paths.ts";
+import { StatusBadge } from "./StatusBadge.tsx";
+import { WORKBENCH_KEY } from "./Workbench.tsx";
 
 // Everything that waits for a person: blocked tickets with the reason and what went wrong, specs the platform
 // paused, overall reviews that stopped, and pull requests that were closed or cannot be read. Each has the actions
@@ -17,8 +19,8 @@ export const BLOCKED_KEY = ["blocked"] as const;
 // Resolves when the lists have been fetched again, so a button stays disabled until the card is gone.
 function refreshAll(queryClient: QueryClient) {
   return Promise.all(
-    [BLOCKED_KEY, ["specs"], ["spec"], ["ticket"]].map((queryKey) =>
-      queryClient.invalidateQueries({ queryKey }),
+    [BLOCKED_KEY, WORKBENCH_KEY, ["specs"], ["spec"], ["ticket"]].map(
+      (queryKey) => queryClient.invalidateQueries({ queryKey }),
     ),
   );
 }
@@ -119,14 +121,14 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
   return (
     <li className="blocked-card" data-testid={`blocked-${ticket.displayId}`}>
       <h3>
-        <a href={`#/tickets/${id}`}>{ticket.displayId}</a> {ticket.title}
+        <a href={paths.ticket(id)}>{ticket.displayId}</a> {ticket.title}
       </h3>
       <p className="note">
-        <a href={`#/specs/${ticket.specId}`}>{ticket.specDisplayId}</a>, repo{" "}
+        <a href={paths.spec(ticket.specId)}>{ticket.specDisplayId}</a>, repo{" "}
         {ticket.repo}
       </p>
       <p>
-        <span className="badge ticket-blocked">{ticket.blockedReason}</span>
+        <StatusBadge kind="blocked" code={ticket.blockedReason ?? "blocked"} />
       </p>
       <Brief brief={ticket.brief} />
       {canRetry ? null : (
@@ -230,10 +232,10 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
   return (
     <li className="blocked-card" data-testid={`paused-${spec.displayId}`}>
       <h3>
-        <a href={`#/specs/${spec.id}`}>{spec.displayId}</a> {spec.title}
+        <a href={paths.spec(spec.id)}>{spec.displayId}</a> {spec.title}
       </h3>
       <p>
-        <span className="badge spec-paused">paused</span> {spec.reason}
+        <StatusBadge kind="spec" code="paused" /> {spec.reason}
       </p>
       <div className="actions">
         <label>
@@ -287,14 +289,14 @@ function BlockedFinalization({
       data-testid={`final-${item.specDisplayId}-${item.repo}`}
     >
       <h3>
-        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>{" "}
+        <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
         {beforePullRequests
           ? "e2e before the pull requests"
           : `overall review of ${item.repo}`}
       </h3>
       <p>
         {item.step}{" "}
-        <span className="badge ticket-blocked">{item.blockedReason}</span>
+        <StatusBadge kind="blocked" code={item.blockedReason ?? "blocked"} />
       </p>
       <Brief brief={item.brief} />
       <div className="actions">
@@ -330,16 +332,14 @@ function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
       data-testid={`pull-${item.specDisplayId}-${item.repo}`}
     >
       <h3>
-        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>{" "}
+        <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
         <a href={item.url}>
           {item.repo} #{item.number}
         </a>
       </h3>
       <p>
         {item.state === "closed" ? (
-          <span className={`badge pr-${item.state}`}>
-            {pullStateLabel(item.state)}
-          </span>
+          <StatusBadge kind="pr" code={item.state} />
         ) : null}
         {item.syncError ? (
           <span className="error"> could not be read: {item.syncError}</span>
@@ -359,7 +359,7 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
   return (
     <li className="blocked-card" data-testid={`cleanup-${item.specDisplayId}`}>
       <h3>
-        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>
+        <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>
       </h3>
       <p className="error">Clean-up did not finish: {item.error}</p>
       <p className="note">
@@ -377,7 +377,7 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
       data-testid={`ready-${item.specDisplayId}-${item.repo}`}
     >
       <h3>
-        <a href={`#/specs/${item.specId}`}>{item.specDisplayId}</a>{" "}
+        <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
         <a href={item.url}>
           {item.repo} #{item.number}
         </a>

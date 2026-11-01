@@ -1,16 +1,30 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { App } from "./App.tsx";
-import { fakeServer, renderWithApp } from "./test-utils.tsx";
+import { fakeServer, renderApp } from "./test-utils.tsx";
 
-afterEach(() => {
-  cleanup();
-  window.location.hash = "";
-});
+afterEach(cleanup);
+
+const emptyWaiting = {
+  tickets: [],
+  finalizations: [],
+  pullRequests: [],
+  cleanups: [],
+  readyFailures: [],
+  specs: [],
+};
+
+const emptyWorkbench = {
+  waiting: emptyWaiting,
+  running: [],
+  awaitingAcceptance: [],
+  recentlyCompleted: [],
+};
 
 const server = () =>
   fakeServer({
+    "GET /workbench": () => ({ json: emptyWorkbench }),
+    "GET /blocked": () => ({ json: emptyWaiting }),
     "GET /specs": () => ({
       json: {
         specs: [
@@ -71,69 +85,62 @@ const server = () =>
         acceptancePack: null,
       },
     }),
+    "GET /tickets/9": () => ({
+      json: {
+        ticket: {
+          id: 9,
+          displayId: "T-9",
+          specId: 3,
+          specDisplayId: "S-3",
+          title: "Only ticket",
+          type: "implementation",
+          state: "done",
+          blockedReason: null,
+          repo: "backend",
+          brief: null,
+          body: "",
+          acceptanceCriteria: ["works"],
+          modules: [],
+          allowedProtectedPaths: [],
+          contentVersion: 1,
+          contractSha: null,
+          fixCounts: {},
+          reviewed: false,
+        },
+        versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
+        upstream: [],
+        downstream: [],
+        runs: [],
+        findings: [],
+        gateResults: [],
+      },
+    }),
   });
 
 describe("the app", () => {
-  it("starts on the list of specs", async () => {
-    renderWithApp(<App />, server());
+  it("starts on the workbench, not a spec table", async () => {
+    renderApp(server());
+    expect(await screen.findByRole("heading", { name: "工作台" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "S-3" })).toBeNull();
+  });
+
+  it("opens a spec at /specs/<id> and the spec list at /specs", async () => {
+    const { router } = renderApp(server(), "/specs/3");
+    expect(await screen.findByTestId("node-T-9")).toBeTruthy();
+    await router.navigate({ to: "/specs" });
     expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
   });
 
-  it("shows a spec's page for #/specs/<id>, and goes back to the list", async () => {
-    window.location.hash = "#/specs/3";
-    renderWithApp(<App />, server());
-    expect(await screen.findByTestId("node-T-9")).toBeTruthy();
-    window.location.hash = "#/";
-    await waitFor(() =>
-      expect(screen.getByRole("link", { name: "S-3" })).toBeTruthy(),
-    );
-  });
-
-  it("shows a ticket's page for #/tickets/<id>", async () => {
-    window.location.hash = "#/tickets/9";
-    const base = server();
-    const withTicket = fakeServer({
-      "GET /tickets/9": () => ({
-        json: {
-          ticket: {
-            id: 9,
-            displayId: "T-9",
-            specId: 3,
-            specDisplayId: "S-3",
-            title: "Only ticket",
-            type: "implementation",
-            state: "done",
-            blockedReason: null,
-            repo: "backend",
-            brief: null,
-            body: "",
-            acceptanceCriteria: ["works"],
-            modules: [],
-            allowedProtectedPaths: [],
-            contentVersion: 1,
-            contractSha: null,
-            fixCounts: {},
-            reviewed: false,
-          },
-          versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
-          upstream: [],
-          downstream: [],
-          runs: [],
-          findings: [],
-          gateResults: [],
-        },
-      }),
-    });
-    void base;
-    renderWithApp(<App />, withTicket);
+  it("opens a ticket at /tickets/<id>", async () => {
+    renderApp(server(), "/tickets/9");
     expect(
       (await screen.findByRole("heading", { level: 2 })).textContent,
     ).toContain("T-9 Only ticket");
   });
 
-  it("shows the queue of what waits for you at #/blocked, and counts it in the menu", async () => {
-    window.location.hash = "#/blocked";
+  it("shows the queue at /waiting and counts it in the menu", async () => {
     const fake = fakeServer({
+      "GET /workbench": () => ({ json: emptyWorkbench }),
       "GET /blocked": () => ({
         json: {
           tickets: [
@@ -160,59 +167,75 @@ describe("the app", () => {
         },
       }),
     });
-    renderWithApp(<App />, fake);
+    renderApp(fake, "/waiting");
     expect(await screen.findByTestId("blocked-T-1")).toBeTruthy();
     expect(
-      screen
-        .getByRole("link", { name: "Waiting for you (2)" })
-        .getAttribute("href"),
-    ).toBe("#/blocked");
+      screen.getByRole("link", { name: "待处理 (2)" }).getAttribute("href"),
+    ).toBe("/waiting");
     expect(
-      screen.getByRole("link", { name: "Specs" }).getAttribute("href"),
-    ).toBe("#/");
+      screen.getByRole("link", { name: "工作台" }).getAttribute("href"),
+    ).toBe("/");
+    expect(
+      screen.getByRole("link", { name: "需求" }).getAttribute("href"),
+    ).toBe("/specs");
   });
 
   it("does not show a count in the menu when nothing waits", async () => {
-    renderWithApp(
-      <App />,
-      fakeServer({
-        "GET /specs": () => ({ json: { specs: [] } }),
-        "GET /blocked": () => ({
-          json: {
-            tickets: [],
-            finalizations: [],
-            pullRequests: [],
-            cleanups: [],
-            readyFailures: [],
-            specs: [],
-          },
-        }),
-      }),
-    );
-    expect(
-      await screen.findByRole("link", { name: "Waiting for you" }),
-    ).toBeTruthy();
+    renderApp(server());
+    expect(await screen.findByRole("link", { name: "待处理" })).toBeTruthy();
   });
 
-  it("has the search box at the top of every page", async () => {
+  it("has a search control on every page", async () => {
+    renderApp(server(), "/specs/3");
+    expect(
+      await screen.findByRole("button", { name: "搜索需求与票" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "搜索需求与票" }));
+    expect(await screen.findByPlaceholderText("搜索需求与票")).toBeTruthy();
+  });
+
+  it("does not honour a leftover hash address like #/specs/3", async () => {
+    renderApp(server(), "/");
     window.location.hash = "#/specs/3";
-    renderWithApp(<App />, server());
-    expect(
-      await screen.findByRole("searchbox", {
-        name: "Search specs and tickets",
-      }),
-    ).toBeTruthy();
-    window.location.hash = "#/blocked";
-    await waitFor(() =>
-      expect(
-        screen.getByRole("searchbox", { name: "Search specs and tickets" }),
-      ).toBeTruthy(),
-    );
+    expect(await screen.findByRole("heading", { name: "工作台" })).toBeTruthy();
+    expect(screen.queryByTestId("node-T-9")).toBeNull();
   });
 
-  it("falls back to the list for an address it does not know", async () => {
-    window.location.hash = "#/specs/not-a-number";
-    renderWithApp(<App />, server());
+  it("says so for an address it does not know", async () => {
+    renderApp(server(), "/nope");
+    expect(await screen.findByText("没有这个页面")).toBeTruthy();
+  });
+
+  it("goes home, to waiting and to specs with g h / g b / g s", async () => {
+    const { router } = renderApp(server(), "/specs");
     expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "h" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "b" });
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/waiting"),
+    );
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "s" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/specs"));
+  });
+
+  it("does not fire page shortcuts while typing in a field", async () => {
+    const { router } = renderApp(server(), "/specs");
+    await screen.findByRole("link", { name: "S-3" });
+    fireEvent.click(screen.getByRole("button", { name: "搜索需求与票" }));
+    const box = await screen.findByPlaceholderText("搜索需求与票");
+    fireEvent.keyDown(box, { key: "g" });
+    fireEvent.keyDown(box, { key: "h" });
+    expect(router.state.location.pathname).toBe("/specs");
+  });
+
+  it("opens help with ?", async () => {
+    renderApp(server());
+    await screen.findByRole("heading", { name: "工作台" });
+    fireEvent.keyDown(window, { key: "?" });
+    expect(await screen.findByRole("heading", { name: "快捷键" })).toBeTruthy();
   });
 });

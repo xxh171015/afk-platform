@@ -1,7 +1,9 @@
 import { createApiClient } from "@afk/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { createPlatformRouter } from "./App.tsx";
 import { ApiProvider } from "./api.tsx";
 
 // jsdom has no layout engine; React Flow asks for these.
@@ -24,6 +26,22 @@ export type Handler = (request: {
   body: unknown;
   url: URL;
 }) => Reply | Promise<Reply>;
+
+export const emptyWaiting = {
+  tickets: [] as unknown[],
+  finalizations: [] as unknown[],
+  pullRequests: [] as unknown[],
+  cleanups: [] as unknown[],
+  readyFailures: [] as unknown[],
+  specs: [] as unknown[],
+};
+
+export const emptyWorkbench = {
+  waiting: emptyWaiting,
+  running: [] as unknown[],
+  awaitingAcceptance: [] as unknown[],
+  recentlyCompleted: [] as unknown[],
+};
 
 // A stand-in for the platform API: `routes` maps "METHOD /path" to what it answers. Every call is recorded.
 export function fakeServer(routes: Record<string, Handler>) {
@@ -48,18 +66,35 @@ export function fakeServer(routes: Record<string, Handler>) {
   return { calls, client: createApiClient("http://api.test", fetch) };
 }
 
+function providers(server: ReturnType<typeof fakeServer>, child: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchInterval: false } },
+  });
+  return {
+    queryClient,
+    tree: (
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={server.client}>{child}</ApiProvider>
+      </QueryClientProvider>
+    ),
+  };
+}
+
 export function renderWithApp(
   ui: ReactElement,
   server: ReturnType<typeof fakeServer>,
 ) {
-  // no polling and no retries in tests: a failed request should show up at once
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, refetchInterval: false } },
-  });
-  const rendered = render(
-    <QueryClientProvider client={queryClient}>
-      <ApiProvider client={server.client}>{ui}</ApiProvider>
-    </QueryClientProvider>,
+  const { queryClient, tree } = providers(server, ui);
+  return { ...render(tree), queryClient };
+}
+
+export function renderApp(server: ReturnType<typeof fakeServer>, path = "/") {
+  const router = createPlatformRouter(
+    createMemoryHistory({ initialEntries: [path] }),
   );
-  return { ...rendered, queryClient };
+  const { queryClient, tree } = providers(
+    server,
+    <RouterProvider router={router} />,
+  );
+  return { ...render(tree), queryClient, router };
 }

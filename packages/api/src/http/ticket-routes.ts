@@ -26,6 +26,7 @@ import {
   specView,
   ticketView,
 } from "../tickets/views.ts";
+import { workbench } from "../tickets/workbench.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int();
@@ -238,6 +239,25 @@ const specRoute = createRoute({
   },
 });
 
+const SpecListItem = z.object({
+  id: Id,
+  displayId: z.string(),
+  slug: z.string(),
+  title: z.string(),
+  type: z.string(),
+  state: z.enum(SPEC_STATES),
+  pauseReason: z.string().nullable(),
+  project: z.string(),
+  progress: z.object({
+    total: Id,
+    done: Id,
+    active: Id,
+    blocked: Id,
+    pending: Id,
+    cancelled: Id,
+  }),
+});
+
 const specsRoute = createRoute({
   method: "get",
   path: "/specs",
@@ -245,26 +265,7 @@ const specsRoute = createRoute({
     200: reply(
       "Every spec, newest first, with the progress of its tickets",
       z.object({
-        specs: z.array(
-          z.object({
-            id: Id,
-            displayId: z.string(),
-            slug: z.string(),
-            title: z.string(),
-            type: z.string(),
-            state: z.enum(SPEC_STATES),
-            pauseReason: z.string().nullable(),
-            project: z.string(),
-            progress: z.object({
-              total: Id,
-              done: Id,
-              active: Id,
-              blocked: Id,
-              pending: Id,
-              cancelled: Id,
-            }),
-          }),
-        ),
+        specs: z.array(SpecListItem),
       }),
     ),
   },
@@ -307,50 +308,92 @@ const searchRoute = createRoute({
   },
 });
 
+const BlockedQueue = z.object({
+  tickets: z.array(TicketSummary),
+  finalizations: z.array(Finalization),
+  pullRequests: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      repo: z.string(),
+      number: z.number().int(),
+      url: z.string(),
+      state: z.string(),
+      syncError: z.string().nullable(),
+    }),
+  ),
+  cleanups: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      error: z.string(),
+    }),
+  ),
+  readyFailures: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      repo: z.string(),
+      number: z.number().int(),
+      url: z.string(),
+      error: z.string(),
+    }),
+  ),
+  specs: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      title: z.string(),
+      reason: z.string(),
+    }),
+  ),
+});
+
 const blockedRoute = createRoute({
   method: "get",
   path: "/blocked",
   responses: {
     200: reply(
       "Blocked tickets, stuck pull requests, cleanups that failed and paused specs, everything waiting for a person",
+      BlockedQueue,
+    ),
+  },
+});
+
+const RunningTicket = z.object({
+  id: Id,
+  displayId: z.string(),
+  title: z.string(),
+  state: z.enum(TICKET_STATES),
+  repo: z.string(),
+  stage: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  elapsedMs: z.number().int().nullable(),
+  meanMs: z.number().int().nullable(),
+  slow: z.boolean(),
+});
+
+const workbenchRoute = createRoute({
+  method: "get",
+  path: "/workbench",
+  responses: {
+    200: reply(
+      "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
       z.object({
-        tickets: z.array(TicketSummary),
-        finalizations: z.array(Finalization),
-        pullRequests: z.array(
+        waiting: BlockedQueue,
+        running: z.array(
+          z.object({ spec: SpecListItem, tickets: z.array(RunningTicket) }),
+        ),
+        awaitingAcceptance: z.array(
           z.object({
-            specId: Id,
-            specDisplayId: z.string(),
-            repo: z.string(),
-            number: z.number().int(),
-            url: z.string(),
-            state: z.string(),
-            syncError: z.string().nullable(),
+            spec: SpecListItem,
+            pullRequestCount: Id,
+            verifiedCriteria: Id,
+            totalCriteria: Id,
           }),
         ),
-        cleanups: z.array(
-          z.object({
-            specId: Id,
-            specDisplayId: z.string(),
-            error: z.string(),
-          }),
-        ),
-        readyFailures: z.array(
-          z.object({
-            specId: Id,
-            specDisplayId: z.string(),
-            repo: z.string(),
-            number: z.number().int(),
-            url: z.string(),
-            error: z.string(),
-          }),
-        ),
-        specs: z.array(
-          z.object({
-            id: Id,
-            displayId: z.string(),
-            title: z.string(),
-            reason: z.string(),
-          }),
+        recentlyCompleted: z.array(
+          z.object({ spec: SpecListItem, completedAt: z.string() }),
         ),
       }),
     ),
@@ -586,6 +629,10 @@ export function registerTicketRoutes(
   );
 
   app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));
+
+  app.openapi(workbenchRoute, async (c) =>
+    c.json(await workbench(pool, context.clock()), 200),
+  );
 
   app.openapi(retryRoute, async (c) => {
     const result = await retryTicket(

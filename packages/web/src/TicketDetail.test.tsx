@@ -133,9 +133,8 @@ describe("the ticket page", () => {
     });
     renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
 
-    expect(
-      await screen.findByText("backend@01234567, payments@fedcba98"),
-    ).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "0123456" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "fedcba9" })).toBeTruthy();
   });
 
   it("shows which SHA of which repo a run had mounted under /refs", async () => {
@@ -151,7 +150,7 @@ describe("the ticket page", () => {
     });
     renderWithApp(<TicketDetail ticketId={4} logPollMs={20} />, server);
 
-    expect(await screen.findByText("backend@01234567")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "0123456" })).toBeTruthy();
   });
 
   it("shows an older version of the body and of the original text from the version list", async () => {
@@ -206,7 +205,7 @@ describe("the ticket page", () => {
       name: /T-4/,
     });
     expect(heading.textContent).toContain("T-4 Export orders as CSV");
-    expect(heading.textContent).toContain("running");
+    expect(heading.textContent).toContain("运行中");
     expect(screen.getByText("returns text/csv")).toBeTruthy();
     expect(screen.getByText("has a header row")).toBeTruthy();
     expect(
@@ -219,7 +218,7 @@ describe("the ticket page", () => {
       screen.getByText(/implementation, repo backend, version 1/),
     ).toBeTruthy();
     for (const link of screen.getAllByRole("link", { name: /S-1/ }))
-      expect(link.getAttribute("href")).toBe("#/specs/1");
+      expect(link.getAttribute("href")).toBe("/specs/1");
   });
 
   it("shows the log of the newest run, and of another one when it is picked", async () => {
@@ -386,7 +385,7 @@ describe("the ticket page", () => {
     expect(note.textContent).toContain("gate ended failed");
     expect(note.textContent).toContain("R-11");
     expect(note.textContent).toContain("# test failed");
-    expect(screen.getByText(/blocked: gate-failed/)).toBeTruthy();
+    expect(screen.getByTitle("gate-failed").textContent).toBe("门禁失败");
   });
 
   it("shows every e2e of an integration ticket with its diagnosis and its fix ticket", async () => {
@@ -446,13 +445,20 @@ describe("the ticket page", () => {
     expect(screen.getByText(/1 of 2 fix rounds used/)).toBeTruthy();
     expect(screen.getByText(/R-20 failed/)).toBeTruthy();
     expect(
-      screen.getByText(/1 of 3 tests failed, built from backend@01234567/),
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "LI" &&
+          /1 of 3 tests failed, built from backend@0123456/.test(
+            element.textContent ?? "",
+          ),
+      ),
     ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "0123456" })).toBeTruthy();
     expect(
       screen.getByText(/GET \/orders\/1\/export answers 404/),
     ).toBeTruthy();
     expect(screen.getByRole("link", { name: "T-9" }).getAttribute("href")).toBe(
-      "#/tickets/9",
+      "/tickets/9",
     );
     expect(screen.getByText(/R-24 passed/)).toBeTruthy();
   });
@@ -487,11 +493,11 @@ describe("the ticket page", () => {
     await within(side).findByText(/Order export/);
     expect(
       within(side).getByRole("link", { name: "S-1" }).getAttribute("href"),
-    ).toBe("#/specs/1");
+    ).toBe("/specs/1");
     const waits = within(side).getAllByRole("link", { name: "T-2" });
     expect(waits.map((l) => l.getAttribute("href"))).toEqual([
-      "#/tickets/2",
-      "#/tickets/2",
+      "/tickets/2",
+      "/tickets/2",
     ]);
     expect(side.textContent).toMatch(/T-2.*\(blocks, done\)/);
     expect(side.textContent).toMatch(/Blocks.*T-6.*\(contract, pending\)/);

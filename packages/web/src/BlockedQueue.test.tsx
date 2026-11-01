@@ -107,16 +107,18 @@ describe("the queue of what waits for a person", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
     expect(card("T-1").getByText("Ticket 1")).toBeTruthy();
-    expect(card("T-1").getByText("agent-gave-up")).toBeTruthy();
+    expect(card("T-1").getByTitle("agent-gave-up").textContent).toBe(
+      "模型放弃",
+    );
     const note = card("T-1").getByRole("note");
     expect(note.textContent).toContain("implement ended agent-gave-up in R-7");
     expect(note.textContent).toContain("needs a decision");
     expect(
       card("T-1").getByRole("link", { name: "T-1" }).getAttribute("href"),
-    ).toBe("#/tickets/1");
+    ).toBe("/tickets/1");
     expect(
       card("T-1").getByRole("link", { name: "S-1" }).getAttribute("href"),
-    ).toBe("#/specs/1");
+    ).toBe("/specs/1");
   });
 
   it("shows the paths the gate found for protected-path-changed and the gate's log for a failed gate", async () => {
@@ -514,7 +516,9 @@ describe("paused specs and stopped overall reviews", () => {
     });
     renderWithApp(<BlockedQueue />, fake);
     const item = within(await screen.findByTestId("final-S-1-backend"));
-    expect(item.getByText("post-merge-gate-failed")).toBeTruthy();
+    expect(item.getByTitle("post-merge-gate-failed").textContent).toBe(
+      "合并后门禁失败",
+    );
     expect(item.getByRole("note").textContent).toContain("# test failed");
     fireEvent.click(
       item.getByRole("button", { name: "Run final-merge again" }),
@@ -612,12 +616,12 @@ describe("pull requests a person has to look at", () => {
       }),
     );
     const item = within(await screen.findByTestId("pull-S-1-backend"));
-    expect(item.getByText(/closed without merge/)).toBeTruthy();
+    expect(item.getByText(/关闭未合并/)).toBeTruthy();
     expect(
       item.getByRole("link", { name: "backend #7" }).getAttribute("href"),
     ).toBe("https://github.com/me/shop/pull/7");
     expect(item.getByRole("link", { name: "S-1" }).getAttribute("href")).toBe(
-      "#/specs/1",
+      "/specs/1",
     );
     expect(
       item.getByText(/Reopen it on the host, rework the spec, or cancel it/),
@@ -636,7 +640,7 @@ describe("pull requests a person has to look at", () => {
       }),
     );
     const item = within(await screen.findByTestId("pull-S-1-backend"));
-    expect(item.getByText("closed without merge")).toBeTruthy();
+    expect(item.getByText("关闭未合并")).toBeTruthy();
     expect(
       item.getByText(/could not be read: GitHub answered 404/),
     ).toBeTruthy();
@@ -659,7 +663,7 @@ describe("pull requests a person has to look at", () => {
     expect(
       item.getByText(/could not be read: GitHub answered 404/),
     ).toBeTruthy();
-    expect(item.queryByText(/closed without merge/)).toBeNull();
+    expect(item.queryByText(/关闭未合并/)).toBeNull();
   });
 });
 

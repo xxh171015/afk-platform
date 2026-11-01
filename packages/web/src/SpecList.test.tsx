@@ -58,13 +58,13 @@ describe("the spec list", () => {
     expect(rows).toHaveLength(3); // header and two specs
     const first = within(rows[1] as HTMLElement);
     expect(first.getByText("S-2")).toBeTruthy();
-    expect(first.getByText("draft")).toBeTruthy();
+    expect(first.getByTitle("draft").textContent).toBe("草稿");
     expect(first.getByText("other")).toBeTruthy();
     expect(first.getByText("0/0 done")).toBeTruthy();
 
     const second = within(rows[2] as HTMLElement);
     expect(second.getByText("Order export")).toBeTruthy();
-    expect(second.getByText("running")).toBeTruthy();
+    expect(second.getByTitle("running").textContent).toBe("运行中");
     expect(second.getByText("1/4 done, 1 blocked")).toBeTruthy();
     const bar = second.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("1");
@@ -80,7 +80,7 @@ describe("the spec list", () => {
     });
     renderWithApp(<SpecList />, server);
     const link = await screen.findByRole("link", { name: "S-7" });
-    expect(link.getAttribute("href")).toBe("#/specs/7");
+    expect(link.getAttribute("href")).toBe("/specs/7");
   });
 
   it("does not mention blocked tickets when there are none", async () => {
