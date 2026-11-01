@@ -47,7 +47,7 @@ plat repo edit backend --project <P> --contract-path openapi/openapi.yaml    # �
 plat repo add --project <P> --name frontend --url https://github.com/<owner>/<前端仓库>.git
 ```
 
-- **仓库名是你起的**，它就是 `tickets.yaml` 里 `repo:`、`refs:`、`environment:` 要写的名字（试点用的是 `afk-pilot-backend` / `afk-pilot-frontend`）。
+- **仓库名是你起的**，它就是票文件里 `repo:`、`refs:`、`environment:` 要写的名字（试点用的是 `afk-pilot-backend` / `afk-pilot-frontend`）。
 - 契约路径只设在**出契约的仓库**上。没设就导入含契约票的文件，会被拒绝。
 - `--protected-path` 是 agent 默认不能改的路径（再加上契约文件）。要改就在票里写 `protected_paths_ok`。
 
@@ -108,7 +108,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写
 ```
 
 - 它给出编号的票清单，让你检查**粒度**和**依赖边**；确认前不会发布。
-- 然后写 `tickets.yaml`（格式见附录 A）并执行 `plat tickets import S-n tickets.yaml`。导入要么全成功要么全不写，**一次列出全部问题**。**每个 draft spec 只能导入一次**，导入后要加票用 `--append`（第 6 节）。
+- 然后让 to-tickets 把票写成一个目录，一张票一个 `.md` 文件（格式见附录 A），并执行 `plat tickets import S-n <目录>`。导入要么全成功要么全不写，**一次列出全部问题**。**每个 draft spec 只能导入一次**，导入后要加票用 `--append`（第 6 节）。
 
 ### 第 4 步 读票、confirm
 
@@ -140,7 +140,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 和场景 A 的区别只有四点。
 
 1. **规划在哪里**：skills 仍在后端仓库里跑（契约在这里，tracker 文档也在这里）。后端 agent 看不到前端代码，所以：grill 时把前端的目录结构、技术栈、API client 的生成方式讲给它，或者把前端仓库也加进同一个 agent 工作区（Cursor 多根工作区 / Claude Code 的 `--add-dir`）让它能读——这是我的建议，仓库文档没有明说，你试一下哪种可用。`to-spec` 里要把**共享的名字、字段、接口形状**写死，否则前后端会各起各的名。
-2. **票的写法**（附录 B，照 `docs/specs/m2-acceptance/tickets.yaml`）：
+2. **票的写法**（附录 B，照 `docs/specs/m2-acceptance/tickets/`）：
 
    ```
    contract(后端) ──blocks──► be-impl(后端) ──────────┐
@@ -211,7 +211,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | 门禁发现改了保护路径，且你同意 | `plat ticket approve-protected T-n`，再 retry |
 | 票需要改某个保护路径但文件里没批准 | `plat ticket allow-path T-n <路径>`，再 retry |
 | 票的描述有问题 | `plat ticket view T-n --md > t.md`，改完 `plat ticket edit T-n --file t.md`（只对 pending / blocked 的票，可改标题、正文、模块、已批准的保护路径，验收标准从正文重新解析；改仓库、类型、依赖要取消后追加） |
-| 漏了票或要拆票 | `plat tickets import S-n more.yaml --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
+| 漏了票或要拆票 | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
 | 不要这张票了 | `plat ticket cancel T-n`（`--cascade` 一并取消下游） |
 | spec 暂停（超出 agent 时长） | `plat spec resume S-n`（可给更多时间） |
 | 整体 review 步骤 blocked | `plat spec retry-final S-n`；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明） |
@@ -256,92 +256,187 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 
 升级后，各台机器上的 skills checkout 也要切到新 SHA：`up.sh` 发现 checkout 的 HEAD 不对会提议切过去，worker 在 HEAD 不对时拒绝启动，并说明怎么切。
 
-## 附录 A：场景 A 的 `tickets.yaml`
+## 附录 A：场景 A 的票目录
 
-```yaml
-spec: S-1
-tickets:
-  - key: contract
-    repo: backend                 # 1.2 登记的仓库名
-    type: contract
-    title: "契约：订单备注字段"
-    modules: ["openapi/**"]
-    protected_paths_ok: ["openapi/openapi.yaml"]
-    acceptance:
-      - "openapi.yaml 的 Order 里有可选字符串字段 note，最长 200 个字符"
-    body: |
-      只改契约，不改代码。
+票是一个目录，一张票一个 `.md` 文件，文件名（去掉 `.md`）就是票的 key。front matter 放标题和平台字段，后面是 to-tickets 的 issue 模板原文；验收标准只从 `## Acceptance criteria` 读，不另写。`## Parent` 写要导入的 spec。下面用 spec `S-1`。
 
-  - key: note-field
-    repo: backend
-    type: implementation
-    title: "订单增加备注字段"
-    modules: ["src/orders/**", "test/**"]
-    blocked_by: [contract]
-    contract: contract            # 可选：拿到契约票合并时的版本
-    acceptance:
-      - "POST /orders 接受可选的 note，超长返回 400"
-      - "每条验收标准都有对应的 HTTP 测试，已有测试不减少、不跳过"
-    body: |
-      按契约实现，不要修改契约文件。
-external_blocked_by: []
+**`contract.md`**
+
+```markdown
+---
+title: "契约：订单备注字段"
+repo: backend                 # 1.2 登记的仓库名
+type: contract
+modules: ["openapi/**"]
+protected_paths_ok: ["openapi/openapi.yaml"]
+---
+
+## Parent
+
+S-1
+
+## What to build
+
+只改契约，不改代码。
+
+## Acceptance criteria
+
+- [ ] openapi.yaml 的 Order 里有可选字符串字段 note，最长 200 个字符
+```
+
+**`note-field.md`**
+
+```markdown
+---
+title: "订单增加备注字段"
+repo: backend
+type: implementation
+modules: ["src/orders/**", "test/**"]
+blocked_by: [contract]
+contract: contract            # 可选：拿到契约票合并时的版本
+---
+
+## Parent
+
+S-1
+
+## What to build
+
+按契约实现，不要修改契约文件。
+
+## Acceptance criteria
+
+- [ ] POST /orders 接受可选的 note，超长返回 400
+- [ ] 每条验收标准都有对应的 HTTP 测试，已有测试不减少、不跳过
 ```
 
 不改契约的需求可以不要 `contract` 票，直接写 `implementation` 票。
 
-## 附录 B：场景 B 的 `tickets.yaml`
+## 附录 B：场景 B 的票目录
 
-```yaml
-spec: S-2
-tickets:
-  - key: contract
-    repo: backend
-    type: contract
-    title: "契约：取消订单必须带原因"
-    modules: ["openapi/**"]
-    protected_paths_ok: ["openapi/openapi.yaml"]
-    acceptance:
-      - "POST /orders/{id}/status 的请求体增加可选字段 reason（1 到 200 个字符）；status 为 cancelled 时必须带，否则返回 400"
-    body: |
-      只改契约，不改代码。
+前后端两个仓库，spec 是 `S-2`。`refs` 和 `environment` 也写在 front matter 里。
 
-  - key: be-cancel-reason
-    repo: backend
-    type: implementation
-    title: "后端：取消订单记录原因"
-    modules: ["src/orders/**", "test/**"]
-    blocked_by: [contract]
-    acceptance:
-      - "带 { status: \"cancelled\", reason } 时成功，状态记录带上 reason"
-      - "取消但没有 reason 时返回 400"
-    body: |
-      按契约实现，不要修改契约文件。
+**`contract.md`**
 
-  - key: fe-status-actions
-    repo: frontend
-    type: implementation
-    title: "前端：订单详情页的取消原因"
-    modules: ["src/**", "contract/**"]
-    contract: contract            # 跨仓库的契约边
-    # refs: [backend]             # 可选：只读参考后端代码，出现在 /refs/backend/
-    acceptance:
-      - "契约副本 contract/openapi.yaml 更新为这张票的契约，client 重新生成"
-      - "点「取消」弹出输入框填原因，原因为空时不能提交"
-    body: |
-      调后端只用生成的 client，mock 只用 openapi-msw。e2e 由联调票写。
+```markdown
+---
+title: "契约：取消订单必须带原因"
+repo: backend
+type: contract
+modules: ["openapi/**"]
+protected_paths_ok: ["openapi/openapi.yaml"]
+---
 
-  - key: e2e
-    repo: frontend
-    type: integration
-    title: "联调：取消原因"
-    modules: ["e2e/**"]
-    environment: [backend]        # 不能包含票自己的仓库
-    blocked_by: [be-cancel-reason, fe-status-actions]
-    acceptance:
-      - "e2e：取消订单时填写原因，状态记录显示这个原因"
-    body: |
-      在联调环境里写 e2e，对着真后端跑通再提交。
-external_blocked_by: []
+## Parent
+
+S-2
+
+## What to build
+
+只改契约，不改代码。
+
+## Acceptance criteria
+
+- [ ] POST /orders/{id}/status 的请求体增加可选字段 reason（1 到 200 个字符）；status 为 cancelled 时必须带，否则返回 400
 ```
 
-**不想要自动联调**时去掉 `e2e` 票，前后端实现票各自完成即可，联调由你在合并前手动验证。
+**`be-cancel-reason.md`**
+
+```markdown
+---
+title: "后端：取消订单记录原因"
+repo: backend
+type: implementation
+modules: ["src/orders/**", "test/**"]
+blocked_by: [contract]
+---
+
+## Parent
+
+S-2
+
+## What to build
+
+按契约实现，不要修改契约文件。
+
+## Acceptance criteria
+
+- [ ] 带 { status: "cancelled", reason } 时成功，状态记录带上 reason
+- [ ] 取消但没有 reason 时返回 400
+```
+
+**`fe-status-actions.md`**
+
+```markdown
+---
+title: "前端：订单详情页的取消原因"
+repo: frontend
+type: implementation
+modules: ["src/**", "contract/**"]
+contract: contract            # 跨仓库的契约边
+refs: [backend]               # 可选：只读参考后端代码，出现在 /refs/backend/
+---
+
+## Parent
+
+S-2
+
+## What to build
+
+调后端只用生成的 client，mock 只用 openapi-msw。e2e 由联调票写。
+
+## Acceptance criteria
+
+- [ ] 契约副本 contract/openapi.yaml 更新为这张票的契约，client 重新生成
+- [ ] 点「取消」弹出输入框填原因，原因为空时不能提交
+```
+
+**`e2e.md`**
+
+```markdown
+---
+title: "联调：取消原因"
+repo: frontend
+type: integration
+modules: ["e2e/**"]
+environment: [backend]        # 不能包含票自己的仓库
+blocked_by: [be-cancel-reason, fe-status-actions]
+---
+
+## Parent
+
+S-2
+
+## What to build
+
+在联调环境里写 e2e，对着真后端跑通再提交。
+
+## Acceptance criteria
+
+- [ ] e2e：取消订单时填写原因，状态记录显示这个原因
+```
+
+**不想要自动联调**时去掉 `e2e.md`，前后端实现票各自完成即可，联调由你在合并前手动验证。
+
+## 附录 C：追加票时指向已有的票
+
+spec confirm 之后用 `plat tickets import S-n <目录> --append` 追加票（见第 6 节）。追加的票文件里：
+
+- 新票的 `blocked_by` 和 `contract` 可以写已有的票 `T-<n>`：新票等它们，或把它们当作契约上游；
+- `blocks: [T-<n>]` 让新票去阻塞一张已有的票（只有 `pending` 或 `blocked` 的票可以被阻塞）。这是让新票排在已有票前面的**唯一**写法；
+- 但 `blocks` 只能写普通的阻塞边，**contract 边不能指向已有的票**：新的契约票没法写成已有票的契约上游。「契约变更」（contract-change-needed）后追加新的契约票时，让新契约票 `blocks` 那张已阻塞的票，它就会等新契约票合并；已有票读到的契约仍是它原来的契约上游，要换成新契约需要取消它再追加一张新票（`contract: <新契约票的 key>`）。
+
+例子：已有一张被卡住的票 `T-8`，追加一张新的契约票，让 `T-8` 等它。新票的文件：
+
+```markdown
+---
+title: "契约：补上取消原因的长度限制"
+repo: backend
+type: contract
+modules: ["openapi/**"]
+protected_paths_ok: ["openapi/openapi.yaml"]
+blocks: [T-8]                 # 只能在 --append 的文件里写
+---
+```
+
+如果以后要让新契约票成为已有票的契约上游，需要给 front matter 加字段，到时另开票讨论。

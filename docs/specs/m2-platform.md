@@ -37,7 +37,7 @@ M1 把单个仓库里的一个需求跑到了「可以由人验收」，但开�
 
 追加与改票
 
-10. As a 开发者, I want 用 `plat tickets import S-n more.yaml --append` 往一个已确认、还没收尾的需求里加票和边, so that 契约要改、要拆票时不用取消重来。
+10. As a 开发者, I want 用 `plat tickets import S-n <目录> --append` 往一个已确认、还没收尾的需求里加票和边, so that 契约要改、要拆票时不用取消重来。
 11. As a 开发者, I want 追加时平台列出「还在用旧契约」的票（pending / blocked 的提示接上新契约，已经开工或做完的提示追加适配票）, so that 我不会漏掉按旧契约做的票。
 12. As a 开发者, I want 做完的票保持 done，要改就追加适配票, so that 一张票只对应一段合并历史，追溯和验收包不乱。
 13. As a 开发者, I want 用 `plat ticket edit T-n --file t.yaml` 改 pending 或 blocked 的票的内容，版本号加一、每版留快照, so that 改票后重试有据可查。
@@ -85,7 +85,7 @@ M1 把单个仓库里的一个需求跑到了「可以由人验收」，但开�
 
 ### 追加与改票（「契约变更与改票」#65）
 
-- **追加**：`plat tickets import S-n more.yaml --append`，spec 是 planned / running / paused 时可用（draft 用普通导入；finalizing 及以后拒绝）。文件里可以用 `T-n` 引用已有票。追加文件另有顶层 `edges: [{ from, to, kind }]`（`kind` 默认 `blocks`，两端写本文件的 key 或 `T-n`），用来写「新票 → 已有票」的边，因为 `blocked_by` / `contract` 只能写在被挡的那张票上；普通导入不接受 `edges`。全套校验在合并后的整张图上做（只算没取消的票）。**立即生效，不再确认拆分**，告警在命令输出里。
+- **追加**：`plat tickets import S-n <目录> --append`，spec 是 planned / running / paused 时可用（draft 用普通导入；finalizing 及以后拒绝）。文件里可以用 `T-n` 引用已有票。票文件 front matter 里的 `blocks: [T-n]` 用来写「新票 → 已有票」的边，因为 `blocked_by` / `contract` 只能写在被挡的那张票上；它只产生普通的阻塞边，contract 边不能指向已有票；普通导入不接受 `blocks`。全套校验在合并后的整张图上做（只算没取消的票）。**立即生效，不再确认拆分**，告警在命令输出里。
   - 每条新边至少一端是新票；已有票 → 新票：已有票不是 cancelled 即可（done 的当场算满足）；新票 → 已有票：被挡的已有票必须是 pending 或 blocked。
   - 「拆票」= 追加新票 + `plat ticket cancel` 原票。
 - **done 是终态，不重开**。追加了契约票时，平台找出同一仓库旧契约票的 contract 下游里、这次没接到新契约票下的票：pending / blocked 的提示「会继续用旧契约，是否接上新契约票」；queued / running / merging / done 的提示「已经或正在按旧契约做，考虑追加适配票」。适配票就是普通的实现票。

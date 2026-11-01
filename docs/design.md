@@ -970,7 +970,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat spec create --type feature --file spec.md`   | 建 spec，返回 `S-12`                        |
 | `plat repo add --name <名字> --url … [--contract-path …]` / `plat repo edit <名字>` | 登记仓库（只有名字，不分前后端）、设契约路径 |
 | `plat tickets import S-12 <目录>`                  | 一次性导入整张依赖图（一张票一个 md 文件），校验通过才写入 |
-| `plat tickets import S-12 more.yaml --append`      | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
+| `plat tickets import S-12 <目录> --append`        | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
 | `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做） |
 | `plat spec show S-12` / `plat ticket view T-123`   | 查看                                        |
 | `plat ticket edit T-123 --file t.md`               | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版） |
