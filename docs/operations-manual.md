@@ -66,12 +66,15 @@ plat repo add --project <P> --name frontend --url https://github.com/<owner>/<�
 
 grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写平台，需要在**规划仓库**（场景 A：后端仓库；场景 B：后端仓库，契约就在这里）里让 skills 知道 `plat` 的用法：
 
-1. 在 agent 里对该仓库运行 `/setup-matt-pocock-skills`，tracker 选「其他」（Other），triage 标签用默认，domain docs 用单上下文（默认）。
-2. 它会生成 `docs/agents/issue-tracker.md`。把内容换成 `docs/agents/templates/pilot-issue-tracker.md`（在 afk-platform 仓库里），再按你的项目改三处：
-   - 「This repo is the project's `backend` repo」那句里的 `repo:` 名字，改成你在 1.2 登记的名字；
-   - `plat spec create --project <id>` 里的 project id 改成 `<P>`；
-   - 删掉「One spec can only change one repo in M1」这一句（已过时：M2 一个 spec 可以跨多个仓库）；场景 B 另加附录 C 的几行。
-3. 把这些文件提交并推到 `main`。
+1. 在规划仓库里运行（`<P>` 是 1.2 的项目 id，`<名字>` 是这个仓库在 1.2 登记的名字）：
+
+   ```bash
+   mkdir -p docs/agents
+   plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md
+   ```
+
+   `plat tracker-doc` 只打印，不写文件、不碰 git。文档第一行是版本标记（平台版本和 skills SHA）；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
+2. 把 `docs/agents/issue-tracker.md` 提交并推到 `main`。平台或项目配置变了以后，重新运行同一条命令，再提交。
 
 前端仓库**不需要**装 tracker 文档（只在规划仓库里跑 skills）。
 
@@ -341,18 +344,3 @@ external_blocked_by: []
 ```
 
 **不想要自动联调**时去掉 `e2e` 票，前后端实现票各自完成即可，联调由你在合并前手动验证。
-
-## 附录 C：场景 B 要加进 tracker 文档的几行
-
-在 `docs/agents/issue-tracker.md` 的 tickets.yaml 一节后面补：
-
-```
-## 多个仓库（场景 B）
-
-- 一个 spec 可以改多个仓库；每张票的 `repo:` 写仓库在平台里的名字（backend / frontend）。
-- 契约属于出契约的仓库（后端）；使用契约的票用 `contract: <契约票的 key>`，可以跨仓库。
-- 前端想只读参考后端代码时，在票上写 `refs: [backend]`。
-- 联调票：`type: integration`，写在使用方仓库，`environment: [被依赖的仓库名]`（不能包含自己的仓库），
-  `blocked_by` 两边的实现票；e2e 写在 `e2e/**`，由 `npm run e2e` 运行。
-- 前端、后端各自的票只改自己仓库的 `modules`；跨仓库的字段名和接口形状写在 spec 里。
-```

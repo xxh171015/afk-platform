@@ -60,6 +60,34 @@ const projectRoute = createRoute({
   responses: { 201: reply("Created", z.object({ id: Id, name: z.string() })) },
 });
 
+const projectViewRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}",
+  request: {
+    params: z.object({
+      projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: reply(
+      "The project with its repos",
+      z.object({
+        id: Id,
+        name: z.string(),
+        repos: z.array(
+          z.object({
+            name: z.string(),
+            url: z.string(),
+            defaultBranch: z.string(),
+            contractPath: z.string().nullable(),
+          }),
+        ),
+      }),
+    ),
+    404: reply("No such project", ErrorReply),
+  },
+});
+
 const projectEditRoute = createRoute({
   method: "patch",
   path: "/projects/{projectId}",
@@ -249,6 +277,32 @@ export function registerPlanningRoutes(
   app.openapi(projectRoute, async (c) => {
     const project = await createProject(pool, c.req.valid("json"));
     return c.json(project, 201);
+  });
+
+  app.openapi(projectViewRoute, async (c) => {
+    const { projectId } = c.req.valid("param");
+    const project = await pool.query(
+      "SELECT id, name FROM projects WHERE id = $1",
+      [projectId],
+    );
+    if (!project.rows[0]) return c.json({ error: "no such project" }, 404);
+    const repos = await pool.query(
+      "SELECT name, url, default_branch, contract_path FROM repos WHERE project_id = $1 ORDER BY id",
+      [projectId],
+    );
+    return c.json(
+      {
+        id: project.rows[0].id as number,
+        name: project.rows[0].name as string,
+        repos: repos.rows.map((r) => ({
+          name: r.name as string,
+          url: r.url as string,
+          defaultBranch: r.default_branch as string,
+          contractPath: (r.contract_path as string | null) ?? null,
+        })),
+      },
+      200,
+    );
   });
 
   app.openapi(projectEditRoute, async (c) => {

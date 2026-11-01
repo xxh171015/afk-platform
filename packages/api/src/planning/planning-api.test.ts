@@ -497,6 +497,38 @@ modules: ["src/orders/**"]
   });
 });
 
+describe("project view", () => {
+  it("lists the project's repos in the order they were added, with the contract path of the one that has it", async () => {
+    const { projectId } = await setup();
+    const response = await fetch(`${api.url}/projects/${projectId}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      id: projectId,
+      name: "shop",
+      repos: [
+        {
+          name: "backend",
+          url: "git@github.com:acme/backend.git",
+          defaultBranch: "main",
+          contractPath: "openapi.yaml",
+        },
+        {
+          name: "frontend",
+          url: "git@github.com:acme/frontend.git",
+          defaultBranch: "develop",
+          contractPath: null,
+        },
+      ],
+    });
+  });
+
+  it("says plainly when the project does not exist", async () => {
+    const response = await fetch(`${api.url}/projects/99`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "no such project" });
+  });
+});
+
 describe("project edit", () => {
   const projectRow = async () =>
     (await db.pool.query("SELECT * FROM projects WHERE id = 1")).rows[0];

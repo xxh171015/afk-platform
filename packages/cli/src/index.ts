@@ -7,6 +7,7 @@ import {
 } from "@afk/shared/spec-template";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { blockedText, specText, ticketText } from "./format.ts";
+import { renderTrackerDoc } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
@@ -232,6 +233,29 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       );
       if (!data) throw failureFrom(response, error);
       print(data, `repo ${data.id} ${data.name} updated`);
+    });
+
+  program
+    .command("tracker-doc")
+    .description(
+      "print the planning repo's docs/agents/issue-tracker.md (redirect it to the file; nothing is written)",
+    )
+    .requiredOption("--project <id>", "project id", toInt)
+    .requiredOption("--repo <name>", "the planning repo's name on the platform")
+    .action(async (options) => {
+      const { data, response, error } = await api().GET(
+        "/projects/{projectId}",
+        { params: { path: { projectId: options.project } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      let doc: string;
+      try {
+        doc = renderTrackerDoc(data, options.repo);
+      } catch (e) {
+        throw new Failure(e instanceof Error ? e.message : String(e));
+      }
+      // The document itself, even with --json: it is meant to be redirected into a file.
+      io.stdout(doc);
     });
 
   const spec = program.command("spec").description("specs");
