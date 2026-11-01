@@ -1,6 +1,7 @@
 import { formatDisplayId, REVIEW_AXES, type ReviewAxis } from "@afk/shared";
 import { z } from "@hono/zod-openapi";
 import type pg from "pg";
+import { enqueuePackDescriptions } from "../host/host-jobs.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
 import { integrationAttempts } from "../tickets/integration-attempts.ts";
 
@@ -608,6 +609,7 @@ export async function saveAcceptancePack(
      ON CONFLICT (spec_id) DO UPDATE SET content = EXCLUDED.content, generated_at = now()`,
     [specId, JSON.stringify(pack)],
   );
+  await enqueuePackDescriptions(client, specId);
 }
 
 // The stored pack with today's pull requests and merge order; null before one was made. A pack made before the

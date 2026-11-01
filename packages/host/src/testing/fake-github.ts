@@ -269,6 +269,7 @@ export class FakeGitHub {
       const pull = this.pulls.find((p) => p.number === Number(one[1]));
       if (!pull) return this.json(res, 404, { message: "Not Found" });
       if (body.state === "closed" && !pull.merged) pull.state = "closed";
+      if (typeof body.body === "string") pull.body = body.body;
       return this.json(res, 200, this.render(pull));
     }
     const ref = /^\/git\/refs\/heads\/(.+)$/.exec(rest);

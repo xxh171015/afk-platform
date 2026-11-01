@@ -1880,7 +1880,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -2016,6 +2016,34 @@
                         }
                       },
                       "required": ["kind", "pulls", "branches"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["patch-pr-body"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "section": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "number",
+                        "section",
+                        "summary"
+                      ]
                     }
                   ]
                 }

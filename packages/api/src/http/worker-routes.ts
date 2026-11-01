@@ -8,6 +8,7 @@ import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import {
   readHostSyncPayload,
   readOpenPrPayload,
+  readPatchPrBodyPayload,
   readPrReadyPayload,
   readSpecCleanupPayload,
 } from "../host/host-jobs.ts";
@@ -285,6 +286,13 @@ const HostTask = z.discriminatedUnion("kind", [
     ),
     branches: z.array(z.object({ repoUrl: z.string(), branch: z.string() })),
   }),
+  z.object({
+    kind: z.literal("patch-pr-body"),
+    repoUrl: z.string(),
+    number: z.number().int(),
+    section: z.string(),
+    summary: z.string(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -300,7 +308,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -512,7 +520,8 @@ export function registerWorkerRoutes(
       (readOpenPrPayload(row) ??
         readHostSyncPayload(row) ??
         readPrReadyPayload(row) ??
-        readSpecCleanupPayload(row));
+        readSpecCleanupPayload(row) ??
+        readPatchPrBodyPayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)

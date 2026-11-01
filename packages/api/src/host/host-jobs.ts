@@ -4,7 +4,8 @@ import { enqueueJob } from "../jobs/queue.ts";
 
 // The jobs that talk to the code host. A worker runs them because the host's credentials live there only
 // (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` looks at every
-// pull request of a project that is still open. Neither holds a lock key.
+// pull request of a project that is still open, `patch-pr-body` writes the acceptance pack into a description.
+// None of them holds a lock key.
 
 export const SYNC_INTERVAL_SECONDS = 60;
 
@@ -20,6 +21,11 @@ export interface SpecCleanupPayload {
 }
 
 export interface PrReadyPayload {
+  pullId: number;
+}
+
+export interface PatchPrBodyPayload {
+  specId: number;
   pullId: number;
 }
 
@@ -62,6 +68,18 @@ export function readSpecCleanupPayload(job: {
   const { specId } = job.payload;
   return job.type === "spec-cleanup" && typeof specId === "number"
     ? { specId }
+    : undefined;
+}
+
+export function readPatchPrBodyPayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): PatchPrBodyPayload | undefined {
+  const { specId, pullId } = job.payload;
+  return job.type === "patch-pr-body" &&
+    typeof specId === "number" &&
+    typeof pullId === "number"
+    ? { specId, pullId }
     : undefined;
 }
 
@@ -170,4 +188,37 @@ export async function enqueuePrReady(
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
     ...(notBefore ? { notBefore } : {}),
   });
+}
+
+export const patchPrBodyKeyPrefix = ({ specId, pullId }: PatchPrBodyPayload) =>
+  `${formatDisplayId("spec", specId)}:pull-${pullId}:pack:`;
+
+// After the acceptance pack is saved, each of the spec's pull requests gets its marked section PATCHed.
+export async function enqueuePatchPrBody(
+  client: pg.PoolClient,
+  payload: PatchPrBodyPayload,
+) {
+  const prefix = patchPrBodyKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "patch-pr-body",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+  });
+}
+
+export async function enqueuePackDescriptions(
+  client: pg.PoolClient,
+  specId: number,
+) {
+  const pulls = await client.query<{ id: number }>(
+    "SELECT id FROM pull_requests WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  for (const pull of pulls.rows)
+    await enqueuePatchPrBody(client, { specId, pullId: pull.id });
 }

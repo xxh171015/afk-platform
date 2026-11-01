@@ -32,6 +32,14 @@ export {
 } from "./limits.ts";
 export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
+export {
+  fitPrDescription,
+  GITHUB_PR_BODY_LIMIT,
+  PACK_MARK_END,
+  PACK_MARK_START,
+  splicePackSection,
+  wrapPackSection,
+} from "./pr-description.ts";
 export { redactSecrets } from "./redact.ts";
 export type {
   AxisReview,

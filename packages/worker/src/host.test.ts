@@ -29,6 +29,12 @@ const noCleanup = {
   deleteBranch: async (): Promise<"deleted" | "gone"> => {
     throw new Error("not used");
   },
+  getPullRequestBody: async () => {
+    throw new Error("not used");
+  },
+  updatePullRequestBody: async () => {
+    throw new Error("not used");
+  },
 };
 const log = () => {};
 const open = {
@@ -73,6 +79,50 @@ describe("a pr-ready task", () => {
           "GitHub refused to mark pull request 9 ready (403)",
           403,
         );
+      },
+    };
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, task, log),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+});
+
+describe("a patch-pr-body task", () => {
+  const task = {
+    kind: "patch-pr-body" as const,
+    repoUrl: "https://github.com/me/pilot.git",
+    number: 7,
+    section: "pack here",
+    summary: "summary here",
+  };
+
+  it("keeps what a person wrote outside the markers and replaces the marked section", async () => {
+    const writes: string[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7),
+      getPullRequestBody: async () => "Spec: S-1\n\nI added a note",
+      updatePullRequestBody: async ({ body }) => {
+        writes.push(body);
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(result).toEqual({ stage: "patch-pr-body", outcome: "patched" });
+    expect(writes[0]).toContain("Spec: S-1");
+    expect(writes[0]).toContain("I added a note");
+    expect(writes[0]).toContain("pack here");
+    expect(writes[0]).toContain("<!-- afk-acceptance-pack -->");
+  });
+
+  it("fails as an infrastructure problem when the host refuses, so the job is tried again", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7),
+      getPullRequestBody: async () => "",
+      updatePullRequestBody: async () => {
+        throw new HostError("GitHub answered 403 updating pull request 7", 403);
       },
     };
     await expect(
@@ -203,6 +253,8 @@ describe("a spec-cleanup task", () => {
       calls,
       openPullRequest: async () => info(0),
       getPullRequest: async () => info(0),
+      getPullRequestBody: async () => "",
+      updatePullRequestBody: async () => {},
       markReady: async () => info(0),
       closePullRequest: async ({ number }) => {
         calls.push(`close ${number}`);

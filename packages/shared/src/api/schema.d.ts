@@ -1057,7 +1057,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1104,6 +1104,14 @@ export interface paths {
                     repoUrl: string;
                     branch: string;
                   }[];
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "patch-pr-body";
+                  repoUrl: string;
+                  number: number;
+                  section: string;
+                  summary: string;
                 };
           };
         };

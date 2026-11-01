@@ -1939,11 +1939,15 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
     ]);
     expect(github.pullRequests()[0]?.body).toContain("Spec: S-1");
     expect(github.pullRequests()[0]?.body).toContain("- T-1 Ticket a");
+    expect(github.pullRequests()[0]?.body).toContain(
+      "<!-- afk-acceptance-pack -->",
+    );
 
     // each token was asked for what its job needed, for the one repo, and never for workflows or administration
     const asked = github.tokensIssued.map((t) => t.permissions);
     expect(asked).toContainEqual({ contents: "write" });
     expect(asked).toContainEqual({ pull_requests: "write", contents: "read" });
+    expect(asked).toContainEqual({ pull_requests: "write" });
     for (const t of github.tokensIssued) {
       expect(t.repositories).toEqual(["afk-pilot-backend"]);
       expect(Object.keys(t.permissions)).not.toContain("workflows");

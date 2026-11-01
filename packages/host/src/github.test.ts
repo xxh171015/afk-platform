@@ -90,6 +90,33 @@ describe("openPullRequest", () => {
   });
 });
 
+describe("updatePullRequestBody", () => {
+  it("PATCHes the description with pull_requests write and without contents", async () => {
+    const a = adapter();
+    await open(a);
+    await a.updatePullRequestBody({
+      repo,
+      number: 1,
+      body: "Spec: S-1\n\nupdated",
+    });
+    expect(github.tokensIssued.at(-1)?.permissions).toEqual({
+      pull_requests: "write",
+    });
+    expect(await a.getPullRequestBody({ repo, number: 1 })).toBe(
+      "Spec: S-1\n\nupdated",
+    );
+  });
+
+  it("reads the current description with pull_requests read only", async () => {
+    const a = adapter();
+    await open(a);
+    expect(await a.getPullRequestBody({ repo, number: 1 })).toBe("Spec: S-1");
+    expect(github.tokensIssued.at(-1)?.permissions).toEqual({
+      pull_requests: "read",
+    });
+  });
+});
+
 describe("getPullRequest", () => {
   it("reports a merged pull request as merged", async () => {
     const a = adapter();

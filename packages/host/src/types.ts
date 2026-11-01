@@ -52,6 +52,14 @@ export interface HostAdapter {
     repo: RepoRef;
     number: number;
   }): Promise<PullRequestInfo>;
+  // The current description, so a PATCH can keep what a person wrote outside the platform's markers.
+  getPullRequestBody(input: { repo: RepoRef; number: number }): Promise<string>;
+  // Writes the description. Pull requests:write is enough; this never merges.
+  updatePullRequestBody(input: {
+    repo: RepoRef;
+    number: number;
+    body: string;
+  }): Promise<void>;
   // Turns a draft pull request into one that is ready for review. One that is not a draft (a person got there
   // first) is returned as it is, nothing is sent.
   markReady(input: { repo: RepoRef; number: number }): Promise<PullRequestInfo>;

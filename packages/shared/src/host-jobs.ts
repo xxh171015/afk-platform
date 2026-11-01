@@ -5,5 +5,6 @@ export const HOST_JOB_TYPES = [
   "host-sync",
   "spec-cleanup",
   "pr-ready",
+  "patch-pr-body",
 ] as const;
 export const HOST_CAPABILITY = "host";

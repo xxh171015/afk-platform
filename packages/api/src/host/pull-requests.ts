@@ -7,7 +7,8 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
-import { saveAcceptancePack } from "../acceptance/pack.ts";
+import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
+import { renderPackSection } from "../acceptance/pack-description.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import {
   enqueueHostSync,
@@ -16,6 +17,7 @@ import {
   enqueueSpecCleanup,
   type HostSyncPayload,
   type OpenPrPayload,
+  type PatchPrBodyPayload,
   type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
@@ -51,6 +53,13 @@ export type HostTask =
       kind: "spec-cleanup";
       pulls: { id: number; repoUrl: string; number: number }[]; // last seen open: to be closed
       branches: { repoUrl: string; branch: string }[]; // to be deleted
+    }
+  | {
+      kind: "patch-pr-body";
+      repoUrl: string;
+      number: number;
+      section: string;
+      summary: string;
     };
 
 const PullFacts = {
@@ -120,8 +129,29 @@ export async function buildHostTask(
     | OpenPrPayload
     | HostSyncPayload
     | SpecCleanupPayload
-    | PrReadyPayload,
+    | PrReadyPayload
+    | PatchPrBodyPayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "patch-pr-body") {
+    const { specId, pullId } = payload as PatchPrBodyPayload;
+    const pull = (
+      await pool.query<{ url: string; number: number; repo: string }>(
+        `SELECT r.url, p.number, r.name AS repo
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    const pack = await readAcceptancePack(pool, specId);
+    if (!pull || !pack) return undefined;
+    const rendered = renderPackSection(pack, pull.repo, specId);
+    return {
+      kind: "patch-pr-body",
+      repoUrl: pull.url,
+      number: pull.number,
+      section: rendered.section,
+      summary: rendered.summary,
+    };
+  }
   if (job.type === "spec-cleanup")
     return specCleanupTask(pool, payload as SpecCleanupPayload);
   if (job.type === "pr-ready") {
