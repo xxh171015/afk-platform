@@ -431,6 +431,7 @@ export function specText(view: {
   spec: {
     displayId: string;
     title: string;
+    body?: string;
     state: string;
     pauseReason: string | null;
     warnings: unknown[];
@@ -445,6 +446,7 @@ export function specText(view: {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
     ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
+    ...(view.spec.body?.trim() ? ["", view.spec.body.trimEnd(), ""] : []),
     "tickets:",
     ...view.tickets.flatMap((t) => [
       `  ${t.displayId}  ${stateOf(t)}  [${t.repo}]  ${t.title}${t.appended ? "  (appended)" : ""}`,

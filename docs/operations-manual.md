@@ -94,7 +94,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写
 ```
 
 - 不会再采访你，只汇总刚才的对话；**它会让你确认「测试 seams」**，认真看：无人值守的 agent 不能再问你，seams 在这里定死。
-- 发布时它调用 `plat spec create`，打印 `S-n`。标题没有英文单词时必须带 `--slug <english-slug>`（中文标题生成不了 slug）。
+- 发布时它调用 `plat spec create`，打印 `S-n`。spec 缺了 to-spec 模板的某一节、或节名被改，以及 `## Testing Decisions` 里没写 seams 时，会在 stderr 告警（不拒绝，正文照存，只统一换行符和末尾换行）。标题没有英文单词时必须带 `--slug <english-slug>`（中文标题生成不了 slug）。
 - spec 此时是 draft，什么都还没开始跑。
 
 ### 第 3 步 to-tickets（拆票并导入）
@@ -109,7 +109,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写
 ### 第 4 步 读票、confirm
 
 ```sh
-plat spec show S-n          # 票、依赖边、导入告警
+plat spec show S-n          # spec 正文、票、依赖边、导入告警
 ```
 
 对着看四件事：

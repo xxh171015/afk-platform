@@ -125,6 +125,17 @@ function putTickets(directory: string, tickets: TestTicket[], specId = 1) {
   }
 }
 
+const SPEC_SECTIONS = [
+  "Problem Statement",
+  "Solution",
+  "User Stories",
+  "Implementation Decisions",
+  "Testing Decisions",
+  "Out of Scope",
+  "Further Notes",
+];
+const SPEC_BODY = `${SPEC_SECTIONS.map((s) => `## ${s}\n\n${s === "Testing Decisions" ? "Seam: the HTTP API." : "text."}\n`).join("\n")}`;
+
 async function register() {
   await plat("project", "create", "shop");
   await plat(
@@ -156,7 +167,7 @@ async function register() {
     "--url",
     "git@github.com:acme/frontend.git",
   );
-  files["spec.md"] = "# Order export\n";
+  files["spec.md"] = SPEC_BODY;
   return plat(
     "spec",
     "create",
@@ -172,14 +183,69 @@ async function register() {
 }
 
 describe("plat", () => {
+  async function createSpecFrom(text: string) {
+    await plat("project", "create", "shop");
+    files["spec.md"] = text;
+    return plat(
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "feature",
+      "--title",
+      "Order export",
+      "--file",
+      "spec.md",
+    );
+  }
+
+  it("creates a spec with a missing or renamed section and warns which one", async () => {
+    const body = SPEC_BODY.replace("## Solution", "## The Solution").replace(
+      "## Out of Scope\n\ntext.\n",
+      "",
+    );
+    const created = await createSpecFrom(body);
+    expect(created.code).toBe(0);
+    expect(created.stdout).toBe("S-1\n");
+    expect(created.stderr).toContain("warning: the spec has no ## Solution");
+    expect(created.stderr).toContain(
+      "warning: the spec has no ## Out of Scope",
+    );
+    expect(created.stderr).not.toContain("Problem Statement");
+  });
+
+  it("warns once when Testing Decisions does not name seams", async () => {
+    const created = await createSpecFrom(
+      SPEC_BODY.replace("Seam: the HTTP API.", "Write good tests."),
+    );
+    expect(created.code).toBe(0);
+    expect(created.stderr).toContain("seams");
+    expect(created.stderr.match(/warning/g)).toHaveLength(1);
+  });
+
+  it("stores the body as written apart from line endings and the final newline", async () => {
+    const created = await createSpecFrom(
+      `${SPEC_BODY.trimEnd().replace(/\n/g, "\r\n")}\r\n\r\n`,
+    );
+    expect(created.stderr).toBe("");
+    const stored = await db.pool.query("SELECT body FROM specs");
+    expect(stored.rows[0].body).toBe(SPEC_BODY);
+  });
+
+  it("prints the spec body in spec show", async () => {
+    await register();
+    const shown = await plat("spec", "show", "S-1");
+    expect(shown.stdout).toContain(
+      "## Testing Decisions\n\nSeam: the HTTP API.",
+    );
+  });
+
   it("walks project create, repo add, spec create and tickets import", async () => {
     const spec = await register();
     expect(spec).toEqual({ code: 0, stdout: "S-1\n", stderr: "" });
     const stored = await db.pool.query("SELECT slug, body FROM specs");
-    expect(stored.rows[0]).toEqual({
-      slug: "order-export",
-      body: "# Order export\n",
-    });
+    expect(stored.rows[0]).toEqual({ slug: "order-export", body: SPEC_BODY });
 
     putTickets("tickets", TICKETS);
     const imported = await plat("tickets", "import", "S-1", "tickets");

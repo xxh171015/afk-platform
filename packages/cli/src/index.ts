@@ -1,6 +1,10 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { type ApiClient, createApiClient, parseDisplayId } from "@afk/shared";
+import {
+  normalizeSpecBody,
+  specTemplateWarnings,
+} from "@afk/shared/spec-template";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { parse as parseYaml } from "yaml";
 import { blockedText, specText, ticketText } from "./format.ts";
@@ -242,7 +246,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--file <path>", "markdown body")
     .action(async (options) => {
       const slug = options.slug ?? slugify(options.title);
-      const body = options.file ? await io.readFile(options.file) : undefined;
+      const body = options.file
+        ? normalizeSpecBody(await io.readFile(options.file))
+        : undefined;
       const { data, response, error } = await api().POST("/specs", {
         body: {
           projectId: options.project,
@@ -253,6 +259,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         },
       });
       if (!data) throw failureFrom(response, error);
+      for (const warning of body === undefined
+        ? []
+        : specTemplateWarnings(body))
+        io.stderr(`warning: ${warning}\n`);
       print(data, data.displayId);
     });
 
