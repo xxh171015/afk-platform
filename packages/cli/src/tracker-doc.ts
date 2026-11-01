@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import type { HostKind } from "@afk/shared";
+import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
 import {
   readSkillSnapshot,
   type SnapshotFile,
 } from "@afk/shared/skills-snapshot";
-import pkg from "../package.json" with { type: "json" };
 
 // The planning repo's docs/agents/issue-tracker.md, generated per project and repo from the templates under
 // packages/cli/templates/ and the seed template of the repo's code host in the skills snapshot. Pure: it prints, it
@@ -82,7 +82,7 @@ export function renderTrackerDoc(
   const crossRepo =
     project.repos.length > 1 && project.repos.some((r) => r.contractPath);
   const parts = [
-    `<!-- plat tracker-doc ${pkg.version} skills mattpocock/skills@${SKILLS_SHA} project ${project.id} repo ${repo.name} -->`,
+    `<!-- plat tracker-doc ${PLATFORM_VERSION} skills mattpocock/skills@${SKILLS_SHA} project ${project.id} repo ${repo.name} -->`,
     fill(template("routing"), values).trim(),
     fill(template("platform"), values).trim(),
     ...(crossRepo ? [fill(template("multi-repo"), values).trim()] : []),

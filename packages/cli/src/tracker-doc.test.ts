@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { readTicketFiles } from "@afk/shared/ticket-files";
@@ -39,6 +40,7 @@ describe("renderTrackerDoc", () => {
     expect(first).toMatch(
       /^<!-- plat tracker-doc \S+ skills mattpocock\/skills@/,
     );
+    expect(first).toContain(` ${PLATFORM_VERSION} skills `);
     expect(first).toContain(`mattpocock/skills@${SKILLS_SHA}`);
   });
 

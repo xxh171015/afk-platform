@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./db": "./src/db.ts",
+    "./platform-version": "./src/platform-version.ts",
     "./skills-sha": "./src/skills-sha.ts",
     "./skills-snapshot": "./src/skills-snapshot.ts",
     "./spec-template": "./src/spec-template.ts",
