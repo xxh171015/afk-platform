@@ -74,7 +74,7 @@ docker compose up -d --wait postgres
 export DATABASE_URL=postgres://afk:afk@localhost:5432/afk
 pnpm db:migrate
 pnpm api                      # http://127.0.0.1:3000 ($PORT to change); run logs go to ~/.afk/logs/<instance id>/ ($AFK_LOG_DIR to change; give each database its own)
-pnpm web                      # http://127.0.0.1:5173
+pnpm web                      # http://127.0.0.1:5173 （工作台）
 
 export AFK_MODEL=<cursor model>
 export AFK_SKILLS_DIR=~/.afk/skills/skills/engineering

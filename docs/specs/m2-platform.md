@@ -196,7 +196,7 @@ implement（agent，在联调环境里写 e2e 并提交）→ 门禁（本仓库
 - PR 评论返工 `rework`、`update-branch`、`trial-merge`、多个需求并行、跨需求的依赖边（M3 / M4）。
 - 按仓库区分的 worker 能力标签、多 worker、公司服务器、GitLab、MinIO（M3）。
 - `plat context`、bug 类型 spec、追溯反查（M4）；事件与插件、信任阶梯、登录与权限（M5）。
-- 页面上编辑票、追加票、改依赖；通知。
+- 页面上追加票、改依赖、取消整个 Spec。通知、页面改正文、带说明重试已由 [操作体验 spec](experience-platform.md) 拿回。
 - Cursor 的 token 用量与成本统计。
 - 容器内存上限和其他加固。
 

@@ -57,7 +57,7 @@ plat repo add --project <P> --name frontend --url https://github.com/<owner>/<�
 | 条件 | 说明 |
 | --- | --- |
 | GitHub App 已装到这个仓库 | 开 PR、转 ready、删分支都靠它。检查：`node scripts/check-github-app.ts <owner>/<repo>`（在 `~/code/afk-platform` 下）。draft 转 ready 需要 App 同时有 `pull_requests: write` 和 `contents: write`。 |
-| 默认分支是 `main`，工作区干净地推到了远端 | 平台只 clone 远端，**没推到 GitHub 的东西平台看不到**（包括下面 grill 产出的 `GLOSSARY.md`、ADR）。 |
+| 默认分支是 `main`，工作区干净地推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR **不要先推 main**：它们作为规划提交，成为规划仓库这个 Spec 集成分支的起点（见第 1 步、第 4 步）。 |
 | `.sandcastle/gates.yaml` | 列出 `setup`、`typecheck`、`test`（带 JUnit 路径）、`lint`。门禁就是它。 |
 | `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它。前后端仓库都要有。 |
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
@@ -90,7 +90,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写
 /grill-with-docs
 ```
 
-它会反复追问，并在过程中补 `GLOSSARY.md` 和 `docs/adr/`。**结束后把这些文档改动提交并推到 `main`**，平台上的 agent 才读得到。
+它会反复追问，并在过程中补 `GLOSSARY.md` 和 `docs/adr/`。**不要把这些改动先推 `main`。** 结束后在规划仓库里打一次规划提交（GLOSSARY、ADR、本仓库 `AGENTS.md`），推到 `plan/<id>/<slug>`；`plat spec confirm` 核这个 SHA，它会成为规划仓库集成分支的起点。同一 Spec 里其他仓库的票在 `/context/domain/` 读到这份 GLOSSARY / ADR。to-spec / to-tickets 的过程文件写到仓库外（`~/.afk/planning/<spec>/`），不进 git。
 
 ### 第 2 步 to-spec（发布 spec）
 
@@ -124,15 +124,17 @@ plat spec show S-n          # spec 正文、票、依赖边、导入告警
 3. 触碰保护路径（契约、`.github/**`）的票有没有写 `protected_paths_ok`。
 4. 依赖图没有环、没有多余的串行。
 
-确认没问题：
+确认没问题。改过规范文档时，在**规划仓库**工作区里 confirm（它会核规划提交已推送、是默认分支的后代、这些文件没有未提交改动）：
 
 ```sh
 plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实现
 ```
 
+页面确认不读本地 git：还没做过规划仓库 CLI 检查时预检标黄，不硬拦，集成分支从默认分支切。`--force` 才能跳过脏工作区检查。
+
 ### 第 5 步 等待和验收
 
-- 页面 `http://127.0.0.1:5173` 看进度；终端里 `plat spec show S-n`。
+- 页面 `http://127.0.0.1:5173` 先看工作台（等你处理 / 正在运行 / 等你验收 / 最近完成）；终端里 `plat spec show S-n`。票卡住时本机也会发一条 macOS 通知（点开打不开页面，去待处理或通知里的链接）。
 - 全部票 done 后平台做整体 review 和修复，然后开 PR（`spec/<id>/<slug>` → `main`），并生成验收包（`plat spec show S-n` 里能看）。
 - **你**读验收包，在 GitHub 上看 diff、合并 PR。合并后平台自动清理分支，spec 变 `merged`。
 
@@ -198,7 +200,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | 一张票的内容 | `plat ticket view T-n`（旧版本：`--version 1`） |
 | **有什么在等我** | `plat blocked`（blocked 的票和原因简报、paused 的 spec、被关掉或读不出的 PR、清理没做完的） |
 | 某次 run 的日志 | `plat run logs R-n` |
-| 图形化 | 页面 `http://127.0.0.1:5173`：依赖图、各仓库 PR、合并顺序 |
+| 图形化 | 页面 `http://127.0.0.1:5173`：工作台、需求（流程条和五个嵌套页）、待处理、独立 Run |
 
 日志目录：API 的 run 日志在 `~/.afk/logs/<实例 id>/`；worker 的沙箱原始日志在 `~/.afk/sandbox-logs/`（含未脱敏的流，别拿去分享）。
 
@@ -208,14 +210,14 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 
 | 情况 | 做法 |
 | --- | --- |
-| 票 blocked，想让它再试一次 | `plat ticket retry T-n`（可加 `--mode continue` 接着做 / `--mode restart` 重来） |
+| 票 blocked，想让它再试一次 | `plat ticket retry T-n`（`--mode continue` 接着做 / `--mode restart` 重来；可选 `--note "…"` 只对下一次 Run 有效）。页面待处理和票页也能写这句说明再重试。 |
 | 门禁发现改了保护路径，且你同意 | `plat ticket approve-protected T-n`，再 retry |
 | 票需要改某个保护路径但文件里没批准 | `plat ticket allow-path T-n <路径>`，再 retry |
 | 票的描述有问题 | `plat ticket view T-n --md > t.md`，改完 `plat ticket edit T-n --file t.md`（只对 pending / blocked 的票，可改标题、正文、模块、已批准的保护路径，验收标准从正文重新解析；改仓库、类型、依赖要取消后追加） |
 | 漏了票或要拆票 | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
 | 不要这张票了 | `plat ticket cancel T-n`（`--cascade` 一并取消下游） |
 | spec 暂停（超出 agent 时长） | `plat spec resume S-n`（可给更多时间） |
-| 整体 review 步骤 blocked | `plat spec retry-final S-n`；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明） |
+| 整体 review 步骤 blocked | `plat spec retry-final S-n`（也可带 `--note`，出现在这批收尾 Run 上）；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明） |
 | PR 被关掉没合并 | 在 GitHub 上重开；或重做 spec；或 `plat spec cancel S-n` |
 | 取消了但分支/PR 没清干净 | `plat spec cleanup S-n` |
 | 整个 spec 不要了 | `plat spec cancel S-n`（没做完的票和作业停掉，随后关 PR、删分支） |
@@ -224,9 +226,9 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 
 - [ ] 场景 A、场景 B 各完整走通一次，PR 都合并过。
 - [ ] 目标仓库都满足 1.3 的条件（尤其是 `gates.yaml`、`AGENTS.md`、GitHub App 权限）。
-- [ ] 规划仓库里的 `docs/agents/issue-tracker.md` 已推到 `main`。
+- [ ] 规划仓库里的 `docs/agents/issue-tracker.md` 已推到 `main`（平台或项目配置变了要重新 `plat tracker-doc` 再提交）。
 - [ ] 你知道怎么看 `plat blocked` 并处理（第 6 节练过一次）。
-- [ ] 清楚平台当前的边界：**没有认证**，只监听 127.0.0.1；只有一个 worker，同时只跑一个需求；PR 评论返工、页面上改票/追加票、多个需求并行都还没有。
+- [ ] 清楚平台当前的边界：**没有认证**，只监听 127.0.0.1；只有一个 worker，同时只跑一个需求；PR 评论返工、页面上追加票/改依赖、多个需求并行都还没有。pending / blocked 的票可以在页面上改正文、带说明重试。
 - [ ] **升级平台前先确认没有在跑的作业**（`plat blocked` 和页面上都没有 running 的票）：迁移随重启执行，没跑完的作业重跑时，前后阶段可能读到两种拼法的票正文。
 - [ ] 停机方式：Ctrl-C；正在跑的 run 会在 worker 租约到期后重新派发，不会丢。
 
