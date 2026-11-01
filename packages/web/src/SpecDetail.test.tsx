@@ -465,7 +465,7 @@ describe("the spec page", () => {
       <SpecDetail specId={1} />,
       fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
     );
-    expect(await screen.findByText("No warnings.")).toBeTruthy();
+    expect(await screen.findByText("没有黄项")).toBeTruthy();
   });
 
   it("links every ticket to its own page, from the graph and from the list", async () => {
@@ -657,7 +657,7 @@ describe("the side column", () => {
         /waits for T-1 \(contract\)/.test(el.textContent ?? ""),
     );
     expect(item).toBeTruthy();
-    expect(screen.getByText("Warnings from the import")).toBeTruthy();
+    expect(screen.getByText("确认前预检")).toBeTruthy();
     expect(screen.getByText("Dependency graph")).toBeTruthy();
     // the confirm button of a draft is in the side column
     const side = item.closest("aside");
@@ -736,6 +736,45 @@ describe("confirming the split", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("confirm-plan is not allowed in running");
     expect(screen.getByRole("button", { name: "Confirm split" })).toBeTruthy();
+  });
+
+  it("lists yellow prechecks and still lets the draft be confirmed", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            prechecks: [
+              {
+                code: "missing-planning-commit",
+                level: "yellow",
+                message: "未做规划仓库 CLI 检查",
+              },
+              {
+                code: "module-overlap",
+                level: "yellow",
+                message: "tickets a and b overlap",
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/confirm": () => ({
+        json: {
+          state: "running",
+          integrationBranches: [],
+          enqueued: [],
+        },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    expect(await screen.findByText("未做规划仓库 CLI 检查")).toBeTruthy();
+    expect(screen.getByText("tickets a and b overlap")).toBeTruthy();
+    const button = screen.getByRole("button", { name: "Confirm split" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /specs/1/confirm"),
+    );
   });
 
   it("cannot be pressed while there is nothing to confirm", async () => {

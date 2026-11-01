@@ -33,8 +33,12 @@ async function patchJson(path: string, body: unknown) {
 async function post(path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   });
   return {
     status: response.status,

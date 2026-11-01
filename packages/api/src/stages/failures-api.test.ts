@@ -32,8 +32,12 @@ type Json = any;
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method,
-    headers: { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   });
   return { status: response.status, body: (await response.json()) as Json };
 }

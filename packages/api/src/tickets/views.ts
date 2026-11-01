@@ -350,9 +350,43 @@ export async function ticketView(
   };
 }
 
+export interface SpecPrecheck {
+  code: string;
+  level: "yellow";
+  message: string;
+}
+
+const MISSING_PLANNING_COMMIT: SpecPrecheck = {
+  code: "missing-planning-commit",
+  level: "yellow",
+  message: "未做规划仓库 CLI 检查",
+};
+
+function prechecksOf(
+  planningSha: string | null,
+  warnings: { type?: string; message?: string }[],
+): SpecPrecheck[] {
+  return [
+    ...(planningSha ? [] : [MISSING_PLANNING_COMMIT]),
+    ...warnings.flatMap((warning) =>
+      typeof warning.message === "string"
+        ? [
+            {
+              code: warning.type ?? "import-warning",
+              level: "yellow" as const,
+              message: warning.message,
+            },
+          ]
+        : [],
+    ),
+  ];
+}
+
 export async function specView(pool: pg.Pool, specId: number) {
   const spec = await pool.query(
-    `SELECT id, slug, title, type, state, pause_reason, integration_branches, import_warnings, order_broken, body FROM specs WHERE id = $1`,
+    `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
+            s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo
+     FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
   );
   const row = spec.rows[0];
@@ -363,9 +397,12 @@ export async function specView(pool: pg.Pool, specId: number) {
      WHERE t.spec_id = $1 ORDER BY e.id`,
     [specId],
   );
+  const warnings = row.import_warnings as { type?: string; message?: string }[];
+  const planningSha = (row.planning_sha as string | null) ?? null;
   return {
     spec: {
       id: row.id as number,
+      projectId: row.project_id as number,
       displayId: formatDisplayId("spec", row.id),
       slug: row.slug as string,
       title: row.title as string,
@@ -377,7 +414,10 @@ export async function specView(pool: pg.Pool, specId: number) {
         repoId: number;
         branch: string;
       }[],
-      warnings: row.import_warnings as unknown[],
+      warnings,
+      planningSha,
+      planningRepo: (row.planning_repo as string | null) ?? null,
+      prechecks: prechecksOf(planningSha, warnings),
     },
     tickets,
     finalizations: [

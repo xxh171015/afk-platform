@@ -169,6 +169,14 @@ const Bundle = z.object({
     url: z.string(),
     defaultBranch: z.string(),
   }),
+  domain: z
+    .object({
+      repo: z.string(),
+      url: z.string(),
+      defaultBranch: z.string(),
+      sha: z.string(),
+    })
+    .nullable(),
   integrationBranch: z.string().nullable(),
   // The branch the stage's work is made on: the ticket's own, or the one of the spec's overall fix.
   agentBranch: z.string(),

@@ -17,8 +17,8 @@ import { layoutGraph, STATE_COLORS } from "./graph.ts";
 import { Markdown } from "./Markdown.tsx";
 import { pullStateLabel } from "./pull-request.ts";
 
-// One spec: the dependency graph with a node per ticket coloured by its state, the warnings the import left, and
-// the button that confirms the split so that the platform starts working on it.
+// One spec: the dependency graph with a node per ticket coloured by its state, the yellow prechecks before
+// confirm, and the button that confirms the split so that the platform starts working on it.
 
 interface TicketNodeData extends Record<string, unknown> {
   id: number;
@@ -337,6 +337,15 @@ export function SpecDetail({ specId }: { specId: number }) {
   } = view.data;
 
   const canConfirm = spec.state === "draft" && tickets.length > 0;
+  const prechecks =
+    spec.prechecks ??
+    spec.warnings.flatMap((warning) => {
+      const message =
+        (warning as { message?: string }).message ?? JSON.stringify(warning);
+      return message
+        ? [{ code: "import-warning", level: "yellow" as const, message }]
+        : [];
+    });
   // what each ticket waits for: the tickets with an edge into it, and the kind of the edge
   const waitsFor = (displayId: string) =>
     edges.filter((e) => e.to === displayId);
@@ -446,16 +455,14 @@ export function SpecDetail({ specId }: { specId: number }) {
         </aside>
       </div>
 
-      <h3>Warnings from the import</h3>
-      {spec.warnings.length === 0 ? (
-        <p className="note">No warnings.</p>
+      <h3>确认前预检</h3>
+      {prechecks.length === 0 ? (
+        <p className="note">没有黄项</p>
       ) : (
-        <ul className="warnings">
-          {spec.warnings.map((warning, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: warnings have no id of their own
-            <li key={index}>
-              {(warning as { message?: string }).message ??
-                JSON.stringify(warning)}
+        <ul className="warnings" data-testid="prechecks">
+          {prechecks.map((item) => (
+            <li key={`${item.code}:${item.message}`} data-level={item.level}>
+              {item.message}
             </li>
           ))}
         </ul>

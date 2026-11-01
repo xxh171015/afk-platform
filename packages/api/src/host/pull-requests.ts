@@ -224,7 +224,10 @@ async function specCleanupTask(
     `SELECT r.id, r.url FROM repos r WHERE r.id IN (
        SELECT repo_id FROM tickets WHERE spec_id = $1
        UNION SELECT repo_id FROM pull_requests WHERE spec_id = $1
-       UNION SELECT repo_id FROM finalizations WHERE spec_id = $1) ORDER BY r.id`,
+       UNION SELECT repo_id FROM finalizations WHERE spec_id = $1
+       UNION SELECT planning_repo_id FROM specs WHERE id = $1 AND planning_repo_id IS NOT NULL
+       UNION SELECT (b->>'repoId')::int FROM specs s, jsonb_array_elements(s.integration_branches) b
+        WHERE s.id = $1) ORDER BY r.id`,
     [specId],
   );
   const tickets = await pool.query<{ id: number; repo_id: number }>(

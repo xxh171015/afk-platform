@@ -934,6 +934,28 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "planningSha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Confirmed; the spec is running and the tickets that can start are queued",
@@ -995,9 +1017,22 @@
                         },
                         "required": ["ticketId", "displayId", "jobId"]
                       }
+                    },
+                    "planningSha": {
+                      "type": ["string", "null"],
+                      "pattern": "^[0-9a-f]{40}$"
+                    },
+                    "planningRepo": {
+                      "type": ["string", "null"]
                     }
                   },
-                  "required": ["state", "integrationBranches", "enqueued"]
+                  "required": [
+                    "state",
+                    "integrationBranches",
+                    "enqueued",
+                    "planningSha",
+                    "planningRepo"
+                  ]
                 }
               }
             }
@@ -1020,6 +1055,22 @@
           },
           "409": {
             "description": "The spec is not a draft, or has no tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The planning commit is incomplete or names no such repo",
             "content": {
               "application/json": {
                 "schema": {
@@ -1587,6 +1638,24 @@
                       },
                       "required": ["id", "name", "url", "defaultBranch"]
                     },
+                    "domain": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "repo": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        },
+                        "sha": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["repo", "url", "defaultBranch", "sha"]
+                    },
                     "integrationBranch": {
                       "type": ["string", "null"]
                     },
@@ -1723,6 +1792,7 @@
                     "specTickets",
                     "spec",
                     "repo",
+                    "domain",
                     "integrationBranch",
                     "agentBranch",
                     "protectedPaths",
@@ -3020,6 +3090,9 @@
                         "id": {
                           "type": "integer"
                         },
+                        "projectId": {
+                          "type": "integer"
+                        },
                         "displayId": {
                           "type": "string"
                         },
@@ -3071,10 +3144,36 @@
                         "warnings": {
                           "type": "array",
                           "items": {}
+                        },
+                        "planningSha": {
+                          "type": ["string", "null"]
+                        },
+                        "planningRepo": {
+                          "type": ["string", "null"]
+                        },
+                        "prechecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "string",
+                                "enum": ["yellow"]
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "level", "message"]
+                          }
                         }
                       },
                       "required": [
                         "id",
+                        "projectId",
                         "displayId",
                         "slug",
                         "title",
@@ -3083,7 +3182,10 @@
                         "state",
                         "pauseReason",
                         "integrationBranches",
-                        "warnings"
+                        "warnings",
+                        "planningSha",
+                        "planningRepo",
+                        "prechecks"
                       ]
                     },
                     "tickets": {

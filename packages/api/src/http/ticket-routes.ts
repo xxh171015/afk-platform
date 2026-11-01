@@ -201,6 +201,7 @@ const specRoute = createRoute({
       z.object({
         spec: z.object({
           id: Id,
+          projectId: Id,
           displayId: z.string(),
           slug: z.string(),
           title: z.string(),
@@ -212,6 +213,15 @@ const specRoute = createRoute({
             z.object({ repoId: Id, branch: z.string() }),
           ),
           warnings: z.array(z.unknown()),
+          planningSha: z.string().nullable(),
+          planningRepo: z.string().nullable(),
+          prechecks: z.array(
+            z.object({
+              code: z.string(),
+              level: z.literal("yellow"),
+              message: z.string(),
+            }),
+          ),
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),

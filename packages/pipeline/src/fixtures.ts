@@ -66,6 +66,7 @@ export function bundleFor(
       url: "git@x:backend",
       defaultBranch: "main",
     },
+    domain: null,
     integrationBranch: "spec/order-export",
     agentBranch: "agent/T-123",
     protectedPaths: ["openapi/**", ".github/"],

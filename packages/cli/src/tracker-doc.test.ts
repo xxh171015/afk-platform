@@ -116,6 +116,8 @@ describe("renderTrackerDoc", () => {
     const doc = renderTrackerDoc(single, "backend");
     expect(doc).toContain("开工吗");
     expect(doc).toContain("plat spec confirm S-7");
+    expect(doc).toContain("~/.afk/planning/S-7/");
+    expect(doc).toContain("outside git");
     expect(doc).toMatch(
       /not\*\* what a skill means by "modify a parent issue"/,
     );

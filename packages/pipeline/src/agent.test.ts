@@ -494,6 +494,7 @@ describe("the prompts", () => {
       "cannot-proceed",
       "不要 push",
       "保护路径",
+      "/context/domain/",
     ])
       expect(overlay).toContain(word);
   });
@@ -553,6 +554,7 @@ describe("the prompts", () => {
       "/context/ticket.md",
       "/context/spec.md",
       "/context/run.json",
+      "/context/domain/",
     ])
       expect(implement).toContain(file);
     expect(readFileSync(PROMPTS.gateFix, "utf8")).toContain(

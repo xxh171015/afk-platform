@@ -117,6 +117,9 @@ export const specs = pgTable(
     pauseReason: text("pause_reason"),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
+    // The planning commit (GLOSSARY / ADR / AGENTS.md) this spec's planning-repo integration branch starts from.
+    planningSha: text("planning_sha"),
+    planningRepoId: integer("planning_repo_id").references(() => repos.id),
     createdAt: createdAt(),
   },
   (t) => [
@@ -124,6 +127,14 @@ export const specs = pgTable(
     unique("specs_project_slug_unique").on(t.projectId, t.slug),
     check("specs_type_check", oneOf(t.type, SPEC_TYPES)),
     check("specs_state_check", oneOf(t.state, SPEC_STATES)),
+    check(
+      "specs_planning_commit_check",
+      sql`(${t.planningSha} is null) = (${t.planningRepoId} is null)`,
+    ),
+    check(
+      "specs_planning_sha_check",
+      sql`${t.planningSha} is null or ${t.planningSha} ~ '^[0-9a-f]{40}$'`,
+    ),
   ],
 );
 

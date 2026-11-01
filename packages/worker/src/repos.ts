@@ -87,4 +87,33 @@ export class RepoStore {
   has(dir: string, ref: string): boolean {
     return hasRef(dir, ref);
   }
+
+  hasObject(dir: string, sha: string): boolean {
+    return git(dir, ["cat-file", "-t", sha]).stdout.trim() === "commit";
+  }
+
+  // A planning commit may live only on plan/*, which ensure() does not fetch.
+  fetchObject(dir: string, url: string, sha: string): void {
+    if (this.hasObject(dir, sha)) return;
+    try {
+      this.run(dir, ["fetch", "--quiet", "--no-tags", "origin", sha], url);
+    } catch {}
+    if (this.hasObject(dir, sha)) return;
+    try {
+      this.run(
+        dir,
+        [
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "origin",
+          "+refs/heads/plan/*:refs/heads/plan/*",
+        ],
+        url,
+      );
+    } catch {}
+    if (!this.hasObject(dir, sha)) {
+      throw new Error(`planning commit ${sha} is not on origin`);
+    }
+  }
 }

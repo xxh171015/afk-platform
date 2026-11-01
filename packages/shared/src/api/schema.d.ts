@@ -544,7 +544,14 @@ export interface paths {
         };
         cookie?: never;
       };
-      requestBody?: never;
+      requestBody?: {
+        content: {
+          "application/json": {
+            planningSha?: string;
+            planningRepo?: string;
+          };
+        };
+      };
       responses: {
         /** @description Confirmed; the spec is running and the tickets that can start are queued */
         200: {
@@ -574,6 +581,8 @@ export interface paths {
                 displayId: string;
                 jobId: number;
               }[];
+              planningSha: string | null;
+              planningRepo: string | null;
             };
           };
         };
@@ -590,6 +599,17 @@ export interface paths {
         };
         /** @description The spec is not a draft, or has no tickets */
         409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The planning commit is incomplete or names no such repo */
+        422: {
           headers: {
             [name: string]: unknown;
           };
@@ -940,6 +960,12 @@ export interface paths {
                 url: string;
                 defaultBranch: string;
               };
+              domain: {
+                repo: string;
+                url: string;
+                defaultBranch: string;
+                sha: string;
+              } | null;
               integrationBranch: string | null;
               agentBranch: string;
               protectedPaths: string[];
@@ -1627,6 +1653,7 @@ export interface paths {
             "application/json": {
               spec: {
                 id: number;
+                projectId: number;
                 displayId: string;
                 slug: string;
                 title: string;
@@ -1650,6 +1677,14 @@ export interface paths {
                   branch: string;
                 }[];
                 warnings: unknown[];
+                planningSha: string | null;
+                planningRepo: string | null;
+                prechecks: {
+                  code: string;
+                  /** @enum {string} */
+                  level: "yellow";
+                  message: string;
+                }[];
               };
               tickets: {
                 id: number;

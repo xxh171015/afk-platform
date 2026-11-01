@@ -69,6 +69,14 @@ export interface Bundle {
     type: string;
   };
   repo: { id: number; name: string; url: string; defaultBranch: string };
+  // Planning commit of the spec. The worker cuts the planning repo's integration branch from this SHA and
+  // mounts GLOSSARY/ADR at /context/domain/ for every other repo's tickets. Null when confirm did not register one.
+  domain: {
+    repo: string;
+    url: string;
+    defaultBranch: string;
+    sha: string;
+  } | null;
   integrationBranch: string | null;
   // The branch the stage's work is made on: the ticket's own, or the one of the spec's overall fix.
   agentBranch: string;
@@ -107,6 +115,28 @@ const runSettings = (limits: unknown, defaultModel: unknown) => {
   };
 };
 
+function domainOf(row: {
+  planning_sha: string | null;
+  planning_repo_name: string | null;
+  planning_repo_url: string | null;
+  planning_default_branch: string | null;
+}): Bundle["domain"] {
+  if (
+    !row.planning_sha ||
+    !row.planning_repo_name ||
+    !row.planning_repo_url ||
+    !row.planning_default_branch
+  ) {
+    return null;
+  }
+  return {
+    repo: row.planning_repo_name,
+    url: row.planning_repo_url,
+    defaultBranch: row.planning_default_branch,
+    sha: row.planning_sha,
+  };
+}
+
 async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   const { rows } = await pool.query<{
     tests_total: number;
@@ -139,13 +169,16 @@ export async function buildBundle(
     `SELECT t.id, t.type, t.title, t.body, t.acceptance_criteria, t.modules, t.state, t.content_version,
             t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths,
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
-            s.integration_branches, s.branch_namespace,
+            s.integration_branches, s.branch_namespace, s.planning_sha, s.planning_repo_id,
             r.id AS repo_id, r.name, r.url, r.default_branch,
+            pr.name AS planning_repo_name, pr.url AS planning_repo_url,
+            pr.default_branch AS planning_default_branch,
             p.protected_paths, p.limits, p.default_model
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
      JOIN projects p ON p.id = s.project_id
+     LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE t.id = $1`,
     [ticketId],
   );
@@ -213,6 +246,7 @@ export async function buildBundle(
       url: row.url,
       defaultBranch: row.default_branch,
     },
+    domain: domainOf(row),
     integrationBranch,
     agentBranch: branchNames(row.branch_namespace).ticket(
       formatDisplayId("ticket", row.id),
@@ -240,10 +274,15 @@ async function buildFinalBundle(
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
-            s.integration_branches, s.branch_namespace, r.id AS repo_id, r.name, r.url, r.default_branch,
+            s.integration_branches, s.branch_namespace, s.planning_sha, s.planning_repo_id,
+            r.id AS repo_id, r.name, r.url, r.default_branch,
+            pr.name AS planning_repo_name, pr.url AS planning_repo_url,
+            pr.default_branch AS planning_default_branch,
             p.protected_paths,
             p.limits, p.default_model
-     FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+     FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
+     LEFT JOIN repos pr ON pr.id = s.planning_repo_id
+     WHERE s.id = $1`,
     [final.specId, final.repoId],
   );
   const row = found.rows[0];
@@ -295,6 +334,7 @@ async function buildFinalBundle(
       url: row.url,
       defaultBranch: row.default_branch,
     },
+    domain: domainOf(row),
     integrationBranch:
       branches.find((b) => b.repoId === row.repo_id)?.branch ?? null,
     agentBranch: branchNames(row.branch_namespace).final(
