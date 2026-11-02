@@ -217,8 +217,10 @@ describe("the app", () => {
   it("opens a ticket at /tickets/<id>", async () => {
     renderApp(server(), "/tickets/9");
     expect(
-      (await screen.findByRole("heading", { level: 2 })).textContent,
-    ).toContain("T-9 Only ticket");
+      (await screen.findByRole("heading", { level: 1, name: /T-9/ }))
+        .textContent,
+    ).toContain("T-9");
+    expect(screen.getByText("Only ticket")).toBeTruthy();
   });
 
   it("opens a run at /runs/<id>", async () => {

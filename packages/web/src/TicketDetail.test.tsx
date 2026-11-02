@@ -122,7 +122,7 @@ describe("the ticket page", () => {
     expect(gate.getByText("20 s")).toBeTruthy();
   });
 
-  it("shows an older version of the body and of the original text from the version list", async () => {
+  it("opens a compare dialog of title, body and acceptance criteria from the version list", async () => {
     const edited = view({
       versions: [
         { version: 1, createdAt: "2026-10-28T09:00:00.000Z" },
@@ -148,17 +148,16 @@ describe("the ticket page", () => {
     });
     renderWithApp(<TicketDetail ticketId={4} />, server);
 
-    const select = (await screen.findByLabelText(
-      /Version/,
-    )) as HTMLSelectElement;
-    expect(select.value).toBe("2");
-    expect(screen.getByText(/v2 \(2026-10-29\) · current/)).toBeTruthy();
-    fireEvent.change(select, { target: { value: "1" } });
-    expect(await screen.findByText("the first wording")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText(/agent 读到的原文/));
-    expect(screen.getByTestId("ticket-original").textContent).toBe(
-      "---\nversion: 1\n---\nthe first file\n",
-    );
+    fireEvent.click(await screen.findByRole("button", { name: /v1/ }));
+    expect(
+      await screen.findByRole("heading", { name: "内容版本对比" }),
+    ).toBeTruthy();
+    expect(await screen.findByText(/the first wording/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "标题" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "正文" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "验收标准" })).toBeTruthy();
+    expect(screen.queryByText(/the first file/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /原文/ })).toBeNull();
   });
 
   it("shows the title, state, type and the body as markdown, with its checkboxes", async () => {
@@ -170,10 +169,11 @@ describe("the ticket page", () => {
       }),
     );
     const heading = await screen.findByRole("heading", {
-      level: 2,
+      level: 1,
       name: /T-4/,
     });
-    expect(heading.textContent).toContain("T-4 Export orders as CSV");
+    expect(heading.textContent).toContain("T-4");
+    expect(heading.textContent).toContain("Export orders as CSV");
     expect(heading.textContent).toContain("运行中");
     expect(screen.getByText("returns text/csv")).toBeTruthy();
     expect(screen.getByText("has a header row")).toBeTruthy();
@@ -232,10 +232,10 @@ describe("the ticket page", () => {
     });
     renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(await screen.findByText("abcdef1")).toBeTruthy();
-    expect(screen.getByText(/12 tests, 1 skipped/)).toBeTruthy();
+    expect(screen.getByText(/12 个测试，跳过 1 个/)).toBeTruthy();
     expect(screen.getByText("typecheck: exit 0")).toBeTruthy();
     expect(screen.getByText("test: exit 1")).toBeTruthy();
-    expect(screen.getByText(/no JUnit/)).toBeTruthy();
+    expect(screen.getByText(/没有 JUnit/)).toBeTruthy();
   });
 
   it("shows findings with what became of them", async () => {
@@ -276,9 +276,9 @@ describe("the ticket page", () => {
       <TicketDetail ticketId={4} />,
       fakeServer({ "GET /tickets/4": () => ({ json: view({ runs: [] }) }) }),
     );
-    expect(await screen.findByText("No runs yet.")).toBeTruthy();
-    expect(screen.getByText("No gate has run on this ticket.")).toBeTruthy();
-    expect(screen.getByText("No findings.")).toBeTruthy();
+    expect(await screen.findByText("尚无运行记录")).toBeTruthy();
+    expect(screen.getByText("暂无门禁结果")).toBeTruthy();
+    expect(screen.getByText("暂无意见")).toBeTruthy();
     expect(screen.queryByTestId("run-log")).toBeNull();
   });
 
@@ -405,14 +405,15 @@ describe("the ticket page", () => {
       ...logs({ 10: "a", 11: "b" }),
     });
     renderWithApp(<TicketDetail ticketId={4} />, server);
-    expect(await screen.findByText("E2E tries")).toBeTruthy();
-    expect(screen.getByText(/1 of 2 fix rounds used/)).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: /联调 · 已用修复轮 1\/2/ }),
+    ).toBeTruthy();
     expect(screen.getByText(/R-20 failed/)).toBeTruthy();
     expect(
       screen.getByText(
         (_, element) =>
           element?.tagName === "LI" &&
-          /1 of 3 tests failed, built from backend@0123456/.test(
+          /3 个测试中失败 1 个，构建自 backend@0123456/.test(
             element.textContent ?? "",
           ),
       ),
@@ -452,7 +453,7 @@ describe("the ticket page", () => {
       ...logs({ 10: "a", 11: "b" }),
     });
     renderWithApp(<TicketDetail ticketId={4} />, server);
-    const side = (await screen.findByText("Waits for")).closest("aside");
+    const side = (await screen.findByText(/等待/)).closest("aside");
     if (!side) throw new Error("no side column");
     await within(side).findByText(/Order export/);
     expect(
@@ -464,8 +465,8 @@ describe("the ticket page", () => {
       "/tickets/2",
     ]);
     expect(side.textContent).toMatch(/T-2.*\(blocks, done\)/);
-    expect(side.textContent).toMatch(/Blocks.*T-6.*\(contract, pending\)/);
-    expect(within(side).getByText("Tickets of S-1")).toBeTruthy();
+    expect(side.textContent).toMatch(/挡住.*T-6.*\(contract, pending\)/);
+    expect(within(side).getByText("S-1 的票")).toBeTruthy();
     expect(
       within(side).getByRole("link", { name: "T-4" }).closest("li")?.className,
     ).toBe("picked");
@@ -479,9 +480,9 @@ describe("the ticket page", () => {
       }),
     });
     renderWithApp(<TicketDetail ticketId={4} />, server);
-    expect(screen.getByText("Loading the ticket…")).toBeTruthy();
+    expect(screen.getByText("加载这张票…")).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Could not load the ticket: no such ticket",
+      "无法加载这张票: no such ticket",
     );
   });
 
@@ -504,7 +505,7 @@ describe("the ticket page", () => {
       expect(queryClient.getQueryState(["ticket", 4])?.status).toBe("error"),
     );
     expect(screen.getByText(/Export orders as CSV/)).toBeTruthy();
-    expect(screen.queryByText(/Could not load the ticket/)).toBeNull();
+    expect(screen.queryByText(/无法加载这张票/)).toBeNull();
   });
 
   it("lets a pending or blocked ticket be edited, and a blocked one retried with a note", async () => {
@@ -550,23 +551,19 @@ describe("the ticket page", () => {
     fireEvent.change(screen.getByLabelText("这一次 Run 的说明"), {
       target: { value: "use the helper in src/orders/csv.ts" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Retry, keep the work" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "重试，保留已有工作" }));
     await waitFor(() =>
       expect(bodies.retry).toEqual({
         mode: "continue",
         note: "use the helper in src/orders/csv.ts",
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Retry from scratch" }));
+    fireEvent.click(screen.getByRole("button", { name: "从头重试" }));
     expect(bodies.retry).toEqual({
       mode: "continue",
       note: "use the helper in src/orders/csv.ts",
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Retry T-4 from scratch" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "确认从头重试" }));
     await waitFor(() =>
       expect(bodies.retry).toEqual({
         mode: "restart",
@@ -584,7 +581,7 @@ describe("the ticket page", () => {
     expect(screen.queryByLabelText("票正文")).toBeNull();
     expect(screen.queryByLabelText("这一次 Run 的说明")).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "Retry, keep the work" }),
+      screen.queryByRole("button", { name: "重试，保留已有工作" }),
     ).toBeNull();
   });
 });
