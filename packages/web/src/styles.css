@@ -1,42 +1,37 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+@import "@xyflow/react/dist/style.css";
+@source "../src";
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
-  --text: #212529;
-  --note: #6c757d;
-  --line: #dee2e6;
-  --bg: #ffffff;
-  --link: #1c7ed6;
-  --danger: #c92a2a;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: var(--text);
-  background: var(--bg);
-}
+/*
+ * AFK 平台设计系统。所有颜色用 oklch，状态色/仓库色都是 token，
+ * 组件只引用语义类名（bg-state-running、text-repo-1 …）。
+ */
 
 @theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-terminal: var(--terminal);
+  --color-terminal-foreground: var(--terminal-foreground);
+  --color-terminal-muted: var(--terminal-muted);
+  --color-terminal-success: var(--terminal-success);
+  --color-terminal-cyan: var(--terminal-cyan);
+  --color-terminal-magenta: var(--terminal-magenta);
+  --color-terminal-danger: var(--terminal-danger);
+  --color-terminal-warning: var(--terminal-warning);
+  --color-terminal-blue: var(--terminal-blue);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -47,418 +42,380 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
+  --color-ring-offset-background: var(--background);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* 状态色 */
+  --color-state-neutral: var(--state-neutral);
+  --color-state-queued: var(--state-queued);
+  --color-state-running: var(--state-running);
+  --color-state-merging: var(--state-merging);
+  --color-state-done: var(--state-done);
+  --color-state-blocked: var(--state-blocked);
+  --color-state-paused: var(--state-paused);
+  --color-state-review: var(--state-review);
+  --color-state-partial: var(--state-partial);
+
+  /* 仓库色 */
+  --color-repo-1: var(--repo-1);
+  --color-repo-2: var(--repo-2);
+  --color-repo-3: var(--repo-3);
+  --color-repo-4: var(--repo-4);
+  --color-repo-5: var(--repo-5);
+  --color-repo-6: var(--repo-6);
+
+  --animate-breathe: breathe 1.8s ease-in-out infinite;
 }
 
-body {
-  margin: 0;
-}
-main {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 16px 24px 48px;
-}
-a {
-  color: var(--link);
-}
-h1 {
-  font-size: 1.3rem;
-  margin: 0 0 16px;
-}
-h1 a {
-  color: inherit;
-  text-decoration: none;
-}
-h2 {
-  font-size: 1.15rem;
-}
-h3 {
-  font-size: 1rem;
-  margin-top: 24px;
-}
-code {
-  background: #f1f3f5;
-  padding: 1px 4px;
-  border-radius: 3px;
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
 }
 
-.note {
-  color: var(--note);
-}
-.error {
-  color: var(--danger);
+:root {
+  --terminal: oklch(0.14 0.005 260);
+  --terminal-foreground: oklch(0.9 0.008 260);
+  --terminal-muted: oklch(0.58 0.012 260);
+  --terminal-success: oklch(0.75 0.14 150);
+  --terminal-cyan: oklch(0.76 0.1 210);
+  --terminal-magenta: oklch(0.76 0.13 320);
+  --terminal-danger: oklch(0.75 0.15 25);
+  --terminal-warning: oklch(0.8 0.13 75);
+  --terminal-blue: oklch(0.76 0.12 255);
+  --radius: 0.375rem;
+  --background: oklch(0.99 0.002 260);
+  --surface: oklch(0.975 0.003 260);
+  --surface-raised: oklch(1 0 0);
+  --foreground: oklch(0.22 0.01 265);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.01 265);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.01 265);
+  --primary: oklch(0.52 0.15 255);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.955 0.004 260);
+  --secondary-foreground: oklch(0.3 0.01 265);
+  --muted: oklch(0.955 0.004 260);
+  --muted-foreground: oklch(0.5 0.012 265);
+  --subtle-foreground: oklch(0.46 0.01 265);
+  --accent: oklch(0.94 0.006 260);
+  --accent-foreground: oklch(0.22 0.01 265);
+  --destructive: oklch(0.56 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.91 0.005 260);
+  --border-strong: oklch(0.84 0.008 260);
+  --input: oklch(0.89 0.006 260);
+  --ring: oklch(0.6 0.13 255);
+
+  --sidebar: oklch(0.97 0.003 260);
+  --sidebar-foreground: oklch(0.35 0.01 265);
+  --sidebar-primary: oklch(0.52 0.15 255);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.93 0.006 260);
+  --sidebar-accent-foreground: oklch(0.2 0.01 265);
+  --sidebar-border: oklch(0.91 0.005 260);
+  --sidebar-ring: oklch(0.6 0.13 255);
+
+  --state-neutral: oklch(0.45 0.01 265);
+  --state-queued: oklch(0.43 0.05 250);
+  --state-running: oklch(0.45 0.17 255);
+  --state-merging: oklch(0.44 0.19 300);
+  --state-done: oklch(0.43 0.12 150);
+  --state-blocked: oklch(0.46 0.18 25);
+  --state-paused: oklch(0.45 0.1 70);
+  --state-review: oklch(0.43 0.08 210);
+  --state-partial: oklch(0.43 0.08 180);
+
+  --repo-1: oklch(0.43 0.12 40);
+  --repo-2: oklch(0.43 0.1 230);
+  --repo-3: oklch(0.43 0.13 330);
+  --repo-4: oklch(0.43 0.1 130);
+  --repo-5: oklch(0.43 0.09 85);
+  --repo-6: oklch(0.43 0.1 280);
 }
 
-table.specs {
-  width: 100%;
-  border-collapse: collapse;
-}
-table.specs th,
-table.specs td {
-  text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
-  vertical-align: middle;
-}
-table.specs th {
-  font-weight: 600;
-  color: var(--note);
-  font-size: 0.85rem;
+.dark {
+  --background: oklch(0.155 0.004 265);
+  --surface: oklch(0.175 0.005 265);
+  --surface-raised: oklch(0.2 0.006 265);
+  --foreground: oklch(0.93 0.004 265);
+  --card: oklch(0.185 0.005 265);
+  --card-foreground: oklch(0.93 0.004 265);
+  --popover: oklch(0.2 0.006 265);
+  --popover-foreground: oklch(0.93 0.004 265);
+  --primary: oklch(0.68 0.14 255);
+  --primary-foreground: oklch(0.16 0.01 265);
+  --secondary: oklch(0.23 0.006 265);
+  --secondary-foreground: oklch(0.88 0.004 265);
+  --muted: oklch(0.22 0.006 265);
+  --muted-foreground: oklch(0.66 0.01 265);
+  --subtle-foreground: oklch(0.68 0.01 265);
+  --accent: oklch(0.245 0.007 265);
+  --accent-foreground: oklch(0.95 0.004 265);
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.155 0.004 265);
+  --border: oklch(0.26 0.006 265);
+  --border-strong: oklch(0.32 0.008 265);
+  --input: oklch(0.28 0.007 265);
+  --ring: oklch(0.6 0.12 255);
+
+  --sidebar: oklch(0.135 0.004 265);
+  --sidebar-foreground: oklch(0.72 0.008 265);
+  --sidebar-primary: oklch(0.68 0.14 255);
+  --sidebar-primary-foreground: oklch(0.16 0.01 265);
+  --sidebar-accent: oklch(0.21 0.006 265);
+  --sidebar-accent-foreground: oklch(0.95 0.004 265);
+  --sidebar-border: oklch(0.23 0.005 265);
+  --sidebar-ring: oklch(0.6 0.12 255);
+
+  --state-neutral: oklch(0.64 0.01 265);
+  --state-queued: oklch(0.68 0.05 250);
+  --state-running: oklch(0.7 0.15 250);
+  --state-merging: oklch(0.7 0.16 300);
+  --state-done: oklch(0.72 0.15 150);
+  --state-blocked: oklch(0.68 0.19 25);
+  --state-paused: oklch(0.78 0.14 75);
+  --state-review: oklch(0.75 0.11 210);
+  --state-partial: oklch(0.74 0.11 180);
+
+  --repo-1: oklch(0.74 0.14 45);
+  --repo-2: oklch(0.72 0.12 230);
+  --repo-3: oklch(0.72 0.14 335);
+  --repo-4: oklch(0.74 0.13 135);
+  --repo-5: oklch(0.8 0.13 90);
+  --repo-6: oklch(0.72 0.12 285);
 }
 
-.badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 0.8rem;
-  background: #f1f3f5;
-}
-.spec-running,
-.ticket-running,
-.ticket-queued,
-.ticket-merging {
-  background: #d0ebff;
-}
-.spec-finalizing,
-.spec-awaiting-review,
-.spec-partially-merged {
-  background: #e5dbff;
-}
-.spec-merged,
-.ticket-done,
-.criterion-verified,
-.pr-merged {
-  background: #d3f9d8;
-}
-.spec-paused,
-.ticket-blocked,
-.criterion-unverified {
-  background: #ffe3e3;
-}
-.pr-open {
-  background: #d0ebff;
-}
-.pr-closed {
-  background: #e9ecef;
-}
-.spec-cancelled,
-.ticket-cancelled {
-  background: #e9ecef;
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-.progress {
-  width: 160px;
-  height: 8px;
-  background: #e9ecef;
-  border-radius: 4px;
-  overflow: hidden;
-  display: inline-block;
-  vertical-align: middle;
-}
-.progress-done {
-  height: 100%;
-  background: #40c057;
-}
-.progress-text {
-  margin-left: 8px;
-  font-size: 0.85rem;
-  color: var(--note);
+@utility tabular {
+  font-variant-numeric: tabular-nums;
 }
 
-.confirm {
-  margin: 12px 0;
+/* Read-only dependency canvas; semantic tokens shared with the dashboard. */
+.afk-graph {
+  --xy-edge-stroke: var(--border-strong);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-label-color: var(--muted-foreground);
+  --xy-edge-label-background-color: var(--surface);
+  --xy-controls-button-background-color-default: var(--card);
+  --xy-controls-button-background-color-hover-default: var(--accent);
+  --xy-controls-button-color-default: var(--foreground);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-minimap-background-color-default: var(--card);
+  --xy-minimap-mask-background-color-default: var(--surface);
+  --xy-minimap-node-background-color-default: var(--border-strong);
 }
-.confirm button {
-  font: inherit;
-  padding: 6px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--link);
-  background: var(--link);
-  color: #fff;
+.afk-graph .react-flow__node-lane {
+  pointer-events: none;
+}
+.afk-graph .react-flow__node-ticket {
   cursor: pointer;
 }
-.confirm button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.afk-graph .react-flow__node-ticket.selected .afk-ticket-node {
+  outline: 2px solid var(--primary);
 }
-
-.warnings {
-  color: #e8590c;
+.afk-graph .react-flow__handle {
+  background: var(--border-strong);
+  border-color: var(--card);
+  width: 6px;
+  height: 6px;
 }
-.graph {
-  height: 420px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+.afk-edge-contract .react-flow__edge-path {
+  stroke-dasharray: 6 5;
 }
-.ticket-node {
-  box-sizing: border-box;
-  width: 200px;
-  min-height: 64px;
-  padding: 8px 10px;
-  border: 2px solid;
-  border-radius: 8px;
-  font-size: 0.8rem;
+.afk-edge-done .react-flow__edge-path {
+  stroke: var(--state-done);
+  stroke-width: 2;
 }
-.ticket-node-state {
-  margin-top: 4px;
-  color: var(--note);
+.afk-legend-done {
+  border-color: var(--state-done);
 }
-ul.tickets,
-ul.finalizations {
-  padding-left: 18px;
+.afk-graph .react-flow__controls {
+  right: 8px;
+  bottom: 8px;
+  margin: 0;
+  z-index: 6;
 }
-
-@media (max-width: 640px) {
-  main {
-    padding: 12px;
+.afk-graph .afk-minimap {
+  right: 48px;
+  bottom: 8px;
+  width: 145px;
+  height: 90px;
+  margin: 0;
+  overflow: hidden;
+}
+.afk-graph .afk-minimap svg {
+  width: 145px;
+  height: 90px;
+}
+.afk-graph .react-flow__minimap {
+  background: var(--card);
+}
+.afk-graph .react-flow__minimap-mask {
+  fill: var(--surface);
+  opacity: 0.6;
+}
+.afk-graph .react-flow__minimap-node {
+  fill: var(--border-strong);
+}
+.afk-graph .react-flow__controls-button {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+  fill: currentColor;
+}
+.afk-lane {
+  background: color-mix(in oklch, var(--lane-color) 4%, var(--surface));
+  border-color: color-mix(in oklch, var(--lane-color) 15%, var(--border));
+}
+.afk-repo-0 {
+  --lane-color: var(--repo-1);
+}
+.afk-repo-1 {
+  --lane-color: var(--repo-2);
+}
+.afk-repo-2 {
+  --lane-color: var(--repo-3);
+}
+.afk-repo-3 {
+  --lane-color: var(--repo-4);
+}
+.afk-repo-4 {
+  --lane-color: var(--repo-5);
+}
+.afk-repo-5 {
+  --lane-color: var(--repo-6);
+}
+.afk-node-running {
+  animation: node-running 3s ease-in-out infinite;
+}
+@keyframes node-running {
+  50% {
+    border-top-color: var(--state-running);
+    border-right-color: var(--state-running);
+    border-bottom-color: var(--state-running);
   }
-  table.specs th:nth-child(3),
-  table.specs td:nth-child(3) {
+}
+.afk-change-flash {
+  animation: afk-change-flash 850ms ease-out;
+}
+.afk-count-bounce {
+  animation: afk-count-bounce 650ms ease-out;
+}
+@keyframes afk-change-flash {
+  20% {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    filter: brightness(1.2);
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: 4px;
+  }
+}
+@keyframes afk-count-bounce {
+  35% {
+    transform: translateY(-3px) scale(1.12);
+  }
+  65% {
+    transform: translateY(1px);
+  }
+  100% {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afk-node-running,
+  .animate-breathe,
+  .afk-change-flash,
+  .afk-count-bounce {
+    animation: none;
+  }
+}
+@media (max-width: 640px) {
+  .afk-sidebar {
+    width: 52px;
+  }
+  .afk-sidebar {
+    transition: none;
+  }
+  .afk-sidebar > div:first-child {
+    padding-inline: 13px;
+  }
+  .afk-sidebar button > span,
+  .afk-topbar > button > span,
+  .afk-topbar > button > kbd {
     display: none;
   }
-  .progress {
-    width: 100px;
+  .afk-sidebar > div:first-child > span,
+  .afk-sidebar nav a > span:not([aria-label]) {
+    display: none;
   }
-}
-
-table.runs {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-table.runs th,
-table.runs td {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
-}
-table.runs tr.picked {
-  background: #f1f8ff;
-}
-button.link {
-  font: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--link);
-  cursor: pointer;
-  text-decoration: underline;
-}
-pre.run-log {
-  background: #1e1e1e;
-  color: #e6e6e6;
-  padding: 12px;
-  border-radius: 6px;
-  max-height: 360px;
-  overflow: auto;
-  font-size: 0.8rem;
-  white-space: pre-wrap;
-}
-.brief {
-  border-left: 4px solid #fa5252;
-  background: #fff5f5;
-  padding: 8px 12px;
-  margin: 12px 0;
-}
-.brief pre {
-  margin: 6px 0 0;
-  white-space: pre-wrap;
-  font-size: 0.8rem;
-}
-
-nav {
-  margin: -8px 0 16px;
-  display: flex;
-  gap: 16px;
-}
-ul.blocked-list {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: 12px;
-}
-.blocked-card {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 4px 16px 12px;
-}
-.blocked-card h3 {
-  margin: 12px 0 4px;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-}
-.actions button {
-  font: inherit;
-  padding: 4px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: #fff;
-  cursor: pointer;
-}
-.actions button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.actions button.danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.actions input[type="number"] {
-  width: 5em;
-}
-
-.search {
-  position: relative;
-  margin-bottom: 8px;
-}
-.search input {
-  width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-.search-results {
-  position: absolute;
-  z-index: 10;
-  left: 0;
-  right: 0;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 4px 12px 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  max-height: 60vh;
-  overflow: auto;
-}
-.search-results h4 {
-  margin: 8px 0 4px;
-  font-size: 0.8rem;
-  color: var(--note);
-  text-transform: uppercase;
-}
-.search-results ul {
-  margin: 0;
-  padding-left: 16px;
-}
-.ticket-node-repo {
-  color: var(--note);
-  font-style: italic;
-}
-
-/* The spec page: the text on the left, the tickets beside it, the graph and warnings under both. */
-.two-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
-  gap: 1.5rem;
-  align-items: start;
-}
-.side-column {
-  position: sticky;
-  top: 1rem;
-}
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-  border-bottom: 1px solid #ccc;
-  margin-bottom: 1rem;
-}
-.tab {
-  border: 1px solid transparent;
-  border-bottom: none;
-  background: none;
-  padding: 0.4rem 0.9rem;
-  cursor: pointer;
-}
-.tab.selected {
-  border-color: #ccc;
-  background: #fff;
-  font-weight: 600;
-}
-.contents ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-}
-.markdown {
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.markdown pre {
-  overflow-x: auto;
-  background: #f5f5f5;
-  padding: 0.6rem;
-}
-.markdown table {
-  border-collapse: collapse;
-}
-.markdown table th,
-.markdown table td {
-  border: 1px solid #ccc;
-  padding: 0.25rem 0.6rem;
-}
-.markdown li.task-list-item {
-  list-style: none;
-}
-.markdown ul:has(> li.task-list-item) {
-  padding-left: 0.5rem;
-}
-@media (max-width: 800px) {
-  .two-columns {
-    grid-template-columns: minmax(0, 1fr);
+  .afk-sidebar nav a [aria-label$="项待处理"] {
+    display: grid;
+    position: absolute;
+    top: -2px;
+    right: 2px;
   }
-  .side-column {
-    position: static;
+  .afk-topbar {
+    padding-inline: 12px;
   }
-}
-
-.body-controls {
-  margin-bottom: 0.75rem;
-}
-.ticket-original {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: #f5f5f5;
-  padding: 0.6rem;
-}
-.retry-note,
-.ticket-edit label {
-  display: block;
-  margin: 8px 0;
-  font-size: 0.9rem;
-}
-.retry-note textarea,
-.ticket-edit textarea {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin-top: 4px;
-  font: inherit;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-ul.related {
-  list-style: none;
-  padding: 0;
-}
-.markdown h2 {
-  font-size: 1.1rem;
+  .afk-topbar nav {
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .afk-topbar > button {
+    width: 28px;
+    flex-shrink: 0;
+    justify-content: center;
+    padding: 0;
+  }
+  main > div {
+    padding-inline: 16px;
+  }
+  .afk-graph {
+    height: 520px;
+  }
 }

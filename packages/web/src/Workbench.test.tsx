@@ -34,8 +34,8 @@ describe("the workbench", () => {
       <Workbench />,
       fakeServer({ "GET /workbench": () => ({ json: empty }) }),
     );
-    expect(await screen.findByRole("heading", { name: "工作台" })).toBeTruthy();
-    expect(screen.getByText(EMPTY_WAITING)).toBeTruthy();
+    expect(await screen.findByText(EMPTY_WAITING)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "工作台" })).toBeTruthy();
     expect(screen.getByText(EMPTY_RUNNING)).toBeTruthy();
     expect(screen.getByText(EMPTY_REVIEW)).toBeTruthy();
     expect(screen.getByText(EMPTY_COMPLETED)).toBeTruthy();
@@ -170,35 +170,91 @@ describe("the workbench", () => {
       }),
     );
 
-    const waiting = within(await screen.findByTestId("quadrant-等你处理"));
-    expect(
-      waiting.getByRole("link", { name: "T-9" }).getAttribute("href"),
-    ).toBe("/tickets/9");
+    await screen.findByText("Stuck");
+    expect(screen.getByText("shop")).toBeTruthy();
+    expect(screen.getByText(/项目/)).toBeTruthy();
+    const waiting = within(screen.getByTestId("quadrant-等你处理"));
+    expect(waiting.getByText("T-9").closest("a")?.getAttribute("href")).toBe(
+      "/tickets/9",
+    );
     expect(waiting.getByText("模型放弃").title).toBe("agent-gave-up");
 
     const running = within(screen.getByTestId("quadrant-正在运行"));
-    expect(
-      running.getByRole("link", { name: "S-3" }).getAttribute("href"),
-    ).toBe("/specs/3");
-    expect(
-      running.getByRole("link", { name: "T-4" }).getAttribute("href"),
-    ).toBe("/tickets/4");
+    expect(running.getByText("S-3")).toBeTruthy();
+    expect(running.getByText("T-4").closest("a")?.getAttribute("href")).toBe(
+      "/tickets/4",
+    );
     expect(running.getByText(/implement/)).toBeTruthy();
     expect(running.getByText(/已运行 25 分钟/)).toBeTruthy();
     expect(running.getByText("偏慢")).toBeTruthy();
 
     const review = within(screen.getByTestId("quadrant-等你验收"));
-    expect(review.getByRole("link", { name: "S-5" }).getAttribute("href")).toBe(
+    expect(review.getByText("S-5").closest("a")?.getAttribute("href")).toBe(
       "/specs/5",
     );
     expect(review.getByText(/2 个 PR/)).toBeTruthy();
-    expect(review.getByText(/验收标准 1\/3/)).toBeTruthy();
+    expect(review.getByText(/验收标准/).textContent).toMatch(/1\/3/);
     expect(review.getByText("待验收").title).toBe("awaiting-review");
 
     const done = within(screen.getByTestId("quadrant-最近完成"));
-    expect(done.getByRole("link", { name: "S-1" }).getAttribute("href")).toBe(
+    expect(done.getByText("S-1").closest("a")?.getAttribute("href")).toBe(
       "/specs/1",
     );
     expect(done.getByTitle("2026-11-01 10:00:00 UTC")).toBeTruthy();
+  });
+
+  it("does not mark a running ticket 偏慢 when there is no peer history", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        "GET /workbench": () => ({
+          json: {
+            waiting: emptyWaiting,
+            running: [
+              {
+                spec: {
+                  id: 3,
+                  displayId: "S-3",
+                  slug: "s",
+                  title: "Third",
+                  type: "feature",
+                  state: "running",
+                  pauseReason: null,
+                  project: "shop",
+                  progress: {
+                    total: 1,
+                    done: 0,
+                    active: 1,
+                    blocked: 0,
+                    pending: 0,
+                    cancelled: 0,
+                  },
+                },
+                tickets: [
+                  {
+                    id: 4,
+                    displayId: "T-4",
+                    title: "Export",
+                    state: "running",
+                    repo: "backend",
+                    stage: "implement",
+                    startedAt: "2026-11-01T11:00:00.000Z",
+                    elapsedMs: 25 * 60_000,
+                    meanMs: null,
+                    slow: false,
+                  },
+                ],
+              },
+            ],
+            awaitingAcceptance: [],
+            recentlyCompleted: [],
+          },
+        }),
+      }),
+    );
+    expect(await screen.findByText("Export")).toBeTruthy();
+    const running = within(screen.getByTestId("quadrant-正在运行"));
+    expect(running.getByText(/已运行 25 分钟/)).toBeTruthy();
+    expect(running.queryByText("偏慢")).toBeNull();
   });
 });

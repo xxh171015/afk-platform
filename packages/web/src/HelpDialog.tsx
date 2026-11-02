@@ -2,11 +2,17 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogHeader,
   DialogTitle,
 } from "./components/ui/dialog.tsx";
 
-// The ? overlay: which chords go where, and that they do not fire while typing.
+const rows = [
+  ["工作台", "g h"],
+  ["待处理", "g b"],
+  ["需求", "g s"],
+  ["全局搜索", "⌘K / Ctrl+K"],
+  ["快捷键帮助", "?"],
+  ["关闭面板", "Esc"],
+] as const;
 
 export function HelpDialog({
   open,
@@ -17,35 +23,25 @@ export function HelpDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>快捷键</DialogTitle>
-          <DialogDescription>
-            输入框或对话框打开时这些键不会跳转。
-          </DialogDescription>
-        </DialogHeader>
-        <dl className="grid grid-cols-[6rem_1fr] gap-2 text-sm">
-          <dt>
-            <kbd>g</kbd> <kbd>h</kbd>
-          </dt>
-          <dd>工作台</dd>
-          <dt>
-            <kbd>g</kbd> <kbd>s</kbd>
-          </dt>
-          <dd>需求</dd>
-          <dt>
-            <kbd>g</kbd> <kbd>b</kbd>
-          </dt>
-          <dd>待处理</dd>
-          <dt>
-            <kbd>⌘</kbd>
-            <kbd>K</kbd>
-          </dt>
-          <dd>搜索</dd>
-          <dt>
-            <kbd>?</kbd>
-          </dt>
-          <dd>本说明</dd>
+      <DialogContent className="max-w-md">
+        <DialogTitle>快捷键</DialogTitle>
+        <DialogDescription className="sr-only">
+          输入框或对话框打开时这些键不会跳转。
+        </DialogDescription>
+        <dl className="divide-y">
+          {rows.map(([label, key]) => (
+            <div
+              key={label}
+              className="flex items-center justify-between py-3 text-sm"
+            >
+              <dt>{label}</dt>
+              <dd>
+                <kbd className="rounded-sm border bg-surface px-2 py-1 font-mono text-xs">
+                  {key}
+                </kbd>
+              </dd>
+            </div>
+          ))}
         </dl>
       </DialogContent>
     </Dialog>

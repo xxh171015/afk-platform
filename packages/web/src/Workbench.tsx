@@ -1,8 +1,18 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  Activity,
+  ArrowUpRight,
+  CheckCircle2,
+  ClipboardCheck,
+  Inbox,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { describeError, useApi } from "./api.tsx";
-import { Skeleton } from "./components/ui/skeleton.tsx";
+import { Mono, Pill } from "./components/afk/badges.tsx";
+import { Page } from "./components/afk/page.tsx";
+import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
@@ -10,17 +20,12 @@ import { StatusBadge } from "./StatusBadge.tsx";
 import { formatElapsed } from "./time.ts";
 import { waitingCount } from "./waiting.ts";
 
-export const EMPTY_WAITING =
-  "没有事等你。票卡住、收尾停住或 PR 需要人看时会出现在这里。";
-export const EMPTY_RUNNING =
-  "现在没有在跑的需求。确认拆分后，阶段和耗时会出现在这里。";
-export const EMPTY_REVIEW = "还没有可以验收的需求。PR 开齐后会出现在这里。";
-export const EMPTY_COMPLETED = "还没有合并完的需求。";
+export const EMPTY_WAITING = "没有在等你的事。平台在自己跑。";
+export const EMPTY_RUNNING = "没有正在运行的票。";
+export const EMPTY_REVIEW = "没有等你验收的需求。";
+export const EMPTY_COMPLETED = "还没有已合并的需求。";
 
 export const WORKBENCH_KEY = ["workbench"] as const;
-
-// Home of the control tower: four quadrants instead of a spec table
-// (docs/specs/experience-platform.md「工作台与导航」).
 
 export function useWorkbench() {
   const api = useApi();
@@ -39,174 +44,316 @@ export function useWorkbench() {
 
 function Quadrant({
   title,
-  empty,
-  children,
+  icon,
   count,
+  children,
 }: {
   title: string;
-  empty: string;
-  count: number;
+  icon: ReactNode;
+  count?: number;
   children: ReactNode;
 }) {
   return (
     <section
-      className="rounded-lg border border-border bg-card p-4"
+      aria-label={title}
       data-testid={`quadrant-${title}`}
+      className="min-w-0 border-t"
     >
-      <h2 className="mb-3 text-base font-semibold">{title}</h2>
-      {count === 0 ? (
-        <p className="note">{empty}</p>
-      ) : (
-        <ul className="grid gap-3">{children}</ul>
-      )}
+      <h2 className="flex h-12 items-center gap-2 text-sm font-medium">
+        {icon}
+        {title}
+        <span className="ml-auto font-mono text-xs text-muted-foreground tabular">
+          {count ?? "—"}
+        </span>
+      </h2>
+      {children}
     </section>
+  );
+}
+
+function LoadingRows() {
+  return (
+    <div role="status" aria-label="正在加载" className="space-y-4 py-3">
+      {[0, 1, 2].map((n) => (
+        <div key={n} className="space-y-2">
+          <Skeleton className="h-4 w-4/5" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Empty({ text }: { text: string }) {
+  return (
+    <p className="flex min-h-32 items-center justify-center border-b border-dashed px-4 text-center text-sm text-muted-foreground">
+      {text}
+    </p>
+  );
+}
+
+function ItemLink({
+  href,
+  displayId,
+  title,
+  children,
+}: {
+  href: string;
+  displayId: string;
+  title: string;
+  children?: ReactNode;
+}) {
+  const external = /^https?:\/\//.test(href);
+  return (
+    <a
+      href={href}
+      {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
+      className="group block min-w-0 border-b px-2 py-3 transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      <div className="flex min-w-0 items-start gap-2 text-[13px]">
+        <span className="max-w-[45%] shrink-0 break-all font-mono text-xs text-muted-foreground">
+          {displayId}
+        </span>
+        <span className="min-w-0 flex-1 break-words font-medium">{title}</span>
+        <ArrowUpRight className="mt-0.5 size-3.5 shrink-0 text-subtle-foreground group-hover:text-foreground" />
+      </div>
+      {children ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+          {children}
+        </div>
+      ) : null}
+    </a>
   );
 }
 
 export function Workbench() {
   const board = useWorkbench();
-  if (board.isPending) {
-    return (
-      <div aria-busy="true">
-        <p className="note">加载工作台…</p>
-        <Skeleton className="mt-4 h-40 w-full" />
-      </div>
-    );
-  }
+  const data = board.data;
+  const project =
+    data?.running[0]?.spec.project ??
+    data?.awaitingAcceptance[0]?.spec.project ??
+    data?.recentlyCompleted[0]?.spec.project ??
+    null;
+
   if (board.isError && !board.data) {
     return (
-      <p className="error" role="alert">
-        无法加载工作台: {board.error.message}
-      </p>
+      <Page title="工作台">
+        <ErrorState
+          error={board.error}
+          prefix="无法加载工作台"
+          onRetry={() => void board.refetch()}
+        />
+      </Page>
     );
   }
-  const data = board.data;
-  if (!data) return null;
 
   return (
-    <div>
-      <h1 className="mb-4 text-xl font-semibold">工作台</h1>
-      <div className="grid gap-4 md:grid-cols-2">
-        <Quadrant
-          title="等你处理"
-          empty={EMPTY_WAITING}
-          count={waitingCount(data.waiting)}
-        >
-          {data.waiting.tickets.map((ticket) => (
-            <li key={`t-${ticket.id}`}>
-              <a href={paths.ticket(ticket.id)}>{ticket.displayId}</a>{" "}
-              {ticket.title}{" "}
-              <StatusBadge
-                kind="blocked"
-                code={ticket.blockedReason ?? "blocked"}
-              />
-            </li>
-          ))}
-          {data.waiting.finalizations.map((item) => (
-            <li key={`f-${item.specId}-${item.repo}`}>
-              <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
-              {item.step}{" "}
-              <StatusBadge
-                kind="blocked"
-                code={item.blockedReason ?? "blocked"}
-              />
-            </li>
-          ))}
-          {data.waiting.pullRequests.map((item) => (
-            <li key={`p-${item.specId}-${item.repo}`}>
-              <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
-              {item.repo} #{item.number}
-            </li>
-          ))}
-          {data.waiting.cleanups.map((item) => (
-            <li key={`c-${item.specId}`}>
-              <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
-              清理失败
-            </li>
-          ))}
-          {data.waiting.readyFailures.map((item) => (
-            <li key={`r-${item.specId}-${item.repo}`}>
-              <a href={paths.spec(item.specId)}>{item.specDisplayId}</a>{" "}
-              {item.repo} #{item.number} 未能转 ready
-            </li>
-          ))}
-          {data.waiting.specs.map((spec) => (
-            <li key={`s-${spec.id}`}>
-              <a href={paths.spec(spec.id)}>{spec.displayId}</a> {spec.title}{" "}
-              <StatusBadge kind="spec" code="paused" />
-            </li>
-          ))}
-        </Quadrant>
+    <Page
+      title="工作台"
+      subtitle={
+        project ? (
+          <span>
+            项目 <Mono>{project}</Mono>
+          </span>
+        ) : undefined
+      }
+      actions={<StaleNotice error={data ? board.error : null} />}
+    >
+      {!data ? (
+        <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
+          <p className="sr-only">加载工作台…</p>
+          <Quadrant
+            title="等你处理"
+            icon={<Inbox className="size-4 text-destructive" />}
+          >
+            <LoadingRows />
+          </Quadrant>
+          <Quadrant
+            title="正在运行"
+            icon={<Activity className="size-4 text-primary" />}
+          >
+            <LoadingRows />
+          </Quadrant>
+          <Quadrant
+            title="等你验收"
+            icon={<ClipboardCheck className="size-4 text-primary" />}
+          >
+            <LoadingRows />
+          </Quadrant>
+          <Quadrant
+            title="最近完成"
+            icon={<CheckCircle2 className="size-4 text-primary" />}
+          >
+            <LoadingRows />
+          </Quadrant>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
+          <Quadrant
+            title="等你处理"
+            icon={<Inbox className="size-4 text-destructive" />}
+            count={waitingCount(data.waiting)}
+          >
+            {waitingCount(data.waiting) === 0 ? (
+              <Empty text={EMPTY_WAITING} />
+            ) : (
+              <>
+                {data.waiting.tickets.map((ticket) => (
+                  <ItemLink
+                    key={`t-${ticket.id}`}
+                    href={paths.ticket(ticket.id)}
+                    displayId={ticket.displayId}
+                    title={ticket.title}
+                  >
+                    <StatusBadge
+                      kind="blocked"
+                      code={ticket.blockedReason ?? "blocked"}
+                    />
+                  </ItemLink>
+                ))}
+                {data.waiting.finalizations.map((item) => (
+                  <ItemLink
+                    key={`f-${item.specId}-${item.repo}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title={item.step}
+                  >
+                    <StatusBadge
+                      kind="blocked"
+                      code={item.blockedReason ?? "blocked"}
+                    />
+                  </ItemLink>
+                ))}
+                {data.waiting.pullRequests.map((item) => (
+                  <ItemLink
+                    key={`p-${item.specId}-${item.repo}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title={`${item.repo} #${item.number}`}
+                  />
+                ))}
+                {data.waiting.cleanups.map((item) => (
+                  <ItemLink
+                    key={`c-${item.specId}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title="清理失败"
+                  />
+                ))}
+                {data.waiting.readyFailures.map((item) => (
+                  <ItemLink
+                    key={`r-${item.specId}-${item.repo}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title={`${item.repo} #${item.number} 未能转 ready`}
+                  />
+                ))}
+                {data.waiting.specs.map((spec) => (
+                  <ItemLink
+                    key={`s-${spec.id}`}
+                    href={paths.spec(spec.id)}
+                    displayId={spec.displayId}
+                    title={spec.title}
+                  >
+                    <StatusBadge kind="spec" code="paused" />
+                  </ItemLink>
+                ))}
+              </>
+            )}
+          </Quadrant>
 
-        <Quadrant
-          title="正在运行"
-          empty={EMPTY_RUNNING}
-          count={data.running.length}
-        >
-          {data.running.map((row) => (
-            <li
-              key={row.spec.id}
-              className="rounded-md border border-border p-3"
-            >
-              <p>
-                <a href={paths.spec(row.spec.id)}>{row.spec.displayId}</a>{" "}
-                {row.spec.title}{" "}
-                <StatusBadge kind="spec" code={row.spec.state} />
-              </p>
-              <ul className="mt-2 grid gap-1">
-                {row.tickets.map((ticket) => (
-                  <li key={ticket.id}>
-                    <a href={paths.ticket(ticket.id)}>{ticket.displayId}</a>{" "}
-                    {ticket.title}
-                    {ticket.stage ? ` · ${ticket.stage}` : ""}
-                    {ticket.elapsedMs !== null
-                      ? ` · 已运行 ${formatElapsed(ticket.elapsedMs)}`
-                      : ""}
-                    {ticket.slow ? (
-                      <span
-                        className="badge"
-                        title="current stage is slower than the project mean"
-                      >
-                        {" "}
-                        偏慢
+          <Quadrant
+            title="正在运行"
+            icon={<Activity className="size-4 text-primary" />}
+            count={data.running.reduce((n, row) => n + row.tickets.length, 0)}
+          >
+            {data.running.length === 0 ? (
+              <Empty text={EMPTY_RUNNING} />
+            ) : (
+              data.running.flatMap((row) =>
+                row.tickets.map((ticket) => (
+                  <ItemLink
+                    key={ticket.id}
+                    href={paths.ticket(ticket.id)}
+                    displayId={ticket.displayId}
+                    title={ticket.title}
+                  >
+                    {ticket.stage ? (
+                      <>
+                        <Mono title={stageLabel[ticket.stage]}>
+                          {ticket.stage}
+                        </Mono>
+                        <span>{stageLabel[ticket.stage] ?? ticket.stage}</span>
+                      </>
+                    ) : null}
+                    {ticket.elapsedMs !== null ? (
+                      <span className="font-mono tabular">
+                        已运行 {formatElapsed(ticket.elapsedMs)}
                       </span>
                     ) : null}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </Quadrant>
+                    {ticket.slow ? (
+                      <Pill tone="paused" className="font-sans">
+                        偏慢
+                      </Pill>
+                    ) : null}
+                    <span>
+                      属于 <Mono>{row.spec.displayId}</Mono>
+                    </span>
+                  </ItemLink>
+                )),
+              )
+            )}
+          </Quadrant>
 
-        <Quadrant
-          title="等你验收"
-          empty={EMPTY_REVIEW}
-          count={data.awaitingAcceptance.length}
-        >
-          {data.awaitingAcceptance.map((row) => (
-            <li key={row.spec.id}>
-              <a href={paths.spec(row.spec.id)}>{row.spec.displayId}</a>{" "}
-              {row.spec.title} <StatusBadge kind="spec" code={row.spec.state} />{" "}
-              · {row.pullRequestCount} 个 PR · 验收标准 {row.verifiedCriteria}/
-              {row.totalCriteria}
-            </li>
-          ))}
-        </Quadrant>
+          <Quadrant
+            title="等你验收"
+            icon={<ClipboardCheck className="size-4 text-primary" />}
+            count={data.awaitingAcceptance.length}
+          >
+            {data.awaitingAcceptance.length === 0 ? (
+              <Empty text={EMPTY_REVIEW} />
+            ) : (
+              data.awaitingAcceptance.map((row) => (
+                <ItemLink
+                  key={row.spec.id}
+                  href={paths.spec(row.spec.id)}
+                  displayId={row.spec.displayId}
+                  title={row.spec.title}
+                >
+                  <StatusBadge kind="spec" code={row.spec.state} />
+                  <span>{row.pullRequestCount} 个 PR</span>
+                  <span>
+                    验收标准{" "}
+                    <Mono>{`${row.verifiedCriteria}/${row.totalCriteria}`}</Mono>
+                  </span>
+                </ItemLink>
+              ))
+            )}
+          </Quadrant>
 
-        <Quadrant
-          title="最近完成"
-          empty={EMPTY_COMPLETED}
-          count={data.recentlyCompleted.length}
-        >
-          {data.recentlyCompleted.map((row) => (
-            <li key={row.spec.id}>
-              <a href={paths.spec(row.spec.id)}>{row.spec.displayId}</a>{" "}
-              {row.spec.title} <StatusBadge kind="spec" code={row.spec.state} />{" "}
-              <RelativeTime iso={row.completedAt} />
-            </li>
-          ))}
-        </Quadrant>
-      </div>
-    </div>
+          <Quadrant
+            title="最近完成"
+            icon={<CheckCircle2 className="size-4 text-primary" />}
+            count={data.recentlyCompleted.length}
+          >
+            {data.recentlyCompleted.length === 0 ? (
+              <Empty text={EMPTY_COMPLETED} />
+            ) : (
+              data.recentlyCompleted.map((row) => (
+                <ItemLink
+                  key={row.spec.id}
+                  href={paths.spec(row.spec.id)}
+                  displayId={row.spec.displayId}
+                  title={row.spec.title}
+                >
+                  <StatusBadge kind="spec" code={row.spec.state} />
+                  <RelativeTime iso={row.completedAt} />
+                </ItemLink>
+              ))
+            )}
+          </Quadrant>
+        </div>
+      )}
+    </Page>
   );
 }

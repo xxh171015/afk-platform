@@ -23,6 +23,20 @@ export function formatElapsed(ms: number): string {
   return `${Math.round(ms / HOUR)} 小时`;
 }
 
+export function formatDuration(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "—";
+  const seconds = Math.max(0, ms / 1000);
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  const whole = Math.floor(seconds);
+  if (whole < 3600)
+    return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, "0")}s`;
+  return `${Math.floor(whole / 3600)}h ${String(Math.floor(whole / 60) % 60).padStart(2, "0")}m`;
+}
+
+export function formatSeconds(ms: number | null): string {
+  return ms === null ? "—" : `${Math.round(ms / 1000)} s`;
+}
+
 export function formatAbsoluteTime(iso: string): string {
   const date = new Date(iso);
   if (!Number.isFinite(date.getTime())) return iso;

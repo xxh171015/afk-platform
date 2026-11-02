@@ -159,6 +159,32 @@ describe("the app", () => {
     renderApp(server());
     expect(await screen.findByRole("heading", { name: "工作台" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "S-3" })).toBeNull();
+    expect(await screen.findByText("shop")).toBeTruthy();
+  });
+
+  it("remembers light and dark in afk-theme, not the system", async () => {
+    const mem: Record<string, string> = {};
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => mem[key] ?? null,
+        setItem: (key: string, value: string) => {
+          mem[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete mem[key];
+        },
+      },
+    });
+    document.documentElement.classList.add("dark");
+    renderApp(server());
+    await screen.findByRole("heading", { name: "工作台" });
+    fireEvent.click(screen.getByRole("button", { name: "切换到亮色" }));
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(mem["afk-theme"]).toBe("light");
+    fireEvent.click(screen.getByRole("button", { name: "切换到暗色" }));
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(mem["afk-theme"]).toBe("dark");
   });
 
   it("opens a spec at /specs/<id> and the spec list at /specs", async () => {
@@ -245,19 +271,23 @@ describe("the app", () => {
     renderApp(fake, "/waiting");
     expect(await screen.findByTestId("blocked-T-1")).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: "待处理 (2)" }).getAttribute("href"),
+      screen
+        .getAllByRole("link", { name: "待处理 (2)" })[0]
+        ?.getAttribute("href"),
     ).toBe("/waiting");
     expect(
-      screen.getByRole("link", { name: "工作台" }).getAttribute("href"),
+      screen.getAllByRole("link", { name: "工作台" })[0]?.getAttribute("href"),
     ).toBe("/");
     expect(
-      screen.getByRole("link", { name: "需求" }).getAttribute("href"),
+      screen.getAllByRole("link", { name: "需求" })[0]?.getAttribute("href"),
     ).toBe("/specs");
   });
 
   it("does not show a count in the menu when nothing waits", async () => {
     renderApp(server());
-    expect(await screen.findByRole("link", { name: "待处理" })).toBeTruthy();
+    expect(
+      (await screen.findAllByRole("link", { name: "待处理" })).length,
+    ).toBeGreaterThan(0);
   });
 
   it("has a search control on every page", async () => {

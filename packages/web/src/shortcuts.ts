@@ -6,7 +6,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (TYPABLE.has(target.tagName)) return true;
   if (target.isContentEditable) return true;
-  if (target.closest("[role='dialog']")) return true;
+  if (target.closest("[role='dialog'], [role='alertdialog']")) return true;
   return false;
 }
 

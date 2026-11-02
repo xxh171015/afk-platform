@@ -5,6 +5,7 @@ import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createPlatformRouter } from "./App.tsx";
 import { ApiProvider } from "./api.tsx";
+import { TooltipProvider } from "./components/ui/tooltip.tsx";
 
 // jsdom has no layout engine; React Flow asks for these.
 class FakeResizeObserver {
@@ -74,7 +75,9 @@ function providers(server: ReturnType<typeof fakeServer>, child: ReactElement) {
     queryClient,
     tree: (
       <QueryClientProvider client={queryClient}>
-        <ApiProvider client={server.client}>{child}</ApiProvider>
+        <ApiProvider client={server.client}>
+          <TooltipProvider>{child}</TooltipProvider>
+        </ApiProvider>
       </QueryClientProvider>
     ),
   };
