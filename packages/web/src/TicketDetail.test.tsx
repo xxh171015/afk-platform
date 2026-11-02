@@ -108,7 +108,7 @@ describe("the ticket page", () => {
       implement.getByRole("link", { name: "R-10" }).getAttribute("href"),
     ).toBe("/runs/10");
     expect(implement.getByText("implement #1")).toBeTruthy();
-    expect(implement.getByText("done")).toBeTruthy();
+    expect(implement.getByText("成功").getAttribute("title")).toBe("done");
     expect(implement.getByText("146 s")).toBeTruthy();
     expect(implement.getByRole("time").getAttribute("dateTime")).toBe(
       "2026-10-28T10:00:00.000Z",
@@ -118,7 +118,7 @@ describe("the ticket page", () => {
     expect(gate.getByRole("link", { name: "R-11" }).getAttribute("href")).toBe(
       "/runs/11",
     );
-    expect(gate.getByText("failed")).toBeTruthy();
+    expect(gate.getByText("失败").getAttribute("title")).toBe("failed");
     expect(gate.getByText("20 s")).toBeTruthy();
   });
 

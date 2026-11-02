@@ -63,7 +63,18 @@ describe("the six-step bar", () => {
     ).toBe("收尾");
     expect(
       currentFlowStep("cancelled", { pullRequests: 1, finalizing: true }),
+    ).toBe("开 PR");
+    expect(
+      currentFlowStep("cancelled", { pullRequests: 1, finalizing: false }),
     ).toBe("验收合并");
+    expect(
+      currentFlowStep("paused", {
+        pullRequests: 0,
+        finalizing: false,
+        started: false,
+        confirmed: true,
+      }),
+    ).toBe("确认");
   });
 
   it("names the banner for those exception states", () => {

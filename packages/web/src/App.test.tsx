@@ -190,6 +190,17 @@ describe("the app", () => {
     expect(mem["afk-theme"]).toBe("dark");
   });
 
+  it("opens a ticket sheet from a graph node without leaving the spec", async () => {
+    const { router } = renderApp(server(), "/specs/3");
+    fireEvent.click(await screen.findByRole("link", { name: "T-9" }));
+    expect(
+      (await screen.findByRole("link", { name: "打开票详情" })).getAttribute(
+        "href",
+      ),
+    ).toBe("/tickets/9");
+    expect(router.state.location.pathname).toBe("/specs/3");
+  });
+
   it("opens a spec at /specs/<id> and the spec list at /specs", async () => {
     const { router } = renderApp(server(), "/specs/3");
     expect(await screen.findByTestId("node-T-9")).toBeTruthy();

@@ -80,6 +80,17 @@ describe("the workbench", () => {
                   brief: null,
                 },
               ],
+              finalizations: [
+                {
+                  specId: 3,
+                  specDisplayId: "S-3",
+                  repo: "backend",
+                  step: "final-merge",
+                  state: "blocked",
+                  blockedReason: "merge-conflict",
+                  brief: null,
+                },
+              ],
             },
             running: [
               {
@@ -176,6 +187,9 @@ describe("the workbench", () => {
     const waiting = within(screen.getByTestId("quadrant-等你处理"));
     expect(waiting.getByText("T-9").closest("a")?.getAttribute("href")).toBe(
       "/tickets/9",
+    );
+    expect(waiting.getByText("S-3").closest("a")?.getAttribute("href")).toBe(
+      "/specs/3/delivery",
     );
     expect(waiting.getByText("模型放弃").title).toBe("agent-gave-up");
 

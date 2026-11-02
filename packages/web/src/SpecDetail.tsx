@@ -86,7 +86,12 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
       onClick={() => data.onOpen?.(data.id)}
     >
       <Handle type="target" position={Position.Left} />
-      <a href={paths.ticket(data.id)}>
+      <a
+        href={paths.ticket(data.id)}
+        onClick={(event) => {
+          event.preventDefault();
+        }}
+      >
         <strong>{data.displayId}</strong>
       </a>{" "}
       {data.title}
@@ -435,6 +440,7 @@ export function SpecDetail({
     started: tickets.some(
       (ticket) => ticket.state !== "pending" && ticket.state !== "cancelled",
     ),
+    confirmed: timelineEvents.some((event) => event.kind === "confirm-plan"),
   });
   const stepIndex = flowStepIndex(step);
   const complete = flowStepComplete(spec.state);
@@ -735,7 +741,13 @@ function Overview({
       ) : (
         <ul className="warnings" data-testid="prechecks">
           {prechecks.map((item) => (
-            <li key={`${item.code}:${item.message}`} data-level={item.level}>
+            <li
+              key={`${item.code}:${item.message}`}
+              data-level={item.level}
+              className={
+                item.level === "yellow" ? "text-state-paused" : undefined
+              }
+            >
               {item.message}
             </li>
           ))}

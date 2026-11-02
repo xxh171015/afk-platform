@@ -18,6 +18,7 @@ export type FlowFacts = {
   pullRequests: number;
   finalizing: boolean;
   started?: boolean;
+  confirmed?: boolean;
 };
 
 export type FlowBanner = {
@@ -75,8 +76,9 @@ export function currentFlowStep(state: SpecState, facts: FlowFacts): FlowStep {
 }
 
 function exceptionStep(facts: FlowFacts): FlowStep {
-  if (facts.pullRequests > 0) return "验收合并";
+  if (facts.pullRequests > 0) return facts.finalizing ? "开 PR" : "验收合并";
   if (facts.finalizing) return "收尾";
+  if (facts.confirmed) return facts.started === false ? "确认" : "运行";
   if (facts.started === false) return "草稿";
   return "运行";
 }

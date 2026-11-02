@@ -106,6 +106,7 @@ describe("the queue of what waits for a person", () => {
     const { fake } = server(queue({ tickets: [ticket(1, "agent-gave-up")] }));
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
+    expect(screen.getByRole("tab", { name: /卡住的票/ })).toBeTruthy();
     expect(card("T-1").getByText("Ticket 1")).toBeTruthy();
     expect(card("T-1").getByTitle("agent-gave-up").textContent).toBe(
       "模型放弃",

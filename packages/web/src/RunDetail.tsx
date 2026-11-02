@@ -17,7 +17,7 @@ import {
   TabsTrigger,
 } from "./components/ui/tabs.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
-import { stageLabel } from "./lib/labels.ts";
+import { runResultLabel, stageLabel } from "./lib/labels.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
@@ -69,13 +69,6 @@ export function RunDetail({
   if (!run) return null;
 
   const result = run.result ?? "running";
-  const resultLabel: Record<string, string> = {
-    done: "成功",
-    passed: "成功",
-    failed: "失败",
-    running: "运行中",
-    cancelled: "已取消",
-  };
   const duration = formatDuration(run.durationMs);
   const commits = run.commits ?? [];
   const contractEntries = run.contractShas
@@ -85,7 +78,7 @@ export function RunDetail({
 
   return (
     <Page
-      title={`${run.displayId} · ${run.ticketDisplayId ?? run.specDisplayId} · ${stageLabel[run.stage] ?? run.stage} · 第 ${run.attempt} 次 · ${resultLabel[result] ?? result} · ${duration}`}
+      title={`${run.displayId} · ${run.ticketDisplayId ?? run.specDisplayId} · ${stageLabel[run.stage] ?? run.stage} · 第 ${run.attempt} 次 · ${runResultLabel[result] ?? result} · ${duration}`}
       actions={<StaleNotice error={view.error} />}
     >
       <div className="mb-5 flex flex-wrap gap-5 text-sm">

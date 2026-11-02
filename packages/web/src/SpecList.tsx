@@ -249,7 +249,7 @@ export function SpecList() {
                         return next;
                       })
                     }
-                    title={specStateLabel(st)}
+                    title={st}
                     className={cn(
                       "inline-flex h-6 items-center gap-1.5 rounded-sm border px-1.5 font-mono text-[11px] transition-colors",
                       on
@@ -257,7 +257,7 @@ export function SpecList() {
                         : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                     )}
                   >
-                    {st}
+                    {specStateLabel(st)}
                     <span className="tabular text-subtle-foreground">
                       {stateCounts.get(st)}
                     </span>

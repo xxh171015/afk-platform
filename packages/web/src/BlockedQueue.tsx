@@ -131,7 +131,7 @@ const barClass: Record<Category, string> = {
   paused: "bg-state-paused",
 };
 const categoryLabel: Record<Category, string> = {
-  ticket: "blocked 票",
+  ticket: "卡住的票",
   final: "停下的收尾",
   pr: "需要看的 PR",
   ready: "没能转为 ready",
@@ -746,7 +746,7 @@ export function BlockedQueue() {
     counts.tickets + counts.final + counts.pr + counts.cleanup + counts.paused;
   const filterLabel: Record<Filter, string> = {
     all: "全部",
-    tickets: "blocked 票",
+    tickets: "卡住的票",
     final: "收尾",
     pr: "PR",
     cleanup: "清理",

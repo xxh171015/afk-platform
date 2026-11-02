@@ -44,7 +44,7 @@ import {
   SelectValue,
 } from "./components/ui/select.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
-import { ticketTypeLabel } from "./lib/labels.ts";
+import { runResultLabel, ticketTypeLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
 import { Markdown } from "./Markdown.tsx";
@@ -212,7 +212,11 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
                             {run.axis ? ` (${run.axis})` : ""} #{run.attempt}
                           </Mono>
                         </td>
-                        <td className="p-2.5">{run.result ?? "running"}</td>
+                        <td className="p-2.5" title={run.result ?? "running"}>
+                          {runResultLabel[run.result ?? "running"] ??
+                            run.result ??
+                            "running"}
+                        </td>
                         <td className="whitespace-nowrap p-2.5">
                           {formatSeconds(run.durationMs)}
                         </td>

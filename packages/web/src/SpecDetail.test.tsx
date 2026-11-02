@@ -466,9 +466,11 @@ describe("the spec page", () => {
         "GET /specs/1": () => ({ json: view({ spec: { warnings } }) }),
       }),
     );
-    expect(
-      await screen.findByText(/tickets a and b touch overlapping modules/),
-    ).toBeTruthy();
+    const warning = await screen.findByText(
+      /tickets a and b touch overlapping modules/,
+    );
+    expect(warning.getAttribute("data-level")).toBe("yellow");
+    expect(warning.className).toMatch(/text-state-paused/);
   });
 
   it("says so when there are no warnings", async () => {
@@ -1059,6 +1061,31 @@ describe("the six-step bar and nested pages", () => {
         "href",
       ),
     ).toBe("/tickets/1");
+  });
+
+  it("sits on 确认 when a confirmed spec is paused before any ticket starts", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "paused", pauseReason: "budget" },
+            tickets: [ticket(1, "pending")],
+            timeline: [
+              {
+                at: "2026-10-28T09:00:00.000Z",
+                kind: "confirm-plan",
+                specId: 1,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("flow-bar");
+    expect(bar.querySelector('[data-current="true"]')?.textContent).toContain(
+      "确认",
+    );
   });
 
   it("sits on 收尾 when finalizing has no PR, and 开 PR once a PR exists", async () => {
