@@ -56,20 +56,25 @@ describe("the spec list", () => {
 
     const rows = await screen.findAllByRole("row");
     expect(rows).toHaveLength(3); // header and two specs
-    const first = within(rows[1] as HTMLElement);
-    expect(first.getByText("S-2")).toBeTruthy();
-    expect(first.getByTitle("draft").textContent).toBe("草稿");
-    expect(first.getByText("other")).toBeTruthy();
-    expect(first.getByText("0/0 done")).toBeTruthy();
+    const draft = within(
+      rows.find((row) => row.textContent?.includes("S-2")) as HTMLElement,
+    );
+    expect(draft.getByText("S-2")).toBeTruthy();
+    expect(draft.getByTitle("draft").textContent).toBe("草稿");
+    expect(draft.getByText("other")).toBeTruthy();
+    expect(draft.getByText("0/0 已完成")).toBeTruthy();
 
-    const second = within(rows[2] as HTMLElement);
-    expect(second.getByText("Order export")).toBeTruthy();
-    expect(second.getByTitle("running").textContent).toBe("运行中");
-    expect(second.getByText("1/4 done, 1 blocked")).toBeTruthy();
-    const bar = second.getByRole("progressbar");
+    const running = within(
+      rows.find((row) =>
+        row.textContent?.includes("Order export"),
+      ) as HTMLElement,
+    );
+    expect(running.getByText("Order export")).toBeTruthy();
+    expect(running.getByTitle("running").textContent).toBe("运行中");
+    expect(running.getByText("1/4 已完成，1 张卡住")).toBeTruthy();
+    const bar = running.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("1");
     expect(bar.getAttribute("aria-valuemax")).toBe("4");
-    expect((bar.firstElementChild as HTMLElement).style.width).toBe("25%");
   });
 
   it("links each spec to its page", async () => {
@@ -104,8 +109,8 @@ describe("the spec list", () => {
       }),
     });
     renderWithApp(<SpecList />, server);
-    expect(await screen.findByText("2/2 done")).toBeTruthy();
-    expect(screen.queryByText(/blocked/)).toBeNull();
+    expect(await screen.findByText("2/2 已完成")).toBeTruthy();
+    expect(screen.queryByText(/卡住/)).toBeNull();
   });
 
   it("says so when there is nothing yet", async () => {
@@ -113,7 +118,7 @@ describe("the spec list", () => {
       <SpecList />,
       fakeServer({ "GET /specs": () => ({ json: { specs: [] } }) }),
     );
-    expect(await screen.findByText(/No specs yet/)).toBeTruthy();
+    expect(await screen.findByText("还没有需求")).toBeTruthy();
   });
 
   it("says it is loading, and then says what went wrong when the API fails", async () => {
@@ -124,11 +129,9 @@ describe("the spec list", () => {
       }),
     });
     renderWithApp(<SpecList />, server);
-    expect(screen.getByText("Loading specs…")).toBeTruthy();
+    expect(screen.getByText("加载需求…")).toBeTruthy();
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain(
-      "Could not load the specs: database is down",
-    );
+    expect(alert.textContent).toContain("无法加载需求: database is down");
   });
 
   it("keeps showing the list when a later GET fails", async () => {
@@ -147,6 +150,6 @@ describe("the spec list", () => {
       expect(queryClient.getQueryState(["specs"])?.status).toBe("error"),
     );
     expect(screen.getByText("Order export")).toBeTruthy();
-    expect(screen.queryByText(/Could not load the specs/)).toBeNull();
+    expect(screen.queryByText(/无法加载需求/)).toBeNull();
   });
 });

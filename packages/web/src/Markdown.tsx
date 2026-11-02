@@ -44,7 +44,7 @@ export function Markdown({
   return (
     <div className="markdown">
       {contents && sections.length > 0 ? (
-        <nav className="contents" aria-label="Contents">
+        <nav className="contents" aria-label="目录">
           <ul>
             {sections.map((section) => (
               <li key={section.id}>
