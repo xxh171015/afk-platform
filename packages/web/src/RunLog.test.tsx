@@ -78,7 +78,7 @@ describe("the log of a run", () => {
   it("keeps polling while the run is going, even before anything is written", async () => {
     const { state, server, write } = growingLog("");
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
-    await screen.findByText("Nothing logged yet.");
+    await screen.findByText("还没有日志。");
     const before = state.asked.length;
     await waitFor(() => expect(state.asked.length).toBeGreaterThan(before + 1));
     write("now there is something\n");
@@ -119,9 +119,9 @@ describe("the log of a run", () => {
       }),
     });
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
-    expect(screen.getByText("Loading the log…")).toBeTruthy();
+    expect(screen.getByText("加载日志…")).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Could not load the log: no such run",
+      "无法加载日志: no such run",
     );
   });
 
@@ -162,7 +162,7 @@ describe("the log of a run", () => {
       ).toBe(true),
     );
     expect(log()).toContain("still here");
-    expect(screen.queryByText(/Could not load the log/)).toBeNull();
+    expect(screen.queryByText(/无法加载日志/)).toBeNull();
   });
 
   it("splits JSON events by action and keeps the original JSON collapsed", async () => {

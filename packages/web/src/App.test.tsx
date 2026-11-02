@@ -140,6 +140,9 @@ const server = () =>
         refShas: null,
         startedAt: "2026-10-28T10:00:00.000Z",
         finishedAt: "2026-10-28T10:00:01.000Z",
+        prompt: null,
+        output: null,
+        commits: [],
       },
     }),
     "GET /runs/4/logs": () => ({
@@ -225,7 +228,7 @@ describe("the app", () => {
 
   it("opens a run at /runs/<id>", async () => {
     renderApp(server(), "/runs/4");
-    expect(await screen.findByRole("heading", { name: "R-4" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /R-4/ })).toBeTruthy();
     expect(screen.getByText("implement")).toBeTruthy();
     expect(screen.getByText("次数")).toBeTruthy();
   });
@@ -238,7 +241,7 @@ describe("the app", () => {
     fireEvent.change(box, { target: { value: "R-4" } });
     fireEvent.click(await screen.findByRole("option", { name: "R-4" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/runs/4"));
-    expect(await screen.findByRole("heading", { name: "R-4" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /R-4/ })).toBeTruthy();
   });
 
   it("shows the queue at /waiting and counts it in the menu", async () => {

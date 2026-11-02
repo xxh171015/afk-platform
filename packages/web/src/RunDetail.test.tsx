@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { RunDetail } from "./RunDetail.tsx";
 import { fakeServer, renderWithApp } from "./test-utils.tsx";
@@ -26,6 +26,9 @@ const run = (over: Record<string, unknown> = {}) => ({
   refShas: null,
   startedAt: "2026-10-28T10:00:00.000Z",
   finishedAt: "2026-10-28T10:02:26.000Z",
+  prompt: null,
+  output: null,
+  commits: [],
   ...over,
 });
 
@@ -57,7 +60,7 @@ describe("the run page", () => {
     );
     const heading = await screen.findByRole("heading", {
       level: 1,
-      name: "R-4",
+      name: /R-4/,
     });
     expect(heading).toBeTruthy();
     expect(screen.getByText("阶段")).toBeTruthy();
@@ -76,6 +79,11 @@ describe("the run page", () => {
     );
     expect(screen.getByText("读取")).toBeTruthy();
     expect(screen.getByText("运行命令")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "提示词" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "结构化输出" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "提交" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "提交" }));
+    expect(await screen.findByText("没有提交记录")).toBeTruthy();
   });
 
   it("links a finishing run with no ticket back to the spec", async () => {
@@ -93,9 +101,10 @@ describe("the run page", () => {
         "GET /runs/4/logs": () => finishedLog(""),
       }),
     );
-    expect(
-      (await screen.findByRole("link", { name: /S-1/ })).getAttribute("href"),
-    ).toBe("/specs/1");
+    const specLinks = await screen.findAllByRole("link", { name: /S-1/ });
+    expect(specLinks.map((link) => link.getAttribute("href"))).toEqual([
+      "/specs/1",
+    ]);
   });
 
   it("keeps showing the run when a later GET fails", async () => {
@@ -108,13 +117,55 @@ describe("the run page", () => {
       "GET /runs/4/logs": () => finishedLog(""),
     });
     const { queryClient } = renderWithApp(<RunDetail runId={4} />, server);
-    await screen.findByRole("heading", { name: "R-4" });
+    await screen.findByRole("heading", { name: /R-4/ });
     failing = true;
     await queryClient.refetchQueries({ queryKey: ["run", 4] });
     await waitFor(() =>
       expect(queryClient.getQueryState(["run", 4])?.status).toBe("error"),
     );
-    expect(screen.getByRole("heading", { name: "R-4" })).toBeTruthy();
-    expect(screen.queryByText(/Could not load the run/)).toBeNull();
+    expect(screen.getByRole("heading", { name: /R-4/ })).toBeTruthy();
+    expect(screen.queryByText(/无法加载这次运行/)).toBeNull();
+  });
+
+  it("keeps the three tabs and shows empty states when prompt, output and commits are missing", async () => {
+    renderWithApp(
+      <RunDetail runId={4} />,
+      fakeServer({
+        "GET /runs/4": () => ({ json: run() }),
+        "GET /runs/4/logs": () => finishedLog(""),
+      }),
+    );
+    expect(await screen.findByRole("tab", { name: "提示词" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "结构化输出" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "提交" })).toBeTruthy();
+    expect(screen.getByText("没有提示词")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "结构化输出" }));
+    expect(await screen.findByText("没有结构化输出")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "提交" }));
+    expect(await screen.findByText("没有提交记录")).toBeTruthy();
+  });
+
+  it("shows the prompt, a JSON tree of the structured output, and only SHAs for commits", async () => {
+    renderWithApp(
+      <RunDetail runId={4} />,
+      fakeServer({
+        "GET /runs/4": () => ({
+          json: run({
+            prompt: "overlay + implement",
+            output: { outcome: "done", files: ["src/a.ts"] },
+            commits: ["abcdef1234567890"],
+          }),
+        }),
+        "GET /runs/4/logs": () => finishedLog(""),
+      }),
+    );
+    expect(await screen.findByText("overlay + implement")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "结构化输出" }));
+    expect(await screen.findByText(/outcome/)).toBeTruthy();
+    expect(screen.getByText(/"done"/)).toBeTruthy();
+    expect(screen.queryByText("nextAction")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "提交" }));
+    expect(await screen.findByRole("button", { name: "abcdef1" })).toBeTruthy();
+    expect(screen.queryByText(/implement the export/)).toBeNull();
   });
 });

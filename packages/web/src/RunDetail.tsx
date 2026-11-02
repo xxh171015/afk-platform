@@ -1,15 +1,27 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { Mono, ShaChip } from "./components/afk/badges.tsx";
+import { JsonTree } from "./components/afk/json-tree.tsx";
+import { Page } from "./components/afk/page.tsx";
+import {
+  EmptyState,
+  ErrorState,
+  RowsSkeleton,
+  StaleNotice,
+} from "./components/afk/states.tsx";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "./components/ui/tabs.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { stageLabel } from "./lib/labels.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
-
-// One Run: the four facts first, then the log split by action
-// (docs/specs/experience-platform.md「Run 日志」).
-
-const seconds = (ms: number | null) =>
-  ms === null ? "—" : `${Math.round(ms / 1000)} s`;
+import { formatDuration, formatSeconds } from "./time.ts";
 
 export function RunDetail({
   runId,
@@ -20,6 +32,7 @@ export function RunDetail({
 }) {
   const api = useApi();
   const poll = useResourcePoll(DETAIL_POLL_MS);
+  const [tab, setTab] = useState("prompt");
   const view = useQuery({
     queryKey: ["run", runId],
     queryFn: async () => {
@@ -33,41 +46,170 @@ export function RunDetail({
     placeholderData: keepPreviousData,
   });
 
-  if (view.isPending) return <p className="note">Loading the run…</p>;
-  if (view.isError && !view.data)
+  if (view.isPending) {
     return (
-      <p className="error" role="alert">
-        Could not load the run: {view.error.message}
-      </p>
+      <Page title="Run">
+        <p className="sr-only">加载这次运行…</p>
+        <RowsSkeleton rows={8} />
+      </Page>
     );
+  }
+  if (view.isError && !view.data) {
+    return (
+      <Page title="Run">
+        <ErrorState
+          error={view.error}
+          prefix="无法加载这次运行"
+          onRetry={() => void view.refetch()}
+        />
+      </Page>
+    );
+  }
   const run = view.data;
   if (!run) return null;
 
-  const back = run.ticketId
-    ? { href: paths.ticket(run.ticketId), label: run.ticketDisplayId }
-    : { href: paths.spec(run.specId), label: run.specDisplayId };
+  const result = run.result ?? "running";
+  const resultLabel: Record<string, string> = {
+    done: "成功",
+    passed: "成功",
+    failed: "失败",
+    running: "运行中",
+    cancelled: "已取消",
+  };
+  const duration = formatDuration(run.durationMs);
+  const commits = run.commits ?? [];
+  const contractEntries = run.contractShas
+    ? Object.entries(run.contractShas)
+    : [];
+  const refEntries = run.refShas ? Object.entries(run.refShas) : [];
 
   return (
-    <section className="run-detail">
-      <p>
-        <a href={back.href}>← {back.label}</a>
-      </p>
-      <h1>{run.displayId}</h1>
-      <dl className="mt-4 grid grid-cols-[6rem_1fr] gap-2 text-sm">
-        <dt>阶段</dt>
-        <dd>
-          {run.stage}
-          {run.axis ? ` (${run.axis})` : ""}
-        </dd>
-        <dt>次数</dt>
-        <dd>{run.attempt}</dd>
-        <dt>结果</dt>
-        <dd>{run.result ?? "running"}</dd>
-        <dt>耗时</dt>
-        <dd>{seconds(run.durationMs)}</dd>
+    <Page
+      title={`${run.displayId} · ${run.ticketDisplayId ?? run.specDisplayId} · ${stageLabel[run.stage] ?? run.stage} · 第 ${run.attempt} 次 · ${resultLabel[result] ?? result} · ${duration}`}
+      actions={<StaleNotice error={view.error} />}
+    >
+      <div className="mb-5 flex flex-wrap gap-5 text-sm">
+        {run.ticketId ? (
+          <a
+            href={paths.ticket(run.ticketId)}
+            className="text-primary hover:underline"
+          >
+            {run.ticketDisplayId}
+          </a>
+        ) : null}
+        <a
+          href={paths.spec(run.specId)}
+          className="text-primary hover:underline"
+        >
+          {run.specDisplayId}
+        </a>
+      </div>
+      <dl className="mb-7 flex flex-wrap gap-x-6 gap-y-4 border-y py-4 text-xs">
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">阶段</dt>
+          <dd>
+            <Mono title={stageLabel[run.stage]}>{run.stage}</Mono>
+            {run.axis ? ` (${run.axis})` : ""}
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">次数</dt>
+          <dd>{run.attempt}</dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">结果</dt>
+          <dd>
+            <Mono>{result}</Mono>
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">耗时</dt>
+          <dd>{formatSeconds(run.durationMs)}</dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">模型</dt>
+          <dd>
+            <Mono>{run.model ?? "—"}</Mono>
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">skills SHA</dt>
+          <dd>
+            <ShaChip sha={run.skillsSha ?? null} />
+          </dd>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <dt className="text-muted-foreground">契约 SHA</dt>
+          <dd className="flex flex-wrap gap-2">
+            {contractEntries.length
+              ? contractEntries.map(([repo, sha]) => (
+                  <span key={repo} className="flex items-center gap-2">
+                    <Mono>{repo}</Mono>
+                    <ShaChip sha={sha} />
+                  </span>
+                ))
+              : "—"}
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">refs SHA</dt>
+          <dd className="flex flex-wrap gap-2">
+            {refEntries.length
+              ? refEntries.map(([repo, sha]) => (
+                  <span key={repo} className="flex items-center gap-2">
+                    <Mono>{repo}</Mono>
+                    <ShaChip sha={sha} />
+                  </span>
+                ))
+              : "—"}
+          </dd>
+        </div>
       </dl>
-      <h2 className="mt-6 text-base font-semibold">日志</h2>
       <RunLog runId={runId} pollMs={logPollMs} />
-    </section>
+      <Tabs value={tab} onValueChange={setTab} className="mt-7">
+        <TabsList>
+          <TabsTrigger value="prompt" onClick={() => setTab("prompt")}>
+            提示词
+          </TabsTrigger>
+          <TabsTrigger value="output" onClick={() => setTab("output")}>
+            结构化输出
+          </TabsTrigger>
+          <TabsTrigger value="commits" onClick={() => setTab("commits")}>
+            提交
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="prompt">
+          {run.prompt ? (
+            <pre className="whitespace-pre-wrap break-words py-4 font-sans text-sm leading-7">
+              {run.prompt}
+            </pre>
+          ) : (
+            <EmptyState title="没有提示词" />
+          )}
+        </TabsContent>
+        <TabsContent value="output">
+          {run.output == null ? (
+            <EmptyState title="没有结构化输出" />
+          ) : (
+            <div className="overflow-x-auto py-4">
+              <JsonTree value={run.output} />
+            </div>
+          )}
+        </TabsContent>
+        <TabsContent value="commits">
+          {commits.length ? (
+            <ul className="divide-y">
+              {commits.map((sha) => (
+                <li key={sha} className="flex items-start gap-3 py-4 text-sm">
+                  <ShaChip sha={sha} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState title="没有提交记录" />
+          )}
+        </TabsContent>
+      </Tabs>
+    </Page>
   );
 }
