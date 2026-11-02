@@ -173,10 +173,10 @@ describe("the queue of what waits for a person", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-2");
     expect(
-      card("T-1").queryByRole("button", { name: "Approve protected paths" }),
+      card("T-1").queryByRole("button", { name: "批准这些保护路径" }),
     ).toBeNull();
     expect(
-      card("T-2").getByRole("button", { name: "Approve protected paths" }),
+      card("T-2").getByRole("button", { name: "批准这些保护路径" }),
     ).toBeTruthy();
   });
 
@@ -186,8 +186,8 @@ describe("the queue of what waits for a person", () => {
     );
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-5");
-    expect(card("T-5").queryByRole("button", { name: /Retry/ })).toBeNull();
-    expect(card("T-5").getByRole("button", { name: "Cancel…" })).toBeTruthy();
+    expect(card("T-5").queryByRole("button", { name: /重试/ })).toBeNull();
+    expect(card("T-5").getByRole("button", { name: "取消…" })).toBeTruthy();
   });
 });
 
@@ -201,7 +201,7 @@ describe("retrying", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
     fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+      card("T-1").getByRole("button", { name: "重试，保留已有工作" }),
     );
     await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
     expect(bodies["POST /tickets/1/retry"]).toEqual({ mode: "continue" });
@@ -214,13 +214,9 @@ describe("retrying", () => {
     );
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
-    fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry from scratch" }),
-    );
+    fireEvent.click(card("T-1").getByRole("button", { name: "从头重试" }));
     expect(bodies["POST /tickets/1/retry"]).toBeUndefined();
-    fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry T-1 from scratch" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "确认从头重试" }));
     await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
     expect(bodies["POST /tickets/1/retry"]).toEqual({ mode: "restart" });
   });
@@ -235,7 +231,7 @@ describe("retrying", () => {
       target: { value: "use the helper in src/orders/csv.ts" },
     });
     fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+      card("T-1").getByRole("button", { name: "重试，保留已有工作" }),
     );
     await waitFor(() => expect(screen.queryByTestId("blocked-T-1")).toBeNull());
     expect(bodies["POST /tickets/1/retry"]).toEqual({
@@ -289,7 +285,7 @@ describe("retrying", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
     fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+      card("T-1").getByRole("button", { name: "重试，保留已有工作" }),
     );
     expect((await screen.findByRole("alert")).textContent).toBe(
       "retry is not allowed in running",
@@ -324,14 +320,10 @@ describe("while an action is under way", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
     fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+      card("T-1").getByRole("button", { name: "重试，保留已有工作" }),
     );
     await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2)); // the refresh has started
-    for (const name of [
-      "Retry, keep the work",
-      "Retry from scratch",
-      "Cancel…",
-    ]) {
+    for (const name of ["重试，保留已有工作", "从头重试", "取消…"]) {
       expect(
         (card("T-1").getByRole("button", { name }) as HTMLButtonElement)
           .disabled,
@@ -355,15 +347,13 @@ describe("while an action is under way", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
     fireEvent.click(
-      card("T-1").getByRole("button", { name: "Retry, keep the work" }),
+      card("T-1").getByRole("button", { name: "重试，保留已有工作" }),
     );
     expect((await screen.findByRole("alert")).textContent).toBe(
       "the retry was refused",
     );
-    fireEvent.click(card("T-1").getByRole("button", { name: "Cancel…" }));
-    fireEvent.click(
-      card("T-1").getByRole("button", { name: "Cancel T-1 for good" }),
-    );
+    fireEvent.click(card("T-1").getByRole("button", { name: "取消…" }));
+    fireEvent.click(screen.getByRole("button", { name: "永久取消 T-1" }));
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toBe(
         "the cancel was refused",
@@ -376,13 +366,13 @@ describe("while an action is under way", () => {
     const { fake } = server(queue({ tickets: [ticket(3, "agent-gave-up")] }));
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-3");
-    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
-    fireEvent.click(card("T-3").getByRole("checkbox"));
-    fireEvent.click(card("T-3").getByRole("button", { name: "Keep it" }));
-    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
-    expect(
-      (card("T-3").getByRole("checkbox") as HTMLInputElement).checked,
-    ).toBe(false);
+    fireEvent.click(card("T-3").getByRole("button", { name: "取消…" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    fireEvent.click(card("T-3").getByRole("button", { name: "取消…" }));
+    expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe(
+      "false",
+    );
   });
 });
 
@@ -397,7 +387,7 @@ describe("when a refresh fails", () => {
     });
     const { queryClient } = renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-1");
-    fireEvent.click(card("T-1").getByRole("button", { name: "Cancel…" }));
+    fireEvent.click(card("T-1").getByRole("button", { name: "取消…" }));
 
     failing = true;
     const reads = fake.calls.length;
@@ -407,10 +397,8 @@ describe("when a refresh fails", () => {
       expect(queryClient.getQueryState(["blocked"])?.status).toBe("error"),
     );
     expect(screen.getByTestId("blocked-T-1")).toBeTruthy();
-    expect(
-      card("T-1").getByRole("button", { name: "Cancel T-1 for good" }),
-    ).toBeTruthy(); // the open confirm is still there
-    expect(screen.queryByText(/Could not load the queue/)).toBeNull();
+    expect(screen.getByRole("button", { name: "永久取消 T-1" })).toBeTruthy(); // the open confirm is still there
+    expect(screen.queryByText(/无法加载待处理/)).toBeNull();
   });
 });
 
@@ -421,11 +409,7 @@ describe("a ticket that waits for a cancelled one", () => {
     );
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-5");
-    expect(
-      card("T-5").getByText(
-        /was cancelled, so trying again would only wait for ever/,
-      ),
-    ).toBeTruthy();
+    expect(card("T-5").getByText(/它等的票已取消/)).toBeTruthy();
   });
 });
 
@@ -437,11 +421,11 @@ describe("approving protected paths", () => {
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-2");
     fireEvent.click(
-      card("T-2").getByRole("button", { name: "Approve protected paths" }),
+      card("T-2").getByRole("button", { name: "批准这些保护路径" }),
     );
     await waitFor(() => expect(screen.queryByTestId("blocked-T-2")).toBeNull());
     expect(fake.calls).toContain("POST /tickets/2/approve-protected");
-    expect(await screen.findByText("Nothing is waiting for you.")).toBeTruthy();
+    expect(await screen.findByText("没有在等你的事")).toBeTruthy();
   });
 });
 
@@ -450,12 +434,10 @@ describe("cancelling", () => {
     const { fake } = server(queue({ tickets: [ticket(3, "agent-gave-up")] }));
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-3");
-    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
-    expect(
-      card("T-3").getByRole("button", { name: "Cancel T-3 for good" }),
-    ).toBeTruthy();
-    fireEvent.click(card("T-3").getByRole("button", { name: "Keep it" }));
-    expect(card("T-3").getByRole("button", { name: "Cancel…" })).toBeTruthy();
+    fireEvent.click(card("T-3").getByRole("button", { name: "取消…" }));
+    expect(screen.getByRole("button", { name: "永久取消 T-3" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(card("T-3").getByRole("button", { name: "取消…" })).toBeTruthy();
     expect(fake.calls).not.toContain("POST /tickets/3/cancel");
   });
 
@@ -465,10 +447,8 @@ describe("cancelling", () => {
     );
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-3");
-    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
-    fireEvent.click(
-      card("T-3").getByRole("button", { name: "Cancel T-3 for good" }),
-    );
+    fireEvent.click(card("T-3").getByRole("button", { name: "取消…" }));
+    fireEvent.click(screen.getByRole("button", { name: "永久取消 T-3" }));
     await waitFor(() => expect(screen.queryByTestId("blocked-T-3")).toBeNull());
     expect(bodies["POST /tickets/3/cancel"]).toEqual({ cascade: false });
   });
@@ -479,11 +459,9 @@ describe("cancelling", () => {
     );
     renderWithApp(<BlockedQueue />, fake);
     await screen.findByTestId("blocked-T-3");
-    fireEvent.click(card("T-3").getByRole("button", { name: "Cancel…" }));
-    fireEvent.click(card("T-3").getByRole("checkbox"));
-    fireEvent.click(
-      card("T-3").getByRole("button", { name: "Cancel T-3 for good" }),
-    );
+    fireEvent.click(card("T-3").getByRole("button", { name: "取消…" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "永久取消 T-3" }));
     await waitFor(() => expect(screen.queryByTestId("blocked-T-3")).toBeNull());
     expect(bodies["POST /tickets/3/cancel"]).toEqual({ cascade: true });
   });
@@ -527,10 +505,10 @@ describe("paused specs and stopped overall reviews", () => {
       spec.getByText(/the agent time limit of the spec was reached/),
     ).toBeTruthy();
     expect(spec.queryByLabelText("这一次 Run 的说明")).toBeNull();
-    fireEvent.change(spec.getByLabelText("extra agent hours for S-1"), {
+    fireEvent.change(spec.getByLabelText("S-1 追加的 agent 小时"), {
       target: { value: "2.5" },
     });
-    fireEvent.click(spec.getByRole("button", { name: "Resume" }));
+    fireEvent.click(spec.getByRole("button", { name: "恢复" }));
     await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
     expect(resumed).toEqual({ extraSeconds: 9000 });
   });
@@ -544,10 +522,10 @@ describe("paused specs and stopped overall reviews", () => {
     );
     const spec = within(await screen.findByTestId("paused-S-1"));
     const field = spec.getByLabelText(
-      "extra agent hours for S-1",
+      "S-1 追加的 agent 小时",
     ) as HTMLInputElement;
     const resume = spec.getByRole("button", {
-      name: "Resume",
+      name: "恢复",
     }) as HTMLButtonElement;
     const ok = (value: string) => {
       fireEvent.change(field, { target: { value } });
@@ -571,11 +549,11 @@ describe("paused specs and stopped overall reviews", () => {
       }),
     );
     const spec = within(await screen.findByTestId("paused-S-1"));
-    fireEvent.change(spec.getByLabelText("extra agent hours for S-1"), {
+    fireEvent.change(spec.getByLabelText("S-1 追加的 agent 小时"), {
       target: { value: "0" },
     });
     expect(
-      (spec.getByRole("button", { name: "Resume" }) as HTMLButtonElement)
+      (spec.getByRole("button", { name: "恢复" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });
@@ -600,9 +578,7 @@ describe("paused specs and stopped overall reviews", () => {
     fireEvent.change(item.getByLabelText("这一次 Run 的说明"), {
       target: { value: "take theirs on src/a.ts" },
     });
-    fireEvent.click(
-      item.getByRole("button", { name: "Run final-merge again" }),
-    );
+    fireEvent.click(item.getByRole("button", { name: "再跑一次 final-merge" }));
     await waitFor(() =>
       expect(screen.queryByTestId("final-S-1-backend")).toBeNull(),
     );
@@ -631,13 +607,12 @@ describe("paused specs and stopped overall reviews", () => {
     renderWithApp(<BlockedQueue />, fake);
     const item = within(await screen.findByTestId("final-S-1-(integration)"));
     expect(item.getByTitle("final-e2e-failed")).toBeTruthy();
-    expect(item.getByText(/e2e before the pull requests/)).toBeTruthy();
+    expect(item.getByText(/开 PR 前的联调/)).toBeTruthy();
     expect(
-      item.getByRole("button", { name: "Run final-e2e again" }),
+      item.getByRole("button", { name: "再跑一次 final-e2e" }),
     ).toBeTruthy();
-    fireEvent.click(
-      item.getByRole("button", { name: "Open the pull requests anyway" }),
-    );
+    fireEvent.click(item.getByRole("button", { name: "仍然开 PR" }));
+    fireEvent.click(screen.getByRole("button", { name: "仍然开 PR" }));
     await waitFor(() =>
       expect(screen.queryByTestId("final-S-1-(integration)")).toBeNull(),
     );
@@ -652,9 +627,7 @@ describe("paused specs and stopped overall reviews", () => {
       }),
     );
     const item = within(await screen.findByTestId("final-S-1-backend"));
-    expect(
-      item.queryByRole("button", { name: "Open the pull requests anyway" }),
-    ).toBeNull();
+    expect(item.queryByRole("button", { name: "仍然开 PR" })).toBeNull();
   });
 
   it("shows a resume refusal", async () => {
@@ -668,7 +641,7 @@ describe("paused specs and stopped overall reviews", () => {
     renderWithApp(<BlockedQueue />, fake);
     fireEvent.click(
       within(await screen.findByTestId("paused-S-1")).getByRole("button", {
-        name: "Resume",
+        name: "恢复",
       }),
     );
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -705,7 +678,7 @@ describe("pull requests a person has to look at", () => {
       "/specs/1",
     );
     expect(
-      item.getByText(/Reopen it on the host, rework the spec, or cancel it/),
+      item.getByText(/到代码托管上重新打开它、返工这个需求，或取消它/),
     ).toBeTruthy();
   });
 
@@ -722,9 +695,7 @@ describe("pull requests a person has to look at", () => {
     );
     const item = within(await screen.findByTestId("pull-S-1-backend"));
     expect(item.getByText("关闭未合并")).toBeTruthy();
-    expect(
-      item.getByText(/could not be read: GitHub answered 404/),
-    ).toBeTruthy();
+    expect(item.getByText(/读取失败：GitHub answered 404/)).toBeTruthy();
   });
 
   it("shows why a pull request cannot be read", async () => {
@@ -741,9 +712,7 @@ describe("pull requests a person has to look at", () => {
       }),
     );
     const item = within(await screen.findByTestId("pull-S-1-backend"));
-    expect(
-      item.getByText(/could not be read: GitHub answered 404/),
-    ).toBeTruthy();
+    expect(item.getByText(/读取失败：GitHub answered 404/)).toBeTruthy();
     expect(item.queryByText(/关闭未合并/)).toBeNull();
   });
 });
@@ -795,7 +764,7 @@ describe("a draft pull request that could not be turned ready", () => {
     );
     const item = within(await screen.findByTestId("ready-S-1-frontend"));
     expect(item.getByText(/refused to mark pull request 2 ready/)).toBeTruthy();
-    expect(item.getByText(/still a draft/)).toBeTruthy();
+    expect(item.getByText(/仍是 draft/)).toBeTruthy();
   });
 });
 
@@ -805,7 +774,7 @@ describe("when there is nothing to show", () => {
       <BlockedQueue />,
       fakeServer({ "GET /blocked": () => ({ json: queue() }) }),
     );
-    expect(await screen.findByText("Nothing is waiting for you.")).toBeTruthy();
+    expect(await screen.findByText("没有在等你的事")).toBeTruthy();
   });
 
   it("says it is loading, and says what went wrong", async () => {
@@ -818,9 +787,9 @@ describe("when there is nothing to show", () => {
         }),
       }),
     );
-    expect(screen.getByText("Loading what is waiting for you…")).toBeTruthy();
+    expect(screen.getByText("加载待处理…")).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Could not load the queue: database is down",
+      "无法加载待处理: database is down",
     );
   });
 });
