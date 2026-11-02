@@ -1362,7 +1362,12 @@ describe("what a person sees", () => {
     const specId = await runningSpec([ticket("a")]);
     await stage("implement", {
       outcome: "done",
-      run: { durationMs: 146000 },
+      run: {
+        durationMs: 146000,
+        prompt: "overlay + implement",
+        output: { outcome: "done" },
+        commits: ["abc1234"],
+      },
     });
     const ticketRun = await call("GET", "/runs/1");
     expect(ticketRun.status).toBe(200);
@@ -1377,7 +1382,14 @@ describe("what a person sees", () => {
       attempt: 1,
       result: "done",
       durationMs: 146000,
+      prompt: "overlay + implement",
+      output: { outcome: "done" },
+      commits: ["abc1234"],
     });
+    const listed = await call("GET", "/tickets/1");
+    expect(listed.body.runs[0].prompt).toBeUndefined();
+    expect(listed.body.runs[0].output).toBeUndefined();
+    expect(listed.body.runs[0].commits).toBeUndefined();
     await db.pool.query(
       `INSERT INTO runs (spec_id, repo_id, stage, result)
        VALUES ($1, 1, 'final-review', 'passed')`,
@@ -1392,6 +1404,9 @@ describe("what a person sees", () => {
       ticketDisplayId: null,
       stage: "final-review",
       result: "passed",
+      prompt: null,
+      output: null,
+      commits: [],
     });
     expect((await call("GET", "/runs/99")).status).toBe(404);
   });

@@ -139,6 +139,11 @@ const RunView = RunRow.extend({
   specDisplayId: z.string(),
   ticketId: Id.nullable(),
   ticketDisplayId: z.string().nullable(),
+  // Run prompt / Structured output / commits: only on this detail. Ticket runs tables stay thin
+  // (docs/specs/experience-platform.md「Run 页签」).
+  prompt: z.string().nullable(),
+  output: z.unknown().nullable(),
+  commits: z.array(z.string()),
 });
 
 const ticketRoute = createRoute({
@@ -208,7 +213,10 @@ const runRoute = createRoute({
   path: "/runs/{id}",
   request: { params: z.object({ id: PathId }) },
   responses: {
-    200: reply("The run: stage, attempt, result and duration", RunView),
+    200: reply(
+      "The run: stage, attempt, result, duration, prompt, structured output and commits",
+      RunView,
+    ),
     404: reply("No such run", ErrorReply),
   },
 });

@@ -3110,7 +3110,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The run: stage, attempt, result and duration",
+            "description": "The run: stage, attempt, result, duration, prompt, structured output and commits",
             "content": {
               "application/json": {
                 "schema": {
@@ -3179,6 +3179,16 @@
                     },
                     "ticketDisplayId": {
                       "type": ["string", "null"]
+                    },
+                    "prompt": {
+                      "type": ["string", "null"]
+                    },
+                    "output": {},
+                    "commits": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -3200,7 +3210,9 @@
                     "specId",
                     "specDisplayId",
                     "ticketId",
-                    "ticketDisplayId"
+                    "ticketDisplayId",
+                    "prompt",
+                    "commits"
                   ]
                 }
               }

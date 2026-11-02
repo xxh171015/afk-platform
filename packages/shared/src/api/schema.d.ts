@@ -1653,7 +1653,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The run: stage, attempt, result and duration */
+        /** @description The run: stage, attempt, result, duration, prompt, structured output and commits */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1684,6 +1684,9 @@ export interface paths {
               specDisplayId: string;
               ticketId: number | null;
               ticketDisplayId: string | null;
+              prompt: string | null;
+              output?: unknown;
+              commits: string[];
             };
           };
         };

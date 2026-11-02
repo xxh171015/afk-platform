@@ -384,6 +384,12 @@ interface RunRecord {
   ref_shas: Record<string, string> | null;
 }
 
+interface RunDetailRecord extends RunRecord {
+  prompt: string | null;
+  output: unknown;
+  commits: string[];
+}
+
 function runRow(r: RunRecord) {
   return {
     id: r.id,
@@ -406,10 +412,11 @@ function runRow(r: RunRecord) {
 
 export async function runView(pool: pg.Pool, runId: number) {
   const { rows } = await pool.query<
-    RunRecord & { spec_id: number; ticket_id: number | null }
+    RunDetailRecord & { spec_id: number; ticket_id: number | null }
   >(
     `SELECT id, spec_id, ticket_id, stage, attempt, result, duration_ms, started_at, finished_at,
-            agent, model, skills_sha, axis, cursor_cli_version, contract_shas, ref_shas
+            agent, model, skills_sha, axis, cursor_cli_version, contract_shas, ref_shas,
+            prompt, output, commits
      FROM runs WHERE id = $1`,
     [runId],
   );
@@ -423,6 +430,9 @@ export async function runView(pool: pg.Pool, runId: number) {
     ticketDisplayId: r.ticket_id
       ? formatDisplayId("ticket", r.ticket_id)
       : null,
+    prompt: r.prompt,
+    output: r.output ?? null,
+    commits: r.commits ?? [],
   };
 }
 
