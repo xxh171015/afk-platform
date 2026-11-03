@@ -1,5 +1,7 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import {
   type ApiClient,
   createApiClient,
@@ -17,9 +19,18 @@ import {
   Option,
 } from "commander";
 import { blockedText, specText, ticketText } from "./format.ts";
+import {
+  hasRegistrations,
+  InitError,
+  inspectCheckout,
+  parseWith,
+  planInit,
+  planText,
+  TRACKER_DOC_PATH,
+} from "./init.ts";
 import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
 import { inspectPlanningCommit } from "./planning-commit.ts";
-import { renderTrackerDoc } from "./tracker-doc.ts";
+import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
@@ -32,6 +43,22 @@ export interface Io {
   // The regular files of a directory (not the hidden ones), with their text. Rejects when it is not a directory.
   readDirectory: (path: string) => Promise<{ name: string; text: string }[]>;
   cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
+  // Asks the person a yes/no question (`plat init`); absent when nobody can answer, e.g. stdin is not a terminal.
+  confirm?: (question: string) => Promise<boolean>;
+}
+
+async function askOnTerminal(question: string): Promise<boolean> {
+  const prompt = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+  try {
+    return /^y(es)?$/i.test(
+      (await prompt.question(`${question} [y/N] `)).trim(),
+    );
+  } finally {
+    prompt.close();
+  }
 }
 
 export const defaultIo: Io = {
@@ -51,6 +78,7 @@ export const defaultIo: Io = {
         })),
     );
   },
+  confirm: process.stdin.isTTY ? askOnTerminal : undefined,
 };
 
 const DEFAULT_API_URL = "http://127.0.0.1:3000";
@@ -287,6 +315,182 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       // A check that cannot run is not worth failing a command that worked.
     }
   };
+
+  program
+    .command("init")
+    .description(
+      "run in the planning repo: register its project and repos (this one and each --with) and write its tracker doc; asks first, never commits",
+    )
+    .option(
+      "--with <path[=name]>",
+      "another repo's local checkout, optionally with the name tickets use for it (repeatable)",
+      collect,
+      [],
+    )
+    .option(
+      "--project <id>",
+      "the project to add to (default: the one the tracker doc or this repo's address names, else a new one)",
+      toInt,
+    )
+    .option(
+      "--project-name <name>",
+      "name of a new project (default: this repo's name)",
+    )
+    .option(
+      "--contract-path <path>",
+      "this repo's contract file, when it is new here (default: its only openapi file)",
+    )
+    .option("-y, --yes", "do not ask before registering")
+    .action(async (options) => {
+      const client = api();
+      const loadProject = async (projectId: number) => {
+        const { data, response, error } = await client.GET(
+          "/projects/{projectId}",
+          { params: { path: { projectId } } },
+        );
+        return { data, response, error };
+      };
+      let plan: ReturnType<typeof planInit>;
+      try {
+        const cwd = io.cwd ?? process.cwd();
+        const planning = inspectCheckout(".", cwd);
+        const others = (options.with as string[]).map((value) => {
+          const { path, name } = parseWith(value);
+          return { checkout: inspectCheckout(path, cwd), name };
+        });
+        const docPath = join(planning.dir, TRACKER_DOC_PATH);
+        const before = existsSync(docPath)
+          ? readFileSync(docPath, "utf8")
+          : null;
+
+        // The project: --project, else the one the tracker doc names, else the one this repo is registered in.
+        let found: Awaited<ReturnType<typeof loadProject>>["data"];
+        if (options.project !== undefined) {
+          const loaded = await loadProject(options.project);
+          if (!loaded.data) throw failureFrom(loaded.response, loaded.error);
+          found = loaded.data;
+        } else {
+          const named = before ? trackerDocTarget(before) : null;
+          if (named) found = (await loadProject(named.project)).data;
+          if (!found) {
+            const { data, response, error } = await client.GET("/projects", {
+              params: { query: { repoUrl: planning.url } },
+            });
+            if (!data) throw failureFrom(response, error);
+            if (data.projects.length > 1) {
+              throw new Failure(
+                `${planning.url} is in several projects (${data.projects.map((p) => `${p.id} ${p.name}`).join(", ")}); pick one with --project`,
+              );
+            }
+            const only = data.projects[0];
+            if (only) found = (await loadProject(only.id)).data;
+          }
+        }
+
+        plan = planInit({
+          project: found ?? {
+            newName: options.projectName ?? planning.repoName,
+          },
+          planning,
+          others,
+          contractPath: options.contractPath,
+        });
+        if (!json()) io.stdout(`${planText(plan)}\n`);
+
+        const registering = hasRegistrations(plan);
+        if (!registering && found) {
+          const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
+          if (doc === before) {
+            print(
+              { project: found.id, registered: [], trackerDoc: "unchanged" },
+              "nothing to register and the tracker doc is up to date",
+            );
+            return;
+          }
+        }
+        if (!options.yes) {
+          if (!io.confirm) {
+            throw new Failure(
+              "plat init asks before it registers: run it in a terminal, or pass --yes",
+            );
+          }
+          if (!(await io.confirm("Register and write the tracker doc?"))) {
+            print({ cancelled: true }, "nothing done");
+            return;
+          }
+        }
+
+        let projectId: number;
+        if (plan.project.kind === "new") {
+          const { data, response, error } = await client.POST("/projects", {
+            body: {
+              name: plan.project.name,
+              protectedPaths: plan.project.protectedPaths,
+            },
+          });
+          if (!data) throw failureFrom(response, error);
+          projectId = data.id;
+        } else {
+          projectId = plan.project.id;
+        }
+        const registered: string[] = [];
+        for (const repo of plan.repos) {
+          if (repo.registered) continue;
+          const added = await client.POST("/projects/{projectId}/repos", {
+            params: { path: { projectId } },
+            body: {
+              url: repo.checkout.url,
+              name: repo.name,
+              defaultBranch: repo.checkout.defaultBranch,
+              hostKind: repo.checkout.hostKind,
+            },
+          });
+          if (!added.data) throw failureFrom(added.response, added.error);
+          if (repo.contractPath) {
+            const edited = await client.PATCH(
+              "/projects/{projectId}/repos/{name}",
+              {
+                params: { path: { projectId, name: repo.name } },
+                body: { contractPath: repo.contractPath },
+              },
+            );
+            if (!edited.data) {
+              throw failureFrom(edited.response, edited.error);
+            }
+          }
+          registered.push(repo.name);
+        }
+
+        const after = await loadProject(projectId);
+        if (!after.data) throw failureFrom(after.response, after.error);
+        const doc = renderTrackerDoc(after.data, plan.repos[0]?.name as string);
+        const state =
+          before === null ? "new" : before === doc ? "unchanged" : "updated";
+        if (state !== "unchanged") {
+          mkdirSync(dirname(docPath), { recursive: true });
+          writeFileSync(docPath, doc);
+        }
+        const lines = [
+          `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
+          ...(registered.length > 0
+            ? [`registered: ${registered.join(", ")}`]
+            : []),
+          `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
+          ...(state === "unchanged"
+            ? []
+            : [
+                `next, in ${planning.dir}: git add ${TRACKER_DOC_PATH} && git commit -m "Generate the tracker doc with plat init" && git push`,
+              ]),
+        ];
+        print(
+          { project: projectId, registered, trackerDoc: state },
+          lines.join("\n"),
+        );
+      } catch (e) {
+        if (e instanceof InitError) throw new Failure(e.message);
+        throw e;
+      }
+    });
 
   program
     .command("tracker-doc")

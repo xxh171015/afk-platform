@@ -37,20 +37,27 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 `plat` 是 `~/.local/bin/plat`（包装 `packages/cli`），在任何目录都能用，默认连 `http://127.0.0.1:3000`。以下命令都直接写 `plat`。
 
-### 1.2 登记项目和仓库（每个项目一次）
+### 1.2 登记项目和仓库、装 tracker 文档（`plat init`，每个项目一次）
+
+在**规划仓库**里运行 `plat init`。规划仓库是你跑规划 skills（grill / to-spec / to-tickets）的仓库，也是出契约的仓库（场景 A、B 都是后端）。其他仓库用 `--with` 给出本地路径：
 
 ```sh
-plat project create shop --protected-path ".github/**"     # 记下打印的 project id，下面叫 <P>
-plat repo add --project <P> --name backend  --url https://github.com/<owner>/<后端仓库>.git
-plat repo edit backend --project <P> --contract-path openapi/openapi.yaml    # 契约属于后端
-# 场景 B 再加：
-plat repo add --project <P> --name frontend --url https://github.com/<owner>/<前端仓库>.git
+cd ~/project/afk-pilot-backend
+plat init --with ../afk-pilot-frontend          # 场景 A 不写 --with
 ```
 
-- **代码托管类型**：`--host-kind github|gitlab`（`plat repo add` 和 `plat repo edit` 都可以）。不写时按地址推断一次（地址里有 `gitlab` 就是 GitLab，否则 GitHub）并存下来；自建 GitLab 的地址不含 `gitlab` 时要显式写 `--host-kind gitlab`。`plat tracker-doc` 按它选 GitHub 或 GitLab 的种子模板。
-- **仓库名是你起的**，它就是票文件里 `repo:`、`refs:`、`environment:` 要写的名字（试点用的是 `afk-pilot-backend` / `afk-pilot-frontend`）。
-- 契约路径只设在**出契约的仓库**上。没设就导入含契约票的文件，会被拒绝。
-- `--protected-path` 是 agent 默认不能改的路径（再加上契约文件）。要改就在票里写 `protected_paths_ok`。
+它从各仓库的 git 读出登记要的东西，先打印一份清单，问一次「Register and write the tracker doc? [y/N]」，你答 y 才登记（`--yes` 不问）：
+
+- **项目**：先看 `--project <id>`，再看规划仓库里 tracker 文档第一行写的项目，再按规划仓库的地址找它已经在哪个项目里；都没有就新建，名字默认是规划仓库名（`--project-name` 改），保护路径默认 `.github/**`。
+- **仓库名**：默认是代码托管上的仓库名（`afk-pilot-frontend`），`--with ../fe=frontend` 改名。名字就是票文件里 `repo:`、`refs:`、`environment:` 要写的。已登记的仓库按地址认出来，**名字和设置都不改**；设置和本地读到的不一样时，清单里给出对应的 `plat repo edit` 命令，由你决定改不改。
+- **地址、托管类型、默认分支**：地址取 `origin`，ssh 写法登记成 https；托管类型按地址推断；默认分支问远端（`git ls-remote`），问不到就当 `main`，清单里标「unconfirmed」。
+- **契约路径**：只给规划仓库设，取它里面唯一的 `openapi*.yaml/json`；没有或有好几个就不设，清单里提示用 `--contract-path` 指定。前端那份是契约副本，不设。
+- **接入条件**：清单列出每个仓库缺的 `.sandcastle/gates.yaml`、`.sandcastle/Dockerfile`、`AGENTS.md`，以及有没有联调用的 `.sandcastle/integration/compose.yaml`。缺了不挡登记，但票跑不起来，按 1.3 补齐。
+- **tracker 文档**：写进规划仓库的 `docs/agents/issue-tracker.md`（新建、已是最新或已更新），**不 commit、不 push**；最后打印要你执行的 git 命令。把它提交并推到 `main`。
+
+以后多了仓库、平台升级了，在规划仓库里再跑一次 `plat init --with …`：只补登记新的仓库、重新生成 tracker 文档，不会建第二个项目。逐条登记和改设置的命令见附录 D。
+
+前端仓库**不需要**装 tracker 文档（只在规划仓库里跑 skills）。
 
 ### 1.3 每个目标仓库要满足的条件
 
@@ -63,22 +70,12 @@ plat repo add --project <P> --name frontend --url https://github.com/<owner>/<�
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
 | （场景 B 的联调票）联调环境 | 被依赖的仓库（`environment:` 里列的）要有 `.sandcastle/integration/compose.yaml`；种子数据服务命名 `seed-<仓库名>`；e2e 所在仓库有 `npm run e2e`，把 JUnit 写到 `reports/e2e-junit.xml`。 |
 
-### 1.4 在「规划仓库」装 tracker 文档
+### 1.4 tracker 文档是什么
 
-grill / to-spec / to-tickets 默认往 GitHub Issues 写。要让它们改成写平台，需要在**规划仓库**（场景 A：后端仓库；场景 B：后端仓库，契约就在这里）里让 skills 知道 `plat` 的用法：
+grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `docs/agents/issue-tracker.md` 让它们改成写平台；`plat init` 生成它（单独生成用 `plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md`，只打印、不写文件）。
 
-1. 在规划仓库里运行（`<P>` 是 1.2 的项目 id，`<名字>` 是这个仓库在 1.2 登记的名字）：
-
-   ```bash
-   mkdir -p docs/agents
-   plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md
-   ```
-
-   `plat tracker-doc` 只打印，不写文件、不碰 git。文档第一行是版本标记（平台版本、skills SHA、项目和仓库）；平台版本只写在仓库根 `package.json` 的 `version`，改了平台、想让规划过的人知道时手动加一，文档是否过期则看整份比对；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
-2. 把 `docs/agents/issue-tracker.md` 提交并推到 `main`。平台或项目配置变了以后，重新运行同一条命令，再提交。
-3. 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及本机用户级 skills 目录（`~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）里的 to-spec、to-tickets 是否和快照逐字一致。告警里会写出更新命令，或怎么把 skills 链到固定 SHA 的 checkout。
-
-前端仓库**不需要**装 tracker 文档（只在规划仓库里跑 skills）。
+- 文档第一行是版本标记（平台版本、skills SHA、项目和仓库）；平台版本只写在仓库根 `package.json` 的 `version`，改了平台、想让规划过的人知道时手动加一，文档是否过期则看整份比对；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
+- 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及本机用户级 skills 目录（`~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）里的 to-spec、to-tickets 是否和快照逐字一致。告警里会写出更新命令，或怎么把 skills 链到固定 SHA 的 checkout。
 
 ## 2. 场景 A：只有后端
 
@@ -167,8 +164,8 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | # | 做什么 | 预期 |
 | --- | --- | --- |
 | 1 | `scripts/up.sh --check`，然后 `scripts/up.sh` | 全部 `[ok]`；API 和页面起来；页面能打开 |
-| 2 | 1.2 登记项目和仓库 | `plat repo add` 成功；`node scripts/check-github-app.ts <owner>/<repo>` 通过 |
-| 3 | 1.4 装 tracker 文档并推到 main | GitHub 上能看到 `docs/agents/issue-tracker.md` |
+| 2 | 1.2 在规划仓库里 `plat init`（场景 B 加 `--with`） | 清单里各仓库的名字、地址、契约路径都对；`node scripts/check-github-app.ts <owner>/<repo>` 通过 |
+| 3 | 把 `plat init` 写的 tracker 文档提交并推到 main | GitHub 上能看到 `docs/agents/issue-tracker.md` |
 | 4 | **场景 A**，选一个小需求（一个字段、一个接口） | 见下 |
 | 5 | **场景 B**，选一个前后端各改一点的小需求 | 见下 |
 
@@ -268,7 +265,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 ```markdown
 ---
 title: "契约：订单备注字段"
-repo: backend                 # 1.2 登记的仓库名
+repo: backend                 # 1.2 登记的仓库名（plat init 的清单里有）
 type: contract
 modules: ["openapi/**"]
 protected_paths_ok: ["openapi/openapi.yaml"]
@@ -443,3 +440,19 @@ blocks: [T-8]                 # 只能在 --append 的文件里写
 ```
 
 如果以后要让新契约票成为已有票的契约上游，需要给 front matter 加字段，到时另开票讨论。
+
+## 附录 D：逐条登记和改设置
+
+`plat init` 做的事也可以一条条做，改已登记的设置只能这样做：
+
+```sh
+plat project create shop --protected-path ".github/**"     # 打印 project id，下面叫 <P>
+plat repo add --project <P> --name backend  --url https://github.com/<owner>/<后端仓库>.git
+plat repo edit backend --project <P> --contract-path openapi/openapi.yaml    # 契约属于后端
+plat repo add --project <P> --name frontend --url https://github.com/<owner>/<前端仓库>.git
+plat tracker-doc --project <P> --repo backend > docs/agents/issue-tracker.md   # 在规划仓库里
+```
+
+- **代码托管类型**：`--host-kind github|gitlab`（`plat repo add` 和 `plat repo edit` 都可以）。不写时按地址推断一次（地址里有 `gitlab` 就是 GitLab，否则 GitHub）并存下来；自建 GitLab 的地址不含 `gitlab` 时要显式写 `--host-kind gitlab`。`plat tracker-doc` 按它选 GitHub 或 GitLab 的种子模板。
+- 契约路径只设在**出契约的仓库**上。没设就导入含契约票的文件，会被拒绝。
+- `--protected-path` 是 agent 默认不能改的路径（再加上契约文件）。要改就在票里写 `protected_paths_ok`。

@@ -4,6 +4,7 @@ import {
   LimitOverridesSchema,
   SPEC_STATES,
   SPEC_TYPES,
+  tryParseRepoUrl,
 } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
@@ -93,6 +94,24 @@ const projectViewRoute = createRoute({
       }),
     ),
     404: reply("No such project", ErrorReply),
+  },
+});
+
+// `plat init` finds the project a planning repo already belongs to by its address, whatever way it is spelt
+// (https, ssh, with or without .git).
+const projectListRoute = createRoute({
+  method: "get",
+  path: "/projects",
+  request: {
+    query: z.object({ repoUrl: Text.optional() }),
+  },
+  responses: {
+    200: reply(
+      "The projects, or with repoUrl the ones that have a repo at that address",
+      z.object({
+        projects: z.array(z.object({ id: Id, name: z.string() })),
+      }),
+    ),
   },
 });
 
@@ -338,6 +357,36 @@ export function registerPlanningRoutes(
           contractPath: (r.contract_path as string | null) ?? null,
           hostKind: r.host_kind as HostKind,
         })),
+      },
+      200,
+    );
+  });
+
+  app.openapi(projectListRoute, async (c) => {
+    const { repoUrl } = c.req.valid("query");
+    const projects = await pool.query(
+      "SELECT id, name FROM projects ORDER BY id",
+    );
+    let ids: Set<number> | null = null;
+    if (repoUrl !== undefined) {
+      const wanted = tryParseRepoUrl(repoUrl);
+      const repos = await pool.query("SELECT project_id, url FROM repos");
+      ids = new Set(
+        repos.rows
+          .filter((r) => {
+            const ref = tryParseRepoUrl(r.url as string);
+            return wanted && ref
+              ? ref.owner === wanted.owner && ref.name === wanted.name
+              : r.url === repoUrl;
+          })
+          .map((r) => r.project_id as number),
+      );
+    }
+    return c.json(
+      {
+        projects: projects.rows
+          .filter((p) => ids === null || ids.has(p.id as number))
+          .map((p) => ({ id: p.id as number, name: p.name as string })),
       },
       200,
     );

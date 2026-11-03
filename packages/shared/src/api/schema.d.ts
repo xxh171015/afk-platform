@@ -11,7 +11,33 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    get: {
+      parameters: {
+        query?: {
+          repoUrl?: string;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The projects, or with repoUrl the ones that have a repo at that address */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              projects: {
+                id: number;
+                name: string;
+              }[];
+            };
+          };
+        };
+      };
+    };
     put?: never;
     post: {
       parameters: {
