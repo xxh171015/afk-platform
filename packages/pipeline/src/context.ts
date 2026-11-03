@@ -19,6 +19,8 @@ export interface ContextInput {
   failureLog?: string; // gate-fix and merge-fix: the tail of the failing gate
   review?: unknown; // review-fix: the review's structured result
   contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
+  // Planning commit files (GLOSSARY.md, docs/adr/**). Omit for the planning repo's own tickets.
+  domain?: { path: string; content: string }[];
 }
 
 function specTicketsMarkdown(bundle: Bundle): string {
@@ -50,12 +52,20 @@ function runJson(input: ContextInput) {
       sha: c.sha,
       file: contractFile(c.repo, c.path),
     })),
+    domain: input.domain?.length
+      ? input.domain.map((file) => domainFile(file.path))
+      : null,
   };
 }
 
 // The agent sees each contract under /context/contract/<repo>/.
 const contractFile = (repo: string, path: string) =>
   `contract/${repo}/${basename(path)}`;
+
+// The agent sees planning docs under /context/domain/, mirroring the planning repo.
+const domainFile = (path: string) => `domain/${path}`;
+
+const DOMAIN_TREE = ["GLOSSARY.md", "docs/adr"];
 
 export function renderContext(input: ContextInput): void {
   const { dir, bundle } = input;
@@ -71,6 +81,9 @@ export function renderContext(input: ContextInput): void {
     `# ${bundle.spec.displayId} ${bundle.spec.title}\n\n${bundle.spec.body}\n`,
   );
   writeFileSync(join(dir, "run.json"), JSON.stringify(runJson(input), null, 2));
+  if (bundle.note) {
+    writeFileSync(join(dir, "note.md"), bundle.note);
+  }
   if (input.failureLog !== undefined) {
     mkdirSync(join(dir, "failure"), { recursive: true });
     writeFileSync(join(dir, "failure", "gate.log"), input.failureLog);
@@ -85,6 +98,11 @@ export function renderContext(input: ContextInput): void {
     const file = join(dir, contractFile(contract.repo, contract.path));
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, contract.content);
+  }
+  for (const file of input.domain ?? []) {
+    const dest = join(dir, domainFile(file.path));
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.content);
   }
 }
 
@@ -102,4 +120,30 @@ export function readContract(
   }
   // the file exactly as committed, trailing newline included
   return { path, content: shown.stdout };
+}
+
+// GLOSSARY.md and docs/adr/** at a planning SHA. Never AGENTS.md, never the rest of the repo.
+export function readDomainFiles(
+  repoDir: string,
+  sha: string,
+): { path: string; content: string }[] {
+  const listed = git(repoDir, [
+    "ls-tree",
+    "-r",
+    "--name-only",
+    sha,
+    "--",
+    ...DOMAIN_TREE,
+  ]);
+  if (listed.code !== 0) {
+    throw new Error(`git ls-tree ${sha} failed: ${listed.out.slice(0, 400)}`);
+  }
+  const paths = listed.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((path) => path === "GLOSSARY.md" || path.startsWith("docs/adr/"));
+  return paths.map((path) => ({
+    path,
+    content: readContract(repoDir, { sha, path }).content,
+  }));
 }

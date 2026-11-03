@@ -4,7 +4,12 @@ import {
   parseRepoUrl,
   type RepoRef,
 } from "@afk/host";
-import { type HostTask, isPlatformBranch } from "@afk/shared";
+import {
+  fitPrDescription,
+  type HostTask,
+  isPlatformBranch,
+  splicePackSection,
+} from "@afk/shared";
 import { InfrastructureError } from "./executor.ts";
 
 // The jobs that talk to the code host. The worker does them because the host's credentials are only here.
@@ -40,6 +45,30 @@ export async function runHostTask(
     }
     log(`opened ${pr.url} (${pr.state})`);
     return { stage: "open-pr", outcome: "opened", ...pr };
+  }
+  if (task.kind === "patch-pr-body") {
+    try {
+      const current = await deps.adapter.getPullRequestBody({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+      });
+      const full = splicePackSection(current, task.section);
+      const summarized = splicePackSection(current, task.summary);
+      const body = fitPrDescription(full, summarized, task.summary);
+      await deps.adapter.updatePullRequestBody({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+        body,
+      });
+      log(`updated description of pull request ${task.number}`);
+      return { stage: "patch-pr-body", outcome: "patched" };
+    } catch (error) {
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not update the pull request description: ${String(error)}`,
+      );
+    }
   }
   if (task.kind === "pr-ready") {
     try {

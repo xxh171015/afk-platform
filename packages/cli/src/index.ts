@@ -18,6 +18,7 @@ import {
 } from "commander";
 import { blockedText, specText, ticketText } from "./format.ts";
 import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
+import { inspectPlanningCommit } from "./planning-commit.ts";
 import { renderTrackerDoc } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -30,6 +31,7 @@ export interface Io {
   readFile: (path: string) => Promise<string>;
   // The regular files of a directory (not the hidden ones), with their text. Rejects when it is not a directory.
   readDirectory: (path: string) => Promise<{ name: string; text: string }[]>;
+  cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
 }
 
 export const defaultIo: Io = {
@@ -346,15 +348,60 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description(
       "confirm the split: the spec runs and ready tickets are queued",
     )
-    .action(async (id: string) => {
+    .option(
+      "--force",
+      "confirm even if GLOSSARY.md, docs/adr or AGENTS.md still have uncommitted changes",
+    )
+    .action(async (id: string, options: { force?: boolean }) => {
       const specId = specIdOf(id);
+      const view = await api().GET("/specs/{id}", {
+        params: { path: { id: specId } },
+      });
+      if (!view.data) throw failureFrom(view.response, view.error);
+      const project = await api().GET("/projects/{projectId}", {
+        params: { path: { projectId: view.data.spec.projectId } },
+      });
+      const inspected = project.data
+        ? inspectPlanningCommit(io.cwd ?? process.cwd(), project.data.repos)
+        : ({ status: "skip" } as const);
+      const dirty =
+        inspected.status === "ok" || inspected.status === "reject"
+          ? inspected.dirty
+          : false;
+      const planning =
+        inspected.status === "ok" ||
+        (options.force === true &&
+          inspected.status === "reject" &&
+          inspected.reason === "dirty")
+          ? {
+              planningSha: inspected.sha,
+              planningRepo: inspected.repoName,
+            }
+          : undefined;
+      if (inspected.status === "reject" && planning === undefined) {
+        for (const line of yellowLines(view.data.spec.prechecks, dirty, false))
+          io.stderr(`${line}\n`);
+        throw new Failure(inspected.message);
+      }
+      for (const line of yellowLines(
+        view.data.spec.prechecks,
+        dirty,
+        planning !== undefined,
+      ))
+        io.stderr(`${line}\n`);
       const { data, response, error } = await api().POST(
         "/specs/{specId}/confirm",
-        { params: { path: { specId } } },
+        {
+          params: { path: { specId } },
+          ...(planning ? { body: planning } : {}),
+        },
       );
       if (!data) throw failureFrom(response, error);
       const lines = [
         `${id} is ${data.state}`,
+        ...(data.planningSha
+          ? [`  planning ${data.planningSha} (${data.planningRepo})`]
+          : []),
         ...data.integrationBranches.map(
           (b) => `  repo ${b.repoId}: ${b.branch}`,
         ),
@@ -424,11 +471,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("retry-final <spec>")
     .description("run the blocked step of a spec's overall review again")
-    .action(async (id: string) => {
+    .option(
+      "--note <text>",
+      "Retry note for the next Run only; not a ticket edit",
+    )
+    .action(async (id: string, options) => {
       const { data, response, error } = await api().POST(
         "/specs/{id}/final/retry",
         {
           params: { path: { id: specIdOf(id) } },
+          body: options.note === undefined ? {} : { note: options.note },
         },
       );
       if (!data) throw failureFrom(response, error);
@@ -561,6 +613,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--mode <mode>",
       "continue (keep the branch) or restart (start from the integration branch)",
     )
+    .option(
+      "--note <text>",
+      "Retry note for the next Run only; not a ticket edit",
+    )
     .action(async (id: string, options) => {
       if (options.mode !== "continue" && options.mode !== "restart") {
         throw new Failure("--mode must be continue or restart");
@@ -569,7 +625,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         "/tickets/{id}/retry",
         {
           params: { path: { id: ticketIdOf(id) } },
-          body: { mode: options.mode },
+          body: {
+            mode: options.mode,
+            ...(options.note === undefined ? {} : { note: options.note }),
+          },
         },
       );
       if (!data) throw failureFrom(response, error);
@@ -715,6 +774,21 @@ function ticketIdOf(text: string): number {
     throw new Failure(`${text} is not a ticket id like T-123`);
   }
   return parsed.id;
+}
+
+function yellowLines(
+  prechecks: { code: string; message: string }[],
+  dirty: boolean,
+  recordingPlanning: boolean,
+): string[] {
+  return [
+    ...prechecks
+      .filter(
+        (p) => !(recordingPlanning && p.code === "missing-planning-commit"),
+      )
+      .map((p) => `yellow: ${p.message}`),
+    ...(dirty ? ["yellow: 规划仓库工作区相对规划提交不干净"] : []),
+  ];
 }
 
 function specIdOf(text: string): number {

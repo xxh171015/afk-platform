@@ -449,6 +449,9 @@ export function specText(view: {
     state: string;
     pauseReason: string | null;
     warnings: unknown[];
+    planningSha?: string | null;
+    planningRepo?: string | null;
+    prechecks?: { code: string; level: string; message: string }[];
   };
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
@@ -460,6 +463,14 @@ export function specText(view: {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
     ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
+    ...(view.spec.planningSha
+      ? [
+          `planning ${view.spec.planningSha}${view.spec.planningRepo ? ` (${view.spec.planningRepo})` : ""}`,
+        ]
+      : []),
+    ...(view.spec.prechecks?.length
+      ? view.spec.prechecks.map((p) => `yellow: ${p.message}`)
+      : []),
     ...(view.spec.body?.trim() ? ["", view.spec.body.trimEnd(), ""] : []),
     "tickets:",
     ...view.tickets.flatMap((t) => [

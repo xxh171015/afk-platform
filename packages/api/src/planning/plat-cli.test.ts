@@ -1,10 +1,13 @@
 import { execFile } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type Io, run } from "@afk/cli";
+import { gitOrThrow } from "@afk/pipeline";
+import { makeRepo } from "@afk/pipeline/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
@@ -18,6 +21,7 @@ let db: TestDatabase;
 let api: RunningApi;
 let files: Record<string, string>;
 let logDir: string;
+let workDir: string | undefined;
 
 beforeEach(async () => {
   db = await createTestDatabase();
@@ -25,6 +29,7 @@ beforeEach(async () => {
   logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   api = await listen(createApp({ pool: db.pool, logDir }));
   files = {};
+  workDir = undefined;
 });
 afterEach(async () => {
   await api.close();
@@ -81,6 +86,7 @@ async function plat(...args: string[]) {
         text,
       }));
     },
+    cwd: workDir,
   };
   const code = await run(args, io);
   return { code, stdout, stderr };
@@ -354,6 +360,79 @@ describe("plat", () => {
     expect((await plat("spec", "confirm", "T-1")).stderr).toMatch(
       /not a spec id/,
     );
+  });
+
+  it("records the planning SHA from a matching workspace, and --force skips a dirty tree", async () => {
+    const origin = makeRepo({ "GLOSSARY.md": "# t\n", "README.md": "r\n" });
+    const root = await mkdtemp(join(tmpdir(), "afk-plan-ws-"));
+    try {
+      await plat("project", "create", "shop");
+      await plat(
+        "repo",
+        "add",
+        "--project",
+        "1",
+        "--name",
+        "backend",
+        "--url",
+        origin.dir,
+      );
+      await plat(
+        "repo",
+        "add",
+        "--project",
+        "1",
+        "--name",
+        "frontend",
+        "--url",
+        "git@github.com:acme/frontend.git",
+      );
+      await plat(
+        "repo",
+        "edit",
+        "backend",
+        "--project",
+        "1",
+        "--contract-path",
+        "openapi.yaml",
+      );
+      files["spec.md"] = SPEC_BODY;
+      await plat(
+        "spec",
+        "create",
+        "--project",
+        "1",
+        "--type",
+        "feature",
+        "--title",
+        "Order export",
+        "--file",
+        "spec.md",
+      );
+      putTickets("tickets", TICKETS);
+      expect((await plat("tickets", "import", "S-1", "tickets")).code).toBe(0);
+
+      const work = join(root, "work");
+      gitOrThrow(root, ["clone", "--quiet", origin.dir, work]);
+      workDir = work;
+      writeFileSync(join(work, "GLOSSARY.md"), "# dirty\n");
+      const refused = await plat("spec", "confirm", "S-1");
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toMatch(/--force/);
+      expect(refused.stderr).toContain("规划仓库工作区相对规划提交不干净");
+
+      const sha = gitOrThrow(work, ["rev-parse", "HEAD"]);
+      const forced = await plat("spec", "confirm", "S-1", "--force");
+      expect(forced.code).toBe(0);
+      expect(forced.stdout).toContain(`planning ${sha} (backend)`);
+      expect(
+        (await db.pool.query("SELECT planning_sha FROM specs WHERE id = 1"))
+          .rows[0].planning_sha,
+      ).toBe(sha);
+    } finally {
+      origin.cleanup();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("passes --limit overrides to the project", async () => {
@@ -802,6 +881,31 @@ describe("plat", () => {
     expect(
       (await plat("ticket", "retry", "T-1", "--mode", "continue")).stderr,
     ).toMatch(/not allowed in queued/);
+  });
+
+  it("retries with a note that the next Run reads", async () => {
+    const worker = await blockedContract();
+    const note = "use the helper in src/orders/csv.ts";
+    expect(
+      await plat(
+        "ticket",
+        "retry",
+        "T-1",
+        "--mode",
+        "continue",
+        "--note",
+        note,
+      ),
+    ).toMatchObject({ code: 0 });
+    const job = (await worker.claim()).body.job;
+    const bundle = (await fetch(
+      `${api.url}/worker/jobs/${job?.id}/bundle?workerId=w1&attempt=${job?.attempt}`,
+    ).then((r) => r.json())) as {
+      note: string | null;
+      ticket: { file: string };
+    };
+    expect(bundle.note).toBe(note);
+    expect(bundle.ticket.file).not.toContain(note);
   });
 
   it("resumes a paused spec with more agent time", async () => {

@@ -591,7 +591,9 @@ export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
       );
     }
   }
-  await startRun(pool, ticketId, job.id, stage);
+  // A spec Retry note is only for retry-final. Ordinary ticket claims must not take it. The spec's
+  // final e2e jobs are ticket-stage jobs, so they copy the spec note here.
+  await startRun(pool, ticketId, job.id, stage, job.payload.finalE2e === true);
 }
 
 // A re-claim after a lease ran out finds the Run already there and leaves it be.
@@ -600,13 +602,15 @@ async function startRun(
   ticketId: number,
   jobId: number,
   stage: Stage,
+  fromSpecNote: boolean,
 ): Promise<void> {
   const contracts = await contractsOf(pool, ticketId);
   await pool.query(
-    `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, contract_shas, started_at)
+    `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, contract_shas, retry_note, started_at)
      SELECT t.spec_id, t.repo_id, t.id, t.content_version, $2, $3,
-       (SELECT count(*) FROM runs r WHERE r.ticket_id = t.id AND r.stage = $3) + 1, $4::jsonb, now()
-     FROM tickets t WHERE t.id = $1
+       (SELECT count(*) FROM runs r WHERE r.ticket_id = t.id AND r.stage = $3) + 1, $4::jsonb,
+       ${fromSpecNote ? "COALESCE(t.retry_note, s.retry_note)" : "t.retry_note"}, now()
+     FROM tickets t JOIN specs s ON s.id = t.spec_id WHERE t.id = $1
      ON CONFLICT (job_id) DO NOTHING`,
     [
       ticketId,
@@ -619,4 +623,13 @@ async function startRun(
         : null,
     ],
   );
+  await pool.query("UPDATE tickets SET retry_note = NULL WHERE id = $1", [
+    ticketId,
+  ]);
+  if (fromSpecNote) {
+    await pool.query(
+      "UPDATE specs SET retry_note = NULL WHERE id = (SELECT spec_id FROM tickets WHERE id = $1)",
+      [ticketId],
+    );
+  }
 }

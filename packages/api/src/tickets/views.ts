@@ -1,5 +1,6 @@
 import {
   formatDisplayId,
+  type HostKind,
   type ReviewAxis,
   type SpecState,
   type TicketState,
@@ -13,6 +14,7 @@ import {
   integrationAttempts,
 } from "./integration-attempts.ts";
 import { ticketFileOf } from "./ticket-file.ts";
+import { specTimeline } from "./timeline.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -160,6 +162,12 @@ async function finalE2eSteps(
   );
 }
 
+export interface RepoIdentity {
+  name: string;
+  url: string;
+  hostKind: HostKind;
+}
+
 export interface TicketSummary {
   id: number;
   displayId: string;
@@ -170,6 +178,8 @@ export interface TicketSummary {
   state: TicketState;
   blockedReason: string | null;
   repo: string;
+  repoUrl: string;
+  hostKind: HostKind;
   refs: string[];
   environment: string[];
   appended: boolean;
@@ -182,7 +192,8 @@ async function summaries(
   params: unknown[],
 ): Promise<TicketSummary[]> {
   const { rows } = await pool.query(
-    `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, t.refs, t.environment, t.appended, r.name AS repo
+    `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, t.refs, t.environment, t.appended,
+            r.name AS repo, r.url AS repo_url, r.host_kind
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE ${where} ORDER BY t.id`,
     params,
   );
@@ -197,6 +208,8 @@ async function summaries(
       state: row.state as TicketState,
       blockedReason: (row.blocked_reason as string | null) ?? null,
       repo: row.repo as string,
+      repoUrl: row.repo_url as string,
+      hostKind: row.host_kind as HostKind,
       refs: row.refs as string[],
       environment: row.environment as string[],
       appended: row.appended as boolean,
@@ -314,23 +327,7 @@ export async function ticketView(
         kind: e.kind as string,
         state: e.to_state as TicketState,
       })),
-    runs: runs.rows.map((r) => ({
-      id: r.id as number,
-      displayId: formatDisplayId("run", r.id),
-      stage: r.stage as string,
-      attempt: r.attempt as number,
-      result: (r.result as string | null) ?? null,
-      durationMs: (r.duration_ms as number | null) ?? null,
-      agent: (r.agent as string | null) ?? null,
-      model: (r.model as string | null) ?? null,
-      skillsSha: (r.skills_sha as string | null) ?? null,
-      axis: (r.axis as ReviewAxis | null) ?? null,
-      cursorCliVersion: (r.cursor_cli_version as string | null) ?? null,
-      contractShas: (r.contract_shas as Record<string, string> | null) ?? null,
-      refShas: (r.ref_shas as Record<string, string> | null) ?? null,
-      startedAt: r.started_at ? (r.started_at as Date).toISOString() : null,
-      finishedAt: r.finished_at ? (r.finished_at as Date).toISOString() : null,
-    })),
+    runs: runs.rows.map((r) => runRow(r)),
     findings: findings.rows.map((f) => ({
       id: f.id as number,
       runId: f.run_id as number,
@@ -350,9 +347,186 @@ export async function ticketView(
   };
 }
 
+export interface SpecPrecheck {
+  code: string;
+  level: "yellow";
+  message: string;
+}
+
+const MISSING_PLANNING_COMMIT: SpecPrecheck = {
+  code: "missing-planning-commit",
+  level: "yellow",
+  message: "未做规划仓库 CLI 检查",
+};
+
+function prechecksOf(
+  planningSha: string | null,
+  warnings: { type?: string; message?: string }[],
+): SpecPrecheck[] {
+  return [
+    ...(planningSha ? [] : [MISSING_PLANNING_COMMIT]),
+    ...warnings.flatMap((warning) =>
+      typeof warning.message === "string"
+        ? [
+            {
+              code: warning.type ?? "import-warning",
+              level: "yellow" as const,
+              message: warning.message,
+            },
+          ]
+        : [],
+    ),
+  ];
+}
+
+interface RunRecord {
+  id: number;
+  stage: string;
+  attempt: number;
+  result: string | null;
+  duration_ms: number | null;
+  started_at: Date | null;
+  finished_at: Date | null;
+  agent: string | null;
+  model: string | null;
+  skills_sha: string | null;
+  axis: ReviewAxis | null;
+  cursor_cli_version: string | null;
+  contract_shas: Record<string, string> | null;
+  ref_shas: Record<string, string> | null;
+}
+
+interface RunDetailRecord extends RunRecord {
+  prompt: string | null;
+  output: unknown;
+  commits: string[];
+}
+
+function runRow(r: RunRecord) {
+  return {
+    id: r.id,
+    displayId: formatDisplayId("run", r.id),
+    stage: r.stage,
+    attempt: r.attempt,
+    result: r.result,
+    durationMs: r.duration_ms,
+    agent: r.agent,
+    model: r.model,
+    skillsSha: r.skills_sha,
+    axis: r.axis,
+    cursorCliVersion: r.cursor_cli_version,
+    contractShas: r.contract_shas,
+    refShas: r.ref_shas,
+    startedAt: r.started_at ? r.started_at.toISOString() : null,
+    finishedAt: r.finished_at ? r.finished_at.toISOString() : null,
+  };
+}
+
+export async function runView(pool: pg.Pool, runId: number) {
+  const { rows } = await pool.query<
+    RunDetailRecord & {
+      spec_id: number;
+      ticket_id: number | null;
+      repo_url: string;
+      host_kind: HostKind;
+    }
+  >(
+    `SELECT r.id, r.spec_id, r.ticket_id, r.stage, r.attempt, r.result, r.duration_ms, r.started_at, r.finished_at,
+            r.agent, r.model, r.skills_sha, r.axis, r.cursor_cli_version, r.contract_shas, r.ref_shas,
+            r.prompt, r.output, r.commits, repo.url AS repo_url, repo.host_kind
+     FROM runs r JOIN repos repo ON repo.id = r.repo_id WHERE r.id = $1`,
+    [runId],
+  );
+  const r = rows[0];
+  if (!r) return undefined;
+  return {
+    ...runRow(r),
+    specId: r.spec_id,
+    specDisplayId: formatDisplayId("spec", r.spec_id),
+    ticketId: r.ticket_id,
+    ticketDisplayId: r.ticket_id
+      ? formatDisplayId("ticket", r.ticket_id)
+      : null,
+    prompt: r.prompt,
+    output: r.output ?? null,
+    commits: r.commits ?? [],
+    repoUrl: r.repo_url,
+    hostKind: r.host_kind,
+  };
+}
+
+async function finalRunsOf(pool: pg.Pool, specId: number) {
+  const { rows } = await pool.query<{
+    id: number;
+    stage: string;
+    result: string | null;
+    repo: string;
+  }>(
+    `SELECT r.id, r.stage, r.result, repo.name AS repo
+     FROM runs r JOIN repos repo ON repo.id = r.repo_id
+     WHERE r.spec_id = $1 AND r.ticket_id IS NULL
+       AND r.stage IN ('final-review', 'final-fix', 'final-merge', 'final-e2e')
+     ORDER BY r.id`,
+    [specId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    displayId: formatDisplayId("run", row.id),
+    repo: row.repo,
+    stage: row.stage,
+    result: row.result,
+  }));
+}
+
+function asRepoIdentity(row: {
+  name: string;
+  url: string;
+  host_kind: string;
+}): RepoIdentity {
+  return {
+    name: row.name,
+    url: row.url,
+    hostKind: row.host_kind as HostKind,
+  };
+}
+
+async function reposBySpecIds(
+  pool: pg.Pool,
+  specIds: number[],
+): Promise<Map<number, RepoIdentity[]>> {
+  const bySpec = new Map<number, RepoIdentity[]>();
+  if (specIds.length === 0) return bySpec;
+  const { rows } = await pool.query<{
+    spec_id: number;
+    name: string;
+    url: string;
+    host_kind: string;
+  }>(
+    `SELECT spec_id, name, url, host_kind FROM (
+       SELECT t.spec_id, r.name, r.url, r.host_kind
+       FROM tickets t JOIN repos r ON r.id = t.repo_id
+       WHERE t.spec_id = ANY($1)
+       UNION
+       SELECT s.id, r.name, r.url, r.host_kind
+       FROM specs s JOIN repos r ON r.id = s.planning_repo_id
+       WHERE s.id = ANY($1)
+     ) q ORDER BY spec_id, name`,
+    [specIds],
+  );
+  for (const row of rows) {
+    const list = bySpec.get(row.spec_id) ?? [];
+    if (!list.some((repo) => repo.name === row.name))
+      list.push(asRepoIdentity(row));
+    bySpec.set(row.spec_id, list);
+  }
+  return bySpec;
+}
+
 export async function specView(pool: pg.Pool, specId: number) {
   const spec = await pool.query(
-    `SELECT id, slug, title, type, state, pause_reason, integration_branches, import_warnings, order_broken, body FROM specs WHERE id = $1`,
+    `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
+            s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo
+     FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
   );
   const row = spec.rows[0];
@@ -363,9 +537,26 @@ export async function specView(pool: pg.Pool, specId: number) {
      WHERE t.spec_id = $1 ORDER BY e.id`,
     [specId],
   );
+  const warnings = row.import_warnings as { type?: string; message?: string }[];
+  const planningSha = (row.planning_sha as string | null) ?? null;
+  const projectRepos = await pool.query<{
+    id: number;
+    name: string;
+    url: string;
+    host_kind: string;
+  }>("SELECT id, name, url, host_kind FROM repos WHERE project_id = $1", [
+    row.project_id,
+  ]);
+  const reposById = new Map(projectRepos.rows.map((repo) => [repo.id, repo]));
+  const storedBranches = row.integration_branches as {
+    repoId: number;
+    branch: string;
+  }[];
+  const repos = (await reposBySpecIds(pool, [specId])).get(specId) ?? [];
   return {
     spec: {
       id: row.id as number,
+      projectId: row.project_id as number,
       displayId: formatDisplayId("spec", row.id),
       slug: row.slug as string,
       title: row.title as string,
@@ -373,11 +564,21 @@ export async function specView(pool: pg.Pool, specId: number) {
       body: row.body as string,
       state: row.state as SpecState,
       pauseReason: (row.pause_reason as string | null) ?? null,
-      integrationBranches: row.integration_branches as {
-        repoId: number;
-        branch: string;
-      }[],
-      warnings: row.import_warnings as unknown[],
+      repos,
+      integrationBranches: storedBranches.map((branch) => {
+        const repo = reposById.get(branch.repoId);
+        return {
+          repoId: branch.repoId,
+          branch: branch.branch,
+          name: repo?.name ?? "",
+          url: repo?.url ?? "",
+          hostKind: (repo?.host_kind as HostKind | undefined) ?? "github",
+        };
+      }),
+      warnings,
+      planningSha,
+      planningRepo: (row.planning_repo as string | null) ?? null,
+      prechecks: prechecksOf(planningSha, warnings),
     },
     tickets,
     finalizations: [
@@ -388,6 +589,8 @@ export async function specView(pool: pg.Pool, specId: number) {
     orderBroken: row.order_broken as { repo: string; skipped: string[] }[],
     pullRequests: await pullRequestRows(pool, specId),
     acceptancePack: await readAcceptancePack(pool, specId),
+    timeline: await specTimeline(pool, specId),
+    finalRuns: await finalRunsOf(pool, specId),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
@@ -409,6 +612,11 @@ export interface Progress {
 export async function specList(pool: pg.Pool) {
   const { rows } = await pool.query(
     `SELECT s.id, s.slug, s.title, s.type, s.state, s.pause_reason, p.name AS project,
+            s.created_at,
+            CASE WHEN s.state = 'merged' THEN (
+              SELECT MAX(pr.synced_at) FROM pull_requests pr
+              WHERE pr.spec_id = s.id AND pr.state = 'merged'
+            ) ELSE NULL END AS ended_at,
             count(t.id) AS total,
             count(t.id) FILTER (WHERE t.state = 'done') AS done,
             count(t.id) FILTER (WHERE t.state IN ('queued', 'running', 'merging')) AS active,
@@ -417,6 +625,10 @@ export async function specList(pool: pg.Pool) {
             count(t.id) FILTER (WHERE t.state = 'cancelled') AS cancelled
      FROM specs s JOIN projects p ON p.id = s.project_id LEFT JOIN tickets t ON t.spec_id = s.id
      GROUP BY s.id, p.name ORDER BY s.id DESC`,
+  );
+  const repos = await reposBySpecIds(
+    pool,
+    rows.map((row) => row.id as number),
   );
   return rows.map((row) => ({
     id: row.id as number,
@@ -427,6 +639,9 @@ export async function specList(pool: pg.Pool) {
     state: row.state as SpecState,
     pauseReason: (row.pause_reason as string | null) ?? null,
     project: row.project as string,
+    repos: repos.get(row.id as number) ?? [],
+    startedAt: (row.created_at as Date).toISOString(),
+    endedAt: row.ended_at ? (row.ended_at as Date).toISOString() : null,
     progress: {
       total: Number(row.total),
       done: Number(row.done),

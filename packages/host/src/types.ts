@@ -1,10 +1,10 @@
 // The code host (GitHub today, GitLab CE later) as the platform sees it: it opens a pull request and reads one
 // back. It has no call that merges one: a person does that on the host (docs/design.md「代码托管」).
 
-export interface RepoRef {
-  owner: string;
-  name: string;
-}
+import type { RepoRef } from "@afk/shared";
+
+export { parseRepoUrl } from "@afk/shared";
+export type { RepoRef };
 
 // GitHub's permission names; the access level a token is asked for. A token is asked for what one job needs.
 export type TokenPermissions = Partial<
@@ -52,6 +52,14 @@ export interface HostAdapter {
     repo: RepoRef;
     number: number;
   }): Promise<PullRequestInfo>;
+  // The current description, so a PATCH can keep what a person wrote outside the platform's markers.
+  getPullRequestBody(input: { repo: RepoRef; number: number }): Promise<string>;
+  // Writes the description. Pull requests:write is enough; this never merges.
+  updatePullRequestBody(input: {
+    repo: RepoRef;
+    number: number;
+    body: string;
+  }): Promise<void>;
   // Turns a draft pull request into one that is ready for review. One that is not a draft (a person got there
   // first) is returned as it is, nothing is sent.
   markReady(input: { repo: RepoRef; number: number }): Promise<PullRequestInfo>;
@@ -77,15 +85,4 @@ export class HostError extends Error {
     this.name = "HostError";
     this.status = status;
   }
-}
-
-// https://github.com/o/n(.git), git@github.com:o/n.git, ssh://git@github.com/o/n.git
-export function parseRepoUrl(url: string): RepoRef {
-  const match =
-    /^(?:https?:\/\/[^/]+\/|ssh:\/\/[^/]+\/|[^@/\s]+@[^:/\s]+:)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(
-      url.trim(),
-    );
-  if (!match?.[1] || !match[2])
-    throw new RangeError(`not a repository address: ${JSON.stringify(url)}`);
-  return { owner: match[1], name: match[2] };
 }

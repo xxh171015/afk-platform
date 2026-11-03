@@ -97,6 +97,14 @@ _Avoid_: tracker 配置、issue-tracker 模板
 一次 agent 运行或一次确定性步骤的尝试记录，每次尝试新增一条，不覆盖。
 _Avoid_: 执行、任务
 
+**Run prompt（运行提示词）**：
+一次 agent Run 里 agent 实际收到的全文。门禁和合并没有。
+_Avoid_: 提示、system prompt
+
+**Structured output（结构化输出）**：
+一次 agent Run 结束时记下的 JSON 结果。不合法时记下当时的原始内容，该次结果为 `invalid-output`。
+_Avoid_: 输出、结果
+
 **Overlay（覆盖层）**：
 平台叠在 matt skill 之上的规则，让 skill 原样在无人值守的 Run 里跑：替 skill 回答它本来要问人的问题，并加上平台的约束。和它对应的 Skills SHA 绑定。
 _Avoid_: 补丁、包装 prompt、fork

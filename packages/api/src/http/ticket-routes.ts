@@ -1,4 +1,9 @@
-import { REVIEW_AXES, SPEC_STATES, TICKET_STATES } from "@afk/shared";
+import {
+  HOST_KINDS,
+  REVIEW_AXES,
+  SPEC_STATES,
+  TICKET_STATES,
+} from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   AcceptancePack,
@@ -7,6 +12,7 @@ import {
   PullRequestRow,
 } from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
+import { aroundSpec, aroundTicket } from "../events/announce.ts";
 import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
@@ -15,17 +21,21 @@ import {
   cancelSpec,
   cancelTicket,
   editTicket,
+  parkedRetryNote,
   resumeSpec,
   retrySpecCleanup,
   retryTicket,
 } from "../tickets/actions.ts";
+import { TIMELINE_KINDS } from "../tickets/timeline.ts";
 import {
   blockedQueue,
+  runView,
   search,
   specList,
   specView,
   ticketView,
 } from "../tickets/views.ts";
+import { workbench } from "../tickets/workbench.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int();
@@ -78,6 +88,12 @@ const Brief = z
   })
   .nullable();
 
+const RepoIdentity = z.object({
+  name: z.string(),
+  url: z.string(),
+  hostKind: z.enum(HOST_KINDS),
+});
+
 const TicketSummary = z.object({
   id: Id,
   displayId: z.string(),
@@ -88,6 +104,8 @@ const TicketSummary = z.object({
   state: z.enum(TICKET_STATES),
   blockedReason: z.string().nullable(),
   repo: z.string(),
+  repoUrl: z.string(),
+  hostKind: z.enum(HOST_KINDS),
   refs: z.array(z.string()),
   environment: z.array(z.string()),
   appended: z.boolean(),
@@ -109,6 +127,38 @@ const EdgeEnd = z.object({
   displayId: z.string(),
   kind: z.string(),
   state: z.enum(TICKET_STATES),
+});
+
+const RunRow = z.object({
+  id: Id,
+  displayId: z.string(),
+  stage: z.string(),
+  attempt: Id,
+  result: z.string().nullable(),
+  durationMs: Id.nullable(),
+  agent: z.string().nullable(),
+  model: z.string().nullable(),
+  skillsSha: z.string().nullable(),
+  axis: z.enum(REVIEW_AXES).nullable(),
+  cursorCliVersion: z.string().nullable(),
+  contractShas: z.record(z.string(), z.string()).nullable(),
+  refShas: z.record(z.string(), z.string()).nullable(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+
+const RunView = RunRow.extend({
+  specId: Id,
+  specDisplayId: z.string(),
+  ticketId: Id.nullable(),
+  ticketDisplayId: z.string().nullable(),
+  // Run prompt / Structured output / commits: only on this detail. Ticket runs tables stay thin
+  // (docs/specs/experience-platform.md「Run 页签」).
+  prompt: z.string().nullable(),
+  output: z.unknown().nullable(),
+  commits: z.array(z.string()),
+  repoUrl: z.string(),
+  hostKind: z.enum(HOST_KINDS),
 });
 
 const ticketRoute = createRoute({
@@ -146,25 +196,7 @@ const ticketRoute = createRoute({
         versions: z.array(z.object({ version: Id, createdAt: z.string() })),
         upstream: z.array(EdgeEnd),
         downstream: z.array(EdgeEnd),
-        runs: z.array(
-          z.object({
-            id: Id,
-            displayId: z.string(),
-            stage: z.string(),
-            attempt: Id,
-            result: z.string().nullable(),
-            durationMs: Id.nullable(),
-            agent: z.string().nullable(),
-            model: z.string().nullable(),
-            skillsSha: z.string().nullable(),
-            axis: z.enum(REVIEW_AXES).nullable(),
-            cursorCliVersion: z.string().nullable(),
-            contractShas: z.record(z.string(), z.string()).nullable(),
-            refShas: z.record(z.string(), z.string()).nullable(),
-            startedAt: z.string().nullable(),
-            finishedAt: z.string().nullable(),
-          }),
-        ),
+        runs: z.array(RunRow),
         findings: z.array(
           z.object({
             id: Id,
@@ -191,6 +223,19 @@ const ticketRoute = createRoute({
   },
 });
 
+const runRoute = createRoute({
+  method: "get",
+  path: "/runs/{id}",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The run: stage, attempt, result, duration, prompt, structured output and commits",
+      RunView,
+    ),
+    404: reply("No such run", ErrorReply),
+  },
+});
+
 const specRoute = createRoute({
   method: "get",
   path: "/specs/{id}",
@@ -201,6 +246,7 @@ const specRoute = createRoute({
       z.object({
         spec: z.object({
           id: Id,
+          projectId: Id,
           displayId: z.string(),
           slug: z.string(),
           title: z.string(),
@@ -208,10 +254,26 @@ const specRoute = createRoute({
           body: z.string(),
           state: z.enum(SPEC_STATES),
           pauseReason: z.string().nullable(),
+          repos: z.array(RepoIdentity),
           integrationBranches: z.array(
-            z.object({ repoId: Id, branch: z.string() }),
+            z.object({
+              repoId: Id,
+              branch: z.string(),
+              name: z.string(),
+              url: z.string(),
+              hostKind: z.enum(HOST_KINDS),
+            }),
           ),
           warnings: z.array(z.unknown()),
+          planningSha: z.string().nullable(),
+          planningRepo: z.string().nullable(),
+          prechecks: z.array(
+            z.object({
+              code: z.string(),
+              level: z.literal("yellow"),
+              message: z.string(),
+            }),
+          ),
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
@@ -222,10 +284,50 @@ const specRoute = createRoute({
         edges: z.array(
           z.object({ from: z.string(), to: z.string(), kind: z.string() }),
         ),
+        timeline: z.array(
+          z.object({
+            kind: z.enum(TIMELINE_KINDS),
+            at: z.string(),
+            text: z.string(),
+            runId: Id.optional(),
+            ticketId: Id.optional(),
+          }),
+        ),
+        finalRuns: z.array(
+          z.object({
+            id: Id,
+            displayId: z.string(),
+            repo: z.string(),
+            stage: z.string(),
+            result: z.string().nullable(),
+          }),
+        ),
       }),
     ),
     404: reply("No such spec", ErrorReply),
   },
+});
+
+const SpecListItem = z.object({
+  id: Id,
+  displayId: z.string(),
+  slug: z.string(),
+  title: z.string(),
+  type: z.string(),
+  state: z.enum(SPEC_STATES),
+  pauseReason: z.string().nullable(),
+  project: z.string(),
+  repos: z.array(RepoIdentity),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  progress: z.object({
+    total: Id,
+    done: Id,
+    active: Id,
+    blocked: Id,
+    pending: Id,
+    cancelled: Id,
+  }),
 });
 
 const specsRoute = createRoute({
@@ -235,26 +337,7 @@ const specsRoute = createRoute({
     200: reply(
       "Every spec, newest first, with the progress of its tickets",
       z.object({
-        specs: z.array(
-          z.object({
-            id: Id,
-            displayId: z.string(),
-            slug: z.string(),
-            title: z.string(),
-            type: z.string(),
-            state: z.enum(SPEC_STATES),
-            pauseReason: z.string().nullable(),
-            project: z.string(),
-            progress: z.object({
-              total: Id,
-              done: Id,
-              active: Id,
-              blocked: Id,
-              pending: Id,
-              cancelled: Id,
-            }),
-          }),
-        ),
+        specs: z.array(SpecListItem),
       }),
     ),
   },
@@ -297,55 +380,99 @@ const searchRoute = createRoute({
   },
 });
 
+const BlockedQueue = z.object({
+  tickets: z.array(TicketSummary),
+  finalizations: z.array(Finalization),
+  pullRequests: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      repo: z.string(),
+      number: z.number().int(),
+      url: z.string(),
+      state: z.string(),
+      syncError: z.string().nullable(),
+    }),
+  ),
+  cleanups: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      error: z.string(),
+    }),
+  ),
+  readyFailures: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      repo: z.string(),
+      number: z.number().int(),
+      url: z.string(),
+      error: z.string(),
+    }),
+  ),
+  specs: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      title: z.string(),
+      reason: z.string(),
+    }),
+  ),
+});
+
 const blockedRoute = createRoute({
   method: "get",
   path: "/blocked",
   responses: {
     200: reply(
       "Blocked tickets, stuck pull requests, cleanups that failed and paused specs, everything waiting for a person",
+      BlockedQueue,
+    ),
+  },
+});
+
+const RunningTicket = z.object({
+  id: Id,
+  displayId: z.string(),
+  title: z.string(),
+  state: z.enum(TICKET_STATES),
+  repo: z.string(),
+  stage: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  elapsedMs: z.number().int().nullable(),
+  meanMs: z.number().int().nullable(),
+  slow: z.boolean(),
+});
+
+const workbenchRoute = createRoute({
+  method: "get",
+  path: "/workbench",
+  responses: {
+    200: reply(
+      "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
       z.object({
-        tickets: z.array(TicketSummary),
-        finalizations: z.array(Finalization),
-        pullRequests: z.array(
+        waiting: BlockedQueue,
+        running: z.array(
+          z.object({ spec: SpecListItem, tickets: z.array(RunningTicket) }),
+        ),
+        awaitingAcceptance: z.array(
           z.object({
-            specId: Id,
-            specDisplayId: z.string(),
-            repo: z.string(),
-            number: z.number().int(),
-            url: z.string(),
-            state: z.string(),
-            syncError: z.string().nullable(),
+            spec: SpecListItem,
+            pullRequestCount: Id,
+            verifiedCriteria: Id,
+            totalCriteria: Id,
           }),
         ),
-        cleanups: z.array(
-          z.object({
-            specId: Id,
-            specDisplayId: z.string(),
-            error: z.string(),
-          }),
-        ),
-        readyFailures: z.array(
-          z.object({
-            specId: Id,
-            specDisplayId: z.string(),
-            repo: z.string(),
-            number: z.number().int(),
-            url: z.string(),
-            error: z.string(),
-          }),
-        ),
-        specs: z.array(
-          z.object({
-            id: Id,
-            displayId: z.string(),
-            title: z.string(),
-            reason: z.string(),
-          }),
+        recentlyCompleted: z.array(
+          z.object({ spec: SpecListItem, completedAt: z.string() }),
         ),
       }),
     ),
   },
 });
+
+const RetryNote = z.string().optional();
 
 const retryRoute = createRoute({
   method: "post",
@@ -353,7 +480,12 @@ const retryRoute = createRoute({
   request: {
     params: z.object({ id: PathId }),
     body: {
-      content: json(z.object({ mode: z.enum(["continue", "restart"]) })),
+      content: json(
+        z.object({
+          mode: z.enum(["continue", "restart"]),
+          note: RetryNote,
+        }),
+      ),
     },
   },
   responses: {
@@ -503,7 +635,13 @@ const cancelSpecRoute = createRoute({
 const retryFinalRoute = createRoute({
   method: "post",
   path: "/specs/{id}/final/retry",
-  request: { params: z.object({ id: PathId }) },
+  request: {
+    params: z.object({ id: PathId }),
+    body: {
+      content: json(z.object({ note: RetryNote })),
+      required: false,
+    },
+  },
   responses: {
     200: reply(
       "The blocked steps of the overall review are queued again",
@@ -562,6 +700,11 @@ export function registerTicketRoutes(
       : c.json({ error: "no such ticket or version" }, 404);
   });
 
+  app.openapi(runRoute, async (c) => {
+    const view = await runView(pool, c.req.valid("param").id);
+    return view ? c.json(view, 200) : c.json({ error: "no such run" }, 404);
+  });
+
   app.openapi(specRoute, async (c) => {
     const view = await specView(pool, c.req.valid("param").id);
     return view ? c.json(view, 200) : c.json({ error: "no such spec" }, 404);
@@ -577,11 +720,15 @@ export function registerTicketRoutes(
 
   app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));
 
+  app.openapi(workbenchRoute, async (c) =>
+    c.json(await workbench(pool, context.clock()), 200),
+  );
+
   app.openapi(retryRoute, async (c) => {
-    const result = await retryTicket(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").mode,
+    const { id } = c.req.valid("param");
+    const { mode, note } = c.req.valid("json");
+    const result = await aroundTicket(context, id, () =>
+      retryTicket(pool, id, mode, note),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -591,7 +738,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(approveRoute, async (c) => {
-    const result = await approveProtected(pool, c.req.valid("param").id);
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      approveProtected(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
     if (result.status === "refused")
@@ -601,7 +750,9 @@ export function registerTicketRoutes(
 
   app.openapi(editRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const result = await editTicket(pool, id, c.req.valid("json").file);
+    const result = await aroundTicket(context, id, () =>
+      editTicket(pool, id, c.req.valid("json").file),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
     if (result.status === "refused")
@@ -615,10 +766,8 @@ export function registerTicketRoutes(
   });
 
   app.openapi(allowPathsRoute, async (c) => {
-    const result = await allowPaths(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").paths,
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      allowPaths(pool, c.req.valid("param").id, c.req.valid("json").paths),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -628,10 +777,8 @@ export function registerTicketRoutes(
   });
 
   app.openapi(cancelRoute, async (c) => {
-    const result = await cancelTicket(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").cascade,
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      cancelTicket(pool, c.req.valid("param").id, c.req.valid("json").cascade),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);
@@ -648,10 +795,12 @@ export function registerTicketRoutes(
   });
 
   app.openapi(resumeRoute, async (c) => {
-    const result = await resumeSpec(
-      pool,
-      c.req.valid("param").id,
-      c.req.valid("json").extraSeconds,
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      resumeSpec(
+        pool,
+        c.req.valid("param").id,
+        c.req.valid("json").extraSeconds,
+      ),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
@@ -661,10 +810,8 @@ export function registerTicketRoutes(
   });
 
   app.openapi(cancelSpecRoute, async (c) => {
-    const result = await cancelSpec(
-      pool,
-      c.req.valid("param").id,
-      context.clock(),
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      cancelSpec(pool, c.req.valid("param").id, context.clock()),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
@@ -681,7 +828,16 @@ export function registerTicketRoutes(
   });
 
   app.openapi(retryFinalRoute, async (c) => {
-    const result = await retryFinalization(pool, c.req.valid("param").id);
+    const { id } = c.req.valid("param");
+    let note: string | undefined;
+    try {
+      note = c.req.valid("json")?.note;
+    } catch {
+      note = undefined;
+    }
+    const result = await aroundSpec(context, id, () =>
+      retryFinalization(pool, id, parkedRetryNote(note)),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")
@@ -690,7 +846,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(waiveFinalRoute, async (c) => {
-    const result = await waiveFinalE2e(pool, c.req.valid("param").id);
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      waiveFinalE2e(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")
@@ -699,7 +857,9 @@ export function registerTicketRoutes(
   });
 
   app.openapi(retryCleanupRoute, async (c) => {
-    const result = await retrySpecCleanup(pool, c.req.valid("param").id);
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      retrySpecCleanup(pool, c.req.valid("param").id),
+    );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "refused")

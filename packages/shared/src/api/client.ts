@@ -17,7 +17,7 @@ export type ApiClient = ReturnType<typeof createApiClient>;
 export type Bundle =
   paths["/worker/jobs/{id}/bundle"]["get"]["responses"][200]["content"]["application/json"];
 
-// What GET /worker/jobs/{id}/host-task returns: what an open-pr or host-sync job has to do on the code host.
+// What GET /worker/jobs/{id}/host-task returns: what a job for the code host has to do.
 export type HostTask =
   paths["/worker/jobs/{id}/host-task"]["get"]["responses"][200]["content"]["application/json"];
 

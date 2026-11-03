@@ -22,6 +22,7 @@ export { FINDING_RESOLUTIONS } from "./findings.ts";
 export { HOST_CAPABILITY, HOST_JOB_TYPES } from "./host-jobs.ts";
 export type { HostKind } from "./host-kinds.ts";
 export { HOST_KINDS, hostKindOfUrl } from "./host-kinds.ts";
+export type { InvalidatePayload } from "./invalidate.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
 export type { LimitOverrides, Limits } from "./limits.ts";
@@ -32,7 +33,25 @@ export {
 } from "./limits.ts";
 export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
+export {
+  fitPrDescription,
+  GITHUB_PR_BODY_LIMIT,
+  PACK_MARK_END,
+  PACK_MARK_START,
+  splicePackSection,
+  wrapPackSection,
+} from "./pr-description.ts";
 export { redactSecrets } from "./redact.ts";
+export type { RepoRef } from "./repo-url.ts";
+export {
+  commitHtmlUrl,
+  ownerHtmlUrl,
+  parseRepoUrl,
+  repoDisplayName,
+  repoHtmlUrl,
+  treeHtmlUrl,
+  tryParseRepoUrl,
+} from "./repo-url.ts";
 export type {
   AxisReview,
   CombinedReview,
@@ -58,6 +77,7 @@ export {
   TicketSchema,
 } from "./schemas.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
+export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specTransition } from "./spec-state.ts";
 export type {

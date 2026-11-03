@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readContract, renderContext } from "./context.ts";
+import { readContract, readDomainFiles, renderContext } from "./context.ts";
 import { bundleFor } from "./fixtures.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
@@ -43,6 +43,7 @@ describe("renderContext", () => {
       allowedProtectedPaths: [],
       fixCounts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
       contracts: [],
+      domain: null,
     });
   });
 
@@ -84,6 +85,38 @@ describe("renderContext", () => {
     expect(existsSync(join(dir, "failure"))).toBe(false);
     expect(existsSync(join(dir, "review.json"))).toBe(false);
     expect(existsSync(join(dir, "contract"))).toBe(false);
+    expect(existsSync(join(dir, "domain"))).toBe(false);
+    expect(existsSync(join(dir, "note.md"))).toBe(false);
+  });
+
+  it("writes note.md when the Run has a Retry note, and never puts it in ticket.md", () => {
+    const dir = ctxDir();
+    const note = "use the helper in src/orders/csv.ts";
+    const bundle = bundleFor({ note });
+    renderContext({ dir, bundle, run });
+    expect(read(dir, "note.md")).toBe(note);
+    expect(read(dir, "ticket.md")).not.toContain(note);
+    expect(read(dir, "ticket.md")).toBe(bundle.ticket?.file);
+  });
+
+  it("writes GLOSSARY and ADRs under domain/, never AGENTS.md", () => {
+    const dir = ctxDir();
+    renderContext({
+      dir,
+      bundle: bundleFor(),
+      run,
+      domain: [
+        { path: "GLOSSARY.md", content: "# terms\n" },
+        { path: "docs/adr/0001-pointers.md", content: "# pointers\n" },
+      ],
+    });
+    expect(read(dir, "domain/GLOSSARY.md")).toBe("# terms\n");
+    expect(read(dir, "domain/docs/adr/0001-pointers.md")).toBe("# pointers\n");
+    expect(existsSync(join(dir, "domain/AGENTS.md"))).toBe(false);
+    expect(JSON.parse(read(dir, "run.json")).domain).toEqual([
+      "domain/GLOSSARY.md",
+      "domain/docs/adr/0001-pointers.md",
+    ]);
   });
 
   it("writes each contract under contract/<repo>/ and points run.json at them", () => {
@@ -162,5 +195,31 @@ describe("readContract", () => {
         path: "openapi/openapi.yaml",
       }),
     ).toThrow(/git show/);
+  });
+});
+
+describe("readDomainFiles", () => {
+  it("reads GLOSSARY and ADRs at that SHA and ignores AGENTS.md", () => {
+    repo = makeRepo({
+      "GLOSSARY.md": "# v1\n",
+      "AGENTS.md": "do not send\n",
+      "docs/adr/0001.md": "# adr1\n",
+      "src/app.ts": "secret\n",
+    });
+    const sha = repo.commit(
+      {
+        "GLOSSARY.md": "# v2\n",
+        "AGENTS.md": "still not sent\n",
+        "docs/adr/0001.md": "# adr1b\n",
+        "docs/adr/0002.md": "# adr2\n",
+      },
+      "planning",
+    );
+    repo.commit({ "GLOSSARY.md": "# v3\n" }, "later");
+    expect(readDomainFiles(repo.dir, sha)).toEqual([
+      { path: "GLOSSARY.md", content: "# v2\n" },
+      { path: "docs/adr/0001.md", content: "# adr1b\n" },
+      { path: "docs/adr/0002.md", content: "# adr2\n" },
+    ]);
   });
 });

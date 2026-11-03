@@ -27,8 +27,12 @@ type Json = any;
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method,
-    headers: { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   });
   return {
     status: response.status,
@@ -198,6 +202,43 @@ describe("retry", () => {
     await stage("review", { outcome: "pass" });
     await stage("merge", { outcome: "merged", headSha: "h" });
     expect(await states()).toEqual(["1:done", "2:queued"]);
+  });
+});
+
+describe("retry note", () => {
+  async function nextBundle() {
+    const job = (await worker.claim()).body.job as Claimed;
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json());
+    return { job, bundle };
+  }
+
+  it("goes on the next Run's bundle, does not bump the content version, and is gone on a later retry that has none", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    expect((await call("GET", "/tickets/1")).body.ticket.contentVersion).toBe(
+      1,
+    );
+
+    const note = "use the helper in src/orders/csv.ts";
+    await call("POST", "/tickets/1/retry", { mode: "continue", note });
+    expect((await call("GET", "/tickets/1")).body.ticket.contentVersion).toBe(
+      1,
+    );
+
+    const first = await nextBundle();
+    expect(first.bundle.note).toBe(note);
+    expect(first.bundle.ticket.file).not.toContain(note);
+    expect(first.bundle.ticket.contentVersion).toBe(1);
+
+    await worker.complete(first.job.id, first.job.attempt, {
+      stage: "implement",
+      ...GAVE_UP,
+    });
+    await call("POST", "/tickets/1/retry", { mode: "continue", note: "   " });
+    const second = await nextBundle();
+    expect(second.bundle.note).toBeNull();
   });
 });
 
@@ -1100,6 +1141,33 @@ describe("the spec list", () => {
       pending: 1,
       cancelled: 0,
     });
+    expect(list.body.specs[1].repos).toEqual([
+      { name: "backend", url: "git@x:backend", hostKind: "github" },
+    ]);
+    expect(list.body.specs[0].repos).toEqual([]);
+    expect(list.body.specs[0].startedAt).toEqual(expect.any(String));
+    expect(list.body.specs[0].endedAt).toBeNull();
+    expect(list.body.specs[1].startedAt).toEqual(expect.any(String));
+    expect(list.body.specs[1].endedAt).toBeNull();
+  });
+
+  it("sets endedAt from the last merged pull request once the spec is merged", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    const started = (await call("GET", "/specs")).body.specs[0].startedAt;
+    expect(started).toEqual(expect.any(String));
+    expect((await call("GET", "/specs")).body.specs[0].endedAt).toBeNull();
+    const ended = new Date("2026-11-01T10:00:00.000Z");
+    await db.pool.query("UPDATE specs SET state = 'merged' WHERE id = $1", [
+      specId,
+    ]);
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha, synced_at)
+       VALUES ($1, 1, 1, 'https://git.example/pr/1', 'merged', 'aaa', $2)`,
+      [specId, ended],
+    );
+    const merged = (await call("GET", "/specs")).body.specs[0];
+    expect(merged.startedAt).toBe(started);
+    expect(merged.endedAt).toBe(ended.toISOString());
   });
 
   it("is empty before anything exists", async () => {
@@ -1195,6 +1263,9 @@ describe("what a person sees", () => {
       acceptanceCriteria: ["it works"],
       reviewed: true,
       brief: null,
+      repo: "backend",
+      repoUrl: "git@x:backend",
+      hostKind: "github",
     });
     expect(view.body.downstream).toEqual([
       { id: 2, displayId: "T-2", kind: "blocks", state: "pending" },
@@ -1253,7 +1324,16 @@ describe("what a person sees", () => {
     });
     const id = (await db.pool.query("SELECT id FROM instance")).rows[0].id;
     expect(view.body.spec.integrationBranches).toEqual([
-      { repoId: 1, branch: `spec/${id}/s` },
+      {
+        repoId: 1,
+        branch: `spec/${id}/s`,
+        name: "backend",
+        url: "git@x:backend",
+        hostKind: "github",
+      },
+    ]);
+    expect(view.body.spec.repos).toEqual([
+      { name: "backend", url: "git@x:backend", hostKind: "github" },
     ]);
     expect(view.body.spec.warnings).toHaveLength(1); // a and b overlap without a path between them
     expect(
@@ -1265,6 +1345,48 @@ describe("what a person sees", () => {
     expect((await call("GET", "/specs/99")).status).toBe(404);
   });
 
+  it("reconstructs the listed timeline events and finishing runs", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", {
+      outcome: "passed",
+      run: { headSha: "abc" },
+      gate: {
+        commitSha: "abc",
+        configSha: "cfg",
+        commandResults: [{ name: "test", exitCode: 0 }],
+        testsTotal: 1,
+        testsSkipped: 0,
+      },
+    });
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, finished_at)
+       VALUES ($1, 1, 'final-review', 'passed', now())`,
+      [specId],
+    );
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.timeline.map((e: Json) => e.kind)).toEqual([
+      "confirm-plan",
+      "ticket-start",
+      "gate",
+      "finalization",
+    ]);
+    expect(view.body.timeline[2]).toMatchObject({
+      kind: "gate",
+      text: "T-1 门禁通过",
+    });
+    expect(view.body.finalRuns).toEqual([
+      {
+        id: expect.any(Number),
+        displayId: expect.stringMatching(/^R-\d+$/),
+        repo: "backend",
+        stage: "final-review",
+        result: "passed",
+      },
+    ]);
+  });
+
   it("a spec view carries the brief of every blocked ticket", async () => {
     const specId = await runningSpec([ticket("a")]);
     await stage("implement", GAVE_UP);
@@ -1273,6 +1395,59 @@ describe("what a person sees", () => {
       stage: "implement",
       result: "agent-gave-up",
     });
+  });
+
+  it("shows one run by itself, including a finishing run with no ticket", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        durationMs: 146000,
+        prompt: "overlay + implement",
+        output: { outcome: "done" },
+        commits: ["abc1234"],
+      },
+    });
+    const ticketRun = await call("GET", "/runs/1");
+    expect(ticketRun.status).toBe(200);
+    expect(ticketRun.body).toMatchObject({
+      id: 1,
+      displayId: "R-1",
+      specId,
+      specDisplayId: "S-1",
+      ticketId: 1,
+      ticketDisplayId: "T-1",
+      stage: "implement",
+      attempt: 1,
+      result: "done",
+      durationMs: 146000,
+      prompt: "overlay + implement",
+      output: { outcome: "done" },
+      commits: ["abc1234"],
+    });
+    const listed = await call("GET", "/tickets/1");
+    expect(listed.body.runs[0].prompt).toBeUndefined();
+    expect(listed.body.runs[0].output).toBeUndefined();
+    expect(listed.body.runs[0].commits).toBeUndefined();
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result)
+       VALUES ($1, 1, 'final-review', 'passed')`,
+      [specId],
+    );
+    const finishing = await call("GET", "/runs/2");
+    expect(finishing.status).toBe(200);
+    expect(finishing.body).toMatchObject({
+      displayId: "R-2",
+      specId,
+      ticketId: null,
+      ticketDisplayId: null,
+      stage: "final-review",
+      result: "passed",
+      prompt: null,
+      output: null,
+      commits: [],
+    });
+    expect((await call("GET", "/runs/99")).status).toBe(404);
   });
 });
 

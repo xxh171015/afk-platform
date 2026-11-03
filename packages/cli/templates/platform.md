@@ -13,18 +13,21 @@ The platform has no labels and no comments. A draft spec is what a skill means b
 ### Conventions
 
 - **Publish a spec** (what a skill means by "publish to the issue tracker" for a spec):
-  `plat spec create --project {{PROJECT}} --type feature --title "<title>" --slug <english-slug> --file <spec.md>`
+  Write the spec markdown **outside this repo** (do not commit it), then:
+  `plat spec create --project {{PROJECT}} --type feature --title "<title>" --slug <english-slug> --file ~/.afk/planning/draft/spec.md`
   It prints the spec number, e.g. `S-7`. Pass `--slug` (lowercase letters, digits, hyphens) whenever the title has no
   Latin words: a Chinese-only title cannot be turned into a slug. The spec is stored as written. `plat` warns, on
   stderr, about a section of the to-spec template that is missing or renamed, and about a Testing Decisions section
-  that names no seams; it still creates the spec.
+  that names no seams; it still creates the spec. After it prints `S-7`, keep process files under `~/.afk/planning/S-7/`.
 - **Read a spec** (what a skill means by "fetch the issue and read its body and comments"): `plat spec show S-7`.
   It prints the spec's body, its tickets, edges and warnings (after the run, the acceptance pack). A spec has no comments.
 - **Publish tickets** (to-tickets step 5). On this tracker publishing is four steps, in this order:
-  1. Write one markdown file per ticket into a directory, e.g. `tickets/01-contract.md`, numbered in dependency order
-     (format below).
-  2. `plat tickets import S-7 tickets/`. The import is all or nothing and lists every problem at once; fix the files
-     and run it again. A spec takes one import while it is a draft.
+  1. Write one markdown file per ticket into `~/.afk/planning/S-7/` (create the directory; it is outside git), e.g.
+     `~/.afk/planning/S-7/01-contract.md`, numbered in dependency order (format below). Do not put these files in
+     this repository.
+  2. `plat tickets import S-7 ~/.afk/planning/S-7/`. The import is all or nothing and lists every problem at once; fix
+     the files and run it again. A spec takes one import while it is a draft. The platform is then the only source of
+     the spec and its tickets.
   3. Show the person the import's warnings exactly as printed (or say there were none), then ask once:
      "开工吗？" (start the work now?).
   4. If they say yes, run `plat spec confirm S-7`. Then tell them that from here they only wait for the acceptance

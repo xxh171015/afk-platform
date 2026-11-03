@@ -47,6 +47,7 @@ interface RawPull {
   state: "open" | "closed";
   draft?: boolean;
   merged?: boolean;
+  body?: string | null;
   head: { sha: string };
 }
 
@@ -205,6 +206,33 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
 
   return {
     getPullRequest,
+    async getPullRequestBody({ repo, number }) {
+      const read = await call(
+        repo,
+        { pull_requests: "read" },
+        "GET",
+        `/pulls/${number}`,
+      );
+      if (read.status !== 200)
+        throw new HostError(
+          `GitHub answered ${read.status} reading pull request ${number}`,
+          read.status,
+        );
+      return (read.body as RawPull).body ?? "";
+    },
+    async updatePullRequestBody({ repo, number, body }) {
+      const patched = await call(repo, CLOSE, "PATCH", `/pulls/${number}`, {
+        body,
+      });
+      if (patched.status !== 200)
+        throw new HostError(
+          `GitHub answered ${patched.status} updating pull request ${number}`,
+          patched.status,
+        );
+      etags.delete(
+        `${apiUrl}/repos/${repo.owner}/${repo.name}/pulls/${number}`,
+      );
+    },
     async markReady({ repo, number }) {
       const raw = (await get(repo, `/pulls/${number}`)) as RawPull;
       if (raw.state !== "open" || raw.merged || raw.draft !== true)

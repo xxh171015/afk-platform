@@ -43,6 +43,7 @@ import { type Bundle, REVIEW_AXES, type ReviewAxis } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
+import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
 import type { EnvironmentLimiter } from "./environments.ts";
 import type { PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
@@ -141,6 +142,7 @@ export async function executeStage(
     ...bundle.contracts.map((c) => c.url),
     ...bundle.refs.map((r) => r.url),
     ...bundle.environment.map((r) => r.url),
+    ...(bundle.domain ? [bundle.domain.url] : []),
   ]);
   if (!bundle.integrationBranch)
     throw new InfrastructureError(
@@ -151,7 +153,13 @@ export async function executeStage(
     bundle.repo.url,
     bundle.repo.defaultBranch,
   );
-  ensureIntegrationBranch(deps, mainDir, bundle);
+  try {
+    cutIntegrationBranch(deps.repos, deps.push, mainDir, bundle);
+  } catch (error) {
+    throw new InfrastructureError(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 
   const slot = await deps.slots.acquire({
     jobId: context.job.id,
@@ -169,28 +177,6 @@ export async function executeStage(
     // Any stage that ran to an answer leaves a clean slot, whatever the answer; a clone is kept only when the stage broke.
     await slot.release(body ? "success" : "failure");
   }
-}
-
-// The integration branch is made from the default branch the first time any stage of the spec needs it.
-function ensureIntegrationBranch(
-  deps: ExecutorDeps,
-  mainDir: string,
-  bundle: Bundle,
-) {
-  const branch = bundle.integrationBranch as string;
-  if (deps.repos.has(mainDir, `refs/heads/${branch}`)) return;
-  const base = gitOrThrow(mainDir, ["rev-parse", bundle.repo.defaultBranch]);
-  gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, base]);
-  const pushed = deps.push({
-    repoDir: mainDir,
-    source: `refs/heads/${branch}`,
-    target: `refs/heads/${branch}`,
-    expectedOld: "", // it must not exist on the remote yet
-  });
-  if (!pushed.ok)
-    throw new InfrastructureError(
-      `could not create ${branch}: ${pushed.error}`,
-    );
 }
 
 // Branches a slot needs to find in its clone, fetched from the main clone.
@@ -271,6 +257,7 @@ function renderFor(
 ) {
   const { bundle } = context;
   const dir = join(ctxRoot, "context");
+  const domainFiles = fetchDomain(deps.repos, bundle.domain, bundle.repo.name);
   renderContext({
     dir,
     bundle,
@@ -284,6 +271,7 @@ function renderFor(
     ...(bundle.contracts.length
       ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
       : {}),
+    ...(domainFiles ? { domain: domainFiles } : {}),
   });
   return dir;
 }

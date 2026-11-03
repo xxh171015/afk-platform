@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
+import { paths } from "./paths.ts";
+import { StatusBadge } from "./StatusBadge.tsx";
 
 // The search box at the top of every page: type a number (S-12, T-5), part of a title or of a body. Results come
 // grouped as specs and tickets; choosing one goes to its page.
@@ -39,14 +41,19 @@ export function SearchBox({
     },
   });
 
-  // Enter opens the first result: the first spec, else the first ticket
   const firstSpec = results.data?.specs[0];
   const firstTicket = results.data?.tickets[0];
-  const firstResult = firstSpec
-    ? `#/specs/${firstSpec.id}`
-    : firstTicket
-      ? `#/tickets/${firstTicket.id}`
-      : undefined;
+  const openFirst = () => {
+    const path = firstSpec
+      ? paths.spec(firstSpec.id)
+      : firstTicket
+        ? paths.ticket(firstTicket.id)
+        : undefined;
+    if (!path) return;
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    close();
+  };
 
   const close = () => {
     setTyped("");
@@ -64,10 +71,7 @@ export function SearchBox({
         maxLength={MAX_QUERY_LENGTH}
         onKeyDown={(event) => {
           if (event.key === "Escape") close();
-          if (event.key === "Enter" && firstResult) {
-            window.location.hash = firstResult;
-            close();
-          }
+          if (event.key === "Enter") openFirst();
         }}
       />
       {asked !== "" ? (
@@ -89,12 +93,10 @@ export function SearchBox({
                     <ul>
                       {results.data.specs.map((spec) => (
                         <li key={spec.id}>
-                          <a href={`#/specs/${spec.id}`} onClick={close}>
+                          <a href={paths.spec(spec.id)} onClick={close}>
                             {spec.displayId} {spec.title}
                           </a>{" "}
-                          <span className={`badge spec-${spec.state}`}>
-                            {spec.state}
-                          </span>{" "}
+                          <StatusBadge kind="spec" code={spec.state} />{" "}
                           <span className="note">
                             in {spec.matched.join(", ")}
                           </span>
@@ -109,12 +111,10 @@ export function SearchBox({
                     <ul>
                       {results.data.tickets.map((ticket) => (
                         <li key={ticket.id}>
-                          <a href={`#/tickets/${ticket.id}`} onClick={close}>
+                          <a href={paths.ticket(ticket.id)} onClick={close}>
                             {ticket.displayId} {ticket.title}
                           </a>{" "}
-                          <span className={`badge ticket-${ticket.state}`}>
-                            {ticket.state}
-                          </span>{" "}
+                          <StatusBadge kind="ticket" code={ticket.state} />{" "}
                           <span className="note">
                             of {ticket.specDisplayId}, in{" "}
                             {ticket.matched.join(", ")}

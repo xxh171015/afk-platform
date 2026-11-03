@@ -7,6 +7,7 @@ import {
 } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
+import { aroundSpec } from "../events/announce.ts";
 import {
   addRepo,
   createProject,
@@ -259,11 +260,26 @@ const importRoute = createRoute({
   },
 });
 
+const PlanningSha = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex git SHA");
+
+const ConfirmBody = z
+  .object({
+    planningSha: PlanningSha.optional(),
+    planningRepo: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+
 const confirmRoute = createRoute({
   method: "post",
   path: "/specs/{specId}/confirm",
   request: {
     params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    body: {
+      content: { "application/json": { schema: ConfirmBody } },
+      required: false,
+    },
   },
   responses: {
     200: reply(
@@ -276,10 +292,16 @@ const confirmRoute = createRoute({
         enqueued: z.array(
           z.object({ ticketId: Id, displayId: z.string(), jobId: Id }),
         ),
+        planningSha: PlanningSha.nullable(),
+        planningRepo: z.string().nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),
     409: reply("The spec is not a draft, or has no tickets", ErrorReply),
+    422: reply(
+      "The planning commit is incomplete or names no such repo",
+      ErrorReply,
+    ),
   },
 });
 
@@ -375,18 +397,16 @@ export function registerPlanningRoutes(
         409,
       );
     }
+    context.events.publish({ specId: result.spec.id });
     return c.json(result.spec, 201);
   });
 
   app.openapi(importRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    const result = await importTickets(
-      pool,
-      specId,
-      c.req.valid("json").files,
-      {
+    const result = await aroundSpec(context, specId, () =>
+      importTickets(pool, specId, c.req.valid("json").files, {
         append: c.req.valid("query").append === "true",
-      },
+      }),
     );
     switch (result.status) {
       case "no-spec":
@@ -405,17 +425,37 @@ export function registerPlanningRoutes(
 
   app.openapi(confirmRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    const result = await confirmSpec(pool, specId);
+    let body: { planningSha?: string; planningRepo?: string } = {};
+    try {
+      body = c.req.valid("json") ?? {};
+    } catch {
+      body = {};
+    }
+    const planning =
+      body.planningSha || body.planningRepo
+        ? {
+            sha: body.planningSha as string,
+            repoName: body.planningRepo as string,
+          }
+        : undefined;
+    const result = await aroundSpec(context, specId, () =>
+      confirmSpec(pool, specId, planning),
+    );
     if (result.status === "no-spec")
       return c.json({ error: "no such spec" }, 404);
     if (result.status === "not-confirmable") {
       return c.json({ error: result.message }, 409);
+    }
+    if (result.status === "invalid") {
+      return c.json({ error: result.message }, 422);
     }
     return c.json(
       {
         state: result.state,
         integrationBranches: result.integrationBranches,
         enqueued: result.enqueued,
+        planningSha: result.planningSha,
+        planningRepo: result.planningRepo,
       },
       200,
     );

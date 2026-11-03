@@ -22,7 +22,7 @@ export interface WorkerOptions {
   api: WorkerApi;
   executor: Omit<ExecutorDeps, "api">;
   capabilities?: string[];
-  host?: HostDeps; // the code host: a worker that has it also takes open-pr and host-sync jobs
+  host?: HostDeps; // the code host: a worker that has it also takes the host jobs
   heartbeatMs?: number; // the lease is 120 s; the design renews every 30 s
   logFlushMs?: number; // how often a running stage uploads what it has logged so far
   pollMs?: number; // wait between claims when the queue is empty

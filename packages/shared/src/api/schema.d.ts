@@ -352,6 +352,14 @@ export interface paths {
                   | "cancelled";
                 pauseReason: string | null;
                 project: string;
+                repos: {
+                  name: string;
+                  url: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
+                }[];
+                startedAt: string;
+                endedAt: string | null;
                 progress: {
                   total: number;
                   done: number;
@@ -544,7 +552,14 @@ export interface paths {
         };
         cookie?: never;
       };
-      requestBody?: never;
+      requestBody?: {
+        content: {
+          "application/json": {
+            planningSha?: string;
+            planningRepo?: string;
+          };
+        };
+      };
       responses: {
         /** @description Confirmed; the spec is running and the tickets that can start are queued */
         200: {
@@ -574,6 +589,8 @@ export interface paths {
                 displayId: string;
                 jobId: number;
               }[];
+              planningSha: string | null;
+              planningRepo: string | null;
             };
           };
         };
@@ -590,6 +607,17 @@ export interface paths {
         };
         /** @description The spec is not a draft, or has no tickets */
         409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The planning commit is incomplete or names no such repo */
+        422: {
           headers: {
             [name: string]: unknown;
           };
@@ -940,6 +968,12 @@ export interface paths {
                 url: string;
                 defaultBranch: string;
               };
+              domain: {
+                repo: string;
+                url: string;
+                defaultBranch: string;
+                sha: string;
+              } | null;
               integrationBranch: string | null;
               agentBranch: string;
               protectedPaths: string[];
@@ -963,6 +997,7 @@ export interface paths {
                 defaultBranch: string;
                 sha: string | null;
               }[];
+              note: string | null;
               failureLog: string | null;
               review?: unknown;
               gateBaseline: {
@@ -1031,7 +1066,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1078,6 +1113,14 @@ export interface paths {
                     repoUrl: string;
                     branch: string;
                   }[];
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "patch-pr-body";
+                  repoUrl: string;
+                  number: number;
+                  section: string;
+                  summary: string;
                 };
           };
         };
@@ -1408,6 +1451,9 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                repoUrl: string;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
                 refs: string[];
                 environment: string[];
                 appended: boolean;
@@ -1600,6 +1646,85 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/runs/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The run: stage, attempt, result, duration, prompt, structured output and commits */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              displayId: string;
+              stage: string;
+              attempt: number;
+              result: string | null;
+              durationMs: number | null;
+              agent: string | null;
+              model: string | null;
+              skillsSha: string | null;
+              /** @enum {string|null} */
+              axis: "standards" | "spec" | null;
+              cursorCliVersion: string | null;
+              contractShas: {
+                [key: string]: string;
+              } | null;
+              refShas: {
+                [key: string]: string;
+              } | null;
+              startedAt: string | null;
+              finishedAt: string | null;
+              specId: number;
+              specDisplayId: string;
+              ticketId: number | null;
+              ticketDisplayId: string | null;
+              prompt: string | null;
+              output?: unknown;
+              commits: string[];
+              repoUrl: string;
+              /** @enum {string} */
+              hostKind: "github" | "gitlab";
+            };
+          };
+        };
+        /** @description No such run */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs/{id}": {
     parameters: {
       query?: never;
@@ -1627,6 +1752,7 @@ export interface paths {
             "application/json": {
               spec: {
                 id: number;
+                projectId: number;
                 displayId: string;
                 slug: string;
                 title: string;
@@ -1645,11 +1771,29 @@ export interface paths {
                   | "paused"
                   | "cancelled";
                 pauseReason: string | null;
+                repos: {
+                  name: string;
+                  url: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
+                }[];
                 integrationBranches: {
                   repoId: number;
                   branch: string;
+                  name: string;
+                  url: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
                 }[];
                 warnings: unknown[];
+                planningSha: string | null;
+                planningRepo: string | null;
+                prechecks: {
+                  code: string;
+                  /** @enum {string} */
+                  level: "yellow";
+                  message: string;
+                }[];
               };
               tickets: {
                 id: number;
@@ -1669,6 +1813,9 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                repoUrl: string;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
                 refs: string[];
                 environment: string[];
                 appended: boolean;
@@ -1925,6 +2072,35 @@ export interface paths {
                 to: string;
                 kind: string;
               }[];
+              timeline: {
+                /** @enum {string} */
+                kind:
+                  | "confirm-plan"
+                  | "ticket-start"
+                  | "gate"
+                  | "review"
+                  | "ticket-merge"
+                  | "ticket-blocked"
+                  | "finalization"
+                  | "pr-opened"
+                  | "pr-ready"
+                  | "pack"
+                  | "ticket-appended"
+                  | "pause"
+                  | "resume"
+                  | "merged";
+                at: string;
+                text: string;
+                runId?: number;
+                ticketId?: number;
+              }[];
+              finalRuns: {
+                id: number;
+                displayId: string;
+                repo: string;
+                stage: string;
+                result: string | null;
+              }[];
             };
           };
         };
@@ -2063,6 +2239,9 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                repoUrl: string;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
                 refs: string[];
                 environment: string[];
                 appended: boolean;
@@ -2204,6 +2383,334 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/workbench": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The four workbench quadrants: waiting, running, awaiting acceptance, recently merged */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              waiting: {
+                tickets: {
+                  id: number;
+                  displayId: string;
+                  specId: number;
+                  specDisplayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "pending"
+                    | "queued"
+                    | "running"
+                    | "merging"
+                    | "done"
+                    | "blocked"
+                    | "cancelled";
+                  blockedReason: string | null;
+                  repo: string;
+                  repoUrl: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
+                  refs: string[];
+                  environment: string[];
+                  appended: boolean;
+                  brief: {
+                    run: {
+                      id: number;
+                      displayId: string;
+                    };
+                    stage: string;
+                    result: string | null;
+                    output?: unknown;
+                    logPath: string;
+                    attempts?: {
+                      e2e: {
+                        id: number;
+                        displayId: string;
+                        result: string | null;
+                        testsTotal: number | null;
+                        testsFailed: number | null;
+                        envUpMs: number | null;
+                        refShas: {
+                          [key: string]: string;
+                        } | null;
+                        headSha: string | null;
+                      };
+                      diagnosis: {
+                        result: string | null;
+                        failingRepo: string | null;
+                        evidence: string;
+                        failingTests: string[];
+                      } | null;
+                      fixTicket: {
+                        id: number;
+                        displayId: string;
+                        /** @enum {string} */
+                        state:
+                          | "pending"
+                          | "queued"
+                          | "running"
+                          | "merging"
+                          | "done"
+                          | "blocked"
+                          | "cancelled";
+                        repo: string;
+                      } | null;
+                    }[];
+                  } | null;
+                }[];
+                finalizations: {
+                  specId: number;
+                  specDisplayId: string;
+                  repo: string;
+                  step: string;
+                  state: string;
+                  blockedReason: string | null;
+                  brief: {
+                    run: {
+                      id: number;
+                      displayId: string;
+                    };
+                    stage: string;
+                    result: string | null;
+                    output?: unknown;
+                    logPath: string;
+                    attempts?: {
+                      e2e: {
+                        id: number;
+                        displayId: string;
+                        result: string | null;
+                        testsTotal: number | null;
+                        testsFailed: number | null;
+                        envUpMs: number | null;
+                        refShas: {
+                          [key: string]: string;
+                        } | null;
+                        headSha: string | null;
+                      };
+                      diagnosis: {
+                        result: string | null;
+                        failingRepo: string | null;
+                        evidence: string;
+                        failingTests: string[];
+                      } | null;
+                      fixTicket: {
+                        id: number;
+                        displayId: string;
+                        /** @enum {string} */
+                        state:
+                          | "pending"
+                          | "queued"
+                          | "running"
+                          | "merging"
+                          | "done"
+                          | "blocked"
+                          | "cancelled";
+                        repo: string;
+                      } | null;
+                    }[];
+                  } | null;
+                }[];
+                pullRequests: {
+                  specId: number;
+                  specDisplayId: string;
+                  repo: string;
+                  number: number;
+                  url: string;
+                  state: string;
+                  syncError: string | null;
+                }[];
+                cleanups: {
+                  specId: number;
+                  specDisplayId: string;
+                  error: string;
+                }[];
+                readyFailures: {
+                  specId: number;
+                  specDisplayId: string;
+                  repo: string;
+                  number: number;
+                  url: string;
+                  error: string;
+                }[];
+                specs: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  reason: string;
+                }[];
+              };
+              running: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  slug: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  pauseReason: string | null;
+                  project: string;
+                  repos: {
+                    name: string;
+                    url: string;
+                    /** @enum {string} */
+                    hostKind: "github" | "gitlab";
+                  }[];
+                  startedAt: string;
+                  endedAt: string | null;
+                  progress: {
+                    total: number;
+                    done: number;
+                    active: number;
+                    blocked: number;
+                    pending: number;
+                    cancelled: number;
+                  };
+                };
+                tickets: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  /** @enum {string} */
+                  state:
+                    | "pending"
+                    | "queued"
+                    | "running"
+                    | "merging"
+                    | "done"
+                    | "blocked"
+                    | "cancelled";
+                  repo: string;
+                  stage: string | null;
+                  startedAt: string | null;
+                  elapsedMs: number | null;
+                  meanMs: number | null;
+                  slow: boolean;
+                }[];
+              }[];
+              awaitingAcceptance: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  slug: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  pauseReason: string | null;
+                  project: string;
+                  repos: {
+                    name: string;
+                    url: string;
+                    /** @enum {string} */
+                    hostKind: "github" | "gitlab";
+                  }[];
+                  startedAt: string;
+                  endedAt: string | null;
+                  progress: {
+                    total: number;
+                    done: number;
+                    active: number;
+                    blocked: number;
+                    pending: number;
+                    cancelled: number;
+                  };
+                };
+                pullRequestCount: number;
+                verifiedCriteria: number;
+                totalCriteria: number;
+              }[];
+              recentlyCompleted: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  slug: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  pauseReason: string | null;
+                  project: string;
+                  repos: {
+                    name: string;
+                    url: string;
+                    /** @enum {string} */
+                    hostKind: "github" | "gitlab";
+                  }[];
+                  startedAt: string;
+                  endedAt: string | null;
+                  progress: {
+                    total: number;
+                    done: number;
+                    active: number;
+                    blocked: number;
+                    pending: number;
+                    cancelled: number;
+                  };
+                };
+                completedAt: string;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/tickets/{id}/retry": {
     parameters: {
       query?: never;
@@ -2227,6 +2734,7 @@ export interface paths {
           "application/json": {
             /** @enum {string} */
             mode: "continue" | "restart";
+            note?: string;
           };
         };
       };
@@ -2732,7 +3240,13 @@ export interface paths {
         };
         cookie?: never;
       };
-      requestBody?: never;
+      requestBody?: {
+        content: {
+          "application/json": {
+            note?: string;
+          };
+        };
+      };
       responses: {
         /** @description The blocked steps of the overall review are queued again */
         200: {

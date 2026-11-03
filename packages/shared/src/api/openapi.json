@@ -688,6 +688,31 @@
                           "project": {
                             "type": "string"
                           },
+                          "repos": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "type": "string"
+                                },
+                                "hostKind": {
+                                  "type": "string",
+                                  "enum": ["github", "gitlab"]
+                                }
+                              },
+                              "required": ["name", "url", "hostKind"]
+                            }
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "endedAt": {
+                            "type": ["string", "null"]
+                          },
                           "progress": {
                             "type": "object",
                             "properties": {
@@ -729,6 +754,9 @@
                           "state",
                           "pauseReason",
                           "project",
+                          "repos",
+                          "startedAt",
+                          "endedAt",
                           "progress"
                         ]
                       }
@@ -934,6 +962,28 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "planningSha": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Confirmed; the spec is running and the tickets that can start are queued",
@@ -995,9 +1045,22 @@
                         },
                         "required": ["ticketId", "displayId", "jobId"]
                       }
+                    },
+                    "planningSha": {
+                      "type": ["string", "null"],
+                      "pattern": "^[0-9a-f]{40}$"
+                    },
+                    "planningRepo": {
+                      "type": ["string", "null"]
                     }
                   },
-                  "required": ["state", "integrationBranches", "enqueued"]
+                  "required": [
+                    "state",
+                    "integrationBranches",
+                    "enqueued",
+                    "planningSha",
+                    "planningRepo"
+                  ]
                 }
               }
             }
@@ -1020,6 +1083,22 @@
           },
           "409": {
             "description": "The spec is not a draft, or has no tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The planning commit is incomplete or names no such repo",
             "content": {
               "application/json": {
                 "schema": {
@@ -1587,6 +1666,24 @@
                       },
                       "required": ["id", "name", "url", "defaultBranch"]
                     },
+                    "domain": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "repo": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        },
+                        "sha": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["repo", "url", "defaultBranch", "sha"]
+                    },
                     "integrationBranch": {
                       "type": ["string", "null"]
                     },
@@ -1677,6 +1774,9 @@
                         "required": ["name", "url", "defaultBranch", "sha"]
                       }
                     },
+                    "note": {
+                      "type": ["string", "null"]
+                    },
                     "failureLog": {
                       "type": ["string", "null"]
                     },
@@ -1723,6 +1823,7 @@
                     "specTickets",
                     "spec",
                     "repo",
+                    "domain",
                     "integrationBranch",
                     "agentBranch",
                     "protectedPaths",
@@ -1730,6 +1831,7 @@
                     "contracts",
                     "refs",
                     "environment",
+                    "note",
                     "failureLog",
                     "gateBaseline",
                     "limits",
@@ -1810,7 +1912,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready or spec-cleanup job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -1946,6 +2048,34 @@
                         }
                       },
                       "required": ["kind", "pulls", "branches"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["patch-pr-body"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "section": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "number",
+                        "section",
+                        "summary"
+                      ]
                     }
                   ]
                 }
@@ -2405,6 +2535,13 @@
                         "repo": {
                           "type": "string"
                         },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "hostKind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        },
                         "refs": {
                           "type": "array",
                           "items": {
@@ -2607,6 +2744,8 @@
                         "state",
                         "blockedReason",
                         "repo",
+                        "repoUrl",
+                        "hostKind",
                         "refs",
                         "environment",
                         "appended",
@@ -2992,6 +3131,158 @@
         }
       }
     },
+    "/runs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run: stage, attempt, result, duration, prompt, structured output and commits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "displayId": {
+                      "type": "string"
+                    },
+                    "stage": {
+                      "type": "string"
+                    },
+                    "attempt": {
+                      "type": "integer"
+                    },
+                    "result": {
+                      "type": ["string", "null"]
+                    },
+                    "durationMs": {
+                      "type": ["integer", "null"]
+                    },
+                    "agent": {
+                      "type": ["string", "null"]
+                    },
+                    "model": {
+                      "type": ["string", "null"]
+                    },
+                    "skillsSha": {
+                      "type": ["string", "null"]
+                    },
+                    "axis": {
+                      "type": ["string", "null"],
+                      "enum": ["standards", "spec", null]
+                    },
+                    "cursorCliVersion": {
+                      "type": ["string", "null"]
+                    },
+                    "contractShas": {
+                      "type": ["object", "null"],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "refShas": {
+                      "type": ["object", "null"],
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "startedAt": {
+                      "type": ["string", "null"]
+                    },
+                    "finishedAt": {
+                      "type": ["string", "null"]
+                    },
+                    "specId": {
+                      "type": "integer"
+                    },
+                    "specDisplayId": {
+                      "type": "string"
+                    },
+                    "ticketId": {
+                      "type": ["integer", "null"]
+                    },
+                    "ticketDisplayId": {
+                      "type": ["string", "null"]
+                    },
+                    "prompt": {
+                      "type": ["string", "null"]
+                    },
+                    "output": {},
+                    "commits": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "repoUrl": {
+                      "type": "string"
+                    },
+                    "hostKind": {
+                      "type": "string",
+                      "enum": ["github", "gitlab"]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "displayId",
+                    "stage",
+                    "attempt",
+                    "result",
+                    "durationMs",
+                    "agent",
+                    "model",
+                    "skillsSha",
+                    "axis",
+                    "cursorCliVersion",
+                    "contractShas",
+                    "refShas",
+                    "startedAt",
+                    "finishedAt",
+                    "specId",
+                    "specDisplayId",
+                    "ticketId",
+                    "ticketDisplayId",
+                    "prompt",
+                    "commits",
+                    "repoUrl",
+                    "hostKind"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/specs/{id}": {
       "get": {
         "parameters": [
@@ -3018,6 +3309,9 @@
                       "type": "object",
                       "properties": {
                         "id": {
+                          "type": "integer"
+                        },
+                        "projectId": {
                           "type": "integer"
                         },
                         "displayId": {
@@ -3053,6 +3347,25 @@
                         "pauseReason": {
                           "type": ["string", "null"]
                         },
+                        "repos": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "hostKind": {
+                                "type": "string",
+                                "enum": ["github", "gitlab"]
+                              }
+                            },
+                            "required": ["name", "url", "hostKind"]
+                          }
+                        },
                         "integrationBranches": {
                           "type": "array",
                           "items": {
@@ -3063,18 +3376,60 @@
                               },
                               "branch": {
                                 "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "hostKind": {
+                                "type": "string",
+                                "enum": ["github", "gitlab"]
                               }
                             },
-                            "required": ["repoId", "branch"]
+                            "required": [
+                              "repoId",
+                              "branch",
+                              "name",
+                              "url",
+                              "hostKind"
+                            ]
                           }
                         },
                         "warnings": {
                           "type": "array",
                           "items": {}
+                        },
+                        "planningSha": {
+                          "type": ["string", "null"]
+                        },
+                        "planningRepo": {
+                          "type": ["string", "null"]
+                        },
+                        "prechecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "string",
+                                "enum": ["yellow"]
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "level", "message"]
+                          }
                         }
                       },
                       "required": [
                         "id",
+                        "projectId",
                         "displayId",
                         "slug",
                         "title",
@@ -3082,8 +3437,12 @@
                         "body",
                         "state",
                         "pauseReason",
+                        "repos",
                         "integrationBranches",
-                        "warnings"
+                        "warnings",
+                        "planningSha",
+                        "planningRepo",
+                        "prechecks"
                       ]
                     },
                     "tickets": {
@@ -3126,6 +3485,13 @@
                           },
                           "repo": {
                             "type": "string"
+                          },
+                          "repoUrl": {
+                            "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           },
                           "refs": {
                             "type": "array",
@@ -3290,6 +3656,8 @@
                           "state",
                           "blockedReason",
                           "repo",
+                          "repoUrl",
+                          "hostKind",
                           "refs",
                           "environment",
                           "appended",
@@ -4091,6 +4459,76 @@
                         },
                         "required": ["from", "to", "kind"]
                       }
+                    },
+                    "timeline": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "confirm-plan",
+                              "ticket-start",
+                              "gate",
+                              "review",
+                              "ticket-merge",
+                              "ticket-blocked",
+                              "finalization",
+                              "pr-opened",
+                              "pr-ready",
+                              "pack",
+                              "ticket-appended",
+                              "pause",
+                              "resume",
+                              "merged"
+                            ]
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": "integer"
+                          },
+                          "ticketId": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["kind", "at", "text"]
+                      }
+                    },
+                    "finalRuns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "repo",
+                          "stage",
+                          "result"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -4101,7 +4539,9 @@
                     "orderBroken",
                     "pullRequests",
                     "acceptancePack",
-                    "edges"
+                    "edges",
+                    "timeline",
+                    "finalRuns"
                   ]
                 }
               }
@@ -4305,6 +4745,13 @@
                           "repo": {
                             "type": "string"
                           },
+                          "repoUrl": {
+                            "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "refs": {
                             "type": "array",
                             "items": {
@@ -4468,6 +4915,8 @@
                           "state",
                           "blockedReason",
                           "repo",
+                          "repoUrl",
+                          "hostKind",
                           "refs",
                           "environment",
                           "appended",
@@ -4774,6 +5223,1000 @@
         }
       }
     },
+    "/workbench": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "waiting": {
+                      "type": "object",
+                      "properties": {
+                        "tickets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "queued",
+                                  "running",
+                                  "merging",
+                                  "done",
+                                  "blocked",
+                                  "cancelled"
+                                ]
+                              },
+                              "blockedReason": {
+                                "type": ["string", "null"]
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "hostKind": {
+                                "type": "string",
+                                "enum": ["github", "gitlab"]
+                              },
+                              "refs": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "environment": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "appended": {
+                                "type": "boolean"
+                              },
+                              "brief": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "run": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "integer"
+                                      },
+                                      "displayId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["id", "displayId"]
+                                  },
+                                  "stage": {
+                                    "type": "string"
+                                  },
+                                  "result": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "output": {},
+                                  "logPath": {
+                                    "type": "string"
+                                  },
+                                  "attempts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "e2e": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "integer"
+                                            },
+                                            "displayId": {
+                                              "type": "string"
+                                            },
+                                            "result": {
+                                              "type": ["string", "null"]
+                                            },
+                                            "testsTotal": {
+                                              "type": ["integer", "null"]
+                                            },
+                                            "testsFailed": {
+                                              "type": ["integer", "null"]
+                                            },
+                                            "envUpMs": {
+                                              "type": ["integer", "null"]
+                                            },
+                                            "refShas": {
+                                              "type": ["object", "null"],
+                                              "additionalProperties": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "headSha": {
+                                              "type": ["string", "null"]
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "displayId",
+                                            "result",
+                                            "testsTotal",
+                                            "testsFailed",
+                                            "envUpMs",
+                                            "refShas",
+                                            "headSha"
+                                          ]
+                                        },
+                                        "diagnosis": {
+                                          "type": ["object", "null"],
+                                          "properties": {
+                                            "result": {
+                                              "type": ["string", "null"]
+                                            },
+                                            "failingRepo": {
+                                              "type": ["string", "null"]
+                                            },
+                                            "evidence": {
+                                              "type": "string"
+                                            },
+                                            "failingTests": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
+                                          "required": [
+                                            "result",
+                                            "failingRepo",
+                                            "evidence",
+                                            "failingTests"
+                                          ]
+                                        },
+                                        "fixTicket": {
+                                          "type": ["object", "null"],
+                                          "properties": {
+                                            "id": {
+                                              "type": "integer"
+                                            },
+                                            "displayId": {
+                                              "type": "string"
+                                            },
+                                            "state": {
+                                              "type": "string",
+                                              "enum": [
+                                                "pending",
+                                                "queued",
+                                                "running",
+                                                "merging",
+                                                "done",
+                                                "blocked",
+                                                "cancelled"
+                                              ]
+                                            },
+                                            "repo": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "displayId",
+                                            "state",
+                                            "repo"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "e2e",
+                                        "diagnosis",
+                                        "fixTicket"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "run",
+                                  "stage",
+                                  "result",
+                                  "logPath"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "specId",
+                              "specDisplayId",
+                              "title",
+                              "type",
+                              "state",
+                              "blockedReason",
+                              "repo",
+                              "repoUrl",
+                              "hostKind",
+                              "refs",
+                              "environment",
+                              "appended",
+                              "brief"
+                            ]
+                          }
+                        },
+                        "finalizations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "blockedReason": {
+                                "type": ["string", "null"]
+                              },
+                              "brief": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                  "run": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "integer"
+                                      },
+                                      "displayId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["id", "displayId"]
+                                  },
+                                  "stage": {
+                                    "type": "string"
+                                  },
+                                  "result": {
+                                    "type": ["string", "null"]
+                                  },
+                                  "output": {},
+                                  "logPath": {
+                                    "type": "string"
+                                  },
+                                  "attempts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "e2e": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "integer"
+                                            },
+                                            "displayId": {
+                                              "type": "string"
+                                            },
+                                            "result": {
+                                              "type": ["string", "null"]
+                                            },
+                                            "testsTotal": {
+                                              "type": ["integer", "null"]
+                                            },
+                                            "testsFailed": {
+                                              "type": ["integer", "null"]
+                                            },
+                                            "envUpMs": {
+                                              "type": ["integer", "null"]
+                                            },
+                                            "refShas": {
+                                              "type": ["object", "null"],
+                                              "additionalProperties": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "headSha": {
+                                              "type": ["string", "null"]
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "displayId",
+                                            "result",
+                                            "testsTotal",
+                                            "testsFailed",
+                                            "envUpMs",
+                                            "refShas",
+                                            "headSha"
+                                          ]
+                                        },
+                                        "diagnosis": {
+                                          "type": ["object", "null"],
+                                          "properties": {
+                                            "result": {
+                                              "type": ["string", "null"]
+                                            },
+                                            "failingRepo": {
+                                              "type": ["string", "null"]
+                                            },
+                                            "evidence": {
+                                              "type": "string"
+                                            },
+                                            "failingTests": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
+                                          "required": [
+                                            "result",
+                                            "failingRepo",
+                                            "evidence",
+                                            "failingTests"
+                                          ]
+                                        },
+                                        "fixTicket": {
+                                          "type": ["object", "null"],
+                                          "properties": {
+                                            "id": {
+                                              "type": "integer"
+                                            },
+                                            "displayId": {
+                                              "type": "string"
+                                            },
+                                            "state": {
+                                              "type": "string",
+                                              "enum": [
+                                                "pending",
+                                                "queued",
+                                                "running",
+                                                "merging",
+                                                "done",
+                                                "blocked",
+                                                "cancelled"
+                                              ]
+                                            },
+                                            "repo": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "displayId",
+                                            "state",
+                                            "repo"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "e2e",
+                                        "diagnosis",
+                                        "fixTicket"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "run",
+                                  "stage",
+                                  "result",
+                                  "logPath"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "specId",
+                              "specDisplayId",
+                              "repo",
+                              "step",
+                              "state",
+                              "blockedReason",
+                              "brief"
+                            ]
+                          }
+                        },
+                        "pullRequests": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "syncError": {
+                                "type": ["string", "null"]
+                              }
+                            },
+                            "required": [
+                              "specId",
+                              "specDisplayId",
+                              "repo",
+                              "number",
+                              "url",
+                              "state",
+                              "syncError"
+                            ]
+                          }
+                        },
+                        "cleanups": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["specId", "specDisplayId", "error"]
+                          }
+                        },
+                        "readyFailures": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "specId",
+                              "specDisplayId",
+                              "repo",
+                              "number",
+                              "url",
+                              "error"
+                            ]
+                          }
+                        },
+                        "specs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["id", "displayId", "title", "reason"]
+                          }
+                        }
+                      },
+                      "required": [
+                        "tickets",
+                        "finalizations",
+                        "pullRequests",
+                        "cleanups",
+                        "readyFailures",
+                        "specs"
+                      ]
+                    },
+                    "running": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "pauseReason": {
+                                "type": ["string", "null"]
+                              },
+                              "project": {
+                                "type": "string"
+                              },
+                              "repos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "hostKind": {
+                                      "type": "string",
+                                      "enum": ["github", "gitlab"]
+                                    }
+                                  },
+                                  "required": ["name", "url", "hostKind"]
+                                }
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "endedAt": {
+                                "type": ["string", "null"]
+                              },
+                              "progress": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "done": {
+                                    "type": "integer"
+                                  },
+                                  "active": {
+                                    "type": "integer"
+                                  },
+                                  "blocked": {
+                                    "type": "integer"
+                                  },
+                                  "pending": {
+                                    "type": "integer"
+                                  },
+                                  "cancelled": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "done",
+                                  "active",
+                                  "blocked",
+                                  "pending",
+                                  "cancelled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "slug",
+                              "title",
+                              "type",
+                              "state",
+                              "pauseReason",
+                              "project",
+                              "repos",
+                              "startedAt",
+                              "endedAt",
+                              "progress"
+                            ]
+                          },
+                          "tickets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "pending",
+                                    "queued",
+                                    "running",
+                                    "merging",
+                                    "done",
+                                    "blocked",
+                                    "cancelled"
+                                  ]
+                                },
+                                "repo": {
+                                  "type": "string"
+                                },
+                                "stage": {
+                                  "type": ["string", "null"]
+                                },
+                                "startedAt": {
+                                  "type": ["string", "null"]
+                                },
+                                "elapsedMs": {
+                                  "type": ["integer", "null"]
+                                },
+                                "meanMs": {
+                                  "type": ["integer", "null"]
+                                },
+                                "slow": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "displayId",
+                                "title",
+                                "state",
+                                "repo",
+                                "stage",
+                                "startedAt",
+                                "elapsedMs",
+                                "meanMs",
+                                "slow"
+                              ]
+                            }
+                          }
+                        },
+                        "required": ["spec", "tickets"]
+                      }
+                    },
+                    "awaitingAcceptance": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "pauseReason": {
+                                "type": ["string", "null"]
+                              },
+                              "project": {
+                                "type": "string"
+                              },
+                              "repos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "hostKind": {
+                                      "type": "string",
+                                      "enum": ["github", "gitlab"]
+                                    }
+                                  },
+                                  "required": ["name", "url", "hostKind"]
+                                }
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "endedAt": {
+                                "type": ["string", "null"]
+                              },
+                              "progress": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "done": {
+                                    "type": "integer"
+                                  },
+                                  "active": {
+                                    "type": "integer"
+                                  },
+                                  "blocked": {
+                                    "type": "integer"
+                                  },
+                                  "pending": {
+                                    "type": "integer"
+                                  },
+                                  "cancelled": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "done",
+                                  "active",
+                                  "blocked",
+                                  "pending",
+                                  "cancelled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "slug",
+                              "title",
+                              "type",
+                              "state",
+                              "pauseReason",
+                              "project",
+                              "repos",
+                              "startedAt",
+                              "endedAt",
+                              "progress"
+                            ]
+                          },
+                          "pullRequestCount": {
+                            "type": "integer"
+                          },
+                          "verifiedCriteria": {
+                            "type": "integer"
+                          },
+                          "totalCriteria": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "spec",
+                          "pullRequestCount",
+                          "verifiedCriteria",
+                          "totalCriteria"
+                        ]
+                      }
+                    },
+                    "recentlyCompleted": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "spec": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "pauseReason": {
+                                "type": ["string", "null"]
+                              },
+                              "project": {
+                                "type": "string"
+                              },
+                              "repos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "hostKind": {
+                                      "type": "string",
+                                      "enum": ["github", "gitlab"]
+                                    }
+                                  },
+                                  "required": ["name", "url", "hostKind"]
+                                }
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "endedAt": {
+                                "type": ["string", "null"]
+                              },
+                              "progress": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "done": {
+                                    "type": "integer"
+                                  },
+                                  "active": {
+                                    "type": "integer"
+                                  },
+                                  "blocked": {
+                                    "type": "integer"
+                                  },
+                                  "pending": {
+                                    "type": "integer"
+                                  },
+                                  "cancelled": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "done",
+                                  "active",
+                                  "blocked",
+                                  "pending",
+                                  "cancelled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "slug",
+                              "title",
+                              "type",
+                              "state",
+                              "pauseReason",
+                              "project",
+                              "repos",
+                              "startedAt",
+                              "endedAt",
+                              "progress"
+                            ]
+                          },
+                          "completedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["spec", "completedAt"]
+                      }
+                    }
+                  },
+                  "required": [
+                    "waiting",
+                    "running",
+                    "awaitingAcceptance",
+                    "recentlyCompleted"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tickets/{id}/retry": {
       "post": {
         "parameters": [
@@ -4797,6 +6240,9 @@
                   "mode": {
                     "type": "string",
                     "enum": ["continue", "restart"]
+                  },
+                  "note": {
+                    "type": "string"
                   }
                 },
                 "required": ["mode"]
@@ -5434,6 +6880,21 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The blocked steps of the overall review are queued again",

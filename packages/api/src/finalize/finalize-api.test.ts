@@ -27,8 +27,12 @@ type Json = any;
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method,
-    headers: { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   });
   return { status: response.status, body: (await response.json()) as Json };
 }
@@ -390,6 +394,28 @@ describe("when it goes wrong", () => {
     expect(await fin()).toEqual([
       { step: "final-merge", state: "done", blocked_reason: null },
     ]);
+  });
+
+  it("a retry-final note goes on the next Run's bundle, then a retry without one has none", async () => {
+    await toFinalFix();
+    await step("final-fix", { outcome: "done" });
+    await step("final-merge", { outcome: "conflict" });
+    const note = "take theirs on src/a.ts";
+    expect((await call("POST", "/specs/1/final/retry", { note })).status).toBe(
+      200,
+    );
+    const again = (await claim()) as Claimed;
+    const bundleOf = async (job: Claimed) =>
+      (await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      ).then((r) => r.json())) as Json;
+    expect((await bundleOf(again)).note).toBe(note);
+    await worker.complete(again.id, again.attempt, {
+      stage: "final-merge",
+      outcome: "conflict",
+    });
+    expect((await call("POST", "/specs/1/final/retry")).status).toBe(200);
+    expect((await bundleOf((await claim()) as Claimed)).note).toBeNull();
   });
 
   it("a conflict is merge-conflict", async () => {

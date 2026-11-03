@@ -8,8 +8,12 @@
       "*.ts",
       "!**/node_modules",
       "!**/dist",
-      "!packages/shared/skills-snapshot"
+      "!packages/shared/skills-snapshot",
+      "!packages/web/src/routeTree.gen.ts"
     ]
   },
-  "formatter": { "indentStyle": "space", "indentWidth": 2 }
+  "formatter": { "indentStyle": "space", "indentWidth": 2 },
+  "css": {
+    "parser": { "tailwindDirectives": true }
+  }
 }

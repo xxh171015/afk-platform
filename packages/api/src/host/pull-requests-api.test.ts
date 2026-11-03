@@ -1,8 +1,10 @@
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { saveAcceptancePack } from "../acceptance/pack.ts";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { inTransaction } from "../scheduling/scheduler.ts";
 import {
   FakeClock,
   FakeWorker,
@@ -34,8 +36,12 @@ type Json = any;
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const response = await fetch(`${api.url}${path}`, {
     method,
-    headers: { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   });
   return { status: response.status, body: (await response.json()) as Json };
 }
@@ -149,11 +155,24 @@ async function settledSpec(
 }
 
 // Answers the next host-sync with the given facts about pull requests, a minute on.
+const PATCHED = { stage: "patch-pr-body", outcome: "patched" };
+
+async function completeIfPatch(job: {
+  type: string;
+  id: number;
+  attempt: number;
+}) {
+  if (job.type !== "patch-pr-body") return false;
+  await worker.complete(job.id, job.attempt, PATCHED);
+  return true;
+}
+
 async function syncWith(pulls: Json[]) {
   clock.advanceSeconds(61);
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     const job = (await worker.claim()).body.job;
     if (!job) break;
+    if (await completeIfPatch(job)) continue;
     if (job.type === "host-sync") {
       await worker.complete(job.id, job.attempt, { stage: "host-sync", pulls });
       return;
@@ -182,9 +201,22 @@ const jobsOf = async (type: string) =>
   ).rows as Json[];
 
 async function claimOf(type: string) {
-  const job = (await worker.claim()).body.job;
-  expect(job?.type).toBe(type);
-  return job as { id: number; attempt: number; payload: Json };
+  for (let i = 0; i < 8; i++) {
+    const job = (await worker.claim()).body.job;
+    if (!job) break;
+    if (job.type === type)
+      return job as { id: number; attempt: number; payload: Json };
+    if (await completeIfPatch(job)) continue;
+    if (job.type === "host-sync") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "host-sync",
+        pulls: [],
+      });
+      continue;
+    }
+    expect(job.type).toBe(type);
+  }
+  throw new Error(`no ${type} job`);
 }
 const taskOf = async (job: { id: number; attempt: number }, attempt?: number) =>
   fetch(
@@ -301,11 +333,12 @@ describe("turning a draft pull request ready", () => {
   }
   // the next job of this type; a host-sync that is due first is answered with nothing to report
   async function claimNamed(type: string) {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const job = (await worker.claim()).body.job;
       if (!job) break;
       if (job.type === type)
         return job as { id: number; attempt: number; payload: Json };
+      if (await completeIfPatch(job)) continue;
       if (job.type === "host-sync") {
         await worker.complete(job.id, job.attempt, {
           stage: "host-sync",
@@ -320,9 +353,10 @@ describe("turning a draft pull request ready", () => {
   // The next host-sync; a pr-ready job queued before it is left running (a worker that has taken it and not yet
   // finished), which is also what keeps another from being queued.
   async function claimSyncKeeping() {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const job = (await worker.claim()).body.job;
       if (!job) break;
+      if (await completeIfPatch(job)) continue;
       if (job.type === "host-sync")
         return job as { id: number; attempt: number; payload: Json };
     }
@@ -510,6 +544,8 @@ describe("opening the pull requests", () => {
     });
     expect(task.body.body).toContain("Spec: S-1");
     expect(task.body.body).toContain("- T-1 Ticket backend");
+    expect(task.body.body).toContain("the platform never merges");
+    expect(task.body.body).not.toContain("afk-acceptance-pack");
   });
 
   it("opens the pull request from the flat branch of a spec that was made before the databases had ids", async () => {
@@ -1381,6 +1417,45 @@ describe("the acceptance pack", () => {
     ]);
   });
 
+  it("fills missing arrays on a stored pack that already has repo sections", async () => {
+    await packOf();
+    await db.pool.query(
+      "UPDATE acceptance_packs SET content = $1 WHERE spec_id = 1",
+      [
+        JSON.stringify({
+          generatedAt: "2026-10-01T00:00:00.000Z",
+          agentSeconds: 12,
+          mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
+          repos: [
+            {
+              repo: "backend",
+              tickets: [
+                {
+                  displayId: "T-1",
+                  title: "Ticket a",
+                  appended: false,
+                  criteria: [
+                    {
+                      text: "it works",
+                      status: "unverified",
+                      reason: null,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      ],
+    );
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.cancelledTickets).toEqual([]);
+    expect(acceptancePack.repos[0].findings).toEqual([]);
+    expect(acceptancePack.repos[0].tickets[0].criteria[0].tests).toEqual([]);
+    const stored = await db.pool.query("SELECT content FROM acceptance_packs");
+    expect(stored.rows[0].content.cancelledTickets).toBeUndefined();
+  });
+
   it("makes a pack again from the record when the stored one is of the older kind, without repo sections", async () => {
     await packOf();
     await db.pool.query(
@@ -1432,6 +1507,69 @@ describe("the acceptance pack", () => {
     );
     expect(out).toContain("T-1: .github/workflows/ci.yml");
   });
+
+  it("opens with the spec only, then queues a patch of each description once every pull request is recorded", async () => {
+    await settledSpec(["backend", "frontend"], undefined, {
+      contractPaths: { backend: "openapi.yaml" },
+      tickets: [
+        contractTicket("contract", "backend"),
+        ticket("fe", "frontend", ["fe works"], { contract: "contract" }),
+      ],
+    });
+    const first = await claimOf("open-pr");
+    expect((await taskOf(first)).body.body).not.toContain(
+      "afk-acceptance-pack",
+    );
+    await worker.complete(first.id, first.attempt, opened(1));
+    expect(await jobsOf("patch-pr-body")).toEqual([]);
+    const second = await claimOf("open-pr");
+    await worker.complete(second.id, second.attempt, opened(2));
+    expect(await jobsOf("patch-pr-body")).toHaveLength(2);
+  });
+
+  it("gives the worker this repo's section, the merge order, and not the other repo's criteria", async () => {
+    await settledSpec(["backend", "frontend"], undefined, {
+      contractPaths: { backend: "openapi.yaml" },
+      tickets: [
+        contractTicket("contract", "backend"),
+        ticket("fe", "frontend", ["fe works"], { contract: "contract" }),
+      ],
+    });
+    for (let n = 1; n <= 2; n++) {
+      const job = await claimOf("open-pr");
+      await worker.complete(job.id, job.attempt, opened(n));
+    }
+    const tasks: Json[] = [];
+    for (let i = 0; i < 2; i++) {
+      const job = await claimOf("patch-pr-body");
+      tasks.push((await taskOf(job)).body);
+      await worker.complete(job.id, job.attempt, PATCHED);
+    }
+    const backend = tasks.find((t) => t.repoUrl.includes("backend"));
+    const frontend = tasks.find((t) => t.repoUrl.includes("frontend"));
+    expect(backend).toMatchObject({ kind: "patch-pr-body", number: 1 });
+    expect(backend.section).toContain("## Merge order");
+    expect(backend.section).toContain("backend → frontend");
+    expect(backend.section).toContain("contract works");
+    expect(backend.section).not.toContain("fe works");
+    expect(backend.section).toContain("/specs/1/delivery");
+    expect(backend.summary).toContain("/specs/1/delivery");
+    expect(frontend.section).toContain("fe works");
+    expect(frontend.section).not.toContain("contract works");
+  });
+
+  it("queues another patch when the pack is saved again", async () => {
+    await packOf();
+    expect(await jobsOf("patch-pr-body")).toHaveLength(1);
+    await inTransaction(db.pool, (client) =>
+      saveAcceptancePack(client, 1, clock.now()),
+    );
+    expect(await jobsOf("patch-pr-body")).toHaveLength(2);
+    expect(await jobsOf("patch-pr-body")).toMatchObject([
+      { payload: { specId: 1, pullId: 1 } },
+      { payload: { specId: 1, pullId: 1 } },
+    ]);
+  });
 });
 
 const CLEANUP_GRACE_SECONDS = 150; // a lease (120 s) and a heartbeat
@@ -1446,10 +1584,11 @@ describe("cleaning up after a cancelled or merged spec", () => {
   // The sync that was queued first may still be waiting; it is answered with nothing to report.
   async function claimCleanup() {
     clock.advanceSeconds(CLEANUP_GRACE_SECONDS);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const job = (await worker.claim()).body.job;
       if (!job) break;
       if (job.type === "spec-cleanup") return job;
+      if (await completeIfPatch(job)) continue;
       await worker.complete(job.id, job.attempt, {
         stage: "host-sync",
         pulls: [],
@@ -1557,10 +1696,11 @@ describe("cleaning up after a cancelled or merged spec", () => {
 
   // Is the cleanup claimable now? Any sync that is due is answered with nothing to report on the way.
   async function cleanupIsDue() {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       const job = (await worker.claim()).body.job;
       if (!job) return false;
       if (job.type === "spec-cleanup") return true;
+      if (await completeIfPatch(job)) continue;
       await worker.complete(job.id, job.attempt, {
         stage: "host-sync",
         pulls: [],

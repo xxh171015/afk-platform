@@ -62,12 +62,23 @@ const refused = (message: string) => ({ status: "refused", message }) as const;
 
 export type RetryMode = "continue" | "restart";
 
+// Empty or whitespace is no note. The note is not ticket content.
+export function parkedRetryNote(
+  note: string | undefined | null,
+): string | null {
+  if (typeof note !== "string") return null;
+  const trimmed = note.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 // continue keeps the branch and its commits; restart starts again from the integration branch. Either way the
-// fix counts and the review start over, and the ticket goes back to pending for the scheduler.
+// fix counts and the review start over, and the ticket goes back to pending for the scheduler. A Retry note
+// (if any) is parked until the next Run is claimed.
 export async function retryTicket(
   pool: pg.Pool,
   ticketId: number,
   mode: RetryMode,
+  note?: string | null,
 ): Promise<ActionResult<{ state: TicketState }>> {
   return inTransaction(pool, async (client) => {
     const ticket = await loadLocked(client, ticketId);
@@ -91,9 +102,15 @@ export async function retryTicket(
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false,
          restart = $3 AND resume_stage IS NULL, integration_rounds = 0,
-         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs),
+         retry_note = $4
        WHERE id = $1`,
-      [ticketId, JSON.stringify(plan.fixCounts), plan.deleteBranch],
+      [
+        ticketId,
+        JSON.stringify(plan.fixCounts),
+        plan.deleteBranch,
+        parkedRetryNote(note),
+      ],
     );
     await schedulePass(client, ticket.spec_id);
     const after = await client.query<{ state: TicketState }>(

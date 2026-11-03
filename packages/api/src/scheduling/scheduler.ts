@@ -33,15 +33,23 @@ export interface ScheduleResult {
   paused: boolean;
 }
 
+export type ConfirmPlanning = {
+  sha: string;
+  repoName: string;
+};
+
 export type ConfirmResult =
   | {
       status: "ok";
       state: SpecState;
       integrationBranches: { repoId: number; branch: string }[];
       enqueued: ScheduledTicket[];
+      planningSha: string | null;
+      planningRepo: string | null;
     }
   | { status: "no-spec" }
-  | { status: "not-confirmable"; message: string };
+  | { status: "not-confirmable"; message: string }
+  | { status: "invalid"; message: string };
 
 // Scheduling passes and ticket completions of one spec take this lock, so they never interleave.
 export async function lockSpec(
@@ -70,25 +78,54 @@ export async function inTransaction<T>(
 }
 
 // draft -> planned -> running in one step, one integration branch (spec/<id>/<slug>) per repo the spec touches,
-// then the first scheduling pass.
+// then the first scheduling pass. An optional planning commit is recorded as a pointer; this does not create
+// git branches or commit for the caller.
 export async function confirmSpec(
   pool: pg.Pool,
   specId: number,
+  planning?: ConfirmPlanning,
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      "SELECT slug, state, branch_namespace FROM specs WHERE id = $1 FOR UPDATE",
+      "SELECT slug, state, branch_namespace, project_id FROM specs WHERE id = $1 FOR UPDATE",
       [specId],
     );
     if (spec.rowCount === 0) return { status: "no-spec" };
-    const { slug, state, branch_namespace } = spec.rows[0] as {
+    const { slug, state, branch_namespace, project_id } = spec.rows[0] as {
       slug: string;
       state: SpecState;
       branch_namespace: string | null;
+      project_id: number;
     };
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
       return { status: "not-confirmable", message: planned.reason };
+    }
+    const shaGiven = planning?.sha !== undefined;
+    const repoGiven = planning?.repoName !== undefined;
+    if (shaGiven !== repoGiven) {
+      return {
+        status: "invalid",
+        message: "planningSha and planningRepo must be given together",
+      };
+    }
+    let planningRepoId: number | null = null;
+    let planningRepo: string | null = null;
+    const planningSha = planning?.sha ?? null;
+    if (planning) {
+      const found = await client.query<{ id: number; name: string }>(
+        "SELECT id, name FROM repos WHERE project_id = $1 AND name = $2",
+        [project_id, planning.repoName],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        return {
+          status: "invalid",
+          message: `no repo ${planning.repoName} in this spec's project`,
+        };
+      }
+      planningRepoId = row.id;
+      planningRepo = row.name;
     }
     const repos = await client.query<{ repo_id: number }>(
       "SELECT DISTINCT repo_id FROM tickets WHERE spec_id = $1 ORDER BY repo_id",
@@ -102,13 +139,26 @@ export async function confirmSpec(
     }
     const running = specTransition(planned.state, "start");
     if (!running.ok) throw new Error(running.reason);
-    const integrationBranches = repos.rows.map((row) => ({
-      repoId: row.repo_id,
+    const repoIds = [
+      ...new Set([
+        ...repos.rows.map((row) => row.repo_id),
+        ...(planningRepoId === null ? [] : [planningRepoId]),
+      ]),
+    ].sort((a, b) => a - b);
+    const integrationBranches = repoIds.map((repoId) => ({
+      repoId,
       branch: branchNames(branch_namespace).integration(slug),
     }));
     await client.query(
-      "UPDATE specs SET state = $2, integration_branches = $3 WHERE id = $1",
-      [specId, running.state, JSON.stringify(integrationBranches)],
+      `UPDATE specs SET state = $2, integration_branches = $3, planning_sha = $4, planning_repo_id = $5
+       WHERE id = $1`,
+      [
+        specId,
+        running.state,
+        JSON.stringify(integrationBranches),
+        planningSha,
+        planningRepoId,
+      ],
     );
     const scheduled = await schedulePass(client, specId);
     return {
@@ -116,6 +166,8 @@ export async function confirmSpec(
       state: scheduled.paused ? "paused" : running.state,
       integrationBranches,
       enqueued: scheduled.enqueued,
+      planningSha,
+      planningRepo,
     };
   });
 }
