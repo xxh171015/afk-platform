@@ -49,6 +49,37 @@ export interface Io {
   confirm?: (question: string) => Promise<boolean>;
 }
 
+// How long plat init waits for a worker to say whether the GitHub App can work on the repos.
+const ACCESS_WAIT_SECONDS = 20;
+
+function accessLine(
+  name: string,
+  access:
+    | {
+        state: string;
+        missing?: string[];
+        fixUrl?: string;
+        message?: string;
+      }
+    | undefined,
+): string {
+  const whoever = "(whoever runs the platform)";
+  switch (access?.state) {
+    case "ok":
+      return `${name}: the GitHub App can work here`;
+    case "not-installed":
+      return `${name}: the GitHub App is not installed on this repo; install it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
+    case "missing-permissions":
+      return `${name}: the GitHub App lacks ${(access.missing ?? []).join(", ")}; grant it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
+    case "error":
+      return `${name}: the GitHub App could not be checked: ${access.message ?? "unknown error"}`;
+    case "pending":
+      return `${name}: the GitHub App is not checked yet (no worker has answered)`;
+    default:
+      return `${name}: not checked (only GitHub is)`;
+  }
+}
+
 async function askOnTerminal(question: string): Promise<boolean> {
   const prompt = createInterface({
     input: process.stdin,
@@ -260,6 +291,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         },
       );
       if (!data) throw failureFrom(response, error);
+      // a worker checks whether the GitHub App can work on it; plat init shows the answer
+      await api().POST("/projects/{projectId}/repos/{name}/access-check", {
+        params: { path: { projectId: options.project, name: data.name } },
+      });
       print(data, `repo ${data.id} ${data.name}`);
     });
 
@@ -411,14 +446,62 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           );
           return;
         }
+        // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
+        const accessLines = async (projectId: number, names: string[]) => {
+          for (const name of names) {
+            await client.POST(
+              "/projects/{projectId}/repos/{name}/access-check",
+              {
+                params: { path: { projectId, name } },
+              },
+            );
+          }
+          const waitMs =
+            Number(io.env.AFK_ACCESS_WAIT_SECONDS ?? ACCESS_WAIT_SECONDS) *
+            1000;
+          const deadline = Date.now() + waitMs;
+          const read = async () =>
+            Promise.all(
+              names.map(async (name) => {
+                const { data } = await client.GET(
+                  "/projects/{projectId}/repos/{name}/access",
+                  { params: { path: { projectId, name } } },
+                );
+                return { name, access: data };
+              }),
+            );
+          let found = await read();
+          while (
+            Date.now() < deadline &&
+            found.some(
+              ({ access }) => access?.state === "pending" || access?.checking,
+            )
+          ) {
+            await new Promise((done) => setTimeout(done, 1000));
+            found = await read();
+          }
+          return found.map(({ name, access }) => accessLine(name, access));
+        };
         const agentDocs = planAgentDocs(planning.dir);
         const agentDocsChange = agentDocs.some((d) => d.before !== d.after);
         if (!registering && found && !agentDocsChange) {
           const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
           if (doc === before) {
+            const access = await accessLines(
+              found.id,
+              plan.repos.map((r) => r.name),
+            );
             print(
-              { project: found.id, registered: [], trackerDoc: "unchanged" },
-              "nothing to register and the agent docs are up to date",
+              {
+                project: found.id,
+                registered: [],
+                trackerDoc: "unchanged",
+                access,
+              },
+              [
+                "nothing to register and the agent docs are up to date",
+                ...access,
+              ].join("\n"),
             );
             return;
           }
@@ -517,14 +600,19 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
                 `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
               ]),
         ];
+        const access = await accessLines(
+          projectId,
+          plan.repos.map((r) => r.name),
+        );
         print(
           {
             project: projectId,
             registered,
             trackerDoc: state,
             agentDocs: docStates,
+            access,
           },
-          lines.join("\n"),
+          [...lines, ...access].join("\n"),
         );
       } catch (e) {
         if (e instanceof InitError) throw new Failure(e.message);

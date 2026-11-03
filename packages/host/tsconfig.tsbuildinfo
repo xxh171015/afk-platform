@@ -1,0 +1,1 @@
+{"root":["./src/app-access.test.ts","./src/app-access.ts","./src/credentials.ts","./src/github-app.test.ts","./src/github-app.ts","./src/github.test.ts","./src/github.ts","./src/index.ts","./src/types.ts","./src/testing/fake-github.ts","./src/testing/index.ts"],"version":"5.9.3"}

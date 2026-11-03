@@ -6,5 +6,6 @@ export const HOST_JOB_TYPES = [
   "spec-cleanup",
   "pr-ready",
   "patch-pr-body",
+  "repo-access",
 ] as const;
 export const HOST_CAPABILITY = "host";

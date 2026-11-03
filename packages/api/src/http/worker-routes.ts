@@ -27,6 +27,12 @@ import {
   recordSpecCleanup,
 } from "../host/pull-requests.ts";
 import {
+  readRepoAccessPayload,
+  recordRepoAccess,
+  repoAccessFailed,
+  repoAccessTask,
+} from "../host/repo-access.ts";
+import {
   checkBeforePush,
   checkHolder,
   claimJob,
@@ -305,6 +311,10 @@ const HostTask = z.discriminatedUnion("kind", [
     section: z.string(),
     summary: z.string(),
   }),
+  z.object({
+    kind: z.literal("repo-access"),
+    repoUrl: z.string(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -320,7 +330,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -535,7 +545,15 @@ export function registerWorkerRoutes(
               const sync = readHostSyncPayload(job.rows[0]);
               const cleanup = readSpecCleanupPayload(job.rows[0]);
               const ready = readPrReadyPayload(job.rows[0]);
-              if (openPr)
+              const access = readRepoAccessPayload(job.rows[0]);
+              if (access)
+                await recordRepoAccess(
+                  client,
+                  access,
+                  (result ?? {}) as Record<string, unknown>,
+                  context.clock(),
+                );
+              else if (openPr)
                 await recordOpenPr(client, openPr, result, context.clock());
               else if (sync)
                 await recordHostSync(client, sync, result, context.clock());
@@ -595,6 +613,13 @@ export function registerWorkerRoutes(
       payload: Record<string, unknown>;
     }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
     const row = job.rows[0];
+    const access = row && readRepoAccessPayload(row);
+    if (access) {
+      const task = await repoAccessTask(context.pool, access);
+      return task
+        ? c.json(task, 200)
+        : c.json({ error: "the repo is gone" }, 404);
+    }
     const payload =
       row &&
       (readOpenPrPayload(row) ??
@@ -668,8 +693,11 @@ export function registerWorkerRoutes(
             context.clock(),
           );
           const sync = readHostSyncPayload(job.rows[0]);
+          const access = readRepoAccessPayload(job.rows[0]);
           if (failure.status === "not-a-stage" && sync)
             await hostSyncFailed(client, sync.projectId, context.clock());
+          if (failure.status === "not-a-stage" && access)
+            await repoAccessFailed(client, access, error, context.clock());
         }
         return failed;
       }),

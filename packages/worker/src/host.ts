@@ -1,4 +1,5 @@
 import {
+  type AppAccess,
   type HostAdapter,
   HostError,
   parseRepoUrl,
@@ -16,6 +17,8 @@ import { InfrastructureError } from "./executor.ts";
 export interface HostDeps {
   adapter: HostAdapter;
   repoRef?: (url: string) => RepoRef;
+  // whether the GitHub App can work on a repo (checkAppAccess); absent where the host is not GitHub
+  checkAccess?: (repo: RepoRef) => Promise<AppAccess>;
 }
 
 export async function runHostTask(
@@ -86,6 +89,21 @@ export async function runHostTask(
         error instanceof HostError || error instanceof RangeError
           ? error.message
           : `could not mark the pull request ready: ${String(error)}`,
+      );
+    }
+  }
+  if (task.kind === "repo-access") {
+    if (!deps.checkAccess)
+      throw new InfrastructureError("this worker cannot check a GitHub App");
+    try {
+      const access = await deps.checkAccess(repoRef(task.repoUrl));
+      log(`the GitHub App on ${task.repoUrl}: ${access.state}`);
+      return { stage: "repo-access", ...access };
+    } catch (error) {
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not check the GitHub App: ${String(error)}`,
       );
     }
   }

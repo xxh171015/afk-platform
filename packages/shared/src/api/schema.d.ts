@@ -275,6 +275,134 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/projects/{projectId}/repos/{name}/access": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What the last check of the GitHub App's access to the repo found */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "unchecked"
+                | "pending"
+                | "ok"
+                | "not-installed"
+                | "missing-permissions"
+                | "error";
+              missing?: string[];
+              fixUrl?: string;
+              message?: string;
+              requestedAt?: string;
+              checkedAt?: string;
+              checking?: boolean;
+            };
+          };
+        };
+        /** @description No such project or repo */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/repos/{name}/access-check": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description A worker with the code host's credentials will check the repo (GitLab repos are not checked) */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "unchecked"
+                | "pending"
+                | "ok"
+                | "not-installed"
+                | "missing-permissions"
+                | "error";
+              missing?: string[];
+              fixUrl?: string;
+              message?: string;
+              requestedAt?: string;
+              checkedAt?: string;
+              checking?: boolean;
+            };
+          };
+        };
+        /** @description No such project or repo */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/projects/{projectId}/repos/{name}": {
     parameters: {
       query?: never;
@@ -1245,7 +1373,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1300,6 +1428,11 @@ export interface paths {
                   number: number;
                   section: string;
                   summary: string;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "repo-access";
+                  repoUrl: string;
                 };
           };
         };

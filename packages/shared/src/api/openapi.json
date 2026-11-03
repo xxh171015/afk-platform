@@ -505,6 +505,184 @@
         }
       }
     },
+    "/projects/{projectId}/repos/{name}/access": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the last check of the GitHub App's access to the repo found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "unchecked",
+                        "pending",
+                        "ok",
+                        "not-installed",
+                        "missing-permissions",
+                        "error"
+                      ]
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "fixUrl": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestedAt": {
+                      "type": "string"
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "checking": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/repos/{name}/access-check": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "unchecked",
+                        "pending",
+                        "ok",
+                        "not-installed",
+                        "missing-permissions",
+                        "error"
+                      ]
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "fixUrl": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "requestedAt": {
+                      "type": "string"
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "checking": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects/{projectId}/repos/{name}": {
       "patch": {
         "parameters": [
@@ -2141,7 +2319,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -2305,6 +2483,19 @@
                         "section",
                         "summary"
                       ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["repo-access"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["kind", "repoUrl"]
                     }
                   ]
                 }

@@ -12,6 +12,11 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { aroundSpec } from "../events/announce.ts";
 import {
+  readRepoAccess,
+  repoIdByName,
+  requestRepoAccess,
+} from "../host/repo-access.ts";
+import {
   addRepo,
   createProject,
   createSpec,
@@ -171,6 +176,54 @@ const repoRoute = createRoute({
     201: reply("Created", z.object({ id: Id, name: z.string() })),
     404: reply("No such project", ErrorReply),
     409: reply("The project already has a repo with this name", ErrorReply),
+  },
+});
+
+const RepoAccessView = z.object({
+  state: z.enum([
+    "unchecked",
+    "pending",
+    "ok",
+    "not-installed",
+    "missing-permissions",
+    "error",
+  ]),
+  missing: z.array(z.string()).optional(),
+  fixUrl: z.string().optional(),
+  message: z.string().optional(),
+  requestedAt: z.string().optional(),
+  checkedAt: z.string().optional(),
+  checking: z.boolean().optional(),
+});
+
+const repoAccessParams = z.object({
+  projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+  name: Text,
+});
+
+const repoAccessRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}/repos/{name}/access",
+  request: { params: repoAccessParams },
+  responses: {
+    200: reply(
+      "What the last check of the GitHub App's access to the repo found",
+      RepoAccessView,
+    ),
+    404: reply("No such project or repo", ErrorReply),
+  },
+});
+
+const repoAccessCheckRoute = createRoute({
+  method: "post",
+  path: "/projects/{projectId}/repos/{name}/access-check",
+  request: { params: repoAccessParams },
+  responses: {
+    200: reply(
+      "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+      RepoAccessView,
+    ),
+    404: reply("No such project or repo", ErrorReply),
   },
 });
 
@@ -468,6 +521,25 @@ export function registerPlanningRoutes(
       );
     }
     return c.json(result.repo, 201);
+  });
+
+  app.openapi(repoAccessRoute, async (c) => {
+    const { projectId, name } = c.req.valid("param");
+    const access = await readRepoAccess(pool, projectId, name);
+    if (access === "no-repo") return c.json({ error: "no such repo" }, 404);
+    return c.json(access, 200);
+  });
+
+  app.openapi(repoAccessCheckRoute, async (c) => {
+    const { projectId, name } = c.req.valid("param");
+    const repoId = await repoIdByName(pool, projectId, name);
+    if (repoId === undefined) return c.json({ error: "no such repo" }, 404);
+    await requestRepoAccess(pool, repoId, context.clock());
+    const access = await readRepoAccess(pool, projectId, name);
+    return c.json(
+      access === "no-repo" ? { state: "unchecked" as const } : access,
+      200,
+    );
   });
 
   app.openapi(repoEditRoute, async (c) => {
