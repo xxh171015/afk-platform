@@ -64,6 +64,13 @@ export async function runReadinessGate(
   try {
     const work = join(scratch, repo.name);
     gitOrThrow(scratch, ["clone", "--quiet", "--no-checkout", dir, work]);
+    // nothing checked out, so any branch, the default one too, can be fetched and given to the sandbox
+    gitOrThrow(work, [
+      "update-ref",
+      "--no-deref",
+      "HEAD",
+      gitOrThrow(work, ["rev-parse", "HEAD"]),
+    ]);
     gitOrThrow(work, [
       "fetch",
       "--quiet",

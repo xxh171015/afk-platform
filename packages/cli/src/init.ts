@@ -267,7 +267,7 @@ export function planText(plan: InitPlan): string {
     for (const note of repo.notes) lines.push(`    - ${note}`);
     lines.push(
       c.missing.length === 0
-        ? "    - readiness: gates, sandbox image and AGENTS.md are there"
+        ? "    - readiness: gates and AGENTS.md are there"
         : `    - readiness: missing ${c.missing.join(", ")}`,
     );
     lines.push(

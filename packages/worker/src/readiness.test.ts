@@ -75,6 +75,20 @@ describe("checking a repo's gate on a branch", () => {
     expect(sandboxes[0]?.opened).toEqual(["afk/setup"]);
   });
 
+  it("gates the default branch too", async () => {
+    const repo = makeRepo({
+      ".sandcastle/gates.yaml": gates(
+        `  - { name: test, run: ${JSON.stringify(writesJunit)}, timeoutSeconds: 30, junit: reports/junit.xml }\n`,
+      ),
+    });
+    cleanups.push(() => repo.cleanup());
+
+    expect(await check(repo, "main").result).toMatchObject({
+      pass: true,
+      steps: ["setup", "test"],
+    });
+  });
+
   it("stops at the first failing command and names it, with the end of its output", async () => {
     const repo = origin({
       ".sandcastle/gates.yaml": gates(
