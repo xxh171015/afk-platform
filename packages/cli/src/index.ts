@@ -414,7 +414,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
               "plat init asks before it registers: run it in a terminal, or pass --yes",
             );
           }
-          if (!(await io.confirm("Register and write the tracker doc?"))) {
+          const question = registering
+            ? "Register and write the tracker doc?"
+            : "Write the tracker doc?";
+          if (!(await io.confirm(question))) {
             print({ cancelled: true }, "nothing done");
             return;
           }
