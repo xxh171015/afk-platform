@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -332,6 +332,22 @@ describe("plat init", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("branch main (unconfirmed)");
     expect((await project(1)).body.repos[0].defaultBranch).toBe("main");
+  });
+
+  it("asks only about the tracker doc when every repo is registered and the doc is out of date", async () => {
+    const backend = checkout("backend", "https://github.com/acme/backend.git");
+    await plat(backend.dir, ["init", "--yes"]);
+    const docPath = join(backend.dir, "docs/agents/issue-tracker.md");
+    const generated = readFileSync(docPath, "utf8");
+    writeFileSync(docPath, `${generated}\nedited by hand\n`);
+
+    const result = await plat(backend.dir, ["init"], true);
+
+    expect(result.questions).toEqual(["Write the tracker doc?"]);
+    expect(result.stdout).toContain(
+      "tracker doc docs/agents/issue-tracker.md: updated",
+    );
+    expect(readFileSync(docPath, "utf8")).toBe(generated);
   });
 
   it("refuses a new repo whose name the project already gives to another address", async () => {
