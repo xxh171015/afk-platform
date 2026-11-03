@@ -12,6 +12,11 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { aroundSpec } from "../events/announce.ts";
 import {
+  readRepoAccess,
+  repoIdByName,
+  requestRepoAccess,
+} from "../host/repo-access.ts";
+import {
   addRepo,
   createProject,
   createSpec,
@@ -20,6 +25,10 @@ import {
   importTickets,
 } from "../planning/planning.ts";
 import { actOnBlockedPlanning } from "../planning/planning-commit.ts";
+import {
+  enqueueReadinessGate,
+  readReadinessGate,
+} from "../planning/readiness-gate.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
@@ -171,6 +180,107 @@ const repoRoute = createRoute({
     201: reply("Created", z.object({ id: Id, name: z.string() })),
     404: reply("No such project", ErrorReply),
     409: reply("The project already has a repo with this name", ErrorReply),
+  },
+});
+
+const RepoAccessView = z.object({
+  state: z.enum([
+    "unchecked",
+    "pending",
+    "ok",
+    "not-installed",
+    "missing-permissions",
+    "error",
+  ]),
+  missing: z.array(z.string()).optional(),
+  fixUrl: z.string().optional(),
+  message: z.string().optional(),
+  requestedAt: z.string().optional(),
+  checkedAt: z.string().optional(),
+  checking: z.boolean().optional(),
+});
+
+const repoAccessParams = z.object({
+  projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+  name: Text,
+});
+
+const repoAccessRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}/repos/{name}/access",
+  request: { params: repoAccessParams },
+  responses: {
+    200: reply(
+      "What the last check of the GitHub App's access to the repo found",
+      RepoAccessView,
+    ),
+    404: reply("No such project or repo", ErrorReply),
+  },
+});
+
+const repoAccessCheckRoute = createRoute({
+  method: "post",
+  path: "/projects/{projectId}/repos/{name}/access-check",
+  request: { params: repoAccessParams },
+  responses: {
+    200: reply(
+      "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+      RepoAccessView,
+    ),
+    404: reply("No such project or repo", ErrorReply),
+  },
+});
+
+const gateCheckRoute = createRoute({
+  method: "post",
+  path: "/projects/{projectId}/repos/{name}/gate-check",
+  request: {
+    params: repoAccessParams,
+    body: {
+      content: json(
+        z.object({ branch: Text.regex(/^[A-Za-z0-9._/-]+$/) }).strict(),
+      ),
+    },
+  },
+  responses: {
+    202: reply(
+      "A worker will run the repo's gate on the branch in the platform's sandbox",
+      z.object({ id: Id }),
+    ),
+    404: reply("No such project or repo", ErrorReply),
+  },
+});
+
+const ReadinessGateResult = z.object({
+  stage: z.literal("readiness-gate").optional(),
+  pass: z.boolean(),
+  reasons: z.array(z.string()),
+  steps: z.array(z.string()),
+  failedStep: z.string().optional(),
+  tests: z.number().int().optional(),
+  skipped: z.number().int().optional(),
+  log: z.string().optional(),
+});
+
+const gateCheckViewRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}/repos/{name}/gate-checks/{id}",
+  request: {
+    params: repoAccessParams.extend({
+      id: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: reply(
+      "Where the check is, and the worker's answer once it is done",
+      z.object({
+        state: z.enum(["queued", "running", "done", "failed"]),
+        branch: z.string(),
+        result: ReadinessGateResult.optional(),
+        error: z.string().optional(),
+      }),
+    ),
+    404: reply("No such project, repo or check", ErrorReply),
   },
 });
 
@@ -468,6 +578,56 @@ export function registerPlanningRoutes(
       );
     }
     return c.json(result.repo, 201);
+  });
+
+  app.openapi(gateCheckRoute, async (c) => {
+    const { projectId, name } = c.req.valid("param");
+    const repoId = await repoIdByName(pool, projectId, name);
+    if (repoId === undefined) return c.json({ error: "no such repo" }, 404);
+    const id = await enqueueReadinessGate(pool, {
+      repoId,
+      branch: c.req.valid("json").branch,
+    });
+    return c.json({ id }, 202);
+  });
+
+  app.openapi(gateCheckViewRoute, async (c) => {
+    const { projectId, name, id } = c.req.valid("param");
+    const repoId = await repoIdByName(pool, projectId, name);
+    const check =
+      repoId === undefined
+        ? undefined
+        : await readReadinessGate(pool, repoId, id);
+    if (!check) return c.json({ error: "no such check" }, 404);
+    const parsed = ReadinessGateResult.safeParse(check.result);
+    return c.json(
+      {
+        state: check.state,
+        branch: check.branch,
+        ...(parsed.success ? { result: parsed.data } : {}),
+        ...(check.error ? { error: check.error } : {}),
+      },
+      200,
+    );
+  });
+
+  app.openapi(repoAccessRoute, async (c) => {
+    const { projectId, name } = c.req.valid("param");
+    const access = await readRepoAccess(pool, projectId, name);
+    if (access === "no-repo") return c.json({ error: "no such repo" }, 404);
+    return c.json(access, 200);
+  });
+
+  app.openapi(repoAccessCheckRoute, async (c) => {
+    const { projectId, name } = c.req.valid("param");
+    const repoId = await repoIdByName(pool, projectId, name);
+    if (repoId === undefined) return c.json({ error: "no such repo" }, 404);
+    await requestRepoAccess(pool, repoId, context.clock());
+    const access = await readRepoAccess(pool, projectId, name);
+    return c.json(
+      access === "no-repo" ? { state: "unchecked" as const } : access,
+      200,
+    );
   });
 
   app.openapi(repoEditRoute, async (c) => {

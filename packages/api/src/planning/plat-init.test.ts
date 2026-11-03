@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type PlatWorkspace, platWorkspace } from "../test/plat-workspace.ts";
 
@@ -79,7 +80,9 @@ describe("plat init", () => {
     expect(existsSync(join(frontend.dir, "docs/agents/issue-tracker.md"))).toBe(
       false,
     );
-    expect(result.stdout).toContain("git add docs/agents/issue-tracker.md");
+    expect(result.stdout).toContain(
+      "git add docs/agents/issue-tracker.md docs/agents/domain.md docs/agents/triage-labels.md AGENTS.md",
+    );
   });
 
   it("run again, finds the project through the tracker doc, keeps registered names and adds only the new repo", async () => {
@@ -123,7 +126,7 @@ describe("plat init", () => {
     expect(third.code).toBe(0);
     expect(third.questions).toEqual([]);
     expect(third.stdout).toContain(
-      "nothing to register and the tracker doc is up to date",
+      "nothing to register and the agent docs are up to date",
     );
   });
 
@@ -181,11 +184,30 @@ describe("plat init", () => {
     expect(result.stdout).toContain(
       "project: new, backend (protected paths: .github/**)",
     );
-    expect(result.stdout).toContain(
-      "readiness: missing .sandcastle/Dockerfile, AGENTS.md",
-    );
+    expect(result.stdout).toContain("readiness: missing AGENTS.md");
     expect(result.stdout).toContain("has .sandcastle/integration/compose.yaml");
     expect(result.stdout).toContain("nothing done");
+    expect((await project(1)).status).toBe(404);
+    expect(existsSync(join(backend.dir, "docs/agents/issue-tracker.md"))).toBe(
+      false,
+    );
+  });
+
+  it("with --dry-run shows the plan without asking, registers and writes nothing, and succeeds", async () => {
+    const backend = checkout("backend", "https://github.com/acme/backend.git", {
+      "AGENTS.md": "# agents\n",
+    });
+
+    const result = await plat(backend.dir, ["init", "--dry-run"], "nobody");
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.questions).toEqual([]);
+    expect(result.stdout).toContain("project: new, backend");
+    expect(result.stdout).toContain(
+      "readiness: missing .sandcastle/gates.yaml\n",
+    );
+    expect(result.stdout).toContain("dry run: nothing registered or written");
     expect((await project(1)).status).toBe(404);
     expect(existsSync(join(backend.dir, "docs/agents/issue-tracker.md"))).toBe(
       false,
@@ -267,11 +289,66 @@ describe("plat init", () => {
 
     const result = await plat(backend.dir, ["init"], true);
 
-    expect(result.questions).toEqual(["Write the tracker doc?"]);
+    expect(result.questions).toEqual(["Write the agent docs?"]);
     expect(result.stdout).toContain(
       "tracker doc docs/agents/issue-tracker.md: updated",
     );
     expect(readFileSync(docPath, "utf8")).toBe(generated);
+  });
+
+  it("writes what setup-matt-pocock-skills would, for the platform: the domain and triage label docs and an Agent skills section", async () => {
+    const backend = checkout("backend", "https://github.com/acme/backend.git");
+
+    const result = await plat(backend.dir, ["init", "--yes"]);
+
+    expect(result.code).toBe(0);
+    const read = (path: string) =>
+      readFileSync(join(backend.dir, path), "utf8");
+    expect(read("docs/agents/domain.md")).toBe(
+      readSkillSnapshot("setup-matt-pocock-skills/domain.md").content,
+    );
+    expect(read("docs/agents/triage-labels.md")).toBe(
+      readSkillSnapshot("setup-matt-pocock-skills/triage-labels.md").content,
+    );
+    const agents = read("AGENTS.md");
+    expect(agents).toContain("## Agent skills\n");
+    expect(agents).toContain("See `docs/agents/issue-tracker.md`.");
+    expect(agents).toContain("See `docs/agents/triage-labels.md`.");
+    expect(agents).toContain(
+      "Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.",
+    );
+    expect(result.stdout).toContain("AGENTS.md: new");
+    expect(result.stdout).toContain("docs/agents/domain.md: new");
+
+    const again = await plat(backend.dir, ["init"]);
+    expect(again.stdout).toContain(
+      "nothing to register and the agent docs are up to date",
+    );
+  });
+
+  it("keeps docs the repo already has, and replaces only the Agent skills section of CLAUDE.md", async () => {
+    const claude =
+      "# Shop\n\nRead this first.\n\n## Agent skills\n\nold block\n\n## Style\n\nTabs.\n";
+    const backend = checkout("backend", "https://github.com/acme/backend.git", {
+      "CLAUDE.md": claude,
+      "AGENTS.md": "# agents\n",
+      "docs/agents/domain.md": "our own domain rules\n",
+    });
+
+    const result = await plat(backend.dir, ["init", "--yes"]);
+
+    expect(result.code).toBe(0);
+    const read = (path: string) =>
+      readFileSync(join(backend.dir, path), "utf8");
+    expect(read("docs/agents/domain.md")).toBe("our own domain rules\n");
+    expect(read("AGENTS.md")).toBe("# agents\n");
+    const edited = read("CLAUDE.md");
+    expect(
+      edited.startsWith("# Shop\n\nRead this first.\n\n## Agent skills\n"),
+    ).toBe(true);
+    expect(edited).not.toContain("old block");
+    expect(edited.endsWith("## Style\n\nTabs.\n")).toBe(true);
+    expect(edited.match(/## Agent skills/g)).toHaveLength(1);
   });
 
   it("refuses a new repo whose name the project already gives to another address", async () => {

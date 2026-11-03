@@ -41,6 +41,17 @@ export class FakeGitHub {
   tokenLifetimeMs = 60 * 60 * 1000;
   refuseReady: "status" | "error" | false = false; // how a mark-ready is refused: HTTP 403, or a GraphQL error
   refuseBranchDeletes = false; // answer 403 to a branch delete, as a token without contents:write would get
+  // The App's installation: false when the App is installed nowhere for this owner; the repositories it was given
+  // (any, unless a test names them) and the permissions it was granted.
+  installed = true;
+  installedRepos: string[] | undefined;
+  installationPermissions: Record<string, string> = {
+    contents: "write",
+    pull_requests: "write",
+    checks: "read",
+    statuses: "read",
+    metadata: "read",
+  };
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
   private readonly branchNames = new Set<string>();
@@ -177,9 +188,39 @@ export class FakeGitHub {
     const exchange = new RegExp(
       `^/app/installations/${this.options.installationId}/access_tokens$`,
     );
+    const installation = new RegExp(
+      `^/app/installations/${this.options.installationId}$`,
+    );
+    if (req.method === "GET" && (path === "/app" || installation.test(path))) {
+      if (!this.verifyJwt(req.headers.authorization))
+        return this.json(res, 401, { message: "bad JWT" });
+      if (path === "/app")
+        return this.json(res, 200, {
+          slug: "afk-bot",
+          html_url: "https://github.com/apps/afk-bot",
+        });
+      if (!this.installed) return this.json(res, 404, { message: "Not Found" });
+      return this.json(res, 200, {
+        id: Number(this.options.installationId),
+        permissions: this.installationPermissions,
+        html_url: `https://github.com/settings/installations/${this.options.installationId}`,
+      });
+    }
     if (req.method === "POST" && exchange.test(path)) {
       if (!this.verifyJwt(req.headers.authorization))
         return this.json(res, 401, { message: "bad JWT" });
+      if (!this.installed) return this.json(res, 404, { message: "Not Found" });
+      const given = this.installedRepos;
+      if (
+        given &&
+        ((body.repositories as string[] | undefined) ?? []).some(
+          (name) => !given.includes(name),
+        )
+      )
+        return this.json(res, 422, {
+          message:
+            "There is at least one repository that does not exist or is not accessible to the parent installation.",
+        });
       const token = `ghs_${this.tokensIssued.length + 1}`;
       this.live.set(token, this.now() + this.tokenLifetimeMs);
       this.tokensIssued.push({

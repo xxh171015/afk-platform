@@ -275,6 +275,257 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/projects/{projectId}/repos/{name}/gate-check": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            branch: string;
+          };
+        };
+      };
+      responses: {
+        /** @description A worker will run the repo's gate on the branch in the platform's sandbox */
+        202: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+            };
+          };
+        };
+        /** @description No such project or repo */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/repos/{name}/gate-checks/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Where the check is, and the worker's answer once it is done */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state: "queued" | "running" | "done" | "failed";
+              branch: string;
+              result?: {
+                /** @enum {string} */
+                stage?: "readiness-gate";
+                pass: boolean;
+                reasons: string[];
+                steps: string[];
+                failedStep?: string;
+                tests?: number;
+                skipped?: number;
+                log?: string;
+              };
+              error?: string;
+            };
+          };
+        };
+        /** @description No such project, repo or check */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/repos/{name}/access": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What the last check of the GitHub App's access to the repo found */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "unchecked"
+                | "pending"
+                | "ok"
+                | "not-installed"
+                | "missing-permissions"
+                | "error";
+              missing?: string[];
+              fixUrl?: string;
+              message?: string;
+              requestedAt?: string;
+              checkedAt?: string;
+              checking?: boolean;
+            };
+          };
+        };
+        /** @description No such project or repo */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/repos/{name}/access-check": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+          name: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description A worker with the code host's credentials will check the repo (GitLab repos are not checked) */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "unchecked"
+                | "pending"
+                | "ok"
+                | "not-installed"
+                | "missing-permissions"
+                | "error";
+              missing?: string[];
+              fixUrl?: string;
+              message?: string;
+              requestedAt?: string;
+              checkedAt?: string;
+              checking?: boolean;
+            };
+          };
+        };
+        /** @description No such project or repo */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/projects/{projectId}/repos/{name}": {
     parameters: {
       query?: never;
@@ -814,6 +1065,44 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/version": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The platform's version and the mattpocock/skills commit it pins */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              platformVersion: string;
+              skillsSha: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/claim": {
     parameters: {
       query?: never;
@@ -1245,7 +1534,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1300,10 +1589,84 @@ export interface paths {
                   number: number;
                   section: string;
                   summary: string;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "repo-access";
+                  repoUrl: string;
                 };
           };
         };
         /** @description No such job, or not a job for the code host */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/worker/jobs/{id}/readiness-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What a readiness-gate job has to do: run the repo's gate on the branch, with that branch's gates.yaml (plat repo check) */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              repo: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+              };
+              branch: string;
+            };
+          };
+        };
+        /** @description No such job, or not a readiness-gate job */
         404: {
           headers: {
             [name: string]: unknown;

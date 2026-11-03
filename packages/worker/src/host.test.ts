@@ -364,3 +364,54 @@ describe("a spec-cleanup task", () => {
     ]);
   });
 });
+
+describe("a repo-access task", () => {
+  const adapter = {
+    openPullRequest: async () => info(1),
+    getPullRequest: async () => info(1),
+    ...noCleanup,
+  } as HostAdapter;
+  const task = {
+    kind: "repo-access" as const,
+    repoUrl: "https://github.com/me/pilot.git",
+  };
+
+  it("reports what the check of the App found, for the repo the task names", async () => {
+    const asked: unknown[] = [];
+    const result = await runHostTask(
+      {
+        adapter,
+        checkAccess: async (repo) => {
+          asked.push(repo);
+          return {
+            state: "not-installed",
+            fixUrl: "https://github.com/settings/installations/7",
+          };
+        },
+      },
+      task,
+      log,
+    );
+    expect(asked).toEqual([{ owner: "me", name: "pilot" }]);
+    expect(result).toEqual({
+      stage: "repo-access",
+      state: "not-installed",
+      fixUrl: "https://github.com/settings/installations/7",
+    });
+  });
+
+  it("fails the job when GitHub cannot be asked", async () => {
+    const failing = runHostTask(
+      {
+        adapter,
+        checkAccess: async () => {
+          throw new HostError("GitHub did not describe the App: HTTP 502", 502);
+        },
+      },
+      task,
+      log,
+    );
+    await expect(failing).rejects.toBeInstanceOf(InfrastructureError);
+    await expect(failing).rejects.toThrow("HTTP 502");
+  });
+});

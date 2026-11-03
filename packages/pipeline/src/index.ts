@@ -61,6 +61,7 @@ export type {
   TestCounts,
 } from "./gate.ts";
 export {
+  GATE_CONFIG_PATH,
   GateCache,
   junitCases,
   junitCounts,

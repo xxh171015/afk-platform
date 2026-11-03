@@ -9,6 +9,7 @@ import {
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
 } from "@afk/shared";
+import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import {
   normalizeSpecBody,
   specTemplateWarnings,
@@ -19,6 +20,7 @@ import {
   InvalidArgumentError,
   Option,
 } from "commander";
+import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
 import {
   hasRegistrations,
@@ -29,7 +31,11 @@ import {
   planText,
   TRACKER_DOC_PATH,
 } from "./init.ts";
-import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
+import {
+  skillsWarnings,
+  trackerDocWarnings,
+  versionWarnings,
+} from "./planning-checks.ts";
 import { readPlanningDocs } from "./planning-docs.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
@@ -46,6 +52,37 @@ export interface Io {
   cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
   // Asks the person a yes/no question (`plat init`); absent when nobody can answer, e.g. stdin is not a terminal.
   confirm?: (question: string) => Promise<boolean>;
+}
+
+// How long plat init waits for a worker to say whether the GitHub App can work on the repos.
+const ACCESS_WAIT_SECONDS = 20;
+
+function accessLine(
+  name: string,
+  access:
+    | {
+        state: string;
+        missing?: string[];
+        fixUrl?: string;
+        message?: string;
+      }
+    | undefined,
+): string {
+  const whoever = "(whoever runs the platform)";
+  switch (access?.state) {
+    case "ok":
+      return `${name}: the GitHub App can work here`;
+    case "not-installed":
+      return `${name}: the GitHub App is not installed on this repo; install it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
+    case "missing-permissions":
+      return `${name}: the GitHub App lacks ${(access.missing ?? []).join(", ")}; grant it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
+    case "error":
+      return `${name}: the GitHub App could not be checked: ${access.message ?? "unknown error"}`;
+    case "pending":
+      return `${name}: the GitHub App is not checked yet (no worker has answered)`;
+    default:
+      return `${name}: not checked (only GitHub is)`;
+  }
 }
 
 async function askOnTerminal(question: string): Promise<boolean> {
@@ -259,6 +296,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         },
       );
       if (!data) throw failureFrom(response, error);
+      // a worker checks whether the GitHub App can work on it; plat init shows the answer
+      await api().POST("/projects/{projectId}/repos/{name}/access-check", {
+        params: { path: { projectId: options.project, name: data.name } },
+      });
       print(data, `repo ${data.id} ${data.name}`);
     });
 
@@ -294,6 +335,87 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `repo ${data.id} ${data.name} updated`);
     });
 
+  repoCommands
+    .command("check <name>")
+    .description(
+      "have the platform run the repo's gate on a pushed branch, in its own sandbox, with that branch's .sandcastle/gates.yaml; waits for the answer",
+    )
+    .option("--branch <branch>", "the pushed branch to gate", "afk/setup")
+    .option(
+      "--project <id>",
+      "the project (default: the one this checkout's tracker doc names)",
+      toInt,
+    )
+    .action(async (name: string, options) => {
+      let projectId: number | undefined = options.project;
+      if (projectId === undefined) {
+        const target = await io
+          .readFile(TRACKER_DOC_PATH)
+          .then(trackerDocTarget)
+          .catch(() => null);
+        projectId = target?.project;
+      }
+      if (projectId === undefined)
+        throw new Failure(
+          "which project? run this in the planning repo (its tracker doc names the project), or give --project",
+        );
+      const client = api();
+      const queued = await client.POST(
+        "/projects/{projectId}/repos/{name}/gate-check",
+        {
+          params: { path: { projectId, name } },
+          body: { branch: options.branch },
+        },
+      );
+      if (!queued.data) throw failureFrom(queued.response, queued.error);
+      const pollMs = Number(io.env.AFK_POLL_SECONDS ?? 3) * 1000;
+      const deadline = Date.now() + 60 * 60 * 1000;
+      for (;;) {
+        const { data, response, error } = await client.GET(
+          "/projects/{projectId}/repos/{name}/gate-checks/{id}",
+          { params: { path: { projectId, name, id: queued.data.id } } },
+        );
+        if (!data) throw failureFrom(response, error);
+        const label = `${name} ${data.branch}`;
+        if (data.state === "failed")
+          throw new Failure(
+            `${label}: the check could not run: ${data.error ?? "unknown error"}`,
+          );
+        if (data.state === "done") {
+          const result = data.result;
+          if (!result)
+            throw new Failure(
+              `${label}: the worker's answer was not understood`,
+            );
+          if (result.pass) {
+            print(
+              data,
+              `${label}: the gate passed in the platform's sandbox (${result.steps.join(", ")}${result.tests === undefined ? "" : `; ${result.tests} tests`})`,
+            );
+            return;
+          }
+          print(
+            data,
+            [
+              `${label}: the gate failed: ${result.reasons.join("; ")}`,
+              ...(result.log
+                ? [
+                    `--- the end of ${result.failedStep ?? "its"} output ---`,
+                    result.log,
+                  ]
+                : []),
+            ].join("\n"),
+          );
+          throw new Failure("the gate failed");
+        }
+        if (Date.now() > deadline)
+          throw new Failure(
+            `${label}: no answer after an hour (is a worker running?)`,
+          );
+        await new Promise((done) => setTimeout(done, pollMs));
+      }
+    });
+
   // The warnings `spec create` and `tickets import` print about this planning machine; they never change the exit code.
   const warnAboutPlanningMachine = async (project?: number) => {
     try {
@@ -315,7 +437,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     } catch {
       // A check that cannot run is not worth failing a command that worked.
     }
+    await warnAboutVersion();
   };
+
+  // An older plat than the platform it talks to: /afk-setup fetches the platform's.
+  const warnAboutVersion = async () => {
+    try {
+      for (const warning of await versionWarnings(async () => {
+        const { data } = await api().GET("/version");
+        if (!data) throw new Error("no version");
+        return data;
+      }))
+        io.stderr(`${warning}\n`);
+    } catch {}
+  };
+
+  program
+    .command("version")
+    .description("print the platform version this plat comes from")
+    .action(() => {
+      io.stdout(`${PLATFORM_VERSION}\n`);
+    });
 
   program
     .command("init")
@@ -342,8 +484,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "this repo's contract file, when it is new here (default: its only openapi file)",
     )
     .option("-y, --yes", "do not ask before registering")
+    .option(
+      "--dry-run",
+      "only show the plan and what each repo lacks; register and write nothing",
+    )
     .action(async (options) => {
       const client = api();
+      await warnAboutVersion();
       const loadProject = async (projectId: number) => {
         const { data, response, error } = await client.GET(
           "/projects/{projectId}",
@@ -399,12 +546,69 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         if (!json()) io.stdout(`${planText(plan)}\n`);
 
         const registering = hasRegistrations(plan);
-        if (!registering && found) {
+        if (options.dryRun) {
+          print(
+            { dryRun: true, plan: planText(plan) },
+            "dry run: nothing registered or written",
+          );
+          return;
+        }
+        // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
+        const accessLines = async (projectId: number, names: string[]) => {
+          for (const name of names) {
+            await client.POST(
+              "/projects/{projectId}/repos/{name}/access-check",
+              {
+                params: { path: { projectId, name } },
+              },
+            );
+          }
+          const waitMs =
+            Number(io.env.AFK_ACCESS_WAIT_SECONDS ?? ACCESS_WAIT_SECONDS) *
+            1000;
+          const deadline = Date.now() + waitMs;
+          const read = async () =>
+            Promise.all(
+              names.map(async (name) => {
+                const { data } = await client.GET(
+                  "/projects/{projectId}/repos/{name}/access",
+                  { params: { path: { projectId, name } } },
+                );
+                return { name, access: data };
+              }),
+            );
+          let found = await read();
+          while (
+            Date.now() < deadline &&
+            found.some(
+              ({ access }) => access?.state === "pending" || access?.checking,
+            )
+          ) {
+            await new Promise((done) => setTimeout(done, 1000));
+            found = await read();
+          }
+          return found.map(({ name, access }) => accessLine(name, access));
+        };
+        const agentDocs = planAgentDocs(planning.dir);
+        const agentDocsChange = agentDocs.some((d) => d.before !== d.after);
+        if (!registering && found && !agentDocsChange) {
           const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
           if (doc === before) {
+            const access = await accessLines(
+              found.id,
+              plan.repos.map((r) => r.name),
+            );
             print(
-              { project: found.id, registered: [], trackerDoc: "unchanged" },
-              "nothing to register and the tracker doc is up to date",
+              {
+                project: found.id,
+                registered: [],
+                trackerDoc: "unchanged",
+                access,
+              },
+              [
+                "nothing to register and the agent docs are up to date",
+                ...access,
+              ].join("\n"),
             );
             return;
           }
@@ -416,8 +620,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             );
           }
           const question = registering
-            ? "Register and write the tracker doc?"
-            : "Write the tracker doc?";
+            ? "Register and write the agent docs?"
+            : "Write the agent docs?";
           if (!(await io.confirm(question))) {
             print({ cancelled: true }, "nothing done");
             return;
@@ -474,21 +678,48 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           mkdirSync(dirname(docPath), { recursive: true });
           writeFileSync(docPath, doc);
         }
+        const written = state === "unchanged" ? [] : [TRACKER_DOC_PATH];
+        const docStates: Record<string, string> = {};
+        for (const agentDoc of agentDocs) {
+          const docState =
+            agentDoc.before === null
+              ? "new"
+              : agentDoc.before === agentDoc.after
+                ? "unchanged"
+                : "updated";
+          docStates[agentDoc.path] = docState;
+          if (docState === "unchanged") continue;
+          const target = join(planning.dir, agentDoc.path);
+          mkdirSync(dirname(target), { recursive: true });
+          writeFileSync(target, agentDoc.after);
+          written.push(agentDoc.path);
+        }
         const lines = [
           `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
           ...(registered.length > 0
             ? [`registered: ${registered.join(", ")}`]
             : []),
           `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
-          ...(state === "unchanged"
+          ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
+          ...(written.length === 0
             ? []
             : [
-                `next, in ${planning.dir}: git add ${TRACKER_DOC_PATH} && git commit -m "Generate the tracker doc with plat init" && git push`,
+                `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
               ]),
         ];
+        const access = await accessLines(
+          projectId,
+          plan.repos.map((r) => r.name),
+        );
         print(
-          { project: projectId, registered, trackerDoc: state },
-          lines.join("\n"),
+          {
+            project: projectId,
+            registered,
+            trackerDoc: state,
+            agentDocs: docStates,
+            access,
+          },
+          [...lines, ...access].join("\n"),
         );
       } catch (e) {
         if (e instanceof InitError) throw new Failure(e.message);
@@ -598,11 +829,15 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         );
       }
       for (const check of view.data.spec.prechecks) {
-        if (
-          docs.status === "ok" &&
-          check.code === "page-confirm-without-planning-docs"
-        )
-          continue;
+        if (check.code === "page-confirm-without-planning-docs") {
+          if (docs.status === "ok") continue;
+          if (docs.status === "elsewhere" && docs.checkout) {
+            io.stderr(
+              `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, in Cursor, run /afk-setup with it in the workspace\n`,
+            );
+            continue;
+          }
+        }
         io.stderr(`yellow: ${check.message}\n`);
       }
       const { data, response, error } = await api().POST(
@@ -1127,3 +1362,5 @@ function slugify(title: string): string {
   }
   return slug;
 }
+
+export { renderTrackerDoc } from "./tracker-doc.ts";

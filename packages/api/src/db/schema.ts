@@ -65,6 +65,8 @@ export const repos = pgTable(
     contractPath: text("contract_path"),
     // Which code host the repo is on: github or gitlab. It picks the seed template of the tracker doc.
     hostKind: text("host_kind").notNull().default("github"),
+    // The last check of the GitHub App's access to the repo, and when a new one was asked for (host/repo-access.ts).
+    access: jsonb("access"),
     createdAt: createdAt(),
   },
   // The name (backend, frontend) is how a ticket file names a repo (its `repo` field), so it is unique within a project.

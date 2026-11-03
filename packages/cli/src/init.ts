@@ -18,11 +18,8 @@ export const DEFAULT_PROTECTED_PATHS = [".github/**"];
 
 // What a repo needs before the platform can take its tickets (GLOSSARY「Repo readiness」). Missing ones are only
 // reported: registering does not depend on them.
-const READINESS_FILES = [
-  ".sandcastle/gates.yaml",
-  ".sandcastle/Dockerfile",
-  "AGENTS.md",
-];
+// The sandbox image is the platform's, not the repo's (it runs every repo's tickets).
+const READINESS_FILES = [".sandcastle/gates.yaml", "AGENTS.md"];
 // Needed only when an integration ticket runs against the repo, which init cannot know yet.
 const INTEGRATION_COMPOSE = ".sandcastle/integration/compose.yaml";
 
@@ -270,7 +267,7 @@ export function planText(plan: InitPlan): string {
     for (const note of repo.notes) lines.push(`    - ${note}`);
     lines.push(
       c.missing.length === 0
-        ? "    - readiness: gates, sandbox image and AGENTS.md are there"
+        ? "    - readiness: gates and AGENTS.md are there"
         : `    - readiness: missing ${c.missing.join(", ")}`,
     );
     lines.push(

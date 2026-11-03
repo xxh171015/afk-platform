@@ -4,6 +4,7 @@ import {
   createApiClient,
   type HostTask,
   type PlanningTask,
+  type ReadinessTask,
 } from "@afk/shared";
 
 // The worker talks to the platform over HTTP only (docs/specs/m1-platform.md「worker 专用接口」): it has no
@@ -28,6 +29,7 @@ export interface WorkerApi {
   bundle(job: ClaimedJob): Promise<Bundle | "lost">;
   hostTask(job: ClaimedJob): Promise<HostTask | "lost">;
   planningTask(job: ClaimedJob): Promise<PlanningTask | "lost">;
+  readinessTask(job: ClaimedJob): Promise<ReadinessTask | "lost">;
   // Is this job still running under a live lease at this attempt? Throws when the API cannot be asked.
   isHeld(jobId: number, attempt: number): Promise<boolean>;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
@@ -115,6 +117,20 @@ export function createWorkerApi(
       if (data) return data;
       if (holding(response.status) === "lost") return "lost";
       throw new Error(`planning task failed: HTTP ${response.status}`);
+    },
+    async readinessTask(job) {
+      const { data, response } = await client.GET(
+        "/worker/jobs/{id}/readiness-task",
+        {
+          params: {
+            path: { id: job.id },
+            query: { workerId, attempt: job.attempt },
+          },
+        },
+      );
+      if (data) return data;
+      if (holding(response.status) === "lost") return "lost";
+      throw new Error(`readiness task failed: HTTP ${response.status}`);
     },
     async complete(job, result) {
       const { params, body } = call(job);

@@ -61,8 +61,9 @@ describe("plat spec create on a machine that is not set up for planning", () => 
     expect(code).toBe(0);
     expect(machine.out.join("")).toBe("S-7\n");
     const warnings = machine.err.join("");
-    expect(warnings).toContain("docs/agents/issue-tracker.md does not exist");
-    expect(warnings).toContain("plat tracker-doc --project 3 --repo <name>");
+    expect(warnings).toContain(
+      "this repo is not set up for the platform (no docs/agents/issue-tracker.md): in Cursor, run /afk-setup",
+    );
     expect(warnings).toContain("the to-spec skill");
     expect(warnings).toContain("the to-tickets skill");
   });

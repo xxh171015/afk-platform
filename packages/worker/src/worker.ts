@@ -17,6 +17,7 @@ import {
 import { type HostDeps, runHostTask } from "./host.ts";
 import { runPlanningCommit } from "./planning.ts";
 import { rawLogSink } from "./raw-log.ts";
+import { READINESS_GATE_JOB, runReadinessGate } from "./readiness.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -161,6 +162,20 @@ export async function processJob(
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";
       log(`planning-commit ${body.outcome}`);
+      return "completed";
+    }
+    if (job.type === READINESS_GATE_JOB) {
+      const task = await api.readinessTask(job);
+      if (task === "lost") return "abandoned";
+      // fetches the branch with that repo's token
+      const deps = await withCredentials(
+        { ...options.executor, api },
+        task.repo.url,
+      );
+      const body = await runReadinessGate(deps, task, log, lost.signal);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
       return "completed";
     }
     if ((HOST_JOB_TYPES as readonly string[]).includes(job.type)) {

@@ -25,6 +25,10 @@ export type HostTask =
 export type PlanningTask =
   paths["/worker/jobs/{id}/planning-task"]["get"]["responses"][200]["content"]["application/json"];
 
+// What GET /worker/jobs/{id}/readiness-task returns: the branch whose gate to run (plat repo check).
+export type ReadinessTask =
+  paths["/worker/jobs/{id}/readiness-task"]["get"]["responses"][200]["content"]["application/json"];
+
 // The acceptance pack as GET /specs/{id} returns it. Declared once, in the API; the CLI and the page read this.
 export type AcceptancePackView = NonNullable<
   paths["/specs/{id}"]["get"]["responses"][200]["content"]["application/json"]["acceptancePack"]

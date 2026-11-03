@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import {
+  checkAppAccess,
   createAppTokenSource,
   createGitHubAdapter,
   loadAppCredentials,
@@ -141,7 +142,10 @@ log(
 );
 await runWorker({
   api,
-  host: { adapter: createGitHubAdapter({ tokens }) },
+  host: {
+    adapter: createGitHubAdapter({ tokens }),
+    checkAccess: (repo) => checkAppAccess({ credentials }, repo),
+  },
   executor: {
     slots: new SlotManager({
       root: slotsRoot,

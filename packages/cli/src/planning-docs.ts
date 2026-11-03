@@ -15,8 +15,9 @@ export interface RegisteredRepo {
 }
 
 export type PlanningDocs =
-  // not in a checkout of one of the project's repos: confirm sends nothing, like the page
-  | { status: "elsewhere" }
+  // not in a checkout of one of the project's repos: confirm sends nothing, like the page. `checkout` is the git
+  // checkout it is in, when it is in one: a repo the project may be missing.
+  | { status: "elsewhere"; checkout?: string }
   // in a checkout of another repo of the project
   | { status: "other-repo"; repo: string }
   | { status: "ok"; patch: string; files: string[] };
@@ -53,7 +54,7 @@ export function readPlanningDocs(
   const dir = top.out.trim();
   const origin = git(dir, ["config", "--get", "remote.origin.url"]).out.trim();
   const repo = origin ? repos.find((r) => sameRepo(r.url, origin)) : undefined;
-  if (!repo) return { status: "elsewhere" };
+  if (!repo) return { status: "elsewhere", checkout: dir };
   if (repo.name !== planningRepo)
     return { status: "other-repo", repo: repo.name };
 

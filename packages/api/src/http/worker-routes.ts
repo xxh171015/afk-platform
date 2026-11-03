@@ -27,6 +27,12 @@ import {
   recordSpecCleanup,
 } from "../host/pull-requests.ts";
 import {
+  readRepoAccessPayload,
+  recordRepoAccess,
+  repoAccessFailed,
+  repoAccessTask,
+} from "../host/repo-access.ts";
+import {
   checkBeforePush,
   checkHolder,
   claimJob,
@@ -41,6 +47,10 @@ import {
   readPlanningPayload,
   recordPlanningResult,
 } from "../planning/planning-commit.ts";
+import {
+  readinessGateTask,
+  readReadinessGatePayload,
+} from "../planning/readiness-gate.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { recordJobFailure } from "../stages/failures.ts";
@@ -305,6 +315,10 @@ const HostTask = z.discriminatedUnion("kind", [
     section: z.string(),
     summary: z.string(),
   }),
+  z.object({
+    kind: z.literal("repo-access"),
+    repoUrl: z.string(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -320,11 +334,49 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, spec-cleanup or patch-pr-body job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
       description: "No such job, or not a job for the code host",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
+const readinessTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/readiness-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What a readiness-gate job has to do: run the repo's gate on the branch, with that branch's gates.yaml (plat repo check)",
+      content: {
+        "application/json": {
+          schema: z.object({
+            repo: z.object({
+              name: z.string(),
+              url: z.string(),
+              defaultBranch: z.string(),
+            }),
+            branch: z.string(),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "No such job, or not a readiness-gate job",
       content: { "application/json": { schema: ErrorReply } },
     },
     409: {
@@ -535,7 +587,15 @@ export function registerWorkerRoutes(
               const sync = readHostSyncPayload(job.rows[0]);
               const cleanup = readSpecCleanupPayload(job.rows[0]);
               const ready = readPrReadyPayload(job.rows[0]);
-              if (openPr)
+              const access = readRepoAccessPayload(job.rows[0]);
+              if (access)
+                await recordRepoAccess(
+                  client,
+                  access,
+                  (result ?? {}) as Record<string, unknown>,
+                  context.clock(),
+                );
+              else if (openPr)
                 await recordOpenPr(client, openPr, result, context.clock());
               else if (sync)
                 await recordHostSync(client, sync, result, context.clock());
@@ -595,6 +655,13 @@ export function registerWorkerRoutes(
       payload: Record<string, unknown>;
     }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
     const row = job.rows[0];
+    const access = row && readRepoAccessPayload(row);
+    if (access) {
+      const task = await repoAccessTask(context.pool, access);
+      return task
+        ? c.json(task, 200)
+        : c.json({ error: "the repo is gone" }, 404);
+    }
     const payload =
       row &&
       (readOpenPrPayload(row) ??
@@ -606,6 +673,30 @@ export function registerWorkerRoutes(
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)
       return c.json({ error: "this job is not for the code host" }, 404);
+    return c.json(task, 200);
+  });
+
+  app.openapi(readinessTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const payload = job.rows[0] && readReadinessGatePayload(job.rows[0]);
+    const task = payload && (await readinessGateTask(context.pool, payload));
+    if (!task)
+      return c.json({ error: "this job is not a readiness gate" }, 404);
     return c.json(task, 200);
   });
 
@@ -668,8 +759,11 @@ export function registerWorkerRoutes(
             context.clock(),
           );
           const sync = readHostSyncPayload(job.rows[0]);
+          const access = readRepoAccessPayload(job.rows[0]);
           if (failure.status === "not-a-stage" && sync)
             await hostSyncFailed(client, sync.projectId, context.clock());
+          if (failure.status === "not-a-stage" && access)
+            await repoAccessFailed(client, access, error, context.clock());
         }
         return failed;
       }),

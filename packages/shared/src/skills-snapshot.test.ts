@@ -12,7 +12,7 @@ import {
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 describe("the skills snapshot", () => {
-  it("holds the five skills the platform runs and the two tracker seed templates", () => {
+  it("holds the five skills the platform runs and the seed templates plat init writes", () => {
     expect(SNAPSHOT_FILES).toEqual([
       "to-spec/SKILL.md",
       "to-tickets/SKILL.md",
@@ -21,6 +21,8 @@ describe("the skills snapshot", () => {
       "code-review/SKILL.md",
       "setup-matt-pocock-skills/issue-tracker-github.md",
       "setup-matt-pocock-skills/issue-tracker-gitlab.md",
+      "setup-matt-pocock-skills/domain.md",
+      "setup-matt-pocock-skills/triage-labels.md",
     ]);
   });
 

@@ -7,6 +7,7 @@ export type {
   PlanningTask,
   PullRequestRowView,
   paths,
+  ReadinessTask,
 } from "./api/client.ts";
 export { createApiClient } from "./api/client.ts";
 export {

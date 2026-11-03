@@ -1,6 +1,12 @@
+import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { describe, expect, it } from "vitest";
-import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
+import { readAfkSetupSkill } from "./afk-setup-text.ts";
+import {
+  skillsWarnings,
+  trackerDocWarnings,
+  versionWarnings,
+} from "./planning-checks.ts";
 import { renderTrackerDoc } from "./tracker-doc.ts";
 
 const project = {
@@ -35,7 +41,7 @@ describe("trackerDocWarnings", () => {
     );
   });
 
-  it("warns, and prints the exact update command, when the document differs in any way", async () => {
+  it("warns, and points at /afk-setup, when the document differs in any way", async () => {
     const warnings = await trackerDocWarnings(
       docs(`${current}\nhand edited\n`),
       load,
@@ -43,15 +49,13 @@ describe("trackerDocWarnings", () => {
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("out of date");
-    expect(warnings[0]).toContain(
-      "plat tracker-doc --project 3 --repo backend > docs/agents/issue-tracker.md",
-    );
+    expect(warnings[0]).toContain("run /afk-setup again");
   });
 
-  it("warns when the document does not exist, with the project it was asked about", async () => {
+  it("warns that the repo is not set up when the document does not exist", async () => {
     const warnings = await trackerDocWarnings(files({}), load, 3);
     expect(warnings[0]).toContain("docs/agents/issue-tracker.md");
-    expect(warnings[0]).toContain("plat tracker-doc --project 3 --repo <name>");
+    expect(warnings[0]).toContain("run /afk-setup");
   });
 
   it("warns when the document has no version line to regenerate it from", async () => {
@@ -60,7 +64,7 @@ describe("trackerDocWarnings", () => {
       load,
       3,
     );
-    expect(warnings[0]).toContain("plat tracker-doc --project 3 --repo <name>");
+    expect(warnings[0]).toContain("run /afk-setup to replace it");
   });
 
   it("warns that it could not compare when the project cannot be read", async () => {
@@ -85,6 +89,7 @@ describe("skillsWarnings", () => {
     files({
       [`${home}/${dir}/to-spec/SKILL.md`]: snapshot("to-spec"),
       [`${home}/${dir}/to-tickets/SKILL.md`]: snapshot("to-tickets"),
+      [`${home}/${dir}/afk-setup/SKILL.md`]: readAfkSetupSkill(),
       ...over,
     });
 
@@ -102,8 +107,7 @@ describe("skillsWarnings", () => {
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("to-tickets");
-    expect(warnings[0]).toMatch(/git -C .* checkout [0-9a-f]{40}/);
-    expect(warnings[0]).toContain("ln -sfn");
+    expect(warnings[0]).toContain("in Cursor, run /afk-setup");
   });
 
   it("is quiet when one directory has a stale copy but another has the pinned one", async () => {
@@ -111,6 +115,7 @@ describe("skillsWarnings", () => {
       [`${home}/.claude/skills/to-spec/SKILL.md`]: "older",
       [`${home}/.claude/skills/to-tickets/SKILL.md`]: snapshot("to-tickets"),
       [`${home}/.cursor/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
+      [`${home}/.agents/skills/afk-setup/SKILL.md`]: readAfkSetupSkill(),
     });
     expect(await skillsWarnings(both, home)).toEqual([]);
   });
@@ -120,13 +125,47 @@ describe("skillsWarnings", () => {
       [`${home}/.claude/skills/to-spec/SKILL.md`]: "older",
       [`${home}/.claude/skills/to-tickets/SKILL.md`]: snapshot("to-tickets"),
       [`${home}/.cursor/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
+      [`${home}/.agents/skills/afk-setup/SKILL.md`]: readAfkSetupSkill(),
     });
     expect(await skillsWarnings(both, home)).toEqual([]);
   });
 
-  it("warns about both when neither is installed", async () => {
+  it("warns about each when none is installed", async () => {
     const warnings = await skillsWarnings(files({}), home);
-    expect(warnings).toHaveLength(2);
+    expect(warnings).toHaveLength(3);
     expect(warnings.join("\n")).toContain("not found");
+  });
+
+  it("warns, with the command that updates it, when afk-setup is not this platform's", async () => {
+    const warnings = await skillsWarnings(
+      installed(".agents/skills", {
+        [`${home}/.agents/skills/afk-setup/SKILL.md`]: "older",
+      }),
+      home,
+    );
+    expect(warnings).toEqual([
+      expect.stringContaining(
+        "npx skills@latest add xxh171015/afk-platform --skill afk-setup -g -y",
+      ),
+    ]);
+  });
+});
+
+describe("versionWarnings", () => {
+  it("is quiet when plat is the platform's version", async () => {
+    expect(
+      await versionWarnings(async () => ({
+        platformVersion: PLATFORM_VERSION,
+      })),
+    ).toEqual([]);
+  });
+
+  it("points at /afk-setup when the platform has moved on", async () => {
+    const warnings = await versionWarnings(async () => ({
+      platformVersion: "99.0.0",
+    }));
+    expect(warnings).toEqual([
+      `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is 99.0.0: in Cursor, run /afk-setup to update it`,
+    ]);
   });
 });
