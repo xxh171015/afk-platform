@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { SpecDetail } from "./SpecDetail.tsx";
 import { fakeServer, renderWithApp } from "./test-utils.tsx";
@@ -37,6 +43,12 @@ const view = (
     acceptancePack?: unknown;
     timeline?: unknown[];
     finalRuns?: unknown[];
+    mergeOrder?: {
+      ordered: string[];
+      after: Record<string, string[]>;
+      unordered: string[];
+    };
+    orderBroken?: unknown[];
   } = {},
 ) => ({
   spec: {
@@ -62,12 +74,56 @@ const view = (
     { from: "T-1", to: "T-3", kind: "contract" },
   ],
   finalizations: over.finalizations ?? [],
-  mergeOrder: { ordered: [], after: {}, unordered: [] },
-  orderBroken: [],
+  mergeOrder: over.mergeOrder ?? { ordered: [], after: {}, unordered: [] },
+  orderBroken: over.orderBroken ?? [],
   pullRequests: over.pullRequests ?? [],
   acceptancePack: over.acceptancePack ?? null,
   timeline: over.timeline ?? [],
   finalRuns: over.finalRuns ?? [],
+});
+
+const ticketView = (n: number, over: Record<string, unknown> = {}) => ({
+  ticket: {
+    id: n,
+    displayId: `T-${n}`,
+    specId: 1,
+    specDisplayId: "S-1",
+    title: `Ticket ${n}`,
+    type: "implementation",
+    state: "done",
+    blockedReason: null,
+    repo: "backend",
+    repoUrl: "https://github.com/acme/shop-backend.git",
+    hostKind: "github",
+    brief: null,
+    body: `## What to build\n\nBody of T-${n}.\n`,
+    file: `---\nid: T-${n}\n---\n`,
+    acceptanceCriteria: ["works"],
+    modules: [],
+    allowedProtectedPaths: [],
+    contentVersion: 1,
+    contractSha: null,
+    fixCounts: {},
+    reviewed: false,
+    ...over,
+  },
+  versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
+  upstream: [],
+  downstream: [],
+  runs: [
+    {
+      id: 10,
+      displayId: "R-10",
+      stage: "implement",
+      attempt: 1,
+      result: "done",
+      durationMs: 1000,
+      axis: null,
+      startedAt: "2026-10-28T10:00:00.000Z",
+    },
+  ],
+  findings: [],
+  gateResults: [],
 });
 
 const node = (id: string) => screen.getByTestId(`node-${id}`);
@@ -218,13 +274,12 @@ describe("the spec page", () => {
         }),
       }),
     );
-    expect(
-      await screen.findByText(
-        (_, element) =>
-          element?.tagName === "LI" &&
-          /T-1 Ticket 1 \[backend\] — 门禁失败/.test(element.textContent ?? ""),
-      ),
-    ).toBeTruthy();
+    const cards = await screen.findByTestId("ticket-cards");
+    const item = within(cards).getByRole("listitem");
+    expect(item.textContent).toMatch(/T-1/);
+    expect(item.textContent).toMatch(/Ticket 1/);
+    expect(item.textContent).toMatch(/backend/);
+    expect(item.textContent).toMatch(/门禁失败/);
   });
 
   it("shows the pull requests in merge order and the acceptance pack: what backs each criterion, findings, doubts, gates", async () => {
@@ -379,6 +434,12 @@ describe("the spec page", () => {
     expect(criterion("exports orders").getAttribute("data-status")).toBe(
       "verified",
     );
+    expect(criterion("exports orders").textContent).not.toMatch(
+      /\(exports a csv\)/,
+    );
+    expect(
+      within(criterion("exports orders")).getByText("exports a csv"),
+    ).toBeTruthy();
     expect(criterion("has a header").getAttribute("data-status")).toBe(
       "unverified",
     );
@@ -395,7 +456,10 @@ describe("the spec page", () => {
     ).toBe("scope-creep");
     expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
     expect(screen.getByText(/门禁：/));
-    expect(screen.getByRole("button", { name: "0123456" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /0123456/ })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "backend #7" }).getAttribute("target"),
+    ).toBe("_blank");
     expect(screen.getByText(/3 个测试，跳过 1 个，4.0 s/)).toBeTruthy();
     expect(screen.getByText(/\.github\/ci.yml/)).toBeTruthy();
     // the pack opens with the merge order and has a section for each repo, in that order
@@ -411,6 +475,69 @@ describe("the spec page", () => {
     expect(screen.getByText("已取消的票")).toBeTruthy();
     expect(screen.getByText(/Dropped/).closest("li")?.textContent).toContain(
       "已取消",
+    );
+  });
+
+  it("renders an incomplete stored acceptance pack without crashing", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            acceptancePack: {
+              generatedAt: "2026-10-28T10:00:00.000Z",
+              mergeOrder: {
+                ordered: ["backend"],
+                after: {},
+                unordered: [],
+              },
+              repos: [
+                {
+                  repo: "backend",
+                  tickets: [
+                    {
+                      displayId: "T-1",
+                      title: "Ticket 1",
+                      appended: false,
+                      criteria: [
+                        { text: "exports orders", status: "verified" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              integration: {
+                failedBeforePullRequest: null,
+                tickets: [
+                  {
+                    displayId: "T-9",
+                    title: "E2E",
+                    repo: "frontend",
+                    appended: false,
+                    result: "passed",
+                    runDisplayId: "R-20",
+                    testsTotal: 3,
+                    testsFailed: 0,
+                    envUpMs: 10,
+                    refShas: null,
+                    headSha: null,
+                    criteria: [],
+                  },
+                ],
+              },
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("验收包")).toBeTruthy();
+    expect(screen.getByText("exports orders")).toBeTruthy();
+    expect(screen.getByTestId("pack-integration").textContent).toContain("T-9");
+    expect(screen.getByTestId("pack-integration").textContent).toContain(
+      "passed",
     );
   });
 
@@ -511,12 +638,12 @@ describe("the spec page", () => {
         }),
       }),
     );
-    await screen.findByRole("link", { name: "T-2" });
+    await screen.findByTestId("ticket-cards");
     expect(
       screen
         .getAllByRole("link", { name: "T-2" })
         .map((l) => l.getAttribute("href")),
-    ).toEqual(["/tickets/2"]);
+    ).toEqual(["/tickets/2", "/tickets/2"]);
   });
 
   it("shows the title, the state, and why a spec was paused", async () => {
@@ -648,9 +775,9 @@ describe("the body of the spec", () => {
     const nav = await screen.findByRole("navigation", { name: "目录" });
     const links = [...nav.querySelectorAll("button")].map((b) => b.textContent);
     // the heading inside the code fence is not a section
-    expect(links).toEqual(["Problem Statement", "Testing Decisions"]);
-    fireEvent.click(screen.getByRole("button", { name: "Testing Decisions" }));
-    expect(scrolled).toEqual(["Testing Decisions"]);
+    expect(links).toEqual(["问题", "测试决策"]);
+    fireEvent.click(screen.getByRole("button", { name: "测试决策" }));
+    expect(scrolled).toEqual(["测试决策"]);
   });
 
   it("says so when the spec has no body", async () => {
@@ -675,7 +802,7 @@ describe("the body of the spec", () => {
         },
       ],
     });
-    await screen.findByText("Problem Statement", { selector: "h2" });
+    await screen.findByText("问题", { selector: "h2" });
     expect(screen.queryByRole("heading", { name: "PR" })).toBeNull();
     cleanup();
     renderWithApp(
@@ -703,9 +830,7 @@ describe("the body of the spec", () => {
       }),
     );
     expect(await screen.findByRole("heading", { name: "PR" })).toBeTruthy();
-    expect(
-      screen.queryByText("Problem Statement", { selector: "h2" }),
-    ).toBeNull();
+    expect(screen.queryByText("问题", { selector: "h2" })).toBeNull();
   });
 });
 
@@ -715,16 +840,43 @@ describe("the tickets page", () => {
       <SpecDetail specId={1} section="tickets" />,
       fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
     );
-    const item = await screen.findByText(
-      (_, el) =>
-        el?.tagName === "LI" &&
-        /T-3 Ticket 3 \[backend\]/.test(el.textContent ?? "") &&
-        /等待 T-1 \(contract\)/.test(el.textContent ?? ""),
-    );
-    expect(item).toBeTruthy();
+    const cards = await screen.findByTestId("ticket-cards");
+    expect(screen.getByTestId("node-T-3")).toBeTruthy();
+    const item = within(cards)
+      .getAllByRole("listitem")
+      .find((el) => el.textContent?.includes("T-3"));
+    expect(item?.textContent).toMatch(/契约/);
+    expect(
+      within(item as HTMLElement)
+        .getByRole("link", { name: "T-1" })
+        .getAttribute("href"),
+    ).toBe("/tickets/1");
   });
 
-  it("filters the table by repo and state", async () => {
+  it("opens a ticket sheet from a card T-n without following the href", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="tickets" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "done")],
+            edges: [],
+          }),
+        }),
+        "GET /tickets/1": () => ({ json: ticketView(1) }),
+      }),
+    );
+    const cards = await screen.findByTestId("ticket-cards");
+    const link = within(cards).getByRole("link", { name: "T-1" });
+    expect(link.getAttribute("href")).toBe("/tickets/1");
+    fireEvent.click(link);
+    expect(await screen.findByText("Body of T-1.")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "打开票详情" }).getAttribute("href"),
+    ).toBe("/tickets/1");
+  });
+
+  it("filters the cards by repo, not the graph", async () => {
     renderWithApp(
       <SpecDetail specId={1} section="tickets" />,
       fakeServer({
@@ -739,12 +891,12 @@ describe("the tickets page", () => {
         }),
       }),
     );
-    await screen.findByText("T-1");
-    fireEvent.change(screen.getByLabelText("仓库"), {
-      target: { value: "frontend" },
-    });
-    expect(screen.queryByText("T-1")).toBeNull();
-    expect(screen.getByText("T-2")).toBeTruthy();
+    const cards = await screen.findByTestId("ticket-cards");
+    fireEvent.click(screen.getByLabelText("按仓库筛选"));
+    fireEvent.click(await screen.findByRole("option", { name: "frontend" }));
+    expect(within(cards).queryByText("T-1")).toBeNull();
+    expect(within(cards).getByText("T-2")).toBeTruthy();
+    expect(screen.getByTestId("node-T-1")).toBeTruthy();
   });
 });
 
@@ -878,6 +1030,8 @@ describe("confirming the split", () => {
     );
     await screen.findByTestId("node-T-1");
     expect(screen.queryByRole("button", { name: "确认拆分" })).toBeNull();
+    expect(screen.queryByText("没有黄项")).toBeNull();
+    expect(screen.queryByText("确认前预检")).toBeNull();
   });
 });
 
@@ -939,6 +1093,7 @@ describe("the six-step bar and nested pages", () => {
     expect(bar.querySelector('[data-current="true"]')?.textContent).toContain(
       "运行",
     );
+    expect(screen.getByTestId("flow-caption-运行").textContent).toBe("1/2");
   });
 
   it("links the five nested spec pages from the bar", async () => {
@@ -999,6 +1154,47 @@ describe("the six-step bar and nested pages", () => {
     );
     expect(screen.queryByText("still going")).toBeNull();
     expect(screen.queryByText("job-heartbeat")).toBeNull();
+    expect(screen.getByText("2026-11-01")).toBeTruthy();
+    expect(screen.getByText("2026-11-01 18:00")).toBeTruthy();
+    expect(screen.getByText("2026-11-01 18:00").getAttribute("dateTime")).toBe(
+      "2026-11-01T10:00:00.000Z",
+    );
+  });
+
+  it("links PR timeline events to GitHub", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            pullRequests: [
+              {
+                order: 1,
+                waitsFor: [],
+                repo: "backend",
+                number: 7,
+                url: "https://github.com/me/shop/pull/7",
+                state: "open",
+                draft: false,
+                ci: "none",
+                review: "none",
+                syncError: null,
+              },
+            ],
+            timeline: [
+              {
+                kind: "pr-opened",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "backend #7",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const link = await screen.findByRole("link", { name: "GitHub" });
+    expect(link.getAttribute("href")).toBe("https://github.com/me/shop/pull/7");
+    expect(link.getAttribute("target")).toBe("_blank");
   });
 
   it("links each finishing run from delivery", async () => {
@@ -1053,9 +1249,14 @@ describe("the six-step bar and nested pages", () => {
             edges: [],
           }),
         }),
+        "GET /tickets/1": () => ({ json: ticketView(1) }),
       }),
     );
     fireEvent.click(await screen.findByTestId("node-T-1"));
+    expect(await screen.findByText("Body of T-1.")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "R-10" }).getAttribute("href"),
+    ).toBe("/runs/10");
     expect(
       (await screen.findByRole("link", { name: "打开票详情" })).getAttribute(
         "href",
@@ -1086,6 +1287,55 @@ describe("the six-step bar and nested pages", () => {
     expect(bar.querySelector('[data-current="true"]')?.textContent).toContain(
       "确认",
     );
+  });
+
+  it("only links reached steps, and future steps stay plain text", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [ticket(1, "done"), ticket(2, "running")],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("flow-bar");
+    expect(
+      within(bar).getByRole("link", { name: /运行/ }).getAttribute("href"),
+    ).toBe("/specs/1/tickets");
+    expect(
+      within(bar).getByRole("link", { name: /草稿/ }).getAttribute("href"),
+    ).toBe("/specs/1#flow-draft");
+    expect(within(bar).queryByRole("link", { name: /验收合并/ })).toBeNull();
+    expect(bar.textContent).toContain("验收合并");
+  });
+
+  it("shows the acceptance pack chapter even when the pack is missing", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            mergeOrder: {
+              ordered: [],
+              after: {},
+              unordered: ["backend"],
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("还没有可交付的内容")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "验收包" })).toBeTruthy();
+    expect(screen.getByText("还没有验收包。开完 PR 后会生成。")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "backend" })).toBeNull();
+    expect(screen.queryByText("没有合并顺序（没有契约关系）")).toBeNull();
   });
 
   it("sits on 收尾 when finalizing has no PR, and 开 PR once a PR exists", async () => {

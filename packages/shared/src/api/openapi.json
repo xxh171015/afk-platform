@@ -688,6 +688,31 @@
                           "project": {
                             "type": "string"
                           },
+                          "repos": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "type": "string"
+                                },
+                                "hostKind": {
+                                  "type": "string",
+                                  "enum": ["github", "gitlab"]
+                                }
+                              },
+                              "required": ["name", "url", "hostKind"]
+                            }
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "endedAt": {
+                            "type": ["string", "null"]
+                          },
                           "progress": {
                             "type": "object",
                             "properties": {
@@ -729,6 +754,9 @@
                           "state",
                           "pauseReason",
                           "project",
+                          "repos",
+                          "startedAt",
+                          "endedAt",
                           "progress"
                         ]
                       }
@@ -2507,6 +2535,13 @@
                         "repo": {
                           "type": "string"
                         },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "hostKind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        },
                         "refs": {
                           "type": "array",
                           "items": {
@@ -2709,6 +2744,8 @@
                         "state",
                         "blockedReason",
                         "repo",
+                        "repoUrl",
+                        "hostKind",
                         "refs",
                         "environment",
                         "appended",
@@ -3189,6 +3226,13 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "repoUrl": {
+                      "type": "string"
+                    },
+                    "hostKind": {
+                      "type": "string",
+                      "enum": ["github", "gitlab"]
                     }
                   },
                   "required": [
@@ -3212,7 +3256,9 @@
                     "ticketId",
                     "ticketDisplayId",
                     "prompt",
-                    "commits"
+                    "commits",
+                    "repoUrl",
+                    "hostKind"
                   ]
                 }
               }
@@ -3301,6 +3347,25 @@
                         "pauseReason": {
                           "type": ["string", "null"]
                         },
+                        "repos": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "hostKind": {
+                                "type": "string",
+                                "enum": ["github", "gitlab"]
+                              }
+                            },
+                            "required": ["name", "url", "hostKind"]
+                          }
+                        },
                         "integrationBranches": {
                           "type": "array",
                           "items": {
@@ -3311,9 +3376,25 @@
                               },
                               "branch": {
                                 "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "hostKind": {
+                                "type": "string",
+                                "enum": ["github", "gitlab"]
                               }
                             },
-                            "required": ["repoId", "branch"]
+                            "required": [
+                              "repoId",
+                              "branch",
+                              "name",
+                              "url",
+                              "hostKind"
+                            ]
                           }
                         },
                         "warnings": {
@@ -3356,6 +3437,7 @@
                         "body",
                         "state",
                         "pauseReason",
+                        "repos",
                         "integrationBranches",
                         "warnings",
                         "planningSha",
@@ -3403,6 +3485,13 @@
                           },
                           "repo": {
                             "type": "string"
+                          },
+                          "repoUrl": {
+                            "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           },
                           "refs": {
                             "type": "array",
@@ -3567,6 +3656,8 @@
                           "state",
                           "blockedReason",
                           "repo",
+                          "repoUrl",
+                          "hostKind",
                           "refs",
                           "environment",
                           "appended",
@@ -4654,6 +4745,13 @@
                           "repo": {
                             "type": "string"
                           },
+                          "repoUrl": {
+                            "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "refs": {
                             "type": "array",
                             "items": {
@@ -4817,6 +4915,8 @@
                           "state",
                           "blockedReason",
                           "repo",
+                          "repoUrl",
+                          "hostKind",
                           "refs",
                           "environment",
                           "appended",
@@ -5177,6 +5277,13 @@
                               "repo": {
                                 "type": "string"
                               },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "hostKind": {
+                                "type": "string",
+                                "enum": ["github", "gitlab"]
+                              },
                               "refs": {
                                 "type": "array",
                                 "items": {
@@ -5349,6 +5456,8 @@
                               "state",
                               "blockedReason",
                               "repo",
+                              "repoUrl",
+                              "hostKind",
                               "refs",
                               "environment",
                               "appended",
@@ -5702,6 +5811,31 @@
                               "project": {
                                 "type": "string"
                               },
+                              "repos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "hostKind": {
+                                      "type": "string",
+                                      "enum": ["github", "gitlab"]
+                                    }
+                                  },
+                                  "required": ["name", "url", "hostKind"]
+                                }
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "endedAt": {
+                                "type": ["string", "null"]
+                              },
                               "progress": {
                                 "type": "object",
                                 "properties": {
@@ -5743,6 +5877,9 @@
                               "state",
                               "pauseReason",
                               "project",
+                              "repos",
+                              "startedAt",
+                              "endedAt",
                               "progress"
                             ]
                           },
@@ -5853,6 +5990,31 @@
                               "project": {
                                 "type": "string"
                               },
+                              "repos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "hostKind": {
+                                      "type": "string",
+                                      "enum": ["github", "gitlab"]
+                                    }
+                                  },
+                                  "required": ["name", "url", "hostKind"]
+                                }
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "endedAt": {
+                                "type": ["string", "null"]
+                              },
                               "progress": {
                                 "type": "object",
                                 "properties": {
@@ -5894,6 +6056,9 @@
                               "state",
                               "pauseReason",
                               "project",
+                              "repos",
+                              "startedAt",
+                              "endedAt",
                               "progress"
                             ]
                           },
@@ -5959,6 +6124,31 @@
                               "project": {
                                 "type": "string"
                               },
+                              "repos": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "hostKind": {
+                                      "type": "string",
+                                      "enum": ["github", "gitlab"]
+                                    }
+                                  },
+                                  "required": ["name", "url", "hostKind"]
+                                }
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "endedAt": {
+                                "type": ["string", "null"]
+                              },
                               "progress": {
                                 "type": "object",
                                 "properties": {
@@ -6000,6 +6190,9 @@
                               "state",
                               "pauseReason",
                               "project",
+                              "repos",
+                              "startedAt",
+                              "endedAt",
                               "progress"
                             ]
                           },

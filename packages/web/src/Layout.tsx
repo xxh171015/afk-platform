@@ -1,4 +1,3 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   Link,
   Outlet,
@@ -15,19 +14,18 @@ import {
   Search,
   Sun,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { describeError, useApi } from "./api.tsx";
+import { useEffect, useState } from "react";
 import { useBlocked } from "./BlockedQueue.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
-import { EventsProvider, useResourcePoll } from "./EventsProvider.tsx";
+import { EntityCrumbs } from "./EntityCrumbs.tsx";
+import { EventsProvider } from "./EventsProvider.tsx";
 import { HelpDialog } from "./HelpDialog.tsx";
 import { useChangeFlash } from "./hooks/use-change-flash.ts";
 import { applyTheme, currentTheme, type Theme } from "./lib/theme.ts";
 import { cn } from "./lib/utils.ts";
-import { LIST_POLL_MS } from "./live.ts";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
 import { waitingCount } from "./waiting.ts";
 
@@ -59,25 +57,6 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
       {!collapsed && <span>{theme === "dark" ? "亮色模式" : "暗色模式"}</span>}
     </button>
   );
-}
-
-function useProjectName(): string | null {
-  const api = useApi();
-  const poll = useResourcePoll(LIST_POLL_MS);
-  const specs = useQuery({
-    queryKey: ["specs"],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/specs");
-      if (!data) throw new Error(describeError(error));
-      return data.specs;
-    },
-    refetchInterval: poll,
-    placeholderData: keepPreviousData,
-  });
-  const names = [
-    ...new Set((specs.data ?? []).map((s) => s.project).filter(Boolean)),
-  ];
-  return names[0] ?? null;
 }
 
 function Sidebar({
@@ -162,88 +141,17 @@ function Sidebar({
   );
 }
 
-function crumbsOf(path: string): { label: ReactNode; to?: string }[] {
-  if (path === "/") return [{ label: "工作台" }];
-  if (path === "/waiting") return [{ label: "待处理" }];
-  if (path === "/specs") return [{ label: "需求" }];
-  const spec = path.match(/^\/specs\/([^/]+)/);
-  if (spec)
-    return [
-      { label: "需求", to: "/specs" },
-      {
-        label: (
-          <span className="font-mono">
-            S-{decodeURIComponent(spec[1] ?? "")}
-          </span>
-        ),
-      },
-    ];
-  const tkt = path.match(/^\/tickets\/([^/]+)/);
-  if (tkt)
-    return [
-      { label: "票" },
-      {
-        label: (
-          <span className="font-mono">
-            T-{decodeURIComponent(tkt[1] ?? "")}
-          </span>
-        ),
-      },
-    ];
-  const run = path.match(/^\/runs\/([^/]+)/);
-  if (run)
-    return [
-      { label: "Run" },
-      {
-        label: (
-          <span className="font-mono">
-            R-{decodeURIComponent(run[1] ?? "")}
-          </span>
-        ),
-      },
-    ];
-  return [];
-}
-
 function Topbar({
   onSearch,
   waiting,
-  project,
 }: {
   onSearch: () => void;
   waiting: number;
-  project: string | null;
 }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const crumbs = crumbsOf(path);
   return (
     <header className="afk-topbar sticky top-0 z-20 flex h-12 items-center gap-3 border-b bg-background/85 px-5 backdrop-blur">
-      <nav
-        aria-label="面包屑"
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]"
-      >
-        {project ? (
-          <span className="text-subtle-foreground">{project}</span>
-        ) : null}
-        {crumbs.map((c) => (
-          <span
-            key={`${c.label}-${c.to ?? "current"}`}
-            className="flex items-center gap-1.5"
-          >
-            <span className="text-subtle-foreground">/</span>
-            {c.to ? (
-              <Link
-                to={c.to}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                {c.label}
-              </Link>
-            ) : (
-              <span className="text-foreground">{c.label}</span>
-            )}
-          </span>
-        ))}
-      </nav>
+      <EntityCrumbs />
       <nav
         aria-label="顶部导航"
         className="flex shrink-0 items-center gap-1 text-xs"
@@ -306,7 +214,6 @@ function Chrome() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const waiting = queue.data ? waitingCount(queue.data) : 0;
-  const project = useProjectName();
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
@@ -336,6 +243,14 @@ function Chrome() {
         return;
       event.preventDefault();
       router.history.push(href);
+      const id = href.split("#")[1];
+      if (id) {
+        queueMicrotask(() =>
+          document
+            .getElementById(id)
+            ?.scrollIntoView?.({ behavior: "smooth", block: "start" }),
+        );
+      }
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
@@ -384,11 +299,7 @@ function Chrome() {
           waiting={waiting}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar
-            onSearch={() => setSearchOpen(true)}
-            waiting={waiting}
-            project={project}
-          />
+          <Topbar onSearch={() => setSearchOpen(true)} waiting={waiting} />
           <main className="flex-1">
             <Outlet />
           </main>

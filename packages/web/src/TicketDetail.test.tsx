@@ -183,6 +183,9 @@ describe("the ticket page", () => {
     expect(document.querySelector(".markdown strong")?.textContent).toBe(
       "orders",
     );
+    expect(screen.getByRole("heading", { name: "要做的事" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "验收标准" })).toBeTruthy();
+    expect(screen.getByText("Parent")).toBeTruthy();
     expect(
       screen.getByText(/implementation, repo backend, version 1/),
     ).toBeTruthy();
@@ -209,16 +212,18 @@ describe("the ticket page", () => {
         json: view({
           gateResults: [
             {
+              kind: "gate",
               commitSha: "abcdef1234567",
               configSha: "cfg",
               commandResults: [
-                { name: "typecheck", exitCode: 0 },
-                { name: "test", exitCode: 1 },
+                { name: "typecheck", exitCode: 0, ms: 2100 },
+                { name: "test", exitCode: 1, ms: 4000 },
               ],
               testsTotal: 12,
               testsSkipped: 1,
             },
             {
+              kind: "gate",
               commitSha: "0123456789abc",
               configSha: "cfg",
               commandResults: [],
@@ -233,9 +238,20 @@ describe("the ticket page", () => {
     renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(await screen.findByText("abcdef1")).toBeTruthy();
     expect(screen.getByText(/12 个测试，跳过 1 个/)).toBeTruthy();
-    expect(screen.getByText("typecheck: exit 0")).toBeTruthy();
-    expect(screen.getByText("test: exit 1")).toBeTruthy();
+    const typecheck = screen.getByText("typecheck").closest("tr");
+    expect(typecheck).toBeTruthy();
+    expect(within(typecheck as HTMLElement).getByText("通过")).toBeTruthy();
+    expect(within(typecheck as HTMLElement).getByText("2 s")).toBeTruthy();
+    const testRow = screen.getByText(/^test$/).closest("tr");
+    expect(testRow).toBeTruthy();
+    expect(
+      within(testRow as HTMLElement).getByText(/失败 · exit 1/),
+    ).toBeTruthy();
+    expect(within(testRow as HTMLElement).getByText("4 s")).toBeTruthy();
     expect(screen.getByText(/没有 JUnit/)).toBeTruthy();
+    const gates = document.querySelector(".gates");
+    expect(gates).toBeTruthy();
+    expect(within(gates as HTMLElement).getByText("失败")).toBeTruthy();
   });
 
   it("shows findings with what became of them", async () => {
@@ -418,7 +434,7 @@ describe("the ticket page", () => {
           ),
       ),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "0123456" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /0123456/ })).toBeTruthy();
     expect(
       screen.getByText(/GET \/orders\/1\/export answers 404/),
     ).toBeTruthy();

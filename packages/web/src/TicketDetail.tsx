@@ -6,13 +6,15 @@ import {
 } from "@tanstack/react-query";
 import { diffLines } from "diff";
 import { RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { type MouseEvent, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import {
   IdChip,
   Mono,
+  Pill,
   ReasonBadge,
   RepoTag,
+  ShaChip,
 } from "./components/afk/badges.tsx";
 import { Page } from "./components/afk/page.tsx";
 import {
@@ -43,22 +45,170 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./components/ui/select.tsx";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "./components/ui/sheet.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
-import { runResultLabel, ticketTypeLabel } from "./lib/labels.ts";
+import { commitHtmlUrl } from "./host-links.ts";
+import { runResultLabel, stageLabel, ticketTypeLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
-import { Markdown } from "./Markdown.tsx";
+import { TicketBody } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 import { RetryNoteField, retryTicketBody } from "./RetryNote.tsx";
-import { Sha } from "./Sha.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { structuredBrief } from "./structured-brief.ts";
 import { TicketEdit } from "./TicketEdit.tsx";
 import { formatSeconds } from "./time.ts";
 
-export function TicketDetail({ ticketId }: { ticketId: number }) {
+export function peekTicketClick(
+  event: {
+    preventDefault: () => void;
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+    altKey: boolean;
+    button: number;
+  },
+  id: number,
+  open: (id: number) => void,
+) {
+  if (
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey ||
+    event.button !== 0
+  )
+    return;
+  event.preventDefault();
+  open(id);
+}
+
+function gateSteps(commandResults: unknown[]) {
+  return commandResults.map((step) => {
+    const raw =
+      step !== null && typeof step === "object" && !Array.isArray(step)
+        ? (step as { name?: unknown; exitCode?: unknown; ms?: unknown })
+        : {};
+    return {
+      name:
+        typeof raw.name === "string" && raw.name.length > 0
+          ? raw.name
+          : "command",
+      exitCode: typeof raw.exitCode === "number" ? raw.exitCode : null,
+      ms: typeof raw.ms === "number" && Number.isFinite(raw.ms) ? raw.ms : null,
+    };
+  });
+}
+
+function GateResults({
+  gates,
+  repoUrl,
+}: {
+  gates: {
+    kind?: string;
+    commitSha: string;
+    commandResults: unknown[];
+    testsTotal: number | null;
+    testsSkipped: number | null;
+  }[];
+  repoUrl?: string | null;
+}) {
+  return (
+    <ul className="gates space-y-3">
+      {gates.map((gate) => {
+        const steps = gateSteps(gate.commandResults);
+        const failed = steps.some(
+          (step) => step.exitCode !== null && step.exitCode !== 0,
+        );
+        const passed =
+          steps.length > 0 &&
+          !failed &&
+          steps.every((step) => step.exitCode === 0);
+        return (
+          <li
+            key={`${gate.kind ?? "gate"}:${gate.commitSha}`}
+            className="overflow-hidden rounded-md border bg-card"
+          >
+            <div className="flex flex-wrap items-center gap-2 border-b bg-surface px-3 py-2">
+              {passed ? (
+                <Pill tone="done">通过</Pill>
+              ) : failed ? (
+                <Pill tone="blocked">失败</Pill>
+              ) : null}
+              <span className="text-[11px] text-muted-foreground">
+                {gate.kind === "e2e" ? stageLabel.e2e : stageLabel.gate}
+              </span>
+              <ShaChip
+                sha={gate.commitSha}
+                href={repoUrl ? commitHtmlUrl(repoUrl, gate.commitSha) : null}
+              />
+              <span className="ml-auto font-mono text-[11px] text-muted-foreground tabular">
+                {gate.testsTotal === null
+                  ? "没有 JUnit"
+                  : `${gate.testsTotal} 个测试，跳过 ${gate.testsSkipped ?? 0} 个`}
+              </span>
+            </div>
+            {steps.length > 0 ? (
+              <table className="w-full text-left text-xs">
+                <thead className="border-b text-[11px] text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">命令</th>
+                    <th className="px-3 py-2 font-medium">结果</th>
+                    <th className="px-3 py-2 font-medium">耗时</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {steps.map((step) => {
+                    const ok = step.exitCode === 0;
+                    const bad = step.exitCode !== null && step.exitCode !== 0;
+                    return (
+                      <tr key={step.name}>
+                        <td className="px-3 py-2">
+                          <Mono>{step.name}</Mono>
+                        </td>
+                        <td
+                          className={cn(
+                            "px-3 py-2 font-mono tabular",
+                            ok && "text-state-done",
+                            bad && "text-state-blocked",
+                          )}
+                          title={
+                            step.exitCode === null
+                              ? undefined
+                              : `exit ${step.exitCode}`
+                          }
+                        >
+                          {ok
+                            ? "通过"
+                            : bad
+                              ? `失败 · exit ${step.exitCode}`
+                              : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground tabular">
+                          {formatSeconds(step.ms)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function useTicketView(ticketId: number) {
   const api = useApi();
   const poll = useResourcePoll(DETAIL_POLL_MS);
   const view = useQuery({
@@ -87,6 +237,11 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
     refetchInterval: poll,
     placeholderData: keepPreviousData,
   });
+  return { view, spec };
+}
+
+export function TicketDetail({ ticketId }: { ticketId: number }) {
+  const { view, spec } = useTicketView(ticketId);
 
   if (view.isPending) {
     return (
@@ -109,16 +264,7 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
   }
   const loaded = view.data;
   if (!loaded) return null;
-  const {
-    ticket,
-    versions,
-    runs,
-    findings,
-    gateResults,
-    upstream,
-    downstream,
-    integration,
-  } = loaded;
+  const { ticket } = loaded;
 
   return (
     <Page
@@ -133,7 +279,7 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
         <span className="flex flex-wrap items-center gap-2">
           <Mono title={ticketTypeLabel[ticket.type]}>{ticket.type}</Mono>
           <span>{ticketTypeLabel[ticket.type]}</span>
-          <RepoTag name={ticket.repo} />
+          <RepoTag name={ticket.repo} url={ticket.repoUrl} />
           <Mono>v{ticket.contentVersion}</Mono>
           <span className="sr-only">
             {ticket.type}, repo {ticket.repo}, version {ticket.contentVersion}
@@ -147,6 +293,147 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
           ← 返回所属需求 <Mono>{ticket.specDisplayId}</Mono>
         </a>
       </nav>
+      <TicketContent
+        ticketId={ticketId}
+        loaded={loaded}
+        spec={spec.data}
+        stacked={false}
+      />
+    </Page>
+  );
+}
+
+export function TicketSheet({
+  ticketId,
+  onClose,
+  onOpenTicket,
+}: {
+  ticketId: number | null;
+  onClose: () => void;
+  onOpenTicket: (id: number) => void;
+}) {
+  return (
+    <Sheet
+      open={ticketId !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <SheetContent className="flex w-full flex-col gap-4 overflow-y-auto sm:max-w-2xl">
+        {ticketId !== null ? (
+          <TicketSheetBody
+            key={ticketId}
+            ticketId={ticketId}
+            onOpenTicket={onOpenTicket}
+          />
+        ) : null}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function TicketSheetBody({
+  ticketId,
+  onOpenTicket,
+}: {
+  ticketId: number;
+  onOpenTicket: (id: number) => void;
+}) {
+  const { view, spec } = useTicketView(ticketId);
+  if (view.isPending) {
+    return (
+      <>
+        <SheetHeader>
+          <SheetTitle>票</SheetTitle>
+          <SheetDescription>加载这张票…</SheetDescription>
+        </SheetHeader>
+        <RowsSkeleton rows={8} />
+      </>
+    );
+  }
+  if (view.isError && !view.data) {
+    return (
+      <>
+        <SheetHeader>
+          <SheetTitle>票</SheetTitle>
+          <SheetDescription>无法加载这张票</SheetDescription>
+        </SheetHeader>
+        <ErrorState
+          error={view.error}
+          prefix="无法加载这张票"
+          onRetry={() => void view.refetch()}
+        />
+      </>
+    );
+  }
+  const loaded = view.data;
+  if (!loaded) return null;
+  const { ticket } = loaded;
+  return (
+    <>
+      <SheetHeader>
+        <SheetTitle className="flex flex-wrap items-center gap-2 pr-6">
+          <IdChip id={ticket.id} displayId={ticket.displayId} />
+          <span>{ticket.title}</span>
+          <StatusBadge kind="ticket" code={ticket.state} />
+        </SheetTitle>
+        <SheetDescription>
+          <a
+            href={paths.ticket(ticket.id)}
+            className="text-primary hover:underline"
+          >
+            打开票详情
+          </a>
+        </SheetDescription>
+      </SheetHeader>
+      <div className="flex flex-wrap items-center gap-2 text-[13px]">
+        <Mono title={ticketTypeLabel[ticket.type]}>{ticket.type}</Mono>
+        <span>{ticketTypeLabel[ticket.type]}</span>
+        <RepoTag name={ticket.repo} url={ticket.repoUrl} />
+        <Mono>v{ticket.contentVersion}</Mono>
+      </div>
+      <TicketContent
+        ticketId={ticketId}
+        loaded={loaded}
+        spec={spec.data}
+        stacked
+        onOpenTicket={onOpenTicket}
+      />
+    </>
+  );
+}
+
+function TicketContent({
+  ticketId,
+  loaded,
+  spec,
+  stacked,
+  onOpenTicket,
+}: {
+  ticketId: number;
+  loaded: NonNullable<ReturnType<typeof useTicketView>["view"]["data"]>;
+  spec:
+    | NonNullable<ReturnType<typeof useTicketView>["spec"]["data"]>
+    | undefined;
+  stacked: boolean;
+  onOpenTicket?: (id: number) => void;
+}) {
+  const {
+    ticket,
+    versions,
+    runs,
+    findings,
+    gateResults,
+    upstream,
+    downstream,
+    integration,
+  } = loaded;
+  const openRelated = (id: number) =>
+    onOpenTicket
+      ? (event: MouseEvent) => peekTicketClick(event, id, onOpenTicket)
+      : undefined;
+  return (
+    <>
       {ticket.brief && ticket.blockedReason ? (
         <section className="mb-6 space-y-3 border-l-2 border-destructive bg-destructive/5 p-4">
           <ReasonBadge reason={ticket.blockedReason} />
@@ -176,9 +463,15 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-7 lg:grid-cols-[minmax(0,1fr)_250px]">
+      <div
+        className={
+          stacked
+            ? "min-w-0 space-y-7"
+            : "grid min-w-0 gap-7 lg:grid-cols-[minmax(0,1fr)_250px]"
+        }
+      >
         <div className="min-w-0 space-y-7">
-          <Markdown source={ticket.body} />
+          <TicketBody source={ticket.body} />
           <section>
             <h2 className="mb-3 text-sm font-semibold">运行</h2>
             {runs.length === 0 ? (
@@ -262,7 +555,14 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
                           ([name, sha]) => (
                             <span key={name}>
                               {`，构建自 ${name}@`}
-                              <Sha value={sha} />
+                              <ShaChip
+                                sha={sha}
+                                href={
+                                  ticket.repoUrl
+                                    ? commitHtmlUrl(ticket.repoUrl, sha)
+                                    : null
+                                }
+                              />
                             </span>
                           ),
                         )
@@ -282,7 +582,10 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
                     {attempt.fixTicket ? (
                       <p className="text-xs text-muted-foreground">
                         修复票{" "}
-                        <a href={paths.ticket(attempt.fixTicket.id)}>
+                        <a
+                          href={paths.ticket(attempt.fixTicket.id)}
+                          onClick={openRelated(attempt.fixTicket.id)}
+                        >
                           {attempt.fixTicket.displayId}
                         </a>{" "}
                         ({attempt.fixTicket.state}, {attempt.fixTicket.repo})
@@ -299,29 +602,7 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
             {gateResults.length === 0 ? (
               <p className="text-xs text-muted-foreground">暂无门禁结果</p>
             ) : (
-              <ul className="gates space-y-3">
-                {gateResults.map((gate) => (
-                  <li
-                    key={gate.commitSha}
-                    className="rounded-md border bg-card p-4"
-                  >
-                    <Sha value={gate.commitSha} />{" "}
-                    {gate.testsTotal === null
-                      ? "没有 JUnit"
-                      : `${gate.testsTotal} 个测试，跳过 ${gate.testsSkipped ?? 0} 个`}
-                    <ul>
-                      {gate.commandResults.map((step) => {
-                        const s = step as { name?: string; exitCode?: number };
-                        return (
-                          <li key={s.name ?? JSON.stringify(step)}>
-                            {`${s.name ?? "command"}: exit ${s.exitCode ?? "?"}`}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
+              <GateResults gates={gateResults} repoUrl={ticket.repoUrl} />
             )}
           </section>
 
@@ -349,12 +630,18 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
           </section>
         </div>
 
-        <aside className="space-y-6 text-[13px] lg:border-l lg:pl-5">
+        <aside
+          className={
+            stacked
+              ? "space-y-6 text-[13px]"
+              : "space-y-6 text-[13px] lg:border-l lg:pl-5"
+          }
+        >
           <section>
             <h2 className="mb-3 text-sm font-semibold">所属需求</h2>
             <p>
               <a href={paths.spec(ticket.specId)}>{ticket.specDisplayId}</a>
-              {spec.data?.spec ? ` ${spec.data.spec.title}` : ""}
+              {spec?.spec ? ` ${spec.spec.title}` : ""}
             </p>
           </section>
           {(
@@ -370,23 +657,28 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
               <ul className="related space-y-2">
                 {related.map((e) => (
                   <li key={e.id}>
-                    <a href={paths.ticket(e.id)}>{e.displayId}</a> ({e.kind},{" "}
-                    {e.state})
+                    <a href={paths.ticket(e.id)} onClick={openRelated(e.id)}>
+                      {e.displayId}
+                    </a>{" "}
+                    ({e.kind}, {e.state})
                   </li>
                 ))}
               </ul>
             </section>
           ))}
-          {spec.data ? (
+          {spec ? (
             <section>
               <h3 className="mb-2 text-sm font-semibold">
                 {ticket.specDisplayId} 的票
               </h3>
               <ul className="related spec-tickets space-y-2">
-                {spec.data.tickets.map((t) => (
+                {spec.tickets.map((t) => (
                   <li key={t.id} className={t.id === ticket.id ? "picked" : ""}>
                     <StatusBadge kind="ticket" code={t.state} />{" "}
-                    <a href={paths.ticket(t.id)}>{t.displayId}</a> {t.title}
+                    <a href={paths.ticket(t.id)} onClick={openRelated(t.id)}>
+                      {t.displayId}
+                    </a>{" "}
+                    {t.title}
                   </li>
                 ))}
               </ul>
@@ -395,7 +687,7 @@ export function TicketDetail({ ticketId }: { ticketId: number }) {
           <VersionHistory ticketId={ticketId} versions={versions} />
         </aside>
       </div>
-    </Page>
+    </>
   );
 }
 

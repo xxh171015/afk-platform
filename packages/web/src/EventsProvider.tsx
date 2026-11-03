@@ -28,13 +28,18 @@ function parseInvalidate(data: string): InvalidatePayload | undefined {
   }
 }
 
+function isVisible(): boolean {
+  return document.visibilityState === "visible";
+}
+
 export function EventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
-    const source = new EventSource(`${apiBase()}/events`);
+    let source: EventSource | null = null;
+
     const onInvalidate = (event: MessageEvent<string>) => {
       const payload = parseInvalidate(event.data);
       if (!payload) return;
@@ -42,13 +47,34 @@ export function EventsProvider({ children }: { children: ReactNode }) {
         void queryClient.invalidateQueries({ queryKey });
       }
     };
-    source.addEventListener("invalidate", onInvalidate);
-    source.onopen = () => setConnected(true);
-    source.onerror = () => setConnected(false);
-    return () => {
+
+    const disconnect = () => {
+      if (!source) return;
       source.removeEventListener("invalidate", onInvalidate);
       source.close();
+      source = null;
       setConnected(false);
+    };
+
+    const connect = () => {
+      if (source || !isVisible()) return;
+      // Chrome HTTP/1.1: six sockets per host. Hidden tabs must not hold EventSource.
+      source = new EventSource(`${apiBase()}/events`);
+      source.addEventListener("invalidate", onInvalidate);
+      source.onopen = () => setConnected(true);
+      source.onerror = () => setConnected(false);
+    };
+
+    const onVisibility = () => {
+      if (isVisible()) connect();
+      else disconnect();
+    };
+
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      disconnect();
     };
   }, [queryClient]);
 

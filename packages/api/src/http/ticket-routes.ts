@@ -1,4 +1,9 @@
-import { REVIEW_AXES, SPEC_STATES, TICKET_STATES } from "@afk/shared";
+import {
+  HOST_KINDS,
+  REVIEW_AXES,
+  SPEC_STATES,
+  TICKET_STATES,
+} from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   AcceptancePack,
@@ -83,6 +88,12 @@ const Brief = z
   })
   .nullable();
 
+const RepoIdentity = z.object({
+  name: z.string(),
+  url: z.string(),
+  hostKind: z.enum(HOST_KINDS),
+});
+
 const TicketSummary = z.object({
   id: Id,
   displayId: z.string(),
@@ -93,6 +104,8 @@ const TicketSummary = z.object({
   state: z.enum(TICKET_STATES),
   blockedReason: z.string().nullable(),
   repo: z.string(),
+  repoUrl: z.string(),
+  hostKind: z.enum(HOST_KINDS),
   refs: z.array(z.string()),
   environment: z.array(z.string()),
   appended: z.boolean(),
@@ -144,6 +157,8 @@ const RunView = RunRow.extend({
   prompt: z.string().nullable(),
   output: z.unknown().nullable(),
   commits: z.array(z.string()),
+  repoUrl: z.string(),
+  hostKind: z.enum(HOST_KINDS),
 });
 
 const ticketRoute = createRoute({
@@ -239,8 +254,15 @@ const specRoute = createRoute({
           body: z.string(),
           state: z.enum(SPEC_STATES),
           pauseReason: z.string().nullable(),
+          repos: z.array(RepoIdentity),
           integrationBranches: z.array(
-            z.object({ repoId: Id, branch: z.string() }),
+            z.object({
+              repoId: Id,
+              branch: z.string(),
+              name: z.string(),
+              url: z.string(),
+              hostKind: z.enum(HOST_KINDS),
+            }),
           ),
           warnings: z.array(z.unknown()),
           planningSha: z.string().nullable(),
@@ -295,6 +317,9 @@ const SpecListItem = z.object({
   state: z.enum(SPEC_STATES),
   pauseReason: z.string().nullable(),
   project: z.string(),
+  repos: z.array(RepoIdentity),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
   progress: z.object({
     total: Id,
     done: Id,

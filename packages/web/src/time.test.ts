@@ -2,24 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   formatAbsoluteTime,
   formatElapsed,
-  formatRelativeTime,
+  formatShanghaiDay,
+  formatShanghaiTime,
 } from "./time.ts";
 
-const now = new Date("2026-11-01T12:00:00.000Z");
-
-describe("relative time", () => {
-  it("uses Chinese units and an absolute UTC title", () => {
-    expect(formatRelativeTime("2026-11-01T11:59:30.000Z", now)).toBe("刚刚");
-    expect(formatRelativeTime("2026-11-01T11:50:00.000Z", now)).toBe(
-      "10 分钟前",
+describe("Shanghai wall clocks", () => {
+  it("prints Asia/Shanghai, not relative units or UTC", () => {
+    expect(formatShanghaiTime("2026-11-01T09:00:00.000Z")).toBe(
+      "2026-11-01 17:00",
     );
-    expect(formatRelativeTime("2026-11-01T09:00:00.000Z", now)).toBe(
-      "3 小时前",
-    );
-    expect(formatRelativeTime("2026-10-29T12:00:00.000Z", now)).toBe("3 天前");
     expect(formatAbsoluteTime("2026-11-01T09:00:00.000Z")).toBe(
-      "2026-11-01 09:00:00 UTC",
+      "2026-11-01 17:00:00",
     );
+    expect(formatShanghaiDay("2026-11-01T16:30:00.000Z")).toBe("2026-11-02");
   });
 
   it("formats a running stage's elapsed time", () => {

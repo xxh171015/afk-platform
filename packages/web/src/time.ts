@@ -1,20 +1,44 @@
-// Relative Chinese units for clocks on the page; the hover title is absolute UTC.
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+const TIME_ZONE = "Asia/Shanghai";
 
-export function formatRelativeTime(
+function shanghaiParts(
   iso: string,
-  now: Date = new Date(),
-): string {
-  const then = new Date(iso).getTime();
-  const delta = now.getTime() - then;
-  if (!Number.isFinite(then)) return iso;
-  if (delta < MINUTE) return "刚刚";
-  if (delta < HOUR) return `${Math.round(delta / MINUTE)} 分钟前`;
-  if (delta < DAY) return `${Math.round(delta / HOUR)} 小时前`;
-  return `${Math.round(delta / DAY)} 天前`;
+  extra: Intl.DateTimeFormatOptions = {},
+): Intl.DateTimeFormatPart[] | null {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    ...extra,
+  }).formatToParts(date);
+}
+
+const part = (parts: Intl.DateTimeFormatPart[], type: string) =>
+  parts.find((item) => item.type === type)?.value ?? "";
+
+export function formatShanghaiTime(iso: string): string {
+  const parts = shanghaiParts(iso);
+  if (!parts) return iso;
+  return `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")} ${part(parts, "hour")}:${part(parts, "minute")}`;
+}
+
+export function formatShanghaiDay(iso: string): string {
+  const parts = shanghaiParts(iso);
+  if (!parts) return iso;
+  return `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")}`;
+}
+
+export function formatAbsoluteTime(iso: string): string {
+  const parts = shanghaiParts(iso, { second: "2-digit" });
+  if (!parts) return iso;
+  return `${part(parts, "year")}-${part(parts, "month")}-${part(parts, "day")} ${part(parts, "hour")}:${part(parts, "minute")}:${part(parts, "second")}`;
 }
 
 export function formatElapsed(ms: number): string {
@@ -35,13 +59,4 @@ export function formatDuration(ms: number | null): string {
 
 export function formatSeconds(ms: number | null): string {
   return ms === null ? "—" : `${Math.round(ms / 1000)} s`;
-}
-
-export function formatAbsoluteTime(iso: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return iso;
-  return date
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/, " UTC");
 }

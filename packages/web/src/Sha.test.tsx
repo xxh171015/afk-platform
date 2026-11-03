@@ -16,7 +16,7 @@ describe("Sha", () => {
       </TooltipProvider>,
     );
     const button = screen.getByRole("button", {
-      name: "abcdef1",
+      name: /abcdef1/,
     });
     expect(button.getAttribute("title")).toBe(
       "abcdef1234567890abcdef1234567890abcdef12",

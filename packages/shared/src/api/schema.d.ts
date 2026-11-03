@@ -352,6 +352,14 @@ export interface paths {
                   | "cancelled";
                 pauseReason: string | null;
                 project: string;
+                repos: {
+                  name: string;
+                  url: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
+                }[];
+                startedAt: string;
+                endedAt: string | null;
                 progress: {
                   total: number;
                   done: number;
@@ -1443,6 +1451,9 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                repoUrl: string;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
                 refs: string[];
                 environment: string[];
                 appended: boolean;
@@ -1687,6 +1698,9 @@ export interface paths {
               prompt: string | null;
               output?: unknown;
               commits: string[];
+              repoUrl: string;
+              /** @enum {string} */
+              hostKind: "github" | "gitlab";
             };
           };
         };
@@ -1757,9 +1771,19 @@ export interface paths {
                   | "paused"
                   | "cancelled";
                 pauseReason: string | null;
+                repos: {
+                  name: string;
+                  url: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
+                }[];
                 integrationBranches: {
                   repoId: number;
                   branch: string;
+                  name: string;
+                  url: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
                 }[];
                 warnings: unknown[];
                 planningSha: string | null;
@@ -1789,6 +1813,9 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                repoUrl: string;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
                 refs: string[];
                 environment: string[];
                 appended: boolean;
@@ -2212,6 +2239,9 @@ export interface paths {
                   | "cancelled";
                 blockedReason: string | null;
                 repo: string;
+                repoUrl: string;
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
                 refs: string[];
                 environment: string[];
                 appended: boolean;
@@ -2395,6 +2425,9 @@ export interface paths {
                     | "cancelled";
                   blockedReason: string | null;
                   repo: string;
+                  repoUrl: string;
+                  /** @enum {string} */
+                  hostKind: "github" | "gitlab";
                   refs: string[];
                   environment: string[];
                   appended: boolean;
@@ -2545,6 +2578,14 @@ export interface paths {
                     | "cancelled";
                   pauseReason: string | null;
                   project: string;
+                  repos: {
+                    name: string;
+                    url: string;
+                    /** @enum {string} */
+                    hostKind: "github" | "gitlab";
+                  }[];
+                  startedAt: string;
+                  endedAt: string | null;
                   progress: {
                     total: number;
                     done: number;
@@ -2596,6 +2637,14 @@ export interface paths {
                     | "cancelled";
                   pauseReason: string | null;
                   project: string;
+                  repos: {
+                    name: string;
+                    url: string;
+                    /** @enum {string} */
+                    hostKind: "github" | "gitlab";
+                  }[];
+                  startedAt: string;
+                  endedAt: string | null;
                   progress: {
                     total: number;
                     done: number;
@@ -2630,6 +2679,14 @@ export interface paths {
                     | "cancelled";
                   pauseReason: string | null;
                   project: string;
+                  repos: {
+                    name: string;
+                    url: string;
+                    /** @enum {string} */
+                    hostKind: "github" | "gitlab";
+                  }[];
+                  startedAt: string;
+                  endedAt: string | null;
                   progress: {
                     total: number;
                     done: number;

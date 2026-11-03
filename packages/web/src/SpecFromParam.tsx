@@ -1,3 +1,4 @@
+import { useRouterState } from "@tanstack/react-router";
 import { SpecDetail, type SpecSection } from "./SpecDetail.tsx";
 
 export function SpecFromParam({
@@ -7,6 +8,7 @@ export function SpecFromParam({
   specId: string;
   section?: SpecSection;
 }) {
+  const hash = useRouterState({ select: (s) => s.location.hash });
   const id = Number(specId);
   if (!Number.isInteger(id) || id < 1) {
     return (
@@ -15,5 +17,5 @@ export function SpecFromParam({
       </p>
     );
   }
-  return <SpecDetail specId={id} section={section} />;
+  return <SpecDetail specId={id} section={section} hash={hash} />;
 }

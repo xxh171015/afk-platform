@@ -17,6 +17,7 @@ import {
   TabsTrigger,
 } from "./components/ui/tabs.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { commitHtmlUrl } from "./host-links.ts";
 import { runResultLabel, stageLabel } from "./lib/labels.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
@@ -138,7 +139,12 @@ export function RunDetail({
               ? contractEntries.map(([repo, sha]) => (
                   <span key={repo} className="flex items-center gap-2">
                     <Mono>{repo}</Mono>
-                    <ShaChip sha={sha} />
+                    <ShaChip
+                      sha={sha}
+                      href={
+                        run.repoUrl ? commitHtmlUrl(run.repoUrl, sha) : null
+                      }
+                    />
                   </span>
                 ))
               : "—"}
@@ -151,7 +157,12 @@ export function RunDetail({
               ? refEntries.map(([repo, sha]) => (
                   <span key={repo} className="flex items-center gap-2">
                     <Mono>{repo}</Mono>
-                    <ShaChip sha={sha} />
+                    <ShaChip
+                      sha={sha}
+                      href={
+                        run.repoUrl ? commitHtmlUrl(run.repoUrl, sha) : null
+                      }
+                    />
                   </span>
                 ))
               : "—"}
@@ -194,7 +205,10 @@ export function RunDetail({
             <ul className="divide-y">
               {commits.map((sha) => (
                 <li key={sha} className="flex items-start gap-3 py-4 text-sm">
-                  <ShaChip sha={sha} />
+                  <ShaChip
+                    sha={sha}
+                    href={run.repoUrl ? commitHtmlUrl(run.repoUrl, sha) : null}
+                  />
                 </li>
               ))}
             </ul>

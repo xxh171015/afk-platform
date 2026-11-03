@@ -1417,6 +1417,45 @@ describe("the acceptance pack", () => {
     ]);
   });
 
+  it("fills missing arrays on a stored pack that already has repo sections", async () => {
+    await packOf();
+    await db.pool.query(
+      "UPDATE acceptance_packs SET content = $1 WHERE spec_id = 1",
+      [
+        JSON.stringify({
+          generatedAt: "2026-10-01T00:00:00.000Z",
+          agentSeconds: 12,
+          mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
+          repos: [
+            {
+              repo: "backend",
+              tickets: [
+                {
+                  displayId: "T-1",
+                  title: "Ticket a",
+                  appended: false,
+                  criteria: [
+                    {
+                      text: "it works",
+                      status: "unverified",
+                      reason: null,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      ],
+    );
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.cancelledTickets).toEqual([]);
+    expect(acceptancePack.repos[0].findings).toEqual([]);
+    expect(acceptancePack.repos[0].tickets[0].criteria[0].tests).toEqual([]);
+    const stored = await db.pool.query("SELECT content FROM acceptance_packs");
+    expect(stored.rows[0].content.cancelledTickets).toBeUndefined();
+  });
+
   it("makes a pack again from the record when the stored one is of the older kind, without repo sections", async () => {
     await packOf();
     await db.pool.query(

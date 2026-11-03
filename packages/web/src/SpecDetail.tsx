@@ -16,10 +16,16 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { AlertTriangle, Check } from "lucide-react";
-import { useMemo, useState } from "react";
+import { AlertTriangle, Check, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
-import { IdChip, Mono, ticketBorderClass } from "./components/afk/badges.tsx";
+import {
+  IdChip,
+  Mono,
+  RepoTag,
+  ShaChip,
+  ticketBorderClass,
+} from "./components/afk/badges.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { SegmentedProgress } from "./components/afk/progress-bar.tsx";
 import {
@@ -29,32 +35,47 @@ import {
 } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "./components/ui/sheet.tsx";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
-import { prCiLabel, prReviewLabel, specTypeLabel } from "./lib/labels.ts";
+import { commitHtmlUrl, treeHtmlUrl } from "./host-links.ts";
+import {
+  edgeKindLabel,
+  prCiLabel,
+  prReviewLabel,
+  specTypeLabel,
+} from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
-import { Markdown } from "./Markdown.tsx";
+import { SpecBody } from "./Markdown.tsx";
+import { specExcerpt } from "./markdown-body.ts";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
-import { Sha } from "./Sha.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import {
   currentFlowStep,
   FLOW_STEPS,
   flowBanner,
+  flowStepCaption,
   flowStepComplete,
+  flowStepHref,
   flowStepIndex,
+  flowStepLocation,
+  flowStepReached,
   ticketProgress,
 } from "./spec-flow.ts";
 import { TIMELINE_LABELS, visibleTimeline } from "./spec-timeline.ts";
 import { blockedReasonLabel, ticketStateLabel } from "./status.ts";
+import { peekTicketClick, TicketSheet } from "./TicketDetail.tsx";
+import { formatShanghaiDay, formatShanghaiTime } from "./time.ts";
+
+const list = <T,>(value: T[] | undefined | null): T[] =>
+  Array.isArray(value) ? value : [];
 
 // One spec: the dependency graph with a node per ticket coloured by its state, the yellow prechecks before
 // confirm, and the button that confirms the split so that the platform starts working on it.
@@ -83,13 +104,15 @@ function TicketNode({ data }: NodeProps<Node<TicketNodeData>>) {
       style={{ borderColor: STATE_COLORS[data.state].border }}
       data-testid={`node-${data.displayId}`}
       data-state={data.state}
-      onClick={() => data.onOpen?.(data.id)}
+      onClick={(event) => {
+        if (data.onOpen) peekTicketClick(event, data.id, data.onOpen);
+      }}
     >
       <Handle type="target" position={Position.Left} />
       <a
         href={paths.ticket(data.id)}
         onClick={(event) => {
-          event.preventDefault();
+          if (data.onOpen) peekTicketClick(event, data.id, data.onOpen);
         }}
       >
         <strong>{data.displayId}</strong>
@@ -141,10 +164,12 @@ function DependencyGraph({
   tickets,
   edges,
   onOpen,
+  className,
 }: {
   tickets: SpecView["tickets"];
   edges: SpecView["edges"];
   onOpen?: (id: number) => void;
+  className?: string;
 }) {
   const { nodes, flowEdges } = useMemo(() => {
     const positions = new Map(
@@ -182,7 +207,12 @@ function DependencyGraph({
     return { nodes, flowEdges };
   }, [tickets, edges, onOpen]);
   return (
-    <figure className="afk-graph graph h-[420px] rounded-md border bg-surface">
+    <figure
+      className={cn(
+        "afk-graph graph h-[420px] rounded-md border bg-surface",
+        className,
+      )}
+    >
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
@@ -192,7 +222,8 @@ function DependencyGraph({
         nodesConnectable={false}
         onNodeClick={
           onOpen
-            ? (_, node) => onOpen((node.data as TicketNodeData).id)
+            ? (event, node) =>
+                peekTicketClick(event, (node.data as TicketNodeData).id, onOpen)
             : undefined
         }
       >
@@ -207,39 +238,53 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 type PackRepo = NonNullable<SpecView["acceptancePack"]>["repos"][number];
 
-function PackRepoSection({ repo }: { repo: PackRepo }) {
+function PackRepoSection({
+  repo,
+  repoUrl,
+}: {
+  repo: PackRepo;
+  repoUrl?: string | null;
+}) {
   return (
-    <section className="pack-repo" data-testid={`pack-repo-${repo.repo}`}>
-      <h4>验收标准</h4>
-      {repo.tickets.map((ticket) => (
-        <div key={ticket.displayId}>
+    <section
+      className="pack-repo mt-3 rounded-md border bg-card p-4"
+      data-testid={`pack-repo-${repo.repo}`}
+    >
+      <h3 className="mb-3 text-sm font-semibold">{repo.repo}</h3>
+      <h4 className="text-xs font-medium text-muted-foreground">验收标准</h4>
+      {list(repo.tickets).map((ticket) => (
+        <div key={ticket.displayId} className="mt-2">
           <p>
             <strong>{ticket.displayId}</strong> {ticket.title}
             {ticket.appended ? (
               <span className="badge appended"> 追加</span>
             ) : null}
           </p>
-          <ul className="criteria">
-            {ticket.criteria.map((criterion) => (
+          <ul className="criteria mt-1 space-y-2">
+            {list(ticket.criteria).map((criterion) => (
               <li key={criterion.text} data-status={criterion.status}>
                 <span className={`badge criterion-${criterion.status}`}>
                   {criterion.status}
                 </span>{" "}
                 {criterion.text}
-                {criterion.tests.length > 0
-                  ? ` (${criterion.tests.join(", ")})`
-                  : ""}
                 {criterion.reason ? (
                   <span className="note"> — {criterion.reason}</span>
+                ) : null}
+                {list(criterion.tests).length > 0 ? (
+                  <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
+                    {list(criterion.tests).map((test) => (
+                      <li key={test}>{test}</li>
+                    ))}
+                  </ul>
                 ) : null}
               </li>
             ))}
           </ul>
         </div>
       ))}
-      {repo.findings.length > 0 ? (
+      {list(repo.findings).length > 0 ? (
         <ul className="pack-findings">
-          {repo.findings.map((finding) => (
+          {list(repo.findings).map((finding) => (
             <li key={`${finding.run}-${finding.kind}-${finding.body}`}>
               <span className="badge">{finding.resolution}</span>{" "}
               {finding.axis ? (
@@ -253,11 +298,11 @@ function PackRepoSection({ repo }: { repo: PackRepo }) {
           ))}
         </ul>
       ) : null}
-      {repo.scopeCreep.length > 0 ? (
+      {list(repo.scopeCreep).length > 0 ? (
         <>
           <p className="note">范围蔓延：票没要求的改动</p>
           <ul className="scope-creep">
-            {repo.scopeCreep.map((item) => (
+            {list(repo.scopeCreep).map((item) => (
               <li key={`${item.run}-${item.body}`}>
                 {item.ticket ?? "spec"} {item.run}: {item.body}
               </li>
@@ -265,11 +310,11 @@ function PackRepoSection({ repo }: { repo: PackRepo }) {
           </ul>
         </>
       ) : null}
-      {repo.uncertainties.length > 0 ? (
+      {list(repo.uncertainties).length > 0 ? (
         <>
           <p className="note">模型不确定的地方：</p>
           <ul className="uncertainties">
-            {repo.uncertainties.map((u) => (
+            {list(repo.uncertainties).map((u) => (
               <li key={`${u.source}-${u.text}`}>
                 {u.source}: {u.text}
               </li>
@@ -279,10 +324,14 @@ function PackRepoSection({ repo }: { repo: PackRepo }) {
       ) : null}
       {repo.gate ? (
         <p className="gates">
-          门禁： <Sha value={repo.gate.commitSha} />:{" "}
-          {repo.gate.testsTotal ?? "?"} 个测试，跳过{" "}
+          门禁：{" "}
+          <ShaChip
+            sha={repo.gate.commitSha}
+            href={repoUrl ? commitHtmlUrl(repoUrl, repo.gate.commitSha) : null}
+          />
+          : {repo.gate.testsTotal ?? "?"} 个测试，跳过{" "}
           {repo.gate.testsSkipped ?? "?"} 个，{seconds(repo.gate.durationMs)} (
-          {repo.gate.steps
+          {list(repo.gate.steps)
             .map(
               (step) =>
                 `${step.name} ${seconds(step.ms)}${step.exitCode === 0 ? "" : ` exit ${step.exitCode}`}`,
@@ -291,9 +340,9 @@ function PackRepoSection({ repo }: { repo: PackRepo }) {
           )
         </p>
       ) : null}
-      {repo.protectedPathApprovals.length > 0 ? (
+      {list(repo.protectedPathApprovals).length > 0 ? (
         <ul className="approvals">
-          {repo.protectedPathApprovals.map((approval) => (
+          {list(repo.protectedPathApprovals).map((approval) => (
             <li key={approval.ticket}>
               已批准的保护路径，{approval.ticket}： {approval.paths.join(", ")}
             </li>
@@ -305,34 +354,33 @@ function PackRepoSection({ repo }: { repo: PackRepo }) {
 }
 
 // Merge order, cancelled tickets, agent time: the bits that are not per-repo.
-function AcceptancePackSection({
+function AcceptancePackMeta({
   pack,
 }: {
   pack: NonNullable<SpecView["acceptancePack"]>;
 }) {
   return (
-    <section className="acceptance-pack">
-      <h3>验收包</h3>
-      {pack.orderBroken.map((b) => (
+    <>
+      {list(pack.orderBroken).map((b) => (
         <p key={b.repo} className="error">
           合并顺序被打破：{b.repo} 合在了 {b.skipped.join("、")} 前面。
         </p>
       ))}
       <p className="note" data-testid="pack-merge-order">
-        {pack.mergeOrder.ordered.length > 0
-          ? `合并顺序：${pack.mergeOrder.ordered.join(" → ")}${
-              pack.mergeOrder.unordered.length > 0
-                ? `（没有顺序：${pack.mergeOrder.unordered.join("、")}）`
+        {list(pack.mergeOrder?.ordered).length > 0
+          ? `合并顺序：${list(pack.mergeOrder?.ordered).join(" → ")}${
+              list(pack.mergeOrder?.unordered).length > 0
+                ? `（没有顺序：${list(pack.mergeOrder?.unordered).join("、")}）`
                 : ""
             }`
           : "没有合并顺序：这些仓库没有契约关系。"}
       </p>
 
-      {pack.cancelledTickets.length > 0 ? (
+      {list(pack.cancelledTickets).length > 0 ? (
         <>
           <h4>已取消的票</h4>
           <ul className="cancelled-tickets">
-            {pack.cancelledTickets.map((ticket) => (
+            {list(pack.cancelledTickets).map((ticket) => (
               <li key={ticket.displayId}>
                 <strong>{ticket.displayId}</strong> {ticket.title} [
                 {ticket.repo}] <span className="badge">已取消</span>
@@ -341,8 +389,29 @@ function AcceptancePackSection({
           </ul>
         </>
       ) : null}
-      <p className="note">Agent 耗时：{pack.agentSeconds} s。</p>
-    </section>
+      {pack.agentSeconds != null ? (
+        <p className="note">Agent 耗时：{pack.agentSeconds} s。</p>
+      ) : null}
+      {pack.integration ? (
+        <section className="mt-4" data-testid="pack-integration">
+          <h4>联调</h4>
+          {pack.integration.failedBeforePullRequest ? (
+            <p className="error">开 PR 前联调失败</p>
+          ) : null}
+          <ul>
+            {list(pack.integration.tickets).map((ticket) => (
+              <li key={ticket.displayId}>
+                <strong>{ticket.displayId}</strong> {ticket.title}
+                {ticket.result ? ` · ${ticket.result}` : ""}
+                {ticket.testsTotal != null
+                  ? ` · ${ticket.testsTotal} 个测试，失败 ${ticket.testsFailed ?? 0} 个`
+                  : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -368,9 +437,11 @@ const SECTIONS: {
 export function SpecDetail({
   specId,
   section = "overview",
+  hash = "",
 }: {
   specId: number;
   section?: SpecSection;
+  hash?: string;
 }) {
   const api = useApi();
   const queryClient = useQueryClient();
@@ -390,6 +461,14 @@ export function SpecDetail({
   });
 
   const [openTicket, setOpenTicket] = useState<number | null>(null);
+  useEffect(() => {
+    if (view.isPending) return;
+    const id = hash.replace(/^#/, "");
+    if (!id) return;
+    document
+      .getElementById(id)
+      ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [hash, view.isPending]);
   if (view.isPending)
     return (
       <Page title="需求">
@@ -444,10 +523,33 @@ export function SpecDetail({
   });
   const stepIndex = flowStepIndex(step);
   const complete = flowStepComplete(spec.state);
+  const locationStep = flowStepLocation(section, hash, step);
   const banner = flowBanner(spec.state, spec.pauseReason);
   const blocked = tickets.filter((t) => t.state === "blocked");
-
-  const opened = tickets.find((t) => t.id === openTicket);
+  const repos = spec.repos ?? [];
+  const confirmAt = timelineEvents.find(
+    (event) => event.kind === "confirm-plan",
+  )?.at;
+  const lastFinal = finalizations.at(-1);
+  const captionFacts = {
+    ticketDone: progress.done,
+    ticketTotal: progress.total,
+    blocked: blocked.length,
+    planningSha: Boolean(spec.planningSha),
+    confirmAt: confirmAt ? formatShanghaiTime(confirmAt) : undefined,
+    finalStep: lastFinal ? `${lastFinal.repo} ${lastFinal.step}` : null,
+    prSummary:
+      pullRequests.length > 0
+        ? pullRequests
+            .map(
+              (pr) =>
+                `#${pr.number}${pr.draft ? " 草稿" : ""}${pr.ci === "failure" ? " CI 失败" : ""}`,
+            )
+            .join(" · ")
+        : null,
+    pack: Boolean(acceptancePack),
+    orderBroken: list(orderBroken).length > 0,
+  };
 
   return (
     <Page
@@ -459,14 +561,12 @@ export function SpecDetail({
         </span>
       }
       subtitle={
-        <span className="flex items-center gap-3">
+        <span className="flex flex-wrap items-center gap-3">
           <Mono title={specTypeLabel[spec.type]}>{spec.type}</Mono>
           <span>{specTypeLabel[spec.type]}</span>
-          {"project" in spec && typeof spec.project === "string" ? (
-            <span>
-              项目 <Mono>{spec.project}</Mono>
-            </span>
-          ) : null}
+          {repos.map((repo) => (
+            <RepoTag key={repo.name} name={repo.name} url={repo.url} />
+          ))}
         </span>
       }
     >
@@ -497,7 +597,7 @@ export function SpecDetail({
 
       <ol
         aria-label="需求流程"
-        className="mb-5 flex items-center border-b pb-5"
+        className="mb-5 flex items-start border-b pb-5"
         data-testid="flow-bar"
       >
         <span className="sr-only">
@@ -506,24 +606,13 @@ export function SpecDetail({
         {FLOW_STEPS.map((name, index) => {
           const current = !complete && index === stepIndex;
           const done = complete || index < stepIndex;
-          return (
-            <li
-              key={name}
-              aria-current={current ? "step" : undefined}
-              data-current={current ? "true" : undefined}
-              data-complete={done}
-              className="flex min-w-0 flex-1 items-center gap-2 last:flex-none"
-            >
-              <div
-                className={cn(
-                  "flex shrink-0 items-center gap-2 text-xs",
-                  current
-                    ? "font-semibold text-primary"
-                    : done
-                      ? "text-primary"
-                      : "text-muted-foreground",
-                )}
-              >
+          const reached = flowStepReached(index, stepIndex, complete);
+          const here = locationStep === name;
+          const caption = flowStepCaption(name, captionFacts);
+          const showCaption = (complete || index <= stepIndex) && caption;
+          const body = (
+            <>
+              <span className="flex items-center gap-2 whitespace-nowrap">
                 <span
                   className={cn(
                     "grid size-6 place-items-center rounded-full border font-mono text-[11px]",
@@ -537,9 +626,44 @@ export function SpecDetail({
                   {done ? <Check className="size-3.5" /> : index + 1}
                 </span>
                 {name}
-              </div>
+              </span>
+              {showCaption ? (
+                <span
+                  data-testid={`flow-caption-${name}`}
+                  className="pl-8 text-[10px] font-normal text-muted-foreground"
+                >
+                  {caption}
+                </span>
+              ) : null}
+            </>
+          );
+          return (
+            <li
+              key={name}
+              aria-current={here ? "location" : current ? "step" : undefined}
+              data-current={current ? "true" : undefined}
+              data-here={here ? "true" : undefined}
+              data-complete={done}
+              className="flex min-w-0 flex-1 items-start gap-2 last:flex-none"
+            >
+              {reached ? (
+                <a
+                  href={flowStepHref(name, specId)}
+                  className={cn(
+                    "flex min-w-0 flex-col gap-1 border-b-2 text-xs outline-none hover:text-foreground focus-visible:border-primary",
+                    here ? "border-primary" : "border-transparent",
+                    current ? "font-semibold text-primary" : "text-primary",
+                  )}
+                >
+                  {body}
+                </a>
+              ) : (
+                <span className="flex min-w-0 flex-col gap-1 border-b-2 border-transparent text-xs text-muted-foreground">
+                  {body}
+                </span>
+              )}
               {index < FLOW_STEPS.length - 1 ? (
-                <span className="mx-1 h-px min-w-2 flex-1 bg-border" />
+                <span className="mx-1 mt-3 h-px min-w-2 flex-1 bg-border" />
               ) : null}
             </li>
           );
@@ -603,6 +727,9 @@ export function SpecDetail({
           confirmError={confirm.isError ? confirm.error.message : null}
           onConfirm={() => confirm.mutate()}
           onOpen={setOpenTicket}
+          pullRequests={pullRequests}
+          timeline={timeline}
+          currentStep={step}
         />
       ) : null}
       {section === "description" ? (
@@ -611,11 +738,16 @@ export function SpecDetail({
             这份需求没有正文
           </p>
         ) : (
-          <Markdown source={spec.body} contents />
+          <SpecBody source={spec.body} />
         )
       ) : null}
       {section === "tickets" ? (
-        <TicketsPage tickets={tickets} edges={edges} onOpen={setOpenTicket} />
+        <TicketsPage
+          tickets={tickets}
+          edges={edges}
+          repos={repos}
+          onOpen={setOpenTicket}
+        />
       ) : null}
       {section === "delivery" ? (
         <Delivery
@@ -625,38 +757,17 @@ export function SpecDetail({
           acceptancePack={acceptancePack}
           finalizations={finalizations}
           finalRuns={finalRuns}
+          repos={spec.repos ?? []}
         />
       ) : null}
-      {section === "timeline" ? <TimelinePage events={timeline} /> : null}
-      <Sheet
-        open={openTicket !== null}
-        onOpenChange={(open) => {
-          if (!open) setOpenTicket(null);
-        }}
-      >
-        <SheetContent className="flex w-full flex-col sm:max-w-md">
-          <SheetHeader>
-            <SheetTitle className="flex flex-wrap items-center gap-2">
-              {opened ? (
-                <IdChip id={opened.id} displayId={opened.displayId} />
-              ) : null}
-              {opened?.title ?? "票摘要"}
-            </SheetTitle>
-            <SheetDescription>票摘要</SheetDescription>
-          </SheetHeader>
-          {opened ? (
-            <div className="space-y-4 text-[13px]">
-              <div className="flex flex-wrap gap-2">
-                <StatusBadge kind="ticket" code={opened.state} />
-                <Mono>{opened.repo}</Mono>
-              </div>
-              <Button asChild className="w-full">
-                <a href={paths.ticket(opened.id)}>打开票详情</a>
-              </Button>
-            </div>
-          ) : null}
-        </SheetContent>
-      </Sheet>
+      {section === "timeline" ? (
+        <TimelinePage events={timeline} pullRequests={pullRequests} />
+      ) : null}
+      <TicketSheet
+        ticketId={openTicket}
+        onClose={() => setOpenTicket(null)}
+        onOpenTicket={setOpenTicket}
+      />
     </Page>
   );
 }
@@ -672,6 +783,9 @@ function Overview({
   confirmError,
   onConfirm,
   onOpen,
+  pullRequests,
+  timeline,
+  currentStep,
 }: {
   spec: SpecView["spec"];
   tickets: SpecView["tickets"];
@@ -683,12 +797,30 @@ function Overview({
   confirmError: string | null;
   onConfirm: () => void;
   onOpen: (id: number) => void;
+  pullRequests: SpecView["pullRequests"];
+  timeline: SpecView["timeline"];
+  currentStep: string;
 }) {
   const progress = ticketProgress(tickets);
+  const repos = spec.repos ?? [];
+  const planningRepo = repos.find((repo) => repo.name === spec.planningRepo);
+  const excerpt = specExcerpt(spec.body);
+  const lastEvent = timeline.at(-1);
+  const byRepo = new Map<string, { done: number; total: number }>();
+  for (const ticket of tickets) {
+    const row = byRepo.get(ticket.repo) ?? { done: 0, total: 0 };
+    if (ticket.state !== "cancelled") row.total += 1;
+    if (ticket.state === "done") row.done += 1;
+    byRepo.set(ticket.repo, row);
+  }
+  const draft = spec.state === "draft";
   return (
     <>
-      {spec.state === "draft" ? (
-        <div className="confirm mb-5 flex flex-wrap items-center gap-3">
+      {draft ? (
+        <div
+          id="flow-confirm"
+          className="confirm mb-5 flex scroll-mt-6 flex-wrap items-center gap-3"
+        >
           <Button
             type="button"
             onClick={onConfirm}
@@ -709,19 +841,164 @@ function Overview({
         </div>
       ) : null}
 
-      <p className="note" data-testid="spec-stats">
-        票 {progress.done}/{progress.total}
-        {blocked.length > 0 ? ` · 卡住 ${blocked.length}` : ""}
-      </p>
+      <dl
+        id="flow-draft"
+        className="mb-6 grid scroll-mt-6 gap-x-6 gap-y-3 text-sm sm:grid-cols-2"
+      >
+        <div>
+          <dt className="text-xs text-muted-foreground">仓库</dt>
+          <dd className="mt-1 flex flex-wrap gap-1">
+            {repos.length === 0 ? (
+              <span className="text-muted-foreground">尚未导入票</span>
+            ) : (
+              repos.map((repo) => (
+                <RepoTag key={repo.name} name={repo.name} url={repo.url} />
+              ))
+            )}
+          </dd>
+        </div>
+        <div
+          id={draft ? undefined : "flow-confirm"}
+          className={draft ? undefined : "scroll-mt-6"}
+        >
+          <dt className="text-xs text-muted-foreground">当前步骤</dt>
+          <dd className="mt-1">
+            {currentStep}
+            <span
+              className="ml-2 text-muted-foreground"
+              data-testid="spec-stats"
+            >
+              票 {progress.done}/{progress.total}
+              {blocked.length > 0 ? ` · 卡住 ${blocked.length}` : ""}
+            </span>
+          </dd>
+        </div>
+        {spec.planningSha ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">规划提交</dt>
+            <dd className="mt-1">
+              <ShaChip
+                sha={spec.planningSha}
+                href={
+                  planningRepo
+                    ? commitHtmlUrl(planningRepo.url, spec.planningSha)
+                    : null
+                }
+              />
+              {spec.planningRepo ? (
+                <span className="ml-2 text-muted-foreground">
+                  {spec.planningRepo}
+                </span>
+              ) : null}
+            </dd>
+          </div>
+        ) : null}
+        {(spec.integrationBranches ?? []).length > 0 ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">集成分支</dt>
+            <dd className="mt-1 flex flex-col gap-1 font-mono text-[11px]">
+              {(spec.integrationBranches ?? []).map((branch) => {
+                const href = branch.url
+                  ? treeHtmlUrl(branch.url, branch.branch)
+                  : null;
+                return (
+                  <span key={`${branch.repoId}-${branch.branch}`}>
+                    {href ? (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        {branch.branch}
+                      </a>
+                    ) : (
+                      branch.branch
+                    )}
+                    {branch.name ? (
+                      <span className="ml-2 text-muted-foreground">
+                        {branch.name}
+                      </span>
+                    ) : null}
+                  </span>
+                );
+              })}
+            </dd>
+          </div>
+        ) : null}
+        {byRepo.size > 0 ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">按仓库</dt>
+            <dd className="mt-1 text-xs text-muted-foreground">
+              {[...byRepo.entries()]
+                .map(([repo, row]) => `${repo} ${row.done}/${row.total}`)
+                .join(" · ")}
+            </dd>
+          </div>
+        ) : null}
+        {pullRequests.length > 0 ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">PR</dt>
+            <dd className="mt-1 flex flex-col gap-1">
+              {pullRequests.map((pr) => (
+                <a
+                  key={`${pr.repo}-${pr.number}`}
+                  href={pr.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  {pr.repo} #{pr.number}
+                  <ExternalLink className="size-3" />
+                  <StatusBadge kind="pr" code={pr.state} />
+                </a>
+              ))}
+            </dd>
+          </div>
+        ) : null}
+        {lastEvent ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">最近事件</dt>
+            <dd className="mt-1 text-xs">
+              {TIMELINE_LABELS[
+                lastEvent.kind as keyof typeof TIMELINE_LABELS
+              ] ?? lastEvent.kind}
+              {lastEvent.at ? (
+                <>
+                  {" · "}
+                  <RelativeTime iso={lastEvent.at} />
+                </>
+              ) : null}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      {excerpt ? (
+        <p className="mb-6 text-sm text-muted-foreground">
+          {excerpt}{" "}
+          <a
+            href={paths.specDescription(spec.id)}
+            className="text-primary hover:underline"
+          >
+            需求说明
+          </a>
+        </p>
+      ) : null}
 
       {blocked.length > 0 ? (
         <>
-          <h3>卡住的票</h3>
-          <ul className="tickets">
+          <h3 className="mb-2 text-sm font-semibold">卡住的票</h3>
+          <ul className="tickets mb-5">
             {blocked.map((ticket) => (
               <li key={ticket.id}>
                 <StatusBadge kind="ticket" code={ticket.state} />{" "}
-                <a href={paths.ticket(ticket.id)}>{ticket.displayId}</a>{" "}
+                <a
+                  href={paths.ticket(ticket.id)}
+                  onClick={(event) => peekTicketClick(event, ticket.id, onOpen)}
+                >
+                  {ticket.displayId}
+                </a>{" "}
                 {ticket.title}
                 {ticket.blockedReason ? (
                   <>
@@ -735,24 +1012,28 @@ function Overview({
         </>
       ) : null}
 
-      <h3>确认前预检</h3>
-      {prechecks.length === 0 ? (
-        <p className="note">没有黄项</p>
-      ) : (
-        <ul className="warnings" data-testid="prechecks">
-          {prechecks.map((item) => (
-            <li
-              key={`${item.code}:${item.message}`}
-              data-level={item.level}
-              className={
-                item.level === "yellow" ? "text-state-paused" : undefined
-              }
-            >
-              {item.message}
-            </li>
-          ))}
-        </ul>
-      )}
+      {draft ? (
+        <>
+          <h3 className="mb-2 text-sm font-semibold">确认前预检</h3>
+          {prechecks.length === 0 ? (
+            <p className="note">没有黄项</p>
+          ) : (
+            <ul className="warnings mb-5" data-testid="prechecks">
+              {prechecks.map((item) => (
+                <li
+                  key={`${item.code}:${item.message}`}
+                  data-level={item.level}
+                  className={
+                    item.level === "yellow" ? "text-state-paused" : undefined
+                  }
+                >
+                  {item.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : null}
 
       <h3 className="mb-3 text-sm font-semibold">依赖图</h3>
       {tickets.length === 0 ? (
@@ -767,16 +1048,21 @@ function Overview({
 function TicketsPage({
   tickets,
   edges,
+  repos,
   onOpen,
 }: {
   tickets: SpecView["tickets"];
   edges: SpecView["edges"];
+  repos: NonNullable<SpecView["spec"]["repos"]>;
   onOpen: (id: number) => void;
 }) {
   const [repo, setRepo] = useState("all");
   const [state, setState] = useState("all");
-  const [graph, setGraph] = useState(false);
-  const repos = [...new Set(tickets.map((t) => t.repo))];
+  const repoNames = [...new Set(tickets.map((t) => t.repo))];
+  const repoUrl = new Map(repos.map((item) => [item.name, item.url]));
+  const idByDisplay = new Map(
+    tickets.map((ticket) => [ticket.displayId, ticket.id]),
+  );
   const shown = tickets.filter(
     (t) =>
       (repo === "all" || t.repo === repo) &&
@@ -786,28 +1072,46 @@ function TicketsPage({
     edges.filter((e) => e.to === displayId);
   return (
     <>
-      <p className="flex flex-wrap gap-3 text-sm">
-        <label>
-          仓库{" "}
-          <select
-            value={repo}
-            onChange={(event) => setRepo(event.target.value)}
+      {tickets.length === 0 ? (
+        <p className="note">还没有导入票。</p>
+      ) : (
+        <>
+          <h3 className="mb-3 text-sm font-semibold">依赖图</h3>
+          <DependencyGraph
+            tickets={tickets}
+            edges={edges}
+            onOpen={onOpen}
+            className="h-[480px]"
+          />
+        </>
+      )}
+      <div className="mt-6 mb-3 flex flex-wrap items-center gap-2">
+        <h3 className="mr-2 text-sm font-semibold">票</h3>
+        <Select value={repo} onValueChange={setRepo}>
+          <SelectTrigger
+            className="h-7 w-auto gap-1.5 text-[12px]"
+            aria-label="按仓库筛选"
           >
-            <option value="all">全部</option>
-            {repos.map((name) => (
-              <option key={name} value={name}>
+            <SelectValue placeholder="仓库" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部仓库</SelectItem>
+            {repoNames.map((name) => (
+              <SelectItem key={name} value={name}>
                 {name}
-              </option>
+              </SelectItem>
             ))}
-          </select>
-        </label>
-        <label>
-          状态{" "}
-          <select
-            value={state}
-            onChange={(event) => setState(event.target.value)}
+          </SelectContent>
+        </Select>
+        <Select value={state} onValueChange={setState}>
+          <SelectTrigger
+            className="h-7 w-auto gap-1.5 text-[12px]"
+            aria-label="按状态筛选"
           >
-            <option value="all">全部</option>
+            <SelectValue placeholder="状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
             {(
               [
                 "pending",
@@ -819,95 +1123,196 @@ function TicketsPage({
                 "cancelled",
               ] as const
             ).map((value) => (
-              <option key={value} value={value}>
+              <SelectItem key={value} value={value}>
                 {ticketStateLabel(value)}
-              </option>
+              </SelectItem>
             ))}
-          </select>
-        </label>
-        <button type="button" onClick={() => setGraph((on) => !on)}>
-          {graph ? "票表" : "依赖图"}
-        </button>
-      </p>
-      {graph ? (
-        tickets.length === 0 ? (
-          <p className="note">还没有导入票。</p>
-        ) : (
-          <DependencyGraph tickets={shown} edges={edges} onOpen={onOpen} />
-        )
-      ) : (
-        <ul className="tickets">
-          {shown.map((ticket) => {
-            const waits = waitsFor(ticket.displayId);
-            return (
-              <li key={ticket.id}>
-                <StatusBadge kind="ticket" code={ticket.state} />{" "}
-                <a href={paths.ticket(ticket.id)}>{ticket.displayId}</a>{" "}
-                {ticket.title} <span className="note">[{ticket.repo}]</span>
+          </SelectContent>
+        </Select>
+      </div>
+      <ul className="space-y-2" data-testid="ticket-cards">
+        {shown.map((ticket) => {
+          const waits = waitsFor(ticket.displayId);
+          return (
+            <li
+              key={ticket.id}
+              className="rounded-md border bg-card px-3 py-2.5"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge kind="ticket" code={ticket.state} />
+                <a
+                  href={paths.ticket(ticket.id)}
+                  className="font-mono text-sm hover:underline"
+                  onClick={(event) => peekTicketClick(event, ticket.id, onOpen)}
+                >
+                  {ticket.displayId}
+                </a>
+                <span className="min-w-0 truncate text-sm">{ticket.title}</span>
+                <RepoTag name={ticket.repo} url={repoUrl.get(ticket.repo)} />
                 {ticket.appended ? (
-                  <span className="badge appended"> 追加</span>
+                  <span className="badge appended">追加</span>
                 ) : null}
                 {ticket.blockedReason ? (
-                  <>
-                    {" — "}
-                    <StatusBadge kind="blocked" code={ticket.blockedReason} />
-                  </>
-                ) : (
-                  ""
-                )}
-                {waits.length > 0 ? (
-                  <div className="note waits-for">
-                    等待 {waits.map((e) => `${e.from} (${e.kind})`).join("、")}
-                  </div>
+                  <StatusBadge kind="blocked" code={ticket.blockedReason} />
                 ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+              </div>
+              {waits.length > 0 ? (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {waits.map((edge, index) => {
+                    const targetId = idByDisplay.get(edge.from);
+                    const kind = edgeKindLabel[edge.kind] ?? edge.kind;
+                    return (
+                      <span key={`${edge.from}-${edge.kind}`}>
+                        {index > 0 ? " · " : null}
+                        {kind}{" "}
+                        {targetId ? (
+                          <a
+                            href={paths.ticket(targetId)}
+                            className="font-mono text-primary hover:underline"
+                            onClick={(event) =>
+                              peekTicketClick(event, targetId, onOpen)
+                            }
+                          >
+                            {edge.from}
+                          </a>
+                        ) : (
+                          <span className="font-mono">{edge.from}</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
     </>
   );
 }
 
 function TimelinePage({
   events,
+  pullRequests,
 }: {
   events: { kind: string; at?: string; text?: string; runId?: number }[];
+  pullRequests: SpecView["pullRequests"];
 }) {
   if (events.length === 0) return <p className="note">还没有时间线事件</p>;
+  const days = new Map<string, typeof events>();
+  for (const event of events) {
+    const day = event.at ? formatShanghaiDay(event.at) : "未知日期";
+    const bucket = days.get(day) ?? [];
+    bucket.push(event);
+    days.set(day, bucket);
+  }
+  const prHref = (text?: string) => {
+    if (!text) return null;
+    const prs = list(pullRequests);
+    const match = prs.find(
+      (pr) => text.includes(`#${pr.number}`) || text.includes(pr.repo),
+    );
+    return match?.url ?? prs[0]?.url ?? null;
+  };
   return (
-    <ol className="timeline">
-      {events.map((event) => (
-        <li
-          key={`${event.kind}-${event.at}-${event.text}-${event.runId ?? ""}`}
-        >
-          <strong>
-            {TIMELINE_LABELS[event.kind as keyof typeof TIMELINE_LABELS] ??
-              event.kind}
-          </strong>
-          {event.at ? (
-            <>
-              {" "}
-              <RelativeTime iso={event.at} />
-            </>
-          ) : null}
-          {event.text &&
-          event.text !==
-            TIMELINE_LABELS[event.kind as keyof typeof TIMELINE_LABELS] ? (
-            <div className="note">{event.text}</div>
-          ) : null}
-          {event.runId ? (
-            <div>
-              <a href={paths.run(event.runId)}>R-{event.runId}</a>
-            </div>
-          ) : null}
-        </li>
+    <div className="timeline">
+      {[...days.entries()].map(([day, items]) => (
+        <section key={day} className="timeline-day">
+          <h3 className="timeline-day-label">{day}</h3>
+          <ol className="timeline-rail">
+            {items.map((event) => {
+              const label =
+                TIMELINE_LABELS[event.kind as keyof typeof TIMELINE_LABELS] ??
+                event.kind;
+              const host =
+                event.kind === "pr-opened" ||
+                event.kind === "pr-ready" ||
+                event.kind === "merged"
+                  ? prHref(event.text)
+                  : null;
+              return (
+                <li
+                  key={`${event.kind}-${event.at}-${event.text}-${event.runId ?? ""}`}
+                  className="timeline-item"
+                >
+                  <span className="timeline-dot" aria-hidden="true" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="timeline-kind">{label}</span>
+                    {event.at ? <RelativeTime iso={event.at} /> : null}
+                  </div>
+                  {event.text && event.text !== label ? (
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {event.text}
+                    </div>
+                  ) : null}
+                  <div className="mt-1 flex flex-wrap gap-3 text-xs">
+                    {event.runId ? (
+                      <a
+                        href={paths.run(event.runId)}
+                        className="text-primary hover:underline"
+                      >
+                        R-{event.runId}
+                      </a>
+                    ) : null}
+                    {host ? (
+                      <a
+                        href={host}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        GitHub
+                        <ExternalLink className="size-3" />
+                      </a>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
       ))}
-    </ol>
+    </div>
   );
 }
 
-// The "交付" tab: the pull requests in the order to merge them, the acceptance pack and the overall review.
+function FinalizeLine({
+  step,
+  run,
+}: {
+  step?: SpecView["finalizations"][number];
+  run?: SpecView["finalRuns"][number];
+}) {
+  if (step) {
+    return (
+      <li>
+        {step.repo}: {step.step} {step.state}
+        {step.blockedReason ? (
+          <>
+            {" ("}
+            <StatusBadge kind="blocked" code={step.blockedReason} />
+            {")"}
+          </>
+        ) : null}
+        {run ? (
+          <>
+            {" "}
+            <a href={paths.run(run.id)}>{run.displayId}</a>
+          </>
+        ) : null}
+      </li>
+    );
+  }
+  if (!run) return null;
+  return (
+    <li>
+      {run.repo} {run.stage} {run.result ?? ""}{" "}
+      <a href={paths.run(run.id)}>{run.displayId}</a>
+    </li>
+  );
+}
+
+// The "交付" tab: finalizations, pull requests, then the acceptance pack as its own chapter.
 function Delivery({
   pullRequests,
   orderBroken,
@@ -915,6 +1320,7 @@ function Delivery({
   acceptancePack,
   finalizations,
   finalRuns,
+  repos: specRepos,
 }: Pick<
   SpecView,
   | "pullRequests"
@@ -923,126 +1329,129 @@ function Delivery({
   | "acceptancePack"
   | "finalizations"
   | "finalRuns"
->) {
-  const nothing =
-    pullRequests.length === 0 &&
-    !acceptancePack &&
-    finalizations.length === 0 &&
-    finalRuns.length === 0;
-  const repos = [
-    ...mergeOrder.ordered,
-    ...mergeOrder.unordered,
-    ...pullRequests.map((pr) => pr.repo),
-    ...finalizations.map((step) => step.repo),
-    ...finalRuns.map((run) => run.repo),
-    ...(acceptancePack?.repos.map((item) => item.repo) ?? []),
+> & { repos: NonNullable<SpecView["spec"]["repos"]> }) {
+  const repoUrls = new Map(
+    list(specRepos).map((repo) => [repo.name, repo.url]),
+  );
+  const prs = list(pullRequests);
+  const steps = list(finalizations);
+  const runs = list(finalRuns);
+  const hasFinalize = steps.length > 0 || runs.length > 0;
+  const hasPrs = prs.length > 0;
+  const nothing = !hasFinalize && !hasPrs && !acceptancePack;
+  const finalizeRepos = [
+    ...steps.map((item) => item.repo),
+    ...runs.map((run) => run.repo),
   ].filter((name, index, all) => all.indexOf(name) === index);
+  const prRepos = [
+    ...list(mergeOrder?.ordered),
+    ...prs.map((pr) => pr.repo),
+  ].filter((name, index, all) => all.indexOf(name) === index);
+
   return (
     <>
       {nothing ? <p className="note">还没有可交付的内容</p> : null}
-      {orderBroken.map((b) => (
+      {list(orderBroken).map((b) => (
         <p key={b.repo} className="error" data-testid="order-broken">
           合并顺序被打破：{b.repo} 合在了 {b.skipped.join("、")} 前面。
         </p>
       ))}
-      {pullRequests.length > 0 ? (
-        <>
-          <h3>PR</h3>
-          <p className="note">
+      {hasFinalize ? (
+        <section id="delivery-finalize" className="mb-8 scroll-mt-6">
+          <h2 className="mb-3 text-sm font-semibold">收尾</h2>
+          {finalizeRepos.map((repo) => {
+            const repoSteps = steps.filter((item) => item.repo === repo);
+            const repoRuns = runs.filter((item) => item.repo === repo);
+            return (
+              <div
+                key={repo}
+                className="mb-3 rounded-md border bg-card p-4"
+                data-testid={`delivery-${repo}`}
+              >
+                <h3 className="mb-2 text-sm font-medium">{repo}</h3>
+                <ul className="finalizations space-y-1 text-sm">
+                  {repoSteps.map((f) => (
+                    <FinalizeLine
+                      key={f.step}
+                      step={f}
+                      run={repoRuns.find((item) => item.stage === f.step)}
+                    />
+                  ))}
+                  {repoRuns
+                    .filter(
+                      (run) =>
+                        !repoSteps.some((item) => item.step === run.stage),
+                    )
+                    .map((run) => (
+                      <FinalizeLine key={run.id} run={run} />
+                    ))}
+                </ul>
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
+      {hasPrs ? (
+        <section id="delivery-prs" className="mb-8 scroll-mt-6">
+          <h2 className="mb-1 text-sm font-semibold">PR</h2>
+          <p className="note mb-3">
             按这个顺序合并；平台从不合入。
-            {mergeOrder.ordered.length > 0 && mergeOrder.unordered.length > 0
-              ? ` 没有顺序：${mergeOrder.unordered.join("、")}（没有契约关系）。`
+            {list(mergeOrder?.ordered).length > 0
+              ? ` 合并顺序：${list(mergeOrder?.ordered).join(" → ")}`
+              : " 没有合并顺序（没有契约关系）。"}
+            {list(mergeOrder?.unordered).length > 0
+              ? ` 没有顺序：${list(mergeOrder?.unordered).join("、")}`
               : ""}
           </p>
-        </>
+          {prRepos.map((repo) => {
+            const pr = prs.find((item) => item.repo === repo);
+            if (!pr) return null;
+            return (
+              <div key={repo} className="mb-3 rounded-md border bg-card p-4">
+                <h3 className="mb-2 text-sm font-medium">{repo}</h3>
+                <ul className="pull-requests">
+                  <li>
+                    <a href={pr.url} target="_blank" rel="noreferrer">
+                      {pr.repo} #{pr.number}
+                      <ExternalLink className="ml-1 inline size-3" />
+                    </a>{" "}
+                    <StatusBadge kind="pr" code={pr.state} />
+                    {pr.draft ? " (草稿)" : ""}{" "}
+                    {list(pr.waitsFor).length > 0 ? (
+                      <span className="note">
+                        排在 {list(pr.waitsFor).join("、")} 后面
+                        {" · "}
+                      </span>
+                    ) : null}
+                    {prCiLabel[pr.ci] ?? pr.ci}，
+                    {prReviewLabel[pr.review] ?? pr.review}
+                    {pr.syncError ? (
+                      <span className="error"> 读取失败：{pr.syncError}</span>
+                    ) : null}
+                  </li>
+                </ul>
+              </div>
+            );
+          })}
+        </section>
       ) : null}
-      {repos.map((repo) => {
-        const pr = pullRequests.find((item) => item.repo === repo);
-        const steps = finalizations.filter((item) => item.repo === repo);
-        const runs = finalRuns.filter((item) => item.repo === repo);
-        const place = mergeOrder.ordered.indexOf(repo);
-        return (
-          <section
-            key={repo}
-            className="delivery-repo"
-            data-testid={`delivery-${repo}`}
-          >
-            <h3>{repo}</h3>
-            {place >= 0 ? (
-              <p className="note">
-                合并顺序 {place + 1}/{mergeOrder.ordered.length}
-              </p>
-            ) : mergeOrder.unordered.includes(repo) ? (
-              <p className="note">没有合并顺序（没有契约关系）</p>
-            ) : null}
-            {pr ? (
-              <ul className="pull-requests">
-                <li>
-                  <a href={pr.url}>
-                    {pr.repo} #{pr.number}
-                  </a>{" "}
-                  <StatusBadge kind="pr" code={pr.state} />
-                  {pr.draft ? " (草稿)" : ""}{" "}
-                  {pr.waitsFor.length > 0 ? (
-                    <span className="note">
-                      排在 {pr.waitsFor.join("、")} 后面
-                      {" · "}
-                    </span>
-                  ) : null}
-                  {prCiLabel[pr.ci] ?? pr.ci}，
-                  {prReviewLabel[pr.review] ?? pr.review}
-                  {pr.syncError ? (
-                    <span className="error"> 读取失败：{pr.syncError}</span>
-                  ) : null}
-                </li>
-              </ul>
-            ) : null}
-            {steps.length > 0 || runs.length > 0 ? (
-              <ul className="finalizations">
-                {steps.map((f) => {
-                  const run = runs.find((item) => item.stage === f.step);
-                  return (
-                    <li key={f.step}>
-                      {f.repo}: {f.step} {f.state}
-                      {f.blockedReason ? (
-                        <>
-                          {" ("}
-                          <StatusBadge kind="blocked" code={f.blockedReason} />
-                          {")"}
-                        </>
-                      ) : (
-                        ""
-                      )}
-                      {run ? (
-                        <>
-                          {" "}
-                          <a href={paths.run(run.id)}>{run.displayId}</a>
-                        </>
-                      ) : null}
-                    </li>
-                  );
-                })}
-                {runs
-                  .filter(
-                    (run) => !steps.some((step) => step.step === run.stage),
-                  )
-                  .map((run) => (
-                    <li key={run.id}>
-                      {run.repo} {run.stage} {run.result ?? ""}{" "}
-                      <a href={paths.run(run.id)}>{run.displayId}</a>
-                    </li>
-                  ))}
-              </ul>
-            ) : null}
-            {acceptancePack?.repos
-              .filter((item) => item.repo === repo)
-              .map((item) => (
-                <PackRepoSection key={item.repo} repo={item} />
-              ))}
-          </section>
-        );
-      })}
-      {acceptancePack ? <AcceptancePackSection pack={acceptancePack} /> : null}
+      <section id="delivery-pack" className="mb-4 scroll-mt-6">
+        <h2 className="mb-3 text-sm font-semibold">验收包</h2>
+        {acceptancePack ? (
+          <>
+            <AcceptancePackMeta pack={acceptancePack} />
+            {list(acceptancePack.repos).map((item) => (
+              <PackRepoSection
+                key={item.repo}
+                repo={item}
+                repoUrl={repoUrls.get(item.repo)}
+              />
+            ))}
+          </>
+        ) : (
+          <p className="note">还没有验收包。开完 PR 后会生成。</p>
+        )}
+      </section>
     </>
   );
 }

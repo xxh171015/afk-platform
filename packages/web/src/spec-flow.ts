@@ -90,3 +90,96 @@ export function flowStepIndex(step: FlowStep): number {
 export function flowStepComplete(state: SpecState): boolean {
   return state === "merged";
 }
+
+export function flowStepHref(step: FlowStep, specId: number): string {
+  switch (step) {
+    case "草稿":
+      return `/specs/${specId}#flow-draft`;
+    case "确认":
+      return `/specs/${specId}#flow-confirm`;
+    case "运行":
+      return `/specs/${specId}/tickets`;
+    case "收尾":
+      return `/specs/${specId}/delivery#delivery-finalize`;
+    case "开 PR":
+      return `/specs/${specId}/delivery#delivery-prs`;
+    case "验收合并":
+      return `/specs/${specId}/delivery#delivery-pack`;
+  }
+}
+
+export function flowStepReached(
+  index: number,
+  currentIndex: number,
+  complete: boolean,
+): boolean {
+  return complete || index <= currentIndex;
+}
+
+export type FlowTab =
+  | "overview"
+  | "description"
+  | "tickets"
+  | "delivery"
+  | "timeline";
+
+// Which step the open tab / hash corresponds to. Description and timeline are not on the bar.
+export function flowStepLocation(
+  section: FlowTab,
+  hash: string,
+  lifecycle: FlowStep,
+): FlowStep | null {
+  const id = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (section === "overview") return id === "flow-confirm" ? "确认" : "草稿";
+  if (section === "tickets") return "运行";
+  if (section === "delivery") {
+    if (id === "delivery-finalize") return "收尾";
+    if (id === "delivery-prs") return "开 PR";
+    if (id === "delivery-pack") return "验收合并";
+    if (
+      lifecycle === "收尾" ||
+      lifecycle === "开 PR" ||
+      lifecycle === "验收合并"
+    )
+      return lifecycle;
+    return "验收合并";
+  }
+  return null;
+}
+
+export type FlowCaptionFacts = {
+  ticketDone: number;
+  ticketTotal: number;
+  blocked: number;
+  planningSha: boolean;
+  confirmAt?: string;
+  finalStep?: string | null;
+  prSummary?: string | null;
+  pack?: boolean;
+  orderBroken?: boolean;
+};
+
+export function flowStepCaption(
+  step: FlowStep,
+  facts: FlowCaptionFacts,
+): string | null {
+  switch (step) {
+    case "草稿":
+      if (facts.ticketTotal === 0)
+        return facts.planningSha ? "已有规划提交" : "未导入票";
+      return `${facts.ticketTotal} 张票${facts.planningSha ? " · 已有规划提交" : ""}`;
+    case "确认":
+      return facts.confirmAt ?? null;
+    case "运行":
+      return `${facts.ticketDone}/${facts.ticketTotal}${
+        facts.blocked > 0 ? ` · 卡住 ${facts.blocked}` : ""
+      }`;
+    case "收尾":
+      return facts.finalStep ?? null;
+    case "开 PR":
+      return facts.prSummary ?? null;
+    case "验收合并":
+      if (facts.orderBroken) return "合并顺序被打破";
+      return facts.pack ? "验收包已生成" : null;
+  }
+}

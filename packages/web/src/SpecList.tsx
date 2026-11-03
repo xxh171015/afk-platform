@@ -1,5 +1,5 @@
 import type { SpecState } from "@afk/shared";
-import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ArrowUpDown, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
@@ -11,7 +11,6 @@ import {
   EmptyState,
   ErrorState,
   RowsSkeleton,
-  Skeleton,
   StaleNotice,
 } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -24,10 +23,12 @@ import {
   SelectValue,
 } from "./components/ui/select.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { repoLabel } from "./host-links.ts";
 import { specTypeLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
-import { DETAIL_POLL_MS, LIST_POLL_MS } from "./live.ts";
+import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
+import { RelativeTime } from "./RelativeTime.tsx";
 import { specStateLabel } from "./status.ts";
 
 const STATE_ORDER: SpecState[] = [
@@ -50,7 +51,7 @@ interface Sort {
 }
 
 const GRID =
-  "grid-cols-[auto_minmax(0,1fr)_90px_110px_auto_200px_minmax(0,150px)]";
+  "grid-cols-[4.5rem_minmax(0,16rem)_9rem_5.5rem_7rem_minmax(0,1fr)_8rem_8rem]";
 
 function SortHeader({
   label,
@@ -93,7 +94,6 @@ function SortHeader({
 export function SpecList() {
   const api = useApi();
   const poll = useResourcePoll(LIST_POLL_MS);
-  const detailPoll = useResourcePoll(DETAIL_POLL_MS);
   const specs = useQuery({
     queryKey: ["specs"],
     queryFn: async () => {
@@ -105,27 +105,6 @@ export function SpecList() {
     placeholderData: keepPreviousData,
   });
   const all = useMemo(() => specs.data ?? [], [specs.data]);
-  const details = useQueries({
-    queries: all.map((s) => ({
-      queryKey: ["spec", s.id],
-      queryFn: async () => {
-        const { data, error } = await api.GET("/specs/{id}", {
-          params: { path: { id: s.id } },
-        });
-        if (!data) throw new Error(describeError(error));
-        return data;
-      },
-      refetchInterval: detailPoll,
-    })),
-  });
-  const repoOf = (id: number): string[] | undefined => {
-    const query = details[all.findIndex((s) => s.id === id)];
-    if (!query) return [];
-    if (!query.data && query.error) return [];
-    return query.data
-      ? [...new Set(query.data.tickets.map((t) => t.repo))].sort()
-      : undefined;
-  };
 
   const [states, setStates] = useState<Set<SpecState>>(new Set());
   const [project, setProject] = useState("all");
@@ -137,17 +116,21 @@ export function SpecList() {
     for (const s of all) m.set(s.state, (m.get(s.state) ?? 0) + 1);
     return m;
   }, [all]);
-  const projects = useMemo(
-    () => [...new Set(all.map((s) => s.project))].sort(),
-    [all],
-  );
+  const projects = useMemo(() => {
+    const names = new Set<string>();
+    for (const s of all) {
+      for (const repo of s.repos ?? []) names.add(repoLabel(repo).label);
+    }
+    return [...names].sort();
+  }, [all]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const rows = all.filter(
       (s) =>
         (states.size === 0 || states.has(s.state)) &&
-        (project === "all" || s.project === project) &&
+        (project === "all" ||
+          (s.repos ?? []).some((repo) => repoLabel(repo).label === project)) &&
         (needle === "" ||
           s.title.toLowerCase().includes(needle) ||
           s.displayId.toLowerCase().includes(needle)),
@@ -291,7 +274,7 @@ export function SpecList() {
               className="overflow-x-auto rounded-md border bg-card text-[13px]"
               role="table"
             >
-              <div className="min-w-[960px]">
+              <div className="min-w-[1200px]">
                 {/* biome-ignore lint/a11y/useSemanticElements: keep CSS grid + role=row */}
                 {/* biome-ignore lint/a11y/useFocusableInteractive: header is not a control */}
                 <div
@@ -329,11 +312,11 @@ export function SpecList() {
                       )
                     }
                   />
-                  <span className="text-right">涉及仓库</span>
+                  <span>开始</span>
+                  <span>结束</span>
                 </div>
                 <div className="divide-y">
                   {filtered.map((s) => {
-                    const repos = repoOf(s.id);
                     return (
                       // biome-ignore lint/a11y/useSemanticElements: keep CSS grid + role=row
                       // biome-ignore lint/a11y/useFocusableInteractive: row contains the spec link
@@ -345,42 +328,68 @@ export function SpecList() {
                           GRID,
                         )}
                       >
-                        <span>
+                        <span className="min-w-0">
                           <IdChip displayId={s.displayId} id={s.id} />
                         </span>
                         <a
                           href={paths.spec(s.id)}
-                          className="truncate hover:underline"
+                          className="min-w-0 truncate hover:underline"
                           title={s.title}
                         >
                           {s.title}
                         </a>
-                        <span className="truncate font-mono text-[11px] text-muted-foreground">
-                          {s.project}
-                        </span>
+                        <div className="min-w-0 overflow-hidden">
+                          <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden">
+                            {(s.repos ?? []).length === 0 ? (
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                尚未导入票
+                              </span>
+                            ) : (
+                              (s.repos ?? []).map((repo) => (
+                                <RepoTag
+                                  key={repo.name}
+                                  name={repo.name}
+                                  url={repo.url}
+                                  className="min-w-0"
+                                />
+                              ))
+                            )}
+                          </div>
+                        </div>
                         <span
-                          className="font-mono text-[11px] text-muted-foreground"
+                          className="truncate font-mono text-[11px] whitespace-nowrap text-muted-foreground"
                           title={specTypeLabel[s.type]}
                         >
                           {s.type}
                         </span>
-                        <StateBadge kind="spec" state={s.state} />
-                        <div className="flex items-center gap-2">
-                          <SegmentedProgress progress={s.progress} />
-                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular">
+                        <div className="min-w-0">
+                          <StateBadge kind="spec" state={s.state} />
+                        </div>
+                        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+                          <SegmentedProgress
+                            progress={s.progress}
+                            className="min-w-0"
+                          />
+                          <span
+                            className="min-w-0 truncate font-mono text-[11px] whitespace-nowrap text-muted-foreground tabular"
+                            title={`${s.progress.done}/${s.progress.total} 已完成${
+                              s.progress.blocked > 0
+                                ? `，${s.progress.blocked} 张卡住`
+                                : ""
+                            }`}
+                          >
                             {s.progress.done}/{s.progress.total} 已完成
                             {s.progress.blocked > 0
                               ? `，${s.progress.blocked} 张卡住`
                               : ""}
                           </span>
                         </div>
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {repos ? (
-                            repos.map((r) => <RepoTag key={r} name={r} short />)
-                          ) : (
-                            <Skeleton className="h-5 w-20" />
-                          )}
-                        </div>
+                        <span className="min-w-0 truncate whitespace-nowrap text-[12px] text-muted-foreground">
+                          <RelativeTime iso={s.startedAt} />
+                        </span>
+                        <span className="min-w-0 truncate whitespace-nowrap text-[12px] text-muted-foreground">
+                          {s.endedAt ? <RelativeTime iso={s.endedAt} /> : "—"}
+                        </span>
                       </div>
                     );
                   })}

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeServer, renderApp } from "./test-utils.tsx";
 
 afterEach(cleanup);
@@ -37,6 +43,15 @@ const server = () =>
             state: "running",
             pauseReason: null,
             project: "shop",
+            repos: [
+              {
+                name: "backend",
+                url: "https://github.com/acme/shop-backend.git",
+                hostKind: "github",
+              },
+            ],
+            startedAt: "2026-10-28T01:00:00.000Z",
+            endedAt: null,
             progress: {
               total: 1,
               done: 0,
@@ -62,6 +77,13 @@ const server = () =>
           pauseReason: null,
           integrationBranches: [],
           warnings: [],
+          repos: [
+            {
+              name: "backend",
+              url: "https://github.com/acme/shop-backend.git",
+              hostKind: "github",
+            },
+          ],
         },
         tickets: [
           {
@@ -101,8 +123,10 @@ const server = () =>
           state: "done",
           blockedReason: null,
           repo: "backend",
+          repoUrl: "https://github.com/acme/shop-backend.git",
+          hostKind: "github",
           brief: null,
-          body: "",
+          body: "## What to build\n\nShip the only ticket.\n",
           acceptanceCriteria: ["works"],
           modules: [],
           allowedProtectedPaths: [],
@@ -114,7 +138,25 @@ const server = () =>
         versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
         upstream: [],
         downstream: [],
-        runs: [],
+        runs: [
+          {
+            id: 4,
+            displayId: "R-4",
+            stage: "implement",
+            attempt: 1,
+            result: "done",
+            durationMs: 1000,
+            agent: null,
+            model: null,
+            skillsSha: null,
+            axis: null,
+            cursorCliVersion: null,
+            contractShas: null,
+            refShas: null,
+            startedAt: "2026-10-28T10:00:00.000Z",
+            finishedAt: "2026-10-28T10:00:01.000Z",
+          },
+        ],
         findings: [],
         gateResults: [],
       },
@@ -143,6 +185,8 @@ const server = () =>
         prompt: null,
         output: null,
         commits: [],
+        repoUrl: "https://github.com/acme/shop-backend.git",
+        hostKind: "github",
       },
     }),
     "GET /runs/4/logs": () => ({
@@ -162,7 +206,7 @@ describe("the app", () => {
     renderApp(server());
     expect(await screen.findByRole("heading", { name: "工作台" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "S-3" })).toBeNull();
-    expect(await screen.findByText("shop")).toBeTruthy();
+    expect(screen.queryByText("shop")).toBeNull();
   });
 
   it("remembers light and dark in afk-theme, not the system", async () => {
@@ -193,6 +237,10 @@ describe("the app", () => {
   it("opens a ticket sheet from a graph node without leaving the spec", async () => {
     const { router } = renderApp(server(), "/specs/3");
     fireEvent.click(await screen.findByRole("link", { name: "T-9" }));
+    expect(await screen.findByText("Ship the only ticket.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "R-4" }).getAttribute("href")).toBe(
+      "/runs/4",
+    );
     expect(
       (await screen.findByRole("link", { name: "打开票详情" })).getAttribute(
         "href",
@@ -220,7 +268,9 @@ describe("the app", () => {
       to: "/specs/$specId/tickets",
       params: { specId: "3" },
     });
-    expect(await screen.findByRole("link", { name: "T-9" })).toBeTruthy();
+    expect(
+      (await screen.findAllByRole("link", { name: "T-9" })).length,
+    ).toBeGreaterThan(0);
     await router.navigate({
       to: "/specs/$specId/timeline",
       params: { specId: "3" },
@@ -234,7 +284,7 @@ describe("the app", () => {
       (await screen.findByRole("heading", { level: 1, name: /T-9/ }))
         .textContent,
     ).toContain("T-9");
-    expect(screen.getByText("Only ticket")).toBeTruthy();
+    expect(screen.getAllByText("Only ticket").length).toBeGreaterThan(0);
   });
 
   it("opens a run at /runs/<id>", async () => {
@@ -351,6 +401,210 @@ describe("the app", () => {
     fireEvent.keyDown(box, { key: "g" });
     fireEvent.keyDown(box, { key: "h" });
     expect(router.state.location.pathname).toBe("/specs");
+  });
+
+  it("shows Linear-style crumbs with sibling specs and overflow actions", async () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    const fake = fakeServer({
+      "GET /workbench": () => ({ json: emptyWorkbench }),
+      "GET /blocked": () => ({ json: emptyWaiting }),
+      "GET /specs": () => ({
+        json: {
+          specs: [
+            {
+              id: 2,
+              displayId: "S-2",
+              slug: "other",
+              title: "Second",
+              type: "feature",
+              state: "draft",
+              pauseReason: null,
+              project: "shop",
+              repos: [
+                {
+                  name: "backend",
+                  url: "https://github.com/acme/shop-backend.git",
+                  hostKind: "github",
+                },
+              ],
+              startedAt: "2026-10-28T01:00:00.000Z",
+              endedAt: null,
+              progress: {
+                total: 0,
+                done: 0,
+                active: 0,
+                blocked: 0,
+                pending: 0,
+                cancelled: 0,
+              },
+            },
+            {
+              id: 3,
+              displayId: "S-3",
+              slug: "s",
+              title: "Third",
+              type: "feature",
+              state: "running",
+              pauseReason: null,
+              project: "shop",
+              repos: [
+                {
+                  name: "backend",
+                  url: "https://github.com/acme/shop-backend.git",
+                  hostKind: "github",
+                },
+              ],
+              startedAt: "2026-10-28T01:00:00.000Z",
+              endedAt: null,
+              progress: {
+                total: 1,
+                done: 0,
+                active: 1,
+                blocked: 0,
+                pending: 0,
+                cancelled: 0,
+              },
+            },
+          ],
+        },
+      }),
+      "GET /specs/3": () => ({
+        json: {
+          spec: {
+            id: 3,
+            displayId: "S-3",
+            slug: "s",
+            title: "Third",
+            type: "feature",
+            body: "",
+            state: "running",
+            pauseReason: null,
+            integrationBranches: [],
+            warnings: [],
+            repos: [
+              {
+                name: "backend",
+                url: "https://github.com/acme/shop-backend.git",
+                hostKind: "github",
+              },
+            ],
+          },
+          tickets: [
+            {
+              id: 9,
+              displayId: "T-9",
+              specId: 3,
+              specDisplayId: "S-3",
+              title: "Only ticket",
+              type: "implementation",
+              state: "running",
+              blockedReason: null,
+              repo: "backend",
+              brief: null,
+            },
+          ],
+          edges: [],
+          finalizations: [],
+          pullRequests: [],
+          mergeOrder: { ordered: [], after: {}, unordered: [] },
+          orderBroken: [],
+          acceptancePack: null,
+          timeline: [],
+          finalRuns: [],
+        },
+      }),
+      "GET /tickets/9": () => ({
+        json: {
+          ticket: {
+            id: 9,
+            displayId: "T-9",
+            specId: 3,
+            specDisplayId: "S-3",
+            title: "Only ticket",
+            type: "implementation",
+            state: "pending",
+            blockedReason: null,
+            repo: "backend",
+            repoUrl: "https://github.com/acme/shop-backend.git",
+            hostKind: "github",
+            brief: null,
+            body: "",
+            file: "---\nid: T-9\n---\n",
+            acceptanceCriteria: ["works"],
+            modules: [],
+            allowedProtectedPaths: [],
+            contentVersion: 1,
+            contractSha: null,
+            fixCounts: {},
+            reviewed: false,
+          },
+          versions: [{ version: 1, createdAt: "2026-10-28T09:00:00.000Z" }],
+          upstream: [],
+          downstream: [],
+          runs: [],
+          findings: [],
+          gateResults: [],
+        },
+      }),
+    });
+    const { router } = renderApp(fake, "/specs/3");
+    const crumbs = await screen.findByTestId("entity-crumbs");
+    expect(
+      (await within(crumbs).findByRole("link", { name: "acme" })).getAttribute(
+        "href",
+      ),
+    ).toBe("https://github.com/acme");
+    expect(
+      within(crumbs).getByRole("link", { name: "需求" }).getAttribute("href"),
+    ).toBe("/specs");
+    await waitFor(() =>
+      expect(within(crumbs).getByTestId("crumb-siblings").dataset.count).toBe(
+        "2",
+      ),
+    );
+    const siblings = within(crumbs).getByTestId("crumb-siblings");
+    fireEvent.pointerDown(siblings, { button: 0 });
+    expect(
+      (
+        await screen.findByRole("menuitem", { name: /S-2 Second/ })
+      ).getAttribute("href"),
+    ).toBe("/specs/2");
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerDown(
+      within(crumbs).getByRole("button", { name: "更多操作" }),
+      {
+        button: 0,
+      },
+    );
+    expect(
+      (
+        await screen.findByRole("menuitem", { name: "在 GitHub 打开" })
+      ).getAttribute("href"),
+    ).toBe("https://github.com/acme/shop-backend");
+    expect(
+      screen.getByRole("menuitem", { name: "时间线" }).getAttribute("href"),
+    ).toBe("/specs/3/timeline");
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制编号" }));
+    expect(writeText).toHaveBeenCalledWith("S-3");
+
+    await router.navigate({
+      to: "/tickets/$ticketId",
+      params: { ticketId: "9" },
+    });
+    const ticketCrumbs = await screen.findByTestId("entity-crumbs");
+    expect(within(ticketCrumbs).getByText("S-3")).toBeTruthy();
+    expect(within(ticketCrumbs).getByText("T-9")).toBeTruthy();
+    expect(
+      within(ticketCrumbs).getAllByRole("button", { name: "切换兄弟项" }),
+    ).toHaveLength(2);
+    fireEvent.pointerDown(
+      within(ticketCrumbs).getByRole("button", { name: "更多操作" }),
+      { button: 0 },
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "改正文" }),
+    ).toBeTruthy();
   });
 
   it("opens help with ?", async () => {

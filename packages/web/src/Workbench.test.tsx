@@ -182,8 +182,7 @@ describe("the workbench", () => {
     );
 
     await screen.findByText("Stuck");
-    expect(screen.getByText("shop")).toBeTruthy();
-    expect(screen.getByText(/项目/)).toBeTruthy();
+    expect(screen.queryByText("shop")).toBeNull();
     const waiting = within(screen.getByTestId("quadrant-等你处理"));
     expect(waiting.getByText("T-9").closest("a")?.getAttribute("href")).toBe(
       "/tickets/9",
@@ -214,7 +213,8 @@ describe("the workbench", () => {
     expect(done.getByText("S-1").closest("a")?.getAttribute("href")).toBe(
       "/specs/1",
     );
-    expect(done.getByTitle("2026-11-01 10:00:00 UTC")).toBeTruthy();
+    expect(done.getByTitle("2026-11-01 18:00:00")).toBeTruthy();
+    expect(done.getByText("2026-11-01 18:00")).toBeTruthy();
   });
 
   it("does not mark a running ticket 偏慢 when there is no peer history", async () => {

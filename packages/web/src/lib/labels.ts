@@ -29,6 +29,11 @@ export const specTypeLabel: Record<string, string> = {
   improvement: "改进",
 };
 
+export const edgeKindLabel: Record<string, string> = {
+  blocks: "挡住",
+  contract: "契约",
+};
+
 export const runResultLabel: Record<string, string> = {
   done: "成功",
   passed: "成功",

@@ -1,4 +1,5 @@
 import type { BlockedReason, SpecState, TicketState } from "@afk/shared";
+import { repoDisplayName, repoHtmlUrl } from "@afk/shared";
 import { Check, Copy } from "lucide-react";
 import { Children, isValidElement, type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -265,9 +266,11 @@ export function IdChip({
 
 export function ShaChip({
   sha,
+  href,
   className,
 }: {
   sha: string | null;
+  href?: string | null;
   className?: string;
 }) {
   const { copied, copy } = useCopy();
@@ -276,24 +279,45 @@ export function ShaChip({
       <span className="font-mono text-[11px] text-subtle-foreground">—</span>
     );
   const short = shortSha(sha);
+  const label = href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="hover:underline"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {short}
+    </a>
+  ) : (
+    <span>{short}</span>
+  );
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          aria-label={short}
-          title={sha}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            void copy(sha);
-          }}
+        <span
           className={cn(chipBase, "gap-1 text-muted-foreground", className)}
         >
-          {short}
-          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-        </Button>
+          {label}
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label={`复制 ${short}`}
+            title={sha}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void copy(sha);
+            }}
+            className="h-4 w-4 p-0 text-muted-foreground"
+          >
+            {copied ? (
+              <Check className="size-3" />
+            ) : (
+              <Copy className="size-3" />
+            )}
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent className="font-mono text-[11px]">{sha}</TooltipContent>
     </Tooltip>
@@ -317,25 +341,47 @@ export function repoColorIndex(name: string): number {
 
 export function RepoTag({
   name,
+  url,
   short,
   className,
 }: {
   name: string;
+  url?: string | null;
   short?: boolean;
   className?: string;
 }) {
-  const label = short ? name.replace(/^afk-pilot-/, "") : name;
-  return (
+  const html = url ? repoHtmlUrl(url) : null;
+  const label = html
+    ? (repoDisplayName(url as string) ?? name)
+    : short
+      ? name.replace(/^afk-pilot-/, "")
+      : name;
+  const chip = (
     <span
-      title={name}
+      title={html ? undefined : label}
       className={cn(
-        "inline-flex h-5 items-center rounded-sm border px-1.5 font-mono text-[11px]",
+        "inline-block h-5 max-w-full min-w-0 truncate rounded-sm border px-1.5 font-mono text-[11px] leading-5",
         repoClasses[repoColorIndex(name)],
-        className,
+        !html && className,
       )}
     >
       {label}
     </span>
+  );
+  if (!html) return chip;
+  return (
+    <a
+      href={html}
+      target="_blank"
+      rel="noreferrer"
+      title={label}
+      className={cn(
+        "inline-block min-w-0 max-w-full hover:opacity-80",
+        className,
+      )}
+    >
+      {chip}
+    </a>
   );
 }
 

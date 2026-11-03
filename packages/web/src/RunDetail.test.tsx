@@ -165,7 +165,7 @@ describe("the run page", () => {
     expect(screen.getByText(/"done"/)).toBeTruthy();
     expect(screen.queryByText("nextAction")).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "提交" }));
-    expect(await screen.findByRole("button", { name: "abcdef1" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /abcdef1/ })).toBeTruthy();
     expect(screen.queryByText(/implement the export/)).toBeNull();
   });
 });

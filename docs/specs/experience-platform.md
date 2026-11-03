@@ -63,7 +63,7 @@ Run、票、待处理
 
 按冻结原型**正在渲染的路由**写进 `packages/web`，视觉一对一（见 Solution）。不复活已不用的 `SpecOverview` / `SpecPrPanel`。不把 TanStack Start 或 mock 应用搬进来；视觉层怎么搬见 [ADR 0004](../adr/0004-control-tower-visual-layer-not-tanstack-start.md)。
 
-导航文案「需求 / 待处理」是给人看的名字，实体仍是 Spec 和 blocked 队列。首页叫**工作台**。面包屑和工作台副标题用真实 Project 名，不写死 `shop`。
+导航文案「需求 / 待处理」是给人看的名字，实体仍是 Spec 和 blocked 队列。首页叫**工作台**。控制塔日常身份是 GitHub 仓库 `owner/name`，不是平台 Project 登记名（手册示例里的 `shop` 只是 CLI 一次性容器）。列表「项目」列、工作台副标题、面包屑第一段都不渲染 `projects.name`。面包屑是 Linear 式：`{owner} › 需求 › S-n 标题▾ › ⋯`；票页带所属需求（`{owner} › 需求 › S-n▾ › T-n 标题▾`）。`⋯` 复制编号/链接、在 GitHub 打开（有 PR 优先）、跳到五个嵌套页；票上另有改正文（仅 pending/blocked）。不做星标。
 
 侧栏 + 顶栏、`≤640px` 断点（侧栏只留图标、隐藏搜索文字和 kbd、图 520px）、默认暗色、`localStorage` 键 `afk-theme`（不跟系统）、Inter + JetBrains Mono、危险操作 AlertDialog、图节点 Sheet、toast sonner：都跟冻结原型同一套。
 
@@ -104,7 +104,15 @@ type StructuredBrief = {
 
 字段按原因码有则填；没有的键不上屏。点证据进对应 Run。
 
-状态徽标主文案中文、英文码在 `title`。不增加枚举值。SHA 只显示前 7 位，点击复制完整值。时间继续用相对时间、悬停绝对时间。徽标不只靠颜色。
+状态徽标主文案中文、英文码在 `title`。不增加枚举值。SHA 只显示前 7 位，复制按钮仍复制完整值；有仓库 URL 时短 SHA / 分支 / 仓库名外链到 GitHub（或 GitLab）浏览页，PR 用已存的 `html_url`。墙钟用 `Asia/Shanghai` 的 `yyyy-MM-dd HH:mm`（`<time datetime={iso}>`），悬停带秒；`formatElapsed` / `formatDuration` 仍表示耗时。徽标不只靠颜色。
+
+需求说明按 to-spec 的 `##` 切段，中文节名 + 英文原名；票正文同样切 Parent / What to build / Acceptance criteria / Blocked by。Markdown 用设计 token 排版，目录 class 是 `markdown-toc`（不是 Tailwind `contents`）。编辑、diff、Run prompt 仍是纯文本。
+
+时间线按上海日历日分组的竖轨；`pr-opened` / `pr-ready` / `merged` 链到 GitHub PR，有 `runId` 的链到 Run 页。不新增事件种类。`resume` 若 API 不发，UI 静默丢弃。
+
+六步流程条映射不变；每步挂已有事实（票数、确认时间、卡住数、收尾步、PR 草稿/CI、验收包 / 合并顺序被打破）。未到达的步不可点；已到达的步落到不同锚点（草稿/确认 → 概览，运行 → 票与依赖，收尾/开 PR/验收合并 → 交付页对应章节）。勾和实心圆表示生命周期，底边表示当前页。确认后的概览是属性区（仓库、规划提交、集成分支、票进度、PR、最近事件、需求摘录）+ 依赖图，不再挂「没有黄项」。交付页「验收包」是独立一章。票与依赖上图下卡片。
+
+旧验收包缺数组字段时 API 先 coerce 再必要时重建；交付页对 pack 数组一律按空数组渲染，不再对 `.length` 崩溃。
 
 「偏慢」：当前阶段耗时超过该项目同类阶段历史均值 2～3 倍；没有同类历史则不出标记。不上「预计还需」。
 
@@ -118,7 +126,7 @@ type StructuredBrief = {
 
 - 路由：TanStack Router **文件路由**（`packages/web/src/routes/`），真实路径如上。旧 `#/specs/3` 不做兼容跳转。
 - 样式：Tailwind 4；设计 token、`app-shell`、实际用到的原型 `afk` 组件搬进 `packages/web`。
-- 组件：shadcn new-york，只拷贝页面实际 import 的文件。原型产品代码真正用到的大约是 button、input、dialog、alert-dialog、command、select、sheet、tabs、tooltip、skeleton、checkbox、collapsible、sonner。状态徽标、卡片、表格自己用 Tailwind 画。禁止整包搬 Lovable 的 46 个 `components/ui`。不用 MUI / Mantine。
+- 组件：shadcn new-york，只拷贝页面实际 import 的文件。实际用到的是 button、input、dialog、alert-dialog、command、select、sheet、tabs、tooltip、skeleton、checkbox、sonner、dropdown-menu。状态徽标、卡片、表格自己用 Tailwind 画。禁止整包搬 Lovable 的 46 个 `components/ui`。不用 MUI / Mantine。
 - 留下：React 19、TanStack Query、`@xyflow/react`、openapi-fetch、Testing Library 假 HTTP、Biome。
 
 `docs/m1-tech-stack.md` 的「页面」一行按上表改。栈本身仍是 issue 134；搬视觉层记在 ADR 0004。
@@ -208,14 +216,14 @@ Retry note 不是票内容，不加 Content version，只对紧接着那一次 R
 
 ### 默认写进、不再另开决策票的
 
-收尾 Run 在交付页可见；Runs 表按上面瘦身；中文状态；SHA 七位；亮暗色（默认暗色）、相对时间、骨架/空/错误、危险操作 AlertDialog，保持冻结原型打磨，不回退。1:1 靠人并排对照冻结物（亮/暗各一遍，桌面再加一档 640px），不上截图像素 CI。
+收尾 Run 在交付页可见；Runs 表按上面瘦身；中文状态；SHA 七位；亮暗色（默认暗色）、上海墙钟、骨架/空/错误、危险操作 AlertDialog。信息架构仍跟冻结原型的活路由走，但项目身份、Markdown 排版、时间线轨、面包屑和六步 caption 按本节覆盖冻结视觉。不上截图像素 CI。
 
 ## Testing Decisions
 
 照 M1 / M2 的三层，尽量用最高的一层。不另写 shop 跨仓库验收需求：这一期验的是平台自己。
 
-1. **API 层**（HTTP + 真 Postgres）：`invalidate` 在票 / Spec / Run / 待处理变化时发出、日志追加不发；规划 SHA 登记与脏工作区拒绝；Retry note 进下一次 Run 的 bundle、不加 Content version；PR 描述按标记 PATCH、人改的标记外保留；通知适配器接到七类事件（测试里不真调 osascript，缝是适配器）；`GET /runs/{id}` 带上 `prompt` / `output` / `commits`，票详情的 `runs` 数组仍不带这三项。状态机表格不因此增加状态。
-2. **页面层**（Testing Library + 假 HTTP）：视图映射纯函数——六步当前步、横幅、工作台分块、结构化简报、时间线拒收未列事件、日志动作类型、中文状态、SHA 七位、`invalidate` 该失效哪些 query key。路由表与地址清单一致。Run 三页签在、空数据走空状态。不测 shadcn 内部、不测样式、不做截图像素对比。
+1. **API 层**（HTTP + 真 Postgres）：`invalidate` 在票 / Spec / Run / 待处理变化时发出、日志追加不发；规划 SHA 登记与脏工作区拒绝；Retry note 进下一次 Run 的 bundle、不加 Content version；PR 描述按标记 PATCH、人改的标记外保留；通知适配器接到七类事件（测试里不真调 osascript，缝是适配器）；`GET /runs/{id}` 带上 `prompt` / `output` / `commits`，票详情的 `runs` 数组仍不带这三项。`GET /specs` 与详情带 `repos[]`；票与 Run 带 `repoUrl` / `hostKind`；不完整的旧验收包 coerce 或缺字段重建。状态机表格不因此增加状态。
+2. **页面层**（Testing Library + 假 HTTP）：视图映射纯函数——六步当前步与 caption / href、横幅、工作台分块、结构化简报、时间线拒收未列事件、日志动作类型、中文状态、SHA 七位、上海墙钟、`invalidate` 该失效哪些 query key。列表「项目」列是 GitHub `owner/name` 且按它筛选。需求说明 / 票正文中文章节。交付页能渲染缺数组的旧 pack。面包屑兄弟切换与 ⋯。路由表与地址清单一致。Run 三页签在、空数据走空状态。不测 shadcn 内部、不测样式、不做截图像素对比。
 3. **端到端（不进自动化）**：本机点通工作台 → 需求交付上的收尾 Run → Run 页（日志 + 三页签）→ `⌘K` `R-n` → 票顶简报进 Run；blocked 带说明重试一次；改过 GLOSSARY 的 Spec 用 CLI confirm 登记规划提交。并排冻结原型对照：工作台、待处理、需求列表、需求五页、票详情（含版本 Dialog）、Run、⌘K、`?`、确认拆分、blocked 操作（改正文和 Retry note 允许不像原型）。通知在关系统通知时允许静默。
 
 ## Out of Scope

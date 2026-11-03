@@ -18,6 +18,12 @@ globalThis.ResizeObserver ??=
 globalThis.DOMMatrixReadOnly ??= class {
   m22 = 1;
 } as unknown as typeof DOMMatrixReadOnly;
+if (typeof Element !== "undefined") {
+  Element.prototype.scrollIntoView ??= () => {};
+}
+if (typeof window !== "undefined") {
+  window.scrollTo = () => {};
+}
 
 export interface Reply {
   status?: number;

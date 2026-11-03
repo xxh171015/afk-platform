@@ -15,6 +15,7 @@ class FakeEventSource {
   static instances: FakeEventSource[] = [];
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  closed = false;
   readonly listeners = new Map<string, (event: MessageEvent<string>) => void>();
   readonly url: string;
 
@@ -34,7 +35,9 @@ class FakeEventSource {
     this.listeners.delete(name);
   }
 
-  close() {}
+  close() {
+    this.closed = true;
+  }
 
   open() {
     this.onopen?.();
@@ -80,5 +83,39 @@ describe("EventsProvider", () => {
         queryKeysForInvalidate({ specId: 3, ticketId: 9 }),
       ),
     );
+  });
+
+  it("does not hold an EventSource while the tab is hidden", async () => {
+    FakeEventSource.instances = [];
+    (globalThis as { EventSource: typeof EventSource }).EventSource =
+      FakeEventSource as unknown as typeof EventSource;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const visibility = { state: "visible" };
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility.state,
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EventsProvider>
+          <p>live</p>
+        </EventsProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    visibility.state = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() =>
+      expect(FakeEventSource.instances[0]?.closed).toBe(true),
+    );
+
+    visibility.state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+    expect(FakeEventSource.instances[1]?.closed).toBe(false);
   });
 });

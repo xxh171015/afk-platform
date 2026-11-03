@@ -1141,6 +1141,33 @@ describe("the spec list", () => {
       pending: 1,
       cancelled: 0,
     });
+    expect(list.body.specs[1].repos).toEqual([
+      { name: "backend", url: "git@x:backend", hostKind: "github" },
+    ]);
+    expect(list.body.specs[0].repos).toEqual([]);
+    expect(list.body.specs[0].startedAt).toEqual(expect.any(String));
+    expect(list.body.specs[0].endedAt).toBeNull();
+    expect(list.body.specs[1].startedAt).toEqual(expect.any(String));
+    expect(list.body.specs[1].endedAt).toBeNull();
+  });
+
+  it("sets endedAt from the last merged pull request once the spec is merged", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    const started = (await call("GET", "/specs")).body.specs[0].startedAt;
+    expect(started).toEqual(expect.any(String));
+    expect((await call("GET", "/specs")).body.specs[0].endedAt).toBeNull();
+    const ended = new Date("2026-11-01T10:00:00.000Z");
+    await db.pool.query("UPDATE specs SET state = 'merged' WHERE id = $1", [
+      specId,
+    ]);
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha, synced_at)
+       VALUES ($1, 1, 1, 'https://git.example/pr/1', 'merged', 'aaa', $2)`,
+      [specId, ended],
+    );
+    const merged = (await call("GET", "/specs")).body.specs[0];
+    expect(merged.startedAt).toBe(started);
+    expect(merged.endedAt).toBe(ended.toISOString());
   });
 
   it("is empty before anything exists", async () => {
@@ -1236,6 +1263,9 @@ describe("what a person sees", () => {
       acceptanceCriteria: ["it works"],
       reviewed: true,
       brief: null,
+      repo: "backend",
+      repoUrl: "git@x:backend",
+      hostKind: "github",
     });
     expect(view.body.downstream).toEqual([
       { id: 2, displayId: "T-2", kind: "blocks", state: "pending" },
@@ -1294,7 +1324,16 @@ describe("what a person sees", () => {
     });
     const id = (await db.pool.query("SELECT id FROM instance")).rows[0].id;
     expect(view.body.spec.integrationBranches).toEqual([
-      { repoId: 1, branch: `spec/${id}/s` },
+      {
+        repoId: 1,
+        branch: `spec/${id}/s`,
+        name: "backend",
+        url: "git@x:backend",
+        hostKind: "github",
+      },
+    ]);
+    expect(view.body.spec.repos).toEqual([
+      { name: "backend", url: "git@x:backend", hostKind: "github" },
     ]);
     expect(view.body.spec.warnings).toHaveLength(1); // a and b overlap without a path between them
     expect(

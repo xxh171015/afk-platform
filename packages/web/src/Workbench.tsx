@@ -129,11 +129,6 @@ function ItemLink({
 export function Workbench() {
   const board = useWorkbench();
   const data = board.data;
-  const project =
-    data?.running[0]?.spec.project ??
-    data?.awaitingAcceptance[0]?.spec.project ??
-    data?.recentlyCompleted[0]?.spec.project ??
-    null;
 
   if (board.isError && !board.data) {
     return (
@@ -150,13 +145,6 @@ export function Workbench() {
   return (
     <Page
       title="工作台"
-      subtitle={
-        project ? (
-          <span>
-            项目 <Mono>{project}</Mono>
-          </span>
-        ) : undefined
-      }
       actions={<StaleNotice error={data ? board.error : null} />}
     >
       {!data ? (

@@ -614,19 +614,91 @@ export async function saveAcceptancePack(
 
 // The stored pack with today's pull requests and merge order; null before one was made. A pack made before the
 // packs were kept by repo (it has no repo sections) is made again from what the platform recorded, and kept.
+const asArray = <T>(value: T[] | undefined | null): T[] =>
+  Array.isArray(value) ? value : [];
+
+function coerceStoredPack(raw: unknown): AcceptancePack | null {
+  if (!raw || typeof raw !== "object") return null;
+  const pack = raw as Record<string, unknown>;
+  if (!Array.isArray(pack.repos)) return null;
+  const mergeOrder =
+    pack.mergeOrder && typeof pack.mergeOrder === "object"
+      ? (pack.mergeOrder as Record<string, unknown>)
+      : {};
+  const candidate = {
+    ...pack,
+    generatedAt:
+      typeof pack.generatedAt === "string"
+        ? pack.generatedAt
+        : new Date(0).toISOString(),
+    agentSeconds: typeof pack.agentSeconds === "number" ? pack.agentSeconds : 0,
+    integration: pack.integration ?? null,
+    cancelledTickets: asArray(pack.cancelledTickets as never[]),
+    orderBroken: asArray(pack.orderBroken as never[]),
+    mergeOrder: {
+      ordered: asArray(mergeOrder.ordered as string[]),
+      after:
+        mergeOrder.after && typeof mergeOrder.after === "object"
+          ? mergeOrder.after
+          : {},
+      unordered: asArray(mergeOrder.unordered as string[]),
+    },
+    repos: pack.repos.map((section) => {
+      const repo =
+        section && typeof section === "object"
+          ? (section as Record<string, unknown>)
+          : {};
+      return {
+        ...repo,
+        repo: typeof repo.repo === "string" ? repo.repo : "",
+        pullRequest: repo.pullRequest ?? null,
+        gate: repo.gate ?? null,
+        tickets: asArray(repo.tickets as never[]).map((ticket) => {
+          const row =
+            ticket && typeof ticket === "object"
+              ? (ticket as Record<string, unknown>)
+              : {};
+          return {
+            ...row,
+            criteria: asArray(row.criteria as never[]).map((criterion) => {
+              const item =
+                criterion && typeof criterion === "object"
+                  ? (criterion as Record<string, unknown>)
+                  : {};
+              return { ...item, tests: asArray(item.tests as string[]) };
+            }),
+          };
+        }),
+        findings: asArray(repo.findings as never[]),
+        scopeCreep: asArray(repo.scopeCreep as never[]),
+        uncertainties: asArray(repo.uncertainties as never[]),
+        protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
+      };
+    }),
+  };
+  const parsed = AcceptancePack.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
 export async function readAcceptancePack(
   pool: Pick<pg.Pool, "query">,
   specId: number,
 ): Promise<AcceptancePack | null> {
-  const { rows } = await pool.query<{ content: AcceptancePack }>(
+  const { rows } = await pool.query<{ content: unknown }>(
     "SELECT content FROM acceptance_packs WHERE spec_id = $1",
     [specId],
   );
   if (!rows[0]) return null;
-  let pack = rows[0].content;
-  pack = { ...pack, integration: pack.integration ?? null };
-  if (!Array.isArray(pack.repos)) {
-    pack = await buildAcceptancePack(pool, specId, new Date(pack.generatedAt));
+  const stored = rows[0].content;
+  let pack = coerceStoredPack(stored);
+  if (!pack) {
+    const generatedAt =
+      stored &&
+      typeof stored === "object" &&
+      typeof (stored as { generatedAt?: unknown }).generatedAt === "string"
+        ? (stored as { generatedAt: string }).generatedAt
+        : new Date().toISOString();
+    pack = await buildAcceptancePack(pool, specId, new Date(generatedAt));
     await pool.query(
       "UPDATE acceptance_packs SET content = $2 WHERE spec_id = $1",
       [specId, JSON.stringify(pack)],

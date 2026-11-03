@@ -42,6 +42,16 @@ export {
   wrapPackSection,
 } from "./pr-description.ts";
 export { redactSecrets } from "./redact.ts";
+export type { RepoRef } from "./repo-url.ts";
+export {
+  commitHtmlUrl,
+  ownerHtmlUrl,
+  parseRepoUrl,
+  repoDisplayName,
+  repoHtmlUrl,
+  treeHtmlUrl,
+  tryParseRepoUrl,
+} from "./repo-url.ts";
 export type {
   AxisReview,
   CombinedReview,
