@@ -5,6 +5,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
 import { EventsHub } from "./events/hub.ts";
+import { registerCliRoutes } from "./http/cli-routes.ts";
 import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
@@ -77,6 +78,7 @@ export function createApp(options: AppOptions): OpenAPIHono {
     cors({ origin: (origin) => (LOCAL_ORIGIN.test(origin) ? origin : null) }),
   );
   registerPlanningRoutes(app, context);
+  registerCliRoutes(app);
   registerWorkerRoutes(app, context);
   registerLogRoutes(app, context);
   registerTicketRoutes(app, context);

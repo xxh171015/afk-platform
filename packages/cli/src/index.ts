@@ -9,6 +9,7 @@ import {
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
 } from "@afk/shared";
+import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import {
   normalizeSpecBody,
   specTemplateWarnings,
@@ -30,7 +31,11 @@ import {
   planText,
   TRACKER_DOC_PATH,
 } from "./init.ts";
-import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
+import {
+  skillsWarnings,
+  trackerDocWarnings,
+  versionWarnings,
+} from "./planning-checks.ts";
 import { readPlanningDocs } from "./planning-docs.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
@@ -432,7 +437,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     } catch {
       // A check that cannot run is not worth failing a command that worked.
     }
+    await warnAboutVersion();
   };
+
+  // An older plat than the platform it talks to: /afk-setup fetches the platform's.
+  const warnAboutVersion = async () => {
+    try {
+      for (const warning of await versionWarnings(async () => {
+        const { data } = await api().GET("/version");
+        if (!data) throw new Error("no version");
+        return data;
+      }))
+        io.stderr(`${warning}\n`);
+    } catch {}
+  };
+
+  program
+    .command("version")
+    .description("print the platform version this plat comes from")
+    .action(() => {
+      io.stdout(`${PLATFORM_VERSION}\n`);
+    });
 
   program
     .command("init")
@@ -465,6 +490,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     )
     .action(async (options) => {
       const client = api();
+      await warnAboutVersion();
       const loadProject = async (projectId: number) => {
         const { data, response, error } = await client.GET(
           "/projects/{projectId}",
@@ -1336,3 +1362,5 @@ function slugify(title: string): string {
   }
   return slug;
 }
+
+export { renderTrackerDoc } from "./tracker-doc.ts";

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import type { HostKind } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
@@ -6,6 +5,7 @@ import {
   readSkillSnapshot,
   type SnapshotFile,
 } from "@afk/shared/skills-snapshot";
+import { readTemplateText } from "./template-text.ts";
 
 // The planning repo's docs/agents/issue-tracker.md, generated per project and repo from the templates under
 // packages/cli/templates/ and the seed template of the repo's code host in the skills snapshot. Pure: it prints, it
@@ -42,10 +42,7 @@ const HOSTS: Record<
 // A template's first line is the comment naming the skills SHA it was written for (a test holds it to the constant);
 // it is not part of the document.
 const template = (name: string): string => {
-  const text = readFileSync(
-    new URL(`../templates/${name}.md`, import.meta.url),
-    "utf8",
-  );
+  const text = readTemplateText(name);
   return text.slice(text.indexOf("\n") + 1);
 };
 

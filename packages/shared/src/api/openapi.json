@@ -1718,6 +1718,31 @@
         }
       }
     },
+    "/version": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "The platform's version and the mattpocock/skills commit it pins",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "platformVersion": {
+                      "type": "string"
+                    },
+                    "skillsSha": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["platformVersion", "skillsSha"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/claim": {
       "post": {
         "requestBody": {
