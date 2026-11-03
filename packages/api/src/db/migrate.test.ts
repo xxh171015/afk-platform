@@ -379,8 +379,7 @@ describe("the host kind of a repo", () => {
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
         (e: { tag: string }) =>
-          e.tag !== "0029_repo_host_kind" &&
-          e.tag !== "0030_planning_commit",
+          e.tag !== "0029_repo_host_kind" && e.tag !== "0030_planning_commit",
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);

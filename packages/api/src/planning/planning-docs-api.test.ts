@@ -54,6 +54,10 @@ async function draftSpec(
     (await ws.plat(backend.dir, ["init", "--with", frontend.dir, "--yes"]))
       .code,
   ).toBe(0);
+  // what plat init wrote reaches main through the afk/setup pull request
+  gitOrThrow(backend.dir, ["add", "-A"]);
+  gitOrThrow(backend.dir, ["commit", "-q", "-m", "Set up for the platform"]);
+  gitOrThrow(backend.dir, ["push", "-q", "origin", "HEAD:main"]);
   const outside = dirname(backend.dir);
   writeFileSync(join(outside, "spec.md"), SPEC_BODY);
   const created = await ws.plat(backend.dir, [

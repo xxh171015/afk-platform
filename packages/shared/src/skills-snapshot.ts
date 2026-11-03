@@ -11,6 +11,8 @@ export const SNAPSHOT_FILES = [
   "code-review/SKILL.md",
   "setup-matt-pocock-skills/issue-tracker-github.md",
   "setup-matt-pocock-skills/issue-tracker-gitlab.md",
+  "setup-matt-pocock-skills/domain.md",
+  "setup-matt-pocock-skills/triage-labels.md",
 ] as const;
 
 export type SnapshotFile = (typeof SNAPSHOT_FILES)[number];

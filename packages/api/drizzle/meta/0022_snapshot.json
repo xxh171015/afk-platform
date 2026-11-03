@@ -39,13 +39,9 @@
         "acceptance_packs_spec_id_specs_id_fk": {
           "name": "acceptance_packs_spec_id_specs_id_fk",
           "tableFrom": "acceptance_packs",
-          "columnsFrom": [
-            "spec_id"
-          ],
+          "columnsFrom": ["spec_id"],
           "tableTo": "specs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -54,9 +50,7 @@
       "uniqueConstraints": {
         "acceptance_packs_spec_id_unique": {
           "name": "acceptance_packs_spec_id_unique",
-          "columns": [
-            "spec_id"
-          ],
+          "columns": ["spec_id"],
           "nullsNotDistinct": false
         }
       },
@@ -114,26 +108,18 @@
         "edges_from_ticket_id_tickets_id_fk": {
           "name": "edges_from_ticket_id_tickets_id_fk",
           "tableFrom": "edges",
-          "columnsFrom": [
-            "from_ticket_id"
-          ],
+          "columnsFrom": ["from_ticket_id"],
           "tableTo": "tickets",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "edges_to_ticket_id_tickets_id_fk": {
           "name": "edges_to_ticket_id_tickets_id_fk",
           "tableFrom": "edges",
-          "columnsFrom": [
-            "to_ticket_id"
-          ],
+          "columnsFrom": ["to_ticket_id"],
           "tableTo": "tickets",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -142,11 +128,7 @@
       "uniqueConstraints": {
         "edges_from_to_kind_unique": {
           "name": "edges_from_to_kind_unique",
-          "columns": [
-            "from_ticket_id",
-            "to_ticket_id",
-            "kind"
-          ],
+          "columns": ["from_ticket_id", "to_ticket_id", "kind"],
           "nullsNotDistinct": false
         }
       },
@@ -225,26 +207,18 @@
         "finalizations_spec_id_specs_id_fk": {
           "name": "finalizations_spec_id_specs_id_fk",
           "tableFrom": "finalizations",
-          "columnsFrom": [
-            "spec_id"
-          ],
+          "columnsFrom": ["spec_id"],
           "tableTo": "specs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "finalizations_repo_id_repos_id_fk": {
           "name": "finalizations_repo_id_repos_id_fk",
           "tableFrom": "finalizations",
-          "columnsFrom": [
-            "repo_id"
-          ],
+          "columnsFrom": ["repo_id"],
           "tableTo": "repos",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -253,10 +227,7 @@
       "uniqueConstraints": {
         "finalizations_spec_repo_unique": {
           "name": "finalizations_spec_repo_unique",
-          "columns": [
-            "spec_id",
-            "repo_id"
-          ],
+          "columns": ["spec_id", "repo_id"],
           "nullsNotDistinct": false
         }
       },
@@ -341,13 +312,9 @@
         "findings_run_id_runs_id_fk": {
           "name": "findings_run_id_runs_id_fk",
           "tableFrom": "findings",
-          "columnsFrom": [
-            "run_id"
-          ],
+          "columnsFrom": ["run_id"],
           "tableTo": "runs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -435,13 +402,9 @@
         "gate_results_repo_id_repos_id_fk": {
           "name": "gate_results_repo_id_repos_id_fk",
           "tableFrom": "gate_results",
-          "columnsFrom": [
-            "repo_id"
-          ],
+          "columnsFrom": ["repo_id"],
           "tableTo": "repos",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -450,10 +413,7 @@
       "uniqueConstraints": {
         "gate_results_repo_commit_unique": {
           "name": "gate_results_repo_commit_unique",
-          "columns": [
-            "repo_id",
-            "commit_sha"
-          ],
+          "columns": ["repo_id", "commit_sha"],
           "nullsNotDistinct": false
         }
       },
@@ -633,9 +593,7 @@
       "uniqueConstraints": {
         "jobs_idempotency_key_unique": {
           "name": "jobs_idempotency_key_unique",
-          "columns": [
-            "idempotency_key"
-          ],
+          "columns": ["idempotency_key"],
           "nullsNotDistinct": false
         }
       },
@@ -823,26 +781,18 @@
         "pull_requests_spec_id_specs_id_fk": {
           "name": "pull_requests_spec_id_specs_id_fk",
           "tableFrom": "pull_requests",
-          "columnsFrom": [
-            "spec_id"
-          ],
+          "columnsFrom": ["spec_id"],
           "tableTo": "specs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "pull_requests_repo_id_repos_id_fk": {
           "name": "pull_requests_repo_id_repos_id_fk",
           "tableFrom": "pull_requests",
-          "columnsFrom": [
-            "repo_id"
-          ],
+          "columnsFrom": ["repo_id"],
           "tableTo": "repos",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -851,10 +801,7 @@
       "uniqueConstraints": {
         "pull_requests_spec_repo_unique": {
           "name": "pull_requests_spec_repo_unique",
-          "columns": [
-            "spec_id",
-            "repo_id"
-          ],
+          "columns": ["spec_id", "repo_id"],
           "nullsNotDistinct": false
         }
       },
@@ -939,13 +886,9 @@
         "repos_project_id_projects_id_fk": {
           "name": "repos_project_id_projects_id_fk",
           "tableFrom": "repos",
-          "columnsFrom": [
-            "project_id"
-          ],
+          "columnsFrom": ["project_id"],
           "tableTo": "projects",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -954,10 +897,7 @@
       "uniqueConstraints": {
         "repos_project_role_unique": {
           "name": "repos_project_role_unique",
-          "columns": [
-            "project_id",
-            "role"
-          ],
+          "columns": ["project_id", "role"],
           "nullsNotDistinct": false
         }
       },
@@ -1152,52 +1092,36 @@
         "runs_spec_id_specs_id_fk": {
           "name": "runs_spec_id_specs_id_fk",
           "tableFrom": "runs",
-          "columnsFrom": [
-            "spec_id"
-          ],
+          "columnsFrom": ["spec_id"],
           "tableTo": "specs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "runs_repo_id_repos_id_fk": {
           "name": "runs_repo_id_repos_id_fk",
           "tableFrom": "runs",
-          "columnsFrom": [
-            "repo_id"
-          ],
+          "columnsFrom": ["repo_id"],
           "tableTo": "repos",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "runs_ticket_id_tickets_id_fk": {
           "name": "runs_ticket_id_tickets_id_fk",
           "tableFrom": "runs",
-          "columnsFrom": [
-            "ticket_id"
-          ],
+          "columnsFrom": ["ticket_id"],
           "tableTo": "tickets",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "runs_job_id_jobs_id_fk": {
           "name": "runs_job_id_jobs_id_fk",
           "tableFrom": "runs",
-          "columnsFrom": [
-            "job_id"
-          ],
+          "columnsFrom": ["job_id"],
           "tableTo": "jobs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1206,9 +1130,7 @@
       "uniqueConstraints": {
         "runs_job_unique": {
           "name": "runs_job_unique",
-          "columns": [
-            "job_id"
-          ],
+          "columns": ["job_id"],
           "nullsNotDistinct": false
         }
       },
@@ -1332,26 +1254,18 @@
         "specs_project_id_projects_id_fk": {
           "name": "specs_project_id_projects_id_fk",
           "tableFrom": "specs",
-          "columnsFrom": [
-            "project_id"
-          ],
+          "columnsFrom": ["project_id"],
           "tableTo": "projects",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "specs_source_spec_id_specs_id_fk": {
           "name": "specs_source_spec_id_specs_id_fk",
           "tableFrom": "specs",
-          "columnsFrom": [
-            "source_spec_id"
-          ],
+          "columnsFrom": ["source_spec_id"],
           "tableTo": "specs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1360,10 +1274,7 @@
       "uniqueConstraints": {
         "specs_project_slug_unique": {
           "name": "specs_project_slug_unique",
-          "columns": [
-            "project_id",
-            "slug"
-          ],
+          "columns": ["project_id", "slug"],
           "nullsNotDistinct": false
         }
       },
@@ -1546,26 +1457,18 @@
         "tickets_spec_id_specs_id_fk": {
           "name": "tickets_spec_id_specs_id_fk",
           "tableFrom": "tickets",
-          "columnsFrom": [
-            "spec_id"
-          ],
+          "columnsFrom": ["spec_id"],
           "tableTo": "specs",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "tickets_repo_id_repos_id_fk": {
           "name": "tickets_repo_id_repos_id_fk",
           "tableFrom": "tickets",
-          "columnsFrom": [
-            "repo_id"
-          ],
+          "columnsFrom": ["repo_id"],
           "tableTo": "repos",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }

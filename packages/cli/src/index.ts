@@ -19,6 +19,7 @@ import {
   InvalidArgumentError,
   Option,
 } from "commander";
+import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
 import {
   hasRegistrations,
@@ -410,12 +411,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           );
           return;
         }
-        if (!registering && found) {
+        const agentDocs = planAgentDocs(planning.dir);
+        const agentDocsChange = agentDocs.some((d) => d.before !== d.after);
+        if (!registering && found && !agentDocsChange) {
           const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
           if (doc === before) {
             print(
               { project: found.id, registered: [], trackerDoc: "unchanged" },
-              "nothing to register and the tracker doc is up to date",
+              "nothing to register and the agent docs are up to date",
             );
             return;
           }
@@ -427,8 +430,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             );
           }
           const question = registering
-            ? "Register and write the tracker doc?"
-            : "Write the tracker doc?";
+            ? "Register and write the agent docs?"
+            : "Write the agent docs?";
           if (!(await io.confirm(question))) {
             print({ cancelled: true }, "nothing done");
             return;
@@ -485,20 +488,42 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           mkdirSync(dirname(docPath), { recursive: true });
           writeFileSync(docPath, doc);
         }
+        const written = state === "unchanged" ? [] : [TRACKER_DOC_PATH];
+        const docStates: Record<string, string> = {};
+        for (const agentDoc of agentDocs) {
+          const docState =
+            agentDoc.before === null
+              ? "new"
+              : agentDoc.before === agentDoc.after
+                ? "unchanged"
+                : "updated";
+          docStates[agentDoc.path] = docState;
+          if (docState === "unchanged") continue;
+          const target = join(planning.dir, agentDoc.path);
+          mkdirSync(dirname(target), { recursive: true });
+          writeFileSync(target, agentDoc.after);
+          written.push(agentDoc.path);
+        }
         const lines = [
           `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
           ...(registered.length > 0
             ? [`registered: ${registered.join(", ")}`]
             : []),
           `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
-          ...(state === "unchanged"
+          ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
+          ...(written.length === 0
             ? []
             : [
-                `next, in ${planning.dir}: git add ${TRACKER_DOC_PATH} && git commit -m "Generate the tracker doc with plat init" && git push`,
+                `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
               ]),
         ];
         print(
-          { project: projectId, registered, trackerDoc: state },
+          {
+            project: projectId,
+            registered,
+            trackerDoc: state,
+            agentDocs: docStates,
+          },
           lines.join("\n"),
         );
       } catch (e) {
