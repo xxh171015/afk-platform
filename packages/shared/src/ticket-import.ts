@@ -231,7 +231,7 @@ export function planImport(
     const where = `ticket ${ticket.key}`;
     if (!repos.has(ticket.repo)) {
       errors.push(
-        `${where}: repo ${ticket.repo} does not belong to the project`,
+        `${where}: repo ${ticket.repo} does not belong to the project (its repos: ${[...repos.keys()].join(", ")}); if it is another repo, register it: plat init --with <path to ${ticket.repo}>`,
       );
     }
     for (const key of ticket.blocked_by)

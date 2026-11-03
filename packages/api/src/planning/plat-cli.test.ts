@@ -344,6 +344,20 @@ describe("plat", () => {
     ).toBe(3);
   });
 
+  it("names the registered repos and how to register one when a ticket's repo is not in the project", async () => {
+    await register();
+    putTickets("tickets", [
+      { ...(TICKETS[3] as TestTicket), repo: "web", contract: undefined },
+    ]);
+
+    const imported = await plat("tickets", "import", "S-1", "tickets");
+
+    expect(imported.code).not.toBe(0);
+    expect(imported.stderr).toContain(
+      "repo web does not belong to the project (its repos: backend, frontend); if it is another repo, register it: plat init --with <path to web>",
+    );
+  });
+
   it("confirms the split and says what was queued", async () => {
     await register();
     putTickets("tickets", TICKETS);
