@@ -17,8 +17,8 @@ const DOC_PATH = "docs/agents/issue-tracker.md";
 const SKILLS_DIRS = [".claude/skills", ".cursor/skills", ".agents/skills"];
 const PLANNING_SKILLS = ["to-spec", "to-tickets"] as const;
 
-const updateCommand = (project: number | string, repo: string) =>
-  `plat tracker-doc --project ${project} --repo ${repo} > ${DOC_PATH}`;
+// Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup).
+const SETUP = "in Cursor, run /afk-setup";
 
 /**
  * Warnings about the planning repo's tracker doc: it is compared whole with what `plat tracker-doc` prints now, so a
@@ -35,13 +35,13 @@ export async function trackerDocWarnings(
     doc = await readFile(DOC_PATH);
   } catch {
     return [
-      `warning: ${DOC_PATH} does not exist; skills will not know how to use the platform. Generate it: ${updateCommand(project ?? "<id>", "<name>")}`,
+      `warning: this repo is not set up for the platform (no ${DOC_PATH}): ${SETUP}`,
     ];
   }
   const target = trackerDocTarget(doc);
   if (!target) {
     return [
-      `warning: ${DOC_PATH} has no version line naming its project and repo (it was not made by this version of plat tracker-doc). Replace it: ${updateCommand(project ?? "<id>", "<name>")}`,
+      `warning: ${DOC_PATH} has no version line naming its project and repo (the platform did not write it): ${SETUP} to replace it`,
     ];
   }
   const projectId = project ?? target.project;
@@ -50,13 +50,13 @@ export async function trackerDocWarnings(
     current = renderTrackerDoc(await loadProject(projectId), target.repo);
   } catch {
     return [
-      `warning: could not compare ${DOC_PATH} with what plat tracker-doc prints for project ${projectId} (is the platform reachable?); regenerate it if unsure: ${updateCommand(projectId, target.repo)}`,
+      `warning: could not compare ${DOC_PATH} with what the platform generates for project ${projectId} (is the platform reachable?); if unsure, ${SETUP} again`,
     ];
   }
   return current === doc
     ? []
     : [
-        `warning: ${DOC_PATH} is out of date (the template, the project settings or the file itself changed). Regenerate it and commit: ${updateCommand(projectId, target.repo)}`,
+        `warning: ${DOC_PATH} is out of date (the template, the project settings or the file itself changed): ${SETUP} again`,
       ];
 }
 

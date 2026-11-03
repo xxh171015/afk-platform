@@ -192,6 +192,27 @@ describe("plat init", () => {
     );
   });
 
+  it("with --dry-run shows the plan without asking, registers and writes nothing, and succeeds", async () => {
+    const backend = checkout("backend", "https://github.com/acme/backend.git", {
+      "AGENTS.md": "# agents\n",
+    });
+
+    const result = await plat(backend.dir, ["init", "--dry-run"], "nobody");
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.questions).toEqual([]);
+    expect(result.stdout).toContain("project: new, backend");
+    expect(result.stdout).toContain(
+      "readiness: missing .sandcastle/gates.yaml, .sandcastle/Dockerfile",
+    );
+    expect(result.stdout).toContain("dry run: nothing registered or written");
+    expect((await project(1)).status).toBe(404);
+    expect(existsSync(join(backend.dir, "docs/agents/issue-tracker.md"))).toBe(
+      false,
+    );
+  });
+
   it("does not register without a yes when nobody can answer", async () => {
     const backend = checkout("backend", "https://github.com/acme/backend.git");
     const result = await plat(backend.dir, ["init"], "nobody");

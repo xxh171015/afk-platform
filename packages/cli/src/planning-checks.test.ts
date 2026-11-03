@@ -35,7 +35,7 @@ describe("trackerDocWarnings", () => {
     );
   });
 
-  it("warns, and prints the exact update command, when the document differs in any way", async () => {
+  it("warns, and points at /afk-setup, when the document differs in any way", async () => {
     const warnings = await trackerDocWarnings(
       docs(`${current}\nhand edited\n`),
       load,
@@ -43,15 +43,13 @@ describe("trackerDocWarnings", () => {
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("out of date");
-    expect(warnings[0]).toContain(
-      "plat tracker-doc --project 3 --repo backend > docs/agents/issue-tracker.md",
-    );
+    expect(warnings[0]).toContain("run /afk-setup again");
   });
 
-  it("warns when the document does not exist, with the project it was asked about", async () => {
+  it("warns that the repo is not set up when the document does not exist", async () => {
     const warnings = await trackerDocWarnings(files({}), load, 3);
     expect(warnings[0]).toContain("docs/agents/issue-tracker.md");
-    expect(warnings[0]).toContain("plat tracker-doc --project 3 --repo <name>");
+    expect(warnings[0]).toContain("run /afk-setup");
   });
 
   it("warns when the document has no version line to regenerate it from", async () => {
@@ -60,7 +58,7 @@ describe("trackerDocWarnings", () => {
       load,
       3,
     );
-    expect(warnings[0]).toContain("plat tracker-doc --project 3 --repo <name>");
+    expect(warnings[0]).toContain("run /afk-setup to replace it");
   });
 
   it("warns that it could not compare when the project cannot be read", async () => {

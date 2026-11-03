@@ -342,6 +342,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "this repo's contract file, when it is new here (default: its only openapi file)",
     )
     .option("-y, --yes", "do not ask before registering")
+    .option(
+      "--dry-run",
+      "only show the plan and what each repo lacks; register and write nothing",
+    )
     .action(async (options) => {
       const client = api();
       const loadProject = async (projectId: number) => {
@@ -399,6 +403,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         if (!json()) io.stdout(`${planText(plan)}\n`);
 
         const registering = hasRegistrations(plan);
+        if (options.dryRun) {
+          print(
+            { dryRun: true, plan: planText(plan) },
+            "dry run: nothing registered or written",
+          );
+          return;
+        }
         if (!registering && found) {
           const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
           if (doc === before) {
@@ -598,11 +609,15 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         );
       }
       for (const check of view.data.spec.prechecks) {
-        if (
-          docs.status === "ok" &&
-          check.code === "page-confirm-without-planning-docs"
-        )
-          continue;
+        if (check.code === "page-confirm-without-planning-docs") {
+          if (docs.status === "ok") continue;
+          if (docs.status === "elsewhere" && docs.checkout) {
+            io.stderr(
+              `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, in Cursor, run /afk-setup with it in the workspace\n`,
+            );
+            continue;
+          }
+        }
         io.stderr(`yellow: ${check.message}\n`);
       }
       const { data, response, error } = await api().POST(
