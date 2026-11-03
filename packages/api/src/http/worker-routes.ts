@@ -47,6 +47,10 @@ import {
   readPlanningPayload,
   recordPlanningResult,
 } from "../planning/planning-commit.ts";
+import {
+  readinessGateTask,
+  readReadinessGatePayload,
+} from "../planning/readiness-gate.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { recordJobFailure } from "../stages/failures.ts";
@@ -344,6 +348,44 @@ const hostTaskRoute = createRoute({
   },
 });
 
+const readinessTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/readiness-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What a readiness-gate job has to do: run the repo's gate on the branch, with that branch's gates.yaml (plat repo check)",
+      content: {
+        "application/json": {
+          schema: z.object({
+            repo: z.object({
+              name: z.string(),
+              url: z.string(),
+              defaultBranch: z.string(),
+            }),
+            branch: z.string(),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "No such job, or not a readiness-gate job",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const planningTaskRoute = createRoute({
   method: "get",
   path: "/worker/jobs/{id}/planning-task",
@@ -631,6 +673,30 @@ export function registerWorkerRoutes(
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)
       return c.json({ error: "this job is not for the code host" }, 404);
+    return c.json(task, 200);
+  });
+
+  app.openapi(readinessTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const payload = job.rows[0] && readReadinessGatePayload(job.rows[0]);
+    const task = payload && (await readinessGateTask(context.pool, payload));
+    if (!task)
+      return c.json({ error: "this job is not a readiness gate" }, 404);
     return c.json(task, 200);
   });
 

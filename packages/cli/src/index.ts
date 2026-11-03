@@ -330,6 +330,87 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `repo ${data.id} ${data.name} updated`);
     });
 
+  repoCommands
+    .command("check <name>")
+    .description(
+      "have the platform run the repo's gate on a pushed branch, in its own sandbox, with that branch's .sandcastle/gates.yaml; waits for the answer",
+    )
+    .option("--branch <branch>", "the pushed branch to gate", "afk/setup")
+    .option(
+      "--project <id>",
+      "the project (default: the one this checkout's tracker doc names)",
+      toInt,
+    )
+    .action(async (name: string, options) => {
+      let projectId: number | undefined = options.project;
+      if (projectId === undefined) {
+        const target = await io
+          .readFile(TRACKER_DOC_PATH)
+          .then(trackerDocTarget)
+          .catch(() => null);
+        projectId = target?.project;
+      }
+      if (projectId === undefined)
+        throw new Failure(
+          "which project? run this in the planning repo (its tracker doc names the project), or give --project",
+        );
+      const client = api();
+      const queued = await client.POST(
+        "/projects/{projectId}/repos/{name}/gate-check",
+        {
+          params: { path: { projectId, name } },
+          body: { branch: options.branch },
+        },
+      );
+      if (!queued.data) throw failureFrom(queued.response, queued.error);
+      const pollMs = Number(io.env.AFK_POLL_SECONDS ?? 3) * 1000;
+      const deadline = Date.now() + 60 * 60 * 1000;
+      for (;;) {
+        const { data, response, error } = await client.GET(
+          "/projects/{projectId}/repos/{name}/gate-checks/{id}",
+          { params: { path: { projectId, name, id: queued.data.id } } },
+        );
+        if (!data) throw failureFrom(response, error);
+        const label = `${name} ${data.branch}`;
+        if (data.state === "failed")
+          throw new Failure(
+            `${label}: the check could not run: ${data.error ?? "unknown error"}`,
+          );
+        if (data.state === "done") {
+          const result = data.result;
+          if (!result)
+            throw new Failure(
+              `${label}: the worker's answer was not understood`,
+            );
+          if (result.pass) {
+            print(
+              data,
+              `${label}: the gate passed in the platform's sandbox (${result.steps.join(", ")}${result.tests === undefined ? "" : `; ${result.tests} tests`})`,
+            );
+            return;
+          }
+          print(
+            data,
+            [
+              `${label}: the gate failed: ${result.reasons.join("; ")}`,
+              ...(result.log
+                ? [
+                    `--- the end of ${result.failedStep ?? "its"} output ---`,
+                    result.log,
+                  ]
+                : []),
+            ].join("\n"),
+          );
+          throw new Failure("the gate failed");
+        }
+        if (Date.now() > deadline)
+          throw new Failure(
+            `${label}: no answer after an hour (is a worker running?)`,
+          );
+        await new Promise((done) => setTimeout(done, pollMs));
+      }
+    });
+
   // The warnings `spec create` and `tickets import` print about this planning machine; they never change the exit code.
   const warnAboutPlanningMachine = async (project?: number) => {
     try {

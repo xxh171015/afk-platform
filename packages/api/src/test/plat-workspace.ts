@@ -90,7 +90,11 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
           stderr += text;
         },
         // plat init does not wait for a worker to check the GitHub App
-        env: { AFK_API_URL: api.url, AFK_ACCESS_WAIT_SECONDS: "0" },
+        env: {
+          AFK_API_URL: api.url,
+          AFK_ACCESS_WAIT_SECONDS: "0",
+          AFK_POLL_SECONDS: "0.05",
+        },
         readFile: async (path) => readFileSync(join(cwd, path), "utf8"),
         readDirectory: async (path) =>
           readdirSync(join(cwd, path), { withFileTypes: true })

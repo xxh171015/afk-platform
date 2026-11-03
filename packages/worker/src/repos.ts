@@ -84,6 +84,28 @@ export class RepoStore {
     }
   }
 
+  // One branch that ensure() does not follow (afk/setup, for `plat repo check`); false when origin has no such branch.
+  fetchBranch(dir: string, url: string, branch: string): boolean {
+    const found = this.run(
+      dir,
+      ["ls-remote", "--heads", "origin", `refs/heads/${branch}`],
+      url,
+    );
+    if (found.trim() === "") return false;
+    this.run(
+      dir,
+      [
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "origin",
+        `+refs/heads/${branch}:refs/heads/${branch}`,
+      ],
+      url,
+    );
+    return true;
+  }
+
   has(dir: string, ref: string): boolean {
     return hasRef(dir, ref);
   }
