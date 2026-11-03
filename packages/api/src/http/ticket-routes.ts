@@ -1,5 +1,6 @@
 import {
   HOST_KINDS,
+  PLANNING_STATES,
   REVIEW_AXES,
   SPEC_STATES,
   TICKET_STATES,
@@ -267,6 +268,13 @@ const specRoute = createRoute({
           warnings: z.array(z.unknown()),
           planningSha: z.string().nullable(),
           planningRepo: z.string().nullable(),
+          // the planning commit (ADR 0005): repo is the spec's planning repo, null when it was not made in one
+          planning: z.object({
+            repo: z.string().nullable(),
+            state: z.enum(PLANNING_STATES).nullable(),
+            sha: z.string().nullable(),
+            conflict: z.array(z.string()),
+          }),
           prechecks: z.array(
             z.object({
               code: z.string(),
@@ -409,6 +417,16 @@ const BlockedQueue = z.object({
       number: z.number().int(),
       url: z.string(),
       error: z.string(),
+    }),
+  ),
+  // planning docs that did not apply (ADR 0005): a person retries or waives them
+  planning: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      title: z.string(),
+      repo: z.string(),
+      files: z.array(z.string()),
     }),
   ),
   specs: z.array(

@@ -6,6 +6,7 @@ import {
   type ApiClient,
   createApiClient,
   HOST_KINDS,
+  MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
 } from "@afk/shared";
 import {
@@ -29,7 +30,7 @@ import {
   TRACKER_DOC_PATH,
 } from "./init.ts";
 import { skillsWarnings, trackerDocWarnings } from "./planning-checks.ts";
-import { inspectPlanningCommit } from "./planning-commit.ts";
+import { readPlanningDocs } from "./planning-docs.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -532,6 +533,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const body = options.file
         ? normalizeSpecBody(await io.readFile(options.file))
         : undefined;
+      // Run in the planning repo, its tracker doc names it: the spec's planning docs live there (ADR 0005).
+      const target = await io
+        .readFile(TRACKER_DOC_PATH)
+        .then(trackerDocTarget)
+        .catch(() => null);
+      const planningRepo =
+        target && target.project === options.project ? target.repo : undefined;
       const { data, response, error } = await api().POST("/specs", {
         body: {
           projectId: options.project,
@@ -539,6 +547,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           slug,
           title: options.title,
           body,
+          planningRepo,
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -553,61 +562,72 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("confirm <spec>")
     .description(
-      "confirm the split: the spec runs and ready tickets are queued",
+      "confirm the split: the spec runs. Run in the spec's planning repo, it also sends the planning docs (GLOSSARY.md, docs/adr, AGENTS.md) as they are, committed or not, for the platform to commit before any ticket starts",
     )
-    .option(
-      "--force",
-      "confirm even if GLOSSARY.md, docs/adr or AGENTS.md still have uncommitted changes",
-    )
-    .action(async (id: string, options: { force?: boolean }) => {
+    .action(async (id: string) => {
       const specId = specIdOf(id);
       const view = await api().GET("/specs/{id}", {
         params: { path: { id: specId } },
       });
       if (!view.data) throw failureFrom(view.response, view.error);
-      const project = await api().GET("/projects/{projectId}", {
-        params: { path: { projectId: view.data.spec.projectId } },
-      });
-      const inspected = project.data
-        ? inspectPlanningCommit(io.cwd ?? process.cwd(), project.data.repos)
-        : ({ status: "skip" } as const);
-      const dirty =
-        inspected.status === "ok" || inspected.status === "reject"
-          ? inspected.dirty
-          : false;
-      const planning =
-        inspected.status === "ok" ||
-        (options.force === true &&
-          inspected.status === "reject" &&
-          inspected.reason === "dirty")
-          ? {
-              planningSha: inspected.sha,
-              planningRepo: inspected.repoName,
-            }
-          : undefined;
-      if (inspected.status === "reject" && planning === undefined) {
-        for (const line of yellowLines(view.data.spec.prechecks, dirty, false))
-          io.stderr(`${line}\n`);
-        throw new Failure(inspected.message);
+      const planningRepo = view.data.spec.planning.repo;
+      let docs: ReturnType<typeof readPlanningDocs> = { status: "elsewhere" };
+      if (planningRepo !== null) {
+        const project = await api().GET("/projects/{projectId}", {
+          params: { path: { projectId: view.data.spec.projectId } },
+        });
+        if (project.data) {
+          docs = readPlanningDocs(
+            io.cwd ?? process.cwd(),
+            project.data.repos,
+            planningRepo,
+          );
+        }
       }
-      for (const line of yellowLines(
-        view.data.spec.prechecks,
-        dirty,
-        planning !== undefined,
-      ))
-        io.stderr(`${line}\n`);
+      if (docs.status === "other-repo") {
+        throw new Failure(
+          `${id}'s planning docs are in ${planningRepo}, not ${docs.repo}: run plat spec confirm in a checkout of ${planningRepo}`,
+        );
+      }
+      if (
+        docs.status === "ok" &&
+        Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
+      ) {
+        throw new Failure(
+          `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only GLOSSARY.md, docs/adr and AGENTS.md belong in it`,
+        );
+      }
+      for (const check of view.data.spec.prechecks) {
+        if (
+          docs.status === "ok" &&
+          check.code === "page-confirm-without-planning-docs"
+        )
+          continue;
+        io.stderr(`yellow: ${check.message}\n`);
+      }
       const { data, response, error } = await api().POST(
         "/specs/{specId}/confirm",
         {
           params: { path: { specId } },
-          ...(planning ? { body: planning } : {}),
+          ...(docs.status === "ok"
+            ? { body: { planningPatch: docs.patch } }
+            : {}),
         },
       );
       if (!data) throw failureFrom(response, error);
+      const branch = data.integrationBranches[0]?.branch ?? "";
       const lines = [
         `${id} is ${data.state}`,
-        ...(data.planningSha
-          ? [`  planning ${data.planningSha} (${data.planningRepo})`]
+        ...(docs.status === "ok" && docs.files.length > 0
+          ? [
+              `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
+              `  your copies here can be put aside: git stash push --include-untracked -- ${docs.files.join(" ")}`,
+            ]
+          : []),
+        ...(data.planningState
+          ? [
+              `  planning commit: ${data.planningState} (no ticket starts before it is made)`,
+            ]
           : []),
         ...data.integrationBranches.map(
           (b) => `  repo ${b.repoId}: ${b.branch}`,
@@ -673,6 +693,67 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       });
       if (!data) throw failureFrom(response, error);
       print(data, specText(data));
+    });
+
+  // Planning docs that did not apply to the planning repo's default branch (ADR 0005).
+  spec
+    .command("retry-planning <spec>")
+    .description(
+      "in the spec's planning repo, after merging its default branch into the planning docs by hand: send them again and make the planning commit again",
+    )
+    .action(async (id: string) => {
+      const specId = specIdOf(id);
+      const view = await api().GET("/specs/{id}", {
+        params: { path: { id: specId } },
+      });
+      if (!view.data) throw failureFrom(view.response, view.error);
+      const planningRepo = view.data.spec.planning.repo;
+      if (view.data.spec.planning.state !== "blocked" || planningRepo === null)
+        throw new Failure(`${id}'s planning docs are not blocked`);
+      const project = await api().GET("/projects/{projectId}", {
+        params: { path: { projectId: view.data.spec.projectId } },
+      });
+      if (!project.data) throw failureFrom(project.response, project.error);
+      const docs = readPlanningDocs(
+        io.cwd ?? process.cwd(),
+        project.data.repos,
+        planningRepo,
+      );
+      if (docs.status !== "ok") {
+        throw new Failure(
+          `run plat spec retry-planning in a checkout of ${planningRepo}, where ${id}'s planning docs are`,
+        );
+      }
+      const { data, response, error } = await api().POST(
+        "/specs/{specId}/planning/retry",
+        {
+          params: { path: { specId } },
+          body: { planningPatch: docs.patch },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `${id}: planning docs ${docs.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
+      );
+    });
+
+  spec
+    .command("waive-planning <spec>")
+    .description(
+      "give up the planning docs that did not apply: the planning commit is the default branch's head, the tickets start, and the acceptance pack says the docs were left out",
+    )
+    .action(async (id: string) => {
+      const specId = specIdOf(id);
+      const { data, response, error } = await api().POST(
+        "/specs/{specId}/planning/waive",
+        { params: { path: { specId } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `${id}: planning docs given up; the planning commit is queued as the default branch's head`,
+      );
     });
 
   spec
@@ -981,21 +1062,6 @@ function ticketIdOf(text: string): number {
     throw new Failure(`${text} is not a ticket id like T-123`);
   }
   return parsed.id;
-}
-
-function yellowLines(
-  prechecks: { code: string; message: string }[],
-  dirty: boolean,
-  recordingPlanning: boolean,
-): string[] {
-  return [
-    ...prechecks
-      .filter(
-        (p) => !(recordingPlanning && p.code === "missing-planning-commit"),
-      )
-      .map((p) => `yellow: ${p.message}`),
-    ...(dirty ? ["yellow: 规划仓库工作区相对规划提交不干净"] : []),
-  ];
 }
 
 function specIdOf(text: string): number {

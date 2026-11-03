@@ -158,6 +158,15 @@ export const AcceptancePack = z.object({
   cancelledTickets: z.array(
     z.object({ displayId: z.string(), title: z.string(), repo: z.string() }),
   ),
+  // the planning docs of the spec (ADR 0005), read live: committed onto the planning repo's integration branch,
+  // none to commit, or given up by a person; null for a spec without a planning repo
+  planningDocs: z
+    .object({
+      repo: z.string(),
+      state: z.enum(["committed", "unchanged", "waived"]),
+    })
+    .nullable()
+    .optional(),
   agentSeconds: z.number().int(),
 });
 export type AcceptancePack = z.infer<typeof AcceptancePack>;
@@ -582,13 +591,35 @@ async function withLiveFacts(
   const pulls = await pullRequestRows(pool, specId);
   const spec = await pool.query<{
     order_broken: { repo: string; skipped: string[] }[];
-  }>("SELECT order_broken FROM specs WHERE id = $1", [specId]);
+    planning_state: string | null;
+    planning_docs_committed: boolean;
+    planning_repo: string | null;
+  }>(
+    `SELECT s.order_broken, s.planning_state, s.planning_docs_committed, r.name AS planning_repo
+     FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
+    [specId],
+  );
+  const planning = spec.rows[0];
   const rank = (repo: string) =>
     pulls.find((p) => p.repo === repo)?.order ?? Number.MAX_SAFE_INTEGER;
   return {
     ...pack,
     mergeOrder: await mergeOrderOf(pool, specId),
-    orderBroken: spec.rows[0]?.order_broken ?? [],
+    orderBroken: planning?.order_broken ?? [],
+    planningDocs:
+      planning?.planning_repo &&
+      (planning.planning_state === "done" ||
+        planning.planning_state === "waived")
+        ? {
+            repo: planning.planning_repo,
+            state:
+              planning.planning_state === "waived"
+                ? "waived"
+                : planning.planning_docs_committed
+                  ? "committed"
+                  : "unchanged",
+          }
+        : null,
     repos: pack.repos
       .map((section) => ({
         ...section,

@@ -41,7 +41,14 @@ export {
   runE2e,
 } from "./e2e.ts";
 export type { ExecAsyncOptions, ExecOptions, ExecResult } from "./exec.ts";
-export { exec, execAsync, git, gitOrThrow, gitOut } from "./exec.ts";
+export {
+  AUTHOR,
+  exec,
+  execAsync,
+  git,
+  gitOrThrow,
+  gitOut,
+} from "./exec.ts";
 export type {
   GateConfig,
   GateOutcome,

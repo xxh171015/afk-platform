@@ -417,6 +417,7 @@ export interface paths {
             slug: string;
             title: string;
             body?: string;
+            planningRepo?: string;
           };
         };
       };
@@ -446,6 +447,17 @@ export interface paths {
         };
         /** @description The project already has a spec with this slug */
         409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The project has no repo of that name */
+        422: {
           headers: {
             [name: string]: unknown;
           };
@@ -560,6 +572,147 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/specs/{specId}/planning/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          specId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            planningPatch: string;
+          };
+        };
+      };
+      responses: {
+        /** @description The planning docs are sent again and the planning commit is queued */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The planning docs are not blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The patch is too large */
+        422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{specId}/planning/waive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          specId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The planning docs are given up; the planning commit is queued as the default branch's head */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The planning docs are not blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs/{specId}/confirm": {
     parameters: {
       query?: never;
@@ -581,8 +734,7 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
-            planningSha?: string;
-            planningRepo?: string;
+            planningPatch?: string;
           };
         };
       };
@@ -615,8 +767,9 @@ export interface paths {
                 displayId: string;
                 jobId: number;
               }[];
-              planningSha: string | null;
               planningRepo: string | null;
+              /** @enum {string|null} */
+              planningState: "pending" | "done" | "blocked" | "waived" | null;
             };
           };
         };
@@ -1151,6 +1304,82 @@ export interface paths {
           };
         };
         /** @description No such job, or not a job for the code host */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/worker/jobs/{id}/planning-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What a planning-commit job has to do: commit the planning docs patch onto the planning repo's integration branch, or, without one, read the default branch's head (ADR 0005) */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              spec: {
+                id: number;
+                displayId: string;
+                title: string;
+              };
+              repo: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+              };
+              integrationBranch: string;
+              patch: string | null;
+              message: string;
+            };
+          };
+        };
+        /** @description No such job, or not a planning-commit job */
         404: {
           headers: {
             [name: string]: unknown;
@@ -1814,6 +2043,13 @@ export interface paths {
                 warnings: unknown[];
                 planningSha: string | null;
                 planningRepo: string | null;
+                planning: {
+                  repo: string | null;
+                  /** @enum {string|null} */
+                  state: "pending" | "done" | "blocked" | "waived" | null;
+                  sha: string | null;
+                  conflict: string[];
+                };
                 prechecks: {
                   code: string;
                   /** @enum {string} */
@@ -2091,6 +2327,11 @@ export interface paths {
                   title: string;
                   repo: string;
                 }[];
+                planningDocs?: {
+                  repo: string;
+                  /** @enum {string} */
+                  state: "committed" | "unchanged" | "waived";
+                } | null;
                 agentSeconds: number;
               } | null;
               edges: {
@@ -2390,6 +2631,13 @@ export interface paths {
                 url: string;
                 error: string;
               }[];
+              planning: {
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                repo: string;
+                files: string[];
+              }[];
               specs: {
                 id: number;
                 displayId: string;
@@ -2575,6 +2823,13 @@ export interface paths {
                   number: number;
                   url: string;
                   error: string;
+                }[];
+                planning: {
+                  specId: number;
+                  specDisplayId: string;
+                  title: string;
+                  repo: string;
+                  files: string[];
                 }[];
                 specs: {
                   id: number;

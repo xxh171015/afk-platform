@@ -2,6 +2,8 @@ import {
   HOST_KINDS,
   type HostKind,
   LimitOverridesSchema,
+  MAX_PLANNING_PATCH_BYTES,
+  PLANNING_STATES,
   SPEC_STATES,
   SPEC_TYPES,
   tryParseRepoUrl,
@@ -17,6 +19,7 @@ import {
   editRepo,
   importTickets,
 } from "../planning/planning.ts";
+import { actOnBlockedPlanning } from "../planning/planning-commit.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
@@ -212,6 +215,8 @@ const specRoute = createRoute({
             .max(100),
           title: Text,
           body: z.string().max(1_000_000).optional(),
+          // the repo the spec is made in, which holds its planning docs (ADR 0005)
+          planningRepo: Text.optional(),
         }),
       ),
     },
@@ -220,6 +225,7 @@ const specRoute = createRoute({
     201: reply("Created", z.object({ id: Id, displayId: z.string() })),
     404: reply("No such project", ErrorReply),
     409: reply("The project already has a spec with this slug", ErrorReply),
+    422: reply("The project has no repo of that name", ErrorReply),
   },
 });
 
@@ -279,16 +285,57 @@ const importRoute = createRoute({
   },
 });
 
-const PlanningSha = z
-  .string()
-  .regex(/^[0-9a-f]{40}$/, "must be a 40-character lowercase hex git SHA");
-
 const ConfirmBody = z
   .object({
-    planningSha: PlanningSha.optional(),
-    planningRepo: z.string().min(1).max(200).optional(),
+    // the planning docs patch from the planning repo ("" when nothing changed); ADR 0005
+    planningPatch: z
+      .string()
+      .max(MAX_PLANNING_PATCH_BYTES * 2)
+      .optional(),
   })
   .strict();
+
+const planningRetryRoute = createRoute({
+  method: "post",
+  path: "/specs/{specId}/planning/retry",
+  request: {
+    params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    body: {
+      content: json(
+        z
+          .object({
+            planningPatch: z.string().max(MAX_PLANNING_PATCH_BYTES * 2),
+          })
+          .strict(),
+      ),
+    },
+  },
+  responses: {
+    200: reply(
+      "The planning docs are sent again and the planning commit is queued",
+      z.object({ ok: z.literal(true) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The planning docs are not blocked", ErrorReply),
+    422: reply("The patch is too large", ErrorReply),
+  },
+});
+
+const planningWaiveRoute = createRoute({
+  method: "post",
+  path: "/specs/{specId}/planning/waive",
+  request: {
+    params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+  },
+  responses: {
+    200: reply(
+      "The planning docs are given up; the planning commit is queued as the default branch's head",
+      z.object({ ok: z.literal(true) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The planning docs are not blocked", ErrorReply),
+  },
+});
 
 const confirmRoute = createRoute({
   method: "post",
@@ -311,8 +358,8 @@ const confirmRoute = createRoute({
         enqueued: z.array(
           z.object({ ticketId: Id, displayId: z.string(), jobId: Id }),
         ),
-        planningSha: PlanningSha.nullable(),
         planningRepo: z.string().nullable(),
+        planningState: z.enum(PLANNING_STATES).nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -440,6 +487,9 @@ export function registerPlanningRoutes(
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);
     }
+    if (result.status === "no-repo") {
+      return c.json({ error: result.message }, 422);
+    }
     if (result.status === "slug-taken") {
       return c.json(
         { error: "the project already has a spec with this slug" },
@@ -472,21 +522,51 @@ export function registerPlanningRoutes(
     }
   });
 
+  const planningAction = async (
+    specId: number,
+    action: Parameters<typeof actOnBlockedPlanning>[2],
+  ) =>
+    aroundSpec(context, specId, () =>
+      actOnBlockedPlanning(pool, specId, action),
+    );
+
+  app.openapi(planningRetryRoute, async (c) => {
+    const { specId } = c.req.valid("param");
+    const result = await planningAction(specId, {
+      kind: "retry",
+      patch: c.req.valid("json").planningPatch,
+    });
+    if (result.status === "no-spec")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "not-blocked")
+      return c.json({ error: result.message }, 409);
+    if (result.status === "invalid")
+      return c.json({ error: result.message }, 422);
+    return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(planningWaiveRoute, async (c) => {
+    const { specId } = c.req.valid("param");
+    const result = await planningAction(specId, { kind: "waive" });
+    if (result.status === "no-spec")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status !== "ok")
+      return c.json({ error: (result as { message: string }).message }, 409);
+    return c.json({ ok: true as const }, 200);
+  });
+
   app.openapi(confirmRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    let body: { planningSha?: string; planningRepo?: string } = {};
+    let body: { planningPatch?: string } = {};
     try {
       body = c.req.valid("json") ?? {};
     } catch {
       body = {};
     }
     const planning =
-      body.planningSha || body.planningRepo
-        ? {
-            sha: body.planningSha as string,
-            repoName: body.planningRepo as string,
-          }
-        : undefined;
+      body.planningPatch === undefined
+        ? undefined
+        : { patch: body.planningPatch };
     const result = await aroundSpec(context, specId, () =>
       confirmSpec(pool, specId, planning),
     );
@@ -503,8 +583,8 @@ export function registerPlanningRoutes(
         state: result.state,
         integrationBranches: result.integrationBranches,
         enqueued: result.enqueued,
-        planningSha: result.planningSha,
         planningRepo: result.planningRepo,
+        planningState: result.planningState,
       },
       200,
     );

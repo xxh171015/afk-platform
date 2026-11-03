@@ -236,6 +236,14 @@ export function Workbench() {
                     title={`${item.repo} #${item.number} 未能转 ready`}
                   />
                 ))}
+                {(data.waiting.planning ?? []).map((item) => (
+                  <ItemLink
+                    key={`planning-${item.specId}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title="规划文档未能提交"
+                  />
+                ))}
                 {data.waiting.specs.map((spec) => (
                   <ItemLink
                     key={`s-${spec.id}`}

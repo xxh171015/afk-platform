@@ -117,9 +117,22 @@ export const specs = pgTable(
     pauseReason: text("pause_reason"),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
-    // The planning commit (GLOSSARY / ADR / AGENTS.md) this spec's planning-repo integration branch starts from.
-    planningSha: text("planning_sha"),
+    // The planning repo, named when the spec was created there (`plat spec create` reads it from the tracker doc).
     planningRepoId: integer("planning_repo_id").references(() => repos.id),
+    // The planning commit (GLOSSARY Planning commit): made by the platform once the spec is confirmed.
+    planningSha: text("planning_sha"),
+    // Where the planning commit is: pending (its job is queued or running), done, blocked (the docs patch did not
+    // apply) or waived (a person gave the patch up). Null when the spec has no planning repo or is not confirmed.
+    planningState: text("planning_state"),
+    // The planning docs patch the CLI sent at confirm; dropped once the planning commit is made or waived.
+    planningPatch: text("planning_patch"),
+    // The files the patch did not apply to, when planning_state is blocked.
+    planningConflict: jsonb("planning_conflict"),
+    // The planning commit carries planning docs (it is not just the default branch's head): they need a pull
+    // request even when the planning repo has no ticket of the spec.
+    planningDocsCommitted: boolean("planning_docs_committed")
+      .notNull()
+      .default(false),
     // Parked until the next final Run is claimed, then copied onto that Run and cleared.
     retryNote: text("retry_note"),
     createdAt: createdAt(),
@@ -131,7 +144,11 @@ export const specs = pgTable(
     check("specs_state_check", oneOf(t.state, SPEC_STATES)),
     check(
       "specs_planning_commit_check",
-      sql`(${t.planningSha} is null) = (${t.planningRepoId} is null)`,
+      sql`${t.planningSha} is null or ${t.planningRepoId} is not null`,
+    ),
+    check(
+      "specs_planning_state_check",
+      sql`${t.planningState} is null or ${t.planningState} in ('pending', 'done', 'blocked', 'waived')`,
     ),
     check(
       "specs_planning_sha_check",

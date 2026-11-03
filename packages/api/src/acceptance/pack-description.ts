@@ -18,6 +18,7 @@ export function renderPackSection(
   const delivery = specDeliveryUrl(specId);
   const spec = formatDisplayId("spec", specId);
   const section = [
+    planningDocsLines(pack, repo),
     mergeOrderLines(pack),
     repoLines(pack, repo),
     integrationLines(pack),
@@ -36,6 +37,15 @@ export function renderPackSection(
     `See ${spec} on the platform: ${delivery}`,
   ].join("\n\n");
   return { section, summary };
+}
+
+// Only in the planning repo's pull request: that is where the planning docs are, or would have been.
+function planningDocsLines(pack: AcceptancePack, repo: string): string {
+  const docs = pack.planningDocs;
+  if (!docs || docs.repo !== repo || docs.state === "unchanged") return "";
+  return docs.state === "waived"
+    ? "## Planning docs\n\n**Left out**: the planning docs did not apply to the default branch and were given up, so this pull request does not carry them."
+    : "## Planning docs\n\nThe first commit of this pull request is the planning docs (glossary, ADRs) the spec was planned with, committed by the platform.";
 }
 
 function mergeOrderLines(pack: AcceptancePack): string {

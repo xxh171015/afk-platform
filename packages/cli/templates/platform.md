@@ -19,6 +19,9 @@ The platform has no labels and no comments. A draft spec is what a skill means b
   Latin words: a Chinese-only title cannot be turned into a slug. The spec is stored as written. `plat` warns, on
   stderr, about a section of the to-spec template that is missing or renamed, and about a Testing Decisions section
   that names no seams; it still creates the spec. After it prints `S-7`, keep process files under `~/.afk/planning/S-7/`.
+- **Planning docs** (`GLOSSARY.md`, `docs/adr/`, `AGENTS.md` in this repo, as grill-with-docs and domain-modeling
+  write them): leave the changes **uncommitted and unpushed**. `plat spec confirm` sends them and the platform
+  commits them onto the spec's integration branch, so they reach the default branch with the spec's pull request.
 - **Read a spec** (what a skill means by "fetch the issue and read its body and comments"): `plat spec show S-7`.
   It prints the spec's body, its tickets, edges and warnings (after the run, the acceptance pack). A spec has no comments.
 - **Publish tickets** (to-tickets step 5). On this tracker publishing is four steps, in this order:
@@ -30,9 +33,10 @@ The platform has no labels and no comments. A draft spec is what a skill means b
      the spec and its tickets.
   3. Show the person the import's warnings exactly as printed (or say there were none), then ask once:
      "开工吗？" (start the work now?).
-  4. If they say yes, run `plat spec confirm S-7`. Then tell them that from here they only wait for the acceptance
-     pack, merge the pull requests, and look at `plat blocked`. If they say no, stop; they can confirm later in the
-     platform's page.
+  4. If they say yes, run `plat spec confirm S-7` here, in this repo. It sends the planning docs (below) as they are in
+     this checkout, and the platform commits them before any ticket starts. Then tell them that from here they only
+     wait for the acceptance pack, merge the pull requests, and look at `plat blocked`. If they say no, stop; they can
+     confirm later here (the platform's page cannot send the planning docs).
 
   Confirming is the last step of publishing tickets on this tracker. It does not change the spec's body and does not
   close the spec, so it is **not** what a skill means by "modify a parent issue".

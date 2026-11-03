@@ -513,7 +513,11 @@ export async function cancelSpec(
         [cancelled],
       );
     }
-    // Every kind of job names its spec in the payload: stages, final steps, open-pr.
+    // A planning docs patch the platform still held is not needed any more (ADR 0005).
+    await client.query("UPDATE specs SET planning_patch = NULL WHERE id = $1", [
+      specId,
+    ]);
+    // Every kind of job names its spec in the payload: stages, final steps, open-pr, the planning commit.
     await client.query(
       `UPDATE jobs SET state = 'failed', error = 'the spec was cancelled', lease_owner = NULL, lease_expires_at = NULL
        WHERE state IN ('queued', 'running') AND (payload->>'specId')::int = $1`,

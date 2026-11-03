@@ -21,6 +21,10 @@ export type Bundle =
 export type HostTask =
   paths["/worker/jobs/{id}/host-task"]["get"]["responses"][200]["content"]["application/json"];
 
+// What GET /worker/jobs/{id}/planning-task returns: the planning commit to make (ADR 0005).
+export type PlanningTask =
+  paths["/worker/jobs/{id}/planning-task"]["get"]["responses"][200]["content"]["application/json"];
+
 // The acceptance pack as GET /specs/{id} returns it. Declared once, in the API; the CLI and the page read this.
 export type AcceptancePackView = NonNullable<
   paths["/specs/{id}"]["get"]["responses"][200]["content"]["application/json"]["acceptancePack"]

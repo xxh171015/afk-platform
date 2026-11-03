@@ -640,6 +640,103 @@ describe("a whole spec with a fake agent", () => {
   });
 });
 
+describe("the planning commit, end to end", () => {
+  it("commits the planning docs onto the planning repo's integration branch first, and other repos' agents read them", async () => {
+    // a second repo, and a GLOSSARY in the planning repo
+    const front = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "README.md": "# web\n",
+    });
+    const frontOrigin = join(home, "front.git");
+    git(home, ["clone", "--quiet", "--bare", front.dir, frontOrigin]);
+    front.cleanup();
+    const person = join(home, "person");
+    git(home, ["clone", "--quiet", origin, person]);
+    writeFileSync(join(person, "GLOSSARY.md"), "# Orders\n");
+    git(person, ["add", "-A"]);
+    git(person, [
+      "-c",
+      "user.name=p",
+      "-c",
+      "user.email=p@x",
+      "commit",
+      "-qm",
+      "glossary",
+    ]);
+    git(person, ["push", "-q", "origin", "HEAD:main"]);
+    // the person's planning: a sharper glossary, not committed
+    writeFileSync(
+      join(person, "GLOSSARY.md"),
+      "# Orders\n\n**Bulk ship**: many at once.\n",
+    );
+    const patch = git(person, [
+      "diff",
+      "--binary",
+      "--full-index",
+      "HEAD",
+    ]).stdout;
+
+    const created = await post("/projects", { name: "shop" });
+    await post(`/projects/${created.body.id}/repos`, {
+      url: origin,
+      name: "backend",
+    });
+    await post(`/projects/${created.body.id}/repos`, {
+      url: frontOrigin,
+      name: "frontend",
+    });
+    const spec = await post("/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "order-export",
+      title: "Order export",
+      planningRepo: "backend",
+    });
+    await post(
+      `/specs/${spec.body.id}/tickets/import`,
+      importBody(spec.body.id, {
+        tickets: [ticket("a"), ticket("f", { repo: "frontend" })],
+      }),
+    );
+    expect(
+      (await post(`/specs/${spec.body.id}/confirm`, { planningPatch: patch }))
+        .status,
+    ).toBe(200);
+
+    const seen: Record<string, string | undefined> = {};
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) => {
+          if (ctx.stage === "implement")
+            seen[ctx.branch.split("/").at(-1) as string] =
+              ctx.context("domain/GLOSSARY.md");
+          return undefined;
+        },
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    const first = gitOut(origin, [
+      "log",
+      "--format=%an %s",
+      "--first-parent",
+      "--reverse",
+      `main..spec/${ID}/order-export`,
+    ]).split("\n")[0];
+    expect(first).toBe("afk-worker Planning docs for S-1 Order export");
+    expect(
+      gitOut(origin, ["show", `spec/${ID}/order-export:GLOSSARY.md`]),
+    ).toContain("**Bulk ship**");
+    expect(gitOut(origin, ["show", "main:GLOSSARY.md"])).toBe("# Orders");
+    // the frontend agent reads the planning docs at the planning commit; the backend one has them in its tree
+    expect(seen["T-2"]).toContain("**Bulk ship**");
+    expect(seen["T-1"]).toBeUndefined();
+  }, 30_000);
+});
+
 describe("failures of the worker's own", () => {
   it("fails the job, keeps the slot's clone, and tells the API", async () => {
     await confirmedSpec([ticket("a")]);

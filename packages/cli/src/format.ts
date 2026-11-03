@@ -191,6 +191,7 @@ export function blockedText(queue: {
     number: number;
     error: string;
   }[];
+  planning: { specDisplayId: string; repo: string; files: string[] }[];
   specs: { displayId: string; title: string; reason: string }[];
 }): string {
   if (
@@ -199,6 +200,7 @@ export function blockedText(queue: {
     queue.pullRequests.length === 0 &&
     queue.cleanups.length === 0 &&
     queue.readyFailures.length === 0 &&
+    queue.planning.length === 0 &&
     queue.specs.length === 0
   ) {
     return "nothing is waiting for you";
@@ -229,6 +231,12 @@ export function blockedText(queue: {
     ...queue.readyFailures.flatMap((r) => [
       `${r.specDisplayId}  ${r.repo} #${r.number} could not be turned ready: ${r.error}`,
       "    it is still a draft; turn it ready on the code host once the pull requests it follows are merged",
+    ]),
+    ...queue.planning.flatMap((p) => [
+      p.files.length > 0
+        ? `${p.specDisplayId}  the planning docs did not apply to ${p.repo}'s default branch: ${p.files.join(", ")}`
+        : `${p.specDisplayId}  the planning commit could not be made in ${p.repo}: its job failed three times (see the job's error)`,
+      `    no ticket starts until: plat spec retry-planning ${p.specDisplayId} (in ${p.repo}, after merging its default branch into them), or plat spec waive-planning ${p.specDisplayId} (leave them out)`,
     ]),
     ...queue.specs.map(
       (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,
@@ -353,6 +361,15 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           ]),
         ]
       : []),
+    ...(pack.planningDocs?.state === "waived"
+      ? [
+          `  !! the planning docs were left out: they did not apply to ${pack.planningDocs.repo}'s default branch and were given up`,
+        ]
+      : pack.planningDocs?.state === "committed"
+        ? [
+            `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s pull request`,
+          ]
+        : []),
     ...pack.orderBroken.map((b) => `  ${brokenOrderLine(b)}`),
     order.ordered.length > 0
       ? `  merge order: ${order.ordered.join(" -> ")}${order.unordered.length ? `  (no order: ${order.unordered.join(", ")})` : ""}`
@@ -449,8 +466,12 @@ export function specText(view: {
     state: string;
     pauseReason: string | null;
     warnings: unknown[];
-    planningSha?: string | null;
-    planningRepo?: string | null;
+    planning?: {
+      repo: string | null;
+      state: string | null;
+      sha: string | null;
+      conflict: string[];
+    };
     prechecks?: { code: string; level: string; message: string }[];
   };
   tickets: TicketLike[];
@@ -463,9 +484,9 @@ export function specText(view: {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
     ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
-    ...(view.spec.planningSha
+    ...(view.spec.planning?.repo
       ? [
-          `planning ${view.spec.planningSha}${view.spec.planningRepo ? ` (${view.spec.planningRepo})` : ""}`,
+          `planning repo ${view.spec.planning.repo}: ${view.spec.planning.state ?? "not confirmed yet"}${view.spec.planning.sha ? ` at ${view.spec.planning.sha}` : ""}${view.spec.planning.conflict.length ? ` (did not apply: ${view.spec.planning.conflict.join(", ")})` : ""}`,
         ]
       : []),
     ...(view.spec.prechecks?.length

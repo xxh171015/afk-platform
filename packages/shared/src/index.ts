@@ -4,6 +4,7 @@ export type {
   Bundle,
   components,
   HostTask,
+  PlanningTask,
   PullRequestRowView,
   paths,
 } from "./api/client.ts";
@@ -33,6 +34,13 @@ export {
 } from "./limits.ts";
 export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
+export type { PlanningCommitResult, PlanningState } from "./planning-docs.ts";
+export {
+  MAX_PLANNING_PATCH_BYTES,
+  PLANNING_COMMIT_JOB,
+  PLANNING_DOC_PATHS,
+  PLANNING_STATES,
+} from "./planning-docs.ts";
 export {
   fitPrDescription,
   GITHUB_PR_BODY_LIMIT,

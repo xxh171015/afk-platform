@@ -1,0 +1,124 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type Io, run } from "@afk/cli";
+import { gitOrThrow } from "@afk/pipeline";
+import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
+import { createApp } from "../app.ts";
+import { migrate } from "../db/migrate.ts";
+import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { listen, type RunningApi } from "./fake-worker.ts";
+
+// The real HTTP API and a real Postgres, with `plat` run in real git checkouts whose origin is a GitHub address
+// that git rewrites (url.<bare>.insteadOf) to a local bare repo, so pushes and ls-remote work offline.
+
+export interface Checkout {
+  dir: string;
+  origin: TestRepo; // the repo the address leads to
+}
+
+export interface PlatResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+  questions: string[];
+}
+
+export interface PlatWorkspace {
+  api: RunningApi;
+  db: TestDatabase;
+  // A checkout at <root>/<folder> whose origin is `address`. The remote's default branch is `defaultBranch`; with
+  // `reachable: false` the address leads nowhere, as when there is no network or no credentials.
+  checkout(
+    folder: string,
+    address: string,
+    files?: Record<string, string>,
+    options?: { defaultBranch?: string; reachable?: boolean },
+  ): Checkout;
+  // `answer` is what the person says when asked; "nobody" means nobody can be asked (no terminal).
+  plat(
+    cwd: string,
+    args: string[],
+    answer?: boolean | "nobody",
+  ): Promise<PlatResult>;
+  close(): Promise<void>;
+}
+
+export async function platWorkspace(): Promise<PlatWorkspace> {
+  const db = await createTestDatabase();
+  await migrate(db.pool);
+  const logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
+  const api = await listen(createApp({ pool: db.pool, logDir }));
+  const root = await mkdtemp(join(tmpdir(), "afk-work-"));
+  const cleanups: (() => void)[] = [];
+
+  return {
+    api,
+    db,
+    checkout(
+      folder,
+      address,
+      files = { "README.md": "r\n" },
+      { defaultBranch = "main", reachable = true } = {},
+    ) {
+      const origin = makeRepo(files);
+      cleanups.push(() => origin.cleanup());
+      if (defaultBranch !== "main") {
+        gitOrThrow(origin.dir, ["branch", "-m", "main", defaultBranch]);
+      }
+      // a remote people push to is not checked out anywhere
+      gitOrThrow(origin.dir, ["config", "receive.denyCurrentBranch", "ignore"]);
+      const dir = join(root, folder);
+      gitOrThrow(root, ["clone", "--quiet", origin.dir, dir]);
+      gitOrThrow(dir, ["config", "user.name", "Person"]);
+      gitOrThrow(dir, ["config", "user.email", "person@example.com"]);
+      gitOrThrow(dir, ["remote", "set-url", "origin", address]);
+      const target = reachable ? origin.dir : join(root, "nowhere");
+      gitOrThrow(dir, ["config", `url.${target}.insteadOf`, address]);
+      return { dir, origin };
+    },
+    async plat(cwd, args, answer) {
+      let stdout = "";
+      let stderr = "";
+      const questions: string[] = [];
+      const io: Io = {
+        stdout: (text) => {
+          stdout += text;
+        },
+        stderr: (text) => {
+          stderr += text;
+        },
+        env: { AFK_API_URL: api.url },
+        readFile: async (path) => readFileSync(join(cwd, path), "utf8"),
+        readDirectory: async (path) =>
+          readdirSync(join(cwd, path), { withFileTypes: true })
+            .filter((e) => e.isFile() && !e.name.startsWith("."))
+            .map((e) => ({
+              name: e.name,
+              text: readFileSync(join(cwd, path, e.name), "utf8"),
+            })),
+        cwd,
+        confirm:
+          answer === "nobody"
+            ? undefined
+            : async (question) => {
+                questions.push(question);
+                if (answer === undefined) {
+                  throw new Error("plat asked unexpectedly");
+                }
+                return answer;
+              },
+      };
+      const code = await run(args, io);
+      return { code, stdout, stderr, questions };
+    },
+    async close() {
+      await api.close();
+      await db.drop();
+      for (const cleanup of cleanups.splice(0)) cleanup();
+      await rm(root, { recursive: true, force: true });
+      await rm(logDir, { recursive: true, force: true });
+    },
+  };
+}

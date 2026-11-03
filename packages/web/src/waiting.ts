@@ -6,6 +6,7 @@ export function waitingCount(queue: {
   pullRequests: readonly unknown[];
   cleanups: readonly unknown[];
   readyFailures: readonly unknown[];
+  planning?: readonly unknown[];
   specs: readonly unknown[];
 }): number {
   return (
@@ -14,6 +15,7 @@ export function waitingCount(queue: {
     queue.pullRequests.length +
     queue.cleanups.length +
     queue.readyFailures.length +
+    (queue.planning?.length ?? 0) +
     queue.specs.length
   );
 }

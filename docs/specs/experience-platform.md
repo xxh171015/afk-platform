@@ -189,6 +189,8 @@ type StructuredBrief = {
 
 规范类文档走规划提交，不靠先推 main。
 
+> 下面「人打提交、推到 `plan/<id>/<slug>`、confirm 核 SHA」的做法已被 [ADR 0005](../adr/0005-planning-docs-go-with-the-spec-committed-by-the-platform.md) 取代：confirm 带上未提交的改动，由平台提交。
+
 - grill 改的 `GLOSSARY.md`、`docs/adr/`、规划仓库的 `AGENTS.md` 打成一次提交。人（或规划阶段的 agent）把该提交推到 `plan/<id>/<slug>`。
 - `plat spec confirm` 在规划仓库工作区里核 SHA：已推送、是默认分支的后代、本地这些文件没有未进该提交的改动（`--force` 除外）；核过就登记，不替人 commit、不建集成分支。
 - 页面确认不读本地 git：有规划 SHA 就用，没有就从默认分支切。确认前预检把「未做规划仓库 CLI 检查」标黄，不硬拦。改过规范文档的必须在规划仓库里 `plat spec confirm`。

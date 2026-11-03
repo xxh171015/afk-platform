@@ -1,100 +1,24 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Io, run } from "@afk/cli";
-import { gitOrThrow } from "@afk/pipeline";
-import { makeRepo } from "@afk/pipeline/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { listen, type RunningApi } from "../test/fake-worker.ts";
+import { type PlatWorkspace, platWorkspace } from "../test/plat-workspace.ts";
 
-// `plat init` against the real HTTP API and a real Postgres, in real git checkouts whose origin is a GitHub address
-// that git rewrites (url.<bare>.insteadOf) to a local bare repo, so the remote's default branch can be read offline.
+// `plat init` against the real HTTP API and a real Postgres, in real git checkouts (test/plat-workspace.ts).
 
-let db: TestDatabase;
-let api: RunningApi;
-let root: string;
-const cleanups: (() => void)[] = [];
+let ws: PlatWorkspace;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
-  api = await listen(
-    createApp({
-      pool: db.pool,
-      logDir: await mkdtemp(join(tmpdir(), "afk-logs-")),
-    }),
-  );
-  root = await mkdtemp(join(tmpdir(), "afk-init-"));
+  ws = await platWorkspace();
 });
 afterEach(async () => {
-  await api.close();
-  await db.drop();
-  for (const cleanup of cleanups.splice(0)) cleanup();
-  await rm(root, { recursive: true, force: true });
+  await ws.close();
 });
 
-interface Checkout {
-  dir: string;
-}
-
-// A checkout at <root>/<folder> whose origin is `address`. The remote's default branch is `defaultBranch`; with
-// `reachable: false` the address leads nowhere, as when there is no network or no credentials.
-function checkout(
-  folder: string,
-  address: string,
-  files: Record<string, string> = { "README.md": "r\n" },
-  { defaultBranch = "main", reachable = true } = {},
-): Checkout {
-  const origin = makeRepo(files);
-  cleanups.push(() => origin.cleanup());
-  if (defaultBranch !== "main") {
-    gitOrThrow(origin.dir, ["branch", "-m", "main", defaultBranch]);
-  }
-  const dir = join(root, folder);
-  gitOrThrow(root, ["clone", "--quiet", origin.dir, dir]);
-  gitOrThrow(dir, ["remote", "set-url", "origin", address]);
-  const target = reachable ? origin.dir : join(root, "nowhere");
-  gitOrThrow(dir, ["config", `url.${target}.insteadOf`, address]);
-  return { dir };
-}
-
-// `answer` is what the person says when asked; "nobody" means nobody can be asked (no terminal).
-async function plat(cwd: string, args: string[], answer?: boolean | "nobody") {
-  let stdout = "";
-  let stderr = "";
-  const questions: string[] = [];
-  const io: Io = {
-    stdout: (text) => {
-      stdout += text;
-    },
-    stderr: (text) => {
-      stderr += text;
-    },
-    env: { AFK_API_URL: api.url },
-    readFile: async (path) => readFileSync(join(cwd, path), "utf8"),
-    readDirectory: async () => [],
-    cwd,
-    confirm:
-      answer === "nobody"
-        ? undefined
-        : async (question) => {
-            questions.push(question);
-            if (answer === undefined) {
-              throw new Error("plat asked unexpectedly");
-            }
-            return answer;
-          },
-  };
-  const code = await run(args, io);
-  return { code, stdout, stderr, questions };
-}
+const checkout: PlatWorkspace["checkout"] = (...args) => ws.checkout(...args);
+const plat: PlatWorkspace["plat"] = (...args) => ws.plat(...args);
 
 async function project(id: number) {
-  const response = await fetch(`${api.url}/projects/${id}`);
+  const response = await fetch(`${ws.api.url}/projects/${id}`);
   return { status: response.status, body: await response.json() };
 }
 

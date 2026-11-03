@@ -13,12 +13,20 @@ _Avoid_: 产品线、应用
 _Avoid_: 代码库、工程、主仓库、角色
 
 **Planning repo（规划仓库）**：
-项目里人跑规划 skills 的那个仓库：Tracker doc 装在这里，契约也由它出。通常一个项目一个，平台不记录是哪一个。
+项目里人跑 grill、to-spec、to-tickets 的那个仓库：Tracker doc 装在这里，契约也由它出。通常一个项目一个；平台不按项目记，而是每个 Spec 记下它是在哪个规划仓库里建的。
 _Avoid_: 主仓库、后端仓库（规划仓库不一定是后端）
 
 **Repo readiness（接入条件）**：
 一个仓库在平台能接手它的票之前要具备的东西：门禁、沙箱镜像、写给 agent 的规范；被联调依赖的仓库还要能起联调环境。缺了不影响登记，只是票跑不起来。
 _Avoid_: 就绪检查、准入
+
+**Planning docs（规划文档）**：
+规划时写下的术语表、ADR 和写给 agent 的规范，属于规划仓库。规划时的改动不由人提交，跟着这个 Spec 的代码一起进 PR。
+_Avoid_: 领域文档、设计文档
+
+**Planning commit（规划提交）**：
+平台在规划仓库的集成分支上提交本 Spec 规划文档改动得到的那个提交；没有改动时，是规划仓库默认分支当时的最新提交。所有票开工前它就要存在，其他仓库的票按它读规划文档。身份是 SHA，不是分支名。
+_Avoid_: 规划 SHA、文档提交、规划分支
 
 **Spec（需求）**：
 一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
@@ -83,14 +91,6 @@ _Avoid_: 接口文档、API 定义
 **Contract copy（契约副本）**：
 使用方仓库里提交的一份别的仓库的契约，生成的 client 以它为准。它必须和这个仓库的票所用的 Contract SHA 上的契约一字不差；没有 contract 入边的票不许改它。
 _Avoid_: 契约快照、本地契约
-
-**Planning repo（规划仓库）**：
-项目里跑 grill、to-spec、to-tickets 的那个仓库；Tracker doc 装在这里。一个 Spec 的规划提交记在这个仓库上。
-_Avoid_: 主仓库、后端仓库
-
-**Planning commit（规划提交）**：
-规划阶段写进规划仓库的那次提交（GLOSSARY.md、ADR、该仓库的 AGENTS.md），作为该仓库这个 Spec 集成分支的起点。身份是 SHA，不是分支名。
-_Avoid_: 规划分支
 
 **Tracker doc（tracker 文档）**：
 规划仓库里告诉 matt skills 去哪里、怎么发布内容的文档：Spec 和 Ticket 发布到平台，其余（地图、分诊）留在代码托管上。由平台按项目和仓库生成（第一行写平台版本、skills SHA、项目和仓库），不手改。
