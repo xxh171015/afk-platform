@@ -50,7 +50,7 @@
 1. **调度是确定性的，不交给 LLM。** to-tickets 已经写好票之间的依赖边，平台直接按边算出可以开工的票。skills 仓库的 `docs/engineering/implement-spec.md` 也说：真正 AFK 的场景，确定性循环更快、更便宜、更可靠。
 2. **Agent 只写代码和 commit，状态全由平台改。** Agent 不 push、不关票、不改标签、不开 PR，和 Sandcastle 仓库自己的 implement prompt 一致。沙箱不连平台 API，也没有 git 凭据；agent 需要的上下文由 worker 渲染成文件只读挂进去。失败时状态不会乱。
 3. **一次运行只往一个仓库提交。** 需要参考另一个仓库时，只读挂载它在固定 SHA 上的快照。
-4. **存指针，不复制。** 原文只在仓库里（GLOSSARY.md、ADR、契约）。平台只存链接、索引和 SHA；prompt 只放路径。agent 读到的 `/context/contract/` 和 `/context/domain/` 是该指针在沙箱里按 SHA 的只读挂载，不是平台库里的第二份正文。规划阶段的术语和 ADR 作为规划提交成为规划仓库集成分支的起点，不先推 main。
+4. **存指针，不复制。** 原文只在仓库里（GLOSSARY.md、ADR、契约）。平台只存链接、索引和 SHA；prompt 只放路径。agent 读到的 `/context/contract/` 和 `/context/domain/` 是该指针在沙箱里按 SHA 的只读挂载，不是平台库里的第二份正文。规划阶段的术语和 ADR（规划文档）由 `plat spec confirm` 带给平台、由平台提交成规划仓库集成分支的第一个提交（规划提交），随需求的 PR 进 main，人不提交也不推送（ADR 0005）。
 5. **按“每次全新会话”设计。** 会话续接（resume）只在 agent 支持时当优化用，这样换 agent 只改配置。
 6. **人工检查点尽量后移。** 人只出现三次：确认拆分、处理 blocked、最终验收。每次拿到的是整理好的简报，不是原始输出。
 7. **不信任 agent 自己的产出，只信任平台验证过的事实。** 门禁配置从基准提交读，不从 agent 分支读；agent 的输出必须是通过 schema 校验的结构化结果；合并后的集成分支要再跑一次门禁才算数。
@@ -1181,7 +1181,8 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat repo add --name <名字> --url … [--host-kind github\|gitlab]` / `plat repo edit <名字> [--contract-path …] [--host-kind …]` | 登记仓库（只有名字，不分前后端）、设契约路径和代码托管类型（不写时按地址推断一次） |
 | `plat tickets import S-12 <目录>`                  | 一次性导入整张依赖图（一张票一个 md 文件），校验通过才写入 |
 | `plat tickets import S-12 <目录> --append`        | 往已确认、还没收尾的 spec 里追加票和边，立即生效，给出「还在用旧契约」的告警 |
-| `plat spec confirm S-12`                           | 确认拆分，spec 进入 planned（页面上也能做）。在规划仓库里核并登记规划提交 SHA；页面确认不读本地 git |
+| `plat spec confirm S-12`                           | 确认拆分，spec 开始运行（页面上也能做）。在规划仓库里跑时把规划文档的改动作为补丁带上，平台先做规划提交、再派票；页面确认带不上本地改动 |
+| `plat spec retry-planning S-12` / `plat spec waive-planning S-12` | 规划文档合不进默认分支时：本地解决后重新发送，或放弃这些文档照常开工 |
 | `plat spec show S-12` / `plat ticket view T-123`   | 查看                                        |
 | `plat ticket edit T-123 --file t.md`               | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版） |
 | `plat ticket retry T-123 --mode continue\|restart` | 处理 blocked；可选带 Retry note，只对下一次 Run 有效 |

@@ -96,6 +96,7 @@ describe("GET /workbench", () => {
         pullRequests: [],
         cleanups: [],
         readyFailures: [],
+        planning: [],
         specs: [],
       },
       running: [],

@@ -46,6 +46,15 @@ export async function startFinalization(
     );
     await enqueueFinalJob(client, { specId, repoId }, "final-review");
   }
+  // The planning docs the platform committed in a planning repo none of whose tickets got done have nothing to
+  // review: that repo's branch is settled as it is, and gets a pull request with the others (ADR 0005).
+  await client.query(
+    `INSERT INTO finalizations (spec_id, repo_id, state)
+     SELECT s.id, s.planning_repo_id, 'done' FROM specs s
+     WHERE s.id = $1 AND s.planning_docs_committed
+       AND s.planning_repo_id NOT IN (SELECT repo_id FROM tickets WHERE spec_id = $1 AND state = 'done')`,
+    [specId],
+  );
   return true;
 }
 

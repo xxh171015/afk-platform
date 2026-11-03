@@ -691,6 +691,51 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
   );
 }
 
+// The planning docs did not apply to the planning repo's default branch, or their commit could not be made
+// (ADR 0005): no ticket of the spec starts until a person retries or gives them up.
+function BlockedPlanning({ item }: { item: Queue["planning"][number] }) {
+  return (
+    <Card
+      category="paused"
+      testId={`planning-${item.specDisplayId}`}
+      title={
+        <>
+          <IdChip displayId={item.specDisplayId} id={item.specId} />
+          <span>
+            {item.files.length > 0 ? (
+              <>
+                规划文档合不进 <Mono>{item.repo}</Mono> 的默认分支
+              </>
+            ) : (
+              <>
+                <Mono>{item.repo}</Mono> 的规划提交连续三次没做成
+              </>
+            )}
+          </span>
+        </>
+      }
+      sub={
+        <a href={paths.spec(item.specId)} className="hover:underline">
+          {item.title}
+        </a>
+      }
+    >
+      {item.files.length > 0 ? (
+        <p className="text-muted-foreground">
+          冲突的文件：<Mono>{item.files.join("、")}</Mono>
+        </p>
+      ) : null}
+      <p className="text-muted-foreground">
+        这个需求的票都还没开始。在 {item.repo}{" "}
+        里合入最新的默认分支、解决冲突后重新发送：
+      </p>
+      <CopyCommand command={`plat spec retry-planning ${item.specDisplayId}`} />
+      <p className="text-muted-foreground">或者不要这些规划文档，直接开工：</p>
+      <CopyCommand command={`plat spec waive-planning ${item.specDisplayId}`} />
+    </Card>
+  );
+}
+
 function CalmIllustration() {
   return (
     <svg viewBox="0 0 160 110" className="h-28 w-40" aria-hidden>
@@ -738,7 +783,7 @@ export function BlockedQueue() {
         final: data.finalizations.length,
         pr: data.pullRequests.length + data.readyFailures.length,
         cleanup: data.cleanups.length,
-        paused: data.specs.length,
+        paused: data.specs.length + (data.planning?.length ?? 0),
         all: 0,
       }
     : { all: 0, tickets: 0, final: 0, pr: 0, cleanup: 0, paused: 0 };
@@ -847,6 +892,10 @@ export function BlockedQueue() {
             ))}
           {show("cleanup") &&
             data.cleanups.map((c) => <StuckCleanup key={c.specId} item={c} />)}
+          {show("paused") &&
+            (data.planning ?? []).map((item) => (
+              <BlockedPlanning key={`planning-${item.specId}`} item={item} />
+            ))}
           {show("paused") &&
             data.specs.map((spec) => <PausedSpec key={spec.id} spec={spec} />)}
         </div>

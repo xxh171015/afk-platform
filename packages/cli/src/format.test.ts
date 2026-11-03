@@ -133,6 +133,7 @@ describe("the e2e before the pull requests", () => {
       pullRequests: [],
       cleanups: [],
       readyFailures: [],
+      planning: [],
       specs: [],
     } as never);
     expect(text).toContain("S-1  e2e before the pull requests");

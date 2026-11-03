@@ -2,8 +2,10 @@ import {
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   MAX_LOG_CHUNK_BYTES,
+  PLANNING_COMMIT_JOB,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
+import { withCredentials } from "./credentials.ts";
 import {
   type ExecutorDeps,
   executeStage,
@@ -13,6 +15,7 @@ import {
   NoFreeSlotError,
 } from "./executor.ts";
 import { type HostDeps, runHostTask } from "./host.ts";
+import { runPlanningCommit } from "./planning.ts";
 import { rawLogSink } from "./raw-log.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
@@ -145,6 +148,21 @@ export async function processJob(
   let uploader: LogUploader | undefined;
   let stopStreaming = () => {};
   try {
+    if (job.type === PLANNING_COMMIT_JOB) {
+      const task = await api.planningTask(job);
+      if (task === "lost") return "abandoned";
+      // pushes the planning repo's integration branch, with that repo's token
+      const deps = await withCredentials(
+        { ...options.executor, api },
+        task.repo.url,
+      );
+      const body = runPlanningCommit(deps, task, log);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      log(`planning-commit ${body.outcome}`);
+      return "completed";
+    }
     if ((HOST_JOB_TYPES as readonly string[]).includes(job.type)) {
       if (!options.host)
         throw new InfrastructureError("this worker has no code host");

@@ -182,11 +182,14 @@ export interface NewSpec {
   slug: string;
   title: string;
   body?: string;
+  // The repo plat spec create ran in (its tracker doc names it): the spec's planning repo.
+  planningRepo?: string;
 }
 
 export type CreateSpecResult =
   | { status: "ok"; spec: { id: number; displayId: string } }
   | { status: "no-project" }
+  | { status: "no-repo"; message: string }
   | { status: "slug-taken" };
 
 export async function createSpec(
@@ -197,11 +200,32 @@ export async function createSpec(
     spec.projectId,
   ]);
   if (project.rowCount === 0) return { status: "no-project" };
+  let planningRepoId: number | null = null;
+  if (spec.planningRepo !== undefined) {
+    const repo = await pool.query<{ id: number }>(
+      "SELECT id FROM repos WHERE project_id = $1 AND name = $2",
+      [spec.projectId, spec.planningRepo],
+    );
+    if (!repo.rows[0]) {
+      return {
+        status: "no-repo",
+        message: `the project has no repo named ${spec.planningRepo}`,
+      };
+    }
+    planningRepoId = repo.rows[0].id;
+  }
   try {
     const { rows } = await pool.query(
-      `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace)
-       SELECT $1, $2, $3, $4, $5, id FROM instance RETURNING id`,
-      [spec.projectId, spec.type, spec.slug, spec.title, spec.body ?? ""],
+      `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id)
+       SELECT $1, $2, $3, $4, $5, id, $6 FROM instance RETURNING id`,
+      [
+        spec.projectId,
+        spec.type,
+        spec.slug,
+        spec.title,
+        spec.body ?? "",
+        planningRepoId,
+      ],
     );
     const id = rows[0].id as number;
     return {

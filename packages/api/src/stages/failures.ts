@@ -30,6 +30,10 @@ import {
   readFinalPayload,
   readStagePayload,
 } from "../jobs/stage-jobs.ts";
+import {
+  planningCommitFailed,
+  readPlanningPayload,
+} from "../planning/planning-commit.ts";
 import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
 import { EXPECTED_STATE, type StageJob } from "./results.ts";
 
@@ -90,6 +94,17 @@ export async function recordJobFailure(
 ): Promise<FailureOutcome> {
   await finishRun(client, job.id, error);
 
+  const planning = readPlanningPayload(job);
+  if (planning) {
+    const outcome = await planningCommitFailed(
+      client,
+      planning,
+      MAX_JOB_FAILURES,
+    );
+    return outcome === "ignored"
+      ? { status: "ignored" }
+      : { status: outcome, failures: MAX_JOB_FAILURES };
+  }
   const finalE2e = readFinalE2ePayload(job.payload);
   if (finalE2e) return finalE2eJobFailed(client, finalE2e);
   const stage = readStagePayload(job.payload);

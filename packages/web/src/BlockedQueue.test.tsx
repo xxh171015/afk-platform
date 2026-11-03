@@ -45,6 +45,7 @@ interface Queue {
   pullRequests: unknown[];
   cleanups: unknown[];
   readyFailures: unknown[];
+  planning: unknown[];
   specs: unknown[];
 }
 const queue = (over: Partial<Queue> = {}): Queue => ({
@@ -53,6 +54,7 @@ const queue = (over: Partial<Queue> = {}): Queue => ({
   pullRequests: [],
   cleanups: [],
   readyFailures: [],
+  planning: [],
   specs: [],
   ...over,
 });
@@ -766,6 +768,34 @@ describe("a draft pull request that could not be turned ready", () => {
     const item = within(await screen.findByTestId("ready-S-1-frontend"));
     expect(item.getByText(/refused to mark pull request 2 ready/)).toBeTruthy();
     expect(item.getByText(/仍是 draft/)).toBeTruthy();
+  });
+});
+
+describe("planning docs that did not apply", () => {
+  it("names the files and gives the two commands: send them again, or start without them", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            planning: [
+              {
+                specId: 3,
+                specDisplayId: "S-3",
+                title: "Bulk ship",
+                repo: "backend",
+                files: ["GLOSSARY.md"],
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("planning-S-3"));
+    expect(item.getByText(/合不进/)).toBeTruthy();
+    expect(item.getByText("GLOSSARY.md")).toBeTruthy();
+    expect(item.getByText("plat spec retry-planning S-3")).toBeTruthy();
+    expect(item.getByText("plat spec waive-planning S-3")).toBeTruthy();
   });
 });
 

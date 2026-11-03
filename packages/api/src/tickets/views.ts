@@ -1,6 +1,7 @@
 import {
   formatDisplayId,
   type HostKind,
+  type PlanningState,
   type ReviewAxis,
   type SpecState,
   type TicketState,
@@ -353,18 +354,20 @@ export interface SpecPrecheck {
   message: string;
 }
 
-const MISSING_PLANNING_COMMIT: SpecPrecheck = {
-  code: "missing-planning-commit",
+// Only `plat spec confirm` in the planning repo can send the planning docs there; the page cannot read them.
+export const PAGE_CONFIRM_WITHOUT_PLANNING_DOCS: SpecPrecheck = {
+  code: "page-confirm-without-planning-docs",
   level: "yellow",
-  message: "未做规划仓库 CLI 检查",
+  message:
+    "页面确认时不会带上本地的规划文档改动；要带上，在规划仓库里运行 plat spec confirm",
 };
 
 function prechecksOf(
-  planningSha: string | null,
+  hasPlanningRepo: boolean,
   warnings: { type?: string; message?: string }[],
 ): SpecPrecheck[] {
   return [
-    ...(planningSha ? [] : [MISSING_PLANNING_COMMIT]),
+    ...(hasPlanningRepo ? [PAGE_CONFIRM_WITHOUT_PLANNING_DOCS] : []),
     ...warnings.flatMap((warning) =>
       typeof warning.message === "string"
         ? [
@@ -525,7 +528,8 @@ async function reposBySpecIds(
 export async function specView(pool: pg.Pool, specId: number) {
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
-            s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo
+            s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo,
+            s.planning_state, s.planning_conflict
      FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
   );
@@ -578,7 +582,16 @@ export async function specView(pool: pg.Pool, specId: number) {
       warnings,
       planningSha,
       planningRepo: (row.planning_repo as string | null) ?? null,
-      prechecks: prechecksOf(planningSha, warnings),
+      planning: {
+        repo: (row.planning_repo as string | null) ?? null,
+        state: (row.planning_state as PlanningState | null) ?? null,
+        sha: planningSha,
+        conflict: (row.planning_conflict as string[] | null) ?? [],
+      },
+      prechecks:
+        row.state === "draft"
+          ? prechecksOf(row.planning_repo !== null, warnings)
+          : prechecksOf(false, warnings),
     },
     tickets,
     finalizations: [
@@ -786,6 +799,22 @@ async function readyFailures(pool: pg.Pool) {
 
 // Everything waiting for a person: tickets that are blocked, blocked steps of an overall review, pull requests that
 // were closed or cannot be read, and specs that the platform paused. A cancelled spec waits for no one.
+// Specs whose planning docs did not apply to the planning repo's default branch (ADR 0005).
+async function blockedPlanning(pool: pg.Pool) {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.title, s.planning_conflict, r.name AS repo
+     FROM specs s JOIN repos r ON r.id = s.planning_repo_id
+     WHERE s.planning_state = 'blocked' AND s.state <> 'cancelled' ORDER BY s.id`,
+  );
+  return rows.map((s) => ({
+    specId: s.id as number,
+    specDisplayId: formatDisplayId("spec", s.id),
+    title: s.title as string,
+    repo: s.repo as string,
+    files: (s.planning_conflict as string[] | null) ?? [],
+  }));
+}
+
 export async function blockedQueue(pool: pg.Pool) {
   const tickets = await summaries(pool, "t.state = 'blocked'", []);
   const specs = await pool.query(
@@ -808,6 +837,7 @@ export async function blockedQueue(pool: pg.Pool) {
     pullRequests: await pullRequestProblems(pool),
     cleanups: await cleanupProblems(pool),
     readyFailures: await readyFailures(pool),
+    planning: await blockedPlanning(pool),
     specs: specs.rows.map((s) => ({
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),

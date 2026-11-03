@@ -4,6 +4,8 @@ import {
   formatDisplayId,
   type IncomingEdge,
   isRunnable,
+  MAX_PLANNING_PATCH_BYTES,
+  type PlanningState,
   resolveLimits,
   type SpecState,
   specTransition,
@@ -16,6 +18,7 @@ import {
   startFinalization,
 } from "../finalize/start.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
+import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
 // docs/specs/m1-platform.md「并发与预算默认值」). The scheduler is the only thing that moves a ticket from
@@ -33,10 +36,9 @@ export interface ScheduleResult {
   paused: boolean;
 }
 
-export type ConfirmPlanning = {
-  sha: string;
-  repoName: string;
-};
+// What `plat spec confirm` in the planning repo sends: the planning docs patch ("" when nothing changed). Absent
+// when the spec is confirmed anywhere else, the page included.
+export type ConfirmPlanning = { patch: string };
 
 export type ConfirmResult =
   | {
@@ -44,8 +46,8 @@ export type ConfirmResult =
       state: SpecState;
       integrationBranches: { repoId: number; branch: string }[];
       enqueued: ScheduledTicket[];
-      planningSha: string | null;
       planningRepo: string | null;
+      planningState: PlanningState | null;
     }
   | { status: "no-spec" }
   | { status: "not-confirmable"; message: string }
@@ -78,8 +80,8 @@ export async function inTransaction<T>(
 }
 
 // draft -> planned -> running in one step, one integration branch (spec/<id>/<slug>) per repo the spec touches,
-// then the first scheduling pass. An optional planning commit is recorded as a pointer; this does not create
-// git branches or commit for the caller.
+// then the first scheduling pass. A spec with a planning repo first gets its planning commit (ADR 0005): the job is
+// queued here, and no ticket is scheduled until it is done.
 export async function confirmSpec(
   pool: pg.Pool,
   specId: number,
@@ -87,45 +89,37 @@ export async function confirmSpec(
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      "SELECT slug, state, branch_namespace, project_id FROM specs WHERE id = $1 FOR UPDATE",
+      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, r.name AS planning_repo
+       FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1 FOR UPDATE OF s`,
       [specId],
     );
     if (spec.rowCount === 0) return { status: "no-spec" };
-    const { slug, state, branch_namespace, project_id } = spec.rows[0] as {
-      slug: string;
-      state: SpecState;
-      branch_namespace: string | null;
-      project_id: number;
-    };
+    const { slug, state, branch_namespace, planning_repo_id, planning_repo } =
+      spec.rows[0] as {
+        slug: string;
+        state: SpecState;
+        branch_namespace: string | null;
+        planning_repo_id: number | null;
+        planning_repo: string | null;
+      };
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
       return { status: "not-confirmable", message: planned.reason };
     }
-    const shaGiven = planning?.sha !== undefined;
-    const repoGiven = planning?.repoName !== undefined;
-    if (shaGiven !== repoGiven) {
+    if (planning !== undefined && planning_repo_id === null) {
       return {
         status: "invalid",
-        message: "planningSha and planningRepo must be given together",
+        message: `${formatDisplayId("spec", specId)} has no planning repo to send planning docs to`,
       };
     }
-    let planningRepoId: number | null = null;
-    let planningRepo: string | null = null;
-    const planningSha = planning?.sha ?? null;
-    if (planning) {
-      const found = await client.query<{ id: number; name: string }>(
-        "SELECT id, name FROM repos WHERE project_id = $1 AND name = $2",
-        [project_id, planning.repoName],
-      );
-      const row = found.rows[0];
-      if (!row) {
-        return {
-          status: "invalid",
-          message: `no repo ${planning.repoName} in this spec's project`,
-        };
-      }
-      planningRepoId = row.id;
-      planningRepo = row.name;
+    if (
+      planning !== undefined &&
+      Buffer.byteLength(planning.patch) > MAX_PLANNING_PATCH_BYTES
+    ) {
+      return {
+        status: "invalid",
+        message: `the planning docs patch is over ${MAX_PLANNING_PATCH_BYTES} bytes`,
+      };
     }
     const repos = await client.query<{ repo_id: number }>(
       "SELECT DISTINCT repo_id FROM tickets WHERE spec_id = $1 ORDER BY repo_id",
@@ -142,7 +136,7 @@ export async function confirmSpec(
     const repoIds = [
       ...new Set([
         ...repos.rows.map((row) => row.repo_id),
-        ...(planningRepoId === null ? [] : [planningRepoId]),
+        ...(planning_repo_id === null ? [] : [planning_repo_id]),
       ]),
     ].sort((a, b) => a - b);
     const integrationBranches = repoIds.map((repoId) => ({
@@ -150,24 +144,23 @@ export async function confirmSpec(
       branch: branchNames(branch_namespace).integration(slug),
     }));
     await client.query(
-      `UPDATE specs SET state = $2, integration_branches = $3, planning_sha = $4, planning_repo_id = $5
-       WHERE id = $1`,
+      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4 WHERE id = $1",
       [
         specId,
         running.state,
         JSON.stringify(integrationBranches),
-        planningSha,
-        planningRepoId,
+        planning?.patch ? planning.patch : null,
       ],
     );
+    if (planning_repo_id !== null) await enqueuePlanningCommit(client, specId);
     const scheduled = await schedulePass(client, specId);
     return {
       status: "ok",
       state: scheduled.paused ? "paused" : running.state,
       integrationBranches,
       enqueued: scheduled.enqueued,
-      planningSha,
-      planningRepo,
+      planningRepo: planning_repo,
+      planningState: planning_repo_id === null ? null : "pending",
     };
   });
 }
@@ -203,8 +196,9 @@ export async function schedulePass(
     state: SpecState;
     project_id: number;
     budget_extra_seconds: number;
+    planning_state: PlanningState | null;
   }>(
-    "SELECT state, project_id, budget_extra_seconds FROM specs WHERE id = $1",
+    "SELECT state, project_id, budget_extra_seconds, planning_state FROM specs WHERE id = $1",
     [specId],
   );
   const row = spec.rows[0];
@@ -212,6 +206,9 @@ export async function schedulePass(
   // Nothing left to run: the spec moves on to its overall review instead of being scheduled, or, when every
   // ticket was cancelled, is cancelled itself.
   if (await cancelIfAllTicketsCancelled(client, specId)) return none;
+  // No ticket starts before the planning commit is there (ADR 0005).
+  if (row.planning_state === "pending" || row.planning_state === "blocked")
+    return none;
   if (await startFinalization(client, specId)) return none;
 
   // Concurrency is counted across the project's specs, so passes of different specs must not interleave

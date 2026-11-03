@@ -621,6 +621,11 @@
                   "body": {
                     "type": "string",
                     "maxLength": 1000000
+                  },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
                   }
                 },
                 "required": ["projectId", "type", "slug", "title"]
@@ -668,6 +673,22 @@
           },
           "409": {
             "description": "The project already has a spec with this slug",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The project has no repo of that name",
             "content": {
               "application/json": {
                 "schema": {
@@ -994,6 +1015,173 @@
         }
       }
     },
+    "/specs/{specId}/planning/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "planningPatch": {
+                    "type": "string",
+                    "maxLength": 2000000
+                  }
+                },
+                "required": ["planningPatch"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The planning docs are sent again and the planning commit is queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The planning docs are not blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The patch is too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{specId}/planning/waive": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The planning docs are given up; the planning commit is queued as the default branch's head",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The planning docs are not blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/specs/{specId}/confirm": {
       "post": {
         "parameters": [
@@ -1015,14 +1203,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "planningSha": {
+                  "planningPatch": {
                     "type": "string",
-                    "pattern": "^[0-9a-f]{40}$"
-                  },
-                  "planningRepo": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
+                    "maxLength": 2000000
                   }
                 },
                 "additionalProperties": false
@@ -1092,20 +1275,20 @@
                         "required": ["ticketId", "displayId", "jobId"]
                       }
                     },
-                    "planningSha": {
-                      "type": ["string", "null"],
-                      "pattern": "^[0-9a-f]{40}$"
-                    },
                     "planningRepo": {
                       "type": ["string", "null"]
+                    },
+                    "planningState": {
+                      "type": ["string", "null"],
+                      "enum": ["pending", "done", "blocked", "waived", null]
                     }
                   },
                   "required": [
                     "state",
                     "integrationBranches",
                     "enqueued",
-                    "planningSha",
-                    "planningRepo"
+                    "planningRepo",
+                    "planningState"
                   ]
                 }
               }
@@ -2130,6 +2313,134 @@
           },
           "404": {
             "description": "No such job, or not a job for the code host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/planning-task": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What a planning-commit job has to do: commit the planning docs patch onto the planning repo's integration branch, or, without one, read the default branch's head (ADR 0005)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "displayId", "title"]
+                    },
+                    "repo": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["name", "url", "defaultBranch"]
+                    },
+                    "integrationBranch": {
+                      "type": "string"
+                    },
+                    "patch": {
+                      "type": ["string", "null"]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "spec",
+                    "repo",
+                    "integrationBranch",
+                    "patch",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or not a planning-commit job",
             "content": {
               "application/json": {
                 "schema": {
@@ -3453,6 +3764,34 @@
                         "planningRepo": {
                           "type": ["string", "null"]
                         },
+                        "planning": {
+                          "type": "object",
+                          "properties": {
+                            "repo": {
+                              "type": ["string", "null"]
+                            },
+                            "state": {
+                              "type": ["string", "null"],
+                              "enum": [
+                                "pending",
+                                "done",
+                                "blocked",
+                                "waived",
+                                null
+                              ]
+                            },
+                            "sha": {
+                              "type": ["string", "null"]
+                            },
+                            "conflict": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": ["repo", "state", "sha", "conflict"]
+                        },
                         "prechecks": {
                           "type": "array",
                           "items": {
@@ -3488,6 +3827,7 @@
                         "warnings",
                         "planningSha",
                         "planningRepo",
+                        "planning",
                         "prechecks"
                       ]
                     },
@@ -4475,6 +4815,19 @@
                             "required": ["displayId", "title", "repo"]
                           }
                         },
+                        "planningDocs": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "repo": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": ["committed", "unchanged", "waived"]
+                            }
+                          },
+                          "required": ["repo", "state"]
+                        },
                         "agentSeconds": {
                           "type": "integer"
                         }
@@ -5232,6 +5585,39 @@
                         ]
                       }
                     },
+                    "planning": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "repo",
+                          "files"
+                        ]
+                      }
+                    },
                     "specs": {
                       "type": "array",
                       "items": {
@@ -5260,6 +5646,7 @@
                     "pullRequests",
                     "cleanups",
                     "readyFailures",
+                    "planning",
                     "specs"
                   ]
                 }
@@ -5782,6 +6169,39 @@
                             ]
                           }
                         },
+                        "planning": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "specId",
+                              "specDisplayId",
+                              "title",
+                              "repo",
+                              "files"
+                            ]
+                          }
+                        },
                         "specs": {
                           "type": "array",
                           "items": {
@@ -5810,6 +6230,7 @@
                         "pullRequests",
                         "cleanups",
                         "readyFailures",
+                        "planning",
                         "specs"
                       ]
                     },

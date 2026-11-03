@@ -36,6 +36,11 @@ import {
   heartbeat,
   isLeaseLive,
 } from "../jobs/queue.ts";
+import {
+  buildPlanningTask,
+  readPlanningPayload,
+  recordPlanningResult,
+} from "../planning/planning-commit.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { recordJobFailure } from "../stages/failures.ts";
@@ -329,6 +334,51 @@ const hostTaskRoute = createRoute({
   },
 });
 
+const planningTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/planning-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What a planning-commit job has to do: commit the planning docs patch onto the planning repo's integration branch, or, without one, read the default branch's head (ADR 0005)",
+      content: {
+        "application/json": {
+          schema: z.object({
+            spec: z.object({
+              id: z.number().int(),
+              displayId: z.string(),
+              title: z.string(),
+            }),
+            repo: z.object({
+              name: z.string(),
+              url: z.string(),
+              defaultBranch: z.string(),
+            }),
+            integrationBranch: z.string(),
+            patch: z.string().nullable(),
+            message: z.string(),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "No such job, or not a planning-commit job",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const leaseRoute = createRoute({
   method: "get",
   path: "/worker/jobs/{id}/lease",
@@ -466,12 +516,17 @@ export function registerWorkerRoutes(
             "SELECT id, type, payload FROM jobs WHERE id = $1",
             [id],
           );
+          const planning = readPlanningPayload(job.rows[0]);
           // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
-          const recorded = readFinalE2ePayload(job.rows[0].payload)
-            ? await recordFinalE2eResult(client, job.rows[0], result).then(
-                () => ({ status: "final-e2e" }) as const,
+          const recorded = planning
+            ? await recordPlanningResult(client, planning, result).then(
+                () => ({ status: "planning-commit" }) as const,
               )
-            : await recordStageResult(client, job.rows[0], result);
+            : readFinalE2ePayload(job.rows[0].payload)
+              ? await recordFinalE2eResult(client, job.rows[0], result).then(
+                  () => ({ status: "final-e2e" }) as const,
+                )
+              : await recordStageResult(client, job.rows[0], result);
           // not a ticket stage: it may be a step of a finalization, or a job for the code host
           if (recorded.status === "no-ticket") {
             const final = await recordFinalResult(client, job.rows[0], result);
@@ -551,6 +606,31 @@ export function registerWorkerRoutes(
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)
       return c.json({ error: "this job is not for the code host" }, 404);
+    return c.json(task, 200);
+  });
+
+  app.openapi(planningTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const payload = job.rows[0] && readPlanningPayload(job.rows[0]);
+    const task =
+      payload && (await buildPlanningTask(context.pool, payload.specId));
+    if (!task)
+      return c.json({ error: "this job is not a planning commit" }, 404);
     return c.json(task, 200);
   });
 

@@ -64,7 +64,7 @@ plat init --with ../afk-pilot-frontend          # 场景 A 不写 --with
 | 条件 | 说明 |
 | --- | --- |
 | GitHub App 已装到这个仓库 | 开 PR、转 ready、删分支都靠它。检查：`node scripts/check-github-app.ts <owner>/<repo>`（在 `~/code/afk-platform` 下）。draft 转 ready 需要 App 同时有 `pull_requests: write` 和 `contents: write`。 |
-| 默认分支是 `main`，工作区干净地推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR **不要先推 main**：它们作为规划提交，成为规划仓库这个 Spec 集成分支的起点（见第 1 步、第 4 步）。 |
+| 默认分支是 `main`，代码推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。 |
 | `.sandcastle/gates.yaml` | 列出 `setup`、`typecheck`、`test`（带 JUnit 路径）、`lint`。门禁就是它。 |
 | `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它。前后端仓库都要有。 |
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
@@ -87,7 +87,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `d
 /grill-with-docs
 ```
 
-它会反复追问，并在过程中补 `GLOSSARY.md` 和 `docs/adr/`。**不要把这些改动先推 `main`。** 结束后在规划仓库里打一次规划提交（GLOSSARY、ADR、本仓库 `AGENTS.md`），推到 `plan/<id>/<slug>`；`plat spec confirm` 核这个 SHA，它会成为规划仓库集成分支的起点。同一 Spec 里其他仓库的票在 `/context/domain/` 读到这份 GLOSSARY / ADR。to-spec / to-tickets 的过程文件写到仓库外（`~/.afk/planning/<spec>/`），不进 git。
+它会反复追问，并在过程中补 `GLOSSARY.md` 和 `docs/adr/`（规划文档）。**这些改动不用提交、也不用推送**，就留在工作区里：第 4 步 `plat spec confirm` 会把它们发给平台，平台在任何票开工前替你提交到这个需求的集成分支上，跟代码在同一个 PR 里进 `main`（ADR 0005）。同一需求里其他仓库的票在 `/context/domain/` 读到它们。to-spec / to-tickets 的过程文件写到仓库外（`~/.afk/planning/<spec>/`），不进 git。
 
 ### 第 2 步 to-spec（发布 spec）
 
@@ -121,13 +121,16 @@ plat spec show S-n          # spec 正文、票、依赖边、导入告警
 3. 触碰保护路径（契约、`.github/**`）的票有没有写 `protected_paths_ok`。
 4. 依赖图没有环、没有多余的串行。
 
-确认没问题。改过规范文档时，在**规划仓库**工作区里 confirm（它会核规划提交已推送、是默认分支的后代、这些文件没有未提交改动）：
+确认没问题，在**规划仓库**里 confirm（to-tickets 问「开工吗？」你答「是」时，它就在规划仓库里跑这一条）：
 
 ```sh
-plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实现
+plat spec confirm S-n       # 从这一刻起开始实现
 ```
 
-页面确认不读本地 git：还没做过规划仓库 CLI 检查时预检标黄，不硬拦，集成分支从默认分支切。`--force` 才能跳过脏工作区检查。
+- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台，不动你的 git。输出里有一条 `git stash push …`，想把本地这份收起来就执行它（不收的话，等 PR 合并后 `git pull` 会和它冲突）。
+- 平台先做**规划提交**：把补丁三方合并到规划仓库默认分支的最新提交上，作为集成分支的第一个提交；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
+- 在页面上确认、或在规划仓库以外的地方 confirm，带不上本地的规划文档（预检标黄）；规划提交就是默认分支当时的最新提交。在项目的另一个仓库里 confirm 会被拒绝。
+- 补丁超过 1 MB 会被拒绝：规划文档只该有这三样。
 
 ### 第 5 步 等待和验收
 
@@ -214,6 +217,7 @@ plat spec confirm S-n       # 或在页面上确认；从这一刻起开始实�
 | 漏了票或要拆票 | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
 | 不要这张票了 | `plat ticket cancel T-n`（`--cascade` 一并取消下游） |
 | spec 暂停（超出 agent 时长） | `plat spec resume S-n`（可给更多时间） |
+| 规划文档合不进默认分支（别人刚改了同一段），或规划提交连续三次没做成 | 在规划仓库里拉最新的默认分支、解决冲突后 `plat spec retry-planning S-n`（重新发送）；不要这些文档了：`plat spec waive-planning S-n`（照常开工，验收包和 PR 描述注明「规划文档未提交」） |
 | 整体 review 步骤 blocked | `plat spec retry-final S-n`（也可带 `--note`，出现在这批收尾 Run 上）；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明） |
 | PR 被关掉没合并 | 在 GitHub 上重开；或重做 spec；或 `plat spec cancel S-n` |
 | 取消了但分支/PR 没清干净 | `plat spec cleanup S-n` |

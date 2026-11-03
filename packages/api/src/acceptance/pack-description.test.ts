@@ -118,6 +118,28 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
 });
 
 describe("renderPackSection", () => {
+  it("says in the planning repo's pull request that its planning docs were left out, and only there", () => {
+    const waived = pack({ planningDocs: { repo: "backend", state: "waived" } });
+    expect(renderPackSection(waived, "backend", 1).section).toContain(
+      "**Left out**: the planning docs did not apply to the default branch",
+    );
+    expect(renderPackSection(waived, "frontend", 1).section).not.toContain(
+      "Planning docs",
+    );
+    const committed = pack({
+      planningDocs: { repo: "backend", state: "committed" },
+    });
+    expect(renderPackSection(committed, "backend", 1).section).toContain(
+      "The first commit of this pull request is the planning docs",
+    );
+    const unchanged = pack({
+      planningDocs: { repo: "backend", state: "unchanged" },
+    });
+    expect(renderPackSection(unchanged, "backend", 1).section).not.toContain(
+      "Planning docs",
+    );
+  });
+
   it("puts unverified criteria before verified ones and leaves the other repo's criteria out", () => {
     const { section } = renderPackSection(pack(), "backend", 1);
     const criteria = section.slice(
