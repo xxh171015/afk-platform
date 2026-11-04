@@ -19,16 +19,51 @@ const DOC_PATH = "docs/agents/issue-tracker.md";
 // home directory (user level). `npx skills` installs into .agents/skills and links the others.
 const SKILLS_DIRS = [".claude/skills", ".cursor/skills", ".agents/skills"];
 const PLANNING_SKILLS = ["to-spec", "to-tickets"] as const;
-// One package holds afk-setup and the planning skills at the pinned SHA (skills/). Installing it is like
-// `npx skills@latest add mattpocock/skills`: it asks which skills, which agents, project or global.
+// One package holds afk-setup and the planning skills at the pinned SHA (skills/). The first install is like
+// `npx skills@latest add mattpocock/skills`: it asks which skills, which agents, project or global. `plat update`
+// installs it again at the level it is at.
 const SKILLS_INSTALL = "npx skills@latest add xxh171015/afk-platform";
-type Level = "project" | "user";
-const skillsFix = (level: Level | undefined) =>
+export type SkillsLevel = "project" | "user";
+const skillsFix = (level: SkillsLevel | undefined) =>
   level === undefined
     ? `install them: ${SKILLS_INSTALL}`
-    : level === "project"
-      ? `update them in this repo: ${SKILLS_INSTALL} --skill '*' -y`
-      : `update them: ${SKILLS_INSTALL} --skill '*' -g -y`;
+    : `update them: plat update${level === "project" ? " (in this repo)" : ""}`;
+
+/** The command `plat update` runs to install the skills package again at `level`. */
+export const skillsUpdateCommand = (level: SkillsLevel): string[] => [
+  "npx",
+  "-y",
+  "skills@latest",
+  "add",
+  "xxh171015/afk-platform",
+  "--skill",
+  "*",
+  ...(level === "user" ? ["-g"] : []),
+  "-y",
+];
+
+/**
+ * Where the afk-setup skill is installed: in the repo `repo` (project level, what the agent there uses), or for the
+ * user; undefined when nowhere.
+ */
+export async function skillsLevel(
+  readFile: ReadFile,
+  home: string,
+  repo = ".",
+): Promise<SkillsLevel | undefined> {
+  for (const [level, root] of [
+    ["project", repo],
+    ["user", home],
+  ] as const) {
+    for (const dir of SKILLS_DIRS) {
+      try {
+        await readFile(`${root}/${dir}/afk-setup/SKILL.md`);
+        return level;
+      } catch {}
+    }
+  }
+  return undefined;
+}
 
 // Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup). The
 // planning agent reads these warnings and runs it itself: the person types nothing.
@@ -92,12 +127,12 @@ export async function skillsWarnings(
     })),
     { skill: "afk-setup", expected: readAfkSetupSkill() },
   ];
-  const levels: [Level, string][] = [
+  const levels: [SkillsLevel, string][] = [
     ["project", repo],
     ["user", home],
   ];
   for (const { skill, expected } of wanted) {
-    let verdict: { level: Level; ok: boolean } | undefined;
+    let verdict: { level: SkillsLevel; ok: boolean } | undefined;
     for (const [level, root] of levels) {
       // Any of the level's directories holding the expected text is enough.
       const copies: string[] = [];
@@ -112,7 +147,7 @@ export async function skillsWarnings(
       }
     }
     if (verdict?.ok) continue;
-    const where = (level: Level) =>
+    const where = (level: SkillsLevel) =>
       level === "project" ? "in this repo" : "on this machine";
     warnings.push(
       verdict
@@ -131,7 +166,7 @@ export async function versionWarnings(
   return platformVersion === PLATFORM_VERSION
     ? []
     : [
-        `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is ${platformVersion}: ${SETUP} to update it`,
+        `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is ${platformVersion}: update it with plat update`,
       ];
 }
 

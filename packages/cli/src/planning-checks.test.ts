@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
 import {
   integrationWarnings,
+  skillsLevel,
+  skillsUpdateCommand,
   skillsWarnings,
   trackerDocWarnings,
   unreadyRepos,
@@ -109,9 +111,7 @@ describe("skillsWarnings", () => {
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("to-tickets");
-    expect(warnings[0]).toContain(
-      "npx skills@latest add xxh171015/afk-platform --skill '*' -g -y",
-    );
+    expect(warnings[0]).toContain("update them: plat update");
   });
 
   it("is quiet when one directory has a stale copy but another has the pinned one", async () => {
@@ -129,7 +129,7 @@ describe("skillsWarnings", () => {
     expect(warnings).toHaveLength(3);
     expect(warnings.join("\n")).toContain("not found");
     expect(warnings[2]).toContain(
-      "npx skills@latest add xxh171015/afk-platform",
+      "install them: npx skills@latest add xxh171015/afk-platform",
     );
   });
 
@@ -141,9 +141,7 @@ describe("skillsWarnings", () => {
       home,
     );
     expect(warnings).toEqual([
-      expect.stringContaining(
-        "npx skills@latest add xxh171015/afk-platform --skill '*' -g -y",
-      ),
+      expect.stringContaining("update them: plat update"),
     ]);
   });
 
@@ -183,9 +181,7 @@ describe("skillsWarnings", () => {
         repo,
       );
       expect(warnings).toEqual([
-        expect.stringContaining(
-          "update them in this repo: npx skills@latest add xxh171015/afk-platform --skill '*' -y",
-        ),
+        expect.stringContaining("update them: plat update (in this repo)"),
       ]);
     });
   });
@@ -205,7 +201,7 @@ describe("versionWarnings", () => {
       platformVersion: "99.0.0",
     }));
     expect(warnings).toEqual([
-      `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is 99.0.0: run the afk-setup skill to update it`,
+      `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is 99.0.0: update it with plat update`,
     ]);
   });
 });
@@ -301,5 +297,44 @@ describe("integrationWarnings", () => {
         new Map([["backend", { state: "pending" }]]),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("where plat update installs the skills again", () => {
+  const home = "/home/dev";
+  const repo = "/work/plan";
+
+  it("is the repo when afk-setup is installed there, even when the user has it too", async () => {
+    const level = await skillsLevel(
+      files({
+        [`${repo}/.agents/skills/afk-setup/SKILL.md`]: "x",
+        [`${home}/.agents/skills/afk-setup/SKILL.md`]: "x",
+      }),
+      home,
+      repo,
+    );
+    expect(level).toBe("project");
+    expect(skillsUpdateCommand("project")).toEqual([
+      "npx",
+      "-y",
+      "skills@latest",
+      "add",
+      "xxh171015/afk-platform",
+      "--skill",
+      "*",
+      "-y",
+    ]);
+  });
+
+  it("is the user's skills otherwise, installed with -g; nowhere when afk-setup is not installed", async () => {
+    expect(
+      await skillsLevel(
+        files({ [`${home}/.claude/skills/afk-setup/SKILL.md`]: "x" }),
+        home,
+        repo,
+      ),
+    ).toBe("user");
+    expect(skillsUpdateCommand("user")).toContain("-g");
+    expect(await skillsLevel(files({}), home, repo)).toBeUndefined();
   });
 });

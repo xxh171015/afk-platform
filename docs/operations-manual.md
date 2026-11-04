@@ -46,7 +46,7 @@ npx skills@latest add xxh171015/afk-platform
 - **项目级**（在规划仓库里运行，选 Project）：skill 放在仓库的 `.agents/skills`，`/afk-setup` 把它们连同 `skills-lock.json` 一起放进 `afk/setup` PR。团队里每个人拉下代码就有同一版本，推荐团队用。
 - **全局**（选 Global，或加 `-g`）：只装在你自己的 `~/.agents/skills`。同名的 skill 会被覆盖成平台用的版本。
 
-不想回答问题时可以直接写全：`npx skills@latest add xxh171015/afk-platform --skill '*' -y`（项目级，在规划仓库里运行），全局再加 `-g`。`plat` 发现这些 skill 过期时也会提示这条命令。
+不想回答问题时可以直接写全：`npx skills@latest add xxh171015/afk-platform --skill '*' -y`（项目级，在规划仓库里运行），全局再加 `-g`。以后平台升级了，在规划仓库（项目级）或任意目录（全局）运行 `plat update`：它从平台下载最新的 plat 替换自己，再按 skill 现在装在哪一级把它们重装一遍。`plat` 发现自己或这些 skill 过期时也会提示 `plat update`。
 
 这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
@@ -269,7 +269,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 4. 改覆盖层声明的 SHA，让它和新常量一致。
 5. `pnpm check`：`VENDORED.md` 的 SHA 和常量不一致、提示词引用的 skill 没在挂载目录里时，守卫测试会失败。
 
-合并后，worker 重启就用上新 skill（`scripts/up.sh` 重启即可）。规划机器上用 `npx skills@latest add xxh171015/afk-platform --skill '*' -y`（全局加 `-g`）更新，`plat` 也会提示。
+合并后，worker 重启就用上新 skill（`scripts/up.sh` 重启即可）。规划机器上运行 `plat update` 更新（`plat` 也会提示）。
 
 ## 附录 A：场景 A 的票目录
 

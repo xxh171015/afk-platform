@@ -16,14 +16,10 @@ Speak the person's language in chat. Show command output when it carries a probl
 The platform's address is `$AFK_API_URL`, default `http://127.0.0.1:3000`; it answers `curl -fsS "$AFK_API_URL/version"`.
 
 1. `node --version` is 20 or newer; `git` and `gh` work (`gh auth status`).
-2. **plat**: `plat version` prints the same `platformVersion` as `/version`. When it is missing or different, install the platform's copy:
+2. **plat**: when there is none, install the platform's copy:
    `mkdir -p ~/.local/bin && curl -fsSL "$AFK_API_URL/cli/plat.mjs" -o ~/.local/bin/plat && chmod +x ~/.local/bin/plat`
-   and make sure `~/.local/bin` is on `PATH`.
-3. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, install the whole package at the level `afk-setup` is at:
-   - **Project level** (`afk-setup` is in the planning repo's `.agents/skills`): in the planning repo's worktree once step 3 made it, `npx skills@latest add xxh171015/afk-platform --skill '*' -y`.
-   - **Global** (`afk-setup` is under `~/.agents/skills` or another home skills directory): now, `npx skills@latest add xxh171015/afk-platform --skill '*' -g -y`.
-
-   At project level, the skills under `.agents/skills` (and their links) and `skills-lock.json` go into the `afk/setup` pull request, so everyone who plans in the repo has the same versions.
+   and make sure `~/.local/bin` is on `PATH`. When `plat version` differs from the `platformVersion` of `/version`, run `plat update`.
+3. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, run `plat update`: it installs the whole package again at the level `afk-setup` is at. At project level (`afk-setup` is in the planning repo's `.agents/skills`), run it in the planning repo's worktree once step 3 made it; the skills under `.agents/skills` (and their links) and `skills-lock.json` then go into the `afk/setup` pull request, so everyone who plans in the repo has the same versions.
 
 Done when `plat version` matches the platform and the six skills are installed at that level.
 
