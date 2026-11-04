@@ -1,5 +1,5 @@
-<!-- mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c skills/engineering/implement/SKILL.md -->
 ---
+
 name: implement
 description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true

@@ -1,6 +1,5 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { SKILLS_SHA } from "@afk/shared";
 
 // What `pnpm worker` needs to know, from the environment. Everything that is wrong is reported at once, in one
 // sentence each, before anything starts.
@@ -12,22 +11,8 @@ export interface WorkerConfig {
   slots: number;
   image: string; // the sandbox image
   model: string;
-  skillsDir: string; // pinned skills (mattpocock/skills at SKILLS_SHA, skills/engineering), mounted read-only into the sandbox
   cursorApiKey: string;
   credentialsDir: string; // the GitHub App's key and ids
-}
-
-// `head` is the HEAD of the git checkout that holds the skills directory, undefined when it is in none. A worker
-// that ran tickets with other skills than the pinned ones would record a version it did not use.
-export function checkSkillsVersion(
-  skillsDir: string,
-  head: string | undefined,
-): string | undefined {
-  if (head === SKILLS_SHA) return undefined;
-  const fix = `git -C ${skillsDir} switch --detach ${SKILLS_SHA}`;
-  return head === undefined
-    ? `AFK_SKILLS_DIR ${skillsDir} is not inside a git checkout of mattpocock/skills; clone it and run: ${fix}`
-    : `the skills checkout of ${skillsDir} is at ${head}, not the pinned ${SKILLS_SHA}; run: ${fix}`;
 }
 
 export class ConfigError extends Error {
@@ -45,7 +30,6 @@ export interface ConfigSources {
   homedir: string;
   // The text of a file, or undefined when it does not exist.
   readFile(path: string): string | undefined;
-  isDirectory(path: string): boolean;
 }
 
 // KEY=VALUE lines of ~/.afk/env; comments, blank lines, `export ` and one pair of quotes around a value are allowed.
@@ -90,14 +74,6 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
   if (!model)
     problems.push("AFK_MODEL is not set: the Cursor model the agents use");
 
-  const skillsDir = env.AFK_SKILLS_DIR ?? "";
-  if (!skillsDir)
-    problems.push(
-      "AFK_SKILLS_DIR is not set: the directory with the pinned skills (skills/engineering of the skills repo)",
-    );
-  else if (!sources.isDirectory(skillsDir))
-    problems.push(`AFK_SKILLS_DIR ${skillsDir} is not a directory`);
-
   const slots = positiveInt(env.AFK_SLOTS, 2, 16);
   if (slots === undefined)
     problems.push(
@@ -119,7 +95,6 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
     slots: slots as number,
     image: env.AFK_SANDBOX_IMAGE || "sandcastle:afk-platform",
     model,
-    skillsDir,
     cursorApiKey,
     // fixed under ~/.afk/secrets by design (not under AFK_HOME): secrets do not move with the working folders
     credentialsDir:

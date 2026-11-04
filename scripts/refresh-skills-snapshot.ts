@@ -1,9 +1,9 @@
-// Rewrites packages/shared/skills-snapshot/ and the planning skills under skills/ from a mattpocock/skills checkout,
-// at SKILLS_SHA:
+// Rewrites everything the platform takes from mattpocock/skills, from a checkout of it, at SKILLS_SHA:
 //   node scripts/refresh-skills-snapshot.ts <path to a skills checkout>
-// Each file is taken from the commit (not the working tree). Snapshot files get a header naming the SHA; the planning
-// skills are copied unchanged, with the upstream LICENSE, so they install as they are. Run it after changing
-// SKILLS_SHA, then read the diff (see "Upgrading the skills SHA" in docs/operations-manual.md).
+// Each file is taken from the commit (not the working tree) and copied unchanged: the planning skills under skills/,
+// the sandbox skills under packages/pipeline/skills/ (each with the upstream LICENSE, so they install and mount as
+// they are), the seed templates under packages/shared/skills-snapshot/. Each folder's VENDORED.md names the SHA. Run
+// it after changing SKILLS_SHA, then read the diff (see "升级 skills SHA" in docs/operations-manual.md).
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -11,9 +11,8 @@ import { fileURLToPath } from "node:url";
 import { SKILLS_SHA } from "../packages/shared/src/skills-sha.ts";
 import {
   PLANNING_SKILLS,
-  SNAPSHOT_DIR,
-  SNAPSHOT_FILES,
-  snapshotHeader,
+  SANDBOX_SKILLS,
+  TEMPLATE_FILES,
 } from "../packages/shared/src/skills-snapshot.ts";
 
 const checkout = process.argv[2];
@@ -24,46 +23,54 @@ if (!checkout) {
   process.exit(2);
 }
 
+const root = fileURLToPath(new URL("../", import.meta.url));
 const git = (...args: string[]) =>
   execFileSync("git", ["-C", checkout, ...args], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   });
 const show = (path: string) => git("show", `${SKILLS_SHA}:${path}`);
-const write = (target: string, content: string) => {
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, content);
+const write = (path: string, content: string) => {
+  mkdirSync(dirname(`${root}${path}`), { recursive: true });
+  writeFileSync(`${root}${path}`, content);
+};
+const note = (dir: string, what: string) =>
+  write(
+    `${dir}/VENDORED.md`,
+    [
+      "# Copied from mattpocock/skills",
+      "",
+      `${what}: copied unchanged from https://github.com/mattpocock/skills at ${SKILLS_SHA}, under its MIT license. Written by scripts/refresh-skills-snapshot.ts; change them upstream, not here.`,
+      "",
+    ].join("\n"),
+  );
+
+const license = show("LICENSE");
+const copySkills = (dir: string, skills: Record<string, string>) => {
+  for (const [name, path] of Object.entries(skills)) {
+    rmSync(`${root}${dir}/${name}`, { recursive: true, force: true });
+    const files = git("ls-tree", "-r", "--name-only", SKILLS_SHA, `${path}/`)
+      .trim()
+      .split("\n");
+    for (const file of files) {
+      write(`${dir}/${name}/${file.slice(path.length + 1)}`, show(file));
+    }
+    write(`${dir}/${name}/LICENSE`, license);
+  }
+  note(dir, Object.keys(skills).join(", "));
 };
 
-for (const file of SNAPSHOT_FILES) {
-  write(
-    `${SNAPSHOT_DIR}${file}`,
-    snapshotHeader(SKILLS_SHA, file) + show(`skills/engineering/${file}`),
-  );
-}
+copySkills("skills", PLANNING_SKILLS);
+copySkills("packages/pipeline/skills", SANDBOX_SKILLS);
 
-const skillsDir = fileURLToPath(new URL("../skills/", import.meta.url));
-const license = show("LICENSE");
-for (const [name, path] of Object.entries(PLANNING_SKILLS)) {
-  rmSync(`${skillsDir}${name}`, { recursive: true, force: true });
-  const files = git("ls-tree", "-r", "--name-only", SKILLS_SHA, `${path}/`)
-    .trim()
-    .split("\n");
-  for (const file of files) {
-    write(`${skillsDir}${name}/${file.slice(path.length + 1)}`, show(file));
-  }
-  write(`${skillsDir}${name}/LICENSE`, license);
+const templates = "packages/shared/skills-snapshot";
+rmSync(`${root}${templates}`, { recursive: true, force: true });
+for (const file of TEMPLATE_FILES) {
+  write(`${templates}/${file}`, show(`skills/engineering/${file}`));
 }
-write(
-  `${skillsDir}VENDORED.md`,
-  [
-    "# Skills copied from mattpocock/skills",
-    "",
-    `${Object.keys(PLANNING_SKILLS).join(", ")}: copied unchanged from https://github.com/mattpocock/skills at ${SKILLS_SHA}, under its MIT license (the LICENSE file in each). Written by scripts/refresh-skills-snapshot.ts; edit them upstream, not here.`,
-    "",
-  ].join("\n"),
-);
+write(`${templates}/LICENSE`, license);
+note(templates, TEMPLATE_FILES.join(", "));
 
 console.log(
-  `Snapshot of ${SNAPSHOT_FILES.length} files and ${Object.keys(PLANNING_SKILLS).length} planning skills at ${SKILLS_SHA}`,
+  `${Object.keys(PLANNING_SKILLS).length} planning skills, ${Object.keys(SANDBOX_SKILLS).length} sandbox skills and ${TEMPLATE_FILES.length} templates at ${SKILLS_SHA}`,
 );

@@ -86,7 +86,7 @@ export async function skillsWarnings(
   const wanted = [
     ...PLANNING_SKILLS.map((skill) => ({
       skill,
-      expected: readSkillSnapshot(`${skill}/SKILL.md`).content,
+      expected: readSkillSnapshot(`${skill}/SKILL.md`),
     })),
     { skill: "afk-setup", expected: readAfkSetupSkill() },
   ];

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SNAPSHOT_FILES, snapshotPath } from "@afk/shared/skills-snapshot";
 import { build, type Plugin } from "esbuild";
 
 // plat as one file that runs with node alone (GET /cli/plat.mjs): /afk-setup puts it on a planning machine that has
@@ -38,8 +39,13 @@ const inlineFiles: Plugin = {
     const replaced: Record<string, () => string> = {
       [at("packages/shared/src/skills-snapshot-text.ts")]: () =>
         reader(
-          "readSnapshotText",
-          filesUnder(at("packages/shared/skills-snapshot")),
+          "readRepoText",
+          Object.fromEntries(
+            SNAPSHOT_FILES.map((file) => {
+              const path = snapshotPath(file);
+              return [path, readFileSync(at(path), "utf8")];
+            }),
+          ),
           "file",
         ),
       [at("packages/cli/src/template-text.ts")]: () =>

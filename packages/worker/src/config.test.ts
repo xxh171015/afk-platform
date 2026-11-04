@@ -3,29 +3,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SKILLS_SHA } from "@afk/shared";
 import { describe, expect, it } from "vitest";
-import {
-  ConfigError,
-  checkSkillsVersion,
-  loadConfig,
-  parseEnvFile,
-} from "./config.ts";
+import { ConfigError, loadConfig, parseEnvFile } from "./config.ts";
 
 const sources = (
   env: Record<string, string>,
   files: Record<string, string> = {},
-  dirs: string[] = ["/skills"],
 ) => ({
   env,
   homedir: "/home/me",
   readFile: (path: string) => files[path],
-  isDirectory: (path: string) => dirs.includes(path),
 });
 const complete = {
   CURSOR_API_KEY: "key",
   AFK_MODEL: "some-model",
-  AFK_SKILLS_DIR: "/skills",
 };
 const problemsOf = (run: () => unknown) => {
   try {
@@ -48,7 +39,7 @@ describe("parseEnvFile", () => {
 });
 
 describe("the worker's configuration", () => {
-  it("has defaults for everything but the key, the model and the skills", () => {
+  it("has defaults for everything but the key and the model", () => {
     const config = loadConfig(sources(complete));
     expect(config).toMatchObject({
       apiUrl: "http://127.0.0.1:3000",
@@ -56,7 +47,6 @@ describe("the worker's configuration", () => {
       slots: 2,
       image: "sandcastle:afk-platform",
       model: "some-model",
-      skillsDir: "/skills",
       cursorApiKey: "key",
       credentialsDir: "/home/me/.afk/secrets/github-app",
     });
@@ -85,41 +75,11 @@ describe("the worker's configuration", () => {
     const problems = problemsOf(() =>
       loadConfig(sources({ AFK_SLOTS: "0", AFK_API_URL: "not a url" })),
     );
-    expect(problems).toHaveLength(5);
+    expect(problems).toHaveLength(4);
     expect(problems.join("\n")).toMatch(/CURSOR_API_KEY is not set/);
     expect(problems.join("\n")).toMatch(/AFK_MODEL is not set/);
-    expect(problems.join("\n")).toMatch(/AFK_SKILLS_DIR is not set/);
     expect(problems.join("\n")).toMatch(/AFK_SLOTS must be/);
     expect(problems.join("\n")).toMatch(/AFK_API_URL is not an address/);
-  });
-
-  it("refuses a skills directory that is not there", () => {
-    expect(
-      problemsOf(() =>
-        loadConfig(sources({ ...complete, AFK_SKILLS_DIR: "/nope" })),
-      ),
-    ).toEqual(["AFK_SKILLS_DIR /nope is not a directory"]);
-  });
-});
-
-describe("the skills checkout", () => {
-  const other = "0123456789abcdef0123456789abcdef01234567";
-
-  it("is accepted when its HEAD is the pinned SHA", () => {
-    expect(checkSkillsVersion("/skills", SKILLS_SHA)).toBeUndefined();
-  });
-
-  it("is refused at any other HEAD, with the command that switches it", () => {
-    const problem = checkSkillsVersion("/skills", other);
-    expect(problem).toContain(other);
-    expect(problem).toContain(SKILLS_SHA);
-    expect(problem).toContain(`git -C /skills switch --detach ${SKILLS_SHA}`);
-  });
-
-  it("is refused when it is not a git checkout", () => {
-    expect(checkSkillsVersion("/skills", undefined)).toContain(
-      "not inside a git checkout",
-    );
   });
 });
 
@@ -159,7 +119,6 @@ describe("pnpm worker", () => {
           HOME: home,
           CURSOR_API_KEY: "k",
           AFK_MODEL: "m",
-          AFK_SKILLS_DIR: home,
           AFK_SANDBOX_IMAGE: "afk-test-image-that-does-not-exist:none",
         },
         encoding: "utf8",
@@ -184,7 +143,6 @@ describe("pnpm worker", () => {
           HOME: home,
           CURSOR_API_KEY: "k",
           AFK_MODEL: "m",
-          AFK_SKILLS_DIR: home,
         },
         encoding: "utf8",
         timeout: 20_000,

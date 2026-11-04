@@ -5,7 +5,7 @@ const h2Names = (text: string): string[] =>
 
 /** The `## ` section names of the to-spec template, in order, read from the snapshot of the skill. */
 export function specTemplateSections(): string[] {
-  const { content } = readSkillSnapshot("to-spec/SKILL.md");
+  const content = readSkillSnapshot("to-spec/SKILL.md");
   const template = /<spec-template>([\s\S]*?)<\/spec-template>/.exec(content);
   if (!template?.[1]) throw new Error("to-spec has no <spec-template>");
   return [...template[1].matchAll(/^## (.+?)\s*$/gm)].map(

@@ -67,7 +67,7 @@ describe("renderTrackerDoc", () => {
   it("puts the GitHub seed template in, byte for byte, for a GitHub repo", () => {
     const seed = readSkillSnapshot(
       "setup-matt-pocock-skills/issue-tracker-github.md",
-    ).content;
+    );
     expect(renderTrackerDoc(single, "backend")).toContain(seed);
   });
 
@@ -89,7 +89,7 @@ describe("renderTrackerDoc", () => {
   it("puts the GitLab seed template in, and routes to glab, for a GitLab repo", () => {
     const seed = readSkillSnapshot(
       "setup-matt-pocock-skills/issue-tracker-gitlab.md",
-    ).content;
+    );
     const doc = renderTrackerDoc(
       {
         id: 5,

@@ -83,7 +83,7 @@ describe("trackerDocWarnings", () => {
 
 describe("skillsWarnings", () => {
   const snapshot = (name: "to-spec" | "to-tickets") =>
-    readSkillSnapshot(`${name}/SKILL.md`).content;
+    readSkillSnapshot(`${name}/SKILL.md`);
   const home = "/home/dev";
   const installed = (dir: string, over: Record<string, string> = {}) =>
     files({
