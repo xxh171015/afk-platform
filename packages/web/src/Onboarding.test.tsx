@@ -8,15 +8,11 @@ afterEach(cleanup);
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
-const server = (projects: unknown[]) =>
+const server = (projects: unknown[], platformCommit: string | null = COMMIT) =>
   fakeServer({
     "GET /projects": () => ({ json: { projects } }),
     "GET /version": () => ({
-      json: {
-        platformVersion: "0.2.0",
-        skillsSha: "x",
-        platformCommit: COMMIT,
-      },
+      json: { platformVersion: "0.2.0", skillsSha: "x", platformCommit },
     }),
   });
 
@@ -26,7 +22,7 @@ describe("getting a project onto the platform from the control tower", () => {
 
     const block = await screen.findByRole("region", { name: "接入第一个项目" });
     const command = `npx skills@latest add xxh171015/afk-platform#${COMMIT}`;
-    expect(within(block).getByText(command)).toBeTruthy();
+    expect(await within(block).findByText(command)).toBeTruthy();
     expect(
       within(block).getByRole("button", { name: `复制命令 ${command}` }),
     ).toBeTruthy();
@@ -49,7 +45,44 @@ describe("getting a project onto the platform from the control tower", () => {
     );
 
     const entry = await screen.findByText("接入新项目");
-    expect(entry.closest("details")?.open).toBe(false);
+    const details = entry.closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
     expect(screen.queryByRole("region", { name: "接入第一个项目" })).toBeNull();
+    expect(
+      await within(details).findByText(
+        `npx skills@latest add xxh171015/afk-platform#${COMMIT}`,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("gives no unpinned command when the platform does not say its commit", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      server([], null),
+    );
+
+    const block = await screen.findByRole("region", { name: "接入第一个项目" });
+    expect(
+      await within(block).findByText(/平台说不出它对应的提交/),
+    ).toBeTruthy();
+    expect(block.textContent).not.toContain("npx skills");
+  });
+
+  it("stays findable when the projects cannot be listed", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      fakeServer({
+        "GET /projects": () => ({ status: 500, json: { error: "down" } }),
+        "GET /version": () => ({
+          json: {
+            platformVersion: "0.2.0",
+            skillsSha: "x",
+            platformCommit: COMMIT,
+          },
+        }),
+      }),
+    );
+
+    expect(await screen.findByText("接入新项目")).toBeTruthy();
   });
 });
