@@ -31,6 +31,7 @@ import {
   InvalidArgumentError,
   Option,
 } from "commander";
+import { afkHome, rememberApiUrl, rememberedApiUrl } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
 import {
@@ -43,7 +44,6 @@ import {
   TRACKER_DOC_PATH,
 } from "./init.ts";
 import {
-  afkHome,
   dropBackup,
   dropFinishedSpecs,
   readBackup,
@@ -192,7 +192,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   const program = new Command("plat")
     .description("AFK platform command line")
     .option("--json", "print one JSON document instead of text")
-    .option("--api-url <url>", "platform API (default $AFK_API_URL)")
+    .option(
+      "--api-url <url>",
+      "platform API (default $AFK_API_URL, else the address plat connect remembered, else http://127.0.0.1:3000)",
+    )
     .exitOverride()
     .configureOutput({
       writeOut: io.stdout,
@@ -200,8 +203,12 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   const json = () => Boolean(program.opts().json);
+  // Where the platform is: --api-url, $AFK_API_URL, the address `plat connect` remembered, the default.
   const apiUrl = (): string =>
-    program.opts().apiUrl ?? io.env.AFK_API_URL ?? DEFAULT_API_URL;
+    program.opts().apiUrl ??
+    io.env.AFK_API_URL ??
+    rememberedApiUrl(afkHome(io.env)) ??
+    DEFAULT_API_URL;
   const api = (): ApiClient => createApiClient(apiUrl());
 
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
@@ -538,6 +545,28 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description("print the platform version this plat comes from")
     .action(() => {
       io.stdout(`${PLATFORM_VERSION}\n`);
+    });
+
+  program
+    .command("connect <url>")
+    .description(
+      "remember the platform's address on this machine, once the platform answers there; --api-url and $AFK_API_URL still come first",
+    )
+    .action(async (url: string) => {
+      const address = url.replace(/\/+$/, "");
+      const version = await createApiClient(address)
+        .GET("/version")
+        .then((r) => r.data?.platformVersion)
+        .catch(() => undefined);
+      if (!version)
+        throw new Failure(
+          `no platform answers at ${address} (GET ${address}/version); nothing remembered`,
+        );
+      const file = rememberApiUrl(afkHome(io.env), address);
+      print(
+        { apiUrl: address, platformVersion: version, file },
+        `plat: the platform is at ${address} (${version}); remembered in ${file}`,
+      );
     });
 
   program

@@ -13,15 +13,14 @@ Speak the person's language in chat. Show command output when it carries a probl
 
 ## 1. Tools on this machine
 
-The platform's address is `$AFK_API_URL`, default `http://127.0.0.1:3000`; it answers `curl -fsS "$AFK_API_URL/version"`.
+1. **Prerequisites**: `node --version` is 20 or newer, `git --version` works, and `gh auth status` says logged in. For each one missing, say in one line the command the person runs (for example "Node 20+: `brew install node`, or the installer from nodejs.org"; "gh: `gh auth login`"), and stop until they are there. Do not install them or log in for the person.
+2. **The platform's address**: the address plat already uses (`plat connect` remembered it, or `$AFK_API_URL`), else `http://127.0.0.1:3000`. It is right when `curl -fsS "<address>/version"` answers. When it does not, ask the person once for the address and check it the same way. Once plat is there (next item), run `plat connect <address>`: plat remembers it on this machine, so nothing goes in the shell's configuration. `--api-url` and `$AFK_API_URL` still come first when set.
+3. **plat**: when there is none, install the platform's copy into a directory already on `PATH` that the person can write to (prefer `~/.local/bin`, then `~/bin`, when on `PATH`; any other directory on `PATH` under the home directory will do):
+   `curl -fsSL "<address>/cli/plat.mjs" -o <dir>/plat && chmod +x <dir>/plat`
+   Only when no such directory is on `PATH`: make `~/.local/bin`, install there, and add one line `export PATH="$HOME/.local/bin:$PATH"` to the configuration of the shell the person uses (`~/.zshrc` for zsh, `~/.bashrc` for bash); say in the report which file got the line. When `plat version` differs from the `platformVersion` of `/version`, run `plat update`.
+4. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, run `plat update`: it installs the whole package again at the level `afk-setup` is at. At project level (`afk-setup` is in the planning repo's `.agents/skills`), run it in the planning repo's worktree once step 3 made it; the skills under `.agents/skills` (and their links) and `skills-lock.json` then go to `afk/setup` and reach the default branch with the first spec, so everyone who plans in the repo has the same versions.
 
-1. `node --version` is 20 or newer; `git` and `gh` work (`gh auth status`).
-2. **plat**: when there is none, install the platform's copy:
-   `mkdir -p ~/.local/bin && curl -fsSL "$AFK_API_URL/cli/plat.mjs" -o ~/.local/bin/plat && chmod +x ~/.local/bin/plat`
-   and make sure `~/.local/bin` is on `PATH`. When `plat version` differs from the `platformVersion` of `/version`, run `plat update`.
-3. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, run `plat update`: it installs the whole package again at the level `afk-setup` is at. At project level (`afk-setup` is in the planning repo's `.agents/skills`), run it in the planning repo's worktree once step 3 made it; the skills under `.agents/skills` (and their links) and `skills-lock.json` then go to `afk/setup` and reach the default branch with the first spec, so everyone who plans in the repo has the same versions.
-
-Done when `plat version` matches the platform and the six skills are installed at that level.
+Done when `plat version` matches the platform, plat remembers its address, and the six skills are installed at that level.
 
 ## 2. The repos
 

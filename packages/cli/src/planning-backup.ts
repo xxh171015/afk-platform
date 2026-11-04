@@ -7,7 +7,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseDisplayId, type SpecState } from "@afk/shared";
 
@@ -24,11 +23,6 @@ export interface PlanningBackup {
 
 const PATCH = "planning-docs.patch";
 const META = "planning-docs.json";
-
-// The planning machine's AFK home, as the worker has it: $AFK_HOME, else ~/.afk.
-export function afkHome(env: Record<string, string | undefined>): string {
-  return env.AFK_HOME || join(env.HOME ?? homedir(), ".afk");
-}
 
 export const specPlanningDir = (home: string, spec: string) =>
   join(home, "planning", spec);

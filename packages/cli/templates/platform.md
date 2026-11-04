@@ -3,7 +3,7 @@
 
 Specs and tickets live in the afk-platform, not on the code host. Use the `plat` CLI for all of it.
 `plat` is a command on this machine; run it from this repo, so file paths are relative to here. It talks to
-`$AFK_API_URL`, default `http://127.0.0.1:3000`. Add `--json` for machine output. `plat --help` and
+the platform at the address `plat connect` remembered (`$AFK_API_URL` overrides it). Add `--json` for machine output. `plat --help` and
 `plat <command> --help` list every command.
 
 This repo is the project's `{{REPO}}` repo (`repo: {{REPO}}` in a ticket file); the project is `{{PROJECT}}` on the platform.
