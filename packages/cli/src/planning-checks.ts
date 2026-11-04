@@ -1,4 +1,4 @@
-import { SETUP_BRANCH } from "@afk/shared";
+import { SETUP_BRANCH, SKILLS_PACKAGE } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
@@ -22,11 +22,12 @@ export const SKILLS_DIRS = [
   ".cursor/skills",
   ".agents/skills",
 ];
-const PLANNING_SKILLS = ["to-spec", "to-tickets"] as const;
+// The planning skills plat carries a copy of, to tell whether an installed one is the platform's.
+const CHECKED_SKILLS = ["to-spec", "to-tickets"] as const;
 // One package holds afk-setup and the planning skills at the pinned SHA (skills/). The first install is like
 // `npx skills@latest add mattpocock/skills`: it asks which skills, which agents, project or global. `plat update`
 // installs it again at the platform's commit, at the levels it is at (skills-install.ts).
-const SKILLS_INSTALL = "npx skills@latest add xxh171015/afk-platform";
+const SKILLS_INSTALL = `npx skills@latest add ${SKILLS_PACKAGE}`;
 export type SkillsLevel = "project" | "user";
 const skillsFix = (level: SkillsLevel | undefined) =>
   level === undefined
@@ -36,8 +37,8 @@ const skillsFix = (level: SkillsLevel | undefined) =>
 /** A skill's SKILL.md as this platform has it, for the skills plat carries a copy of; undefined for the others. */
 export function expectedSkillText(skill: string): string | undefined {
   if (skill === "afk-setup") return readAfkSetupSkill();
-  return (PLANNING_SKILLS as readonly string[]).includes(skill)
-    ? readSkillSnapshot(`${skill as (typeof PLANNING_SKILLS)[number]}/SKILL.md`)
+  return (CHECKED_SKILLS as readonly string[]).includes(skill)
+    ? readSkillSnapshot(`${skill as (typeof CHECKED_SKILLS)[number]}/SKILL.md`)
     : undefined;
 }
 
@@ -96,10 +97,13 @@ export async function skillsWarnings(
   repo = ".",
 ): Promise<string[]> {
   const warnings: string[] = [];
-  const wanted = [...PLANNING_SKILLS, "afk-setup"].map((skill) => ({
-    skill,
-    expected: expectedSkillText(skill) as string,
-  }));
+  const wanted = [
+    ...CHECKED_SKILLS.map((skill) => ({
+      skill,
+      expected: readSkillSnapshot(`${skill}/SKILL.md`),
+    })),
+    { skill: "afk-setup", expected: readAfkSetupSkill() },
+  ];
   const levels: [SkillsLevel, string][] = [
     ["project", repo],
     ["user", home],

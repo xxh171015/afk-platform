@@ -6,22 +6,35 @@ import { cliBundle } from "../cli/cli-bundle.ts";
 
 // What a planning machine fetches from the platform: plat itself, and which version the platform is.
 
-// The commit of the platform's repo this platform runs from: what `plat update` and the control tower's install
-// command pin the skills package to (xxh171015/afk-platform#<commit>). $AFK_PLATFORM_COMMIT when the platform does
-// not run from a git checkout; null when neither says.
+// The commit of the platform's repo that `plat update` and the control tower's install command pin the skills
+// package to (xxh171015/afk-platform#<commit>): the newest commit this platform's checkout runs that a remote has,
+// since GitHub cannot resolve one only this checkout has. $AFK_PLATFORM_COMMIT when the platform does not run from
+// a git checkout; null when neither says.
 let commit: string | null | undefined;
 export function platformCommit(
   env: Record<string, string | undefined> = process.env,
 ): string | null {
   if (env.AFK_PLATFORM_COMMIT) return env.AFK_PLATFORM_COMMIT;
-  if (commit === undefined) {
-    const head = spawnSync("git", ["rev-parse", "HEAD"], {
+  if (commit === undefined) commit = pushedHead();
+  return commit;
+}
+
+function pushedHead(): string | null {
+  const git = (args: string[]) => {
+    const result = spawnSync("git", args, {
       cwd: new URL("../../../..", import.meta.url).pathname,
       encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
     });
-    commit = head.status === 0 ? head.stdout.trim() : null;
-  }
-  return commit;
+    return result.status === 0
+      ? result.stdout.split("\n").filter(Boolean)
+      : null;
+  };
+  const unpushed = git(["rev-list", "HEAD", "--not", "--remotes"]);
+  const line = git(["rev-list", "--first-parent", "HEAD"]);
+  if (!unpushed || !line) return null;
+  const local = new Set(unpushed);
+  return line.find((sha) => !local.has(sha)) ?? null;
 }
 
 const versionRoute = createRoute({

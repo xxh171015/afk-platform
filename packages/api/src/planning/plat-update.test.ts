@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -24,11 +23,14 @@ import {
 let ws: PlatWorkspace;
 let home: string;
 let calls: { args: string[]; cwd: string }[];
+let platformCommit: string;
 
 beforeEach(async () => {
   ws = await platWorkspace();
   home = mkdtempSync(join(tmpdir(), "afk-user-"));
   calls = [];
+  platformCommit = (await (await fetch(`${ws.api.url}/version`)).json())
+    .platformCommit;
 });
 afterEach(async () => {
   await ws.close();
@@ -43,9 +45,6 @@ const PLANNING = [
   "to-tickets",
 ];
 const ALL = ["afk-setup", ...PLANNING];
-const platformCommit = execFileSync("git", ["rev-parse", "HEAD"], {
-  encoding: "utf8",
-}).trim();
 
 function skill(root: string, name: string, text = `${name} as installed\n`) {
   mkdirSync(join(root, ".agents/skills", name), { recursive: true });
@@ -154,44 +153,76 @@ describe("plat update at user level", () => {
     ]);
   });
 
-  it("puts the planning skills in this repo, not over the user's own, and says how to undo the platform's ones for the user", async () => {
+  it("installs afk-setup for the user and the planning skills in this repo when the user has planning skills of their own", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
     );
     skill(home, "afk-setup");
     skill(home, "grilling");
+    writeFileSync(
+      join(home, ".agents/.skill-lock.json"),
+      JSON.stringify({ skills: { grilling: { source: "mattpocock/skills" } } }),
+    );
+
+    const updated = await update(backend);
+
+    expect(updated.code).toBe(0);
+    expect(
+      calls.map((c) => [
+        c.cwd,
+        ...c.args.slice(5).filter((a) => a !== "--skill"),
+      ]),
+    ).toEqual([
+      [home, "afk-setup", "-g", "-y"],
+      [backend.dir, ...PLANNING, "-y"],
+    ]);
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("changes nothing for the user when the user's planning skills are the platform's, and says how to go back to Matt's", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    skill(home, "afk-setup");
     skill(home, "to-spec");
     writeFileSync(
       join(home, ".agents/.skill-lock.json"),
       JSON.stringify({
-        skills: {
-          grilling: { source: "mattpocock/skills" },
-          "to-spec": { source: "xxh171015/afk-platform" },
-        },
+        skills: { "to-spec": { source: "xxh171015/afk-platform" } },
       }),
     );
 
     const updated = await update(backend);
 
     expect(updated.code).toBe(0);
-    const global = calls.filter((c) => c.args.includes("-g"));
-    expect(global.map((c) => c.args.slice(5, -2))).toEqual([
-      ["--skill", "afk-setup"],
-    ]);
-    const here = calls.filter((c) => !c.args.includes("-g"));
-    expect(here).toEqual([
-      {
-        args: expect.arrayContaining(PLANNING.flatMap((s) => ["--skill", s])),
-        cwd: backend.dir,
-      },
-    ]);
+    expect(calls.filter((c) => c.args.includes("-g"))).toEqual([]);
+    expect(calls.map((c) => c.cwd)).toEqual([backend.dir]);
     expect(updated.stdout).toContain(
       "to-spec for you come from the platform, so every project of yours plans with them",
     );
     expect(updated.stdout).toContain(
-      "npx skills@latest add mattpocock/skills -g",
+      "npx skills@latest add mattpocock/skills --skill to-spec -g -y",
     );
-    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("brings both up when the skills are in this repo and for the user", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    skill(home, "afk-setup");
+    skill(backend.dir, "to-spec", "Matt's to-spec\n");
+
+    const updated = await update(backend);
+
+    expect(calls.map((c) => [c.cwd, c.args.includes("-g")])).toEqual([
+      [backend.dir, false],
+      [home, true],
+    ]);
+    expect(updated.stdout).toContain(
+      "replaced in this repo, as they were not the platform's: to-spec",
+    );
   });
 });

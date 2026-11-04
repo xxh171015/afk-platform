@@ -28,15 +28,21 @@ afterEach(async () => {
 });
 
 describe("the platform's version", () => {
-  it("names the platform version, the pinned skills SHA and the commit of the platform's repo it runs", async () => {
+  it("names the platform version, the pinned skills SHA, and a commit of the platform's repo that is on its remote", async () => {
     const response = await fetch(`${ws.api.url}/version`);
-    expect(await response.json()).toEqual({
+    const version = await response.json();
+    expect(version).toMatchObject({
       platformVersion: PLATFORM_VERSION,
       skillsSha: SKILLS_SHA,
-      platformCommit: execFileSync("git", ["rev-parse", "HEAD"], {
-        encoding: "utf8",
-      }).trim(),
     });
+    // the newest commit HEAD has that a remote has too, so GitHub can resolve it
+    const git = (args: string[]) =>
+      execFileSync("git", args, { encoding: "utf8" });
+    expect(version.platformCommit).toMatch(/^[0-9a-f]{40}$/);
+    git(["merge-base", "--is-ancestor", version.platformCommit, "HEAD"]);
+    expect(
+      git(["branch", "-r", "--contains", version.platformCommit]),
+    ).not.toBe("");
   });
 });
 
