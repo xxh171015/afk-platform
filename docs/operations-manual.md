@@ -131,7 +131,7 @@ plat spec show S-n          # spec 正文、票、依赖边、导入告警
 plat spec confirm S-n       # 从这一刻起开始实现
 ```
 
-- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`；多上下文的仓库还有 `GLOSSARY-MAP.md` 和它列出的各上下文下的 `GLOSSARY.md`、`docs/adr/`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台（在 `afk/setup` 工作树里时，相对远端的 `afk/setup`，补丁里只有规划文档的改动），不动你的 git。输出里有一条 `git stash push …`，想把本地这份收起来就执行它（不收的话，等 PR 合并后 `git pull` 会和它冲突）。
+- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`；多上下文的仓库还有 `GLOSSARY-MAP.md` 和它列出的各上下文下的 `GLOSSARY.md`、`docs/adr/`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台（在 `afk/setup` 工作树里时，相对远端的 `afk/setup`，补丁里只有规划文档的改动）。平台收下后，plat 把这些路径上没提交的改动从 checkout 里收走：新建的删掉，改过的还原成 HEAD 的样子，不用 stash；补丁备份在仓库外的 `~/.afk/planning/S-n/`。这样 PR 合并后 `git pull` 不会和它冲突。你已经提交的、以及规划文档以外的改动，一律不动；confirm 被拒时什么都不收走。需求合入或取消后，下一条 plat 命令会顺手删掉这个备份目录。
 - 平台先做**规划提交**：把补丁三方合并到规划仓库的设置提交（没有 `afk/setup` 要叠时就是默认分支的最新提交）上，作为集成分支的开头；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
 - 在页面上确认、或在规划仓库以外的地方 confirm，带不上本地的规划文档（预检标黄）；规划提交就是默认分支当时的最新提交。在项目的另一个仓库里 confirm 会被拒绝。
 - 补丁超过 1 MB 会被拒绝：规划文档只该有上面这些。
@@ -221,7 +221,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | 漏了票或要拆票 | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
 | 不要这张票了 | `plat ticket cancel T-n`（`--cascade` 一并取消下游） |
 | spec 暂停（超出 agent 时长） | `plat spec resume S-n`（可给更多时间） |
-| 规划文档合不进默认分支（别人刚改了同一段），或规划提交连续三次没做成 | 在规划仓库里拉最新的默认分支、解决冲突后 `plat spec retry-planning S-n`（重新发送）；不要这些文档了：`plat spec waive-planning S-n`（照常开工，验收包和 PR 描述注明「规划文档未提交」） |
+| 规划文档合不进默认分支（别人刚改了同一段），或规划提交连续三次没做成 | 在规划仓库里拉最新的默认分支，运行 `plat spec retry-planning S-n`：它用备份把规划文档三方合并放回 checkout，冲突标在文件里；解决后再运行一次同一条命令，重新发送并再次收走；不要这些文档了：`plat spec waive-planning S-n`（照常开工，验收包和 PR 描述注明「规划文档未提交」；备份一并删掉） |
 | 整体 review 步骤 blocked | `plat spec retry-final S-n`（也可带 `--note`，出现在这批收尾 Run 上）；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明） |
 | PR 被关掉没合并 | 在 GitHub 上重开；或重做 spec；或 `plat spec cancel S-n` |
 | 取消了但分支/PR 没清干净 | `plat spec cleanup S-n` |

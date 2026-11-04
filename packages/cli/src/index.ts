@@ -42,6 +42,14 @@ import {
   TRACKER_DOC_PATH,
 } from "./init.ts";
 import {
+  afkHome,
+  dropBackup,
+  dropFinishedSpecs,
+  readBackup,
+  saveBackup,
+  specPlanningDir,
+} from "./planning-backup.ts";
+import {
   integrationWarnings,
   skillsLevel,
   skillsUpdateCommand,
@@ -50,7 +58,13 @@ import {
   unreadyRepos,
   versionWarnings,
 } from "./planning-checks.ts";
-import { readPlanningDocs } from "./planning-docs.ts";
+import {
+  putPlanningDocsAside,
+  putPlanningDocsBack,
+  readPlanningDocs,
+  uncommittedPlanningDocs,
+  withConflictMarkers,
+} from "./planning-docs.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -184,10 +198,23 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   const json = () => Boolean(program.opts().json);
-  const api = (): ApiClient =>
-    createApiClient(
-      program.opts().apiUrl ?? io.env.AFK_API_URL ?? DEFAULT_API_URL,
-    );
+  const apiUrl = (): string =>
+    program.opts().apiUrl ?? io.env.AFK_API_URL ?? DEFAULT_API_URL;
+  const api = (): ApiClient => createApiClient(apiUrl());
+
+  // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
+  program.hook("preAction", async () => {
+    try {
+      await dropFinishedSpecs(afkHome(io.env), apiUrl(), async (spec) => {
+        const { data } = await api().GET("/specs/{id}", {
+          params: { path: { id: specIdOf(spec) } },
+        });
+        return data?.spec.state;
+      });
+    } catch {
+      // a clean-up that cannot run is not worth failing the command
+    }
+  });
   const print = (value: unknown, text: string) =>
     io.stdout(json() ? `${JSON.stringify(value)}\n` : `${text}\n`);
 
@@ -517,11 +544,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
     )
     .action(async () => {
-      const base = (
-        program.opts().apiUrl ??
-        io.env.AFK_API_URL ??
-        DEFAULT_API_URL
-      ).replace(/\/$/, "");
+      const base = apiUrl().replace(/\/$/, "");
       const lines: string[] = [];
 
       // plat: the platform's copy, written next to this one and moved over it.
@@ -964,7 +987,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ...(docs.status === "ok" && docs.files.length > 0
           ? [
               `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
-              `  your copies here can be put aside: git stash push --include-untracked -- ${docs.files.join(" ")}`,
+              ...putAside(`S-${specId}`, docs, planningRepo ?? ""),
             ]
           : []),
         ...(data.planningState
@@ -1072,11 +1095,32 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, specText(data));
     });
 
+  // Once the platform has the planning docs, the copies not committed here go to the spec's folder outside the
+  // checkout, so that pulling the spec's pull request later finds nothing in the way. The lines that say so.
+  const putAside = (
+    spec: string,
+    docs: Extract<ReturnType<typeof readPlanningDocs>, { status: "ok" }>,
+    repo: string,
+  ): string[] => {
+    const kept = saveBackup(afkHome(io.env), spec, {
+      apiUrl: apiUrl(),
+      repo,
+      files: docs.files,
+      patch: docs.patch,
+    });
+    const taken = putPlanningDocsAside(docs.dir, docs.paths);
+    return taken.length > 0
+      ? [
+          `  taken out of this checkout (back to HEAD): ${taken.join(", ")}; kept in ${kept}`,
+        ]
+      : [];
+  };
+
   // Planning docs that did not apply to the planning repo's default branch (ADR 0005).
   spec
     .command("retry-planning <spec>")
     .description(
-      "in the spec's planning repo, after merging its default branch into the planning docs by hand: send them again and make the planning commit again",
+      "in the spec's planning repo, with its default branch merged into your branch: the first run puts the planning docs confirm took back into the checkout, merged three ways (conflicts marked in the files); once they are resolved, the next run sends them again and makes the planning commit again",
     )
     .action(async (id: string) => {
       const specId = specIdOf(id);
@@ -1101,6 +1145,35 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `run plat spec retry-planning in a checkout of ${planningRepo}, where ${id}'s planning docs are`,
         );
       }
+      const home = afkHome(io.env);
+      const spec = `S-${specId}`;
+      const local = uncommittedPlanningDocs(docs.dir, docs.paths);
+      const backup = readBackup(home, spec);
+      if (local.length === 0 && backup) {
+        const back = putPlanningDocsBack(docs.dir, backup.patch, docs.paths);
+        if (!back.ok)
+          throw new Failure(
+            `could not put ${id}'s planning docs back from ${specPlanningDir(home, spec)}: ${back.error}`,
+          );
+        print(
+          { putBack: backup.files, conflicts: back.conflicts },
+          [
+            `${id}: planning docs ${backup.files.join(", ")} put back in this checkout`,
+            ...(back.conflicts.length > 0
+              ? [
+                  `  resolve the conflicts marked in ${back.conflicts.join(", ")}`,
+                ]
+              : []),
+            `  then run plat spec retry-planning ${id} again to send them`,
+          ].join("\n"),
+        );
+        return;
+      }
+      const marked = withConflictMarkers(docs.dir, local);
+      if (marked.length > 0)
+        throw new Failure(
+          `resolve the conflicts marked in ${marked.join(", ")} first, then run plat spec retry-planning ${id} again`,
+        );
       const { data, response, error } = await api().POST(
         "/specs/{specId}/planning/retry",
         {
@@ -1111,7 +1184,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (!data) throw failureFrom(response, error);
       print(
         data,
-        `${id}: planning docs ${docs.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
+        [
+          `${id}: planning docs ${docs.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
+          ...(docs.files.length > 0 ? putAside(spec, docs, planningRepo) : []),
+        ].join("\n"),
       );
     });
 
@@ -1127,6 +1203,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         { params: { path: { specId } } },
       );
       if (!data) throw failureFrom(response, error);
+      dropBackup(afkHome(io.env), `S-${specId}`);
       print(
         data,
         `${id}: planning docs given up; the planning commit is queued as the default branch's head`,

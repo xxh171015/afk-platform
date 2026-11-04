@@ -28,6 +28,7 @@ export interface PlatResult {
 export interface PlatWorkspace {
   api: RunningApi;
   db: TestDatabase;
+  afkHome: string; // the planning machine's AFK home ($AFK_HOME) plat is run with
   // A checkout at <root>/<folder> whose origin is `address`. The remote's default branch is `defaultBranch`; with
   // `reachable: false` the address leads nowhere, as when there is no network or no credentials.
   checkout(
@@ -51,11 +52,13 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
   const logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   const api = await listen(createApp({ pool: db.pool, logDir }));
   const root = await mkdtemp(join(tmpdir(), "afk-work-"));
+  const afkHome = join(root, ".afk");
   const cleanups: (() => void)[] = [];
 
   return {
     api,
     db,
+    afkHome,
     checkout(
       folder,
       address,
@@ -92,6 +95,7 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
         // plat init does not wait for a worker to check the GitHub App
         env: {
           AFK_API_URL: api.url,
+          AFK_HOME: afkHome,
           AFK_ACCESS_WAIT_SECONDS: "0",
           AFK_POLL_SECONDS: "0.05",
         },
