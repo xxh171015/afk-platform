@@ -54,6 +54,8 @@ export class FakeGitHub {
   };
   // The files on the repo's default branch, by path.
   readonly files = new Set<string>();
+  // The files on other branches, by branch and path (a contents read with `?ref=`).
+  readonly branchFiles = new Map<string, Set<string>>();
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
   private readonly branchNames = new Set<string>();
@@ -272,7 +274,9 @@ export class FakeGitHub {
 
     const content = /^\/contents\/(.+)$/.exec(rest);
     if ((req.method === "GET" || req.method === "HEAD") && content) {
-      if (!this.files.has(content[1] as string))
+      const ref = url.searchParams.get("ref");
+      const files = ref ? this.branchFiles.get(ref) : this.files;
+      if (!files?.has(content[1] as string))
         return this.json(res, 404, { message: "Not Found" });
       return this.json(res, 200, { type: "file", path: content[1] });
     }

@@ -4,6 +4,10 @@
 //   spec/<id>/<slug>   agent/<id>/T-<n>   agent/<id>/S-<n>-final        (a spec with an id)
 //   spec/<slug>        agent/T-<n>        agent/S-<n>-final             (an older spec)
 
+// The branch afk-setup pushes a repo's setup to (ADR 0006). It is a person's, not the platform's: the platform
+// reads it, merges it onto each spec's integration branch, and never pushes to it or deletes it.
+export const SETUP_BRANCH = "afk/setup";
+
 const ID = "[0-9a-f]{6}";
 const TICKET = "(T-[1-9][0-9]*|S-[1-9][0-9]*-final)";
 const SLUG = "[a-z0-9]+(?:-[a-z0-9]+)*";

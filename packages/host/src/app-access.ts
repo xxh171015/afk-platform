@@ -1,9 +1,11 @@
+import { SETUP_BRANCH } from "@afk/shared";
 import { type AppTokenOptions, appJwt } from "./github-app.ts";
 import { HostError, type RepoRef, type TokenPermissions } from "./types.ts";
 
 // Whether the GitHub App can do on a repo what the platform needs (docs/design.md「bot 账号」): the repo was given
 // to the App's installation, and the installation was granted these permissions. When it can, also which of the
-// files a repo is set up with are on its default branch. Nothing is changed on GitHub.
+// files a repo is set up with it has: on its default branch, or on afk/setup, which every spec's integration branch
+// starts with until the default branch has it (ADR 0006). Nothing is changed on GitHub.
 
 const NEEDED: Required<TokenPermissions> = {
   contents: "write",
@@ -12,7 +14,7 @@ const NEEDED: Required<TokenPermissions> = {
   statuses: "read",
 };
 
-// The files of a repo's setup that the platform reads from its default branch.
+// The files of a repo's setup that the platform reads from its default branch or afk/setup.
 export const SETUP_FILES = {
   gates: ".sandcastle/gates.yaml",
   integrationCompose: ".sandcastle/integration/compose.yaml",
@@ -112,9 +114,10 @@ export async function checkAppAccess(
     );
   const { token: readToken } = (await reader.json()) as { token: string };
   // Without a ref, the contents API reads the default branch.
-  const present = async (path: string) => {
+  const on = async (path: string, ref?: string) => {
+    const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
     const response = await doFetch(
-      `${apiUrl}/repos/${repo.owner}/${repo.name}/contents/${path}`,
+      `${apiUrl}/repos/${repo.owner}/${repo.name}/contents/${path}${query}`,
       {
         headers: {
           authorization: `token ${readToken}`,
@@ -131,6 +134,9 @@ export async function checkAppAccess(
       );
     return true;
   };
+  // A missing branch is a 404 as well.
+  const present = async (path: string) =>
+    (await on(path)) || (await on(path, SETUP_BRANCH));
   return {
     state: "ok",
     files: {

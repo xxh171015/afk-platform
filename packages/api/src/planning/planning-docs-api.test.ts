@@ -54,7 +54,7 @@ async function draftSpec(
     (await ws.plat(backend.dir, ["init", "--with", frontend.dir, "--yes"]))
       .code,
   ).toBe(0);
-  // what plat init wrote reaches main through the afk/setup pull request
+  // what plat init wrote is on main already (a spec that carried afk/setup was merged)
   gitOrThrow(backend.dir, ["add", "-A"]);
   gitOrThrow(backend.dir, ["commit", "-q", "-m", "Set up for the platform"]);
   gitOrThrow(backend.dir, ["push", "-q", "origin", "HEAD:main"]);
@@ -222,6 +222,76 @@ describe("what plat spec confirm sends", () => {
     );
     expect(task.patch).toContain("docs/adr/0002-local.md");
     expect(task.patch).not.toContain("0003-theirs");
+  });
+
+  // afk-setup pushed afk/setup with an AGENTS.md section; the person plans in that worktree (ADR 0006).
+  function pushSetup(backend: Checkout): void {
+    gitOrThrow(backend.dir, ["checkout", "--quiet", "-b", "afk/setup"]);
+    writeFileSync(
+      join(backend.dir, "AGENTS.md"),
+      "# Backend\n\n## Running unattended\n",
+    );
+    gitOrThrow(backend.dir, ["add", "AGENTS.md"]);
+    gitOrThrow(backend.dir, [
+      "commit",
+      "--quiet",
+      "-m",
+      "Set up for the AFK platform",
+    ]);
+    gitOrThrow(backend.dir, ["push", "--quiet", "-u", "origin", "afk/setup"]);
+  }
+
+  async function sentPatch(): Promise<string> {
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${job.id}/planning-task?workerId=w1&attempt=${job.attempt}`,
+    );
+    return task.patch;
+  }
+
+  it("from the afk/setup worktree carries the planning docs only, not the setup the platform merges itself", async () => {
+    const { backend } = await draftSpec();
+    pushSetup(backend);
+    writeFileSync(
+      join(backend.dir, "AGENTS.md"),
+      "# Backend\n\n## Running unattended\n\nBulk ship is one job.\n",
+    );
+    writeFileSync(join(backend.dir, "docs/adr/0002-bulk.md"), "# Bulk\n");
+
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    const patch = await sentPatch();
+    expect(patch).toContain("+Bulk ship is one job.");
+    expect(patch).toContain("docs/adr/0002-bulk.md");
+    expect(patch).not.toContain("+## Running unattended");
+  });
+
+  it("once the default branch has the setup, is taken against the default branch again", async () => {
+    const { backend } = await draftSpec();
+    pushSetup(backend);
+    // a spec that carried the setup was merged, and the person is back on main
+    gitOrThrow(backend.dir, ["checkout", "--quiet", "main"]);
+    gitOrThrow(backend.dir, [
+      "merge",
+      "--quiet",
+      "--no-ff",
+      "-m",
+      "S-0",
+      "afk/setup",
+    ]);
+    writeFileSync(join(backend.dir, "docs/adr/0003-later.md"), "# Later\n");
+    gitOrThrow(backend.dir, ["add", "-A"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "someone's adr"]);
+    gitOrThrow(backend.dir, ["push", "--quiet", "origin", "main"]);
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
+
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    const patch = await sentPatch();
+    expect(patch).toContain("+# Orders v2");
+    expect(patch).not.toContain("0003-later");
+    expect(patch).not.toContain("Running unattended");
   });
 
   it("refuses a patch over 1 MB", async () => {

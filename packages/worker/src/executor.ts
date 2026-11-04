@@ -154,7 +154,7 @@ export async function executeStage(
     bundle.repo.defaultBranch,
   );
   try {
-    cutIntegrationBranch(deps.repos, deps.push, mainDir, bundle);
+    cutIntegrationBranch(deps.repos, deps.push, mainDir, bundle, context.log);
   } catch (error) {
     throw new InfrastructureError(
       error instanceof Error ? error.message : String(error),

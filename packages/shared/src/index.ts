@@ -14,6 +14,7 @@ export {
   branchNames,
   isPlatformBranch,
   parseTicketBranch,
+  SETUP_BRANCH,
 } from "./branches.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";

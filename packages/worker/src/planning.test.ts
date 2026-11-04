@@ -161,4 +161,92 @@ describe("the planning commit", () => {
       sha: first.sha,
     });
   });
+
+  describe("with an afk/setup branch on origin", () => {
+    function pushSetup(repo: TestRepo, files: Record<string, string>): string {
+      gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "afk/setup"]);
+      const sha = repo.commit(files, "Set up for the AFK platform");
+      gitOrThrow(repo.dir, ["checkout", "--quiet", "main"]);
+      return sha;
+    }
+
+    it("commits the planning docs on top of the setup commit", () => {
+      const repo = origin();
+      const main = gitOrThrow(repo.dir, ["rev-parse", "main"]);
+      const setup = pushSetup(repo, {
+        ".sandcastle/gates.yaml": "steps: []\n",
+        "AGENTS.md": "# Backend\n",
+      });
+      const patch = patchFrom(repo, { "docs/adr/0002-bulk.md": "# Bulk\n" });
+
+      const { result } = run(repo, patch);
+
+      expect(result.outcome).toBe("committed");
+      const sha = (result as { sha: string }).sha;
+      const setupCommit = gitOrThrow(repo.dir, ["rev-parse", `${sha}^`]);
+      expect(
+        gitOrThrow(repo.dir, ["log", "-1", "--format=%P", setupCommit]),
+      ).toBe(`${main} ${setup}`);
+      expect(
+        gitOrThrow(repo.dir, ["show", `${sha}:.sandcastle/gates.yaml`]),
+      ).toBe("steps: []");
+      expect(
+        gitOrThrow(repo.dir, ["show", `${sha}:docs/adr/0002-bulk.md`]),
+      ).toBe("# Bulk");
+    });
+
+    it("takes planning docs written in the afk/setup worktree: their AGENTS.md is the setup's, sharpened", () => {
+      const repo = origin();
+      pushSetup(repo, { "AGENTS.md": "# Backend\n\nline 2\n" });
+      // the person planned on afk/setup; plat takes the patch against afk/setup as origin has it
+      const work = join(tmp("afk-person-"), "work");
+      gitOrThrow(tmpdir(), [
+        "clone",
+        "--quiet",
+        "-b",
+        "afk/setup",
+        repo.dir,
+        work,
+      ]);
+      writeFileSync(
+        join(work, "AGENTS.md"),
+        "# Backend\n\nline 2, sharpened\n",
+      );
+      gitOrThrow(work, ["add", "-A"]);
+      const patch = git(work, [
+        "diff",
+        "--cached",
+        "--binary",
+        "--full-index",
+        "origin/afk/setup",
+        "--",
+        "AGENTS.md",
+      ]).stdout;
+
+      const { result } = run(repo, patch);
+
+      expect(result.outcome).toBe("committed");
+      const sha = (result as { sha: string }).sha;
+      expect(gitOrThrow(repo.dir, ["show", `${sha}:AGENTS.md`])).toBe(
+        "# Backend\n\nline 2, sharpened",
+      );
+    });
+
+    it("without a patch pushes the setup commit as the integration branch", () => {
+      const repo = origin();
+      const main = gitOrThrow(repo.dir, ["rev-parse", "main"]);
+      pushSetup(repo, { ".sandcastle/gates.yaml": "steps: []\n" });
+
+      const { result } = run(repo, null);
+
+      expect(result.outcome).toBe("committed");
+      const sha = (result as { sha: string }).sha;
+      expect(gitOrThrow(repo.dir, ["rev-parse", "spec/abc123/bulk-ship"])).toBe(
+        sha,
+      );
+      expect(gitOrThrow(repo.dir, ["rev-parse", `${sha}^1`])).toBe(main);
+
+      expect(run(repo, null).result).toEqual(result);
+    });
+  });
 });
