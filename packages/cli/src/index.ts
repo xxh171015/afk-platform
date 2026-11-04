@@ -431,7 +431,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           },
           project,
         )),
-        ...(io.env.HOME ? await skillsWarnings(io.readFile, io.env.HOME) : []),
+        ...(io.env.HOME
+          ? await skillsWarnings(io.readFile, io.env.HOME, ".")
+          : []),
       ];
       for (const warning of warnings) io.stderr(`${warning}\n`);
     } catch {
