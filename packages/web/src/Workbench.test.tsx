@@ -271,4 +271,25 @@ describe("the workbench", () => {
     expect(running.getByText(/已运行 25 分钟/)).toBeTruthy();
     expect(running.queryByText("偏慢")).toBeNull();
   });
+
+  it("puts getting the first project on the platform at the top while there is none", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        "GET /workbench": () => ({ json: empty }),
+        "GET /projects": () => ({ json: { projects: [] } }),
+        "GET /version": () => ({
+          json: {
+            platformVersion: "0.2.0",
+            skillsSha: "x",
+            platformCommit: "abc",
+          },
+        }),
+      }),
+    );
+    const block = await screen.findByRole("region", { name: "接入第一个项目" });
+    expect(block.textContent).toContain(
+      "npx skills@latest add xxh171015/afk-platform#abc",
+    );
+  });
 });
