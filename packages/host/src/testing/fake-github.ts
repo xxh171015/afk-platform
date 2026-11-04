@@ -52,6 +52,8 @@ export class FakeGitHub {
     statuses: "read",
     metadata: "read",
   };
+  // The files on the repo's default branch, by path.
+  readonly files = new Set<string>();
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
   private readonly branchNames = new Set<string>();
@@ -268,6 +270,12 @@ export class FakeGitHub {
       return this.json(res, 404, { message: "Not Found" });
     const rest = path.slice(base.length);
 
+    const content = /^\/contents\/(.+)$/.exec(rest);
+    if ((req.method === "GET" || req.method === "HEAD") && content) {
+      if (!this.files.has(content[1] as string))
+        return this.json(res, 404, { message: "Not Found" });
+      return this.json(res, 200, { type: "file", path: content[1] });
+    }
     if (req.method === "POST" && rest === "/pulls") {
       if (this.pulls.some((p) => p.head === body.head && p.state === "open"))
         return this.json(res, 422, {

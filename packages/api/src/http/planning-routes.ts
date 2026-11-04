@@ -194,6 +194,10 @@ const RepoAccessView = z.object({
   ]),
   missing: z.array(z.string()).optional(),
   fixUrl: z.string().optional(),
+  // When the App can work on the repo: which of its setup files the default branch has.
+  files: z
+    .object({ gates: z.boolean(), integrationCompose: z.boolean() })
+    .optional(),
   message: z.string().optional(),
   requestedAt: z.string().optional(),
   checkedAt: z.string().optional(),

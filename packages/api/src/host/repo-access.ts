@@ -26,6 +26,8 @@ export type RepoAccess =
       state: (typeof ACCESS_RESULTS)[number];
       missing?: string[];
       fixUrl?: string;
+      // when the App can work there: which setup files the default branch has
+      files?: { gates: boolean; integrationCompose: boolean };
       checkedAt: string;
       checking?: boolean;
     }
@@ -115,9 +117,21 @@ export async function recordRepoAccess(
   const missing = Array.isArray(result.missing)
     ? result.missing.filter((m): m is string => typeof m === "string")
     : undefined;
+  const files =
+    typeof result.files === "object" && result.files !== null
+      ? (result.files as Record<string, unknown>)
+      : undefined;
   await keep(db, repoId, {
     state,
     ...(missing?.length ? { missing } : {}),
+    ...(files
+      ? {
+          files: {
+            gates: files.gates === true,
+            integrationCompose: files.integrationCompose === true,
+          },
+        }
+      : {}),
     ...(typeof result.fixUrl === "string" ? { fixUrl: result.fixUrl } : {}),
     checkedAt: now.toISOString(),
   });

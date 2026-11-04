@@ -231,7 +231,7 @@ export function planImport(
     const where = `ticket ${ticket.key}`;
     if (!repos.has(ticket.repo)) {
       errors.push(
-        `${where}: repo ${ticket.repo} does not belong to the project (its repos: ${[...repos.keys()].join(", ")}); if it is another repo, add it: in Cursor, run /afk-setup with it in the workspace`,
+        `${where}: repo ${ticket.repo} does not belong to the project (its repos: ${[...repos.keys()].join(", ")}); if it is another repo, set it up with the afk-setup skill (its checkout is a workspace folder), then import again`,
       );
     }
     for (const key of ticket.blocked_by)

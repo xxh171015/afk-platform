@@ -50,15 +50,15 @@ npx skills@latest add xxh171015/afk-platform
 
 这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
-在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它在对话里一步步做下去，你只回答它的问题：
+在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。你在它开出的 PR 里看结果：
 
 1. **工具**：从平台下载 `plat` 到 `~/.local/bin/plat`（`GET /cli/plat.mjs`，和平台同一版本）；确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。平台地址默认 `http://127.0.0.1:3000`（`$AFK_API_URL`）。
-2. **仓库**：工作区里的 git 仓库就是项目的仓库；只有一个时它会问还有没有别的。**规划仓库**（跑 grill / to-spec / to-tickets、出契约的那个）通常是有 openapi 契约的那个，猜不出来就问你。
-3. **登记**：在规划仓库里跑 `plat init --dry-run --with …`，把清单贴给你，你同意后再带 `--yes` 跑。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
-4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`，要联调的再补联调环境；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。
-5. **开 PR**：每个仓库一个 `Set up for the AFK platform` PR。**你合并这些 PR 之后**就能开始规划（第 2 节）：平台只读推上去、合进默认分支的东西。
+2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
+3. **登记**：在规划仓库的 worktree 里直接跑 `plat init --yes --with …`（改动都在 `afk/setup` PR 里，合并前随时可以不要）。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
+4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行）；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。
+5. **开 PR**：每个仓库一个 `Set up for the AFK platform` PR，描述里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。**你合并这些 PR 之后**需求才能开工：平台只读推上去、合进默认分支的东西；`plat spec confirm` 发现某个仓库默认分支上还没有 `gates.yaml` 时会拒绝开工，并给出该仓库接入 PR 的链接。
 
-以后多了仓库、平台升级了、`plat` 提示「run /afk-setup」时，再跑一次 `/afk-setup`：已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
+以后多了仓库不用再跑：把它加进工作区，规划时票用到它，`plat tickets import` 说它不属于项目，规划的 agent 就自己用 afk-setup 接入它，再接着导入，你只会看到一行「已接入 X，PR：…」，合并那个 PR 即可。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
 
 ### 1.3 每个仓库要满足的条件
 
@@ -69,7 +69,7 @@ npx skills@latest add xxh171015/afk-platform
 | `.sandcastle/gates.yaml` | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。 |
 | `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。 |
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
-| （场景 B 的联调票）联调环境 | 被依赖的仓库（`environment:` 里列的）要有 `.sandcastle/integration/compose.yaml`；种子数据服务命名 `seed-<仓库名>`；e2e 所在仓库有 `npm run e2e`，把 JUnit 写到 `reports/e2e-junit.xml`。格式见 `skills/afk-setup/integration.md`。 |
+| （有联调票时）联调环境 | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加 `npm run e2e`，把 JUnit 写到 `reports/e2e-junit.xml`）。`plat tickets import` 发现缺了又没有票补时会警告。 |
 
 沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`，有 Node 22、npm、pnpm、PostgreSQL）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
 

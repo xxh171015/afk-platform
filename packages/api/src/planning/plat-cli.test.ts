@@ -355,7 +355,7 @@ describe("plat", () => {
 
     expect(imported.code).not.toBe(0);
     expect(imported.stderr).toContain(
-      "repo web does not belong to the project (its repos: backend, frontend); if it is another repo, add it: in Cursor, run /afk-setup with it in the workspace",
+      "repo web does not belong to the project (its repos: backend, frontend); if it is another repo, set it up with the afk-setup skill (its checkout is a workspace folder), then import again",
     );
   });
 

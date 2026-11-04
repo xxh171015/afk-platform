@@ -28,7 +28,21 @@ const check = () => checkAppAccess({ credentials, apiUrl: github.url }, repo);
 
 describe("whether the GitHub App can work on a repo", () => {
   it("is ok when the installation has the repo and every permission the platform uses", async () => {
-    expect(await check()).toEqual({ state: "ok" });
+    expect(await check()).toEqual({
+      state: "ok",
+      files: { gates: false, integrationCompose: false },
+    });
+  });
+
+  it("says which setup files the default branch has, read with a token that can only read", async () => {
+    github.files.add(".sandcastle/gates.yaml");
+    expect(await check()).toEqual({
+      state: "ok",
+      files: { gates: true, integrationCompose: false },
+    });
+    expect(github.tokensIssued.at(-1)?.permissions).toEqual({
+      contents: "read",
+    });
   });
 
   it("is not-installed, with the installation's settings page, when the repo was not given to the installation", async () => {

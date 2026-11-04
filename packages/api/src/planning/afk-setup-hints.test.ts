@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type PlatWorkspace, platWorkspace } from "../test/plat-workspace.ts";
 import { ticketFile } from "../test/ticket-files.ts";
 
-// A repo not yet set up for the platform: the planning commands point the person at /afk-setup, the one way in.
+// A repo not yet set up for the platform: the planning commands point the planning agent at the afk-setup skill,
+// which it runs itself; the person types nothing.
 
 let ws: PlatWorkspace;
 
@@ -35,7 +36,7 @@ async function createSpec(dir: string) {
 }
 
 describe("a repo not set up for the platform", () => {
-  it("plat spec create without a tracker doc still creates the spec and points at /afk-setup", async () => {
+  it("plat spec create without a tracker doc still creates the spec and points at the afk-setup skill", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
@@ -47,11 +48,11 @@ describe("a repo not set up for the platform", () => {
     expect(created.code).toBe(0);
     expect(created.stdout).toBe("S-1\n");
     expect(created.stderr).toContain(
-      "this repo is not set up for the platform (no docs/agents/issue-tracker.md): in Cursor, run /afk-setup",
+      "this repo is not set up for the platform (no docs/agents/issue-tracker.md): run the afk-setup skill",
     );
   });
 
-  it("plat spec create with a tracker doc that changed points at /afk-setup to regenerate it", async () => {
+  it("plat spec create with a tracker doc that changed points at the afk-setup skill to regenerate it", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
@@ -66,10 +67,10 @@ describe("a repo not set up for the platform", () => {
     expect(created.stderr).toContain(
       "docs/agents/issue-tracker.md is out of date",
     );
-    expect(created.stderr).toContain("run /afk-setup again");
+    expect(created.stderr).toContain("run the afk-setup skill again");
   });
 
-  it("plat tickets import naming a repo the project lacks points at /afk-setup", async () => {
+  it("plat tickets import naming a repo the project lacks points at the afk-setup skill", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
@@ -97,7 +98,7 @@ describe("a repo not set up for the platform", () => {
 
     expect(imported.code).not.toBe(0);
     expect(imported.stderr).toContain(
-      "repo web does not belong to the project (its repos: backend); if it is another repo, add it: in Cursor, run /afk-setup with it in the workspace",
+      "repo web does not belong to the project (its repos: backend); if it is another repo, set it up with the afk-setup skill (its checkout is a workspace folder), then import again",
     );
   });
 
@@ -126,7 +127,7 @@ describe("a repo not set up for the platform", () => {
 
     expect(confirmed.code).toBe(0);
     expect(confirmed.stderr).toContain(
-      `${stray.dir} is not a repo of this project, so no planning docs were sent; if it should be, in Cursor, run /afk-setup with it in the workspace`,
+      `${stray.dir} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill`,
     );
   });
 });

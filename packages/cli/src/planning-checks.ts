@@ -1,3 +1,4 @@
+import { repoHtmlUrl } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
@@ -29,8 +30,9 @@ const skillsFix = (level: Level | undefined) =>
       ? `update them in this repo: ${SKILLS_INSTALL} --skill '*' -y`
       : `update them: ${SKILLS_INSTALL} --skill '*' -g -y`;
 
-// Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup).
-const SETUP = "in Cursor, run /afk-setup";
+// Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup). The
+// planning agent reads these warnings and runs it itself: the person types nothing.
+const SETUP = "run the afk-setup skill";
 
 /**
  * Warnings about the planning repo's tracker doc: it is compared whole with what `plat tracker-doc` prints now, so a
@@ -131,4 +133,67 @@ export async function versionWarnings(
     : [
         `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is ${platformVersion}: ${SETUP} to update it`,
       ];
+}
+
+// What the last check of a repo found (GET /projects/{id}/repos/{name}/access): `files` comes with a definite answer
+// about a GitHub repo the App can work on, and only such an answer is acted on.
+export interface RepoAccessView {
+  state: string;
+  files?: { gates: boolean; integrationCompose: boolean };
+}
+
+const GATES_PATH = ".sandcastle/gates.yaml";
+const COMPOSE_PATH = ".sandcastle/integration/compose.yaml";
+
+/**
+ * Why a spec cannot start yet (`plat spec confirm`): a repo it has tickets in has no gates.yaml on its default
+ * branch, so every one of its tickets would fail at the gate. A repo set up by the afk-setup skill gets one through
+ * its afk/setup pull request, which a person merges.
+ */
+export function unreadyRepos(
+  repos: { name: string; url: string; access: RepoAccessView | undefined }[],
+): string[] {
+  return repos
+    .filter((repo) => repo.access?.files?.gates === false)
+    .map((repo) => {
+      const html = repoHtmlUrl(repo.url);
+      const where = html ? ` (${html}/pulls?q=is%3Apr+head%3Aafk%2Fsetup)` : "";
+      return `${repo.name} has no ${GATES_PATH} on its default branch, so its tickets cannot pass a gate: merge its setup pull request${where}, then confirm again`;
+    });
+}
+
+/**
+ * Warnings for `plat tickets import`: an integration ticket starts the repos in its `environment` from their
+ * compose files, which the spec itself can add (the environment is built from the spec's integration branches). It
+ * is worth a word when a repo has none on its default branch and no ticket file here in that repo mentions it.
+ */
+export function integrationWarnings(
+  tickets: {
+    displayId: string;
+    type: string;
+    repo: string;
+    environment: string[];
+  }[],
+  files: { name: string; text: string }[],
+  access: Map<string, RepoAccessView | undefined>,
+): string[] {
+  const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const addedIn = (repo: string) => {
+    const inRepo = new RegExp(`^repo:\\s*["']?${escaped(repo)}["']?\\s*$`, "m");
+    return files.some(
+      (file) => inRepo.test(file.text) && file.text.includes(COMPOSE_PATH),
+    );
+  };
+  const warnings: string[] = [];
+  for (const ticket of tickets) {
+    if (ticket.type !== "integration") continue;
+    for (const repo of ticket.environment) {
+      if (access.get(repo)?.files?.integrationCompose !== false) continue;
+      if (addedIn(repo)) continue;
+      warnings.push(
+        `${ticket.displayId} runs its e2e against ${repo}, which has no ${COMPOSE_PATH} on its default branch, and no ticket here in ${repo} adds it: add one (see "Integration tickets" in docs/agents/issue-tracker.md)`,
+      );
+    }
+  }
+  return warnings;
 }

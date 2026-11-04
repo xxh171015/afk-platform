@@ -2,7 +2,8 @@ import { type AppTokenOptions, appJwt } from "./github-app.ts";
 import { HostError, type RepoRef, type TokenPermissions } from "./types.ts";
 
 // Whether the GitHub App can do on a repo what the platform needs (docs/design.md「bot 账号」): the repo was given
-// to the App's installation, and the installation was granted these permissions. Nothing is changed on GitHub.
+// to the App's installation, and the installation was granted these permissions. When it can, also which of the
+// files a repo is set up with are on its default branch. Nothing is changed on GitHub.
 
 const NEEDED: Required<TokenPermissions> = {
   contents: "write",
@@ -11,8 +12,16 @@ const NEEDED: Required<TokenPermissions> = {
   statuses: "read",
 };
 
+// The files of a repo's setup that the platform reads from its default branch.
+export const SETUP_FILES = {
+  gates: ".sandcastle/gates.yaml",
+  integrationCompose: ".sandcastle/integration/compose.yaml",
+} as const;
+
+export type SetupFiles = Record<keyof typeof SETUP_FILES, boolean>;
+
 export type AppAccess =
-  | { state: "ok" }
+  | { state: "ok"; files: SetupFiles }
   | { state: "not-installed"; fixUrl: string }
   | { state: "missing-permissions"; missing: string[]; fixUrl: string };
 
@@ -82,7 +91,51 @@ export async function checkAppAccess(
       return level === "write" ? granted !== "write" : !granted;
     })
     .map(([name, level]) => `${name}: ${level}`);
-  return missing.length > 0
-    ? { state: "missing-permissions", missing, fixUrl }
-    : { state: "ok" };
+  if (missing.length > 0)
+    return { state: "missing-permissions", missing, fixUrl };
+
+  // A token that can read the repo's files, now that the installation is known to have contents.
+  const reader = await asApp(
+    `/app/installations/${options.credentials.installationId}/access_tokens`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        repositories: [repo.name],
+        permissions: { contents: "read" },
+      }),
+    },
+  );
+  if (!reader.ok)
+    throw new HostError(
+      `GitHub refused a token to read ${repo.owner}/${repo.name}: HTTP ${reader.status}`,
+      reader.status,
+    );
+  const { token: readToken } = (await reader.json()) as { token: string };
+  // Without a ref, the contents API reads the default branch.
+  const present = async (path: string) => {
+    const response = await doFetch(
+      `${apiUrl}/repos/${repo.owner}/${repo.name}/contents/${path}`,
+      {
+        headers: {
+          authorization: `token ${readToken}`,
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+        },
+      },
+    );
+    if (response.status === 404) return false;
+    if (!response.ok)
+      throw new HostError(
+        `GitHub did not say whether ${repo.owner}/${repo.name} has ${path}: HTTP ${response.status}`,
+        response.status,
+      );
+    return true;
+  };
+  return {
+    state: "ok",
+    files: {
+      gates: await present(SETUP_FILES.gates),
+      integrationCompose: await present(SETUP_FILES.integrationCompose),
+    },
+  };
 }

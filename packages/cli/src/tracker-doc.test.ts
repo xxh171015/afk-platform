@@ -140,6 +140,21 @@ describe("renderTrackerDoc", () => {
     expect(noContract).not.toContain("Several repos");
   });
 
+  it("adds the integration rules for any project of several repos, contract or not", () => {
+    const noContract = renderTrackerDoc(
+      {
+        ...several,
+        repos: several.repos.map((r) => ({ ...r, contractPath: null })),
+      },
+      "frontend",
+    );
+    expect(noContract).toContain("### Integration tickets");
+    expect(noContract).toContain("seed-<repo>");
+    expect(renderTrackerDoc(single, "backend")).not.toContain(
+      "Integration tickets",
+    );
+  });
+
   it("rejects a repo the project does not have, naming the ones it has", () => {
     expect(() => renderTrackerDoc(single, "mobile")).toThrow(/backend/);
   });
