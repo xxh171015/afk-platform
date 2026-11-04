@@ -32,8 +32,10 @@ import {
   TRACKER_DOC_PATH,
 } from "./init.ts";
 import {
+  integrationWarnings,
   skillsWarnings,
   trackerDocWarnings,
+  unreadyRepos,
   versionWarnings,
 } from "./planning-checks.ts";
 import { readPlanningDocs } from "./planning-docs.ts";
@@ -442,6 +444,42 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     await warnAboutVersion();
   };
 
+  // Asks the workers again about each repo (whether the GitHub App can work there, and which setup files its default
+  // branch has) and waits up to AFK_ACCESS_WAIT_SECONDS for the answers; a repo nobody answered for comes back as
+  // the API last knew it.
+  const accessWaitSeconds = () =>
+    Number(io.env.AFK_ACCESS_WAIT_SECONDS ?? ACCESS_WAIT_SECONDS);
+  const checkRepos = async (projectId: number, names: string[]) => {
+    const client = api();
+    for (const name of names) {
+      await client.POST("/projects/{projectId}/repos/{name}/access-check", {
+        params: { path: { projectId, name } },
+      });
+    }
+    const deadline = Date.now() + accessWaitSeconds() * 1000;
+    const read = async () =>
+      Promise.all(
+        names.map(async (name) => {
+          const { data } = await client.GET(
+            "/projects/{projectId}/repos/{name}/access",
+            { params: { path: { projectId, name } } },
+          );
+          return { name, access: data };
+        }),
+      );
+    let found = await read();
+    while (
+      Date.now() < deadline &&
+      found.some(
+        ({ access }) => access?.state === "pending" || access?.checking,
+      )
+    ) {
+      await new Promise((done) => setTimeout(done, 1000));
+      found = await read();
+    }
+    return found;
+  };
+
   // An older plat than the platform it talks to: /afk-setup fetches the platform's.
   const warnAboutVersion = async () => {
     try {
@@ -556,41 +594,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           return;
         }
         // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
-        const accessLines = async (projectId: number, names: string[]) => {
-          for (const name of names) {
-            await client.POST(
-              "/projects/{projectId}/repos/{name}/access-check",
-              {
-                params: { path: { projectId, name } },
-              },
-            );
-          }
-          const waitMs =
-            Number(io.env.AFK_ACCESS_WAIT_SECONDS ?? ACCESS_WAIT_SECONDS) *
-            1000;
-          const deadline = Date.now() + waitMs;
-          const read = async () =>
-            Promise.all(
-              names.map(async (name) => {
-                const { data } = await client.GET(
-                  "/projects/{projectId}/repos/{name}/access",
-                  { params: { path: { projectId, name } } },
-                );
-                return { name, access: data };
-              }),
-            );
-          let found = await read();
-          while (
-            Date.now() < deadline &&
-            found.some(
-              ({ access }) => access?.state === "pending" || access?.checking,
-            )
-          ) {
-            await new Promise((done) => setTimeout(done, 1000));
-            found = await read();
-          }
-          return found.map(({ name, access }) => accessLine(name, access));
-        };
+        const accessLines = async (projectId: number, names: string[]) =>
+          (await checkRepos(projectId, names)).map(({ name, access }) =>
+            accessLine(name, access),
+          );
         const agentDocs = planAgentDocs(planning.dir);
         const agentDocsChange = agentDocs.some((d) => d.before !== d.after);
         if (!registering && found && !agentDocsChange) {
@@ -835,12 +842,31 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           if (docs.status === "ok") continue;
           if (docs.status === "elsewhere" && docs.checkout) {
             io.stderr(
-              `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, in Cursor, run /afk-setup with it in the workspace\n`,
+              `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill\n`,
             );
             continue;
           }
         }
         io.stderr(`yellow: ${check.message}\n`);
+      }
+      // A repo without its gate on the default branch would fail every ticket it has: say so before anything starts.
+      // Only when plat waits for the workers' answers (AFK_ACCESS_WAIT_SECONDS above 0), and only on a definite one.
+      const ticketRepos = [
+        ...new Map(view.data.tickets.map((t) => [t.repo, t.repoUrl])),
+      ];
+      if (accessWaitSeconds() > 0 && ticketRepos.length > 0) {
+        const checked = await checkRepos(
+          view.data.spec.projectId,
+          ticketRepos.map(([name]) => name),
+        );
+        const problems = unreadyRepos(
+          checked.map(({ name, access }) => ({
+            name,
+            url: ticketRepos.find(([repo]) => repo === name)?.[1] ?? "",
+            access,
+          })),
+        );
+        if (problems.length > 0) throw new Failure(problems.join("\n"));
       }
       const { data, response, error } = await api().POST(
         "/specs/{specId}/confirm",
@@ -873,6 +899,39 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       ];
       print(data, lines.join("\n"));
     });
+
+  // An integration ticket's environment repos need their compose files; the spec can add them, or they are on the
+  // default branch already. Only when plat waits for the workers' answers (AFK_ACCESS_WAIT_SECONDS above 0).
+  const integrationLines = async (
+    specId: number,
+    files: { name: string; text: string }[],
+  ): Promise<string[]> => {
+    if (accessWaitSeconds() <= 0) return [];
+    try {
+      const view = await api().GET("/specs/{id}", {
+        params: { path: { id: specId } },
+      });
+      if (!view.data) return [];
+      const tickets = view.data.tickets;
+      const repos = [
+        ...new Set(
+          tickets
+            .filter((t) => t.type === "integration")
+            .flatMap((t) => t.environment),
+        ),
+      ];
+      if (repos.length === 0) return [];
+      const checked = await checkRepos(view.data.spec.projectId, repos);
+      return integrationWarnings(
+        tickets,
+        files,
+        new Map(checked.map(({ name, access }) => [name, access])),
+      ).map((w) => `warning: ${w}`);
+    } catch {
+      // A check that cannot run is not worth failing an import that worked.
+      return [];
+    }
+  };
 
   program
     .command("tickets")
@@ -914,6 +973,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         `${options.append ? "appended" : "imported"} ${data.tickets.length} tickets ${options.append ? "to" : "into"} ${spec}`,
         ...data.tickets.map((t) => `  ${t.displayId}  ${t.key}`),
         ...data.warnings.map((w) => `warning: ${w.message}`),
+        ...(await integrationLines(specId, files)),
       ];
       print(data, lines.join("\n"));
       await warnAboutPlanningMachine();

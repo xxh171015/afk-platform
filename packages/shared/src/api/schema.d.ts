@@ -434,6 +434,10 @@ export interface paths {
                 | "error";
               missing?: string[];
               fixUrl?: string;
+              files?: {
+                gates: boolean;
+                integrationCompose: boolean;
+              };
               message?: string;
               requestedAt?: string;
               checkedAt?: string;
@@ -500,6 +504,10 @@ export interface paths {
                 | "error";
               missing?: string[];
               fixUrl?: string;
+              files?: {
+                gates: boolean;
+                integrationCompose: boolean;
+              };
               message?: string;
               requestedAt?: string;
               checkedAt?: string;

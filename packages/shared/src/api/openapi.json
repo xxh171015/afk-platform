@@ -752,6 +752,18 @@
                     "fixUrl": {
                       "type": "string"
                     },
+                    "files": {
+                      "type": "object",
+                      "properties": {
+                        "gates": {
+                          "type": "boolean"
+                        },
+                        "integrationCompose": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["gates", "integrationCompose"]
+                    },
                     "message": {
                       "type": "string"
                     },
@@ -840,6 +852,18 @@
                     },
                     "fixUrl": {
                       "type": "string"
+                    },
+                    "files": {
+                      "type": "object",
+                      "properties": {
+                        "gates": {
+                          "type": "boolean"
+                        },
+                        "integrationCompose": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["gates", "integrationCompose"]
                     },
                     "message": {
                       "type": "string"

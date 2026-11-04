@@ -22,6 +22,10 @@ The platform has no labels and no comments. A draft spec is what a skill means b
 - **Planning docs** (`GLOSSARY.md`, `docs/adr/`, `AGENTS.md` in this repo, as grill-with-docs and domain-modeling
   write them): leave the changes **uncommitted and unpushed**. `plat spec confirm` sends them and the platform
   commits them onto the spec's integration branch, so they reach the default branch with the spec's pull request.
+- **A repo the project does not have yet** (a ticket would name a repo in `repo`, `refs` or `environment` that
+  `plat tickets import` says does not belong to the project): set it up yourself with the afk-setup skill, from its
+  checkout among this workspace's folders, without asking the person; then import again. Tell the person in one
+  line, with its setup pull request: the spec can start once that is merged (`plat spec confirm` says so until then).
 - **Read a spec** (what a skill means by "fetch the issue and read its body and comments"): `plat spec show S-7`.
   It prints the spec's body, its tickets, edges and warnings (after the run, the acceptance pack). A spec has no comments.
 - **Publish tickets** (to-tickets step 5). On this tracker publishing is four steps, in this order:

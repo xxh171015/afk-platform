@@ -3,8 +3,10 @@ import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { describe, expect, it } from "vitest";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
 import {
+  integrationWarnings,
   skillsWarnings,
   trackerDocWarnings,
+  unreadyRepos,
   versionWarnings,
 } from "./planning-checks.ts";
 import { renderTrackerDoc } from "./tracker-doc.ts";
@@ -41,7 +43,7 @@ describe("trackerDocWarnings", () => {
     );
   });
 
-  it("warns, and points at /afk-setup, when the document differs in any way", async () => {
+  it("warns, and points at the afk-setup skill, when the document differs in any way", async () => {
     const warnings = await trackerDocWarnings(
       docs(`${current}\nhand edited\n`),
       load,
@@ -49,13 +51,13 @@ describe("trackerDocWarnings", () => {
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("out of date");
-    expect(warnings[0]).toContain("run /afk-setup again");
+    expect(warnings[0]).toContain("run the afk-setup skill again");
   });
 
   it("warns that the repo is not set up when the document does not exist", async () => {
     const warnings = await trackerDocWarnings(files({}), load, 3);
     expect(warnings[0]).toContain("docs/agents/issue-tracker.md");
-    expect(warnings[0]).toContain("run /afk-setup");
+    expect(warnings[0]).toContain("run the afk-setup skill");
   });
 
   it("warns when the document has no version line to regenerate it from", async () => {
@@ -64,7 +66,7 @@ describe("trackerDocWarnings", () => {
       load,
       3,
     );
-    expect(warnings[0]).toContain("run /afk-setup to replace it");
+    expect(warnings[0]).toContain("run the afk-setup skill to replace it");
   });
 
   it("warns that it could not compare when the project cannot be read", async () => {
@@ -198,12 +200,106 @@ describe("versionWarnings", () => {
     ).toEqual([]);
   });
 
-  it("points at /afk-setup when the platform has moved on", async () => {
+  it("points at the afk-setup skill when the platform has moved on", async () => {
     const warnings = await versionWarnings(async () => ({
       platformVersion: "99.0.0",
     }));
     expect(warnings).toEqual([
-      `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is 99.0.0: in Cursor, run /afk-setup to update it`,
+      `warning: this plat is from platform ${PLATFORM_VERSION}, the platform is 99.0.0: run the afk-setup skill to update it`,
     ]);
+  });
+});
+
+describe("unreadyRepos", () => {
+  const backend = {
+    name: "backend",
+    url: "https://github.com/acme/backend.git",
+  };
+
+  it("names a repo whose default branch has no gates.yaml, with where its setup pull request is", () => {
+    expect(
+      unreadyRepos([
+        {
+          ...backend,
+          access: {
+            state: "ok",
+            files: { gates: false, integrationCompose: false },
+          },
+        },
+      ]),
+    ).toEqual([
+      "backend has no .sandcastle/gates.yaml on its default branch, so its tickets cannot pass a gate: merge its setup pull request (https://github.com/acme/backend/pulls?q=is%3Apr+head%3Aafk%2Fsetup), then confirm again",
+    ]);
+  });
+
+  it("lets through a repo that has one, and one nobody could check", () => {
+    expect(
+      unreadyRepos([
+        {
+          ...backend,
+          access: {
+            state: "ok",
+            files: { gates: true, integrationCompose: false },
+          },
+        },
+        { ...backend, name: "web", access: { state: "pending" } },
+        { ...backend, name: "app", access: { state: "not-installed" } },
+        { ...backend, name: "lab", access: undefined },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("integrationWarnings", () => {
+  const ticket = {
+    displayId: "T-3",
+    type: "integration",
+    repo: "web",
+    environment: ["backend"],
+  };
+  const withoutCompose = new Map([
+    [
+      "backend",
+      {
+        state: "ok",
+        files: { gates: true, integrationCompose: false },
+      },
+    ],
+  ]);
+
+  it("warns when the environment's repo has no compose file and no ticket here adds one", () => {
+    expect(integrationWarnings([ticket], [], withoutCompose)).toEqual([
+      'T-3 runs its e2e against backend, which has no .sandcastle/integration/compose.yaml on its default branch, and no ticket here in backend adds it: add one (see "Integration tickets" in docs/agents/issue-tracker.md)',
+    ]);
+  });
+
+  it("is quiet when a ticket file of that repo adds it", () => {
+    const file = {
+      name: "02-backend-env.md",
+      text: "---\nkey: backend-env\nrepo: backend\n---\n## What to build\n\nAdd .sandcastle/integration/compose.yaml ...\n",
+    };
+    expect(integrationWarnings([ticket], [file], withoutCompose)).toEqual([]);
+  });
+
+  it("is quiet when the default branch has one, or nobody could check", () => {
+    expect(
+      integrationWarnings(
+        [ticket],
+        [],
+        new Map([
+          [
+            "backend",
+            { state: "ok", files: { gates: true, integrationCompose: true } },
+          ],
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      integrationWarnings(
+        [ticket],
+        [],
+        new Map([["backend", { state: "pending" }]]),
+      ),
+    ).toEqual([]);
   });
 });

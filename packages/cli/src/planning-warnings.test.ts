@@ -62,7 +62,7 @@ describe("plat spec create on a machine that is not set up for planning", () => 
     expect(machine.out.join("")).toBe("S-7\n");
     const warnings = machine.err.join("");
     expect(warnings).toContain(
-      "this repo is not set up for the platform (no docs/agents/issue-tracker.md): in Cursor, run /afk-setup",
+      "this repo is not set up for the platform (no docs/agents/issue-tracker.md): run the afk-setup skill",
     );
     expect(warnings).toContain("the to-spec skill");
     expect(warnings).toContain("the to-tickets skill");
