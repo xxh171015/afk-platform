@@ -31,7 +31,7 @@ import {
   InvalidArgumentError,
   Option,
 } from "commander";
-import { afkHome, rememberApiUrl, rememberedApiUrl } from "./afk-home.ts";
+import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
 import {
@@ -67,6 +67,7 @@ import {
   uncommittedPlanningDocs,
   unresolvedPlanningDocs,
 } from "./planning-docs.ts";
+import { rememberApiUrl, rememberedApiUrl } from "./plat-config.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -204,11 +205,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
 
   const json = () => Boolean(program.opts().json);
   // Where the platform is: --api-url, $AFK_API_URL, the address `plat connect` remembered, the default.
+  // An empty setting counts as none, as the worker has it.
   const apiUrl = (): string =>
-    program.opts().apiUrl ??
-    io.env.AFK_API_URL ??
-    rememberedApiUrl(afkHome(io.env)) ??
-    DEFAULT_API_URL;
+    withoutTrailingSlash(
+      program.opts().apiUrl ||
+        io.env.AFK_API_URL ||
+        rememberedApiUrl(afkHome(io.env)) ||
+        DEFAULT_API_URL,
+    );
   const api = (): ApiClient => createApiClient(apiUrl());
 
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
@@ -548,16 +552,26 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   program
-    .command("connect <url>")
+    .command("connect [url]")
     .description(
-      "remember the platform's address on this machine, once the platform answers there; --api-url and $AFK_API_URL still come first",
+      "remember the platform's address on this machine, once the platform answers there; --api-url and $AFK_API_URL still come first. Without an address: the address plat uses now, and whether the platform answers there",
     )
-    .action(async (url: string) => {
-      const address = url.replace(/\/+$/, "");
-      const version = await createApiClient(address)
-        .GET("/version")
-        .then((r) => r.data?.platformVersion)
-        .catch(() => undefined);
+    .action(async (url: string | undefined) => {
+      if (url === undefined) {
+        const address = apiUrl();
+        const version = await platformVersionAt(address);
+        if (!version)
+          throw new Failure(
+            `plat uses ${address}, and no platform answers there`,
+          );
+        print(
+          { apiUrl: address, platformVersion: version },
+          `plat: the platform is at ${address} (${version})`,
+        );
+        return;
+      }
+      const address = withoutTrailingSlash(url);
+      const version = await platformVersionAt(address);
       if (!version)
         throw new Failure(
           `no platform answers at ${address} (GET ${address}/version); nothing remembered`,
@@ -575,7 +589,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
     )
     .action(async () => {
-      const base = apiUrl().replace(/\/$/, "");
+      const base = apiUrl();
       const lines: string[] = [];
 
       // plat: the platform's copy, written next to this one and moved over it.
@@ -597,10 +611,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           const next = `${self}.next`;
           writeFileSync(next, text, { mode: 0o755 });
           renameSync(next, self);
-          const version = await api()
-            .GET("/version")
-            .then((r) => r.data?.platformVersion)
-            .catch(() => undefined);
+          const version = await platformVersionAt(base);
           lines.push(
             `plat: replaced with the platform's${version ? ` (${version})` : ""}`,
           );
@@ -1575,6 +1586,15 @@ function ticketIdOf(text: string): number {
   }
   return parsed.id;
 }
+
+const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
+
+// The platform version answering at `address`, or undefined when nothing does.
+const platformVersionAt = (address: string): Promise<string | undefined> =>
+  createApiClient(address)
+    .GET("/version")
+    .then((r) => r.data?.platformVersion)
+    .catch(() => undefined);
 
 function specIdOf(text: string): number {
   const parsed = parseDisplayId(text);

@@ -52,7 +52,7 @@ npx skills@latest add xxh171015/afk-platform
 
 在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。它不开 PR，接入改动推到每个仓库的 `afk/setup` 分支，随第一个需求的 PR 进默认分支，你在那时一起审（ADR 0006）：
 
-1. **工具**：缺 Node 20+、git，或者 `gh` 没登录时，每样用一行告诉你要运行的命令，不替你装、不替你登录。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `~/.afk/plat.json`），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。
+1. **工具**：缺 Node 20+、git，或者 `gh` 没登录时，每样用一行告诉你要运行的命令，不替你装、不替你登录。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。
 2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
 3. **登记**：在规划仓库的 worktree 里直接跑 `plat init --yes --with …`（改动都在 `afk/setup` 分支上，不进默认分支）。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行）；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。

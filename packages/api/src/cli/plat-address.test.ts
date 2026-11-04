@@ -78,4 +78,16 @@ describe("the platform's address", () => {
         .code,
     ).toBe(0);
   });
+
+  it("is what plat connect without an address prints, and an empty $AFK_API_URL does not hide it", async () => {
+    await plat(["connect", `${api.url}/`]);
+
+    const shown = await plat(["connect"], { AFK_API_URL: "" });
+
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain(`the platform is at ${api.url} (`);
+    const elsewhere = await plat(["connect"], { AFK_API_URL: NOWHERE });
+    expect(elsewhere.code).toBe(1);
+    expect(elsewhere.stderr).toContain(`plat uses ${NOWHERE}`);
+  });
 });
