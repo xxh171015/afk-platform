@@ -1,5 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
@@ -33,6 +42,8 @@ import {
 } from "./init.ts";
 import {
   integrationWarnings,
+  skillsLevel,
+  skillsUpdateCommand,
   skillsWarnings,
   trackerDocWarnings,
   unreadyRepos,
@@ -497,6 +508,74 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description("print the platform version this plat comes from")
     .action(() => {
       io.stdout(`${PLATFORM_VERSION}\n`);
+    });
+
+  program
+    .command("update")
+    .description(
+      "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
+    )
+    .action(async () => {
+      const base = (
+        program.opts().apiUrl ??
+        io.env.AFK_API_URL ??
+        DEFAULT_API_URL
+      ).replace(/\/$/, "");
+      const lines: string[] = [];
+
+      // plat: the platform's copy, written next to this one and moved over it.
+      const self = process.argv[1] ? realpathSync(process.argv[1]) : "";
+      if (!self || self.endsWith(".ts")) {
+        lines.push(
+          "plat: runs from a checkout of the platform, so it is as new as that checkout (git pull there)",
+        );
+      } else {
+        const response = await fetch(`${base}/cli/plat.mjs`).catch(() => null);
+        if (!response?.ok)
+          throw new Failure(
+            `could not download plat from ${base}/cli/plat.mjs (${response ? `HTTP ${response.status}` : "the platform does not answer"})`,
+          );
+        const text = await response.text();
+        if (text === readFileSync(self, "utf8")) {
+          lines.push(`plat: up to date (${PLATFORM_VERSION})`);
+        } else {
+          const next = `${self}.next`;
+          writeFileSync(next, text, { mode: 0o755 });
+          renameSync(next, self);
+          const version = await api()
+            .GET("/version")
+            .then((r) => r.data?.platformVersion)
+            .catch(() => undefined);
+          lines.push(
+            `plat: replaced with the platform's${version ? ` (${version})` : ""}`,
+          );
+        }
+      }
+
+      // The skills: installed again at the level afk-setup is at.
+      const level = await skillsLevel(
+        io.readFile,
+        io.env.HOME ?? homedir(),
+        ".",
+      );
+      if (level === undefined) {
+        lines.push(
+          "skills: afk-setup is not installed here or for you; install them once with: npx skills@latest add xxh171015/afk-platform",
+        );
+      } else {
+        const [command, ...args] = skillsUpdateCommand(level);
+        const installed = spawnSync(command as string, args, {
+          stdio: ["ignore", "ignore", "inherit"],
+        });
+        if (installed.status !== 0)
+          throw new Failure(
+            `${lines.join("\n")}\nskills: ${[command, ...args].join(" ")} failed${installed.error ? ` (${installed.error.message})` : ""}`,
+          );
+        lines.push(
+          `skills: afk-setup and the planning skills installed again ${level === "project" ? "in this repo (commit them)" : "for you"}`,
+        );
+      }
+      print({ lines }, lines.join("\n"));
     });
 
   program
