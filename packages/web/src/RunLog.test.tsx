@@ -173,6 +173,54 @@ describe("the log of a run", () => {
     renderWithApp(<RunLog runId={5} pollMs={20} />, server);
     await waitFor(() => expect(screen.getByText("修改")).toBeTruthy());
     expect(screen.getByText("src/a.ts")).toBeTruthy();
-    expect(screen.getByText(line).closest("details")?.open).toBe(false);
+    expect(screen.getByText("src/a.ts").closest("details")?.open).toBe(false);
+  });
+
+  it("shows thinking as prose and keeps a long command output collapsed with a leftover count", async () => {
+    const output = Array.from({ length: 25 }, (_, i) => `line-${i + 1}`).join(
+      "\n",
+    );
+    const text = [
+      JSON.stringify({
+        type: "thinking",
+        subtype: "delta",
+        text: "I will inspect git status.",
+        session_id: "s1",
+        timestamp_ms: 1000,
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "completed",
+        session_id: "s1",
+        timestamp_ms: 5000,
+      }),
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "c1",
+        session_id: "s1",
+        tool_call: {
+          shellToolCall: {
+            description: "Show git status",
+            args: { command: "git status" },
+            result: { success: { stdout: output } },
+          },
+        },
+      }),
+      "",
+    ].join("\n");
+    const { server } = growingLog(text);
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() =>
+      expect(screen.getByText("I will inspect git status.")).toBeTruthy(),
+    );
+    expect(screen.getByText("思考 4s")).toBeTruthy();
+    expect(
+      screen.getByText("I will inspect git status.").closest("pre"),
+    ).toBeTruthy();
+    expect(screen.getByText("Show git status").closest("details")?.open).toBe(
+      false,
+    );
+    expect(screen.getByText("还有 5 行")).toBeTruthy();
   });
 });

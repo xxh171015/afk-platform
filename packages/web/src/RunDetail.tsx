@@ -20,6 +20,7 @@ import { useResourcePoll } from "./EventsProvider.tsx";
 import { commitHtmlUrl } from "./host-links.ts";
 import { runResultLabel, stageLabel } from "./lib/labels.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
+import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
 import { formatDuration, formatSeconds } from "./time.ts";
@@ -169,7 +170,7 @@ export function RunDetail({
           </dd>
         </div>
       </dl>
-      <RunLog runId={runId} pollMs={logPollMs} />
+      <RunLog runId={runId} pollMs={logPollMs} durationMs={run.durationMs} />
       <Tabs value={tab} onValueChange={setTab} className="mt-7">
         <TabsList>
           <TabsTrigger value="prompt" onClick={() => setTab("prompt")}>
@@ -184,9 +185,9 @@ export function RunDetail({
         </TabsList>
         <TabsContent value="prompt">
           {run.prompt ? (
-            <pre className="whitespace-pre-wrap break-words py-4 font-sans text-sm leading-7">
-              {run.prompt}
-            </pre>
+            <div className="py-4">
+              <Markdown source={run.prompt} contents />
+            </div>
           ) : (
             <EmptyState title="没有提示词" />
           )}

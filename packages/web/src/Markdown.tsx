@@ -35,6 +35,7 @@ function MarkdownSource({
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      skipHtml
       components={{
         input: (props) =>
           props.type === "checkbox" ? (

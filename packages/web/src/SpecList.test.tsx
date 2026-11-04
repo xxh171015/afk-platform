@@ -132,6 +132,38 @@ describe("the spec list", () => {
     expect(row.queryByText("—")).toBeNull();
   });
 
+  it("lists newest specs first until a column is sorted", async () => {
+    const server = fakeServer({
+      "GET /specs": () => ({
+        json: {
+          specs: [
+            spec({
+              id: 1,
+              displayId: "S-1",
+              title: "Old running",
+              startedAt: "2026-10-01T00:00:00.000Z",
+            }),
+            spec({
+              id: 11,
+              displayId: "S-11",
+              title: "New draft",
+              state: "draft",
+              startedAt: "2026-11-03T00:00:00.000Z",
+            }),
+          ],
+        },
+      }),
+    });
+    renderWithApp(<SpecList />, server);
+    const rows = await screen.findAllByRole("row");
+    expect(rows[1]?.textContent).toContain("S-11");
+    expect(rows[2]?.textContent).toContain("S-1");
+    fireEvent.click(screen.getByRole("button", { name: /状态/ }));
+    const resorted = screen.getAllByRole("row");
+    expect(resorted[1]?.textContent).toContain("S-1");
+    expect(resorted[2]?.textContent).toContain("S-11");
+  });
+
   it("links each spec to its page", async () => {
     const server = fakeServer({
       "GET /specs": () => ({

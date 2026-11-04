@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyLog, classifyLogLine } from "./log-actions.ts";
+import {
+  classifyLog,
+  classifyLogLine,
+  displayGrepPattern,
+  displayPath,
+  groupLog,
+  truncateLines,
+} from "./log-actions.ts";
 
 describe("classifyLogLine", () => {
   it("maps wrapping keys on a Cursor tool_call to 读取 / 修改 / 运行命令", () => {
@@ -29,6 +36,33 @@ describe("classifyLogLine", () => {
         }),
       ),
     ).toMatchObject({ action: "运行命令", text: "pnpm test" });
+    expect(
+      classifyLogLine(
+        JSON.stringify({
+          tool_call: {
+            globToolCall: { args: { globPattern: "**/*.ts" } },
+          },
+        }),
+      ),
+    ).toMatchObject({ action: "读取", text: "**/*.ts" });
+    expect(
+      classifyLogLine(
+        JSON.stringify({
+          tool_call: { grepToolCall: { args: { pattern: "batch-ship" } } },
+        }),
+      ),
+    ).toMatchObject({ action: "读取", text: "batch-ship" });
+    expect(
+      classifyLogLine(
+        JSON.stringify({
+          tool_call: {
+            grepToolCall: {
+              args: { pattern: String.raw`it\.skip|describe\.only` },
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ action: "读取", text: "it.skip|describe.only" });
   });
 
   it("maps an assistant event whose text is in message.content to agent 说明", () => {
@@ -119,5 +153,310 @@ describe("classifyLog", () => {
       "读取:GLOSSARY.md",
       "agent 说明:next I will edit",
     ]);
+  });
+});
+
+describe("groupLog", () => {
+  it("merges thinking deltas into one thought and drops system and user events", () => {
+    const text = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s1" }),
+      JSON.stringify({
+        type: "user",
+        session_id: "s1",
+        message: { content: [{ type: "text", text: "the overlay prompt" }] },
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "delta",
+        text: "The",
+        session_id: "s1",
+        timestamp_ms: 1000,
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "delta",
+        text: " user",
+        session_id: "s1",
+        timestamp_ms: 1400,
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "completed",
+        session_id: "s1",
+        timestamp_ms: 5000,
+      }),
+      JSON.stringify({
+        type: "assistant",
+        session_id: "s1",
+        message: { content: "I will read the ticket first." },
+      }),
+      "",
+    ].join("\n");
+    const grouped = groupLog(text);
+    expect(grouped.remainder).toBe("");
+    expect(grouped.sessions).toHaveLength(1);
+    expect(grouped.sessions[0]?.blocks.map((block) => block.kind)).toEqual([
+      "thought",
+      "assistant",
+    ]);
+    expect(grouped.sessions[0]?.blocks[0]).toMatchObject({
+      title: "思考",
+      body: "The user",
+      durationMs: 4000,
+    });
+    expect(grouped.sessions[0]?.blocks[1]?.title).toBe(
+      "I will read the ticket first.",
+    );
+    expect(JSON.stringify(grouped)).not.toContain("the overlay prompt");
+    expect(JSON.stringify(grouped)).not.toContain('"type":"system"');
+  });
+
+  it("pairs tool_call started and completed by call_id and maps glob as 读取", () => {
+    const text = [
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "started",
+        call_id: "c1",
+        session_id: "s1",
+        tool_call: {
+          readToolCall: {
+            args: { path: "/home/agent/workspace/src/a.ts" },
+          },
+        },
+      }),
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "c1",
+        session_id: "s1",
+        tool_call: {
+          readToolCall: {
+            args: { path: "/home/agent/workspace/src/a.ts" },
+            result: { success: { content: "export const a = 1;\n" } },
+          },
+        },
+      }),
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "c2",
+        session_id: "s1",
+        tool_call: {
+          globToolCall: {
+            args: { globPattern: "**/*", targetDirectory: "/context" },
+            result: { success: { files: ["run.json", "spec.md"] } },
+          },
+        },
+      }),
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "c3",
+        session_id: "s1",
+        tool_call: {
+          shellToolCall: {
+            description: "Check git history",
+            args: { command: "git status" },
+            result: { success: { stdout: "clean\n", stderr: "" } },
+          },
+        },
+      }),
+      "",
+    ].join("\n");
+    const blocks = groupLog(text).sessions[0]?.blocks ?? [];
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toMatchObject({
+      kind: "tool",
+      action: "读取",
+      title: "src/a.ts",
+      body: "export const a = 1;\n",
+      completed: true,
+    });
+    expect(blocks[1]).toMatchObject({
+      action: "读取",
+      title: "**/*",
+      body: "run.json\nspec.md",
+    });
+    expect(blocks[2]).toMatchObject({
+      action: "运行命令",
+      title: "Check git history",
+      extra: "git status",
+      body: "clean\n",
+    });
+  });
+
+  it("shows a grep card title without regex escapes", () => {
+    const text = `${JSON.stringify({
+      type: "tool_call",
+      subtype: "completed",
+      call_id: "g1",
+      session_id: "s1",
+      tool_call: {
+        grepToolCall: {
+          args: {
+            pattern: String.raw`\bany\b|@ts-ignore`,
+            path: "/home/agent/workspace",
+          },
+          result: { success: { content: "src/a.ts:1:any" } },
+        },
+      },
+    })}\n`;
+    expect(groupLog(text).sessions[0]?.blocks[0]).toMatchObject({
+      action: "读取",
+      title: "any|@ts-ignore",
+      extra: "workspace",
+      body: "src/a.ts:1:any",
+    });
+  });
+
+  it("holds back a trailing incomplete line", () => {
+    expect(groupLog('{"type":"assistant"').remainder).toBe(
+      '{"type":"assistant"',
+    );
+    expect(groupLog('{"type":"assistant"').sessions).toEqual([]);
+    const complete = JSON.stringify({
+      type: "assistant",
+      session_id: "s1",
+      message: { content: "done" },
+    });
+    expect(groupLog(complete).sessions[0]?.blocks[0]?.title).toBe("done");
+    expect(groupLog(complete, { flushRemainder: true }).remainder).toBe("");
+    const grouped = groupLog(
+      `${JSON.stringify({
+        type: "assistant",
+        session_id: "s1",
+        message: { content: "hi" },
+      })}\n{"partial`,
+    );
+    expect(grouped.remainder).toBe('{"partial');
+    expect(grouped.sessions[0]?.blocks[0]?.title).toBe("hi");
+  });
+
+  it("folds gate dumps under --- name --- and keeps prefix lines as commands", () => {
+    const text = [
+      "gate: setup exit 0 (20 ms)",
+      "--- setup ---",
+      "added 96 packages",
+      "npm notice",
+      "--- test ---",
+      "all tests passed",
+      "result: gate passed",
+      "",
+    ].join("\n");
+    const grouped = groupLog(text);
+    expect(
+      grouped.before.map((block) => `${block.kind}:${block.title}`),
+    ).toEqual([
+      "command:gate: setup exit 0 (20 ms)",
+      "output:setup",
+      "output:test",
+      "command:result: gate passed",
+    ]);
+    expect(grouped.before[1]?.body).toContain("added 96 packages");
+    expect(grouped.before[1]?.body).toContain("npm notice");
+    expect(grouped.before[2]?.body).toBe("all tests passed");
+  });
+
+  it("splits review axes that share one file into Standards and Spec sessions", () => {
+    const text = [
+      JSON.stringify({
+        type: "user",
+        session_id: "std",
+        message: {
+          content: [
+            { type: "text", text: "阶段：final-review，Standards 轴\n" },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        session_id: "spec",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "阶段：final-review，Spec 轴\n只做 Spec 轴；编码规范是另一个审查者（Standards 轴）的事。\n",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "delta",
+        text: "std-think",
+        session_id: "std",
+        timestamp_ms: 1,
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "delta",
+        text: "spec-think",
+        session_id: "spec",
+        timestamp_ms: 2,
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "completed",
+        session_id: "std",
+        timestamp_ms: 3,
+      }),
+      JSON.stringify({
+        type: "thinking",
+        subtype: "completed",
+        session_id: "spec",
+        timestamp_ms: 4,
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        session_id: "std",
+        duration_ms: 12_000,
+      }),
+      "",
+    ].join("\n");
+    const grouped = groupLog(text);
+    expect(grouped.sessions.map((session) => session.label)).toEqual([
+      "Standards",
+      "Spec",
+    ]);
+    expect(grouped.sessions[0]?.blocks[0]?.body).toBe("std-think");
+    expect(grouped.sessions[1]?.blocks[0]?.body).toBe("spec-think");
+    expect(grouped.sessions[0]?.durationMs).toBe(12_000);
+  });
+
+  it("does not put a cut JSON line in the title", () => {
+    const grouped = groupLog(
+      'implement: running\n{"type":"tool_call", [line cut]\n',
+    );
+    expect(
+      grouped.before.map((block) => `${block.title}:${block.raw !== null}`),
+    ).toEqual(["implement: running:false", "截断的事件:true"]);
+  });
+});
+
+describe("displayPath and truncateLines", () => {
+  it("strips the sandbox workspace prefix", () => {
+    expect(displayPath("/home/agent/workspace/src/a.ts")).toBe("src/a.ts");
+    expect(displayPath("/home/agent/.cursor/skills/x/SKILL.md")).toBe(
+      ".cursor/skills/x/SKILL.md",
+    );
+  });
+
+  it("drops regex escapes from a grep title", () => {
+    expect(
+      displayGrepPattern(
+        String.raw`it\.skip|describe\.skip|it\.only|describe\.only`,
+      ),
+    ).toBe("it.skip|describe.skip|it.only|describe.only");
+    expect(
+      displayGrepPattern(String.raw`\bany\b|@ts-ignore|@ts-expect-error`),
+    ).toBe("any|@ts-ignore|@ts-expect-error");
+  });
+
+  it("counts hidden lines past the cap", () => {
+    expect(truncateLines("a\nb\nc", 2)).toEqual({
+      visible: "a\nb",
+      hidden: 1,
+    });
   });
 });

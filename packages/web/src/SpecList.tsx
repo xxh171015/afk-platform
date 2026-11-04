@@ -44,10 +44,19 @@ const STATE_ORDER: SpecState[] = [
   "cancelled",
 ];
 
-type SortKey = "state" | "progress";
+type SortKey = "state" | "progress" | "startedAt";
 interface Sort {
   key: SortKey;
   dir: "asc" | "desc";
+}
+
+const DEFAULT_SORT: Sort = { key: "startedAt", dir: "desc" };
+
+function nextSort(prev: Sort, key: SortKey): Sort {
+  if (prev.key === key) {
+    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+  }
+  return { key, dir: key === "startedAt" ? "desc" : "asc" };
 }
 
 const GRID =
@@ -109,7 +118,7 @@ export function SpecList() {
   const [states, setStates] = useState<Set<SpecState>>(new Set());
   const [project, setProject] = useState("all");
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<Sort>({ key: "state", dir: "asc" });
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
 
   const stateCounts = useMemo(() => {
     const m = new Map<SpecState, number>();
@@ -137,6 +146,10 @@ export function SpecList() {
     );
     const dir = sort.dir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
+      if (sort.key === "startedAt") {
+        const d = a.startedAt.localeCompare(b.startedAt);
+        return d !== 0 ? d * dir : (a.id - b.id) * dir;
+      }
       if (sort.key === "state") {
         const d = STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state);
         return d !== 0 ? d * dir : a.displayId.localeCompare(b.displayId);
@@ -292,27 +305,20 @@ export function SpecList() {
                     label="状态"
                     k="state"
                     sort={sort}
-                    onSort={(key) =>
-                      setSort((prev) =>
-                        prev.key === key
-                          ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-                          : { key, dir: "asc" },
-                      )
-                    }
+                    onSort={(key) => setSort((prev) => nextSort(prev, key))}
                   />
                   <SortHeader
                     label="进度"
                     k="progress"
                     sort={sort}
-                    onSort={(key) =>
-                      setSort((prev) =>
-                        prev.key === key
-                          ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-                          : { key, dir: "asc" },
-                      )
-                    }
+                    onSort={(key) => setSort((prev) => nextSort(prev, key))}
                   />
-                  <span>开始</span>
+                  <SortHeader
+                    label="开始"
+                    k="startedAt"
+                    sort={sort}
+                    onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                  />
                   <span>结束</span>
                 </div>
                 <div className="divide-y">

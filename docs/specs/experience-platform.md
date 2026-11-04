@@ -40,7 +40,7 @@ M2 已经能把一个跨仓库需求从拆票跑到验收，但人打开页面�
 
 Run、票、待处理
 
-9. As a 开发者, I want 打开 `/runs/:id` 看到阶段、次数、结果、耗时，日志按读取 / 修改 / 运行命令 / agent 说明分行，下面三个页签是提示词 / 结构化输出 / 提交, so that 我能看出 agent 在干什么、被喂了什么、交出了什么；原始事件流默认可展开；没有数据的页签仍在，显示空状态。
+9. As a 开发者, I want 打开 `/runs/:id` 看到阶段、次数、结果、耗时，日志按思考 / 工具卡分组（完成的工具默认收起；review / final-review 的两轴按 session 分开），下面三个页签是提示词 / 结构化输出 / 提交, so that 我能看出 agent 在干什么、被喂了什么、交出了什么；原始事件流在卡内默认可展开；没有数据的页签仍在，显示空状态。
 10. As a 开发者, I want 票上的 Runs 表只留编号、阶段、结果、耗时、开始时间，行点进 Run 页, so that 打开票不预载全文，打开 Run 页一次拿齐。
 11. As a 开发者, I want blocked 时看到结构化简报（原因码中文结论、步骤、证据、推荐动作），证据能点进 Run, so that 我不用读 JSON。
 12. As a 开发者, I want 在待处理或票页带一句话重试、改正文，危险操作二次确认, so that 被叫回来不必先开终端。这两处原型没有，页面上仍要有，允许不像原型。
@@ -63,7 +63,7 @@ Run、票、待处理
 
 按冻结原型**正在渲染的路由**写进 `packages/web`，视觉一对一（见 Solution）。不复活已不用的 `SpecOverview` / `SpecPrPanel`。不把 TanStack Start 或 mock 应用搬进来；视觉层怎么搬见 [ADR 0004](../adr/0004-control-tower-visual-layer-not-tanstack-start.md)。
 
-导航文案「需求 / 待处理」是给人看的名字，实体仍是 Spec 和 blocked 队列。首页叫**工作台**。控制塔日常身份是 GitHub 仓库 `owner/name`，不是平台 Project 登记名（手册示例里的 `shop` 只是 CLI 一次性容器）。列表「项目」列、工作台副标题、面包屑第一段都不渲染 `projects.name`。面包屑是 Linear 式：`{owner} › 需求 › S-n 标题▾ › ⋯`；票页带所属需求（`{owner} › 需求 › S-n▾ › T-n 标题▾`）。`⋯` 复制编号/链接、在 GitHub 打开（有 PR 优先）、跳到五个嵌套页；票上另有改正文（仅 pending/blocked）。不做星标。
+导航文案「需求 / 待处理」是给人看的名字，实体仍是 Spec 和 blocked 队列。首页叫**工作台**。控制塔日常身份是 GitHub 仓库 `owner/name`，不是平台 Project 登记名（手册示例里的 `shop` 只是 CLI 一次性容器）。列表「项目」列、工作台副标题、面包屑第一段都不渲染 `projects.name`。需求列表默认按新建时间倒序（`startedAt` 即 `created_at`；API 已 newest first），点状态 / 进度列仍可改排。面包屑是 Linear 式：`{owner} › 需求 › S-n 标题▾ › ⋯`；票页带所属需求（`{owner} › 需求 › S-n▾ › T-n 标题▾`）。`⋯` 复制编号/链接、在 GitHub 打开（有 PR 优先）、跳到五个嵌套页；票上另有改正文（仅 pending/blocked）。不做星标。
 
 侧栏 + 顶栏、`≤640px` 断点（侧栏只留图标、隐藏搜索文字和 kbd、图 520px）、默认暗色、`localStorage` 键 `afk-theme`（不跟系统）、Inter + JetBrains Mono、危险操作 AlertDialog、图节点 Sheet、toast sonner：都跟冻结原型同一套。
 
@@ -106,7 +106,7 @@ type StructuredBrief = {
 
 状态徽标主文案中文、英文码在 `title`。不增加枚举值。SHA 只显示前 7 位，复制按钮仍复制完整值；有仓库 URL 时短 SHA / 分支 / 仓库名外链到 GitHub（或 GitLab）浏览页，PR 用已存的 `html_url`。墙钟用 `Asia/Shanghai` 的 `yyyy-MM-dd HH:mm`（`<time datetime={iso}>`），悬停带秒；`formatElapsed` / `formatDuration` 仍表示耗时。徽标不只靠颜色。
 
-需求说明按 to-spec 的 `##` 切段，中文节名 + 英文原名；票正文同样切 Parent / What to build / Acceptance criteria / Blocked by。Markdown 用设计 token 排版，目录 class 是 `markdown-toc`（不是 Tailwind `contents`）。编辑、diff、Run prompt 仍是纯文本。
+需求说明按 to-spec 的 `##` 切段，中文节名 + 英文原名；票正文同样切 Parent / What to build / Acceptance criteria / Blocked by。Markdown 用设计 token 排版，目录 class 是 `markdown-toc`（不是 Tailwind `contents`）。编辑、diff 仍是纯文本。Run prompt 用同一套 Markdown 排版（不切中文章节、不做 SpecBody），长文开目录。HTML 注释（覆盖层的 skills SHA 标记）不上屏。
 
 时间线按上海日历日分组的竖轨；`pr-opened` / `pr-ready` / `merged` 链到 GitHub PR，有 `runId` 的链到 Run 页。不新增事件种类。`resume` 若 API 不发，UI 静默丢弃。
 
@@ -133,18 +133,23 @@ type StructuredBrief = {
 
 ### Run 日志（[Run 日志里 Cursor 事件流的实际形状](https://github.com/xxh171015/afk-platform/issues/127)）
 
-日志是 Cursor stdout NDJSON 和 worker `stageLog` 混在一个纯文本文件里。上屏映射用包装键，不沿用原型 `classifyLogLine`：
+日志是 Cursor stdout NDJSON 和 worker `stageLog` 混在一个纯文本文件里。上屏映射用包装键，不沿用原型 `classifyLogLine`。页面先分组再画成 Cursor 式卡片，不是一行一个 NDJSON：
 
-| 来源                                                                                        | 动作                             |
-| ------------------------------------------------------------------------------------------- | -------------------------------- |
-| `tool_call.readToolCall`                                                                    | 读取                             |
-| `tool_call.editToolCall`                                                                    | 修改                             |
-| `tool_call.shellToolCall`                                                                   | 运行命令                         |
-| `assistant` 且文本在 `message.content`                                                      | agent 说明                       |
-| worker 前缀行（`gate:` / `implement:` / `e2e:` / `merge:` / `environment:` / `result:` 等） | 运行命令                         |
-| 其余                                                                                        | agent 说明；原始 JSON 默认可展开 |
+| 来源                                                                                                                | 上屏                                       |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `thinking` delta 按 session 拼到 `completed`                                                                        | 一块「思考」，耗时用首尾 `timestamp_ms`    |
+| `tool_call` 按 `call_id` 把 `started` / `completed` 合成一张卡                                                      | 读取 / 修改 / 运行命令；完成的默认收起     |
+| `readToolCall` / `globToolCall` / `grepToolCall` / `lsToolCall` / `semSearchToolCall` / `deleteToolCall`            | 读取；grep 标题去掉 `\.` `\b` 这类正则转义 |
+| `editToolCall`                                                                                                      | 修改                                       |
+| `shellToolCall`                                                                                                     | 运行命令                                   |
+| `assistant` 且文本在 `message.content`                                                                              | agent 说明                                 |
+| `result`                                                                                                            | 会话头「工作了 …」（`duration_ms`）        |
+| `system` / `user` / `retry` / `connection` / `interaction_query` / `getMcpToolsToolCall` / `hookAdditionalContexts` | 不上屏（prompt 在页签里）                  |
+| worker 前缀行（`gate:` / `implement:` / `e2e:` / `merge:` / `environment:` / `result:` / `final-review:` 等）       | 运行命令                                   |
+| `--- name ---` 及其后直到下一前缀或 JSON 的输出                                                                     | 挂在该步下，默认收起                       |
+| 其余 JSON                                                                                                           | agent 说明；卡内「原始事件」默认可展开     |
 
-没有顶层 `name`，没有 `writeToolCall`。继续 `GET /runs/{id}/logs?offset=`，跑完停。
+没有顶层 `name`，没有 `writeToolCall`。review / final-review 两轴共用一份日志、行上没有轴标签：按 `session_id` 分成 Standards / Spec 两段（从被隐藏的 `user` 文案认轴）。继续 `GET /runs/{id}/logs?offset=`，跑完停。日志区限高、内部滚动，下面三个页签不用把整份日志翻完。未结束时跟到底，人往上翻就停。
 
 ### Run 页签（提示词 / 结构化输出 / 提交）
 
@@ -225,7 +230,7 @@ Retry note 不是票内容，不加 Content version，只对紧接着那一次 R
 照 M1 / M2 的三层，尽量用最高的一层。不另写 shop 跨仓库验收需求：这一期验的是平台自己。
 
 1. **API 层**（HTTP + 真 Postgres）：`invalidate` 在票 / Spec / Run / 待处理变化时发出、日志追加不发；规划 SHA 登记与脏工作区拒绝；Retry note 进下一次 Run 的 bundle、不加 Content version；PR 描述按标记 PATCH、人改的标记外保留；通知适配器接到七类事件（测试里不真调 osascript，缝是适配器）；`GET /runs/{id}` 带上 `prompt` / `output` / `commits`，票详情的 `runs` 数组仍不带这三项。`GET /specs` 与详情带 `repos[]`；票与 Run 带 `repoUrl` / `hostKind`；不完整的旧验收包 coerce 或缺字段重建。状态机表格不因此增加状态。
-2. **页面层**（Testing Library + 假 HTTP）：视图映射纯函数——六步当前步与 caption / href、横幅、工作台分块、结构化简报、时间线拒收未列事件、日志动作类型、中文状态、SHA 七位、上海墙钟、`invalidate` 该失效哪些 query key。列表「项目」列是 GitHub `owner/name` 且按它筛选。需求说明 / 票正文中文章节。交付页能渲染缺数组的旧 pack。面包屑兄弟切换与 ⋯。路由表与地址清单一致。Run 三页签在、空数据走空状态。不测 shadcn 内部、不测样式、不做截图像素对比。
+2. **页面层**（Testing Library + 假 HTTP）：视图映射纯函数——六步当前步与 caption / href、横幅、工作台分块、结构化简报、时间线拒收未列事件、日志动作类型与分组（思考合并、工具配对、隐藏 system/user、审查双轴按 session 分开）、中文状态、SHA 七位、上海墙钟、`invalidate` 该失效哪些 query key。列表「项目」列是 GitHub `owner/name` 且按它筛选。需求说明 / 票正文中文章节。Run prompt 是 Markdown。交付页能渲染缺数组的旧 pack。面包屑兄弟切换与 ⋯。路由表与地址清单一致。Run 三页签在、空数据走空状态。不测 shadcn 内部、不测样式、不做截图像素对比。
 3. **端到端（不进自动化）**：本机点通工作台 → 需求交付上的收尾 Run → Run 页（日志 + 三页签）→ `⌘K` `R-n` → 票顶简报进 Run；blocked 带说明重试一次；改过 GLOSSARY 的 Spec 用 CLI confirm 登记规划提交。并排冻结原型对照：工作台、待处理、需求列表、需求五页、票详情（含版本 Dialog）、Run、⌘K、`?`、确认拆分、blocked 操作（改正文和 Retry note 允许不像原型）。通知在关系统通知时允许静默。
 
 ## Out of Scope

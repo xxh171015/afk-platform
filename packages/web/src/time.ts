@@ -57,6 +57,15 @@ export function formatDuration(ms: number | null): string {
   return `${Math.floor(whole / 3600)}h ${String(Math.floor(whole / 60) % 60).padStart(2, "0")}m`;
 }
 
+export function formatCompactDuration(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "";
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600)
+    return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
+}
+
 export function formatSeconds(ms: number | null): string {
   return ms === null ? "—" : `${Math.round(ms / 1000)} s`;
 }

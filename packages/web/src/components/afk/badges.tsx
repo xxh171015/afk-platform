@@ -40,8 +40,7 @@ const toneClass: Record<Tone, string> = {
   partial: "text-state-partial bg-state-partial/12 border-state-partial/30",
   draft:
     "text-muted-foreground bg-transparent border-dashed border-border-strong",
-  cancelled:
-    "text-state-neutral bg-state-neutral/8 border-state-neutral/20 line-through",
+  cancelled: "text-state-neutral bg-state-neutral/8 border-state-neutral/20",
 };
 
 const dotClass: Record<Tone, string> = {

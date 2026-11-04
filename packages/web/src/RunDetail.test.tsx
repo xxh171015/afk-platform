@@ -151,7 +151,7 @@ describe("the run page", () => {
       fakeServer({
         "GET /runs/4": () => ({
           json: run({
-            prompt: "overlay + implement",
+            prompt: "## 没有人回答你\n\n- 自己决定\n\noverlay + implement",
             output: { outcome: "done", files: ["src/a.ts"] },
             commits: ["abcdef1234567890"],
           }),
@@ -159,7 +159,11 @@ describe("the run page", () => {
         "GET /runs/4/logs": () => finishedLog(""),
       }),
     );
-    expect(await screen.findByText("overlay + implement")).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "没有人回答你" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("## 没有人回答你")).toBeNull();
+    expect(screen.getByText("overlay + implement")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "结构化输出" }));
     expect(await screen.findByText(/outcome/)).toBeTruthy();
     expect(screen.getByText(/"done"/)).toBeTruthy();
