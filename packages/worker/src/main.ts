@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import {
@@ -11,18 +11,14 @@ import {
 import {
   GateCache,
   realDocker,
+  SANDBOX_SKILLS_DIR,
   SandcastleAgentRunner,
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
 import { SKILLS_SHA } from "@afk/shared";
 import { createWorkerApi } from "./api.ts";
-import {
-  ConfigError,
-  checkSkillsVersion,
-  loadConfig,
-  type WorkerConfig,
-} from "./config.ts";
+import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
@@ -53,7 +49,6 @@ try {
     homedir: homedir(),
     readFile: (path) =>
       existsSync(path) ? readFileSync(path, "utf8") : undefined,
-    isDirectory: (path) => existsSync(path) && statSync(path).isDirectory(),
   });
 } catch (error) {
   if (!(error instanceof ConfigError)) throw error;
@@ -77,18 +72,6 @@ if (image.status !== 0)
     `the sandbox image ${config.image} is not built: run scripts/verify-sandbox-image.sh, or set AFK_SANDBOX_IMAGE`,
   );
 
-// The skills it mounts must be the pinned ones, or the Runs would name a version that was not used.
-const skillsHead = spawnSync(
-  "git",
-  ["-C", config.skillsDir, "rev-parse", "HEAD"],
-  { encoding: "utf8" },
-);
-const skillsProblem = checkSkillsVersion(
-  config.skillsDir,
-  skillsHead.status === 0 ? skillsHead.stdout.trim() : undefined,
-);
-if (skillsProblem) fail(skillsProblem);
-
 // An API that is not there is the commonest mistake: say so now instead of failing at the first claim.
 try {
   const response = await fetch(`${config.apiUrl}/specs`);
@@ -109,7 +92,7 @@ const sandcastle = (cwd: string): SandcastleConfig => ({
   cwd,
   image: config.image,
   model: config.model,
-  skillsMount: config.skillsDir,
+  skillsMount: SANDBOX_SKILLS_DIR,
   cursorApiKey: config.cursorApiKey,
   logDir: join(
     config.home,
@@ -168,7 +151,7 @@ await runWorker({
     makeGateSandbox: (slotDir) =>
       new SandcastleGateSandbox(sandcastle(slotDir)),
     model: config.model,
-    skillsSha: SKILLS_SHA, // the checkout is at it: the check above refused anything else
+    skillsSha: SKILLS_SHA, // what SANDBOX_SKILLS_DIR was copied at
     secrets: [config.cursorApiKey],
   },
   concurrency: config.slots,

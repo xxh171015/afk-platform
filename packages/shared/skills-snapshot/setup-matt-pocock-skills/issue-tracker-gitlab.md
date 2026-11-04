@@ -1,4 +1,3 @@
-<!-- mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md -->
 # Issue tracker: GitLab
 
 Issues and specs for this repo live as GitLab issues. Use the [`glab`](https://gitlab.com/gitlab-org/cli) CLI for all operations.

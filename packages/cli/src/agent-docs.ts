@@ -64,7 +64,7 @@ export function planAgentDocs(dir: string): AgentDoc[] {
     docs.push({
       path,
       before,
-      after: before ?? readSkillSnapshot(template).content,
+      after: before ?? readSkillSnapshot(template),
     });
   }
   // setup-matt-pocock-skills: CLAUDE.md if there is one, else AGENTS.md (created when neither exists)

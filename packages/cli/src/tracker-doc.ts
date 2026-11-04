@@ -83,7 +83,7 @@ export function renderTrackerDoc(
     fill(template("routing"), values).trim(),
     fill(template("platform"), values).trim(),
     ...(crossRepo ? [fill(template("multi-repo"), values).trim()] : []),
-    `## On ${host.name} (\`${host.cli}\`)\n\n${readSkillSnapshot(host.seed).content.trim()}`,
+    `## On ${host.name} (\`${host.cli}\`)\n\n${readSkillSnapshot(host.seed).trim()}`,
   ];
   return `${parts.join("\n\n")}\n`;
 }

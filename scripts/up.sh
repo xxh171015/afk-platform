@@ -2,14 +2,13 @@
 # One command for the four processes of "Run it on this machine (Mac)" in the README:
 # Postgres (compose), migrations, the API, the page and one worker, with their output on one terminal.
 # The first time, it checks what the README's "Once" list asks for and, in a terminal, offers to do each
-# missing step for you (install dependencies, build the sandbox image, check out the skills, save your
+# missing step for you (install dependencies, build the sandbox image, save your
 # model and Cursor key to ~/.afk/env). Without a terminal it only lists what is missing and how to fix it.
 #
 # Usage: scripts/up.sh            (Ctrl-C stops everything; Ctrl-C twice: stop them at once)
 #        scripts/up.sh --check    only check, start nothing
 # Settings are read from the environment first, then from ~/.afk/env (the file the worker reads
-# CURSOR_API_KEY from): AFK_MODEL (the Cursor model), CURSOR_API_KEY, AFK_SKILLS_DIR (default: the checkout
-# found under ~/.afk). Also: DATABASE_URL (default the compose database), PORT (API, default 3000),
+# CURSOR_API_KEY from): AFK_MODEL (the Cursor model), CURSOR_API_KEY. Also: DATABASE_URL (default the compose database), PORT (API, default 3000),
 # WEB=0 or WORKER=0 to leave that one out. The worker's own settings (AFK_HOME, AFK_SLOTS,
 # AFK_SANDBOX_IMAGE, ...) are passed through as they are.
 set -euo pipefail
@@ -36,9 +35,6 @@ export AFK_API_URL="${AFK_API_URL:-http://127.0.0.1:$PORT}"
 afk_home="${AFK_HOME:-$HOME/.afk}"
 env_file="$afk_home/env"
 image="${AFK_SANDBOX_IMAGE:-sandcastle:afk-platform}"
-skills_repo=https://github.com/mattpocock/skills.git
-skills_commit=$(sed -n 's/^export const SKILLS_SHA = "\([0-9a-f]\{40\}\)";$/\1/p' packages/shared/src/skills-sha.ts) # the pinned skills SHA, written down only there
-[ -n "$skills_commit" ] || { echo "up.sh: no SKILLS_SHA in packages/shared/src/skills-sha.ts" >&2; exit 1; }
 
 interactive=0
 if [ -t 0 ] && [ -t 1 ]; then interactive=1; fi
@@ -89,16 +85,6 @@ build_image() {
 }
 build_image_cmd="docker build -t $image --build-arg AGENT_UID=\$(id -u) --build-arg AGENT_GID=\$(id -g) -f .sandcastle/Dockerfile .sandcastle"
 
-clone_skills() {
-  git clone -q "$skills_repo" "$afk_home/skills" && git -C "$afk_home/skills" switch --detach "$skills_commit"
-}
-
-# Put a skills checkout on the pinned commit (fetching it first if the checkout has not got it yet).
-switch_skills() {
-  { git -C "$1" cat-file -e "$skills_commit^{commit}" 2>/dev/null || git -C "$1" fetch -q origin; } &&
-    git -C "$1" switch -q --detach "$skills_commit"
-}
-
 echo "Checking this machine..."
 
 docker_ok=0
@@ -147,36 +133,6 @@ if [ "${WORKER:-1}" != 0 ]; then
       good "sandbox image $image built"
     else
       problem "The sandbox image $image is not built. Build it with: $build_image_cmd"
-    fi
-  fi
-
-  skills_dir="$(setting AFK_SKILLS_DIR)"
-  if [ -z "$skills_dir" ]; then
-    for candidate in "$afk_home/skills/skills/engineering" "$afk_home"/skills@*/skills/engineering; do
-      if [ -d "$candidate" ]; then
-        skills_dir=$candidate
-        break
-      fi
-    done
-  fi
-  if [ -z "$skills_dir" ] && [ ! -e "$afk_home/skills" ]; then
-    if offer "No skills checkout under $afk_home. Clone mattpocock/skills there at the pinned commit?" clone_skills; then
-      skills_dir="$afk_home/skills/skills/engineering"
-    fi
-  fi
-  if [ -z "$skills_dir" ]; then
-    problem "No skills checkout found. Run: git clone $skills_repo $afk_home/skills && git -C $afk_home/skills switch --detach $skills_commit"
-  elif [ ! -d "$skills_dir" ]; then
-    problem "AFK_SKILLS_DIR $skills_dir is not a directory (it should be the skills/engineering folder of a mattpocock/skills checkout)."
-  else
-    export AFK_SKILLS_DIR="$skills_dir"
-    skills_head="$(git -C "$skills_dir" rev-parse HEAD 2>/dev/null || true)"
-    skills_wrong="The skills checkout of $skills_dir is at ${skills_head:-no git checkout}, not the pinned $skills_commit"
-    if [ "$skills_head" != "$skills_commit" ] &&
-      ! offer "$skills_wrong. Switch it?" switch_skills "$skills_dir"; then
-      problem "$skills_wrong (the worker refuses to start on it). Run: git -C $skills_dir switch --detach $skills_commit"
-    else
-      good "skills: $skills_dir at the pinned commit"
     fi
   fi
 

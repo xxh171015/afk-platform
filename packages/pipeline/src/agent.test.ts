@@ -1,8 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SKILLS_SHA, type Stage } from "@afk/shared";
-import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { afterEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -27,6 +32,7 @@ import {
 import { renderContext } from "./context.ts";
 import { git, gitOut } from "./exec.ts";
 import { bundleFor } from "./fixtures.ts";
+import { SANDBOX_SKILLS_DIR } from "./sandcastle.ts";
 import { FakeAgentRunner } from "./testing/fakes.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
@@ -501,12 +507,28 @@ describe("the prompts", () => {
       expect(overlay).toContain(word);
   });
 
-  it("is written for the skills SHA the platform pins, and for the snapshot", () => {
+  it("is written for the skills SHA the platform pins, which the mounted skills were copied at", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     expect(overlaySkillsSha(overlay)).toBe(SKILLS_SHA);
-    expect(readSkillSnapshot("implement/SKILL.md").sha).toBe(
-      overlaySkillsSha(overlay),
+    expect(
+      readFileSync(join(SANDBOX_SKILLS_DIR, "VENDORED.md"), "utf8"),
+    ).toContain(SKILLS_SHA);
+    // every skill a prompt points the agent at is in the folder the worker mounts
+    const promptsDir = join(OVERLAY_FILE, "..");
+    const named = new Set(
+      readdirSync(promptsDir).flatMap((file) =>
+        [
+          ...readFileSync(join(promptsDir, file), "utf8").matchAll(
+            /\/home\/agent\/\.cursor\/skills\/([a-z-]+)\/SKILL\.md/g,
+          ),
+        ].map((match) => match[1]),
+      ),
     );
+    expect([...named].sort()).toEqual(["code-review", "implement", "tdd"]);
+    for (const name of named)
+      expect(existsSync(join(SANDBOX_SKILLS_DIR, `${name}/SKILL.md`))).toBe(
+        true,
+      );
     // a different SHA is not read as the overlay's
     expect(overlaySkillsSha(overlay.replace(SKILLS_SHA, "0".repeat(40)))).toBe(
       "0".repeat(40),
