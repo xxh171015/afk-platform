@@ -98,7 +98,7 @@ describe("skillsWarnings", () => {
     expect(await skillsWarnings(installed(".cursor/skills"), home)).toEqual([]);
   });
 
-  it("warns about the one that differs, and says how to link the pinned checkout", async () => {
+  it("warns about the one that differs, with the command that updates the package for the user", async () => {
     const warnings = await skillsWarnings(
       installed(".claude/skills", {
         [`${home}/.claude/skills/to-tickets/SKILL.md`]: "older",
@@ -107,7 +107,9 @@ describe("skillsWarnings", () => {
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("to-tickets");
-    expect(warnings[0]).toContain("in Cursor, run /afk-setup");
+    expect(warnings[0]).toContain(
+      "npx skills@latest add xxh171015/afk-platform --skill '*' -g -y",
+    );
   });
 
   it("is quiet when one directory has a stale copy but another has the pinned one", async () => {
@@ -120,23 +122,16 @@ describe("skillsWarnings", () => {
     expect(await skillsWarnings(both, home)).toEqual([]);
   });
 
-  it("is quiet when one directory has a stale copy but another has the pinned one", async () => {
-    const both = files({
-      [`${home}/.claude/skills/to-spec/SKILL.md`]: "older",
-      [`${home}/.claude/skills/to-tickets/SKILL.md`]: snapshot("to-tickets"),
-      [`${home}/.cursor/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
-      [`${home}/.agents/skills/afk-setup/SKILL.md`]: readAfkSetupSkill(),
-    });
-    expect(await skillsWarnings(both, home)).toEqual([]);
-  });
-
-  it("warns about each when none is installed", async () => {
+  it("warns about each when none is installed, with the command that installs afk-setup", async () => {
     const warnings = await skillsWarnings(files({}), home);
     expect(warnings).toHaveLength(3);
     expect(warnings.join("\n")).toContain("not found");
+    expect(warnings[2]).toContain(
+      "npx skills@latest add xxh171015/afk-platform",
+    );
   });
 
-  it("warns, with the command that updates it, when afk-setup is not this platform's", async () => {
+  it("warns, with the command that updates it globally, when the user-level afk-setup is not this platform's", async () => {
     const warnings = await skillsWarnings(
       installed(".agents/skills", {
         [`${home}/.agents/skills/afk-setup/SKILL.md`]: "older",
@@ -145,9 +140,52 @@ describe("skillsWarnings", () => {
     );
     expect(warnings).toEqual([
       expect.stringContaining(
-        "npx skills@latest add xxh171015/afk-platform --skill afk-setup -g -y",
+        "npx skills@latest add xxh171015/afk-platform --skill '*' -g -y",
       ),
     ]);
+  });
+
+  describe("installed in the planning repo (project level)", () => {
+    const repo = "/work/plan";
+    const inRepo = (over: Record<string, string> = {}) => ({
+      [`${repo}/.agents/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
+      [`${repo}/.agents/skills/to-tickets/SKILL.md`]: snapshot("to-tickets"),
+      [`${repo}/.agents/skills/afk-setup/SKILL.md`]: readAfkSetupSkill(),
+      ...over,
+    });
+
+    it("is quiet with nothing installed for the user", async () => {
+      expect(await skillsWarnings(files(inRepo()), home, repo)).toEqual([]);
+    });
+
+    it("judges the repo's copy over the user's: the agent uses the repo's", async () => {
+      const warnings = await skillsWarnings(
+        files({
+          ...inRepo({ [`${repo}/.agents/skills/to-spec/SKILL.md`]: "older" }),
+          [`${home}/.agents/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
+        }),
+        home,
+        repo,
+      );
+      expect(warnings).toEqual([
+        expect.stringContaining("the to-spec skill in this repo"),
+      ]);
+    });
+
+    it("updates a stale afk-setup in the repo, not for the user", async () => {
+      const warnings = await skillsWarnings(
+        files(
+          inRepo({ [`${repo}/.agents/skills/afk-setup/SKILL.md`]: "older" }),
+        ),
+        home,
+        repo,
+      );
+      expect(warnings).toEqual([
+        expect.stringContaining(
+          "update them in this repo: npx skills@latest add xxh171015/afk-platform --skill '*' -y",
+        ),
+      ]);
+    });
   });
 });
 

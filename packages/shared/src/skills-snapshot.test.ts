@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SKILLS_SHA } from "./skills-sha.ts";
 import {
+  PLANNING_SKILLS,
   readSkillSnapshot,
   SNAPSHOT_FILES,
   snapshotHeader,
@@ -38,6 +39,36 @@ describe("the skills snapshot", () => {
   });
 });
 
+// `npx skills@latest add xxh171015/afk-platform` installs these beside afk-setup; plat compares to-spec and to-tickets
+// on the planning machine with the snapshot, so the copies under skills/ must be that text.
+describe("the planning skills under skills/", () => {
+  it.each(["to-spec", "to-tickets"] as const)(
+    "%s is the snapshot's text",
+    (name) => {
+      expect(readFileSync(`${repoRoot}skills/${name}/SKILL.md`, "utf8")).toBe(
+        readSkillSnapshot(`${name}/SKILL.md`).content,
+      );
+    },
+  );
+
+  it.each(Object.keys(PLANNING_SKILLS))(
+    "%s is there, with the upstream license",
+    (name) => {
+      const skill = readFileSync(`${repoRoot}skills/${name}/SKILL.md`, "utf8");
+      expect(skill.startsWith(`---\nname: ${name}\n`)).toBe(true);
+      expect(
+        readFileSync(`${repoRoot}skills/${name}/LICENSE`, "utf8"),
+      ).toContain("MIT License");
+    },
+  );
+
+  it("were copied at the pinned SHA", () => {
+    expect(readFileSync(`${repoRoot}skills/VENDORED.md`, "utf8")).toContain(
+      SKILLS_SHA,
+    );
+  });
+});
+
 it("reads back the SHA that snapshotHeader wrote", () => {
   const header = snapshotHeader(SKILLS_SHA, "tdd/SKILL.md");
   expect(header).toBe(
@@ -55,10 +86,12 @@ describe("the pinned SHA", () => {
       .trim()
       .split("\n")
       // the snapshot headers, and the overlay, which says which skills it was written for (a test in the pipeline
-      // package holds that SHA to the constant), and the tracker-doc templates (a test in the cli package does the same)
+      // package holds that SHA to the constant), and the tracker-doc templates (a test in the cli package does the same),
+      // and the note on the planning skills under skills/ (held to it above)
       .filter(
         (file) =>
           !file.startsWith("packages/shared/skills-snapshot/") &&
+          file !== "skills/VENDORED.md" &&
           !file.startsWith("packages/cli/templates/") &&
           file !== "packages/pipeline/prompts/overlay.md",
       );
