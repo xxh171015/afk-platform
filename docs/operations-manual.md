@@ -48,6 +48,8 @@ npx skills@latest add xxh171015/afk-platform
 
 不想回答问题时可以直接写全：`npx skills@latest add xxh171015/afk-platform --skill '*' -y`（项目级，在规划仓库里运行），全局再加 `-g`。`plat` 发现这些 skill 过期时也会提示这条命令。
 
+这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
+
 在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它在对话里一步步做下去，你只回答它的问题：
 
 1. **工具**：从平台下载 `plat` 到 `~/.local/bin/plat`（`GET /cli/plat.mjs`，和平台同一版本）；确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。平台地址默认 `http://127.0.0.1:3000`（`$AFK_API_URL`）。
