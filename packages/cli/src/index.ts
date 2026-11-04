@@ -14,6 +14,7 @@ import { createInterface } from "node:readline/promises";
 import {
   type ApiClient,
   createApiClient,
+  formatDisplayId,
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
@@ -59,11 +60,12 @@ import {
   versionWarnings,
 } from "./planning-checks.ts";
 import {
+  type PlanningDocs,
   putPlanningDocsAside,
   putPlanningDocsBack,
   readPlanningDocs,
   uncommittedPlanningDocs,
-  withConflictMarkers,
+  unresolvedPlanningDocs,
 } from "./planning-docs.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
@@ -205,9 +207,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
   program.hook("preAction", async () => {
     try {
-      await dropFinishedSpecs(afkHome(io.env), apiUrl(), async (spec) => {
+      await dropFinishedSpecs(afkHome(io.env), apiUrl(), async (id) => {
         const { data } = await api().GET("/specs/{id}", {
-          params: { path: { id: specIdOf(spec) } },
+          params: { path: { id } },
         });
         return data?.spec.state;
       });
@@ -932,6 +934,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `${id}'s planning docs are in ${planningRepo}, not ${docs.repo}: run plat spec confirm in a checkout of ${planningRepo}`,
         );
       }
+      if (docs.status === "ok")
+        refuseUnresolved(docs, `plat spec confirm ${id}`);
       if (
         docs.status === "ok" &&
         Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
@@ -987,7 +991,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ...(docs.status === "ok" && docs.files.length > 0
           ? [
               `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
-              ...putAside(`S-${specId}`, docs, planningRepo ?? ""),
+              ...putAside(
+                formatDisplayId("spec", specId),
+                docs,
+                planningRepo ?? "",
+              ),
             ]
           : []),
         ...(data.planningState
@@ -1097,23 +1105,42 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
 
   // Once the platform has the planning docs, the copies not committed here go to the spec's folder outside the
   // checkout, so that pulling the spec's pull request later finds nothing in the way. The lines that say so.
+  // Nothing is kept when every planning doc is committed here: there is nothing to take out.
   const putAside = (
     spec: string,
-    docs: Extract<ReturnType<typeof readPlanningDocs>, { status: "ok" }>,
+    docs: Extract<PlanningDocs, { status: "ok" }>,
     repo: string,
   ): string[] => {
-    const kept = saveBackup(afkHome(io.env), spec, {
-      apiUrl: apiUrl(),
-      repo,
-      files: docs.files,
-      patch: docs.patch,
-    });
+    if (uncommittedPlanningDocs(docs.dir, docs.paths).length === 0) return [];
+    let kept: string;
+    try {
+      kept = saveBackup(afkHome(io.env), spec, {
+        apiUrl: apiUrl(),
+        repo,
+        files: docs.files,
+        patch: docs.patch,
+      });
+    } catch (error) {
+      return [
+        `  your copies here stay where they are: they could not be kept outside the checkout (${(error as Error).message})`,
+      ];
+    }
     const taken = putPlanningDocsAside(docs.dir, docs.paths);
-    return taken.length > 0
-      ? [
-          `  taken out of this checkout (back to HEAD): ${taken.join(", ")}; kept in ${kept}`,
-        ]
-      : [];
+    return [
+      `  taken out of this checkout (back to HEAD): ${taken.join(", ")}; kept in ${kept}`,
+    ];
+  };
+
+  // Planning docs still being merged, or with conflict markers in them, are not sent.
+  const refuseUnresolved = (
+    docs: Extract<PlanningDocs, { status: "ok" }>,
+    rerun: string,
+  ) => {
+    const unresolved = unresolvedPlanningDocs(docs.dir, docs.paths);
+    if (unresolved.length > 0)
+      throw new Failure(
+        `resolve the conflicts in ${unresolved.join(", ")} first, then run ${rerun} again`,
+      );
   };
 
   // Planning docs that did not apply to the planning repo's default branch (ADR 0005).
@@ -1146,7 +1173,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         );
       }
       const home = afkHome(io.env);
-      const spec = `S-${specId}`;
+      const spec = formatDisplayId("spec", specId);
       const local = uncommittedPlanningDocs(docs.dir, docs.paths);
       const backup = readBackup(home, spec);
       if (local.length === 0 && backup) {
@@ -1155,25 +1182,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           throw new Failure(
             `could not put ${id}'s planning docs back from ${specPlanningDir(home, spec)}: ${back.error}`,
           );
+      }
+      // the docs put back are all in HEAD already: they are sent as they are
+      if (
+        local.length === 0 &&
+        backup &&
+        uncommittedPlanningDocs(docs.dir, docs.paths).length > 0
+      ) {
+        const conflicts = unresolvedPlanningDocs(docs.dir, docs.paths);
         print(
-          { putBack: backup.files, conflicts: back.conflicts },
+          { putBack: backup.files, conflicts },
           [
             `${id}: planning docs ${backup.files.join(", ")} put back in this checkout`,
-            ...(back.conflicts.length > 0
-              ? [
-                  `  resolve the conflicts marked in ${back.conflicts.join(", ")}`,
-                ]
+            ...(conflicts.length > 0
+              ? [`  resolve the conflicts marked in ${conflicts.join(", ")}`]
               : []),
             `  then run plat spec retry-planning ${id} again to send them`,
           ].join("\n"),
         );
         return;
       }
-      const marked = withConflictMarkers(docs.dir, local);
-      if (marked.length > 0)
-        throw new Failure(
-          `resolve the conflicts marked in ${marked.join(", ")} first, then run plat spec retry-planning ${id} again`,
-        );
+      refuseUnresolved(docs, `plat spec retry-planning ${id}`);
       const { data, response, error } = await api().POST(
         "/specs/{specId}/planning/retry",
         {
@@ -1203,7 +1232,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         { params: { path: { specId } } },
       );
       if (!data) throw failureFrom(response, error);
-      dropBackup(afkHome(io.env), `S-${specId}`);
+      dropBackup(afkHome(io.env), formatDisplayId("spec", specId));
       print(
         data,
         `${id}: planning docs given up; the planning commit is queued as the default branch's head`,

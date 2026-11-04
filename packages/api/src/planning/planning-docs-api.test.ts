@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -200,6 +201,45 @@ describe("the planning docs in the checkout after confirm", () => {
     expect(existsSync(join(backend.dir, "docs/adr/new"))).toBe(false);
     expect(readFileSync(join(backend.dir, "GLOSSARY.md"), "utf8")).toBe(
       "# Orders\n\n**Order**: a purchase.\n",
+    );
+  });
+
+  it("in a multi-context repo include the glossary map and each context's docs", async () => {
+    const { backend } = await draftSpec();
+    mkdirSync(join(backend.dir, "src/billing"), { recursive: true });
+    writeFileSync(
+      join(backend.dir, "GLOSSARY-MAP.md"),
+      "- [Billing](./src/billing/GLOSSARY.md)\n",
+    );
+    writeFileSync(join(backend.dir, "src/billing/GLOSSARY.md"), "# Billing\n");
+    writeFileSync(join(backend.dir, "src/billing/code.ts"), "export {};\n");
+
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain", "-uall"])).toBe(
+      "?? src/billing/code.ts",
+    );
+  });
+
+  it("are not sent while a merge of them is unfinished", async () => {
+    const { backend } = await draftSpec();
+    gitOrThrow(backend.dir, ["checkout", "--quiet", "-b", "other"]);
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# other\n");
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-am", "other"]);
+    gitOrThrow(backend.dir, ["checkout", "--quiet", "main"]);
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# main\n");
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-am", "main"]);
+    spawnSync("git", ["merge", "--quiet", "other"], { cwd: backend.dir });
+
+    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    expect(confirmed.code).toBe(1);
+    expect(confirmed.stderr).toContain(
+      "resolve the conflicts in GLOSSARY.md first",
+    );
+    expect((await get("/specs/1")).spec.state).toBe("draft");
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe(
+      "UU GLOSSARY.md",
     );
   });
 
@@ -531,9 +571,7 @@ describe("a planning docs patch that does not apply", () => {
 
     const early = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
     expect(early.code).toBe(1);
-    expect(early.stderr).toContain(
-      "resolve the conflicts marked in GLOSSARY.md",
-    );
+    expect(early.stderr).toContain("resolve the conflicts in GLOSSARY.md");
 
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# theirs and mine\n");
     const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
@@ -551,6 +589,28 @@ describe("a planning docs patch that does not apply", () => {
         "utf8",
       ),
     ).toContain("+# theirs and mine");
+  });
+
+  it("retry-planning sends planning docs committed here at once", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# mine, committed\n");
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-am", "glossary"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [first] = await claimAll(worker);
+    await worker.complete(first.id, first.attempt, {
+      stage: "planning-commit",
+      outcome: "conflict",
+      files: ["GLOSSARY.md"],
+    });
+    expect(existsSync(join(ws.afkHome, "planning/S-1"))).toBe(false);
+
+    const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
+
+    expect(sent.stdout).toContain("sent again");
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
+    const [job] = await claimAll(worker);
+    expect(job.type).toBe("planning-commit");
   });
 
   it("waive-planning drops the copy confirm kept", async () => {
@@ -723,5 +783,32 @@ describe("cancelling a spec whose planning commit is pending", () => {
     await ws.plat(backend.dir, ["spec", "show", "S-1"]);
 
     expect(existsSync(join(ws.afkHome, "planning/S-1"))).toBe(false);
+  });
+
+  it("drops the folder of a merged spec, ticket files only or not, and keeps one from another platform", async () => {
+    await draftSpec();
+    for (const [spec, meta] of [
+      ["S-1", null],
+      ["S-2", { apiUrl: "http://elsewhere:3000", repo: "backend", files: [] }],
+    ] as const) {
+      mkdirSync(join(ws.afkHome, "planning", spec), { recursive: true });
+      writeFileSync(join(ws.afkHome, "planning", spec, "01-t.md"), "t\n");
+      if (meta) {
+        writeFileSync(
+          join(ws.afkHome, "planning", spec, "planning-docs.json"),
+          JSON.stringify(meta),
+        );
+        writeFileSync(
+          join(ws.afkHome, "planning", spec, "planning-docs.patch"),
+          "",
+        );
+      }
+    }
+    await ws.db.pool.query("UPDATE specs SET state = 'merged'");
+
+    await ws.plat(dirname(ws.afkHome), ["spec", "show", "S-1"]);
+
+    expect(existsSync(join(ws.afkHome, "planning/S-1"))).toBe(false);
+    expect(existsSync(join(ws.afkHome, "planning/S-2"))).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseDisplayId, type SpecState } from "@afk/shared";
 
 // The planning docs a spec's confirm took out of the checkout, kept outside it on the planning machine, in the
 // spec's folder under ~/.afk/planning/ (where to-tickets writes the ticket files): retry-planning puts them back
@@ -65,22 +66,28 @@ export function dropBackup(home: string, spec: string): void {
   if (existsSync(dir) && readdirSync(dir).length === 0) rmdirSync(dir);
 }
 
-const FINISHED = ["merged", "cancelled"];
+const FINISHED: SpecState[] = ["merged", "cancelled"];
 
-// The folders of this platform's specs that are merged or cancelled, removed. `stateOf` gives a spec's state, or
-// undefined when it cannot be told; such a folder stays.
+const sameUrl = (a: string, b: string) =>
+  a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
+// The folders of this platform's specs that are merged or cancelled, removed: a spec's folder with a backup from
+// another platform stays, one without a backup (only ticket files) is taken to be this platform's. `stateOf` gives
+// a spec's state, or undefined when it cannot be told; such a folder stays.
 export async function dropFinishedSpecs(
   home: string,
   apiUrl: string,
-  stateOf: (spec: string) => Promise<string | undefined>,
+  stateOf: (specId: number) => Promise<SpecState | undefined>,
 ): Promise<string[]> {
   const root = join(home, "planning");
   if (!existsSync(root)) return [];
   const dropped: string[] = [];
   for (const spec of readdirSync(root)) {
-    if (!/^S-[1-9][0-9]*$/.test(spec)) continue;
-    if (readBackup(home, spec)?.apiUrl !== apiUrl) continue;
-    const state = await stateOf(spec);
+    const id = parseDisplayId(spec);
+    if (id?.kind !== "spec") continue;
+    const backup = readBackup(home, spec);
+    if (backup && !sameUrl(backup.apiUrl, apiUrl)) continue;
+    const state = await stateOf(id.id);
     if (state && FINISHED.includes(state)) {
       rmSync(specPlanningDir(home, spec), { recursive: true, force: true });
       dropped.push(spec);

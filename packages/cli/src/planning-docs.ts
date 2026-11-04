@@ -64,7 +64,7 @@ function git(
 }
 
 // Paths from a glossary map are taken as they are, not as patterns.
-const LITERAL = { GIT_LITERAL_PATHSPECS: "1" };
+const LITERAL_PATHSPECS = { GIT_LITERAL_PATHSPECS: "1" };
 
 const sameRepo = (a: string, b: string) => {
   const left = tryParseRepoUrl(a);
@@ -168,7 +168,10 @@ export function readPlanningDocs(
   // A throwaway index, so that new files show up without touching the person's.
   const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
   try {
-    const env = { GIT_INDEX_FILE: join(scratch, "index"), ...LITERAL };
+    const env = {
+      GIT_INDEX_FILE: join(scratch, "index"),
+      ...LITERAL_PATHSPECS,
+    };
     git(dir, ["read-tree", head || "--empty"], env);
     const tracked = git(dir, ["ls-files", "-z", "--", ...paths], env)
       .out.split("\0")
@@ -209,7 +212,7 @@ export function uncommittedPlanningDocs(
       "--",
       ...paths,
     ],
-    LITERAL,
+    LITERAL_PATHSPECS,
   ).out;
   return status
     .split("\0")
@@ -223,20 +226,22 @@ export function uncommittedPlanningDocs(
 export function putPlanningDocsAside(dir: string, paths: string[]): string[] {
   const files = uncommittedPlanningDocs(dir, paths);
   const inHead = files.filter(
-    (file) => git(dir, ["cat-file", "-e", `HEAD:${file}`], LITERAL).code === 0,
+    (file) =>
+      git(dir, ["cat-file", "-e", `HEAD:${file}`], LITERAL_PATHSPECS).code ===
+      0,
   );
   const added = files.filter((file) => !inHead.includes(file));
   if (inHead.length > 0)
     git(
       dir,
       ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...inHead],
-      LITERAL,
+      LITERAL_PATHSPECS,
     );
   if (added.length > 0) {
     git(
       dir,
       ["rm", "--cached", "-q", "--ignore-unmatch", "--", ...added],
-      LITERAL,
+      LITERAL_PATHSPECS,
     );
     for (const file of added) {
       rmSync(join(dir, file), { force: true });
@@ -250,39 +255,43 @@ export function putPlanningDocsAside(dir: string, paths: string[]): string[] {
   return files;
 }
 
-// A planning docs patch put back into the checkout, merged three ways with what is there: the files changed, and
-// those with conflict markers. The person's index is left as HEAD has it for these paths.
+const unmerged = (dir: string, paths: string[]): string[] =>
+  git(
+    dir,
+    ["diff", "--name-only", "--diff-filter=U", "--", ...paths],
+    LITERAL_PATHSPECS,
+  )
+    .out.split("\n")
+    .filter(Boolean);
+
+// A planning docs patch put back into the checkout, merged three ways with what is there; conflicts are marked in
+// the files. The person's index is left as HEAD has it for these paths.
 export function putPlanningDocsBack(
   dir: string,
   patch: string,
   paths: string[],
-): { ok: true; conflicts: string[] } | { ok: false; error: string } {
+): { ok: true } | { ok: false; error: string } {
   const applied = git(
     dir,
     ["apply", "--3way", "--whitespace=nowarn", "-"],
     {},
     patch,
   );
-  const conflicts = git(
-    dir,
-    ["diff", "--name-only", "--diff-filter=U", "--", ...paths],
-    LITERAL,
-  )
-    .out.split("\n")
-    .filter(Boolean);
-  if (applied.code !== 0 && conflicts.length === 0)
+  if (applied.code !== 0 && unmerged(dir, paths).length === 0)
     return { ok: false, error: applied.err.trim() };
   const files = uncommittedPlanningDocs(dir, paths);
-  if (files.length > 0) git(dir, ["reset", "-q", "--", ...files], LITERAL);
-  return { ok: true, conflicts };
+  if (files.length > 0)
+    git(dir, ["reset", "-q", "--", ...files], LITERAL_PATHSPECS);
+  return { ok: true };
 }
 
-// The files that still have conflict markers in them.
-export function withConflictMarkers(dir: string, files: string[]): string[] {
-  return files.filter((file) => {
+// The planning docs not ready to send: in the middle of a merge, or with conflict markers in them.
+export function unresolvedPlanningDocs(dir: string, paths: string[]): string[] {
+  const marked = uncommittedPlanningDocs(dir, paths).filter((file) => {
     const path = join(dir, file);
     return (
       existsSync(path) && /^(<{7}|>{7})( |$)/m.test(readFileSync(path, "utf8"))
     );
   });
+  return [...new Set([...unmerged(dir, paths), ...marked])];
 }
