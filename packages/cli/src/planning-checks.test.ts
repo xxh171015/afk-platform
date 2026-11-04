@@ -212,7 +212,7 @@ describe("unreadyRepos", () => {
     url: "https://github.com/acme/backend.git",
   };
 
-  it("names a repo whose default branch has no gates.yaml, with where its setup pull request is", () => {
+  it("names a repo with no gates.yaml on its default branch or afk/setup, and how to set it up", () => {
     expect(
       unreadyRepos([
         {
@@ -224,7 +224,7 @@ describe("unreadyRepos", () => {
         },
       ]),
     ).toEqual([
-      "backend has no .sandcastle/gates.yaml on its default branch, so its tickets cannot pass a gate: merge its setup pull request (https://github.com/acme/backend/pulls?q=is%3Apr+head%3Aafk%2Fsetup), then confirm again",
+      "backend has no .sandcastle/gates.yaml on its default branch or on afk/setup, so its tickets cannot pass a gate: set it up with the afk-setup skill, then confirm again",
     ]);
   });
 
@@ -265,7 +265,7 @@ describe("integrationWarnings", () => {
 
   it("warns when the environment's repo has no compose file and no ticket here adds one", () => {
     expect(integrationWarnings([ticket], [], withoutCompose)).toEqual([
-      'T-3 runs its e2e against backend, which has no .sandcastle/integration/compose.yaml on its default branch, and no ticket here in backend adds it: add one (see "Integration tickets" in docs/agents/issue-tracker.md)',
+      'T-3 runs its e2e against backend, which has no .sandcastle/integration/compose.yaml on its default branch or on afk/setup, and no ticket here in backend adds it: add one (see "Integration tickets" in docs/agents/issue-tracker.md)',
     ]);
   });
 

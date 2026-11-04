@@ -45,6 +45,14 @@ describe("whether the GitHub App can work on a repo", () => {
     });
   });
 
+  it("counts a setup file on afk/setup, which every spec starts with until the default branch has it", async () => {
+    github.branchFiles.set("afk/setup", new Set([".sandcastle/gates.yaml"]));
+    expect(await check()).toEqual({
+      state: "ok",
+      files: { gates: true, integrationCompose: false },
+    });
+  });
+
   it("is not-installed, with the installation's settings page, when the repo was not given to the installation", async () => {
     github.installedRepos = ["frontend"];
     expect(await check()).toEqual({

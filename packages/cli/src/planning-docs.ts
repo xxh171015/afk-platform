@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PLANNING_DOC_PATHS, tryParseRepoUrl } from "@afk/shared";
+import { PLANNING_DOC_PATHS, SETUP_BRANCH, tryParseRepoUrl } from "@afk/shared";
 
 // What `plat spec confirm` sends from the planning repo (ADR 0005): the planning docs as they are in the work tree,
 // against where this checkout left the remote's default branch, as a patch the platform commits for the person.
@@ -44,6 +44,19 @@ const sameRepo = (a: string, b: string) => {
     : a.trim() === b.trim();
 };
 
+// Planning in the afk/setup worktree (ADR 0006): the platform commits the patch onto the setup commit, which has
+// afk/setup in it, so the patch is taken against afk/setup as the remote has it and carries the planning docs only,
+// not the setup's own AGENTS.md. Only while this checkout has afk/setup and the default branch does not.
+function setupTip(dir: string, fork: string | undefined): string | undefined {
+  const remote = `refs/remotes/origin/${SETUP_BRANCH}`;
+  const tip = git(dir, ["rev-parse", "--verify", "--quiet", remote]);
+  if (tip.code !== 0) return undefined;
+  const within = (ref: string) =>
+    git(dir, ["merge-base", "--is-ancestor", remote, ref]).code === 0;
+  if (!within("HEAD") || (fork && within(fork))) return undefined;
+  return tip.out.trim();
+}
+
 export function readPlanningDocs(
   cwd: string,
   repos: RegisteredRepo[],
@@ -67,8 +80,9 @@ export function readPlanningDocs(
     "--quiet",
     "HEAD",
   ]).out.trim();
-  const fork = git(dir, ["merge-base", "HEAD", remote]);
-  const base = fork.code === 0 ? fork.out.trim() : head;
+  const merged = git(dir, ["merge-base", "HEAD", remote]);
+  const fork = merged.code === 0 ? merged.out.trim() : undefined;
+  const base = setupTip(dir, fork) ?? fork ?? head;
 
   // A throwaway index, so that new files show up without touching the person's.
   const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));

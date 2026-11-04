@@ -43,22 +43,23 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 npx skills@latest add xxh171015/afk-platform
 ```
 
-- **项目级**（在规划仓库里运行，选 Project）：skill 放在仓库的 `.agents/skills`，`/afk-setup` 把它们连同 `skills-lock.json` 一起放进 `afk/setup` PR。团队里每个人拉下代码就有同一版本，推荐团队用。
+- **项目级**（在规划仓库里运行，选 Project）：skill 放在仓库的 `.agents/skills`，`/afk-setup` 把它们连同 `skills-lock.json` 一起推到 `afk/setup`，随第一个需求的 PR 进默认分支。之后团队里每个人拉下代码就有同一版本，推荐团队用。
 - **全局**（选 Global，或加 `-g`）：只装在你自己的 `~/.agents/skills`。同名的 skill 会被覆盖成平台用的版本。
 
 不想回答问题时可以直接写全：`npx skills@latest add xxh171015/afk-platform --skill '*' -y`（项目级，在规划仓库里运行），全局再加 `-g`。以后平台升级了，在规划仓库（项目级）或任意目录（全局）运行 `plat update`：它从平台下载最新的 plat 替换自己，再按 skill 现在装在哪一级把它们重装一遍。`plat` 发现自己或这些 skill 过期时也会提示 `plat update`。
 
 这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
-在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。你在它开出的 PR 里看结果：
+在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。它不开 PR，接入改动推到每个仓库的 `afk/setup` 分支，随第一个需求的 PR 进默认分支，你在那时一起审（ADR 0006）：
 
 1. **工具**：从平台下载 `plat` 到 `~/.local/bin/plat`（`GET /cli/plat.mjs`，和平台同一版本）；确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。平台地址默认 `http://127.0.0.1:3000`（`$AFK_API_URL`）。
 2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
-3. **登记**：在规划仓库的 worktree 里直接跑 `plat init --yes --with …`（改动都在 `afk/setup` PR 里，合并前随时可以不要）。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
+3. **登记**：在规划仓库的 worktree 里直接跑 `plat init --yes --with …`（改动都在 `afk/setup` 分支上，不进默认分支）。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行）；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。
-5. **开 PR**：每个仓库一个 `Set up for the AFK platform` PR，描述里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。**你合并这些 PR 之后**需求才能开工：平台只读推上去、合进默认分支的东西；`plat spec confirm` 发现某个仓库默认分支上还没有 `gates.yaml` 时会拒绝开工，并给出该仓库接入 PR 的链接。
+5. **不开 PR，不用先合**：提交说明里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。平台切每个需求的集成分支时，先把 `afk/setup` 合到默认分支最新提交上（**设置提交**），票按它的 `gates.yaml` 过门禁，接入改动跟代码在同一个 PR 里进默认分支；默认分支已经包含 `afk/setup` 后就不再叠。`plat spec confirm` 只在某个仓库的默认分支和 `afk/setup` 上都没有 `gates.yaml` 时拒绝开工。
+6. **在规划仓库的 `afk/setup` 工作树里规划**：报告会给出它的路径（`<规划仓库>-afk-setup`），tracker 文档和 agent 文档在那里；第 2 节的 grill / to-spec / to-tickets / confirm 都在这个目录里做。带着设置的需求合入后，就可以回到自己的 checkout 规划。
 
-以后多了仓库不用再跑：把它加进工作区，规划时票用到它，`plat tickets import` 说它不属于项目，规划的 agent 就自己用 afk-setup 接入它，再接着导入，你只会看到一行「已接入 X，PR：…」，合并那个 PR 即可。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
+以后多了仓库不用再跑：把它加进工作区，规划时票用到它，`plat tickets import` 说它不属于项目，规划的 agent 就自己用 afk-setup 接入它，再接着导入，你只会看到一行「已接入 X，门禁检查：…」，不用合并什么。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
 
 ### 1.3 每个仓库要满足的条件
 
@@ -84,7 +85,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `d
 
 ### 第 1 步 grill（想清楚）
 
-在后端仓库的工作区里打开 agent，运行：
+在后端仓库（规划仓库）的 `afk/setup` 工作树里打开 agent（设置还没随需求合入默认分支时；见 1.2 第 6 步），运行：
 
 ```
 /grill-with-docs
@@ -130,8 +131,8 @@ plat spec show S-n          # spec 正文、票、依赖边、导入告警
 plat spec confirm S-n       # 从这一刻起开始实现
 ```
 
-- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台，不动你的 git。输出里有一条 `git stash push …`，想把本地这份收起来就执行它（不收的话，等 PR 合并后 `git pull` 会和它冲突）。
-- 平台先做**规划提交**：把补丁三方合并到规划仓库默认分支的最新提交上，作为集成分支的第一个提交；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
+- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台（在 `afk/setup` 工作树里时，相对远端的 `afk/setup`，补丁里只有规划文档的改动），不动你的 git。输出里有一条 `git stash push …`，想把本地这份收起来就执行它（不收的话，等 PR 合并后 `git pull` 会和它冲突）。
+- 平台先做**规划提交**：把补丁三方合并到规划仓库的设置提交（没有 `afk/setup` 要叠时就是默认分支的最新提交）上，作为集成分支的开头；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
 - 在页面上确认、或在规划仓库以外的地方 confirm，带不上本地的规划文档（预检标黄）；规划提交就是默认分支当时的最新提交。在项目的另一个仓库里 confirm 会被拒绝。
 - 补丁超过 1 MB 会被拒绝：规划文档只该有这三样。
 
@@ -171,7 +172,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | --- | --- | --- |
 | 1 | `scripts/up.sh --check`，然后 `scripts/up.sh` | 全部 `[ok]`；API 和页面起来；页面能打开 |
 | 2 | 1.2 在 Cursor 里 `/afk-setup`（场景 B 工作区里放前后端两个仓库） | 清单里各仓库的名字、地址、契约路径都对；每个仓库「the GitHub App can work here」；`plat repo check` 都通过 |
-| 3 | 合并 `/afk-setup` 开的 `afk/setup` PR | GitHub 上的默认分支有 `docs/agents/issue-tracker.md`、`.sandcastle/gates.yaml`、`AGENTS.md` |
+| 3 | 确认 `/afk-setup` 推了各仓库的 `afk/setup`、没有开 PR | 各仓库 GitHub 上有 `afk/setup` 分支，里面有 `.sandcastle/gates.yaml`、`AGENTS.md`，规划仓库还有 `docs/agents/issue-tracker.md`；默认分支没变 |
 | 4 | **场景 A**，选一个小需求（一个字段、一个接口） | 见下 |
 | 5 | **场景 B**，选一个前后端各改一点的小需求 | 见下 |
 

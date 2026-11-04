@@ -25,6 +25,14 @@ function store(): RepoStore {
   return new RepoStore(root);
 }
 
+// What afk-setup pushes: an afk/setup branch on origin, the default branch left as it was.
+function pushSetup(repo: TestRepo, files: Record<string, string>): string {
+  gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "afk/setup"]);
+  const sha = repo.commit(files, "Set up for the AFK platform");
+  gitOrThrow(repo.dir, ["checkout", "--quiet", "main"]);
+  return sha;
+}
+
 const SHA = {
   repo: "backend",
   url: "",
@@ -158,5 +166,80 @@ describe("cutIntegrationBranch", () => {
     expect(gitOrThrow(mainDir, ["rev-parse", "spec/1/order-export"])).toBe(
       first,
     );
+  });
+
+  describe("with an afk/setup branch on origin", () => {
+    const cut = (repo: TestRepo) => {
+      const repos = store();
+      const mainDir = repos.ensure("frontend", repo.dir, "main");
+      const bundle = bundleFor({
+        repo: {
+          id: 2,
+          name: "frontend",
+          url: repo.dir,
+          defaultBranch: "main",
+        },
+        integrationBranch: "spec/1/order-export",
+        domain: null,
+      });
+      cutIntegrationBranch(
+        repos,
+        (request) => pushRef(request),
+        mainDir,
+        bundle,
+      );
+      return gitOrThrow(repo.dir, ["rev-parse", "spec/1/order-export"]);
+    };
+
+    it("starts at afk/setup merged onto the default branch's head, so the gate and the agent read the setup", () => {
+      const frontend = origin({ "src/a.ts": "a\n", "AGENTS.md": "# old\n" });
+      const setup = pushSetup(frontend, {
+        ".sandcastle/gates.yaml": "steps: []\n",
+        "AGENTS.md": "# old\n\n## Running unattended\n",
+      });
+      const head = frontend.commit({ "src/b.ts": "b\n" }, "later on main");
+
+      const start = cut(frontend);
+
+      expect(
+        gitOrThrow(frontend.dir, ["log", "-1", "--format=%P%n%an%n%s", start]),
+      ).toBe(
+        `${head} ${setup}\nafk-worker\nSet up for the AFK platform (afk/setup)`,
+      );
+      expect(
+        gitOrThrow(frontend.dir, ["show", `${start}:.sandcastle/gates.yaml`]),
+      ).toBe("steps: []");
+      expect(gitOrThrow(frontend.dir, ["show", `${start}:src/b.ts`])).toBe("b");
+    });
+
+    it("starts at the default branch once the default branch has the setup", () => {
+      const frontend = origin({ "src/a.ts": "a\n" });
+      pushSetup(frontend, { ".sandcastle/gates.yaml": "steps: []\n" });
+      // a spec that carried it was merged
+      gitOrThrow(frontend.dir, [
+        "merge",
+        "--quiet",
+        "--no-ff",
+        "-m",
+        "S-1",
+        "afk/setup",
+      ]);
+      const head = gitOrThrow(frontend.dir, ["rev-parse", "main"]);
+
+      expect(cut(frontend)).toBe(head);
+    });
+
+    it("refuses a setup that no longer merges, naming the files and what to do", () => {
+      const frontend = origin({ "AGENTS.md": "# old\n" });
+      pushSetup(frontend, { "AGENTS.md": "# setup\n" });
+      frontend.commit({ "AGENTS.md": "# someone else\n" }, "on main");
+
+      expect(() => cut(frontend)).toThrow(
+        "afk/setup in frontend no longer merges into main (AGENTS.md): run the afk-setup skill again",
+      );
+      expect(
+        gitOrThrow(frontend.dir, ["branch", "--list", "spec/1/order-export"]),
+      ).toBe("");
+    });
   });
 });

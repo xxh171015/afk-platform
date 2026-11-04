@@ -2,6 +2,7 @@ import { gitOrThrow, readDomainFiles } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { PushFn } from "./push.ts";
 import type { RepoStore } from "./repos.ts";
+import { setupBase } from "./setup.ts";
 
 // GLOSSARY.md and docs/adr at the planning SHA, for tickets that are not in the planning repo.
 export function fetchDomain(
@@ -15,12 +16,14 @@ export function fetchDomain(
   return readDomainFiles(dir, domain.sha);
 }
 
-// First cut of this spec's integration branch: planning SHA in the planning repo, else the default branch.
+// First cut of this spec's integration branch: the planning SHA in the planning repo (it has the setup commit
+// already), else the setup commit (the default branch's head when there is no setup to merge).
 export function cutIntegrationBranch(
-  repos: Pick<RepoStore, "has" | "fetchObject">,
+  repos: Pick<RepoStore, "has" | "fetchObject" | "fetchBranch">,
   push: PushFn,
   mainDir: string,
   bundle: Bundle,
+  log: (line: string) => void = () => {},
 ): void {
   const branch = bundle.integrationBranch as string;
   if (repos.has(mainDir, `refs/heads/${branch}`)) return;
@@ -29,7 +32,7 @@ export function cutIntegrationBranch(
   if (planning) repos.fetchObject(mainDir, planning.url, planning.sha);
   const base = planning
     ? planning.sha
-    : gitOrThrow(mainDir, ["rev-parse", bundle.repo.defaultBranch]);
+    : setupBase(repos, mainDir, bundle.repo, log);
   gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, base]);
   const pushed = push({
     repoDir: mainDir,

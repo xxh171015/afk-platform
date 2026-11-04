@@ -5,11 +5,11 @@ description: Set a project's repos up for the AFK platform, or bring that setup 
 
 # AFK setup
 
-Gets every repo of a project ready for the AFK platform, so the person can go straight to grill-with-docs, to-spec and to-tickets. You run every command and decide everything the repos themselves answer; the person reviews the result in the pull requests. Ask only for what nothing on this machine says: the platform's address when it does not answer, and a repo's local path when it is not among the workspace folders. Running it again is safe: each step finds what is already done and only fills the gaps.
+Gets every repo of a project ready for the AFK platform, so the person can go straight to grill-with-docs, to-spec and to-tickets. You run every command and decide everything the repos themselves answer. Nothing is merged on its own: each repo's setup goes to an `afk/setup` branch, the platform starts every spec's integration branch with it, and the person reviews it in the spec's pull request, beside the code that needed it. Ask only for what nothing on this machine says: the platform's address when it does not answer, and a repo's local path when it is not among the workspace folders. Running it again is safe: each step finds what is already done and only fills the gaps.
 
 Speak the person's language in chat. Show command output when it carries a problem; otherwise summarise it in a line.
 
-**Called mid-planning** (plat said a ticket's repo does not belong to the project): set up that repo, with the planning repo for its tracker doc, and nothing else; then go back to the planning where it stopped and import again. The planning repo's tracker doc changes in its `afk/setup` pull request, so plat says the doc in the person's checkout is out of date until that is merged: expected, carry on.
+**Called mid-planning** (plat said a ticket's repo does not belong to the project): set up that repo, with the planning repo for its tracker doc, and nothing else; then go back to the planning where it stopped and import again. The planning is done in the planning repo's `afk/setup` worktree, so the tracker doc it rewrites is the one the planning reads; commit and push it to `afk/setup` with the new repo's setup.
 
 ## 1. Tools on this machine
 
@@ -19,7 +19,7 @@ The platform's address is `$AFK_API_URL`, default `http://127.0.0.1:3000`; it an
 2. **plat**: when there is none, install the platform's copy:
    `mkdir -p ~/.local/bin && curl -fsSL "$AFK_API_URL/cli/plat.mjs" -o ~/.local/bin/plat && chmod +x ~/.local/bin/plat`
    and make sure `~/.local/bin` is on `PATH`. When `plat version` differs from the `platformVersion` of `/version`, run `plat update`.
-3. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, run `plat update`: it installs the whole package again at the level `afk-setup` is at. At project level (`afk-setup` is in the planning repo's `.agents/skills`), run it in the planning repo's worktree once step 3 made it; the skills under `.agents/skills` (and their links) and `skills-lock.json` then go into the `afk/setup` pull request, so everyone who plans in the repo has the same versions.
+3. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, run `plat update`: it installs the whole package again at the level `afk-setup` is at. At project level (`afk-setup` is in the planning repo's `.agents/skills`), run it in the planning repo's worktree once step 3 made it; the skills under `.agents/skills` (and their links) and `skills-lock.json` then go to `afk/setup` and reach the default branch with the first spec, so everyone who plans in the repo has the same versions.
 
 Done when `plat version` matches the platform and the six skills are installed at that level.
 
@@ -37,11 +37,13 @@ Done when every repo has a path and the planning repo is decided; the report nam
 
 ## 3. A setup branch per repo
 
-All changes go through an `afk/setup` branch and a pull request, in a worktree beside each checkout, so the person's own branch and files stay as they are:
+All changes go to an `afk/setup` branch, in a worktree beside each checkout, so the person's own branch and files stay as they are:
 
-`git -C <checkout> fetch origin && git -C <checkout> worktree add <checkout>-afk-setup -B afk/setup origin/afk/setup` (when origin has no `afk/setup` yet, start it from `origin/<default branch>`)
+`git -C <checkout> fetch origin && git -C <checkout> worktree add <checkout>-afk-setup -B afk/setup origin/afk/setup` (when origin has no `afk/setup` yet, start it from `origin/<default branch>`; when the worktree is there already, use it and `git pull` in it)
 
-The platform only reads what is pushed: the files reach it when the pull request is merged.
+When `afk/setup` was there already, merge `origin/<default branch>` into it (`git merge origin/<default branch>`), so that it still merges into the default branch: the platform refuses to start a spec's tickets on a setup that does not. When the default branch has everything `afk/setup` has (a spec that carried it was merged), the merge brings it up to date and the steps below only fill what is missing.
+
+The platform only reads what is pushed. It never merges `afk/setup` into the default branch: every spec's integration branch starts with it until the default branch has it, so it reaches the default branch with the first spec's pull request. Open no pull request for it.
 
 ## 4. Register
 
@@ -68,12 +70,10 @@ Then commit (in the planning repo, with the project-level skills when that is wh
 
 It runs the gate in the platform's sandbox, exactly as tickets will be gated. When it fails, read the failing command's output, fix the cause, push, and check again. When a command is missing from the sandbox itself (`command not found` for a toolchain the repo needs), stop for that repo and tell the person: the platform's sandbox image lacks it, and whoever runs the platform has to add it.
 
-Last, open the pull request, or push to the one already open:
-`gh pr create --head afk/setup --title "Set up for the AFK platform" --body "<what was added and why>"`
-The body names every file that was replaced rather than added (for example an `issue-tracker.md` that pointed at another tracker), so the reviewer sees it.
+The commit message says what was added and why, and names every file that was replaced rather than added (for example an `issue-tracker.md` that pointed at another tracker): the reviewer of the spec's pull request reads it there.
 
-Done when every repo has its pull request and a passing `plat repo check`, or a named reason it cannot pass.
+Done when every repo has `afk/setup` pushed and a passing `plat repo check`, or a named reason it cannot pass.
 
 ## 6. Report
 
-A short table: repo, pull request, gate check, GitHub App; and which repo is the planning repo. Then the next steps: merge the pull requests (a spec cannot start in a repo until its pull request is merged; `plat spec confirm` says so); after that, plan with `/grill-with-docs` in the planning repo. Called mid-planning, the report is one line: the repo and its pull request. Remove the worktrees once their branches are pushed (`git worktree remove`).
+A short table: repo, `afk/setup` pushed, gate check, GitHub App; and which repo is the planning repo. Then the next step: plan with `/grill-with-docs` in the planning repo's worktree, `<checkout>-afk-setup`, which has the tracker doc and the agent docs the planning reads. Nothing needs merging first: the setup reaches each default branch with the first spec's pull request, and once it has, planning can go back to the person's own checkout. Called mid-planning, the report is one line: the repo and its gate check. Keep the planning repo's worktree; remove the others once their branches are pushed (`git worktree remove`).

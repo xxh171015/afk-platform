@@ -17,6 +17,7 @@ import {
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
+  SETUP_BRANCH,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import {
@@ -353,7 +354,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description(
       "have the platform run the repo's gate on a pushed branch, in its own sandbox, with that branch's .sandcastle/gates.yaml; waits for the answer",
     )
-    .option("--branch <branch>", "the pushed branch to gate", "afk/setup")
+    .option("--branch <branch>", "the pushed branch to gate", SETUP_BRANCH)
     .option(
       "--project <id>",
       "the project (default: the one this checkout's tracker doc names)",

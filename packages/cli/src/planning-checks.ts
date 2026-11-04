@@ -1,4 +1,4 @@
-import { repoHtmlUrl } from "@afk/shared";
+import { SETUP_BRANCH } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
@@ -182,25 +182,25 @@ const COMPOSE_PATH = ".sandcastle/integration/compose.yaml";
 
 /**
  * Why a spec cannot start yet (`plat spec confirm`): a repo it has tickets in has no gates.yaml on its default
- * branch, so every one of its tickets would fail at the gate. A repo set up by the afk-setup skill gets one through
- * its afk/setup pull request, which a person merges.
+ * branch nor on afk/setup, so every one of its tickets would fail at the gate. The afk-setup skill pushes one to
+ * afk/setup, and the spec's integration branch starts with it (ADR 0006).
  */
 export function unreadyRepos(
   repos: { name: string; url: string; access: RepoAccessView | undefined }[],
 ): string[] {
   return repos
     .filter((repo) => repo.access?.files?.gates === false)
-    .map((repo) => {
-      const html = repoHtmlUrl(repo.url);
-      const where = html ? ` (${html}/pulls?q=is%3Apr+head%3Aafk%2Fsetup)` : "";
-      return `${repo.name} has no ${GATES_PATH} on its default branch, so its tickets cannot pass a gate: merge its setup pull request${where}, then confirm again`;
-    });
+    .map(
+      (repo) =>
+        `${repo.name} has no ${GATES_PATH} on its default branch or on ${SETUP_BRANCH}, so its tickets cannot pass a gate: set it up with the afk-setup skill, then confirm again`,
+    );
 }
 
 /**
  * Warnings for `plat tickets import`: an integration ticket starts the repos in its `environment` from their
  * compose files, which the spec itself can add (the environment is built from the spec's integration branches). It
- * is worth a word when a repo has none on its default branch and no ticket file here in that repo mentions it.
+ * is worth a word when a repo has none on its default branch or afk/setup and no ticket file here in that repo
+ * mentions it.
  */
 export function integrationWarnings(
   tickets: {
@@ -226,7 +226,7 @@ export function integrationWarnings(
       if (access.get(repo)?.files?.integrationCompose !== false) continue;
       if (addedIn(repo)) continue;
       warnings.push(
-        `${ticket.displayId} runs its e2e against ${repo}, which has no ${COMPOSE_PATH} on its default branch, and no ticket here in ${repo} adds it: add one (see "Integration tickets" in docs/agents/issue-tracker.md)`,
+        `${ticket.displayId} runs its e2e against ${repo}, which has no ${COMPOSE_PATH} on its default branch or on ${SETUP_BRANCH}, and no ticket here in ${repo} adds it: add one (see "Integration tickets" in docs/agents/issue-tracker.md)`,
       );
     }
   }
