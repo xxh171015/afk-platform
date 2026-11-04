@@ -3,6 +3,7 @@
 // GateSandbox interfaces, and tests use fakes.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createSandbox,
   cursor,
@@ -30,6 +31,11 @@ const WALL_CLOCK_REASON = "wall-clock";
 const JOB_LOST_REASON = "job-lost";
 
 export const SKILLS_SANDBOX_PATH = "/home/agent/.cursor/skills";
+// The skills the agents run (implement, tdd, code-review, codebase-design), copied unchanged from mattpocock/skills at
+// SKILLS_SHA (packages/pipeline/skills/VENDORED.md). The worker mounts this folder at SKILLS_SANDBOX_PATH.
+export const SANDBOX_SKILLS_DIR = fileURLToPath(
+  new URL("../skills/", import.meta.url),
+);
 export const CONTEXT_SANDBOX_PATH = "/context";
 export const REFS_SANDBOX_PATH = "/refs";
 

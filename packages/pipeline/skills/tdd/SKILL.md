@@ -1,5 +1,5 @@
-<!-- mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c skills/engineering/tdd/SKILL.md -->
 ---
+
 name: tdd
 description: Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
 ---

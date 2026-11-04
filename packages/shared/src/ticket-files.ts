@@ -54,7 +54,7 @@ function templateSections(): {
   acceptance: string;
   blockedBy: string;
 } {
-  const skill = readSkillSnapshot("to-tickets/SKILL.md").content;
+  const skill = readSkillSnapshot("to-tickets/SKILL.md");
   const template = /<issue-template>([\s\S]*?)<\/issue-template>/.exec(
     skill,
   )?.[1];

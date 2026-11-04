@@ -96,6 +96,7 @@ export {
   agentEnv,
   CONTEXT_SANDBOX_PATH,
   classifyAgentError,
+  SANDBOX_SKILLS_DIR,
   SandcastleAgentRunner,
   SandcastleGateSandbox,
   SKILLS_SANDBOX_PATH,

@@ -305,10 +305,10 @@ describe("plat init", () => {
     const read = (path: string) =>
       readFileSync(join(backend.dir, path), "utf8");
     expect(read("docs/agents/domain.md")).toBe(
-      readSkillSnapshot("setup-matt-pocock-skills/domain.md").content,
+      readSkillSnapshot("setup-matt-pocock-skills/domain.md"),
     );
     expect(read("docs/agents/triage-labels.md")).toBe(
-      readSkillSnapshot("setup-matt-pocock-skills/triage-labels.md").content,
+      readSkillSnapshot("setup-matt-pocock-skills/triage-labels.md"),
     );
     const agents = read("AGENTS.md");
     expect(agents).toContain("## Agent skills\n");

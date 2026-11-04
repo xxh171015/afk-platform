@@ -1,4 +1,3 @@
-<!-- mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c skills/engineering/setup-matt-pocock-skills/domain.md -->
 # Domain Docs
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.

@@ -446,7 +446,11 @@
 }
 .run-log .markdown code {
   background: color-mix(in oklch, var(--terminal-foreground) 10%, transparent);
-  border-color: color-mix(in oklch, var(--terminal-foreground) 16%, transparent);
+  border-color: color-mix(
+    in oklch,
+    var(--terminal-foreground) 16%,
+    transparent
+  );
   color: var(--terminal-foreground);
 }
 .run-log .markdown pre,
@@ -456,7 +460,11 @@
 .run-log .markdown pre,
 .run-log .markdown th,
 .run-log .markdown td {
-  border-color: color-mix(in oklch, var(--terminal-foreground) 16%, transparent);
+  border-color: color-mix(
+    in oklch,
+    var(--terminal-foreground) 16%,
+    transparent
+  );
 }
 .run-log .markdown blockquote {
   border-left-color: var(--terminal-muted);

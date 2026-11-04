@@ -53,19 +53,15 @@ Jobs live in the `jobs` table; `packages/api/src/jobs/queue.ts` holds the queue 
 
 Four processes: Postgres, the API, the page and one worker. All of them listen on 127.0.0.1 only (compose binds Postgres there too).
 
-**The first time, just run `scripts/up.sh`.** It checks everything under "Once" below (Docker, Node, dependencies, the sandbox image, the skills checkout, `AFK_MODEL`, the Cursor key, the GitHub App files) and, in a terminal, offers to do each missing step for you: it saves the model and the key to `~/.afk/env` (mode 600) and checks the skills out at the pinned commit. The GitHub App cannot be made for you; the script points at it and starts without. `scripts/up.sh --check` only checks. Settings come from the environment first, then `~/.afk/env`. The steps below are what it does, for doing them by hand.
+**The first time, just run `scripts/up.sh`.** It checks everything under "Once" below (Docker, Node, dependencies, the sandbox image, `AFK_MODEL`, the Cursor key, the GitHub App files) and, in a terminal, offers to do each missing step for you: it saves the model and the key to `~/.afk/env` (mode 600). The GitHub App cannot be made for you; the script points at it and starts without. `scripts/up.sh --check` only checks. Settings come from the environment first, then `~/.afk/env`. The steps below are what it does, for doing them by hand.
 
 **Once**
 
 1. Docker Desktop running, and the sandbox image built: `scripts/verify-sandbox-image.sh` (tags `sandcastle:afk-platform`).
 2. GitHub App credentials in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
 3. The Cursor key in `~/.afk/env` as `CURSOR_API_KEY=…` (or exported). The worker reads nothing else from that file.
-4. A checkout of [mattpocock/skills](https://github.com/mattpocock/skills) at the pinned skills SHA (`SKILLS_SHA` in `packages/shared/src/skills-sha.ts`); the worker mounts its `skills/engineering` directory read-only:
 
-```sh
-git clone https://github.com/mattpocock/skills.git ~/.afk/skills
-git -C ~/.afk/skills switch --detach "$(sed -n 's/^export const SKILLS_SHA = "\(.*\)";$/\1/p' packages/shared/src/skills-sha.ts)"
-```
+The skills the agents run in the sandbox (implement, tdd, code-review, codebase-design) are in this repo, copied from mattpocock/skills at the pinned SHA: the worker mounts `packages/pipeline/skills/` read-only.
 
 **Each time**: `AFK_MODEL=<cursor model> scripts/up.sh` starts all of the below in one terminal (output prefixed `[api]`, `[web]`, `[worker]`; Ctrl-C stops them; `WEB=0` / `WORKER=0` leave one out). Or by hand, one terminal each:
 
@@ -77,7 +73,6 @@ pnpm api                      # http://127.0.0.1:3000 ($PORT to change); run log
 pnpm web                      # http://127.0.0.1:5173 （工作台）
 
 export AFK_MODEL=<cursor model>
-export AFK_SKILLS_DIR=~/.afk/skills/skills/engineering
 pnpm worker                   # Ctrl-C aborts the runs in hand and stops; those jobs are dispatched again when their lease runs out (Ctrl-C twice: exit at once)
 ```
 
@@ -89,7 +84,7 @@ pnpm worker                   # Ctrl-C aborts the runs in hand and stops; those 
 | `AFK_SANDBOX_IMAGE`                             | `sandcastle:afk-platform`                            |
 | `AFK_WORKER_ID`                                 | the host name                                        |
 | `AFK_GITHUB_APP_DIR`                            | `~/.afk/secrets/github-app`                          |
-| `CURSOR_API_KEY`, `AFK_MODEL`, `AFK_SKILLS_DIR` | required                                             |
+| `CURSOR_API_KEY`, `AFK_MODEL`                   | required                                             |
 
 A worker that is missing any of these, or cannot reach the API, says what is wrong and exits before taking a job. A worker with GitHub App credentials also does the jobs for the code host: opening and following a spec's pull requests, and, once a spec is cancelled or merged, closing its pull requests that are still open and deleting its `spec/*` and `agent/*` branches on the remote (closing a pull request needs the App's `pull_requests: write`, deleting a branch `contents: write`; the App already has both). A worker that was killed leaves its sandbox container running on its slot; the next worker to reuse that slot (after the lease runs out) removes the containers that still mount it before it salvages the slot.
 

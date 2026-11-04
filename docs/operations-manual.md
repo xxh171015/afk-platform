@@ -78,7 +78,7 @@ npx skills@latest add xxh171015/afk-platform
 grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `docs/agents/issue-tracker.md` 让它们改成写平台；`plat init`（由 `/afk-setup` 调用）生成它（单独生成用 `plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md`，只打印、不写文件）。
 
 - 文档第一行是版本标记（平台版本、skills SHA、项目和仓库）；平台版本只写在仓库根 `package.json` 的 `version`，改了平台、想让规划过的人知道时手动加一，文档是否过期则看整份比对；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
-- 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及本机用户级 skills 目录（`~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）里的 to-spec、to-tickets 是否和快照逐字一致。告警里会写出更新命令，或怎么把 skills 链到固定 SHA 的 checkout。
+- 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及 to-spec、to-tickets、afk-setup 是否是平台用的版本（先看规划仓库里的 `.agents/skills` 等项目级目录，没有再看 `~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）。告警里会写出按那一级更新的命令。
 
 ## 2. 场景 A：只有后端
 
@@ -241,7 +241,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | 现象 | 原因和处理 |
 | --- | --- |
 | `up.sh` 说端口已被占用 | 旧的栈还在跑；先停掉旧的，不要同时跑两套（会出现两个 worker 抢同一批槽位） |
-| `up.sh` 说缺 `AFK_MODEL` / key / skills | 在终端里运行它会引导补齐；设置保存在 `~/.afk/env` |
+| `up.sh` 说缺 `AFK_MODEL` / key | 在终端里运行它会引导补齐；设置保存在 `~/.afk/env` |
 | `plat spec create` 报 slug 错 | 中文标题要加 `--slug english-slug` |
 | 导入报 YAML 解析错 | 含 `: ` 或以特殊字符开头的 `title`、`acceptance` 整行加引号；全部加引号最稳 |
 | 导入被拒：没有契约路径 | `plat repo edit <名字> --project <P> --contract-path openapi/openapi.yaml` |
@@ -253,15 +253,23 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 ## 9. 升级 skills SHA
 
-固定的 skills SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`）；`up.sh` 从它读取，别处不写。平台依赖的 skill 文件以快照存在 `packages/shared/skills-snapshot/`，每个文件头写明它取自哪个 SHA，守卫测试保证两者一致。升级时在**一个提交**里做完下面几步：
+平台从 mattpocock/skills 取的东西都原样复制在本仓库里，是唯一来源，运行时不再需要 Matt 仓库的 checkout：
+
+| 位置 | 内容 | 谁用 |
+| --- | --- | --- |
+| `skills/` | grill-with-docs、grilling、domain-modeling、to-spec、to-tickets | 规划机器，和 afk-setup 一起用 `npx skills@latest add xxh171015/afk-platform` 装 |
+| `packages/pipeline/skills/` | implement、tdd、code-review、codebase-design | worker 只读挂进沙箱 |
+| `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板 | `plat init`、`plat tracker-doc` |
+
+固定的 SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`），每个目录的 `VENDORED.md` 记下复制时的 SHA，守卫测试保证两者一致。升级时在**一个提交**里做完下面几步：
 
 1. 把 `SKILLS_SHA` 改成新的 commit（在 mattpocock/skills 的 checkout 里 `git fetch` 后确认它存在）。
-2. 跑刷新脚本：`node scripts/refresh-skills-snapshot.ts <skills checkout 路径>`。它从那个 commit 取出快照文件（五个 `SKILL.md` 和几份种子模板）覆盖快照，并把五个规划 skill 整个目录原样复制到仓库 `skills/` 下（附上游 LICENSE，`skills/VENDORED.md` 记下 SHA）。对当前 SHA 重跑，什么都不会变。
-3. 看快照和 `skills/` 的 `git diff`：matt 改了什么；按需要改覆盖层引用的步骤和 tracker 文档模板。合并后，规划机器上用 `npx skills@latest add xxh171015/afk-platform --skill '*' -y`（全局加 `-g`）更新，`plat` 也会提示。
+2. 跑刷新脚本：`node scripts/refresh-skills-snapshot.ts <skills checkout 路径>`。它从那个 commit 把上表三处整个重写（附上游 LICENSE 和 `VENDORED.md`）。对当前 SHA 重跑，什么都不会变。
+3. 看这三处的 `git diff`：matt 改了什么；按需要改覆盖层引用的步骤和 tracker 文档模板。
 4. 改覆盖层声明的 SHA，让它和新常量一致。
-5. `pnpm check`：快照头的 SHA 和常量不一致时，守卫测试会失败。
+5. `pnpm check`：`VENDORED.md` 的 SHA 和常量不一致、提示词引用的 skill 没在挂载目录里时，守卫测试会失败。
 
-升级后，各台机器上的 skills checkout 也要切到新 SHA：`up.sh` 发现 checkout 的 HEAD 不对会提议切过去，worker 在 HEAD 不对时拒绝启动，并说明怎么切。
+合并后，worker 重启就用上新 skill（`scripts/up.sh` 重启即可）。规划机器上用 `npx skills@latest add xxh171015/afk-platform --skill '*' -y`（全局加 `-g`）更新，`plat` 也会提示。
 
 ## 附录 A：场景 A 的票目录
 
