@@ -1089,7 +1089,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The platform's version and the mattpocock/skills commit it pins */
+        /** @description The platform's version, the mattpocock/skills commit it pins, and the commit of the platform's repo it runs (null when unknown) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1098,6 +1098,7 @@ export interface paths {
             "application/json": {
               platformVersion: string;
               skillsSha: string;
+              platformCommit: string | null;
             };
           };
         };

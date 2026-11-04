@@ -37,23 +37,25 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 ### 1.2 接入一个项目（`/afk-setup`，每个项目一次）
 
-规划的那台机器（可以就是这台 Mac）上只需要手动装一次 skill，然后在 Cursor 里跑 `/afk-setup`。这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。装法和 `npx skills@latest add mattpocock/skills` 一样，它会问装哪些 skill（全选）、装给哪些 agent、装在项目里还是全局：
+接入只有两步：
 
-```sh
-npx skills@latest add xxh171015/afk-platform
-```
+1. 在规划仓库里运行控制塔首页给出的命令（锁定到平台的提交，和下面这条一样，只是多了 `#<提交>`）：
 
-- **项目级**（在规划仓库里运行，选 Project）：skill 放在仓库的 `.agents/skills`，`/afk-setup` 把它们连同 `skills-lock.json` 一起推到 `afk/setup`，随第一个需求的 PR 进默认分支。之后团队里每个人拉下代码就有同一版本，推荐团队用。
-- **全局**（选 Global，或加 `-g`）：只装在你自己的 `~/.agents/skills`。同名的 skill 会被覆盖成平台用的版本。
+   ```bash
+   npx skills@latest add xxh171015/afk-platform
+   ```
 
-不想回答问题时可以直接写全：`npx skills@latest add xxh171015/afk-platform --skill '*' -y`（项目级，在规划仓库里运行），全局再加 `-g`。以后平台升级了，在规划仓库（项目级）或任意目录（全局）运行 `plat update`：它从平台下载最新的 plat 替换自己，再按 skill 现在装在哪一级把它们重装一遍。`plat` 发现自己或这些 skill 过期时也会提示 `plat update`。
+   skill 全选；agent 选你用的。装在项目里（默认推荐，只在这台机器上生效，不进仓库）还是全局，由你选。安装时显示的风险表是 skills CLI 对所有包都会做的通用扫描。
+2. 在 Cursor 里打开项目的仓库，输入 `/afk-setup`。
+
+这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。afk-setup 会用 `plat update` 把缺的、不是平台版本的规划 skill 补成平台的版本：只有你自己选了全局才动全局，从不覆盖你在全局已有的同名 skill（那时规划 skill 装进规划仓库）。装在仓库里的 skill 和 `skills-lock.json` 由 plat 写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。以后平台升级了，在规划仓库运行 `plat update`：它从平台下载 plat 替换自己，再按 skill 原来的级别装平台对应提交上的版本，两处都有就两处都升级；全局有平台装的规划 skill 时，它只提示这会影响你的其他项目，并给出恢复 Matt 版本的命令，不改全局。`plat` 发现自己或这些 skill 过期时也会提示 `plat update`。
 
 这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
 在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。它不开 PR，接入改动推到每个仓库的 `afk/setup` 分支，随第一个需求的 PR 进默认分支，你在那时一起审（ADR 0006）：
 
-1. **工具**：缺 Node 20+、git，或者 `gh` 没登录时，每样用一行告诉你要运行的命令，不替你装、不替你登录。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。
-2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
+1. **工具**：缺 Node 20+、git，或者 `gh` 没登录时，每样用一行告诉你要运行的命令，不替你装、不替你登录。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。在规划仓库里运行 `plat update`，把 skill 补齐、升级成平台的版本（规则见上）。
+2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：skill 以项目级装在哪个仓库就是哪个；已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
 3. **登记**：在规划仓库的 worktree 里直接跑 `plat init --yes --with …`（改动都在 `afk/setup` 分支上，不进默认分支）。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行）；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。
 5. **不开 PR，不用先合**：提交说明里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。平台切每个需求的集成分支时，先把 `afk/setup` 合到默认分支最新提交上（**设置提交**），票按它的 `gates.yaml` 过门禁，接入改动跟代码在同一个 PR 里进默认分支；默认分支已经包含 `afk/setup` 后就不再叠。`plat spec confirm` 只在某个仓库的默认分支和 `afk/setup` 上都没有 `gates.yaml` 时拒绝开工。

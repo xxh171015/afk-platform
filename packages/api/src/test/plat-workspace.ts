@@ -38,10 +38,12 @@ export interface PlatWorkspace {
     options?: { defaultBranch?: string; reachable?: boolean },
   ): Checkout;
   // `answer` is what the person says when asked; "nobody" means nobody can be asked (no terminal).
+  // `io` replaces parts of what plat is run with; its env is added to plat's.
   plat(
     cwd: string,
     args: string[],
     answer?: boolean | "nobody",
+    io?: Partial<Io>,
   ): Promise<PlatResult>;
   close(): Promise<void>;
 }
@@ -81,7 +83,7 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
       gitOrThrow(dir, ["config", `url.${target}.insteadOf`, address]);
       return { dir, origin };
     },
-    async plat(cwd, args, answer) {
+    async plat(cwd, args, answer, extra = {}) {
       let stdout = "";
       let stderr = "";
       const questions: string[] = [];
@@ -98,6 +100,7 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
           AFK_HOME: afkHome,
           AFK_ACCESS_WAIT_SECONDS: "0",
           AFK_POLL_SECONDS: "0.05",
+          ...extra.env,
         },
         readFile: async (path) => readFileSync(join(cwd, path), "utf8"),
         readDirectory: async (path) =>
@@ -119,7 +122,8 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
                 return answer;
               },
       };
-      const code = await run(args, io);
+      const { env: _env, ...rest } = extra;
+      const code = await run(args, { ...io, ...rest });
       return { code, stdout, stderr, questions };
     },
     async close() {

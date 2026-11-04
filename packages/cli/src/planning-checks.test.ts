@@ -4,8 +4,6 @@ import { describe, expect, it } from "vitest";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
 import {
   integrationWarnings,
-  skillsLevel,
-  skillsUpdateCommand,
   skillsWarnings,
   trackerDocWarnings,
   unreadyRepos,
@@ -297,44 +295,5 @@ describe("integrationWarnings", () => {
         new Map([["backend", { state: "pending" }]]),
       ),
     ).toEqual([]);
-  });
-});
-
-describe("where plat update installs the skills again", () => {
-  const home = "/home/dev";
-  const repo = "/work/plan";
-
-  it("is the repo when afk-setup is installed there, even when the user has it too", async () => {
-    const level = await skillsLevel(
-      files({
-        [`${repo}/.agents/skills/afk-setup/SKILL.md`]: "x",
-        [`${home}/.agents/skills/afk-setup/SKILL.md`]: "x",
-      }),
-      home,
-      repo,
-    );
-    expect(level).toBe("project");
-    expect(skillsUpdateCommand("project")).toEqual([
-      "npx",
-      "-y",
-      "skills@latest",
-      "add",
-      "xxh171015/afk-platform",
-      "--skill",
-      "*",
-      "-y",
-    ]);
-  });
-
-  it("is the user's skills otherwise, installed with -g; nowhere when afk-setup is not installed", async () => {
-    expect(
-      await skillsLevel(
-        files({ [`${home}/.claude/skills/afk-setup/SKILL.md`]: "x" }),
-        home,
-        repo,
-      ),
-    ).toBe("user");
-    expect(skillsUpdateCommand("user")).toContain("-g");
-    expect(await skillsLevel(files({}), home, repo)).toBeUndefined();
   });
 });

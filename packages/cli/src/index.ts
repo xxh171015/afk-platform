@@ -52,8 +52,6 @@ import {
 } from "./planning-backup.ts";
 import {
   integrationWarnings,
-  skillsLevel,
-  skillsUpdateCommand,
   skillsWarnings,
   trackerDocWarnings,
   unreadyRepos,
@@ -68,6 +66,7 @@ import {
   unresolvedPlanningDocs,
 } from "./planning-docs.ts";
 import { rememberApiUrl, rememberedApiUrl } from "./plat-config.ts";
+import { type RunCommand, runCommand, updateSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -83,6 +82,10 @@ export interface Io {
   cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
   // Asks the person a yes/no question (`plat init`); absent when nobody can answer, e.g. stdin is not a terminal.
   confirm?: (question: string) => Promise<boolean>;
+  // Runs a command such as the skills CLI (`plat update`); runCommand (skills-install.ts) when omitted.
+  run?: RunCommand;
+  // The file plat runs from, which `plat update` replaces; process.argv[1] when omitted, "" for none.
+  platPath?: string;
 }
 
 // How long plat init waits for a worker to say whether the GitHub App can work on the repos.
@@ -593,7 +596,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const lines: string[] = [];
 
       // plat: the platform's copy, written next to this one and moved over it.
-      const self = process.argv[1] ? realpathSync(process.argv[1]) : "";
+      const path = io.platPath ?? process.argv[1];
+      const self = path ? realpathSync(path) : "";
       if (!self || self.endsWith(".ts")) {
         lines.push(
           "plat: runs from a checkout of the platform, so it is as new as that checkout (git pull there)",
@@ -618,28 +622,26 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         }
       }
 
-      // The skills: installed again at the level afk-setup is at.
-      const level = await skillsLevel(
-        io.readFile,
-        io.env.HOME ?? homedir(),
-        ".",
-      );
-      if (level === undefined) {
+      // The skills: installed again at the platform's commit, at the levels afk-setup is at.
+      const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+        cwd: io.cwd ?? process.cwd(),
+        encoding: "utf8",
+      });
+      const platform = await createApiClient(base)
+        .GET("/version")
+        .then((r) => r.data)
+        .catch(() => undefined);
+      try {
         lines.push(
-          "skills: afk-setup is not installed here or for you; install them once with: npx skills@latest add xxh171015/afk-platform",
+          ...updateSkills({
+            home: io.env.HOME ?? homedir(),
+            repo: top.status === 0 ? top.stdout.trim() : undefined,
+            commit: platform?.platformCommit ?? null,
+            run: io.run ?? runCommand,
+          }),
         );
-      } else {
-        const [command, ...args] = skillsUpdateCommand(level);
-        const installed = spawnSync(command as string, args, {
-          stdio: ["ignore", "ignore", "inherit"],
-        });
-        if (installed.status !== 0)
-          throw new Failure(
-            `${lines.join("\n")}\nskills: ${[command, ...args].join(" ")} failed${installed.error ? ` (${installed.error.message})` : ""}`,
-          );
-        lines.push(
-          `skills: afk-setup and the planning skills installed again ${level === "project" ? "in this repo (commit them)" : "for you"}`,
-        );
+      } catch (error) {
+        throw new Failure(`${lines.join("\n")}\n${(error as Error).message}`);
       }
       print({ lines }, lines.join("\n"));
     });

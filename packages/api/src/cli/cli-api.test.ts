@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,11 +28,14 @@ afterEach(async () => {
 });
 
 describe("the platform's version", () => {
-  it("names the platform version and the pinned skills SHA", async () => {
+  it("names the platform version, the pinned skills SHA and the commit of the platform's repo it runs", async () => {
     const response = await fetch(`${ws.api.url}/version`);
     expect(await response.json()).toEqual({
       platformVersion: PLATFORM_VERSION,
       skillsSha: SKILLS_SHA,
+      platformCommit: execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
     });
   });
 });

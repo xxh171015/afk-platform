@@ -18,7 +18,7 @@ Speak the person's language in chat. Show command output when it carries a probl
 3. **plat**: when there is none, install the platform's copy into a directory already on `PATH` that the person can write to (prefer `~/.local/bin`, then `~/bin`, when on `PATH`; any other directory on `PATH` under the home directory will do):
    `curl -fsSL "<address>/cli/plat.mjs" -o <dir>/plat && chmod +x <dir>/plat`
    Only when no such directory is on `PATH`: make `~/.local/bin`, install there, and add one line `export PATH="$HOME/.local/bin:$PATH"` to the configuration of the shell the person uses (`~/.zshrc` for zsh, `~/.bashrc` for bash); say in the report which file got the line. When `plat version` differs from the `platformVersion` of `/version`, run `plat --api-url <address> update`. Then run `plat connect <address>`: plat remembers the address on this machine, so nothing goes in the shell's configuration.
-4. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, run `plat update`: it installs the whole package again at the level `afk-setup` is at. At project level (`afk-setup` is in the planning repo's `.agents/skills`), run it in the planning repo's worktree once section 3 made it; the skills under `.agents/skills` (and their links) and `skills-lock.json` then go to `afk/setup` and reach the default branch with the first spec, so everyone who plans in the repo has the same versions.
+4. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill. Whether a copy is the platform's is what plat's skill warnings check; do not only look whether one is there, since the person may have Matt's skills of the same names. Run `plat update` in the planning repo's checkout (section 2; when afk-setup is installed in one of the repos, that repo): it installs the package at the platform's commit, at the level afk-setup is at, and prints a `skills:` line for each thing it did. Its rules, so you can explain them: afk-setup in this repo → the whole package here; afk-setup for the user, with planning skills of the person's own for the user → afk-setup for the user and the planning skills in this repo, never over theirs; afk-setup for the user and no such skills → the whole package for the user; copies in this repo that are not the platform's are replaced, and named. Skills installed in a repo stay on this machine: plat adds them and `skills-lock.json` to the repo's `.git/info/exclude` (a `skills-lock.json` the repo tracks stays tracked), so they never reach a commit. Put its `skills:` lines in the report.
 
 Done when `plat version` matches the platform, `plat connect` (no address) says the platform answers, and the six skills are installed at that level.
 
@@ -27,10 +27,11 @@ Done when `plat version` matches the platform, `plat connect` (no address) says 
 The repos are the git checkouts among the workspace folders; read each one's `origin` and default branch. A repo added to the workspace later is set up when planning first needs it (see "Called mid-planning").
 
 The **planning repo** is where the person plans, decided in this order:
-1. the repo whose `docs/agents/issue-tracker.md` the platform wrote (its first line is `<!-- plat tracker-doc …`): the project already has it;
-2. the only repo;
-3. the only repo with an `openapi` file (the one that owns the API contract);
-4. the first workspace folder that is a git checkout.
+1. the repo afk-setup is installed in (project level): that is where the person chose to plan; the report says so;
+2. the repo whose `docs/agents/issue-tracker.md` the platform wrote (its first line is `<!-- plat tracker-doc …`): the project already has it;
+3. the only repo;
+4. the only repo with an `openapi` file (the one that owns the API contract);
+5. the first workspace folder that is a git checkout.
 
 Done when every repo has a path and the planning repo is decided; the report names it and why.
 
