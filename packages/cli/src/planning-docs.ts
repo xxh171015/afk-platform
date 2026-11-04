@@ -2,7 +2,13 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { PLANNING_DOC_PATHS, SETUP_BRANCH, tryParseRepoUrl } from "@afk/shared";
+import {
+  CONTEXT_DOC_PATHS,
+  GLOSSARY_MAP_PATH,
+  PLANNING_DOC_PATHS,
+  SETUP_BRANCH,
+  tryParseRepoUrl,
+} from "@afk/shared";
 
 // What `plat spec confirm` sends from the planning repo (ADR 0005): the planning docs as they are in the work tree,
 // against where this checkout left the remote's default branch, as a patch the platform commits for the person.
@@ -57,31 +63,52 @@ function setupTip(dir: string, fork: string | undefined): string | undefined {
   return tip.out.trim();
 }
 
-const GLOSSARY_MAP = "GLOSSARY-MAP.md";
+// The glossary map as the work tree, HEAD and the patch's base have it, those that do: a context added or removed
+// since the base is a planning docs change too.
+function readGlossaryMaps(dir: string, revisions: string[]): string[] {
+  const file = join(dir, GLOSSARY_MAP_PATH);
+  return [
+    ...(existsSync(file) ? [readFileSync(file, "utf8")] : []),
+    ...revisions
+      .filter(Boolean)
+      .map((rev) => git(dir, ["show", `${rev}:${GLOSSARY_MAP_PATH}`]))
+      .filter((shown) => shown.code === 0)
+      .map((shown) => shown.out),
+  ];
+}
 
-// The planning docs' paths in this checkout: in a multi-context repo (GLOSSARY「Planning docs」) also the map and,
-// for each context it links to, that context's GLOSSARY.md and docs/adr. The map is read as it is in the work
-// tree, or as HEAD has it when the person removed it. Links that leave the repo are left out.
-function planningDocPaths(dir: string, head: string): string[] {
-  const file = join(dir, GLOSSARY_MAP);
-  const map = existsSync(file)
-    ? readFileSync(file, "utf8")
-    : head
-      ? git(dir, ["show", `${head}:${GLOSSARY_MAP}`]).out
-      : "";
-  if (!map) return PLANNING_DOC_PATHS;
-  const contexts = new Set<string>();
-  for (const [, target] of map.matchAll(/\]\(\s*<?([^)\s>#]+)/g)) {
-    const path = posix.normalize(target.replace(/^\/+/, ""));
+// Where the contexts a glossary map links to live: the directories of the GLOSSARY.md files its Markdown links
+// point at (`[Ordering](./src/ordering/GLOSSARY.md)`, also `<…>` and `#section` forms), inside the repo.
+function contextsIn(map: string): string[] {
+  const contexts: string[] = [];
+  for (const [, angled, bare] of map.matchAll(
+    /\]\(\s*(?:<([^>]+)>|([^)\s]+))/g,
+  )) {
+    const target = (angled ?? bare ?? "").replace(/[#?].*$/, "");
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue; // a URL, not a path here
+    let decoded = target;
+    try {
+      decoded = decodeURIComponent(target);
+    } catch {}
+    const path = posix.normalize(decoded.replace(/^\/+/, ""));
     if (posix.basename(path) !== "GLOSSARY.md" || path.startsWith(".."))
       continue;
     const context = posix.dirname(path);
-    if (context !== ".") contexts.add(context);
+    if (context !== ".") contexts.push(context);
   }
+  return contexts;
+}
+
+// The planning docs' paths in this checkout: in a multi-context repo also the glossary map and each context's
+// glossary and ADRs.
+function planningDocPaths(dir: string, revisions: string[]): string[] {
+  const maps = readGlossaryMaps(dir, revisions);
+  if (maps.length === 0) return PLANNING_DOC_PATHS;
+  const contexts = [...new Set(maps.flatMap(contextsIn))];
   return [
     ...PLANNING_DOC_PATHS,
-    GLOSSARY_MAP,
-    ...[...contexts].flatMap((c) => [`${c}/GLOSSARY.md`, `${c}/docs/adr`]),
+    GLOSSARY_MAP_PATH,
+    ...contexts.flatMap((c) => CONTEXT_DOC_PATHS.map((path) => `${c}/${path}`)),
   ];
 }
 
@@ -112,12 +139,16 @@ export function readPlanningDocs(
   const fork = merged.code === 0 ? merged.out.trim() : undefined;
   const base = setupTip(dir, fork) ?? fork ?? head;
 
-  const paths = planningDocPaths(dir, head);
+  const paths = planningDocPaths(dir, [head, base]);
 
   // A throwaway index, so that new files show up without touching the person's.
   const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
   try {
-    const env = { GIT_INDEX_FILE: join(scratch, "index") };
+    // paths from a glossary map are taken as they are, not as patterns
+    const env = {
+      GIT_INDEX_FILE: join(scratch, "index"),
+      GIT_LITERAL_PATHSPECS: "1",
+    };
     git(dir, ["read-tree", head || "--empty"], env);
     const tracked = git(dir, ["ls-files", "-z", "--", ...paths], env)
       .out.split("\0")

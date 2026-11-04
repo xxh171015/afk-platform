@@ -38,6 +38,8 @@ export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
 export type { PlanningCommitResult, PlanningState } from "./planning-docs.ts";
 export {
+  CONTEXT_DOC_PATHS,
+  GLOSSARY_MAP_PATH,
   MAX_PLANNING_PATCH_BYTES,
   PLANNING_COMMIT_JOB,
   PLANNING_DOC_PATHS,

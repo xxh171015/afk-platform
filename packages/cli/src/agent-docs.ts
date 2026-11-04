@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { GLOSSARY_MAP_PATH } from "@afk/shared";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { TRACKER_DOC_PATH } from "./init.ts";
 
@@ -70,7 +71,7 @@ export function planAgentDocs(dir: string): AgentDoc[] {
   // setup-matt-pocock-skills: CLAUDE.md if there is one, else AGENTS.md (created when neither exists)
   const target = read("CLAUDE.md") !== null ? "CLAUDE.md" : "AGENTS.md";
   const before = read(target);
-  const section = agentSkillsSection(existsSync(join(dir, "GLOSSARY-MAP.md")));
+  const section = agentSkillsSection(existsSync(join(dir, GLOSSARY_MAP_PATH)));
   docs.push({
     path: target,
     before,

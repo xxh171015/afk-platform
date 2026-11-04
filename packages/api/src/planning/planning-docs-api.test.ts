@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { gitOrThrow } from "@afk/pipeline";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -319,6 +319,28 @@ describe("what plat spec confirm sends", () => {
     expect(patch).toContain("src/billing/GLOSSARY.md");
     expect(patch).not.toContain("code.ts");
     expect(patch).not.toContain("src/shipping");
+  });
+
+  it("in a multi-context repo carries a context taken out of the map since the default branch", async () => {
+    const { backend } = await draftSpec();
+    backend.origin.commit(
+      {
+        "GLOSSARY-MAP.md":
+          "# Glossary Map\n\n- [Billing](./src/billing/GLOSSARY.md)\n- [Docs](https://example.com/x/GLOSSARY.md)\n",
+        "src/billing/GLOSSARY.md": "# Billing\n",
+      },
+      "contexts",
+    );
+    gitOrThrow(backend.dir, ["pull", "--quiet", "origin", "main"]);
+    writeFileSync(join(backend.dir, "GLOSSARY-MAP.md"), "# Glossary Map\n");
+    rmSync(join(backend.dir, "src/billing"), { recursive: true });
+
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    const patch = await sentPatch();
+    expect(patch).toContain("deleted file mode");
+    expect(patch).toContain("src/billing/GLOSSARY.md");
+    expect(patch).toContain("-- [Billing]");
   });
 
   it("refuses a patch over 1 MB", async () => {

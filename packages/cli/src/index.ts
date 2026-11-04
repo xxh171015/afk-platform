@@ -882,7 +882,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("confirm <spec>")
     .description(
-      "confirm the split: the spec runs. Run in the spec's planning repo, it also sends the planning docs (GLOSSARY.md, docs/adr, AGENTS.md) as they are, committed or not, for the platform to commit before any ticket starts",
+      "confirm the split: the spec runs. Run in the spec's planning repo, it also sends the planning docs (GLOSSARY.md, docs/adr, AGENTS.md, and a multi-context repo's GLOSSARY-MAP.md with each context's GLOSSARY.md and docs/adr) as they are, committed or not, for the platform to commit before any ticket starts",
     )
     .action(async (id: string) => {
       const specId = specIdOf(id);
@@ -914,7 +914,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
       ) {
         throw new Failure(
-          `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only GLOSSARY.md, docs/adr and AGENTS.md belong in it`,
+          `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only the glossaries, ADRs and AGENTS.md belong in it`,
         );
       }
       for (const check of view.data.spec.prechecks) {
