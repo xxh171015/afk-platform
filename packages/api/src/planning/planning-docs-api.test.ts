@@ -294,6 +294,33 @@ describe("what plat spec confirm sends", () => {
     expect(patch).not.toContain("Running unattended");
   });
 
+  it("in a multi-context repo carries GLOSSARY-MAP.md and each context's glossary and ADRs", async () => {
+    const { backend } = await draftSpec();
+    const files: Record<string, string> = {
+      "GLOSSARY-MAP.md":
+        "# Glossary Map\n\n## Contexts\n\n- [Ordering](./src/ordering/GLOSSARY.md): orders\n- [Billing](src/billing/GLOSSARY.md): invoices\n",
+      "src/ordering/GLOSSARY.md": "# Ordering\n",
+      "src/ordering/docs/adr/0001-orders.md": "# Orders\n",
+      "src/billing/GLOSSARY.md": "# Billing\n",
+      "src/billing/code.ts": "export {};\n",
+      "src/shipping/GLOSSARY.md": "# Not in the map\n",
+    };
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(backend.dir, path)), { recursive: true });
+      writeFileSync(join(backend.dir, path), text);
+    }
+
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    const patch = await sentPatch();
+    expect(patch).toContain("GLOSSARY-MAP.md");
+    expect(patch).toContain("src/ordering/GLOSSARY.md");
+    expect(patch).toContain("src/ordering/docs/adr/0001-orders.md");
+    expect(patch).toContain("src/billing/GLOSSARY.md");
+    expect(patch).not.toContain("code.ts");
+    expect(patch).not.toContain("src/shipping");
+  });
+
   it("refuses a patch over 1 MB", async () => {
     const { backend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "x".repeat(1_100_000));

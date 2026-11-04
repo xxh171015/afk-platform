@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { PLANNING_DOC_PATHS, SETUP_BRANCH, tryParseRepoUrl } from "@afk/shared";
 
 // What `plat spec confirm` sends from the planning repo (ADR 0005): the planning docs as they are in the work tree,
@@ -57,6 +57,34 @@ function setupTip(dir: string, fork: string | undefined): string | undefined {
   return tip.out.trim();
 }
 
+const GLOSSARY_MAP = "GLOSSARY-MAP.md";
+
+// The planning docs' paths in this checkout: in a multi-context repo (GLOSSARY「Planning docs」) also the map and,
+// for each context it links to, that context's GLOSSARY.md and docs/adr. The map is read as it is in the work
+// tree, or as HEAD has it when the person removed it. Links that leave the repo are left out.
+function planningDocPaths(dir: string, head: string): string[] {
+  const file = join(dir, GLOSSARY_MAP);
+  const map = existsSync(file)
+    ? readFileSync(file, "utf8")
+    : head
+      ? git(dir, ["show", `${head}:${GLOSSARY_MAP}`]).out
+      : "";
+  if (!map) return PLANNING_DOC_PATHS;
+  const contexts = new Set<string>();
+  for (const [, target] of map.matchAll(/\]\(\s*<?([^)\s>#]+)/g)) {
+    const path = posix.normalize(target.replace(/^\/+/, ""));
+    if (posix.basename(path) !== "GLOSSARY.md" || path.startsWith(".."))
+      continue;
+    const context = posix.dirname(path);
+    if (context !== ".") contexts.add(context);
+  }
+  return [
+    ...PLANNING_DOC_PATHS,
+    GLOSSARY_MAP,
+    ...[...contexts].flatMap((c) => [`${c}/GLOSSARY.md`, `${c}/docs/adr`]),
+  ];
+}
+
 export function readPlanningDocs(
   cwd: string,
   repos: RegisteredRepo[],
@@ -84,30 +112,24 @@ export function readPlanningDocs(
   const fork = merged.code === 0 ? merged.out.trim() : undefined;
   const base = setupTip(dir, fork) ?? fork ?? head;
 
+  const paths = planningDocPaths(dir, head);
+
   // A throwaway index, so that new files show up without touching the person's.
   const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
   try {
     const env = { GIT_INDEX_FILE: join(scratch, "index") };
     git(dir, ["read-tree", head || "--empty"], env);
-    const tracked = git(
-      dir,
-      ["ls-files", "-z", "--", ...PLANNING_DOC_PATHS],
-      env,
-    )
+    const tracked = git(dir, ["ls-files", "-z", "--", ...paths], env)
       .out.split("\0")
       .filter(Boolean);
-    const present = PLANNING_DOC_PATHS.filter(
+    const present = paths.filter(
       (path) =>
         existsSync(join(dir, path)) ||
         tracked.some((file) => file === path || file.startsWith(`${path}/`)),
     );
     if (present.length > 0) git(dir, ["add", "-A", "--", ...present], env);
     const diff = (extra: string[]) =>
-      git(
-        dir,
-        ["diff", "--cached", ...extra, base, "--", ...PLANNING_DOC_PATHS],
-        env,
-      ).out;
+      git(dir, ["diff", "--cached", ...extra, base, "--", ...paths], env).out;
     return {
       status: "ok",
       patch: diff(["--binary", "--full-index"]),
