@@ -17,6 +17,16 @@ export const SNAPSHOT_FILES = [
 
 export type SnapshotFile = (typeof SNAPSHOT_FILES)[number];
 
+// The planning skills a planning machine runs, copied whole and unchanged under skills/ beside afk-setup, so that
+// `npx skills@latest add xxh171015/afk-platform` installs them together, at SKILLS_SHA. Name → path upstream.
+export const PLANNING_SKILLS = {
+  "grill-with-docs": "skills/engineering/grill-with-docs",
+  grilling: "skills/productivity/grilling",
+  "domain-modeling": "skills/engineering/domain-modeling",
+  "to-spec": "skills/engineering/to-spec",
+  "to-tickets": "skills/engineering/to-tickets",
+} as const;
+
 export const SNAPSHOT_DIR = fileURLToPath(
   new URL("../skills-snapshot/", import.meta.url),
 );

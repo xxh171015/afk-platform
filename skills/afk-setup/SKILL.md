@@ -17,10 +17,13 @@ The platform's address is `$AFK_API_URL`, default `http://127.0.0.1:3000`. Ask f
 2. **plat**: `plat version` prints the same `platformVersion` as `/version`. When it is missing or different, install the platform's copy:
    `mkdir -p ~/.local/bin && curl -fsSL "$AFK_API_URL/cli/plat.mjs" -o ~/.local/bin/plat && chmod +x ~/.local/bin/plat`
    and make sure `~/.local/bin` is on `PATH`.
-3. **Planning skills** at the commit the platform pins (`skillsSha` from `/version`):
-   `npx skills@latest add https://github.com/mattpocock/skills/tree/<skillsSha> --skill grill-with-docs --skill grilling --skill domain-modeling --skill to-spec --skill to-tickets -g -y`
+3. **Planning skills**: grill-with-docs, grilling, domain-modeling, to-spec and to-tickets come in the same package as this skill, at the commit the platform pins. Look for them beside `afk-setup`; when any is missing, install the whole package at the level `afk-setup` is at:
+   - **Project level** (`afk-setup` is in the planning repo's `.agents/skills`): in the planning repo's worktree once step 3 made it, `npx skills@latest add xxh171015/afk-platform --skill '*' -y`.
+   - **Global** (`afk-setup` is under `~/.agents/skills` or another home skills directory): now, `npx skills@latest add xxh171015/afk-platform --skill '*' -g -y`.
 
-Done when `plat version` matches the platform and the five skills are installed.
+   At project level, the skills under `.agents/skills` (and their links) and `skills-lock.json` go into the `afk/setup` pull request, so everyone who plans in the repo has the same versions.
+
+Done when `plat version` matches the platform and the six skills are installed at that level.
 
 ## 2. The repos
 
@@ -57,7 +60,7 @@ For every repo, in its worktree:
 - **AGENTS.md**: the agent that implements tickets reads it. When the repo has one (or a `CLAUDE.md`), keep it and add only what is missing: how to run the tests, and the section "Running unattended": nobody answers questions during a run; when a decision only a person can make comes up, the agent reports `cannot-proceed` and ends. Without one, write it from the code: what the repo is, where things live, how to run it, its conventions.
 - **Integration**: ask once per project: "Will frontend tickets run end-to-end tests against the real backend?" On yes, follow [integration.md](integration.md).
 
-Then commit, `git push -u origin afk/setup`, and run, from the planning repo's worktree:
+Then commit (in the planning repo, with the project-level skills when that is where they are), `git push -u origin afk/setup`, and run, from the planning repo's worktree:
 
 `plat repo check <repo name> --branch afk/setup`
 

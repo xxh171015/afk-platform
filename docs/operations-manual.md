@@ -37,15 +37,22 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 ### 1.2 接入一个项目（`/afk-setup`，每个项目一次）
 
-规划的那台机器（可以就是这台 Mac）上只需要手动装一样东西，然后在 Cursor 里跑一个 skill：
+规划的那台机器（可以就是这台 Mac）上只需要手动装一次 skill，然后在 Cursor 里跑 `/afk-setup`。这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。装法和 `npx skills@latest add mattpocock/skills` 一样，它会问装哪些 skill（全选）、装给哪些 agent、装在项目里还是全局：
 
 ```sh
-npx skills@latest add xxh171015/afk-platform --skill afk-setup -g -y
+npx skills@latest add xxh171015/afk-platform
 ```
+
+- **项目级**（在规划仓库里运行，选 Project）：skill 放在仓库的 `.agents/skills`，`/afk-setup` 把它们连同 `skills-lock.json` 一起放进 `afk/setup` PR。团队里每个人拉下代码就有同一版本，推荐团队用。
+- **全局**（选 Global，或加 `-g`）：只装在你自己的 `~/.agents/skills`。同名的 skill 会被覆盖成平台用的版本。
+
+不想回答问题时可以直接写全：`npx skills@latest add xxh171015/afk-platform --skill '*' -y`（项目级，在规划仓库里运行），全局再加 `-g`。`plat` 发现这些 skill 过期时也会提示这条命令。
+
+这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
 在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它在对话里一步步做下去，你只回答它的问题：
 
-1. **工具**：从平台下载 `plat` 到 `~/.local/bin/plat`（`GET /cli/plat.mjs`，和平台同一版本）；按平台固定的提交装 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets。平台地址默认 `http://127.0.0.1:3000`（`$AFK_API_URL`）。
+1. **工具**：从平台下载 `plat` 到 `~/.local/bin/plat`（`GET /cli/plat.mjs`，和平台同一版本）；确认规划 skill 都在，漏选了就按 afk-setup 所在的那一级（项目或全局）补装。平台地址默认 `http://127.0.0.1:3000`（`$AFK_API_URL`）。
 2. **仓库**：工作区里的 git 仓库就是项目的仓库；只有一个时它会问还有没有别的。**规划仓库**（跑 grill / to-spec / to-tickets、出契约的那个）通常是有 openapi 契约的那个，猜不出来就问你。
 3. **登记**：在规划仓库里跑 `plat init --dry-run --with …`，把清单贴给你，你同意后再带 `--yes` 跑。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`，要联调的再补联调环境；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。
@@ -249,8 +256,8 @@ plat spec confirm S-n       # 从这一刻起开始实现
 固定的 skills SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`）；`up.sh` 从它读取，别处不写。平台依赖的 skill 文件以快照存在 `packages/shared/skills-snapshot/`，每个文件头写明它取自哪个 SHA，守卫测试保证两者一致。升级时在**一个提交**里做完下面几步：
 
 1. 把 `SKILLS_SHA` 改成新的 commit（在 mattpocock/skills 的 checkout 里 `git fetch` 后确认它存在）。
-2. 跑刷新脚本：`node scripts/refresh-skills-snapshot.ts <skills checkout 路径>`。它从那个 commit 取出五个 `SKILL.md` 和两份 tracker 种子模板，覆盖快照。对当前 SHA 重跑，快照不会有变化。
-3. 看快照的 `git diff`：matt 改了什么；按需要改覆盖层引用的步骤和 tracker 文档模板。
+2. 跑刷新脚本：`node scripts/refresh-skills-snapshot.ts <skills checkout 路径>`。它从那个 commit 取出快照文件（五个 `SKILL.md` 和几份种子模板）覆盖快照，并把五个规划 skill 整个目录原样复制到仓库 `skills/` 下（附上游 LICENSE，`skills/VENDORED.md` 记下 SHA）。对当前 SHA 重跑，什么都不会变。
+3. 看快照和 `skills/` 的 `git diff`：matt 改了什么；按需要改覆盖层引用的步骤和 tracker 文档模板。合并后，规划机器上用 `npx skills@latest add xxh171015/afk-platform --skill '*' -y`（全局加 `-g`）更新，`plat` 也会提示。
 4. 改覆盖层声明的 SHA，让它和新常量一致。
 5. `pnpm check`：快照头的 SHA 和常量不一致时，守卫测试会失败。
 
