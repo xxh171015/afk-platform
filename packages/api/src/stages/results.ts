@@ -427,7 +427,8 @@ export async function writeFacts(
     const inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, stage, attempt, agent, model, skills_sha, axis,
          prompt, branch, base_sha, head_sha, commits, duration_ms, result, output, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, COALESCE($20, now()))
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+         COALESCE($19, (SELECT started_at FROM runs WHERE id = $21)), COALESCE($20, now()))
        RETURNING id`,
       [
         owner.spec_id,
@@ -450,6 +451,8 @@ export async function writeFacts(
         JSON.stringify(extra.run.output ?? null),
         extra.run.startedAt ?? null,
         extra.run.finishedAt ?? null,
+        // the axes run side by side, so one sent without a start time started with the job's own Run
+        runId,
       ],
     );
     if (extra.run.refShas) {

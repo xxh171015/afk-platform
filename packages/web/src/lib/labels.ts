@@ -40,6 +40,17 @@ export const runResultLabel: Record<string, string> = {
   failed: "失败",
   running: "运行中",
   cancelled: "已取消",
+  pass: "通过",
+  fix: "需要修复",
+  merged: "已合并",
+  conflict: "合并冲突",
+  "gate-failed": "门禁失败",
+};
+
+// The two axes of a review, named as the review prompts name them.
+export const axisLabel: Record<string, string> = {
+  standards: "Standards 轴",
+  spec: "Spec 轴",
 };
 
 export const prCiLabel: Record<string, string> = {

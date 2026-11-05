@@ -699,15 +699,11 @@ describe("the spec page", () => {
         }),
       }),
     );
-    expect(
-      await screen.findByText(
-        (_, element) =>
-          element?.tagName === "LI" &&
-          /backend: final-merge blocked \(合并冲突\)/.test(
-            element.textContent ?? "",
-          ),
-      ),
-    ).toBeTruthy();
+    const card = await screen.findByTestId("delivery-backend");
+    expect(card.textContent).toContain("卡住");
+    const merge = within(card).getByTestId("finalize-step-final-merge");
+    expect(merge.dataset.status).toBe("blocked");
+    expect(merge.textContent).toMatch(/最终合并.*卡住.*合并冲突/);
   });
 
   it("links back to the list", async () => {
@@ -1197,7 +1193,24 @@ describe("the six-step bar and nested pages", () => {
     expect(link.getAttribute("target")).toBe("_blank");
   });
 
-  it("links each finishing run from delivery", async () => {
+  it("shows each repo's finishing step by step, with its Runs and the log of the one going now", async () => {
+    const finalRun = (
+      id: number,
+      repo: string,
+      stage: string,
+      result: string | null,
+      axis: string | null = null,
+    ) => ({
+      id,
+      displayId: `R-${id}`,
+      repo,
+      stage,
+      axis,
+      result,
+      durationMs: result === null ? null : 281_000,
+      startedAt: "2026-11-05T05:08:08.000Z",
+      finishedAt: result === null ? null : "2026-11-05T05:12:49.000Z",
+    });
     renderWithApp(
       <SpecDetail specId={1} section="delivery" />,
       fakeServer({
@@ -1212,31 +1225,70 @@ describe("the six-step bar and nested pages", () => {
                 specDisplayId: "S-1",
                 repo: "backend",
                 step: "final-review",
-                state: "running",
+                state: "done",
+                blockedReason: null,
+                brief: null,
+              },
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "frontend",
+                step: "final-fix",
+                state: "active",
                 blockedReason: null,
                 brief: null,
               },
             ],
             finalRuns: [
-              {
-                id: 12,
-                displayId: "R-12",
-                repo: "backend",
-                stage: "final-review",
-                result: null,
-              },
+              finalRun(10, "backend", "final-review", "pass", "standards"),
+              finalRun(11, "backend", "final-review", "pass", "spec"),
+              finalRun(12, "frontend", "final-review", "fix", "standards"),
+              finalRun(13, "frontend", "final-fix", null),
             ],
           }),
         }),
+        "GET /runs/13/logs": () => ({
+          json: {
+            attempt: 1,
+            offset: 0,
+            nextOffset: 0,
+            size: 0,
+            text: "",
+            finished: false,
+          },
+        }),
       }),
     );
-    expect(await screen.findByTestId("delivery-backend")).toBeTruthy();
+    const backend = await screen.findByTestId("delivery-backend");
+    expect(backend.textContent).toContain("已完成");
+    const steps = (repo: string) =>
+      [
+        ...screen
+          .getByTestId(`finalize-steps-${repo}`)
+          .querySelectorAll("[data-status]"),
+      ].map((li) => li.textContent?.replace("→", ""));
+    expect(steps("backend")).toEqual([
+      "终审通过",
+      "终审修复不需要",
+      "最终合并不需要",
+    ]);
+    expect(steps("frontend")).toEqual([
+      "终审需要修复",
+      "终审修复运行中",
+      "最终合并未开始",
+    ]);
+    expect(backend.textContent).toContain("终审 · Spec 轴");
+    expect(backend.textContent).toContain("281 s");
     expect(
-      screen.getByRole("link", { name: "R-12" }).getAttribute("href"),
-    ).toBe("/runs/12");
-    expect(screen.getByTestId("delivery-backend").textContent).toMatch(
-      /final-review/,
-    );
+      screen.getByRole("link", { name: "R-10" }).getAttribute("href"),
+    ).toBe("/runs/10");
+
+    const live = screen.getByTestId("finalize-live-frontend");
+    expect(live.textContent).toMatch(/正在运行 R-13 终审修复 · 已运行 \d+ s/);
+    expect(
+      within(live).getByRole("region", { name: "日志查看器" }),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("finalize-live-backend")).toBeNull();
   });
 
   it("opens a sheet when a graph node is clicked", async () => {

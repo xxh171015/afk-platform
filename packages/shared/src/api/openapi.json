@@ -5455,7 +5455,19 @@
                           "stage": {
                             "type": "string"
                           },
+                          "axis": {
+                            "type": ["string", "null"]
+                          },
                           "result": {
+                            "type": ["string", "null"]
+                          },
+                          "durationMs": {
+                            "type": ["integer", "null"]
+                          },
+                          "startedAt": {
+                            "type": ["string", "null"]
+                          },
+                          "finishedAt": {
                             "type": ["string", "null"]
                           }
                         },
@@ -5464,7 +5476,11 @@
                           "displayId",
                           "repo",
                           "stage",
-                          "result"
+                          "axis",
+                          "result",
+                          "durationMs",
+                          "startedAt",
+                          "finishedAt"
                         ]
                       }
                     }

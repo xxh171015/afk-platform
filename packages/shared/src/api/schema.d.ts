@@ -2738,7 +2738,11 @@ export interface paths {
                 displayId: string;
                 repo: string;
                 stage: string;
+                axis: string | null;
                 result: string | null;
+                durationMs: number | null;
+                startedAt: string | null;
+                finishedAt: string | null;
               }[];
             };
           };
