@@ -37,21 +37,26 @@ The **planning repo** is where the person plans, decided in this order:
 
 Done when every repo has a path and the planning repo is decided; the report names it and why.
 
-## 3. A setup branch per repo
+## 3. A setup worktree per repo
 
-All changes go to an `afk/setup` branch, in a worktree beside each checkout, so the person's own branch and files stay as they are:
+All changes go to `afk/setup` on origin, made in a temporary worktree outside the person's checkout, so their branches and files stay as they are and nothing is left behind. `<setups>` is `~/.afk/setup/<project>` (`$AFK_HOME/setup/<project>` when `$AFK_HOME` is set), where `<project>` is the planning repo's name, so every run finds the same folder; a repo's `<setup>` is `<setups>/<repo name>`. For each repo, first `git -C <checkout> fetch origin`, then:
 
-`git -C <checkout> fetch origin && git -C <checkout> worktree add <checkout>-afk-setup -B afk/setup origin/afk/setup` (when origin has no `afk/setup` yet, start it from `origin/<default branch>`; when the worktree is there already, use it and `git pull` in it)
+- When `<setup>` is there already (an earlier run stopped): if it has uncommitted changes (`git -C <setup> status --porcelain`) or commits origin's `afk/setup` lacks (`git -C <setup> log origin/afk/setup..HEAD`, or against `origin/<default branch>` when origin has no `afk/setup`), carry on in it; otherwise remove it (`git -C <checkout> worktree remove --force <setup>`) and make it again as below.
+- Otherwise: `git -C <checkout> worktree add --detach <setup> origin/afk/setup` (when origin has no `afk/setup` yet, start from `origin/<default branch>`). Detached: no local branch is made.
 
-When `afk/setup` was there already, merge `origin/<default branch>` into it (`git merge origin/<default branch>`), so that it still merges into the default branch: the platform refuses to start a spec's tickets on a setup that does not. When the default branch has everything `afk/setup` has (a spec that carried it was merged), the merge brings it up to date and the steps below only fill what is missing.
+Either way, when origin has `afk/setup`, merge `origin/<default branch>` into it in `<setup>` (`git merge origin/<default branch>`), so that it still merges into the default branch: the platform refuses to start a spec's tickets on a setup that does not. When the default branch has everything `afk/setup` has (a spec that carried it was merged), the merge brings it up to date and the steps below only fill what is missing.
+
+**Left over from an older afk-setup**: a `<checkout>-afk-setup` worktree or a local `afk/setup` branch. They go together: remove them when the worktree has no uncommitted changes (`git -C <checkout>-afk-setup status --porcelain` is empty) and the branch's commits are all on origin (`git -C <checkout> log afk/setup --not --remotes` is empty): `git -C <checkout> worktree remove <checkout>-afk-setup`, then `git -C <checkout> branch -D afk/setup` (`-D`: the check above is what makes it safe, and `-d` refuses a branch whose upstream is gone). Say so in one line of the report. When either check finds something, leave both alone and say in one line which and why (for example "backend-afk-setup kept: 2 uncommitted files").
 
 The platform only reads what is pushed. It never merges `afk/setup` into the default branch: every spec's integration branch starts with it until the default branch has it, so it reaches the default branch with the first spec's pull request. Open no pull request for it.
+
+Done when every repo has its `<setup>`, up to date with origin, and every leftover is removed or named.
 
 ## 4. Register
 
 In the person's own checkout of the planning repo (not a worktree; whatever branch it is on):
 
-1. `plat init --yes --with <checkout of each other repo> ...`. It registers what is not registered yet; a registered repo keeps its name and settings. It writes the tracker doc, `docs/agents/domain.md`, `docs/agents/triage-labels.md` and the local rule files `CLAUDE.local.md` (Claude Code) and `.cursor/rules/afk-platform.mdc` (Cursor), which hold the `## Agent skills` section and the planning conventions. It adds them to the repo's `.git/info/exclude`: they stay on this machine and are never committed. Do not move them into `AGENTS.md` or `CLAUDE.md`. A repo that already tracks one of these files (an older setup committed it) keeps it there: plat updates the tracked file and its `next:` line names it; take that change into the planning repo's `afk/setup` worktree and commit it with the setup (section 5), then `git restore` it in the person's checkout.
+1. `plat init --yes --with <checkout of each other repo> ...`. It registers what is not registered yet; a registered repo keeps its name and settings. It writes the tracker doc, `docs/agents/domain.md`, `docs/agents/triage-labels.md` and the local rule files `CLAUDE.local.md` (Claude Code) and `.cursor/rules/afk-platform.mdc` (Cursor), which hold the `## Agent skills` section and the planning conventions. It adds them to the repo's `.git/info/exclude`: they stay on this machine and are never committed. Do not move them into `AGENTS.md` or `CLAUDE.md`. A repo that already tracks one of these files (an older setup committed it) keeps it there: plat updates the tracked file and its `next:` line names it; copy that change into the planning repo's `<setup>` and commit it with the setup (section 5), then `git restore` it in the person's checkout.
 2. Each repo's GitHub App line comes back. When it is not "can work here", give the person the link from that line and say it is for whoever runs the platform; carry on with the next steps.
 3. Create the triage labels the planning repo's GitHub lacks: compare `gh label list` with the five in `docs/agents/triage-labels.md` and `gh label create` each missing one.
 
@@ -59,14 +64,14 @@ Done when `plat init` printed the project and every repo is registered.
 
 ## 5. Ready each repo
 
-For every repo, in its worktree:
+For every repo, in its `<setup>`:
 
 - **Gate**: write `.sandcastle/gates.yaml` following [gates.md](gates.md), unless one is there already.
 - **AGENTS.md**: the agent that implements tickets reads it. When the repo has one (or a `CLAUDE.md`), keep it and add only what is missing: how to run the tests, and the section "Running unattended": nobody answers questions during a run; when a decision only a person can make comes up, the agent reports `cannot-proceed` and ends. Without one, write it from the code: what the repo is, where things live, how to run it, its conventions.
 
 End-to-end tests against other repos are not set up here: a spec that needs them adds what they need as tickets (the tracker doc's "Integration tickets").
 
-Then commit, `git push -u origin afk/setup`, and run, from the planning repo's checkout:
+Then commit, `git -C <setup> push origin HEAD:afk/setup`, and run, from the planning repo's checkout:
 
 `plat repo check <repo name> --branch afk/setup`
 
@@ -74,8 +79,10 @@ It runs the gate in the platform's sandbox, exactly as tickets will be gated. Wh
 
 The commit message says what was added and why, and names every file that was replaced rather than added (for example an `issue-tracker.md` that pointed at another tracker): the reviewer of the spec's pull request reads it there.
 
-Done when every repo has `afk/setup` pushed and a passing `plat repo check`, or a named reason it cannot pass.
+Once a repo's check passes, remove its worktree: `git -C <checkout> worktree remove <setup> && git -C <checkout> worktree prune`. A repo that fails keeps its `<setup>`, and the report says where it is and where it got stuck; running afk-setup again carries on there. Only when every repo passed, remove `<setups>`; while one failed, it stays with that repo's `<setup>` in it.
+
+Done when every repo has `afk/setup` pushed and a passing `plat repo check` with its worktree removed, or a named reason it cannot pass.
 
 ## 6. Report
 
-A short table: repo, `afk/setup` pushed, gate check, GitHub App; and which repo is the planning repo. Then the next step: plan with `/grill-with-docs` in the person's own checkout of the planning repo, on any branch: the planning files are there, on this machine only. Nothing needs merging first: the setup reaches each default branch with the first spec's pull request. Called mid-planning, the report is one line: the repo and its gate check. Keep no worktree: remove every repo's, the planning repo's too, once its branch is pushed (`git worktree remove`).
+A short table: repo, `afk/setup` pushed, gate check, GitHub App, and for a repo that did not pass, where its `<setup>` is; and which repo is the planning repo. Then the next step: plan with `/grill-with-docs` in the person's own checkout of the planning repo, on any branch: the planning files are there, on this machine only. Nothing needs merging first: the setup reaches each default branch with the first spec's pull request. Called mid-planning, the report is one line: the repo and its gate check. Add a line for each leftover from an older afk-setup that was removed or kept (section 3).
