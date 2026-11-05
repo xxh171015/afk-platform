@@ -610,6 +610,7 @@ async function gate(
       ? []
       : checkContractCopies({
           repoDir: mainDir,
+          repo: bundle.repo.name,
           ref: agent,
           base: baseSha,
           contracts: fetchContracts(deps.repos, bundle.contracts),

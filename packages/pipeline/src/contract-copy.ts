@@ -4,7 +4,8 @@ import { changedFiles } from "./protected-paths.ts";
 
 // The contract copy check (docs/specs/m2-platform.md「契约副本检查」): the consumer repo commits a copy of the
 // contract it builds against, and the copy must be byte for byte the contract at the SHA the platform pinned.
-// A ticket without contract edges may not touch a copy at all.
+// A ticket without contract edges may not touch a copy at all. Only other repos' contracts are copied: a
+// contract edge from the ticket's own repo pins what the agent reads, and the repo has the contract itself.
 
 const COPY_DIR = "contract/";
 
@@ -27,17 +28,19 @@ export const copyPathOf = (contract: ProvidedContract, providers: number) =>
 
 export function checkContractCopies(input: {
   repoDir: string;
+  repo: string; // the ticket's repo
   ref: string; // the ticket's branch
   base: string; // where the branch left the integration branch
   contracts: readonly ProvidedContract[];
 }): ContractCopyProblem[] {
-  const { repoDir, ref, contracts } = input;
+  const { repoDir, ref } = input;
+  const contracts = input.contracts.filter((c) => c.repo !== input.repo);
   if (contracts.length === 0) {
     return changedFiles(repoDir, input.base, ref)
       .filter((file) => file.startsWith(COPY_DIR))
       .map((file) => ({
         file,
-        detail: `${file} is a contract copy, but this ticket has no contract edge, so it may not change it`,
+        detail: `${file} is a contract copy, but this ticket has no contract edge from another repo, so it may not change it`,
       }));
   }
   const problems: ContractCopyProblem[] = [];
