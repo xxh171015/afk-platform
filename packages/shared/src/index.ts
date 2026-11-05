@@ -38,6 +38,8 @@ export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
 export type { PlanningCommitResult, PlanningState } from "./planning-docs.ts";
 export {
+  CONTEXT_DOC_PATHS,
+  GLOSSARY_MAP_PATH,
   MAX_PLANNING_PATCH_BYTES,
   PLANNING_COMMIT_JOB,
   PLANNING_DOC_PATHS,
@@ -86,6 +88,7 @@ export {
   TICKET_TYPES,
   TicketSchema,
 } from "./schemas.ts";
+export { SKILLS_PACKAGE, skillsPackageAt } from "./skills-package.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
 export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";

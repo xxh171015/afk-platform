@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from "./components/ui/select.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { FinalizeProgress } from "./FinalizeProgress.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
 import { commitHtmlUrl, treeHtmlUrl } from "./host-links.ts";
 import {
@@ -1276,42 +1277,6 @@ function TimelinePage({
   );
 }
 
-function FinalizeLine({
-  step,
-  run,
-}: {
-  step?: SpecView["finalizations"][number];
-  run?: SpecView["finalRuns"][number];
-}) {
-  if (step) {
-    return (
-      <li>
-        {step.repo}: {step.step} {step.state}
-        {step.blockedReason ? (
-          <>
-            {" ("}
-            <StatusBadge kind="blocked" code={step.blockedReason} />
-            {")"}
-          </>
-        ) : null}
-        {run ? (
-          <>
-            {" "}
-            <a href={paths.run(run.id)}>{run.displayId}</a>
-          </>
-        ) : null}
-      </li>
-    );
-  }
-  if (!run) return null;
-  return (
-    <li>
-      {run.repo} {run.stage} {run.result ?? ""}{" "}
-      <a href={paths.run(run.id)}>{run.displayId}</a>
-    </li>
-  );
-}
-
 // The "交付" tab: finalizations, pull requests, then the acceptance pack as its own chapter.
 function Delivery({
   pullRequests,
@@ -1339,10 +1304,6 @@ function Delivery({
   const hasFinalize = steps.length > 0 || runs.length > 0;
   const hasPrs = prs.length > 0;
   const nothing = !hasFinalize && !hasPrs && !acceptancePack;
-  const finalizeRepos = [
-    ...steps.map((item) => item.repo),
-    ...runs.map((run) => run.repo),
-  ].filter((name, index, all) => all.indexOf(name) === index);
   const prRepos = [
     ...list(mergeOrder?.ordered),
     ...prs.map((pr) => pr.repo),
@@ -1359,36 +1320,7 @@ function Delivery({
       {hasFinalize ? (
         <section id="delivery-finalize" className="mb-8 scroll-mt-6">
           <h2 className="mb-3 text-sm font-semibold">收尾</h2>
-          {finalizeRepos.map((repo) => {
-            const repoSteps = steps.filter((item) => item.repo === repo);
-            const repoRuns = runs.filter((item) => item.repo === repo);
-            return (
-              <div
-                key={repo}
-                className="mb-3 rounded-md border bg-card p-4"
-                data-testid={`delivery-${repo}`}
-              >
-                <h3 className="mb-2 text-sm font-medium">{repo}</h3>
-                <ul className="finalizations space-y-1 text-sm">
-                  {repoSteps.map((f) => (
-                    <FinalizeLine
-                      key={f.step}
-                      step={f}
-                      run={repoRuns.find((item) => item.stage === f.step)}
-                    />
-                  ))}
-                  {repoRuns
-                    .filter(
-                      (run) =>
-                        !repoSteps.some((item) => item.step === run.stage),
-                    )
-                    .map((run) => (
-                      <FinalizeLine key={run.id} run={run} />
-                    ))}
-                </ul>
-              </div>
-            );
-          })}
+          <FinalizeProgress steps={steps} runs={runs} />
         </section>
       ) : null}
       {hasPrs ? (

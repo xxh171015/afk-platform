@@ -275,7 +275,7 @@ export function planText(plan: InitPlan): string {
     );
   }
   lines.push(
-    `tracker doc: written to ${TRACKER_DOC_PATH} in the planning repo`,
+    `tracker doc: written to ${TRACKER_DOC_PATH} in the planning repo, on this machine only unless the repo tracks it`,
   );
   return lines.join("\n");
 }

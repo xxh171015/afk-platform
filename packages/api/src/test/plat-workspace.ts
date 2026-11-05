@@ -28,6 +28,7 @@ export interface PlatResult {
 export interface PlatWorkspace {
   api: RunningApi;
   db: TestDatabase;
+  afkHome: string; // the planning machine's AFK home ($AFK_HOME) plat is run with
   // A checkout at <root>/<folder> whose origin is `address`. The remote's default branch is `defaultBranch`; with
   // `reachable: false` the address leads nowhere, as when there is no network or no credentials.
   checkout(
@@ -37,10 +38,12 @@ export interface PlatWorkspace {
     options?: { defaultBranch?: string; reachable?: boolean },
   ): Checkout;
   // `answer` is what the person says when asked; "nobody" means nobody can be asked (no terminal).
+  // `io` replaces parts of what plat is run with; its env is added to plat's.
   plat(
     cwd: string,
     args: string[],
     answer?: boolean | "nobody",
+    io?: Partial<Io>,
   ): Promise<PlatResult>;
   close(): Promise<void>;
 }
@@ -51,11 +54,13 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
   const logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   const api = await listen(createApp({ pool: db.pool, logDir }));
   const root = await mkdtemp(join(tmpdir(), "afk-work-"));
+  const afkHome = join(root, ".afk");
   const cleanups: (() => void)[] = [];
 
   return {
     api,
     db,
+    afkHome,
     checkout(
       folder,
       address,
@@ -78,7 +83,7 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
       gitOrThrow(dir, ["config", `url.${target}.insteadOf`, address]);
       return { dir, origin };
     },
-    async plat(cwd, args, answer) {
+    async plat(cwd, args, answer, extra = {}) {
       let stdout = "";
       let stderr = "";
       const questions: string[] = [];
@@ -92,8 +97,10 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
         // plat init does not wait for a worker to check the GitHub App
         env: {
           AFK_API_URL: api.url,
+          AFK_HOME: afkHome,
           AFK_ACCESS_WAIT_SECONDS: "0",
           AFK_POLL_SECONDS: "0.05",
+          ...extra.env,
         },
         readFile: async (path) => readFileSync(join(cwd, path), "utf8"),
         readDirectory: async (path) =>
@@ -115,7 +122,8 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
                 return answer;
               },
       };
-      const code = await run(args, io);
+      const { env: _env, ...rest } = extra;
+      const code = await run(args, { ...io, ...rest });
       return { code, stdout, stderr, questions };
     },
     async close() {

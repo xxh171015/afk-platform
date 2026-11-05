@@ -14,6 +14,7 @@ import { createInterface } from "node:readline/promises";
 import {
   type ApiClient,
   createApiClient,
+  formatDisplayId,
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
@@ -30,8 +31,10 @@ import {
   InvalidArgumentError,
   Option,
 } from "commander";
+import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
+import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
 import {
   hasRegistrations,
   InitError,
@@ -42,15 +45,29 @@ import {
   TRACKER_DOC_PATH,
 } from "./init.ts";
 import {
+  dropBackup,
+  dropFinishedSpecs,
+  readBackup,
+  saveBackup,
+  specPlanningDir,
+} from "./planning-backup.ts";
+import {
   integrationWarnings,
-  skillsLevel,
-  skillsUpdateCommand,
   skillsWarnings,
   trackerDocWarnings,
   unreadyRepos,
   versionWarnings,
 } from "./planning-checks.ts";
-import { readPlanningDocs } from "./planning-docs.ts";
+import {
+  type PlanningDocs,
+  putPlanningDocsAside,
+  putPlanningDocsBack,
+  readPlanningDocs,
+  uncommittedPlanningDocs,
+  unresolvedPlanningDocs,
+} from "./planning-docs.ts";
+import { rememberApiUrl, rememberedApiUrl } from "./plat-config.ts";
+import { type RunCommand, runCommand, updateSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -66,6 +83,10 @@ export interface Io {
   cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
   // Asks the person a yes/no question (`plat init`); absent when nobody can answer, e.g. stdin is not a terminal.
   confirm?: (question: string) => Promise<boolean>;
+  // Runs a command such as the skills CLI (`plat update`); runCommand (skills-install.ts) when omitted.
+  run?: RunCommand;
+  // The file plat runs from, which `plat update` replaces; process.argv[1] when omitted, "" for none.
+  platPath?: string;
 }
 
 // How long plat init waits for a worker to say whether the GitHub App can work on the repos.
@@ -176,7 +197,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   const program = new Command("plat")
     .description("AFK platform command line")
     .option("--json", "print one JSON document instead of text")
-    .option("--api-url <url>", "platform API (default $AFK_API_URL)")
+    .option(
+      "--api-url <url>",
+      "platform API (default $AFK_API_URL, else the address plat connect remembered, else http://127.0.0.1:3000)",
+    )
     .exitOverride()
     .configureOutput({
       writeOut: io.stdout,
@@ -184,10 +208,30 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   const json = () => Boolean(program.opts().json);
-  const api = (): ApiClient =>
-    createApiClient(
-      program.opts().apiUrl ?? io.env.AFK_API_URL ?? DEFAULT_API_URL,
+  // Where the platform is: --api-url, $AFK_API_URL, the address `plat connect` remembered, the default.
+  // An empty setting counts as none, as the worker has it.
+  const apiUrl = (): string =>
+    withoutTrailingSlash(
+      program.opts().apiUrl ||
+        io.env.AFK_API_URL ||
+        rememberedApiUrl(afkHome(io.env)) ||
+        DEFAULT_API_URL,
     );
+  const api = (): ApiClient => createApiClient(apiUrl());
+
+  // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
+  program.hook("preAction", async () => {
+    try {
+      await dropFinishedSpecs(afkHome(io.env), apiUrl(), async (id) => {
+        const { data } = await api().GET("/specs/{id}", {
+          params: { path: { id } },
+        });
+        return data?.spec.state;
+      });
+    } catch {
+      // a clean-up that cannot run is not worth failing the command
+    }
+  });
   const print = (value: unknown, text: string) =>
     io.stdout(json() ? `${JSON.stringify(value)}\n` : `${text}\n`);
 
@@ -512,20 +556,49 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   program
+    .command("connect [url]")
+    .description(
+      "remember the platform's address on this machine, once the platform answers there; --api-url and $AFK_API_URL still come first. Without an address: the address plat uses now, and whether the platform answers there",
+    )
+    .action(async (url: string | undefined) => {
+      if (url === undefined) {
+        const address = apiUrl();
+        const version = await platformVersionAt(address);
+        if (!version)
+          throw new Failure(
+            `plat uses ${address}, and no platform answers there`,
+          );
+        print(
+          { apiUrl: address, platformVersion: version },
+          `plat: the platform is at ${address} (${version})`,
+        );
+        return;
+      }
+      const address = withoutTrailingSlash(url);
+      const version = await platformVersionAt(address);
+      if (!version)
+        throw new Failure(
+          `no platform answers at ${address} (GET ${address}/version); nothing remembered`,
+        );
+      const file = rememberApiUrl(afkHome(io.env), address);
+      print(
+        { apiUrl: address, platformVersion: version, file },
+        `plat: the platform is at ${address} (${version}); remembered in ${file}`,
+      );
+    });
+
+  program
     .command("update")
     .description(
       "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
     )
     .action(async () => {
-      const base = (
-        program.opts().apiUrl ??
-        io.env.AFK_API_URL ??
-        DEFAULT_API_URL
-      ).replace(/\/$/, "");
+      const base = apiUrl();
       const lines: string[] = [];
 
       // plat: the platform's copy, written next to this one and moved over it.
-      const self = process.argv[1] ? realpathSync(process.argv[1]) : "";
+      const path = io.platPath ?? process.argv[1];
+      const self = path ? realpathSync(path) : "";
       if (!self || self.endsWith(".ts")) {
         lines.push(
           "plat: runs from a checkout of the platform, so it is as new as that checkout (git pull there)",
@@ -543,38 +616,33 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           const next = `${self}.next`;
           writeFileSync(next, text, { mode: 0o755 });
           renameSync(next, self);
-          const version = await api()
-            .GET("/version")
-            .then((r) => r.data?.platformVersion)
-            .catch(() => undefined);
+          const version = await platformVersionAt(base);
           lines.push(
             `plat: replaced with the platform's${version ? ` (${version})` : ""}`,
           );
         }
       }
 
-      // The skills: installed again at the level afk-setup is at.
-      const level = await skillsLevel(
-        io.readFile,
-        io.env.HOME ?? homedir(),
-        ".",
-      );
-      if (level === undefined) {
+      // The skills: installed again at the platform's commit, at the levels afk-setup is at.
+      const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+        cwd: io.cwd ?? process.cwd(),
+        encoding: "utf8",
+      });
+      const platform = await createApiClient(base)
+        .GET("/version")
+        .then((r) => r.data)
+        .catch(() => undefined);
+      try {
         lines.push(
-          "skills: afk-setup is not installed here or for you; install them once with: npx skills@latest add xxh171015/afk-platform",
+          ...updateSkills({
+            home: io.env.HOME ?? homedir(),
+            repo: top.status === 0 ? top.stdout.trim() : undefined,
+            commit: platform?.platformCommit ?? null,
+            run: io.run ?? runCommand,
+          }),
         );
-      } else {
-        const [command, ...args] = skillsUpdateCommand(level);
-        const installed = spawnSync(command as string, args, {
-          stdio: ["ignore", "ignore", "inherit"],
-        });
-        if (installed.status !== 0)
-          throw new Failure(
-            `${lines.join("\n")}\nskills: ${[command, ...args].join(" ")} failed${installed.error ? ` (${installed.error.message})` : ""}`,
-          );
-        lines.push(
-          `skills: afk-setup and the planning skills installed again ${level === "project" ? "in this repo (commit them)" : "for you"}`,
-        );
+      } catch (error) {
+        throw new Failure(`${lines.join("\n")}\n${(error as Error).message}`);
       }
       print({ lines }, lines.join("\n"));
     });
@@ -582,7 +650,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   program
     .command("init")
     .description(
-      "run in the planning repo: register its project and repos (this one and each --with) and write its tracker doc; asks first, never commits",
+      "run in the planning repo: register its project and repos (this one and each --with) and write its tracker doc and agent docs, on this machine only unless the repo tracks them; asks first, never commits",
     )
     .option(
       "--with <path[=name]>",
@@ -678,8 +746,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           (await checkRepos(projectId, names)).map(({ name, access }) =>
             accessLine(name, access),
           );
-        const agentDocs = planAgentDocs(planning.dir);
-        const agentDocsChange = agentDocs.some((d) => d.before !== d.after);
+        const agentDocs = planAgentDocs(planning.dir, afkHome(io.env));
+        // what the repo does not track stays on this machine (ADR 0007)
+        const trackerDocTracked = isTracked(planning.dir, TRACKER_DOC_PATH);
+        const localPaths = [
+          ...(trackerDocTracked ? [] : [TRACKER_DOC_PATH]),
+          ...agentDocs.filter((d) => !d.tracked).map((d) => d.path),
+        ];
+        const agentDocsChange =
+          agentDocs.some((d) => d.before !== d.after) ||
+          missingExcludes(planning.dir, localPaths).length > 0;
         if (!registering && found && !agentDocsChange) {
           const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
           if (doc === before) {
@@ -767,7 +843,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           mkdirSync(dirname(docPath), { recursive: true });
           writeFileSync(docPath, doc);
         }
-        const written = state === "unchanged" ? [] : [TRACKER_DOC_PATH];
+        const written =
+          state === "unchanged" || !trackerDocTracked ? [] : [TRACKER_DOC_PATH];
         const docStates: Record<string, string> = {};
         for (const agentDoc of agentDocs) {
           const docState =
@@ -781,8 +858,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           const target = join(planning.dir, agentDoc.path);
           mkdirSync(dirname(target), { recursive: true });
           writeFileSync(target, agentDoc.after);
-          written.push(agentDoc.path);
+          if (agentDoc.tracked) written.push(agentDoc.path);
         }
+        excludeLocally(planning.dir, localPaths);
         const lines = [
           `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
           ...(registered.length > 0
@@ -790,6 +868,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             : []),
           `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
           ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
+          ...(localPaths.length === 0
+            ? []
+            : [
+                `on this machine only (in .git/info/exclude, never committed): ${localPaths.join(", ")}`,
+              ]),
           ...(written.length === 0
             ? []
             : [
@@ -882,7 +965,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("confirm <spec>")
     .description(
-      "confirm the split: the spec runs. Run in the spec's planning repo, it also sends the planning docs (GLOSSARY.md, docs/adr, AGENTS.md) as they are, committed or not, for the platform to commit before any ticket starts",
+      "confirm the split: the spec runs. Run in the spec's planning repo, it also sends the planning docs (GLOSSARY.md, docs/adr, AGENTS.md, and a multi-context repo's GLOSSARY-MAP.md with each context's GLOSSARY.md and docs/adr) as they are, committed or not, for the platform to commit before any ticket starts",
     )
     .action(async (id: string) => {
       const specId = specIdOf(id);
@@ -909,12 +992,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `${id}'s planning docs are in ${planningRepo}, not ${docs.repo}: run plat spec confirm in a checkout of ${planningRepo}`,
         );
       }
+      if (docs.status === "ok")
+        refuseUnresolved(docs, `plat spec confirm ${id}`);
       if (
         docs.status === "ok" &&
         Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
       ) {
         throw new Failure(
-          `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only GLOSSARY.md, docs/adr and AGENTS.md belong in it`,
+          `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only the glossaries, ADRs and AGENTS.md belong in it`,
         );
       }
       for (const check of view.data.spec.prechecks) {
@@ -964,7 +1049,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ...(docs.status === "ok" && docs.files.length > 0
           ? [
               `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
-              `  your copies here can be put aside: git stash push --include-untracked -- ${docs.files.join(" ")}`,
+              ...putAside(
+                formatDisplayId("spec", specId),
+                docs,
+                planningRepo ?? "",
+              ),
             ]
           : []),
         ...(data.planningState
@@ -1072,11 +1161,51 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, specText(data));
     });
 
+  // Once the platform has the planning docs, the copies not committed here go to the spec's folder outside the
+  // checkout, so that pulling the spec's pull request later finds nothing in the way. The lines that say so.
+  // Nothing is kept when every planning doc is committed here: there is nothing to take out.
+  const putAside = (
+    spec: string,
+    docs: Extract<PlanningDocs, { status: "ok" }>,
+    repo: string,
+  ): string[] => {
+    if (uncommittedPlanningDocs(docs.dir, docs.paths).length === 0) return [];
+    let kept: string;
+    try {
+      kept = saveBackup(afkHome(io.env), spec, {
+        apiUrl: apiUrl(),
+        repo,
+        files: docs.files,
+        patch: docs.patch,
+      });
+    } catch (error) {
+      return [
+        `  your copies here stay where they are: they could not be kept outside the checkout (${(error as Error).message})`,
+      ];
+    }
+    const taken = putPlanningDocsAside(docs.dir, docs.paths);
+    return [
+      `  taken out of this checkout (back to HEAD): ${taken.join(", ")}; kept in ${kept}`,
+    ];
+  };
+
+  // Planning docs still being merged, or with conflict markers in them, are not sent.
+  const refuseUnresolved = (
+    docs: Extract<PlanningDocs, { status: "ok" }>,
+    rerun: string,
+  ) => {
+    const unresolved = unresolvedPlanningDocs(docs.dir, docs.paths);
+    if (unresolved.length > 0)
+      throw new Failure(
+        `resolve the conflicts in ${unresolved.join(", ")} first, then run ${rerun} again`,
+      );
+  };
+
   // Planning docs that did not apply to the planning repo's default branch (ADR 0005).
   spec
     .command("retry-planning <spec>")
     .description(
-      "in the spec's planning repo, after merging its default branch into the planning docs by hand: send them again and make the planning commit again",
+      "in the spec's planning repo, with its default branch merged into your branch: the first run puts the planning docs confirm took back into the checkout, merged three ways (conflicts marked in the files); once they are resolved, the next run sends them again and makes the planning commit again",
     )
     .action(async (id: string) => {
       const specId = specIdOf(id);
@@ -1101,6 +1230,37 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `run plat spec retry-planning in a checkout of ${planningRepo}, where ${id}'s planning docs are`,
         );
       }
+      const home = afkHome(io.env);
+      const spec = formatDisplayId("spec", specId);
+      const local = uncommittedPlanningDocs(docs.dir, docs.paths);
+      const backup = readBackup(home, spec);
+      if (local.length === 0 && backup) {
+        const back = putPlanningDocsBack(docs.dir, backup.patch, docs.paths);
+        if (!back.ok)
+          throw new Failure(
+            `could not put ${id}'s planning docs back from ${specPlanningDir(home, spec)}: ${back.error}`,
+          );
+      }
+      // the docs put back are all in HEAD already: they are sent as they are
+      if (
+        local.length === 0 &&
+        backup &&
+        uncommittedPlanningDocs(docs.dir, docs.paths).length > 0
+      ) {
+        const conflicts = unresolvedPlanningDocs(docs.dir, docs.paths);
+        print(
+          { putBack: backup.files, conflicts },
+          [
+            `${id}: planning docs ${backup.files.join(", ")} put back in this checkout`,
+            ...(conflicts.length > 0
+              ? [`  resolve the conflicts marked in ${conflicts.join(", ")}`]
+              : []),
+            `  then run plat spec retry-planning ${id} again to send them`,
+          ].join("\n"),
+        );
+        return;
+      }
+      refuseUnresolved(docs, `plat spec retry-planning ${id}`);
       const { data, response, error } = await api().POST(
         "/specs/{specId}/planning/retry",
         {
@@ -1111,7 +1271,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (!data) throw failureFrom(response, error);
       print(
         data,
-        `${id}: planning docs ${docs.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
+        [
+          `${id}: planning docs ${docs.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
+          ...(docs.files.length > 0 ? putAside(spec, docs, planningRepo) : []),
+        ].join("\n"),
       );
     });
 
@@ -1127,6 +1290,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         { params: { path: { specId } } },
       );
       if (!data) throw failureFrom(response, error);
+      dropBackup(afkHome(io.env), formatDisplayId("spec", specId));
       print(
         data,
         `${id}: planning docs given up; the planning commit is queued as the default branch's head`,
@@ -1440,6 +1604,15 @@ function ticketIdOf(text: string): number {
   }
   return parsed.id;
 }
+
+const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
+
+// The platform version answering at `address`, or undefined when nothing does.
+const platformVersionAt = (address: string): Promise<string | undefined> =>
+  createApiClient(address)
+    .GET("/version")
+    .then((r) => r.data?.platformVersion)
+    .catch(() => undefined);
 
 function specIdOf(text: string): number {
   const parsed = parseDisplayId(text);

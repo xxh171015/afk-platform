@@ -462,10 +462,14 @@ async function finalRunsOf(pool: pg.Pool, specId: number) {
   const { rows } = await pool.query<{
     id: number;
     stage: string;
+    axis: string | null;
     result: string | null;
+    duration_ms: number | null;
+    started_at: Date | null;
+    finished_at: Date | null;
     repo: string;
   }>(
-    `SELECT r.id, r.stage, r.result, repo.name AS repo
+    `SELECT r.id, r.stage, r.axis, r.result, r.duration_ms, r.started_at, r.finished_at, repo.name AS repo
      FROM runs r JOIN repos repo ON repo.id = r.repo_id
      WHERE r.spec_id = $1 AND r.ticket_id IS NULL
        AND r.stage IN ('final-review', 'final-fix', 'final-merge', 'final-e2e')
@@ -477,7 +481,11 @@ async function finalRunsOf(pool: pg.Pool, specId: number) {
     displayId: formatDisplayId("run", row.id),
     repo: row.repo,
     stage: row.stage,
+    axis: row.axis,
     result: row.result,
+    durationMs: row.duration_ms,
+    startedAt: row.started_at ? row.started_at.toISOString() : null,
+    finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
   }));
 }
 

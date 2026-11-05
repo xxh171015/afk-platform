@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,12 +28,21 @@ afterEach(async () => {
 });
 
 describe("the platform's version", () => {
-  it("names the platform version and the pinned skills SHA", async () => {
+  it("names the platform version, the pinned skills SHA, and a commit of the platform's repo that is on its remote", async () => {
     const response = await fetch(`${ws.api.url}/version`);
-    expect(await response.json()).toEqual({
+    const version = await response.json();
+    expect(version).toMatchObject({
       platformVersion: PLATFORM_VERSION,
       skillsSha: SKILLS_SHA,
     });
+    // the newest commit HEAD has that a remote has too, so GitHub can resolve it
+    const git = (args: string[]) =>
+      execFileSync("git", args, { encoding: "utf8" });
+    expect(version.platformCommit).toMatch(/^[0-9a-f]{40}$/);
+    git(["merge-base", "--is-ancestor", version.platformCommit, "HEAD"]);
+    expect(
+      git(["branch", "-r", "--contains", version.platformCommit]),
+    ).not.toBe("");
   });
 });
 

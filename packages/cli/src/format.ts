@@ -236,7 +236,7 @@ export function blockedText(queue: {
       p.files.length > 0
         ? `${p.specDisplayId}  the planning docs did not apply to ${p.repo}'s default branch: ${p.files.join(", ")}`
         : `${p.specDisplayId}  the planning commit could not be made in ${p.repo}: its job failed three times (see the job's error)`,
-      `    no ticket starts until: plat spec retry-planning ${p.specDisplayId} (in ${p.repo}, after merging its default branch into them), or plat spec waive-planning ${p.specDisplayId} (leave them out)`,
+      `    no ticket starts until: plat spec retry-planning ${p.specDisplayId} (in ${p.repo}, after pulling its default branch: it puts the docs back to merge, then sends them), or plat spec waive-planning ${p.specDisplayId} (leave them out)`,
     ]),
     ...queue.specs.map(
       (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,

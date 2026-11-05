@@ -307,7 +307,13 @@ const specRoute = createRoute({
             displayId: z.string(),
             repo: z.string(),
             stage: z.string(),
+            // which axis of a final review (standards | spec), null for the other steps
+            axis: z.string().nullable(),
+            // null while the Run is going
             result: z.string().nullable(),
+            durationMs: Id.nullable(),
+            startedAt: z.string().nullable(),
+            finishedAt: z.string().nullable(),
           }),
         ),
       }),

@@ -1,4 +1,4 @@
-import { SETUP_BRANCH } from "@afk/shared";
+import { SETUP_BRANCH, SKILLS_PACKAGE } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { readAfkSetupSkill } from "./afk-setup-text.ts";
@@ -17,52 +17,29 @@ const DOC_PATH = "docs/agents/issue-tracker.md";
 
 // The skills directories of the agents that run the planning skills, in the planning repo (project level) and in the
 // home directory (user level). `npx skills` installs into .agents/skills and links the others.
-const SKILLS_DIRS = [".claude/skills", ".cursor/skills", ".agents/skills"];
-const PLANNING_SKILLS = ["to-spec", "to-tickets"] as const;
+export const SKILLS_DIRS = [
+  ".claude/skills",
+  ".cursor/skills",
+  ".agents/skills",
+];
+// The planning skills plat carries a copy of, to tell whether an installed one is the platform's.
+const CHECKED_SKILLS = ["to-spec", "to-tickets"] as const;
 // One package holds afk-setup and the planning skills at the pinned SHA (skills/). The first install is like
 // `npx skills@latest add mattpocock/skills`: it asks which skills, which agents, project or global. `plat update`
-// installs it again at the level it is at.
-const SKILLS_INSTALL = "npx skills@latest add xxh171015/afk-platform";
+// installs it again at the platform's commit, at the levels it is at (skills-install.ts).
+const SKILLS_INSTALL = `npx skills@latest add ${SKILLS_PACKAGE}`;
 export type SkillsLevel = "project" | "user";
 const skillsFix = (level: SkillsLevel | undefined) =>
   level === undefined
     ? `install them: ${SKILLS_INSTALL}`
     : `update them: plat update${level === "project" ? " (in this repo)" : ""}`;
 
-/** The command `plat update` runs to install the skills package again at `level`. */
-export const skillsUpdateCommand = (level: SkillsLevel): string[] => [
-  "npx",
-  "-y",
-  "skills@latest",
-  "add",
-  "xxh171015/afk-platform",
-  "--skill",
-  "*",
-  ...(level === "user" ? ["-g"] : []),
-  "-y",
-];
-
-/**
- * Where the afk-setup skill is installed: in the repo `repo` (project level, what the agent there uses), or for the
- * user; undefined when nowhere.
- */
-export async function skillsLevel(
-  readFile: ReadFile,
-  home: string,
-  repo = ".",
-): Promise<SkillsLevel | undefined> {
-  for (const [level, root] of [
-    ["project", repo],
-    ["user", home],
-  ] as const) {
-    for (const dir of SKILLS_DIRS) {
-      try {
-        await readFile(`${root}/${dir}/afk-setup/SKILL.md`);
-        return level;
-      } catch {}
-    }
-  }
-  return undefined;
+/** A skill's SKILL.md as this platform has it, for the skills plat carries a copy of; undefined for the others. */
+export function expectedSkillText(skill: string): string | undefined {
+  if (skill === "afk-setup") return readAfkSetupSkill();
+  return (CHECKED_SKILLS as readonly string[]).includes(skill)
+    ? readSkillSnapshot(`${skill as (typeof CHECKED_SKILLS)[number]}/SKILL.md`)
+    : undefined;
 }
 
 // Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup). The
@@ -121,7 +98,7 @@ export async function skillsWarnings(
 ): Promise<string[]> {
   const warnings: string[] = [];
   const wanted = [
-    ...PLANNING_SKILLS.map((skill) => ({
+    ...CHECKED_SKILLS.map((skill) => ({
       skill,
       expected: readSkillSnapshot(`${skill}/SKILL.md`),
     })),

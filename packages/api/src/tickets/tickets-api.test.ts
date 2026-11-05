@@ -543,6 +543,18 @@ describe("a review of two axes", () => {
     ]);
   });
 
+  it("starts an axis Run sent without a start time when the job's own Run started, since they run side by side", async () => {
+    await reviewed(axisOutput("pass"), axisOutput("pass"), "pass");
+    const runs = await db.pool.query(
+      "SELECT axis, started_at FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(runs.rows[0].started_at).toBeInstanceOf(Date);
+    expect(runs.rows[1]).toEqual({
+      axis: "spec",
+      started_at: runs.rows[0].started_at,
+    });
+  });
+
   it("gives a review-fix the must-fix of both axes in review.json, each with its axis", async () => {
     await reviewed(
       axisOutput("fix", { mustFix: [{ file: "s.ts", problem: "style" }] }),
@@ -1361,8 +1373,8 @@ describe("what a person sees", () => {
       },
     });
     await db.pool.query(
-      `INSERT INTO runs (spec_id, repo_id, stage, result, finished_at)
-       VALUES ($1, 1, 'final-review', 'passed', now())`,
+      `INSERT INTO runs (spec_id, repo_id, stage, axis, result, duration_ms, started_at, finished_at)
+       VALUES ($1, 1, 'final-review', 'standards', 'passed', 90000, now() - interval '90 seconds', now())`,
       [specId],
     );
     const view = await call("GET", `/specs/${specId}`);
@@ -1383,7 +1395,11 @@ describe("what a person sees", () => {
         displayId: expect.stringMatching(/^R-\d+$/),
         repo: "backend",
         stage: "final-review",
+        axis: "standards",
         result: "passed",
+        durationMs: 90000,
+        startedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+        finishedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
       },
     ]);
   });

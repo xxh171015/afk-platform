@@ -1746,7 +1746,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "The platform's version and the mattpocock/skills commit it pins",
+            "description": "The platform's version, the mattpocock/skills commit it pins, and the commit of the platform's repo it runs (null when unknown)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1757,9 +1757,12 @@
                     },
                     "skillsSha": {
                       "type": "string"
+                    },
+                    "platformCommit": {
+                      "type": ["string", "null"]
                     }
                   },
-                  "required": ["platformVersion", "skillsSha"]
+                  "required": ["platformVersion", "skillsSha", "platformCommit"]
                 }
               }
             }
@@ -5452,7 +5455,19 @@
                           "stage": {
                             "type": "string"
                           },
+                          "axis": {
+                            "type": ["string", "null"]
+                          },
                           "result": {
+                            "type": ["string", "null"]
+                          },
+                          "durationMs": {
+                            "type": ["integer", "null"]
+                          },
+                          "startedAt": {
+                            "type": ["string", "null"]
+                          },
+                          "finishedAt": {
                             "type": ["string", "null"]
                           }
                         },
@@ -5461,7 +5476,11 @@
                           "displayId",
                           "repo",
                           "stage",
-                          "result"
+                          "axis",
+                          "result",
+                          "durationMs",
+                          "startedAt",
+                          "finishedAt"
                         ]
                       }
                     }

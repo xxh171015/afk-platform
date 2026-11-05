@@ -36,7 +36,13 @@ describe("a ticket with contract edges", () => {
       "contract/openapi.yaml": backend.content,
     });
     expect(
-      checkContractCopies({ repoDir: dir, ref, base, contracts: [backend] }),
+      checkContractCopies({
+        repoDir: dir,
+        repo: "frontend",
+        ref,
+        base,
+        contracts: [backend],
+      }),
     ).toEqual([]);
   });
 
@@ -46,6 +52,7 @@ describe("a ticket with contract edges", () => {
     });
     const problems = checkContractCopies({
       repoDir: dir,
+      repo: "frontend",
       ref,
       base,
       contracts: [backend],
@@ -65,6 +72,7 @@ describe("a ticket with contract edges", () => {
     expect(
       checkContractCopies({
         repoDir: missing.dir,
+        repo: "frontend",
         ref: missing.ref,
         base: missing.base,
         contracts: [backend],
@@ -82,6 +90,7 @@ describe("a ticket with contract edges", () => {
     expect(
       checkContractCopies({
         repoDir: newline.dir,
+        repo: "frontend",
         ref: newline.ref,
         base: newline.base,
         contracts: [backend],
@@ -97,6 +106,7 @@ describe("a ticket with contract edges", () => {
     expect(
       checkContractCopies({
         repoDir: dir,
+        repo: "frontend",
         ref,
         base,
         contracts: [backend, payments],
@@ -116,7 +126,13 @@ describe("a ticket without contract edges", () => {
       "contract/openapi.yaml": "anything\n",
     });
     expect(
-      checkContractCopies({ repoDir: dir, ref, base, contracts: [] }),
+      checkContractCopies({
+        repoDir: dir,
+        repo: "frontend",
+        ref,
+        base,
+        contracts: [],
+      }),
     ).toEqual([
       {
         file: "contract/openapi.yaml",
@@ -128,7 +144,65 @@ describe("a ticket without contract edges", () => {
   it("is not checked when it leaves the copies alone", () => {
     const { dir, ref, base } = branch({ "src/a.ts": "x\n" });
     expect(
-      checkContractCopies({ repoDir: dir, ref, base, contracts: [] }),
+      checkContractCopies({
+        repoDir: dir,
+        repo: "frontend",
+        ref,
+        base,
+        contracts: [],
+      }),
     ).toEqual([]);
+  });
+});
+
+// The manual's own example has a backend implementation ticket with `contract:` on a backend contract ticket:
+// the agent gets the pinned contract in /context/contract/, but a repo keeps no copy of its own contract.
+describe("a contract edge from the ticket's own repo", () => {
+  it("asks for no copy of the repo's own contract", () => {
+    const { dir, ref, base } = branch({ "src/a.ts": "x\n" });
+    expect(
+      checkContractCopies({
+        repoDir: dir,
+        repo: "backend",
+        ref,
+        base,
+        contracts: [backend],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not count towards the copies of other repos' contracts", () => {
+    const { dir, ref, base } = branch({
+      "contract/openapi.yaml": payments.content,
+    });
+    expect(
+      checkContractCopies({
+        repoDir: dir,
+        repo: "backend",
+        ref,
+        base,
+        contracts: [backend, payments],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not let the ticket change a copy when no other repo's contract is pinned", () => {
+    const { dir, ref, base } = branch({
+      "contract/openapi.yaml": "anything\n",
+    });
+    expect(
+      checkContractCopies({
+        repoDir: dir,
+        repo: "backend",
+        ref,
+        base,
+        contracts: [backend],
+      }),
+    ).toEqual([
+      {
+        file: "contract/openapi.yaml",
+        detail: expect.stringMatching(/no contract edge from another repo/),
+      },
+    ]);
   });
 });

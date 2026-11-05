@@ -97,7 +97,7 @@ M1 把单个仓库里的一个需求跑到了「可以由人验收」，但开�
 
 - bundle 新增 `contracts: [{ repo, url, defaultBranch, sha, path }]`（`url`、`defaultBranch` 让 worker 能 clone 提供契约的仓库）（按仓库，每个仓库取图里最下游契约票的 SHA；取代 M1 的 `LIMIT 1`）和 `refs: [{ name, sha }]`。Run 新增 `contract_shas`（按仓库）和 `ref_shas`。
 - worker 渲染 `/context/contract/<仓库名>/<文件名>`：在提供契约的仓库的主 clone 里 `git show <SHA>:<路径>`，本地没有就先 clone / fetch。
-- **契约副本检查**：使用方仓库提交 `contract/openapi.yaml`（多个上游时 `contract/<仓库名>/openapi.yaml`）。worker 在保护路径检查同一步，逐字节比对副本和这张票该用的契约；没有 contract 入边的票不许改副本。违反 → blocked，新原因码 **`contract-copy-mismatch`**。副本和生成物不进保护路径（由这道检查和门禁里的 `--check` 管住）。门禁沙箱不挂契约。
+- **契约副本检查**：使用方仓库提交 `contract/openapi.yaml`（多个上游时 `contract/<仓库名>/openapi.yaml`）。worker 在保护路径检查同一步，逐字节比对副本和这张票该用的契约；没有 contract 入边的票不许改副本。只有别的仓库的契约要副本：同一个仓库里的 contract 边只钉住 agent 在 `/context/contract/` 读到的版本，仓库不存自己契约的副本，也不算进「多个上游」。违反 → blocked，新原因码 **`contract-copy-mismatch`**。副本和生成物不进保护路径（由这道检查和门禁里的 `--check` 管住）。门禁沙箱不挂契约。
 - **只读快照** `/refs/<仓库名>/`：SHA 由 API 在每次 agent 运行（implement、各种 fix、review）生成 bundle 时定（本 spec 有集成分支用它的 head，没有用 main）。API 没有 git 和代码托管的访问，所以 bundle 的 `refs: [{ name, url, defaultBranch, sha }]` 里 `sha` 取该仓库在本 spec 里最近一次合并后的集成分支 head，没有合并过则为 null，由 worker 取默认分支的 head；worker 把实际用的 SHA 记在 Run 上（`ref_shas`）。`git archive <SHA>` 解到临时目录再 `rename` 到 `~/.afk/snapshots/<仓库名>@<SHA>`，同 SHA 共用；导出前在主 clone 的 `info/attributes` 写 `* -export-ignore -export-subst`；不导出子模块、不展开 LFS（已知限制）；Node 里分别检查 `git archive` 和 `tar` 的退出码；worker 启动时删掉 7 天没用过的快照。
 
 ### 联调（「联调票与修复票的模型」#71、「联调环境原型在 Mac 上跑通」#70）

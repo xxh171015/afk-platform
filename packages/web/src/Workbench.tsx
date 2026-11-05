@@ -14,6 +14,7 @@ import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
 import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
+import { Onboarding } from "./Onboarding.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
@@ -147,6 +148,7 @@ export function Workbench() {
       title="工作台"
       actions={<StaleNotice error={data ? board.error : null} />}
     >
+      <Onboarding />
       {!data ? (
         <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
           <p className="sr-only">加载工作台…</p>
