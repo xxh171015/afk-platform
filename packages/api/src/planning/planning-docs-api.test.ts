@@ -61,10 +61,8 @@ async function draftSpec(
     (await ws.plat(backend.dir, ["init", "--with", frontend.dir, "--yes"]))
       .code,
   ).toBe(0);
-  // what plat init wrote is on main already (a spec that carried afk/setup was merged)
-  gitOrThrow(backend.dir, ["add", "-A"]);
-  gitOrThrow(backend.dir, ["commit", "-q", "-m", "Set up for the platform"]);
-  gitOrThrow(backend.dir, ["push", "-q", "origin", "HEAD:main"]);
+  // what plat init wrote stays on this machine, out of git (ADR 0007)
+  expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
   const outside = dirname(backend.dir);
   writeFileSync(join(outside, "spec.md"), SPEC_BODY);
   const created = await ws.plat(backend.dir, [
@@ -346,21 +344,20 @@ describe("what plat spec confirm sends", () => {
     return task.patch;
   }
 
-  it("from the afk/setup worktree carries the planning docs only, not the setup the platform merges itself", async () => {
+  it("from the person's own branch carries the planning docs only: not plat init's local files, not the setup on afk/setup", async () => {
     const { backend } = await draftSpec();
     pushSetup(backend);
-    writeFileSync(
-      join(backend.dir, "AGENTS.md"),
-      "# Backend\n\n## Running unattended\n\nBulk ship is one job.\n",
-    );
+    gitOrThrow(backend.dir, ["checkout", "--quiet", "-b", "my-work", "main"]);
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
     writeFileSync(join(backend.dir, "docs/adr/0002-bulk.md"), "# Bulk\n");
 
     await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
 
     const patch = await sentPatch();
-    expect(patch).toContain("+Bulk ship is one job.");
-    expect(patch).toContain("docs/adr/0002-bulk.md");
-    expect(patch).not.toContain("+## Running unattended");
+    const files = [...patch.matchAll(/^diff --git a\/(\S+)/gm)].map(
+      (m) => m[1],
+    );
+    expect(files).toEqual(["GLOSSARY.md", "docs/adr/0002-bulk.md"]);
   });
 
   it("once the default branch has the setup, is taken against the default branch again", async () => {

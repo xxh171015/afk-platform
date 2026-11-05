@@ -56,12 +56,12 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 1. **工具**：缺 Node 20+、git，或者 `gh` 没登录时，每样用一行告诉你要运行的命令，不替你装、不替你登录。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。在规划仓库里运行 `plat update`，把 skill 补齐、升级成平台的版本（规则见上）。
 2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：skill 以项目级装在哪个仓库就是哪个；已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
-3. **登记**：在规划仓库的 worktree 里直接跑 `plat init --yes --with …`（改动都在 `afk/setup` 分支上，不进默认分支）。`plat init` 会登记项目和仓库，在规划仓库里写好 tracker 文档 `docs/agents/issue-tracker.md`，以及原本由 `setup-matt-pocock-skills` 写的东西（`docs/agents/domain.md`、`docs/agents/triage-labels.md`、`AGENTS.md` 或 `CLAUDE.md` 里的 `## Agent skills` 一节）；**不用再跑 setup-matt-pocock-skills**。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
+3. **登记**：在你自己的规划仓库 checkout 里（哪个分支都行）跑 `plat init --yes --with …`。`plat init` 会登记项目和仓库，并写好规划要读的文件：tracker 文档 `docs/agents/issue-tracker.md`、原本由 `setup-matt-pocock-skills` 写的 `docs/agents/domain.md` 和 `docs/agents/triage-labels.md`，以及两个本机规则文件 `CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。规则文件里是 `## Agent skills` 一节和规划约定。这些文件都登记在这个仓库的 `.git/info/exclude` 里，只在这台机器上，`git status` 里看不到，也不会被提交；`AGENTS.md` 不改（ADR 0007）。**不用再跑 setup-matt-pocock-skills**。仓库里早先已经提交了 tracker 文档或 `## Agent skills` 的，保持原样，`plat init` 照旧更新那个被跟踪的文件，这处改动随 `afk/setup` 提交。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库开一个 `afk/setup` 分支（在旁边的 worktree 里，不动你自己的分支和文件），按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行）；推上去后用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。
 5. **不开 PR，不用先合**：提交说明里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。平台切每个需求的集成分支时，先把 `afk/setup` 合到默认分支最新提交上（**设置提交**），票按它的 `gates.yaml` 过门禁，接入改动跟代码在同一个 PR 里进默认分支；默认分支已经包含 `afk/setup` 后就不再叠。`plat spec confirm` 只在某个仓库的默认分支和 `afk/setup` 上都没有 `gates.yaml` 时拒绝开工。
-6. **在规划仓库的 `afk/setup` 工作树里规划**：报告会给出它的路径（`<规划仓库>-afk-setup`），tracker 文档和 agent 文档在那里；第 2 节的 grill / to-spec / to-tickets / confirm 都在这个目录里做。带着设置的需求合入后，就可以回到自己的 checkout 规划。
+6. **在自己的 checkout 里规划**：第 2 节的 grill / to-spec / to-tickets / confirm 都在你自己的规划仓库 checkout 里做，哪个分支都行，不用等设置合入，也没有要换过去的工作树。规划要读的文件只在这台机器上：换一台机器规划，在那台机器上也跑一次 `/afk-setup`。项目已经接入时，它只做本机这部分（工具、skill、本机的规划文件），不推送、不重跑门禁检查，报告只有一行「本机已就绪」。
 
-以后多了仓库不用再跑：把它加进工作区，规划时票用到它，`plat tickets import` 说它不属于项目，规划的 agent 就自己用 afk-setup 接入它，再接着导入，你只会看到一行「已接入 X，门禁检查：…」，不用合并什么。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
+以后多了仓库不用再跑：把它加进工作区，规划时票用到它，`plat tickets import` 说它不属于项目，规划的 agent 就自己用 afk-setup 接入它（在本机重写 tracker 文档，不经过 `afk/setup`），再接着导入，你只会看到一行「已接入 X，门禁检查：…」，不用合并什么。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
 
 ### 1.3 每个仓库要满足的条件
 
@@ -78,7 +78,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 ### 1.4 tracker 文档是什么
 
-grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `docs/agents/issue-tracker.md` 让它们改成写平台；`plat init`（由 `/afk-setup` 调用）生成它（单独生成用 `plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md`，只打印、不写文件）。
+grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `docs/agents/issue-tracker.md` 让它们改成写平台。它只在每台规划机器上的那份 checkout 里，不提交，执行票时用不到；`plat init`（由 `/afk-setup` 调用）生成它（单独生成用 `plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md`，只打印、不写文件）。
 
 - 文档第一行是版本标记（平台版本、skills SHA、项目和仓库）；平台版本只写在仓库根 `package.json` 的 `version`，改了平台、想让规划过的人知道时手动加一，文档是否过期则看整份比对；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
 - 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及 to-spec、to-tickets、afk-setup 是否是平台用的版本（先看规划仓库里的 `.agents/skills` 等项目级目录，没有再看 `~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）。告警里会写出按那一级更新的命令。
@@ -87,7 +87,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `d
 
 ### 第 1 步 grill（想清楚）
 
-在后端仓库（规划仓库）的 `afk/setup` 工作树里打开 agent（设置还没随需求合入默认分支时；见 1.2 第 6 步），运行：
+在你自己的后端仓库（规划仓库）checkout 里打开 agent（见 1.2 第 6 步），运行：
 
 ```
 /grill-with-docs
@@ -133,7 +133,7 @@ plat spec show S-n          # spec 正文、票、依赖边、导入告警
 plat spec confirm S-n       # 从这一刻起开始实现
 ```
 
-- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`；多上下文的仓库还有 `GLOSSARY-MAP.md` 和它列出的各上下文下的 `GLOSSARY.md`、`docs/adr/`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台（在 `afk/setup` 工作树里时，相对远端的 `afk/setup`，补丁里只有规划文档的改动）。平台收下后，plat 把这些路径上没提交的改动从 checkout 里收走：新建的删掉，改过的还原成 HEAD 的样子，不用 stash；补丁备份在仓库外的 `~/.afk/planning/S-n/`。这样 PR 合并后 `git pull` 不会和它冲突。你已经提交的、以及规划文档以外的改动，一律不动；confirm 被拒时什么都不收走。需求合入或取消后，下一条 plat 命令会顺手删掉这个备份目录。
+- 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`；多上下文的仓库还有 `GLOSSARY-MAP.md` 和它列出的各上下文下的 `GLOSSARY.md`、`docs/adr/`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台（tracker 文档、`docs/agents` 和本机规则文件不在里面：它们不进仓库）。平台收下后，plat 把这些路径上没提交的改动从 checkout 里收走：新建的删掉，改过的还原成 HEAD 的样子，不用 stash；补丁备份在仓库外的 `~/.afk/planning/S-n/`。这样 PR 合并后 `git pull` 不会和它冲突。你已经提交的、以及规划文档以外的改动，一律不动；confirm 被拒时什么都不收走。需求合入或取消后，下一条 plat 命令会顺手删掉这个备份目录。
 - 平台先做**规划提交**：把补丁三方合并到规划仓库的设置提交（没有 `afk/setup` 要叠时就是默认分支的最新提交）上，作为集成分支的开头；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
 - 在页面上确认、或在规划仓库以外的地方 confirm，带不上本地的规划文档（预检标黄）；规划提交就是默认分支当时的最新提交。在项目的另一个仓库里 confirm 会被拒绝。
 - 补丁超过 1 MB 会被拒绝：规划文档只该有上面这些。
@@ -174,7 +174,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | --- | --- | --- |
 | 1 | `scripts/up.sh --check`，然后 `scripts/up.sh` | 全部 `[ok]`；API 和页面起来；页面能打开 |
 | 2 | 1.2 在 Cursor 里 `/afk-setup`（场景 B 工作区里放前后端两个仓库） | 清单里各仓库的名字、地址、契约路径都对；每个仓库「the GitHub App can work here」；`plat repo check` 都通过 |
-| 3 | 确认 `/afk-setup` 推了各仓库的 `afk/setup`、没有开 PR | 各仓库 GitHub 上有 `afk/setup` 分支，里面有 `.sandcastle/gates.yaml`、`AGENTS.md`，规划仓库还有 `docs/agents/issue-tracker.md`；默认分支没变 |
+| 3 | 确认 `/afk-setup` 推了各仓库的 `afk/setup`、没有开 PR | 各仓库 GitHub 上有 `afk/setup` 分支，里面有 `.sandcastle/gates.yaml`、`AGENTS.md`，规划仓库的 tracker 文档不在里面（它只在本机，`git status` 是干净的）；默认分支没变 |
 | 4 | **场景 A**，选一个小需求（一个字段、一个接口） | 见下 |
 | 5 | **场景 B**，选一个前后端各改一点的小需求 | 见下 |
 
@@ -233,7 +233,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 - [ ] 场景 A、场景 B 各完整走通一次，PR 都合并过。
 - [ ] 目标仓库都满足 1.3 的条件（尤其是 `gates.yaml`、`AGENTS.md`、GitHub App 权限）。
-- [ ] 规划仓库里的 `docs/agents/issue-tracker.md` 已在 `main` 上（平台或项目配置变了，`plat` 会提示，再跑一次 `/afk-setup`）。
+- [ ] 这台规划机器上的规划仓库 checkout 里有 `docs/agents/issue-tracker.md`（本机文件，不在 `main` 上；平台或项目配置变了，`plat` 会提示，再跑一次 `/afk-setup`）。
 - [ ] 你知道怎么看 `plat blocked` 并处理（第 6 节练过一次）。
 - [ ] 清楚平台当前的边界：**没有认证**，只监听 127.0.0.1；只有一个 worker，同时只跑一个需求；PR 评论返工、页面上追加票/改依赖、多个需求并行都还没有。pending / blocked 的票可以在页面上改正文、带说明重试。
 - [ ] **升级平台前先确认没有在跑的作业**（`plat blocked` 和页面上都没有 running 的票）：迁移随重启执行，没跑完的作业重跑时，前后阶段可能读到两种拼法的票正文。

@@ -13,7 +13,6 @@ import {
   CONTEXT_DOC_PATHS,
   GLOSSARY_MAP_PATH,
   PLANNING_DOC_PATHS,
-  SETUP_BRANCH,
   tryParseRepoUrl,
 } from "@afk/shared";
 
@@ -73,19 +72,6 @@ const sameRepo = (a: string, b: string) => {
     ? left.owner === right.owner && left.name === right.name
     : a.trim() === b.trim();
 };
-
-// Planning in the afk/setup worktree (ADR 0006): the platform commits the patch onto the setup commit, which has
-// afk/setup in it, so the patch is taken against afk/setup as the remote has it and carries the planning docs only,
-// not the setup's own AGENTS.md. Only while this checkout has afk/setup and the default branch does not.
-function setupTip(dir: string, fork: string | undefined): string | undefined {
-  const remote = `refs/remotes/origin/${SETUP_BRANCH}`;
-  const tip = git(dir, ["rev-parse", "--verify", "--quiet", remote]);
-  if (tip.code !== 0) return undefined;
-  const within = (ref: string) =>
-    git(dir, ["merge-base", "--is-ancestor", remote, ref]).code === 0;
-  if (!within("HEAD") || (fork && within(fork))) return undefined;
-  return tip.out.trim();
-}
 
 // The glossary map as the work tree, HEAD and the patch's base have it, those that do: a context added or removed
 // since the base is a planning docs change too.
@@ -161,7 +147,7 @@ export function readPlanningDocs(
   ]).out.trim();
   const merged = git(dir, ["merge-base", "HEAD", remote]);
   const fork = merged.code === 0 ? merged.out.trim() : undefined;
-  const base = setupTip(dir, fork) ?? fork ?? head;
+  const base = fork ?? head;
 
   const paths = planningDocPaths(dir, [head, base]);
 

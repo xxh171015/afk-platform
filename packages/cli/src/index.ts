@@ -34,6 +34,7 @@ import {
 import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
+import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
 import {
   hasRegistrations,
   InitError,
@@ -649,7 +650,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   program
     .command("init")
     .description(
-      "run in the planning repo: register its project and repos (this one and each --with) and write its tracker doc; asks first, never commits",
+      "run in the planning repo: register its project and repos (this one and each --with) and write its tracker doc and agent docs, on this machine only unless the repo tracks them; asks first, never commits",
     )
     .option(
       "--with <path[=name]>",
@@ -745,8 +746,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           (await checkRepos(projectId, names)).map(({ name, access }) =>
             accessLine(name, access),
           );
-        const agentDocs = planAgentDocs(planning.dir);
-        const agentDocsChange = agentDocs.some((d) => d.before !== d.after);
+        const agentDocs = planAgentDocs(planning.dir, afkHome(io.env));
+        // what the repo does not track stays on this machine (ADR 0007)
+        const trackerDocTracked = isTracked(planning.dir, TRACKER_DOC_PATH);
+        const localPaths = [
+          ...(trackerDocTracked ? [] : [TRACKER_DOC_PATH]),
+          ...agentDocs.filter((d) => !d.tracked).map((d) => d.path),
+        ];
+        const agentDocsChange =
+          agentDocs.some((d) => d.before !== d.after) ||
+          missingExcludes(planning.dir, localPaths).length > 0;
         if (!registering && found && !agentDocsChange) {
           const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
           if (doc === before) {
@@ -834,7 +843,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           mkdirSync(dirname(docPath), { recursive: true });
           writeFileSync(docPath, doc);
         }
-        const written = state === "unchanged" ? [] : [TRACKER_DOC_PATH];
+        const written =
+          state === "unchanged" || !trackerDocTracked ? [] : [TRACKER_DOC_PATH];
         const docStates: Record<string, string> = {};
         for (const agentDoc of agentDocs) {
           const docState =
@@ -848,8 +858,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           const target = join(planning.dir, agentDoc.path);
           mkdirSync(dirname(target), { recursive: true });
           writeFileSync(target, agentDoc.after);
-          written.push(agentDoc.path);
+          if (agentDoc.tracked) written.push(agentDoc.path);
         }
+        excludeLocally(planning.dir, localPaths);
         const lines = [
           `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
           ...(registered.length > 0
@@ -857,6 +868,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             : []),
           `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
           ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
+          ...(localPaths.length === 0
+            ? []
+            : [
+                `on this machine only (in .git/info/exclude, never committed): ${localPaths.join(", ")}`,
+              ]),
           ...(written.length === 0
             ? []
             : [

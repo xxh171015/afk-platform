@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SKILLS_PACKAGE, skillsPackageAt } from "@afk/shared";
 import { PLANNING_SKILLS } from "@afk/shared/skills-snapshot";
+import { excludeLocally } from "./git-exclude.ts";
 import {
   expectedSkillText,
   SKILLS_DIRS,
@@ -99,27 +100,11 @@ export function excludeProjectSkills(repo: string): string[] {
     .out.split("\0")
     .filter(Boolean)) {
     const match = skill.exec(file);
-    if (match) paths.add(`/${match[1]}`);
-    if (file === LOCK) paths.add(`/${LOCK}`);
+    if (match?.[1]) paths.add(match[1]);
+    if (file === LOCK) paths.add(LOCK);
   }
-  if (paths.size === 0) return [];
-  const where = git(repo, [
-    "rev-parse",
-    "--git-path",
-    "info/exclude",
-  ]).out.trim();
-  const exclude = isAbsolute(where) ? where : join(repo, where);
-  const text = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  const have = new Set(text.split("\n"));
-  const missing = [...paths].sort().filter((line) => !have.has(line));
-  if (missing.length > 0) {
-    mkdirSync(dirname(exclude), { recursive: true });
-    appendFileSync(
-      exclude,
-      `${text && !text.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`,
-    );
-  }
-  return missing;
+  // sorted, so the lines come in the same order every time
+  return excludeLocally(repo, [...paths].sort());
 }
 
 export interface SkillsUpdate {

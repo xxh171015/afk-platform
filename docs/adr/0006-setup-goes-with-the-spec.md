@@ -2,6 +2,8 @@
 
 afk-setup 给仓库补的接入改动（`.sandcastle/gates.yaml`、tracker 文档、`AGENTS.md`/`CLAUDE.md`、`.gitignore`，以及为跑通门禁改的代码配置）只推到 `afk/setup` 分支，不开 PR。平台切每个 Spec 在这个仓库的集成分支时，先把 `afk/setup` 合到默认分支最新提交上（设置提交），票在它上面开工、按它的 `gates.yaml` 过门禁，接入改动跟着代码在同一个 PR 里进默认分支。规划仓库里，规划提交叠在设置提交之上；人在规划仓库的 `afk/setup` 工作树里规划，那里有规划要读的 tracker 文档，`plat spec confirm` 从这里以 `origin/afk/setup` 为基准发补丁，补丁里只有规划文档的改动。和 [ADR 0005](0005-planning-docs-go-with-the-spec-committed-by-the-platform.md) 同一个理由：需求还没开发，接入改动不该先进默认分支。
 
+> tracker 文档随接入改动进仓库、人在规划仓库的 `afk/setup` 工作树里规划、confirm 以 `origin/afk/setup` 为基准发补丁，这几部分已被 [ADR 0007](0007-planning-instructions-stay-on-the-planning-machine.md) 取代：规划要读的文件只放在规划机器上，人在自己的 checkout 里规划。`afk/setup` 不开 PR、由设置提交随需求进默认分支不变。
+
 ## Considered Options
 
 - **开 `afk/setup` PR，合入后才能开工（原做法）**：需求还没开发，接入改动先进了默认分支；人还得先单独审、合一次。
