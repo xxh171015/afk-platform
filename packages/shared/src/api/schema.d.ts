@@ -3218,169 +3218,42 @@ export interface paths {
                   id: number;
                   displayId: string;
                   specId: number;
-                  specDisplayId: string;
                   title: string;
-                  type: string;
-                  /** @enum {string} */
-                  state:
-                    | "pending"
-                    | "queued"
-                    | "running"
-                    | "merging"
-                    | "done"
-                    | "blocked"
-                    | "cancelled";
                   blockedReason: string | null;
-                  repo: string;
-                  repoUrl: string;
-                  /** @enum {string} */
-                  hostKind: "github" | "gitlab";
-                  refs: string[];
-                  environment: string[];
-                  appended: boolean;
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
                 finalizations: {
                   id: number;
                   specId: number;
                   specDisplayId: string;
-                  repo: string;
                   step: string;
-                  state: string;
                   blockedReason: string | null;
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
                 pullRequests: {
                   specId: number;
                   specDisplayId: string;
                   repo: string;
                   number: number;
-                  url: string;
-                  state: string;
-                  syncError: string | null;
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
                 cleanups: {
                   specId: number;
                   specDisplayId: string;
-                  error: string;
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
                 readyFailures: {
                   specId: number;
                   specDisplayId: string;
                   repo: string;
                   number: number;
-                  url: string;
-                  error: string;
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
                 planning: {
                   specId: number;
                   specDisplayId: string;
                   title: string;
-                  repo: string;
-                  files: string[];
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
                 specs: {
                   id: number;
                   displayId: string;
                   title: string;
-                  reason: string;
-                  waitingSince?: string;
-                  blocking?: {
-                    downstream: string[];
-                    finalization: boolean;
-                    pullRequests: boolean;
-                    spec: boolean;
-                    merge: boolean;
-                  };
                 }[];
-                items: (
-                  | {
-                      /** @enum {string} */
-                      kind: "ticket";
-                      id: number;
-                    }
-                  | {
-                      /** @enum {string} */
-                      kind: "finalization";
-                      id: number;
-                      step: string;
-                    }
-                  | {
-                      /** @enum {string} */
-                      kind: "pullRequest";
-                      specId: number;
-                      repo: string;
-                      number: number;
-                    }
-                  | {
-                      /** @enum {string} */
-                      kind: "cleanup";
-                      specId: number;
-                    }
-                  | {
-                      /** @enum {string} */
-                      kind: "readyFailure";
-                      specId: number;
-                      repo: string;
-                      number: number;
-                    }
-                  | {
-                      /** @enum {string} */
-                      kind: "planning";
-                      specId: number;
-                    }
-                  | {
-                      /** @enum {string} */
-                      kind: "pausedSpec";
-                      id: number;
-                    }
-                )[];
               };
               running: {
                 spec: {

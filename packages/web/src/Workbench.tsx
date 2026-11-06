@@ -203,7 +203,7 @@ export function Workbench() {
                 ))}
                 {data.waiting.finalizations.map((item) => (
                   <ItemLink
-                    key={`f-${item.specId}-${item.repo}`}
+                    key={`f-${item.id}-${item.step}`}
                     href={paths.specDelivery(item.specId)}
                     displayId={item.specDisplayId}
                     title={item.step}

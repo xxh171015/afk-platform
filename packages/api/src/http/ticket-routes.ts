@@ -508,9 +508,61 @@ const BlockedQueue = z.object({
   items: z.array(WaitingRef),
 });
 
-const WorkbenchWaiting = BlockedQueue.extend({
-  tickets: z.array(TicketSummary.omit({ brief: true })),
-  finalizations: z.array(Finalization.omit({ brief: true })),
+const WorkbenchWaiting = z.object({
+  tickets: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      specId: Id,
+      title: z.string(),
+      blockedReason: z.string().nullable(),
+    }),
+  ),
+  finalizations: z.array(
+    z.object({
+      id: Id,
+      specId: Id,
+      specDisplayId: z.string(),
+      step: z.string(),
+      blockedReason: z.string().nullable(),
+    }),
+  ),
+  pullRequests: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      repo: z.string(),
+      number: z.number().int(),
+    }),
+  ),
+  cleanups: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+    }),
+  ),
+  readyFailures: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      repo: z.string(),
+      number: z.number().int(),
+    }),
+  ),
+  planning: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      title: z.string(),
+    }),
+  ),
+  specs: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      title: z.string(),
+    }),
+  ),
 });
 
 const blockedRoute = createRoute({

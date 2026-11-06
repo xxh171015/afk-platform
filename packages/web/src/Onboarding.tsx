@@ -240,11 +240,6 @@ function RepoAccessRow({
             : "；联调 compose 没有"}
         </p>
       ) : null}
-      <CheckRow
-        title="AGENTS.md"
-        status="尚未检查"
-        command={AGENTS_MD_COMMAND}
-      />
     </li>
   );
 }
@@ -316,7 +311,22 @@ function AccessChecklist({
     <section aria-label="接入条件" className="space-y-2">
       <h3 className="text-sm font-medium">接入条件</h3>
       <div className="space-y-3 text-sm">
-        <CheckRow title="平台可达" status={reachable} />
+        <CheckRow
+          title="平台可达"
+          status={reachable}
+          action={
+            version.isError ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void version.refetch()}
+              >
+                重试
+              </Button>
+            ) : null
+          }
+        />
         <CheckRow
           title="已登记的项目和仓库"
           status={
@@ -329,13 +339,11 @@ function AccessChecklist({
             <ProjectRepos project={project} enabled={readAccess} />
           </div>
         ))}
-        {projects.length === 0 ? (
-          <CheckRow
-            title="AGENTS.md"
-            status="尚未检查"
-            command={AGENTS_MD_COMMAND}
-          />
-        ) : null}
+        <CheckRow
+          title="AGENTS.md"
+          status="尚未检查"
+          command={AGENTS_MD_COMMAND}
+        />
       </div>
     </section>
   );

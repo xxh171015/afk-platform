@@ -8,7 +8,8 @@ import {
 } from "./views.ts";
 
 // The control-tower home: four quadrants a person glances at instead of a spec table
-// (docs/specs/experience-platform.md「工作台与导航」). Waiting is the waiting queue without briefs.
+// (docs/specs/experience-platform.md「工作台与导航」). Waiting is ids, titles and
+// counts for deep links; briefs and ranking stay on GET /blocked.
 
 export interface WorkbenchSpec {
   id: number;
@@ -40,16 +41,48 @@ export interface RunningTicket {
 
 type RankedQueue = Awaited<ReturnType<typeof blockedQueue>>;
 
-function dropBrief<T extends { brief?: unknown }>(item: T): Omit<T, "brief"> {
-  const { brief: _brief, ...rest } = item;
-  return rest;
-}
-
 function slimWaiting(queue: RankedQueue) {
   return {
-    ...queue,
-    tickets: queue.tickets.map(dropBrief),
-    finalizations: queue.finalizations.map(dropBrief),
+    tickets: queue.tickets.map((ticket) => ({
+      id: ticket.id,
+      displayId: ticket.displayId,
+      specId: ticket.specId,
+      title: ticket.title,
+      blockedReason: ticket.blockedReason,
+    })),
+    finalizations: queue.finalizations.map((item) => ({
+      id: item.id,
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      step: item.step,
+      blockedReason: item.blockedReason,
+    })),
+    pullRequests: queue.pullRequests.map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      repo: item.repo,
+      number: item.number,
+    })),
+    cleanups: queue.cleanups.map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+    })),
+    readyFailures: queue.readyFailures.map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      repo: item.repo,
+      number: item.number,
+    })),
+    planning: queue.planning.map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      title: item.title,
+    })),
+    specs: queue.specs.map((spec) => ({
+      id: spec.id,
+      displayId: spec.displayId,
+      title: spec.title,
+    })),
   };
 }
 
@@ -99,7 +132,9 @@ async function specIdsIn(
 }
 
 export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
-  const waiting = slimWaiting(await blockedQueue(pool, { brief: false }));
+  const waiting = slimWaiting(
+    await blockedQueue(pool, { brief: false, rank: false }),
+  );
 
   const means = await pool.query<{
     project_id: number;

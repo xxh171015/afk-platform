@@ -693,10 +693,6 @@ interface SpecCursor {
   sort: "startedAt" | "state" | "progress";
   dir: "asc" | "desc";
   id: number;
-  startedAt: string;
-  stateRank: number;
-  progress: number;
-  blocked: number;
 }
 
 function encodeSpecCursor(cursor: SpecCursor): string {
@@ -724,73 +720,29 @@ function decodeSpecCursor(text: string): SpecCursor | undefined {
   return undefined;
 }
 
-function stateRankOf(state: SpecState): number {
-  const rank = SPEC_LIST_STATE_ORDER.indexOf(state);
-  return rank < 0 ? SPEC_LIST_STATE_ORDER.length : rank;
-}
-
 function specCursorOf(
   spec: SpecListItem,
   sort: SpecCursor["sort"],
   dir: SpecCursor["dir"],
 ): SpecCursor {
-  const ratio =
-    spec.progress.total === 0 ? 0 : spec.progress.done / spec.progress.total;
-  return {
-    sort,
-    dir,
-    id: spec.id,
-    startedAt: spec.startedAt,
-    stateRank: stateRankOf(spec.state),
-    progress: ratio,
-    blocked: spec.progress.blocked,
-  };
+  return { sort, dir, id: spec.id };
 }
 
-function afterCursor(
-  spec: SpecListItem,
-  cursor: SpecCursor,
-  dir: "asc" | "desc",
-): boolean {
-  const sign = dir === "asc" ? 1 : -1;
-  const byId = () => (spec.id - cursor.id) * sign > 0;
-  if (cursor.sort === "startedAt") {
-    const started = spec.startedAt.localeCompare(cursor.startedAt) * sign;
-    return started !== 0 ? started > 0 : byId();
-  }
-  if (cursor.sort === "state") {
-    const rank = (stateRankOf(spec.state) - cursor.stateRank) * sign;
-    return rank !== 0 ? rank > 0 : byId();
-  }
-  const ratio =
-    spec.progress.total === 0 ? 0 : spec.progress.done / spec.progress.total;
-  const progress = (ratio - cursor.progress) * sign;
-  if (progress !== 0) return progress > 0;
-  const blocked = (spec.progress.blocked - cursor.blocked) * sign;
-  return blocked !== 0 ? blocked > 0 : byId();
+function stateRankSql(column = "s.state"): string {
+  const arms = SPEC_LIST_STATE_ORDER.map(
+    (state, i) => `WHEN ${column} = '${state}' THEN ${i}`,
+  ).join(" ");
+  return `CASE ${arms} ELSE ${SPEC_LIST_STATE_ORDER.length} END`;
 }
 
-function compareSpecs(
-  a: SpecListItem,
-  b: SpecListItem,
-  sort: SpecCursor["sort"],
-  dir: "asc" | "desc",
-): number {
-  const sign = dir === "asc" ? 1 : -1;
-  if (sort === "startedAt") {
-    const started = a.startedAt.localeCompare(b.startedAt);
-    return started !== 0 ? started * sign : (a.id - b.id) * sign;
-  }
-  if (sort === "state") {
-    const rank = stateRankOf(a.state) - stateRankOf(b.state);
-    return rank !== 0 ? rank * sign : (a.id - b.id) * sign;
-  }
-  const ratio = (spec: SpecListItem) =>
-    spec.progress.total === 0 ? 0 : spec.progress.done / spec.progress.total;
-  const progress = ratio(a) - ratio(b);
-  if (progress !== 0) return progress * sign;
-  const blocked = a.progress.blocked - b.progress.blocked;
-  return blocked !== 0 ? blocked * sign : (a.id - b.id) * sign;
+const PROGRESS_RATIO_SQL = `COALESCE(count(t.id) FILTER (WHERE t.state = 'done')::float / NULLIF(count(t.id), 0), 0)`;
+const BLOCKED_COUNT_SQL = `count(t.id) FILTER (WHERE t.state = 'blocked')`;
+
+function specOrderSql(sort: SpecCursor["sort"], dir: "asc" | "desc"): string {
+  const d = dir === "asc" ? "ASC" : "DESC";
+  if (sort === "startedAt") return `s.created_at ${d}, s.id ${d}`;
+  if (sort === "state") return `${stateRankSql()} ${d}, s.id ${d}`;
+  return `${PROGRESS_RATIO_SQL} ${d}, ${BLOCKED_COUNT_SQL} ${d}, s.id ${d}`;
 }
 
 function mapSpecListRow(
@@ -882,6 +834,35 @@ export async function specList(
       OR s.planning_repo_id = ANY($${params.length})
     )`);
   }
+  const having: string[] = [];
+  if (cursor && cursor.sort === sort && cursor.dir === dir) {
+    const op = dir === "asc" ? ">" : "<";
+    params.push(cursor.id);
+    const idParam = `$${params.length}`;
+    if (sort === "startedAt") {
+      where.push(
+        `(s.created_at, s.id) ${op} ((SELECT created_at FROM specs WHERE id = ${idParam}), ${idParam})`,
+      );
+    } else if (sort === "state") {
+      where.push(
+        `(${stateRankSql()}, s.id) ${op} ((SELECT ${stateRankSql("state")} FROM specs WHERE id = ${idParam}), ${idParam})`,
+      );
+    } else {
+      having.push(
+        `(${PROGRESS_RATIO_SQL}, ${BLOCKED_COUNT_SQL}, s.id) ${op} (
+           SELECT ${PROGRESS_RATIO_SQL}, ${BLOCKED_COUNT_SQL}, s2.id
+           FROM specs s2 LEFT JOIN tickets t ON t.spec_id = s2.id
+           WHERE s2.id = ${idParam}
+           GROUP BY s2.id
+         )`,
+      );
+    }
+  }
+  let limitSql = "";
+  if (!query.ids) {
+    params.push(limit + 1);
+    limitSql = `LIMIT $${params.length}`;
+  }
   const { rows } = await pool.query(
     `SELECT s.id, s.slug, s.title, s.type, s.state, s.pause_reason, p.name AS project,
             s.created_at,
@@ -897,20 +878,19 @@ export async function specList(
             count(t.id) FILTER (WHERE t.state = 'cancelled') AS cancelled
      FROM specs s JOIN projects p ON p.id = s.project_id LEFT JOIN tickets t ON t.spec_id = s.id
      ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-     GROUP BY s.id, p.name`,
+     GROUP BY s.id, p.name
+     ${having.length > 0 ? `HAVING ${having.join(" AND ")}` : ""}
+     ${query.ids ? "" : `ORDER BY ${specOrderSql(sort, dir)}`}
+     ${limitSql}`,
     params,
   );
   const repos = await reposBySpecIds(
     pool,
     rows.map((row) => row.id as number),
   );
-  let specs = rows.map((row) =>
+  const specs = rows.map((row) =>
     mapSpecListRow(row as Parameters<typeof mapSpecListRow>[0], repos),
   );
-  specs.sort((a, b) => compareSpecs(a, b, sort, dir));
-  if (cursor && cursor.sort === sort && cursor.dir === dir) {
-    specs = specs.filter((spec) => afterCursor(spec, cursor, dir));
-  }
   if (query.ids) return { specs, nextCursor: null };
   const page = specs.slice(0, limit);
   const last = page[page.length - 1];
@@ -1089,7 +1069,7 @@ async function blockedPlanning(pool: pg.Pool) {
 
 export async function blockedQueue(
   pool: pg.Pool,
-  options: { brief?: boolean } = {},
+  options: { brief?: boolean; rank?: boolean } = {},
 ) {
   const includeBrief = options.brief !== false;
   const tickets = await summaries(
@@ -1128,5 +1108,6 @@ export async function blockedQueue(
       reason: (s.pause_reason as string | null) ?? "paused",
     })),
   };
+  if (options.rank === false) return queue;
   return rankWaitingQueue(pool, queue);
 }

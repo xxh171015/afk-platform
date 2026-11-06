@@ -97,13 +97,12 @@ describe("the workbench", () => {
               ],
               finalizations: [
                 {
+                  id: 1,
                   specId: 3,
                   specDisplayId: "S-3",
                   repo: "backend",
                   step: "final-merge",
-                  state: "blocked",
                   blockedReason: "merge-conflict",
-                  brief: null,
                 },
               ],
             },

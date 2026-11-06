@@ -1189,6 +1189,39 @@ describe("the spec list", () => {
     });
   });
 
+  it("does not repeat a spec when created_at is finer than ISO milliseconds", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    for (const n of [1, 2, 3]) {
+      expect(
+        (
+          await call("POST", "/specs", {
+            projectId: created.body.id,
+            type: "feature",
+            slug: `s-${n}`,
+            title: `Spec ${n}`,
+          })
+        ).status,
+      ).toBe(201);
+    }
+    await db.pool.query(
+      `UPDATE specs SET created_at = TIMESTAMPTZ '2026-06-01 00:00:00.123456+00'
+         + (id * INTERVAL '1 microsecond')`,
+    );
+    const first = await call("GET", "/specs?limit=1");
+    expect(first.body.specs.map((s: Json) => s.displayId)).toEqual(["S-3"]);
+    const second = await call(
+      "GET",
+      `/specs?limit=1&cursor=${encodeURIComponent(first.body.nextCursor)}`,
+    );
+    expect(second.body.specs.map((s: Json) => s.displayId)).toEqual(["S-2"]);
+    const third = await call(
+      "GET",
+      `/specs?limit=1&cursor=${encodeURIComponent(second.body.nextCursor)}`,
+    );
+    expect(third.body.specs.map((s: Json) => s.displayId)).toEqual(["S-1"]);
+    expect(third.body.nextCursor).toBeNull();
+  });
+
   it("pages newest first without repeating or skipping a spec", async () => {
     const created = await call("POST", "/projects", { name: "shop" });
     await call("POST", `/projects/${created.body.id}/repos`, {
@@ -1327,6 +1360,58 @@ describe("the spec list", () => {
     expect(
       sorted.body.specs.map((s: Json) => `${s.displayId}:${s.state}`),
     ).toEqual(["S-1:running", "S-2:draft"]);
+  });
+
+  it("pages by progress without repeating a spec", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    for (const [slug, tickets] of [
+      ["none", [ticket("n")]],
+      ["half", [ticket("h1"), ticket("h2")]],
+      ["done", [ticket("d")]],
+    ] as const) {
+      const spec = await call("POST", "/specs", {
+        projectId: created.body.id,
+        type: "feature",
+        slug,
+        title: slug,
+      });
+      expect(
+        (
+          await call(
+            "POST",
+            `/specs/${spec.body.id}/tickets/import`,
+            importBody(spec.body.id, { tickets: [...tickets] }),
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (await call("POST", `/specs/${spec.body.id}/confirm`)).status,
+      ).toBe(200);
+    }
+    await db.pool.query(
+      "UPDATE tickets SET state = 'done' WHERE title IN ('Ticket h1', 'Ticket d')",
+    );
+    const first = await call("GET", "/specs?sort=progress&dir=asc&limit=2");
+    expect(
+      first.body.specs.map(
+        (s: Json) => `${s.displayId}:${s.progress.done}/${s.progress.total}`,
+      ),
+    ).toEqual(["S-1:0/1", "S-2:1/2"]);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const second = await call(
+      "GET",
+      `/specs?sort=progress&dir=asc&limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`,
+    );
+    expect(
+      second.body.specs.map(
+        (s: Json) => `${s.displayId}:${s.progress.done}/${s.progress.total}`,
+      ),
+    ).toEqual(["S-3:1/1"]);
+    expect(second.body.nextCursor).toBeNull();
   });
 });
 

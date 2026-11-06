@@ -98,7 +98,6 @@ describe("GET /workbench", () => {
         readyFailures: [],
         planning: [],
         specs: [],
-        items: [],
       },
       running: [],
       awaitingAcceptance: [],
@@ -125,25 +124,22 @@ describe("GET /workbench", () => {
     const reply = await call("GET", "/workbench");
     expect(reply.status).toBe(200);
     expect(reply.body.waiting.tickets).toEqual([
-      expect.objectContaining({
+      {
         id: ticketId,
         displayId: `T-${ticketId}`,
-        state: "blocked",
+        specId,
+        title: "Ticket a",
         blockedReason: "agent-gave-up",
-      }),
+      },
     ]);
-    expect(reply.body.waiting.tickets[0].brief).toBeUndefined();
     expect(reply.body.waiting.specs).toEqual([
-      expect.objectContaining({
+      {
         id: specId,
         displayId: `S-${specId}`,
         title: "Stuck spec",
-        reason: "the agent time limit of the spec was reached",
-      }),
+      },
     ]);
-    expect(
-      reply.body.waiting.items.map((item: { kind: string }) => item.kind),
-    ).toEqual(["ticket", "pausedSpec"]);
+    expect(reply.body.waiting.items).toBeUndefined();
     expect(reply.body.running).toEqual([]);
   });
 

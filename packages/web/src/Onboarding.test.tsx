@@ -180,5 +180,31 @@ describe("getting a project onto the platform from the control tower", () => {
       ),
     );
     expect(fake.calls.some((call) => call.includes("gate-check"))).toBe(false);
+    expect(screen.getAllByText("test -f AGENTS.md")).toHaveLength(1);
+  });
+
+  it("lets a person retry when the platform cannot be reached", async () => {
+    let tries = 0;
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      fakeServer({
+        "GET /projects": () => ({ json: { projects: [] } }),
+        "GET /version": () => {
+          tries += 1;
+          if (tries === 1) return { status: 500, json: { error: "down" } };
+          return {
+            json: {
+              platformVersion: "0.2.0",
+              skillsSha: "x",
+              platformCommit: COMMIT,
+            },
+          };
+        },
+      }),
+    );
+    const access = await screen.findByRole("region", { name: "接入条件" });
+    await waitFor(() => expect(access.textContent).toContain("失败"));
+    fireEvent.click(within(access).getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(access.textContent).toContain("通过"));
   });
 });
