@@ -19,7 +19,13 @@ export function queryKeysForInvalidate(
 ): readonly (readonly unknown[])[] {
   const keys: (readonly unknown[])[] = [["workbench"], ["blocked"]];
   if (payload.specId !== undefined) {
-    keys.push(["spec", payload.specId], ["specs"]);
+    keys.push(
+      ["spec", payload.specId],
+      ["specs"],
+      ["search"],
+      ["projects"],
+      ["project"],
+    );
   }
   if (payload.ticketId !== undefined) {
     keys.push(["ticket", payload.ticketId]);

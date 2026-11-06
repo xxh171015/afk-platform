@@ -20,6 +20,9 @@ describe("queryKeysForInvalidate", () => {
       ["blocked"],
       ["spec", 3],
       ["specs"],
+      ["search"],
+      ["projects"],
+      ["project"],
     ]);
     expect(queryKeysForInvalidate({ ticketId: 9 })).toEqual([
       ["workbench"],
@@ -39,6 +42,9 @@ describe("queryKeysForInvalidate", () => {
       ["blocked"],
       ["spec", 3],
       ["specs"],
+      ["search"],
+      ["projects"],
+      ["project"],
       ["ticket", 9],
       ["log", 12],
       ["run", 12],

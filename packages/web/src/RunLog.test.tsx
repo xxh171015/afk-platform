@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { RunLog } from "./RunLog.tsx";
 import { fakeServer, renderWithApp } from "./test-utils.tsx";
@@ -174,6 +174,28 @@ describe("the log of a run", () => {
     await waitFor(() => expect(screen.getByText("修改")).toBeTruthy());
     expect(screen.getByText("src/a.ts")).toBeTruthy();
     expect(screen.getByText("src/a.ts").closest("details")?.open).toBe(false);
+  });
+
+  it("stops following after the reader scrolls up, and a new chunk does not yank the viewport", async () => {
+    const { server, write } = growingLog("first line\n");
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() => expect(log()).toContain("first line"));
+    const el = screen.getByTestId("run-log");
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      get: () => 4000,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      configurable: true,
+      get: () => 400,
+    });
+    el.scrollTop = 80;
+    fireEvent.scroll(el);
+    expect(screen.queryByText("跳到最新")).toBeTruthy();
+    const stayed = el.scrollTop;
+    write("later line\n");
+    await waitFor(() => expect(log()).toContain("later line"));
+    expect(el.scrollTop).toBe(stayed);
   });
 
   it("shows thinking as prose and keeps a long command output collapsed with a leftover count", async () => {

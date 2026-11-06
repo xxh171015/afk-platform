@@ -3,6 +3,7 @@ import {
   type HostKind,
   type PlanningState,
   type ReviewAxis,
+  repoDisplayName,
   type SpecState,
   type TicketState,
 } from "@afk/shared";
@@ -16,6 +17,7 @@ import {
 } from "./integration-attempts.ts";
 import { ticketFileOf } from "./ticket-file.ts";
 import { specTimeline } from "./timeline.ts";
+import { type Blocking, rankWaitingQueue } from "./waiting-queue.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -79,6 +81,7 @@ async function finalBrief(
 }
 
 export interface FinalizationSummary {
+  id: number;
   specId: number;
   specDisplayId: string;
   repo: string;
@@ -86,16 +89,19 @@ export interface FinalizationSummary {
   state: string;
   blockedReason: string | null;
   brief: Brief | null;
+  waitingSince?: string;
+  blocking?: Blocking;
 }
 
 async function finalizations(
   pool: pg.Pool,
   where: string,
   params: unknown[],
+  includeBrief = true,
 ): Promise<FinalizationSummary[]> {
   const { rows } = await pool.query(
     // A review that was not finished when its spec was cancelled is cancelled with it, whatever it was waiting for.
-    `SELECT f.spec_id, f.step, r.name AS repo,
+    `SELECT f.id, f.spec_id, f.step, r.name AS repo,
             CASE WHEN f.state <> 'done' AND s.state = 'cancelled' THEN 'cancelled' ELSE f.state END AS state,
             CASE WHEN s.state = 'cancelled' THEN NULL ELSE f.blocked_reason END AS blocked_reason
      FROM finalizations f JOIN repos r ON r.id = f.repo_id JOIN specs s ON s.id = f.spec_id
@@ -104,6 +110,7 @@ async function finalizations(
   );
   return Promise.all(
     rows.map(async (row) => ({
+      id: row.id as number,
       specId: row.spec_id as number,
       specDisplayId: formatDisplayId("spec", row.spec_id),
       repo: row.repo as string,
@@ -111,7 +118,9 @@ async function finalizations(
       state: row.state as string,
       blockedReason: (row.blocked_reason as string | null) ?? null,
       brief:
-        row.state === "blocked" ? await finalBrief(pool, row.spec_id) : null,
+        includeBrief && row.state === "blocked"
+          ? await finalBrief(pool, row.spec_id)
+          : null,
     })),
   );
 }
@@ -122,25 +131,30 @@ async function finalE2eSteps(
   pool: pg.Pool,
   where: string,
   params: unknown[],
+  includeBrief = true,
 ): Promise<FinalizationSummary[]> {
   const { rows } = await pool.query(
-    `SELECT e.spec_id, e.state, e.blocked_reason FROM final_e2e e JOIN specs s ON s.id = e.spec_id
+    `SELECT e.id, e.spec_id, e.state, e.blocked_reason FROM final_e2e e JOIN specs s ON s.id = e.spec_id
      WHERE ${where} ORDER BY e.id`,
     params,
   );
   return Promise.all(
     rows.map(async (row) => {
-      const bad = await pool.query(
-        `SELECT r.id, r.ticket_id, r.stage, r.result, r.output FROM runs r JOIN tickets t ON t.id = r.ticket_id
+      const bad =
+        includeBrief && row.state === "blocked"
+          ? await pool.query(
+              `SELECT r.id, r.ticket_id, r.stage, r.result, r.output FROM runs r JOIN tickets t ON t.id = r.ticket_id
          WHERE t.spec_id = $1 AND t.type = 'integration' AND r.stage IN ('e2e', 'diagnose')
            AND r.result IS NOT NULL AND NOT (r.result = ANY($2)) ORDER BY r.id DESC LIMIT 1`,
-        [row.spec_id, GOOD_RESULTS],
-      );
+              [row.spec_id, GOOD_RESULTS],
+            )
+          : { rows: [] };
       const run = bad.rows[0];
       const attempts = run
         ? await integrationAttempts(pool, run.ticket_id)
         : [];
       return {
+        id: row.id as number,
         specId: row.spec_id as number,
         specDisplayId: formatDisplayId("spec", row.spec_id),
         repo: "(integration)",
@@ -148,7 +162,7 @@ async function finalE2eSteps(
         state: row.state as string,
         blockedReason: (row.blocked_reason as string | null) ?? null,
         brief:
-          row.state === "blocked" && run
+          includeBrief && row.state === "blocked" && run
             ? {
                 run: { id: run.id, displayId: formatDisplayId("run", run.id) },
                 stage: run.stage,
@@ -185,12 +199,15 @@ export interface TicketSummary {
   environment: string[];
   appended: boolean;
   brief: Brief | null;
+  waitingSince?: string;
+  blocking?: Blocking;
 }
 
 async function summaries(
   pool: pg.Pool,
   where: string,
   params: unknown[],
+  includeBrief = true,
 ): Promise<TicketSummary[]> {
   const { rows } = await pool.query(
     `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, t.refs, t.environment, t.appended,
@@ -216,7 +233,9 @@ async function summaries(
       appended: row.appended as boolean,
       // an upstream cancel is not the fault of any run, so there is no brief to show
       brief:
-        row.state === "blocked" && row.blocked_reason !== "upstream-cancelled"
+        includeBrief &&
+        row.state === "blocked" &&
+        row.blocked_reason !== "upstream-cancelled"
           ? await briefFor(pool, row.id)
           : null,
     })),
@@ -629,8 +648,221 @@ export interface Progress {
   cancelled: number;
 }
 
-// Every spec with how far its tickets have got, newest first: the front page.
-export async function specList(pool: pg.Pool) {
+export const SPEC_LIST_STATE_ORDER: readonly SpecState[] = [
+  "running",
+  "reworking",
+  "finalizing",
+  "planned",
+  "awaiting-review",
+  "partially-merged",
+  "paused",
+  "draft",
+  "merged",
+  "cancelled",
+];
+
+export interface SpecListItem {
+  id: number;
+  displayId: string;
+  slug: string;
+  title: string;
+  type: string;
+  state: SpecState;
+  pauseReason: string | null;
+  project: string;
+  repos: RepoIdentity[];
+  startedAt: string;
+  endedAt: string | null;
+  progress: Progress;
+}
+
+export interface SpecListQuery {
+  limit?: number;
+  cursor?: string;
+  q?: string;
+  states?: SpecState[];
+  repo?: string;
+  sort?: "startedAt" | "state" | "progress";
+  dir?: "asc" | "desc";
+  ids?: number[];
+}
+
+const SPEC_LIST_DEFAULT_LIMIT = 50;
+
+interface SpecCursor {
+  sort: "startedAt" | "state" | "progress";
+  dir: "asc" | "desc";
+  id: number;
+}
+
+function encodeSpecCursor(cursor: SpecCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeSpecCursor(text: string): SpecCursor | undefined {
+  try {
+    const cursor = JSON.parse(
+      Buffer.from(text, "base64url").toString("utf8"),
+    ) as SpecCursor;
+    if (
+      cursor &&
+      (cursor.sort === "startedAt" ||
+        cursor.sort === "state" ||
+        cursor.sort === "progress") &&
+      (cursor.dir === "asc" || cursor.dir === "desc") &&
+      typeof cursor.id === "number"
+    ) {
+      return cursor;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function specCursorOf(
+  spec: SpecListItem,
+  sort: SpecCursor["sort"],
+  dir: SpecCursor["dir"],
+): SpecCursor {
+  return { sort, dir, id: spec.id };
+}
+
+function stateRankSql(column = "s.state"): string {
+  const arms = SPEC_LIST_STATE_ORDER.map(
+    (state, i) => `WHEN ${column} = '${state}' THEN ${i}`,
+  ).join(" ");
+  return `CASE ${arms} ELSE ${SPEC_LIST_STATE_ORDER.length} END`;
+}
+
+const PROGRESS_RATIO_SQL = `COALESCE(count(t.id) FILTER (WHERE t.state = 'done')::float / NULLIF(count(t.id), 0), 0)`;
+const BLOCKED_COUNT_SQL = `count(t.id) FILTER (WHERE t.state = 'blocked')`;
+
+function specOrderSql(sort: SpecCursor["sort"], dir: "asc" | "desc"): string {
+  const d = dir === "asc" ? "ASC" : "DESC";
+  if (sort === "startedAt") return `s.created_at ${d}, s.id ${d}`;
+  if (sort === "state") return `${stateRankSql()} ${d}, s.id ${d}`;
+  return `${PROGRESS_RATIO_SQL} ${d}, ${BLOCKED_COUNT_SQL} ${d}, s.id ${d}`;
+}
+
+function mapSpecListRow(
+  row: {
+    id: number;
+    slug: string;
+    title: string;
+    type: string;
+    state: string;
+    pause_reason: string | null;
+    project: string;
+    created_at: Date;
+    ended_at: Date | null;
+    total: string | number;
+    done: string | number;
+    active: string | number;
+    blocked: string | number;
+    pending: string | number;
+    cancelled: string | number;
+  },
+  repos: Map<number, RepoIdentity[]>,
+): SpecListItem {
+  return {
+    id: row.id,
+    displayId: formatDisplayId("spec", row.id),
+    slug: row.slug,
+    title: row.title,
+    type: row.type,
+    state: row.state as SpecState,
+    pauseReason: row.pause_reason,
+    project: row.project,
+    repos: repos.get(row.id) ?? [],
+    startedAt: row.created_at.toISOString(),
+    endedAt: row.ended_at ? row.ended_at.toISOString() : null,
+    progress: {
+      total: Number(row.total),
+      done: Number(row.done),
+      active: Number(row.active),
+      blocked: Number(row.blocked),
+      pending: Number(row.pending),
+      cancelled: Number(row.cancelled),
+    },
+  };
+}
+
+// Specs with how far their tickets have got. The list is keyset-paged; workbench loads a known id set.
+export async function specList(
+  pool: pg.Pool,
+  query: SpecListQuery = {},
+): Promise<{ specs: SpecListItem[]; nextCursor: string | null }> {
+  const sort = query.sort ?? "startedAt";
+  const dir = query.dir ?? (sort === "startedAt" ? "desc" : ("asc" as const));
+  const limit = Math.min(
+    Math.max(query.limit ?? SPEC_LIST_DEFAULT_LIMIT, 1),
+    100,
+  );
+  const cursor =
+    query.cursor && query.ids === undefined
+      ? decodeSpecCursor(query.cursor)
+      : undefined;
+  const params: unknown[] = [];
+  const where: string[] = [];
+  if (query.ids) {
+    params.push(query.ids);
+    where.push(`s.id = ANY($${params.length})`);
+  }
+  if (query.q) {
+    params.push(`%${escapeLike(query.q)}%`);
+    where.push(
+      `(s.title ILIKE $${params.length} OR ('S-' || s.id) ILIKE $${params.length})`,
+    );
+  }
+  if (query.states && query.states.length > 0) {
+    params.push(query.states);
+    where.push(`s.state = ANY($${params.length})`);
+  }
+  if (query.repo) {
+    const { rows: repoRows } = await pool.query<{
+      id: number;
+      url: string;
+      name: string;
+    }>("SELECT id, url, name FROM repos");
+    const repoIds = repoRows
+      .filter((row) => (repoDisplayName(row.url) ?? row.name) === query.repo)
+      .map((row) => row.id);
+    params.push(repoIds);
+    where.push(`(
+      EXISTS (SELECT 1 FROM tickets t WHERE t.spec_id = s.id AND t.repo_id = ANY($${params.length}))
+      OR s.planning_repo_id = ANY($${params.length})
+    )`);
+  }
+  const having: string[] = [];
+  if (cursor && cursor.sort === sort && cursor.dir === dir) {
+    const op = dir === "asc" ? ">" : "<";
+    params.push(cursor.id);
+    const idParam = `$${params.length}`;
+    if (sort === "startedAt") {
+      where.push(
+        `(s.created_at, s.id) ${op} ((SELECT created_at FROM specs WHERE id = ${idParam}), ${idParam})`,
+      );
+    } else if (sort === "state") {
+      where.push(
+        `(${stateRankSql()}, s.id) ${op} ((SELECT ${stateRankSql("state")} FROM specs WHERE id = ${idParam}), ${idParam})`,
+      );
+    } else {
+      having.push(
+        `(${PROGRESS_RATIO_SQL}, ${BLOCKED_COUNT_SQL}, s.id) ${op} (
+           SELECT ${PROGRESS_RATIO_SQL}, ${BLOCKED_COUNT_SQL}, s2.id
+           FROM specs s2 LEFT JOIN tickets t ON t.spec_id = s2.id
+           WHERE s2.id = ${idParam}
+           GROUP BY s2.id
+         )`,
+      );
+    }
+  }
+  let limitSql = "";
+  if (!query.ids) {
+    params.push(limit + 1);
+    limitSql = `LIMIT $${params.length}`;
+  }
   const { rows } = await pool.query(
     `SELECT s.id, s.slug, s.title, s.type, s.state, s.pause_reason, p.name AS project,
             s.created_at,
@@ -645,33 +877,43 @@ export async function specList(pool: pg.Pool) {
             count(t.id) FILTER (WHERE t.state = 'pending') AS pending,
             count(t.id) FILTER (WHERE t.state = 'cancelled') AS cancelled
      FROM specs s JOIN projects p ON p.id = s.project_id LEFT JOIN tickets t ON t.spec_id = s.id
-     GROUP BY s.id, p.name ORDER BY s.id DESC`,
+     ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+     GROUP BY s.id, p.name
+     ${having.length > 0 ? `HAVING ${having.join(" AND ")}` : ""}
+     ${query.ids ? "" : `ORDER BY ${specOrderSql(sort, dir)}`}
+     ${limitSql}`,
+    params,
   );
   const repos = await reposBySpecIds(
     pool,
     rows.map((row) => row.id as number),
   );
-  return rows.map((row) => ({
-    id: row.id as number,
-    displayId: formatDisplayId("spec", row.id),
-    slug: row.slug as string,
-    title: row.title as string,
-    type: row.type as string,
-    state: row.state as SpecState,
-    pauseReason: (row.pause_reason as string | null) ?? null,
-    project: row.project as string,
-    repos: repos.get(row.id as number) ?? [],
-    startedAt: (row.created_at as Date).toISOString(),
-    endedAt: row.ended_at ? (row.ended_at as Date).toISOString() : null,
-    progress: {
-      total: Number(row.total),
-      done: Number(row.done),
-      active: Number(row.active),
-      blocked: Number(row.blocked),
-      pending: Number(row.pending),
-      cancelled: Number(row.cancelled),
-    } satisfies Progress,
-  }));
+  const specs = rows.map((row) =>
+    mapSpecListRow(row as Parameters<typeof mapSpecListRow>[0], repos),
+  );
+  if (query.ids) return { specs, nextCursor: null };
+  const page = specs.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    specs: page,
+    nextCursor:
+      specs.length > limit && last
+        ? encodeSpecCursor(specCursorOf(last, sort, dir))
+        : null,
+  };
+}
+
+export async function specListItems(pool: pg.Pool, specIds: number[]) {
+  if (specIds.length === 0) return [];
+  const { specs } = await specList(pool, {
+    ids: specIds,
+    limit: Math.max(specIds.length, 1),
+  });
+  const byId = new Map(specs.map((spec) => [spec.id, spec]));
+  return specIds.flatMap((id) => {
+    const spec = byId.get(id);
+    return spec ? [spec] : [];
+  });
 }
 
 const SEARCH_LIMIT = 50;
@@ -737,6 +979,8 @@ export interface PullRequestProblem {
   url: string;
   state: string;
   syncError: string | null;
+  waitingSince?: string;
+  blocking?: Blocking;
 }
 
 // A pull request the platform cannot move on from by itself: closed without merge, or one the host keeps
@@ -823,23 +1067,34 @@ async function blockedPlanning(pool: pg.Pool) {
   }));
 }
 
-export async function blockedQueue(pool: pg.Pool) {
-  const tickets = await summaries(pool, "t.state = 'blocked'", []);
+export async function blockedQueue(
+  pool: pg.Pool,
+  options: { brief?: boolean; rank?: boolean } = {},
+) {
+  const includeBrief = options.brief !== false;
+  const tickets = await summaries(
+    pool,
+    "t.state = 'blocked'",
+    [],
+    includeBrief,
+  );
   const specs = await pool.query(
     "SELECT id, title, pause_reason FROM specs WHERE state = 'paused' ORDER BY id",
   );
-  return {
+  const queue = {
     tickets,
     finalizations: [
       ...(await finalizations(
         pool,
         "f.state = 'blocked' AND f.spec_id NOT IN (SELECT id FROM specs WHERE state = 'cancelled')",
         [],
+        includeBrief,
       )),
       ...(await finalE2eSteps(
         pool,
         "e.state = 'blocked' AND s.state <> 'cancelled'",
         [],
+        includeBrief,
       )),
     ],
     pullRequests: await pullRequestProblems(pool),
@@ -853,4 +1108,6 @@ export async function blockedQueue(pool: pg.Pool) {
       reason: (s.pause_reason as string | null) ?? "paused",
     })),
   };
+  if (options.rank === false) return queue;
+  return rankWaitingQueue(pool, queue);
 }

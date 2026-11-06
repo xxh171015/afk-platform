@@ -218,10 +218,12 @@ export function EntityCrumbs() {
     placeholderData: keepPreviousData,
   });
   const specs = useQuery({
-    queryKey: ["specs"],
+    queryKey: ["search", "S-"],
     enabled: specId !== undefined,
     queryFn: async () => {
-      const { data, error } = await api.GET("/specs");
+      const { data, error } = await api.GET("/search", {
+        params: { query: { q: "S-" } },
+      });
       if (!data) throw new Error(describeError(error));
       return data.specs;
     },
@@ -237,8 +239,7 @@ export function EntityCrumbs() {
   const owner =
     ownerFromRepos(specView?.spec.repos ?? []) ??
     ownerFromUrl(ticketView?.ticket.repoUrl) ??
-    ownerFromUrl(runView?.repoUrl) ??
-    ownerFromRepos(list.flatMap((item) => item.repos ?? []));
+    ownerFromUrl(runView?.repoUrl);
   const github =
     specView?.pullRequests?.find((pr) => pr.url)?.url ??
     (specView?.spec.repos?.[0]

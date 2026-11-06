@@ -133,35 +133,41 @@ describe("the spec list", () => {
   });
 
   it("lists newest specs first until a column is sorted", async () => {
+    const older = spec({
+      id: 1,
+      displayId: "S-1",
+      title: "Old running",
+      startedAt: "2026-10-01T00:00:00.000Z",
+    });
+    const newer = spec({
+      id: 11,
+      displayId: "S-11",
+      title: "New draft",
+      state: "draft",
+      startedAt: "2026-11-03T00:00:00.000Z",
+    });
     const server = fakeServer({
-      "GET /specs": () => ({
+      "GET /specs": ({ url }) => ({
         json: {
-          specs: [
-            spec({
-              id: 1,
-              displayId: "S-1",
-              title: "Old running",
-              startedAt: "2026-10-01T00:00:00.000Z",
-            }),
-            spec({
-              id: 11,
-              displayId: "S-11",
-              title: "New draft",
-              state: "draft",
-              startedAt: "2026-11-03T00:00:00.000Z",
-            }),
-          ],
+          specs:
+            url.searchParams.get("sort") === "state"
+              ? [older, newer]
+              : [newer, older],
+          nextCursor: null,
         },
       }),
     });
     renderWithApp(<SpecList />, server);
     const rows = await screen.findAllByRole("row");
-    expect(rows[1]?.textContent).toContain("S-11");
-    expect(rows[2]?.textContent).toContain("S-1");
+    expect(rows[1]?.textContent).toContain("New draft");
+    expect(rows[2]?.textContent).toContain("Old running");
     fireEvent.click(screen.getByRole("button", { name: /状态/ }));
-    const resorted = screen.getAllByRole("row");
-    expect(resorted[1]?.textContent).toContain("S-1");
-    expect(resorted[2]?.textContent).toContain("S-11");
+    await waitFor(() =>
+      expect(screen.getAllByRole("row")[1]?.textContent).toContain(
+        "Old running",
+      ),
+    );
+    expect(screen.getAllByRole("row")[2]?.textContent).toContain("New draft");
   });
 
   it("links each spec to its page", async () => {
@@ -201,24 +207,27 @@ describe("the spec list", () => {
   });
 
   it("filters the project column by GitHub owner/name", async () => {
+    const shop = spec();
+    const other = spec({
+      id: 2,
+      displayId: "S-2",
+      title: "Other app",
+      repos: [
+        {
+          name: "app",
+          url: "https://github.com/other/app.git",
+          hostKind: "github",
+        },
+      ],
+    });
     const server = fakeServer({
-      "GET /specs": () => ({
+      "GET /specs": ({ url }) => ({
         json: {
-          specs: [
-            spec(),
-            spec({
-              id: 2,
-              displayId: "S-2",
-              title: "Other app",
-              repos: [
-                {
-                  name: "app",
-                  url: "https://github.com/other/app.git",
-                  hostKind: "github",
-                },
-              ],
-            }),
-          ],
+          specs:
+            url.searchParams.get("repo") === "other/app"
+              ? [other]
+              : [shop, other],
+          nextCursor: null,
         },
       }),
     });
@@ -226,11 +235,76 @@ describe("the spec list", () => {
     await screen.findByText("Order export");
     fireEvent.click(screen.getByLabelText("按项目筛选"));
     fireEvent.click(await screen.findByRole("option", { name: "other/app" }));
-    expect(screen.queryByText("Order export")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Order export")).toBeNull());
     expect(screen.getByText("Other app")).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "other/app" }).getAttribute("href"),
     ).toBe("https://github.com/other/app");
+  });
+
+  it("sends title search and state chips to the server", async () => {
+    const server = fakeServer({
+      "GET /specs": ({ url }) => ({
+        json: {
+          specs:
+            url.searchParams.get("q") === "Second"
+              ? [
+                  spec({
+                    id: 2,
+                    displayId: "S-2",
+                    title: "Second",
+                    state: "draft",
+                    repos: [],
+                  }),
+                ]
+              : url.searchParams.getAll("state").includes("draft")
+                ? [
+                    spec({
+                      id: 2,
+                      displayId: "S-2",
+                      title: "Draft only",
+                      state: "draft",
+                      repos: [],
+                    }),
+                  ]
+                : [spec()],
+          nextCursor: null,
+        },
+      }),
+    });
+    renderWithApp(<SpecList />, server);
+    await screen.findByText("Order export");
+    fireEvent.change(screen.getByLabelText("搜索标题或编号"), {
+      target: { value: "Second" },
+    });
+    expect(await screen.findByText("Second")).toBeTruthy();
+    expect(screen.queryByText("Order export")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /清除筛选/ }));
+    await screen.findByText("Order export");
+    fireEvent.click(screen.getByRole("button", { name: /草稿/ }));
+    expect(await screen.findByText("Draft only")).toBeTruthy();
+    expect(screen.queryByText("Order export")).toBeNull();
+  });
+
+  it("loads the next page without dropping the first", async () => {
+    const server = fakeServer({
+      "GET /specs": ({ url }) => {
+        const cursor = url.searchParams.get("cursor");
+        return {
+          json: cursor
+            ? {
+                specs: [spec({ id: 2, displayId: "S-2", title: "Older spec" })],
+                nextCursor: null,
+              }
+            : { specs: [spec()], nextCursor: "page-2" },
+        };
+      },
+    });
+    renderWithApp(<SpecList />, server);
+    await screen.findByText("Order export");
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(await screen.findByText("Older spec")).toBeTruthy();
+    expect(screen.getByText("Order export")).toBeTruthy();
   });
 
   it("says so when there is nothing yet", async () => {
@@ -267,7 +341,12 @@ describe("the spec list", () => {
     failing = true;
     await queryClient.refetchQueries({ queryKey: ["specs"] });
     await waitFor(() =>
-      expect(queryClient.getQueryState(["specs"])?.status).toBe("error"),
+      expect(
+        queryClient
+          .getQueryCache()
+          .findAll({ queryKey: ["specs"] })
+          .some((query) => query.state.status === "error"),
+      ).toBe(true),
     );
     expect(screen.getByText("Order export")).toBeTruthy();
     expect(screen.queryByText(/无法加载需求/)).toBeNull();

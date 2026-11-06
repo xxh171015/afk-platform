@@ -47,17 +47,76 @@ interface Queue {
   readyFailures: unknown[];
   planning: unknown[];
   specs: unknown[];
+  items?: unknown[];
 }
-const queue = (over: Partial<Queue> = {}): Queue => ({
-  tickets: [],
-  finalizations: [],
-  pullRequests: [],
-  cleanups: [],
-  readyFailures: [],
-  planning: [],
-  specs: [],
-  ...over,
-});
+
+function inferredItems(queue: Queue) {
+  return [
+    ...(queue.tickets as { id: number }[]).map((ticket) => ({
+      kind: "ticket",
+      id: ticket.id,
+    })),
+    ...(queue.finalizations as { id?: number; step?: string }[]).map(
+      (item, index) => ({
+        kind: "finalization",
+        id: item.id ?? index + 1,
+        step: item.step ?? "final-review",
+      }),
+    ),
+    ...(
+      queue.pullRequests as { specId: number; repo: string; number: number }[]
+    ).map((item) => ({
+      kind: "pullRequest",
+      specId: item.specId,
+      repo: item.repo,
+      number: item.number,
+    })),
+    ...(
+      queue.readyFailures as { specId: number; repo: string; number: number }[]
+    ).map((item) => ({
+      kind: "readyFailure",
+      specId: item.specId,
+      repo: item.repo,
+      number: item.number,
+    })),
+    ...(queue.cleanups as { specId: number }[]).map((item) => ({
+      kind: "cleanup",
+      specId: item.specId,
+    })),
+    ...(queue.planning as { specId: number }[]).map((item) => ({
+      kind: "planning",
+      specId: item.specId,
+    })),
+    ...(queue.specs as { id: number }[]).map((spec) => ({
+      kind: "pausedSpec",
+      id: spec.id,
+    })),
+  ];
+}
+
+const queue = (over: Partial<Queue> = {}): Queue => {
+  const next: Queue = {
+    tickets: [],
+    finalizations: [],
+    pullRequests: [],
+    cleanups: [],
+    readyFailures: [],
+    planning: [],
+    specs: [],
+    ...over,
+  };
+  next.finalizations = (
+    next.finalizations as { id?: number; step?: string }[]
+  ).map((item, index) => ({
+    id: item.id ?? index + 1,
+    step: item.step ?? "final-review",
+    ...item,
+  }));
+  return {
+    ...next,
+    items: over.items ?? inferredItems(next),
+  };
+};
 
 // A queue that the actions change, like the real one: acting on a ticket takes it off the list.
 function server(initial: Queue, actions: Record<string, Handler> = {}) {
@@ -478,6 +537,7 @@ describe("paused specs and stopped overall reviews", () => {
     reason: "the agent time limit of the spec was reached",
   };
   const stopped = {
+    id: 1,
     specId: 1,
     specDisplayId: "S-1",
     repo: "backend",
@@ -822,5 +882,109 @@ describe("when there is nothing to show", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "无法加载待处理: database is down",
     );
+  });
+});
+
+describe("ranked waiting cards", () => {
+  const blocking = (over: Record<string, unknown> = {}) => ({
+    downstream: [],
+    finalization: false,
+    pullRequests: false,
+    spec: false,
+    merge: false,
+    ...over,
+  });
+
+  it("shows what the item blocks and why it is ranked there", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            tickets: [
+              ticket(1, "agent-gave-up", {
+                blocking: blocking({
+                  downstream: ["T-2", "T-3"],
+                  finalization: true,
+                }),
+                waitingSince: "2026-11-01T04:00:00.000Z",
+              }),
+            ],
+          }),
+        }),
+      }),
+    );
+    await screen.findByTestId("blocked-T-1");
+    const item = card("T-1");
+    expect(
+      item.getByText(/阻断了什么：挡住 T-2、T-3；收尾未开始/),
+    ).toBeTruthy();
+    expect(
+      item.getByText(/为何排在这：排在前面：挡住尚未完成的下游票/),
+    ).toBeTruthy();
+    expect(
+      item.getByRole("button", { name: "重试，保留已有工作" }),
+    ).toBeTruthy();
+    expect(item.getByRole("button", { name: "改正文" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /清理/ })).toBeNull();
+    expect(screen.queryByText("gate-check")).toBeNull();
+  });
+
+  it("keeps category filters and can group by spec", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            tickets: [
+              ticket(1, "agent-gave-up", {
+                blocking: blocking({ downstream: ["T-9"] }),
+                waitingSince: "2026-11-01T04:00:00.000Z",
+              }),
+            ],
+            cleanups: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                error: "GitHub answered 503",
+                blocking: blocking(),
+                waitingSince: "2026-11-02T00:00:00.000Z",
+              },
+            ],
+            specs: [
+              {
+                id: 2,
+                displayId: "S-2",
+                title: "Paused other",
+                reason: "the agent time limit of the spec was reached",
+                blocking: blocking({ spec: true }),
+                waitingSince: "2026-10-01T00:00:00.000Z",
+              },
+            ],
+            items: [
+              { kind: "pausedSpec", id: 2 },
+              { kind: "ticket", id: 1 },
+              { kind: "cleanup", specId: 1 },
+            ],
+          }),
+        }),
+      }),
+    );
+    await screen.findByTestId("paused-S-2");
+    expect(
+      screen
+        .getAllByRole("article")
+        .map((node) => node.getAttribute("data-testid")),
+    ).toEqual(["paused-S-2", "blocked-T-1", "cleanup-S-1"]);
+    fireEvent.click(screen.getByRole("tab", { name: /卡住的票/ }));
+    expect(screen.getByTestId("blocked-T-1")).toBeTruthy();
+    expect(screen.queryByTestId("paused-S-2")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /全部/ }));
+    fireEvent.click(screen.getByText("按需求收拢"));
+    expect(
+      screen
+        .getAllByRole("article")
+        .map((node) => node.getAttribute("data-testid")),
+    ).toEqual(["blocked-T-1", "cleanup-S-1", "paused-S-2"]);
   });
 });

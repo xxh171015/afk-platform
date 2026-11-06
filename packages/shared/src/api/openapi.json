@@ -1103,9 +1103,110 @@
         }
       },
       "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "planned",
+                    "running",
+                    "finalizing",
+                    "awaiting-review",
+                    "partially-merged",
+                    "reworking",
+                    "merged",
+                    "paused",
+                    "cancelled"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "planned",
+                      "running",
+                      "finalizing",
+                      "awaiting-review",
+                      "partially-merged",
+                      "reworking",
+                      "merged",
+                      "paused",
+                      "cancelled"
+                    ]
+                  }
+                }
+              ]
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "repo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["startedAt", "state", "progress"]
+            },
+            "required": false,
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            },
+            "required": false,
+            "name": "dir",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Every spec, newest first, with the progress of its tickets",
+            "description": "A page of specs, newest first unless sort says otherwise, with the progress of their tickets",
             "content": {
               "application/json": {
                 "schema": {
@@ -1224,9 +1325,12 @@
                           "progress"
                         ]
                       }
+                    },
+                    "nextCursor": {
+                      "type": ["string", "null"]
                     }
                   },
-                  "required": ["specs"]
+                  "required": ["specs", "nextCursor"]
                 }
               }
             }
@@ -3590,6 +3694,39 @@
                           },
                           "required": ["run", "stage", "result", "logPath"]
                         },
+                        "waitingSince": {
+                          "type": "string"
+                        },
+                        "blocking": {
+                          "type": "object",
+                          "properties": {
+                            "downstream": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "finalization": {
+                              "type": "boolean"
+                            },
+                            "pullRequests": {
+                              "type": "boolean"
+                            },
+                            "spec": {
+                              "type": "boolean"
+                            },
+                            "merge": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "downstream",
+                            "finalization",
+                            "pullRequests",
+                            "spec",
+                            "merge"
+                          ]
+                        },
                         "body": {
                           "type": "string"
                         },
@@ -4569,6 +4706,39 @@
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
@@ -4595,6 +4765,9 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
                           "specId": {
                             "type": "integer"
                           },
@@ -4749,9 +4922,43 @@
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
+                          "id",
                           "specId",
                           "specDisplayId",
                           "repo",
@@ -5857,6 +6064,39 @@
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
@@ -5883,6 +6123,9 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
                           "specId": {
                             "type": "integer"
                           },
@@ -6037,9 +6280,43 @@
                               }
                             },
                             "required": ["run", "stage", "result", "logPath"]
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
+                          "id",
                           "specId",
                           "specDisplayId",
                           "repo",
@@ -6075,6 +6352,39 @@
                           },
                           "syncError": {
                             "type": ["string", "null"]
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
@@ -6101,6 +6411,39 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": ["specId", "specDisplayId", "error"]
@@ -6128,6 +6471,39 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
@@ -6162,6 +6538,39 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": [
@@ -6189,9 +6598,155 @@
                           },
                           "reason": {
                             "type": "string"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
                           }
                         },
                         "required": ["id", "displayId", "title", "reason"]
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["ticket"]
+                              },
+                              "id": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "id"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["finalization"]
+                              },
+                              "id": {
+                                "type": "integer"
+                              },
+                              "step": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["kind", "id", "step"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["pullRequest"]
+                              },
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "specId", "repo", "number"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["cleanup"]
+                              },
+                              "specId": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "specId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["readyFailure"]
+                              },
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "repo": {
+                                "type": "string"
+                              },
+                              "number": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "specId", "repo", "number"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["planning"]
+                              },
+                              "specId": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "specId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["pausedSpec"]
+                              },
+                              "id": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "id"]
+                          }
+                        ]
                       }
                     }
                   },
@@ -6202,7 +6757,8 @@
                     "cleanups",
                     "readyFailures",
                     "planning",
-                    "specs"
+                    "specs",
+                    "items"
                   ]
                 }
               }
@@ -6238,218 +6794,19 @@
                               "specId": {
                                 "type": "integer"
                               },
-                              "specDisplayId": {
-                                "type": "string"
-                              },
                               "title": {
                                 "type": "string"
                               },
-                              "type": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string",
-                                "enum": [
-                                  "pending",
-                                  "queued",
-                                  "running",
-                                  "merging",
-                                  "done",
-                                  "blocked",
-                                  "cancelled"
-                                ]
-                              },
                               "blockedReason": {
                                 "type": ["string", "null"]
-                              },
-                              "repo": {
-                                "type": "string"
-                              },
-                              "repoUrl": {
-                                "type": "string"
-                              },
-                              "hostKind": {
-                                "type": "string",
-                                "enum": ["github", "gitlab"]
-                              },
-                              "refs": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "environment": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "appended": {
-                                "type": "boolean"
-                              },
-                              "brief": {
-                                "type": ["object", "null"],
-                                "properties": {
-                                  "run": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "integer"
-                                      },
-                                      "displayId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["id", "displayId"]
-                                  },
-                                  "stage": {
-                                    "type": "string"
-                                  },
-                                  "result": {
-                                    "type": ["string", "null"]
-                                  },
-                                  "output": {},
-                                  "logPath": {
-                                    "type": "string"
-                                  },
-                                  "attempts": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "e2e": {
-                                          "type": "object",
-                                          "properties": {
-                                            "id": {
-                                              "type": "integer"
-                                            },
-                                            "displayId": {
-                                              "type": "string"
-                                            },
-                                            "result": {
-                                              "type": ["string", "null"]
-                                            },
-                                            "testsTotal": {
-                                              "type": ["integer", "null"]
-                                            },
-                                            "testsFailed": {
-                                              "type": ["integer", "null"]
-                                            },
-                                            "envUpMs": {
-                                              "type": ["integer", "null"]
-                                            },
-                                            "refShas": {
-                                              "type": ["object", "null"],
-                                              "additionalProperties": {
-                                                "type": "string"
-                                              }
-                                            },
-                                            "headSha": {
-                                              "type": ["string", "null"]
-                                            }
-                                          },
-                                          "required": [
-                                            "id",
-                                            "displayId",
-                                            "result",
-                                            "testsTotal",
-                                            "testsFailed",
-                                            "envUpMs",
-                                            "refShas",
-                                            "headSha"
-                                          ]
-                                        },
-                                        "diagnosis": {
-                                          "type": ["object", "null"],
-                                          "properties": {
-                                            "result": {
-                                              "type": ["string", "null"]
-                                            },
-                                            "failingRepo": {
-                                              "type": ["string", "null"]
-                                            },
-                                            "evidence": {
-                                              "type": "string"
-                                            },
-                                            "failingTests": {
-                                              "type": "array",
-                                              "items": {
-                                                "type": "string"
-                                              }
-                                            }
-                                          },
-                                          "required": [
-                                            "result",
-                                            "failingRepo",
-                                            "evidence",
-                                            "failingTests"
-                                          ]
-                                        },
-                                        "fixTicket": {
-                                          "type": ["object", "null"],
-                                          "properties": {
-                                            "id": {
-                                              "type": "integer"
-                                            },
-                                            "displayId": {
-                                              "type": "string"
-                                            },
-                                            "state": {
-                                              "type": "string",
-                                              "enum": [
-                                                "pending",
-                                                "queued",
-                                                "running",
-                                                "merging",
-                                                "done",
-                                                "blocked",
-                                                "cancelled"
-                                              ]
-                                            },
-                                            "repo": {
-                                              "type": "string"
-                                            }
-                                          },
-                                          "required": [
-                                            "id",
-                                            "displayId",
-                                            "state",
-                                            "repo"
-                                          ]
-                                        }
-                                      },
-                                      "required": [
-                                        "e2e",
-                                        "diagnosis",
-                                        "fixTicket"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "run",
-                                  "stage",
-                                  "result",
-                                  "logPath"
-                                ]
                               }
                             },
                             "required": [
                               "id",
                               "displayId",
                               "specId",
-                              "specDisplayId",
                               "title",
-                              "type",
-                              "state",
-                              "blockedReason",
-                              "repo",
-                              "repoUrl",
-                              "hostKind",
-                              "refs",
-                              "environment",
-                              "appended",
-                              "brief"
+                              "blockedReason"
                             ]
                           }
                         },
@@ -6458,179 +6815,28 @@
                           "items": {
                             "type": "object",
                             "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
                               "specId": {
                                 "type": "integer"
                               },
                               "specDisplayId": {
                                 "type": "string"
                               },
-                              "repo": {
-                                "type": "string"
-                              },
                               "step": {
-                                "type": "string"
-                              },
-                              "state": {
                                 "type": "string"
                               },
                               "blockedReason": {
                                 "type": ["string", "null"]
-                              },
-                              "brief": {
-                                "type": ["object", "null"],
-                                "properties": {
-                                  "run": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "integer"
-                                      },
-                                      "displayId": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["id", "displayId"]
-                                  },
-                                  "stage": {
-                                    "type": "string"
-                                  },
-                                  "result": {
-                                    "type": ["string", "null"]
-                                  },
-                                  "output": {},
-                                  "logPath": {
-                                    "type": "string"
-                                  },
-                                  "attempts": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "e2e": {
-                                          "type": "object",
-                                          "properties": {
-                                            "id": {
-                                              "type": "integer"
-                                            },
-                                            "displayId": {
-                                              "type": "string"
-                                            },
-                                            "result": {
-                                              "type": ["string", "null"]
-                                            },
-                                            "testsTotal": {
-                                              "type": ["integer", "null"]
-                                            },
-                                            "testsFailed": {
-                                              "type": ["integer", "null"]
-                                            },
-                                            "envUpMs": {
-                                              "type": ["integer", "null"]
-                                            },
-                                            "refShas": {
-                                              "type": ["object", "null"],
-                                              "additionalProperties": {
-                                                "type": "string"
-                                              }
-                                            },
-                                            "headSha": {
-                                              "type": ["string", "null"]
-                                            }
-                                          },
-                                          "required": [
-                                            "id",
-                                            "displayId",
-                                            "result",
-                                            "testsTotal",
-                                            "testsFailed",
-                                            "envUpMs",
-                                            "refShas",
-                                            "headSha"
-                                          ]
-                                        },
-                                        "diagnosis": {
-                                          "type": ["object", "null"],
-                                          "properties": {
-                                            "result": {
-                                              "type": ["string", "null"]
-                                            },
-                                            "failingRepo": {
-                                              "type": ["string", "null"]
-                                            },
-                                            "evidence": {
-                                              "type": "string"
-                                            },
-                                            "failingTests": {
-                                              "type": "array",
-                                              "items": {
-                                                "type": "string"
-                                              }
-                                            }
-                                          },
-                                          "required": [
-                                            "result",
-                                            "failingRepo",
-                                            "evidence",
-                                            "failingTests"
-                                          ]
-                                        },
-                                        "fixTicket": {
-                                          "type": ["object", "null"],
-                                          "properties": {
-                                            "id": {
-                                              "type": "integer"
-                                            },
-                                            "displayId": {
-                                              "type": "string"
-                                            },
-                                            "state": {
-                                              "type": "string",
-                                              "enum": [
-                                                "pending",
-                                                "queued",
-                                                "running",
-                                                "merging",
-                                                "done",
-                                                "blocked",
-                                                "cancelled"
-                                              ]
-                                            },
-                                            "repo": {
-                                              "type": "string"
-                                            }
-                                          },
-                                          "required": [
-                                            "id",
-                                            "displayId",
-                                            "state",
-                                            "repo"
-                                          ]
-                                        }
-                                      },
-                                      "required": [
-                                        "e2e",
-                                        "diagnosis",
-                                        "fixTicket"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "run",
-                                  "stage",
-                                  "result",
-                                  "logPath"
-                                ]
                               }
                             },
                             "required": [
+                              "id",
                               "specId",
                               "specDisplayId",
-                              "repo",
                               "step",
-                              "state",
-                              "blockedReason",
-                              "brief"
+                              "blockedReason"
                             ]
                           }
                         },
@@ -6650,25 +6856,13 @@
                               },
                               "number": {
                                 "type": "integer"
-                              },
-                              "url": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string"
-                              },
-                              "syncError": {
-                                "type": ["string", "null"]
                               }
                             },
                             "required": [
                               "specId",
                               "specDisplayId",
                               "repo",
-                              "number",
-                              "url",
-                              "state",
-                              "syncError"
+                              "number"
                             ]
                           }
                         },
@@ -6682,12 +6876,9 @@
                               },
                               "specDisplayId": {
                                 "type": "string"
-                              },
-                              "error": {
-                                "type": "string"
                               }
                             },
-                            "required": ["specId", "specDisplayId", "error"]
+                            "required": ["specId", "specDisplayId"]
                           }
                         },
                         "readyFailures": {
@@ -6706,21 +6897,13 @@
                               },
                               "number": {
                                 "type": "integer"
-                              },
-                              "url": {
-                                "type": "string"
-                              },
-                              "error": {
-                                "type": "string"
                               }
                             },
                             "required": [
                               "specId",
                               "specDisplayId",
                               "repo",
-                              "number",
-                              "url",
-                              "error"
+                              "number"
                             ]
                           }
                         },
@@ -6737,24 +6920,9 @@
                               },
                               "title": {
                                 "type": "string"
-                              },
-                              "repo": {
-                                "type": "string"
-                              },
-                              "files": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
                               }
                             },
-                            "required": [
-                              "specId",
-                              "specDisplayId",
-                              "title",
-                              "repo",
-                              "files"
-                            ]
+                            "required": ["specId", "specDisplayId", "title"]
                           }
                         },
                         "specs": {
@@ -6770,12 +6938,9 @@
                               },
                               "title": {
                                 "type": "string"
-                              },
-                              "reason": {
-                                "type": "string"
                               }
                             },
-                            "required": ["id", "displayId", "title", "reason"]
+                            "required": ["id", "displayId", "title"]
                           }
                         }
                       },

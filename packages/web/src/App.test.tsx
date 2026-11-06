@@ -17,7 +17,9 @@ const emptyWaiting = {
   pullRequests: [],
   cleanups: [],
   readyFailures: [],
+  planning: [],
   specs: [],
+  items: [],
 };
 
 const emptyWorkbench = {
@@ -31,6 +33,20 @@ const server = () =>
   fakeServer({
     "GET /workbench": () => ({ json: emptyWorkbench }),
     "GET /blocked": () => ({ json: emptyWaiting }),
+    "GET /search": () => ({
+      json: {
+        specs: [
+          {
+            id: 3,
+            displayId: "S-3",
+            title: "Third",
+            state: "running",
+            matched: ["id"],
+          },
+        ],
+        tickets: [],
+      },
+    }),
     "GET /specs": () => ({
       json: {
         specs: [
@@ -62,6 +78,7 @@ const server = () =>
             },
           },
         ],
+        nextCursor: null,
       },
     }),
     "GET /specs/3": () => ({
@@ -306,33 +323,36 @@ describe("the app", () => {
   });
 
   it("shows the queue at /waiting and counts it in the menu", async () => {
-    const fake = fakeServer({
-      "GET /workbench": () => ({ json: emptyWorkbench }),
-      "GET /blocked": () => ({
-        json: {
-          tickets: [
-            {
-              id: 1,
-              displayId: "T-1",
-              specId: 3,
-              specDisplayId: "S-3",
-              title: "Stuck",
-              type: "implementation",
-              state: "blocked",
-              blockedReason: "agent-gave-up",
-              repo: "backend",
-              brief: null,
-            },
-          ],
-          finalizations: [],
-          pullRequests: [],
-          cleanups: [],
-          readyFailures: [],
-          specs: [
-            { id: 3, displayId: "S-3", title: "Third", reason: "paused" },
-          ],
+    const waiting = {
+      tickets: [
+        {
+          id: 1,
+          displayId: "T-1",
+          specId: 3,
+          specDisplayId: "S-3",
+          title: "Stuck",
+          type: "implementation",
+          state: "blocked",
+          blockedReason: "agent-gave-up",
+          repo: "backend",
+          brief: null,
         },
+      ],
+      finalizations: [],
+      pullRequests: [],
+      cleanups: [],
+      readyFailures: [],
+      specs: [{ id: 3, displayId: "S-3", title: "Third", reason: "paused" }],
+      items: [
+        { kind: "ticket", id: 1 },
+        { kind: "pausedSpec", id: 3 },
+      ],
+    };
+    const fake = fakeServer({
+      "GET /workbench": () => ({
+        json: { ...emptyWorkbench, waiting },
       }),
+      "GET /blocked": () => ({ json: waiting }),
     });
     renderApp(fake, "/waiting");
     expect(await screen.findByTestId("blocked-T-1")).toBeTruthy();
@@ -347,6 +367,48 @@ describe("the app", () => {
     expect(
       screen.getAllByRole("link", { name: "需求" })[0]?.getAttribute("href"),
     ).toBe("/specs");
+  });
+
+  it("counts waiting from the workbench without loading briefs", async () => {
+    const fake = fakeServer({
+      "GET /workbench": () => ({
+        json: {
+          ...emptyWorkbench,
+          waiting: {
+            ...emptyWaiting,
+            tickets: [
+              {
+                id: 1,
+                displayId: "T-1",
+                specId: 3,
+                specDisplayId: "S-3",
+                title: "Stuck",
+                type: "implementation",
+                state: "blocked",
+                blockedReason: "agent-gave-up",
+                repo: "backend",
+              },
+            ],
+            items: [{ kind: "ticket", id: 1 }],
+          },
+        },
+      }),
+      "GET /projects": () => ({
+        json: { projects: [{ id: 1, name: "shop" }] },
+      }),
+      "GET /version": () => ({
+        json: {
+          platformVersion: "0.2.0",
+          skillsSha: "x",
+          platformCommit: "abc",
+        },
+      }),
+    });
+    renderApp(fake, "/");
+    expect(
+      (await screen.findAllByRole("link", { name: "待处理 (1)" })).length,
+    ).toBeGreaterThan(0);
+    expect(fake.calls).not.toContain("GET /blocked");
   });
 
   it("does not show a count in the menu when nothing waits", async () => {
@@ -409,64 +471,25 @@ describe("the app", () => {
     const fake = fakeServer({
       "GET /workbench": () => ({ json: emptyWorkbench }),
       "GET /blocked": () => ({ json: emptyWaiting }),
-      "GET /specs": () => ({
+      "GET /search": () => ({
         json: {
           specs: [
             {
               id: 2,
               displayId: "S-2",
-              slug: "other",
               title: "Second",
-              type: "feature",
               state: "draft",
-              pauseReason: null,
-              project: "shop",
-              repos: [
-                {
-                  name: "backend",
-                  url: "https://github.com/acme/shop-backend.git",
-                  hostKind: "github",
-                },
-              ],
-              startedAt: "2026-10-28T01:00:00.000Z",
-              endedAt: null,
-              progress: {
-                total: 0,
-                done: 0,
-                active: 0,
-                blocked: 0,
-                pending: 0,
-                cancelled: 0,
-              },
+              matched: ["id"],
             },
             {
               id: 3,
               displayId: "S-3",
-              slug: "s",
               title: "Third",
-              type: "feature",
               state: "running",
-              pauseReason: null,
-              project: "shop",
-              repos: [
-                {
-                  name: "backend",
-                  url: "https://github.com/acme/shop-backend.git",
-                  hostKind: "github",
-                },
-              ],
-              startedAt: "2026-10-28T01:00:00.000Z",
-              endedAt: null,
-              progress: {
-                total: 1,
-                done: 0,
-                active: 1,
-                blocked: 0,
-                pending: 0,
-                cancelled: 0,
-              },
+              matched: ["id"],
             },
           ],
+          tickets: [],
         },
       }),
       "GET /specs/3": () => ({
@@ -563,6 +586,8 @@ describe("the app", () => {
         "2",
       ),
     );
+    expect(fake.calls).toContain("GET /search");
+    expect(fake.calls).not.toContain("GET /specs");
     const siblings = within(crumbs).getByTestId("crumb-siblings");
     fireEvent.pointerDown(siblings, { button: 0 });
     expect(

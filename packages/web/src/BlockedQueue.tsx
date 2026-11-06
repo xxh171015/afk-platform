@@ -51,6 +51,17 @@ import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { structuredBrief } from "./structured-brief.ts";
 import { WaitingTicketEdit } from "./TicketEdit.tsx";
 import { WORKBENCH_KEY } from "./Workbench.tsx";
+import {
+  type Blocking,
+  blockingCopy,
+  filterWaiting,
+  groupWaitingBySpec,
+  matchesFinalization,
+  rankCopy,
+  rankOf,
+  type WaitingRef,
+  waitingCount,
+} from "./waiting.ts";
 
 export const BLOCKED_KEY = ["blocked"] as const;
 
@@ -85,6 +96,24 @@ function useAction<Action>(run: (action: Action) => Promise<unknown>) {
     mutationFn: run,
     onSuccess: () => refreshAll(queryClient),
   });
+}
+
+function WaitingMeta({
+  blocking,
+  waitingSince,
+}: {
+  blocking?: Blocking;
+  waitingSince?: string;
+}) {
+  if (!blocking || !waitingSince) return null;
+  return (
+    <div className="space-y-1 text-[13px]">
+      <p>阻断了什么：{blockingCopy(blocking)}</p>
+      <p className="text-muted-foreground">
+        为何排在这：{rankCopy(blocking, waitingSince)}
+      </p>
+    </div>
+  );
 }
 
 function Brief({
@@ -383,6 +412,10 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
         </>
       }
     >
+      <WaitingMeta
+        blocking={ticket.blocking}
+        waitingSince={ticket.waitingSince}
+      />
       <Brief reason={ticket.blockedReason} brief={ticket.brief} />
     </Card>
   );
@@ -455,6 +488,7 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
         </form>
       }
     >
+      <WaitingMeta blocking={spec.blocking} waitingSince={spec.waitingSince} />
       <p>{spec.reason}</p>
     </Card>
   );
@@ -565,6 +599,7 @@ function BlockedFinalization({
         </>
       }
     >
+      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
       <Brief reason={item.blockedReason} brief={item.brief} />
     </Card>
   );
@@ -611,6 +646,7 @@ function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
         </>
       }
     >
+      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
       {item.syncError ? (
         <CollapsibleCode text={`读取失败：${item.syncError}`} />
       ) : null}
@@ -643,6 +679,7 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
         </a>
       }
     >
+      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
         代码托管上可能还残留着这个需求的分支或 PR。确认后用下面的命令重新清理：
@@ -682,6 +719,7 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
         </>
       }
     >
+      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
         这个 PR 仍是 draft。等排在它前面的 PR 合并后，到代码托管上手动把它转为
@@ -720,6 +758,7 @@ function BlockedPlanning({ item }: { item: Queue["planning"][number] }) {
         </a>
       }
     >
+      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
       {item.files.length > 0 ? (
         <p className="text-muted-foreground">
           冲突的文件：<Mono>{item.files.join("、")}</Mono>
@@ -773,9 +812,196 @@ function CalmIllustration() {
 const FILTERS = ["all", "tickets", "final", "pr", "cleanup", "paused"] as const;
 type Filter = (typeof FILTERS)[number];
 
+function inferredItems(data: Queue): WaitingRef[] {
+  if (data.items && (data.items.length > 0 || waitingCount(data) === 0)) {
+    return data.items;
+  }
+  return [
+    ...data.tickets.map((ticket) => ({
+      kind: "ticket" as const,
+      id: ticket.id,
+    })),
+    ...data.finalizations.map((item) => ({
+      kind: "finalization" as const,
+      id: item.id,
+      step: item.step,
+    })),
+    ...data.pullRequests.map((item) => ({
+      kind: "pullRequest" as const,
+      specId: item.specId,
+      repo: item.repo,
+      number: item.number,
+    })),
+    ...data.readyFailures.map((item) => ({
+      kind: "readyFailure" as const,
+      specId: item.specId,
+      repo: item.repo,
+      number: item.number,
+    })),
+    ...data.cleanups.map((item) => ({
+      kind: "cleanup" as const,
+      specId: item.specId,
+    })),
+    ...(data.planning ?? []).map((item) => ({
+      kind: "planning" as const,
+      specId: item.specId,
+    })),
+    ...data.specs.map((spec) => ({
+      kind: "pausedSpec" as const,
+      id: spec.id,
+    })),
+  ];
+}
+
+function specIdOf(data: Queue, ref: WaitingRef): number {
+  if (ref.kind === "ticket") {
+    return data.tickets.find((item) => item.id === ref.id)?.specId ?? ref.id;
+  }
+  if (ref.kind === "finalization") {
+    return (
+      data.finalizations.find((item) => matchesFinalization(item, ref))
+        ?.specId ?? ref.id
+    );
+  }
+  if (ref.kind === "pausedSpec") return ref.id;
+  return ref.specId;
+}
+
+function rankFields(data: Queue, ref: WaitingRef) {
+  const lookup = () => {
+    if (ref.kind === "ticket")
+      return data.tickets.find((item) => item.id === ref.id);
+    if (ref.kind === "finalization")
+      return data.finalizations.find((item) => matchesFinalization(item, ref));
+    if (ref.kind === "pullRequest")
+      return data.pullRequests.find(
+        (item) =>
+          item.specId === ref.specId &&
+          item.repo === ref.repo &&
+          item.number === ref.number,
+      );
+    if (ref.kind === "cleanup")
+      return data.cleanups.find((item) => item.specId === ref.specId);
+    if (ref.kind === "readyFailure")
+      return data.readyFailures.find(
+        (item) =>
+          item.specId === ref.specId &&
+          item.repo === ref.repo &&
+          item.number === ref.number,
+      );
+    if (ref.kind === "planning")
+      return (data.planning ?? []).find((item) => item.specId === ref.specId);
+    return data.specs.find((item) => item.id === ref.id);
+  };
+  const item = lookup();
+  const blocking = item?.blocking ?? {
+    downstream: [],
+    finalization: false,
+    pullRequests: false,
+    spec: false,
+    merge: false,
+  };
+  const serialId =
+    ref.kind === "ticket" ||
+    ref.kind === "finalization" ||
+    ref.kind === "pausedSpec"
+      ? ref.id
+      : ref.kind === "pullRequest" || ref.kind === "readyFailure"
+        ? ref.number
+        : ref.specId;
+  return {
+    rank: rankOf(blocking),
+    waitingSince: item?.waitingSince ?? "",
+    serialId,
+  };
+}
+
+function refKey(item: WaitingRef): string {
+  if (item.kind === "finalization") {
+    return `${item.kind}-${item.id}-${item.step}`;
+  }
+  if (item.kind === "ticket" || item.kind === "pausedSpec") {
+    return `${item.kind}-${item.id}`;
+  }
+  if (item.kind === "pullRequest" || item.kind === "readyFailure") {
+    return `${item.kind}-${item.specId}-${item.repo}-${item.number}`;
+  }
+  return `${item.kind}-${item.specId}`;
+}
+
+function CardFor({ data, item }: { data: Queue; item: WaitingRef }) {
+  if (item.kind === "ticket") {
+    const ticket = data.tickets.find((row) => row.id === item.id);
+    return ticket ? <TicketCard ticket={ticket} /> : null;
+  }
+  if (item.kind === "finalization") {
+    const row = data.finalizations.find((entry) =>
+      matchesFinalization(entry, item),
+    );
+    return row ? <BlockedFinalization item={row} /> : null;
+  }
+  if (item.kind === "pullRequest") {
+    const row = data.pullRequests.find(
+      (entry) =>
+        entry.specId === item.specId &&
+        entry.repo === item.repo &&
+        entry.number === item.number,
+    );
+    return row ? <StuckPullRequest item={row} /> : null;
+  }
+  if (item.kind === "cleanup") {
+    const row = data.cleanups.find((entry) => entry.specId === item.specId);
+    return row ? <StuckCleanup item={row} /> : null;
+  }
+  if (item.kind === "readyFailure") {
+    const row = data.readyFailures.find(
+      (entry) =>
+        entry.specId === item.specId &&
+        entry.repo === item.repo &&
+        entry.number === item.number,
+    );
+    return row ? <StuckReady item={row} /> : null;
+  }
+  if (item.kind === "planning") {
+    const row = (data.planning ?? []).find(
+      (entry) => entry.specId === item.specId,
+    );
+    return row ? <BlockedPlanning item={row} /> : null;
+  }
+  const spec = data.specs.find((row) => row.id === item.id);
+  return spec ? <PausedSpec spec={spec} /> : null;
+}
+
+function WaitingList({
+  data,
+  type,
+  bySpec,
+}: {
+  data: Queue;
+  type: Filter;
+  bySpec: boolean;
+}) {
+  const filtered = filterWaiting(inferredItems(data), type);
+  const items = bySpec
+    ? groupWaitingBySpec(
+        filtered,
+        (item) => specIdOf(data, item),
+        (item) => rankFields(data, item),
+      )
+    : filtered;
+  return (
+    <div className="space-y-3">
+      {items.map((item) => (
+        <CardFor key={refKey(item)} data={data} item={item} />
+      ))}
+    </div>
+  );
+}
+
 export function BlockedQueue() {
   const queue = useBlocked();
   const [type, setType] = useState<Filter>("all");
+  const [bySpec, setBySpec] = useState(false);
   const data = queue.data;
   const counts: Record<Filter, number> = data
     ? {
@@ -797,8 +1023,6 @@ export function BlockedQueue() {
     cleanup: "清理",
     paused: "暂停的需求",
   };
-  const show = (f: Filter) => type === "all" || type === f;
-
   return (
     <Page
       title="待处理"
@@ -806,38 +1030,51 @@ export function BlockedQueue() {
       actions={<StaleNotice error={data ? queue.error : null} />}
     >
       {!data && !queue.isError ? <p className="sr-only">加载待处理…</p> : null}
-      <div
-        role="tablist"
-        aria-label="按类别筛选"
-        className="mb-4 inline-flex rounded-md border bg-surface p-0.5"
-      >
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            role="tab"
-            aria-selected={type === f}
-            onClick={() => setType(f)}
-            className={cn(
-              "flex h-7 items-center gap-1.5 rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
-              type === f && "bg-background text-foreground shadow-sm",
-            )}
-          >
-            {filterLabel[f]}
-            <span
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div
+          role="tablist"
+          aria-label="按类别筛选"
+          className="inline-flex rounded-md border bg-surface p-0.5"
+        >
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={type === f}
+              onClick={() => setType(f)}
               className={cn(
-                "min-w-4 rounded-full px-1 font-mono text-[10.5px] tabular",
-                data && counts[f] > 0
-                  ? f === "all" || f === "tickets"
-                    ? "bg-state-blocked/15 text-state-blocked"
-                    : "bg-muted text-foreground"
-                  : "text-subtle-foreground",
+                "flex h-7 items-center gap-1.5 rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
+                type === f && "bg-background text-foreground shadow-sm",
               )}
             >
-              {data ? counts[f] : "·"}
-            </span>
-          </button>
-        ))}
+              {filterLabel[f]}
+              <span
+                className={cn(
+                  "min-w-4 rounded-full px-1 font-mono text-[10.5px] tabular",
+                  data && counts[f] > 0
+                    ? f === "all" || f === "tickets"
+                      ? "bg-state-blocked/15 text-state-blocked"
+                      : "bg-muted text-foreground"
+                    : "text-subtle-foreground",
+                )}
+              >
+                {data ? counts[f] : "·"}
+              </span>
+            </button>
+          ))}
+        </div>
+        <label
+          htmlFor="waiting-by-spec"
+          className="inline-flex items-center gap-2 text-[12.5px] text-muted-foreground"
+        >
+          <Checkbox
+            id="waiting-by-spec"
+            checked={bySpec}
+            onCheckedChange={(value) => setBySpec(value === true)}
+          />
+          按需求收拢
+        </label>
       </div>
       {queue.isError && !data ? (
         <ErrorState
@@ -867,38 +1104,7 @@ export function BlockedQueue() {
           <p className="sr-only">没有在等你的事。</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {show("tickets") &&
-            data.tickets.map((ticket) => (
-              <TicketCard
-                key={`${ticket.id}-${ticket.blockedReason}`}
-                ticket={ticket}
-              />
-            ))}
-          {show("final") &&
-            data.finalizations.map((item) => (
-              <BlockedFinalization
-                key={`${item.specId}-${item.repo}`}
-                item={item}
-              />
-            ))}
-          {show("pr") &&
-            data.pullRequests.map((p) => (
-              <StuckPullRequest key={`${p.specId}-${p.repo}`} item={p} />
-            ))}
-          {show("pr") &&
-            data.readyFailures.map((r) => (
-              <StuckReady key={`${r.specId}-${r.repo}`} item={r} />
-            ))}
-          {show("cleanup") &&
-            data.cleanups.map((c) => <StuckCleanup key={c.specId} item={c} />)}
-          {show("paused") &&
-            (data.planning ?? []).map((item) => (
-              <BlockedPlanning key={`planning-${item.specId}`} item={item} />
-            ))}
-          {show("paused") &&
-            data.specs.map((spec) => <PausedSpec key={spec.id} spec={spec} />)}
-        </div>
+        <WaitingList data={data} type={type} bySpec={bySpec} />
       )}
     </Page>
   );

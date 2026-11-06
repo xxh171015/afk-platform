@@ -151,6 +151,10 @@ _Avoid_: 白名单、豁免路径
 **Blocked reason（blocked 原因码）**：
 票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。
 
+**Waiting queue（待处理队列）**：
+需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec。不是 Ticket 状态 pending。
+_Avoid_: pending 队列、待处理项
+
 **Notification（通知）**：
 平台在需要人回来、或流程可以往下走时，发到人眼前的一条短消息。标题是事件类型，正文是显示编号、标题和一句原因，并带对应页面的链接。不是票卡住时页面上那份结构化说明，也不是验收包。
 _Avoid_: 推送、提醒

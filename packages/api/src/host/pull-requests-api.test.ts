@@ -953,6 +953,14 @@ describe("what waits for a person among the pull requests", () => {
         url: "https://github.com/me/shop/pull/1",
         state: "closed",
         syncError: null,
+        waitingSince: expect.any(String),
+        blocking: {
+          downstream: [],
+          finalization: false,
+          pullRequests: false,
+          spec: false,
+          merge: true,
+        },
       },
     ]);
     await sync(synced(1)); // reopened
@@ -1019,7 +1027,7 @@ describe("what waits for a person among the pull requests", () => {
         out += text;
       },
       stderr: () => {},
-      env: { AFK_API_URL: api.url },
+      env: { AFK_API_URL: api.url, AFK_ACCESS_WAIT_SECONDS: "0" },
       readFile: async () => "",
       readDirectory: async () => [],
     };
@@ -1032,10 +1040,14 @@ describe("what waits for a person among the pull requests", () => {
     expect(await plat("blocked")).toBe("nothing is waiting for you\n");
 
     await sync(synced(1, { state: "closed" }));
-    expect(await plat("blocked")).toBe(
-      "S-1  pull request backend #1 was closed without merge: https://github.com/me/shop/pull/1\n" +
-        "    reopen it, or rework the spec, or cancel it: plat spec cancel S-1\n",
+    const closed = await plat("blocked");
+    expect(closed).toContain(
+      "S-1  pull request backend #1 was closed without merge: https://github.com/me/shop/pull/1",
     );
+    expect(closed).toContain(
+      "reopen it, or rework the spec, or cancel it: plat spec cancel S-1",
+    );
+    expect(closed).toContain("blocks merge to main");
     expect(await plat("spec", "show", "S-1")).toContain(
       "1. backend #1  closed without merge  ci pending",
     );
@@ -1056,9 +1068,10 @@ describe("what waits for a person among the pull requests", () => {
     await awaitingReview();
     await sync({ id: 1, error: "GitHub answered 502" });
     const out = await plat("blocked");
-    expect(out).toBe(
-      "S-1  pull request backend #1 could not be read: GitHub answered 502\n",
+    expect(out).toContain(
+      "S-1  pull request backend #1 could not be read: GitHub answered 502",
     );
+    expect(out).toContain("blocks merge to main");
   });
 
   it("shows the pull requests in plat spec show before the acceptance pack exists", async () => {
@@ -1757,7 +1770,19 @@ describe("cleaning up after a cancelled or merged spec", () => {
       clock.advanceSeconds(CLEANUP_GRACE_SECONDS);
     }
     expect(await leftover()).toEqual([
-      { specId: 1, specDisplayId: "S-1", error: "GitHub answered 503" },
+      {
+        specId: 1,
+        specDisplayId: "S-1",
+        error: "GitHub answered 503",
+        waitingSince: expect.any(String),
+        blocking: {
+          downstream: [],
+          finalization: false,
+          pullRequests: false,
+          spec: false,
+          merge: false,
+        },
+      },
     ]);
   });
 
@@ -1787,7 +1812,19 @@ describe("cleaning up after a cancelled or merged spec", () => {
     const failed = await claimCleanup();
     await worker.fail(failed.id, failed.attempt, "GitHub answered 504");
     expect(await leftover()).toEqual([
-      { specId: 1, specDisplayId: "S-1", error: "GitHub answered 504" },
+      {
+        specId: 1,
+        specDisplayId: "S-1",
+        error: "GitHub answered 504",
+        waitingSince: expect.any(String),
+        blocking: {
+          downstream: [],
+          finalization: false,
+          pullRequests: false,
+          spec: false,
+          merge: false,
+        },
+      },
     ]);
   });
 
@@ -1806,14 +1843,17 @@ describe("cleaning up after a cancelled or merged spec", () => {
         out += text;
       },
       stderr: () => {},
-      env: { AFK_API_URL: api.url },
+      env: { AFK_API_URL: api.url, AFK_ACCESS_WAIT_SECONDS: "0" },
       readFile: async () => "",
       readDirectory: async () => [],
     };
     expect(await run(["blocked"], io)).toBe(0);
-    expect(out).toBe(
-      "S-1  clean-up of the spec did not finish: GitHub answered 503\n" +
-        "    branches or pull requests may be left on the code host; try again: plat spec cleanup S-1\n",
+    expect(out).toContain(
+      "S-1  clean-up of the spec did not finish: GitHub answered 503",
+    );
+    expect(out).toContain("does not block other tickets");
+    expect(out).toContain(
+      "branches or pull requests may be left on the code host; try again: plat spec cleanup S-1",
     );
     out = "";
     expect(await run(["spec", "cleanup", "S-1"], io)).toBe(0);

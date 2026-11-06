@@ -49,6 +49,44 @@ export interface GroupedLog {
   after: LogBlock[];
 }
 
+export interface LogCheckpoint {
+  remainder: string;
+  before: LogBlock[];
+  after: LogBlock[];
+  sessions: Map<string, SessionState>;
+  sessionOrder: string[];
+  seenCursor: boolean;
+  dump: { title: string; body: string[] } | null;
+  nextKey: number;
+}
+
+interface SessionState {
+  id: string;
+  label: string;
+  durationMs: number | null;
+  blocks: LogBlock[];
+  openThought: {
+    text: string;
+    startMs: number | null;
+    endMs: number | null;
+    raw: string[];
+  } | null;
+  tools: Map<string, LogBlock>;
+}
+
+export function emptyLogCheckpoint(): LogCheckpoint {
+  return {
+    remainder: "",
+    before: [],
+    after: [],
+    sessions: new Map(),
+    sessionOrder: [],
+    seenCursor: false,
+    dump: null,
+    nextKey: 0,
+  };
+}
+
 const WORKER_PREFIX =
   /^(gate-fix|review-fix|merge-fix|final-review|final-fix|final-e2e|update-branch|gate|implement|e2e|merge|environment|result|review|restart|failed|diagnose):/;
 
@@ -160,61 +198,106 @@ export function classifyLog(text: string): LogLine[] {
   });
 }
 
-export function groupLog(
-  text: string,
-  options: { flushRemainder?: boolean } = {},
-): GroupedLog {
-  const { lines, remainder } = completeLines(text, options.flushRemainder);
+function nextKeyOf(checkpoint: LogCheckpoint): (prefix: string) => string {
+  return (prefix: string) => {
+    checkpoint.nextKey += 1;
+    return `${prefix}-${checkpoint.nextKey}`;
+  };
+}
+
+function cloneSession(session: SessionState): SessionState {
+  const blocks = session.blocks.map((block) => ({ ...block }));
+  const tools = new Map<string, LogBlock>();
+  for (const [callId, block] of session.tools) {
+    const copy = blocks.find((item) => item.key === block.key);
+    if (copy) tools.set(callId, copy);
+  }
+  return {
+    ...session,
+    blocks,
+    tools,
+    openThought: session.openThought
+      ? { ...session.openThought, raw: [...session.openThought.raw] }
+      : null,
+  };
+}
+
+function cloneCheckpoint(checkpoint: LogCheckpoint): LogCheckpoint {
   const sessions = new Map<string, SessionState>();
-  const sessionOrder: string[] = [];
-  const before: LogBlock[] = [];
-  const after: LogBlock[] = [];
-  let seenCursor = false;
-  let dump: { title: string; body: string[] } | null = null;
-  let nextKey = 0;
-  const key = (prefix: string) => {
-    nextKey += 1;
-    return `${prefix}-${nextKey}`;
+  for (const [id, session] of checkpoint.sessions) {
+    sessions.set(id, cloneSession(session));
+  }
+  return {
+    remainder: checkpoint.remainder,
+    before: checkpoint.before.map((block) => ({ ...block })),
+    after: checkpoint.after.map((block) => ({ ...block })),
+    sessions,
+    sessionOrder: [...checkpoint.sessionOrder],
+    seenCursor: checkpoint.seenCursor,
+    dump: checkpoint.dump
+      ? { title: checkpoint.dump.title, body: [...checkpoint.dump.body] }
+      : null,
+    nextKey: checkpoint.nextKey,
   };
+}
 
-  const bucket = () => (seenCursor ? after : before);
+function flushDump(checkpoint: LogCheckpoint, key: (prefix: string) => string) {
+  if (!checkpoint.dump) return;
+  const bucket = checkpoint.seenCursor ? checkpoint.after : checkpoint.before;
+  bucket.push({
+    key: key("output"),
+    kind: "output",
+    action: "运行命令",
+    title: checkpoint.dump.title,
+    body: checkpoint.dump.body.join("\n").replace(/\n+$/, ""),
+    extra: null,
+    durationMs: null,
+    completed: true,
+    raw: null,
+  });
+  checkpoint.dump = null;
+}
 
-  const flushDump = () => {
-    if (!dump) return;
-    bucket().push({
-      key: key("output"),
-      kind: "output",
-      action: "运行命令",
-      title: dump.title,
-      body: dump.body.join("\n").replace(/\n+$/, ""),
-      extra: null,
-      durationMs: null,
-      completed: true,
-      raw: null,
-    });
-    dump = null;
-  };
+export function ingestLog(
+  checkpoint: LogCheckpoint,
+  chunk: string,
+  options: { flushRemainder?: boolean } = {},
+): LogCheckpoint {
+  const { lines, remainder } = completeLines(
+    checkpoint.remainder + chunk,
+    options.flushRemainder,
+  );
+  checkpoint.remainder = remainder;
+  const key = nextKeyOf(checkpoint);
+  const bucket = () =>
+    checkpoint.seenCursor ? checkpoint.after : checkpoint.before;
 
   for (const line of lines) {
     const parsed = parseJsonObject(line);
     if (parsed) {
-      flushDump();
-      seenCursor = true;
-      ingestCursor(parsed, line, sessions, sessionOrder, key);
+      flushDump(checkpoint, key);
+      checkpoint.seenCursor = true;
+      ingestCursor(
+        parsed,
+        line,
+        checkpoint.sessions,
+        checkpoint.sessionOrder,
+        key,
+      );
       continue;
     }
     if (line === "") {
-      if (dump) dump.body.push("");
+      if (checkpoint.dump) checkpoint.dump.body.push("");
       continue;
     }
     const dumpTitle = DUMP_HEADER.exec(line)?.[1];
     if (dumpTitle !== undefined) {
-      flushDump();
-      dump = { title: dumpTitle, body: [] };
+      flushDump(checkpoint, key);
+      checkpoint.dump = { title: dumpTitle, body: [] };
       continue;
     }
     if (WORKER_PREFIX.test(line)) {
-      flushDump();
+      flushDump(checkpoint, key);
       bucket().push({
         key: key("command"),
         kind: "command",
@@ -228,8 +311,8 @@ export function groupLog(
       });
       continue;
     }
-    if (dump) {
-      dump.body.push(line);
+    if (checkpoint.dump) {
+      checkpoint.dump.body.push(line);
       continue;
     }
     // A raw line cut at 16 KiB is not valid JSON; don't put the blob in the title.
@@ -259,14 +342,19 @@ export function groupLog(
       raw: null,
     });
   }
-  flushDump();
-  for (const session of sessions.values()) flushThought(session, key);
+  return checkpoint;
+}
 
+export function groupedLogFrom(checkpoint: LogCheckpoint): GroupedLog {
+  const view = cloneCheckpoint(checkpoint);
+  const key = nextKeyOf(view);
+  flushDump(view, key);
+  for (const session of view.sessions.values()) flushThought(session, key);
   return {
-    remainder,
-    before,
-    sessions: sessionOrder.map((id) => {
-      const session = sessions.get(id) as SessionState;
+    remainder: view.remainder,
+    before: view.before,
+    sessions: view.sessionOrder.map((id) => {
+      const session = view.sessions.get(id) as SessionState;
       return {
         id,
         label: session.label,
@@ -274,22 +362,15 @@ export function groupLog(
         blocks: session.blocks,
       };
     }),
-    after,
+    after: view.after,
   };
 }
 
-interface SessionState {
-  id: string;
-  label: string;
-  durationMs: number | null;
-  blocks: LogBlock[];
-  openThought: {
-    text: string;
-    startMs: number | null;
-    endMs: number | null;
-    raw: string[];
-  } | null;
-  tools: Map<string, LogBlock>;
+export function groupLog(
+  text: string,
+  options: { flushRemainder?: boolean } = {},
+): GroupedLog {
+  return groupedLogFrom(ingestLog(emptyLogCheckpoint(), text, options));
 }
 
 function ingestCursor(

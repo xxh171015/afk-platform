@@ -18,7 +18,9 @@ const emptyWaiting = {
   pullRequests: [],
   cleanups: [],
   readyFailures: [],
+  planning: [],
   specs: [],
+  items: [],
 };
 
 const empty = {
@@ -28,11 +30,23 @@ const empty = {
   recentlyCompleted: [],
 };
 
+const onboarding = {
+  "GET /projects": () => ({
+    json: { projects: [{ id: 1, name: "shop" }] },
+  }),
+  "GET /version": () => ({
+    json: { platformVersion: "0.2.0", skillsSha: "x", platformCommit: "abc" },
+  }),
+};
+
 describe("the workbench", () => {
   it("shows a next-step hint in each empty quadrant, not a blank panel", async () => {
     renderWithApp(
       <Workbench />,
-      fakeServer({ "GET /workbench": () => ({ json: empty }) }),
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({ json: empty }),
+      }),
     );
     expect(await screen.findByText(EMPTY_WAITING)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "工作台" })).toBeTruthy();
@@ -62,6 +76,7 @@ describe("the workbench", () => {
     renderWithApp(
       <Workbench />,
       fakeServer({
+        ...onboarding,
         "GET /workbench": () => ({
           json: {
             waiting: {
@@ -82,13 +97,12 @@ describe("the workbench", () => {
               ],
               finalizations: [
                 {
+                  id: 1,
                   specId: 3,
                   specDisplayId: "S-3",
                   repo: "backend",
                   step: "final-merge",
-                  state: "blocked",
                   blockedReason: "merge-conflict",
-                  brief: null,
                 },
               ],
             },
@@ -221,6 +235,7 @@ describe("the workbench", () => {
     renderWithApp(
       <Workbench />,
       fakeServer({
+        ...onboarding,
         "GET /workbench": () => ({
           json: {
             waiting: emptyWaiting,
@@ -288,8 +303,12 @@ describe("the workbench", () => {
       }),
     );
     const block = await screen.findByRole("region", { name: "接入第一个项目" });
-    expect(block.textContent).toContain(
-      "npx skills@latest add xxh171015/afk-platform#abc",
-    );
+    expect(
+      (
+        await within(block).findAllByText(
+          "npx skills@latest add xxh171015/afk-platform#abc",
+        )
+      ).length,
+    ).toBeGreaterThan(0);
   });
 });

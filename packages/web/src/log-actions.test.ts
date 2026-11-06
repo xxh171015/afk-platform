@@ -4,7 +4,10 @@ import {
   classifyLogLine,
   displayGrepPattern,
   displayPath,
+  emptyLogCheckpoint,
+  groupedLogFrom,
   groupLog,
+  ingestLog,
   truncateLines,
 } from "./log-actions.ts";
 
@@ -306,6 +309,109 @@ describe("groupLog", () => {
       title: "any|@ts-ignore",
       extra: "workspace",
       body: "src/a.ts:1:any",
+    });
+  });
+
+  function snapshot(grouped: ReturnType<typeof groupLog>) {
+    return {
+      remainder: grouped.remainder,
+      before: grouped.before.map((block) => ({
+        key: block.key,
+        kind: block.kind,
+        title: block.title,
+        body: block.body,
+        completed: block.completed,
+      })),
+      sessions: grouped.sessions.map((session) => ({
+        id: session.id,
+        blocks: session.blocks.map((block) => ({
+          key: block.key,
+          kind: block.kind,
+          title: block.title,
+          body: block.body,
+          completed: block.completed,
+        })),
+      })),
+      after: grouped.after.map((block) => ({
+        key: block.key,
+        kind: block.kind,
+        title: block.title,
+        body: block.body,
+      })),
+    };
+  }
+
+  it("groups the same blocks and keys when the log is fed in slices including a half line", () => {
+    const started = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "c1",
+      session_id: "s1",
+      tool_call: {
+        readToolCall: { args: { path: "/home/agent/workspace/src/a.ts" } },
+      },
+    });
+    const completed = JSON.stringify({
+      type: "tool_call",
+      subtype: "completed",
+      call_id: "c1",
+      session_id: "s1",
+      tool_call: {
+        readToolCall: {
+          args: { path: "/home/agent/workspace/src/a.ts" },
+          result: { success: { content: "export const a = 1;\n" } },
+        },
+      },
+    });
+    const text = `${started}\n${completed}\n`;
+    const full = groupLog(text);
+    let checkpoint = emptyLogCheckpoint();
+    const mid = Math.floor(text.length / 2);
+    checkpoint = ingestLog(checkpoint, text.slice(0, mid));
+    checkpoint = ingestLog(checkpoint, text.slice(mid), {
+      flushRemainder: true,
+    });
+    expect(snapshot(groupedLogFrom(checkpoint))).toEqual(snapshot(full));
+  });
+
+  it("updates an existing tool card when the tool completes instead of adding another", () => {
+    const started = `${JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "c1",
+      session_id: "s1",
+      tool_call: {
+        shellToolCall: { args: { command: "pnpm test" } },
+      },
+    })}\n`;
+    const completed = `${JSON.stringify({
+      type: "tool_call",
+      subtype: "completed",
+      call_id: "c1",
+      session_id: "s1",
+      tool_call: {
+        shellToolCall: {
+          args: { command: "pnpm test" },
+          result: { success: { stdout: "ok\n" } },
+        },
+      },
+    })}\n`;
+    let checkpoint = emptyLogCheckpoint();
+    checkpoint = ingestLog(checkpoint, started);
+    const first = groupedLogFrom(checkpoint).sessions[0]?.blocks ?? [];
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      key: "tool-1",
+      completed: false,
+      title: "pnpm test",
+    });
+    checkpoint = ingestLog(checkpoint, completed);
+    const next = groupedLogFrom(checkpoint).sessions[0]?.blocks ?? [];
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({
+      key: "tool-1",
+      completed: true,
+      body: "ok\n",
     });
   });
 

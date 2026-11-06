@@ -1183,7 +1183,235 @@ describe("the spec list", () => {
   });
 
   it("is empty before anything exists", async () => {
-    expect((await call("GET", "/specs")).body).toEqual({ specs: [] });
+    expect((await call("GET", "/specs")).body).toEqual({
+      specs: [],
+      nextCursor: null,
+    });
+  });
+
+  it("does not repeat a spec when created_at is finer than ISO milliseconds", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    for (const n of [1, 2, 3]) {
+      expect(
+        (
+          await call("POST", "/specs", {
+            projectId: created.body.id,
+            type: "feature",
+            slug: `s-${n}`,
+            title: `Spec ${n}`,
+          })
+        ).status,
+      ).toBe(201);
+    }
+    await db.pool.query(
+      `UPDATE specs SET created_at = TIMESTAMPTZ '2026-06-01 00:00:00.123456+00'
+         + (id * INTERVAL '1 microsecond')`,
+    );
+    const first = await call("GET", "/specs?limit=1");
+    expect(first.body.specs.map((s: Json) => s.displayId)).toEqual(["S-3"]);
+    const second = await call(
+      "GET",
+      `/specs?limit=1&cursor=${encodeURIComponent(first.body.nextCursor)}`,
+    );
+    expect(second.body.specs.map((s: Json) => s.displayId)).toEqual(["S-2"]);
+    const third = await call(
+      "GET",
+      `/specs?limit=1&cursor=${encodeURIComponent(second.body.nextCursor)}`,
+    );
+    expect(third.body.specs.map((s: Json) => s.displayId)).toEqual(["S-1"]);
+    expect(third.body.nextCursor).toBeNull();
+  });
+
+  it("pages newest first without repeating or skipping a spec", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    for (let n = 1; n <= 5; n++) {
+      expect(
+        (
+          await call("POST", "/specs", {
+            projectId: created.body.id,
+            type: "feature",
+            slug: `s-${n}`,
+            title: `Spec ${n}`,
+          })
+        ).status,
+      ).toBe(201);
+    }
+    const first = await call("GET", "/specs?limit=2");
+    expect(first.body.specs.map((s: Json) => s.displayId)).toEqual([
+      "S-5",
+      "S-4",
+    ]);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const second = await call(
+      "GET",
+      `/specs?limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`,
+    );
+    expect(second.body.specs.map((s: Json) => s.displayId)).toEqual([
+      "S-3",
+      "S-2",
+    ]);
+    const third = await call(
+      "GET",
+      `/specs?limit=2&cursor=${encodeURIComponent(second.body.nextCursor)}`,
+    );
+    expect(third.body.specs.map((s: Json) => s.displayId)).toEqual(["S-1"]);
+    expect(third.body.nextCursor).toBeNull();
+    const ids = [
+      ...first.body.specs,
+      ...second.body.specs,
+      ...third.body.specs,
+    ].map((s: Json) => s.displayId);
+    expect(ids).toEqual(["S-5", "S-4", "S-3", "S-2", "S-1"]);
+  });
+
+  it("filters by state on the server before paging", async () => {
+    await runningSpec([ticket("a")]);
+    const created = await call("POST", "/projects", { name: "other" });
+    await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "bug",
+      slug: "draft",
+      title: "Draft",
+    });
+    const filtered = await call("GET", "/specs?state=draft");
+    expect(
+      filtered.body.specs.map((s: Json) => `${s.displayId}:${s.state}`),
+    ).toEqual(["S-2:draft"]);
+  });
+
+  it("filters by title or display id before paging", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    expect(
+      (
+        await call("POST", "/specs", {
+          projectId: created.body.id,
+          type: "feature",
+          slug: "alpha",
+          title: "Alpha export",
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await call("POST", "/specs", {
+          projectId: created.body.id,
+          type: "bug",
+          slug: "beta",
+          title: "Beta checkout",
+        })
+      ).status,
+    ).toBe(201);
+    const byTitle = await call("GET", "/specs?q=Alpha");
+    expect(byTitle.body.specs.map((s: Json) => s.displayId)).toEqual(["S-1"]);
+    const byId = await call("GET", "/specs?q=S-2");
+    expect(byId.body.specs.map((s: Json) => s.displayId)).toEqual(["S-2"]);
+  });
+
+  it("filters by the owner/name shown on the list", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "https://github.com/acme/shop-backend.git",
+      name: "backend",
+    });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "https://github.com/other/app.git",
+      name: "app",
+    });
+    const first = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "one",
+      title: "One",
+    });
+    const second = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "two",
+      title: "Two",
+    });
+    await db.pool.query("UPDATE specs SET planning_repo_id = 1 WHERE id = $1", [
+      first.body.id,
+    ]);
+    await db.pool.query("UPDATE specs SET planning_repo_id = 2 WHERE id = $1", [
+      second.body.id,
+    ]);
+    const filtered = await call("GET", "/specs?repo=other/app");
+    expect(filtered.body.specs.map((s: Json) => s.displayId)).toEqual(["S-2"]);
+  });
+
+  it("sorts by state on the server", async () => {
+    await runningSpec([ticket("a")]);
+    const created = await call("POST", "/projects", { name: "other" });
+    await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "bug",
+      slug: "draft",
+      title: "Draft",
+    });
+    const sorted = await call("GET", "/specs?sort=state&dir=asc");
+    expect(
+      sorted.body.specs.map((s: Json) => `${s.displayId}:${s.state}`),
+    ).toEqual(["S-1:running", "S-2:draft"]);
+  });
+
+  it("pages by progress without repeating a spec", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    for (const [slug, tickets] of [
+      ["none", [ticket("n")]],
+      ["half", [ticket("h1"), ticket("h2")]],
+      ["done", [ticket("d")]],
+    ] as const) {
+      const spec = await call("POST", "/specs", {
+        projectId: created.body.id,
+        type: "feature",
+        slug,
+        title: slug,
+      });
+      expect(
+        (
+          await call(
+            "POST",
+            `/specs/${spec.body.id}/tickets/import`,
+            importBody(spec.body.id, { tickets: [...tickets] }),
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (await call("POST", `/specs/${spec.body.id}/confirm`)).status,
+      ).toBe(200);
+    }
+    await db.pool.query(
+      "UPDATE tickets SET state = 'done' WHERE title IN ('Ticket h1', 'Ticket d')",
+    );
+    const first = await call("GET", "/specs?sort=progress&dir=asc&limit=2");
+    expect(
+      first.body.specs.map(
+        (s: Json) => `${s.displayId}:${s.progress.done}/${s.progress.total}`,
+      ),
+    ).toEqual(["S-1:0/1", "S-2:1/2"]);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const second = await call(
+      "GET",
+      `/specs?sort=progress&dir=asc&limit=2&cursor=${encodeURIComponent(first.body.nextCursor)}`,
+    );
+    expect(
+      second.body.specs.map(
+        (s: Json) => `${s.displayId}:${s.progress.done}/${s.progress.total}`,
+      ),
+    ).toEqual(["S-3:1/1"]);
+    expect(second.body.nextCursor).toBeNull();
   });
 });
 
@@ -1216,7 +1444,7 @@ describe("what a person sees", () => {
       },
     });
     expect(queue.body.tickets[0].brief.logPath).toMatch(/^\/runs\/\d+\/logs$/);
-    expect(queue.body.specs).toEqual([
+    expect(queue.body.specs).toMatchObject([
       {
         id: specId,
         displayId: "S-1",
@@ -1236,7 +1464,147 @@ describe("what a person sees", () => {
       readyFailures: [],
       planning: [],
       specs: [],
+      items: [],
     });
+  });
+
+  it("ranks a ticket that blocks unfinished downstream ahead of a paused spec", async () => {
+    await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c", { blocked_by: ["b"] }),
+    ]);
+    await stage("implement", GAVE_UP);
+    const other = await call("POST", "/projects", { name: "other" });
+    await call("POST", `/projects/${other.body.id}/repos`, {
+      url: "git@x:other",
+      name: "other",
+    });
+    const paused = await call("POST", "/specs", {
+      projectId: other.body.id,
+      type: "bug",
+      slug: "paused",
+      title: "Paused",
+    });
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = $1",
+      [paused.body.id],
+    );
+
+    const queue = (await call("GET", "/blocked")).body;
+    expect(queue.tickets[0]).toMatchObject({
+      displayId: "T-1",
+      blocking: {
+        downstream: ["T-2", "T-3"],
+        finalization: true,
+        pullRequests: false,
+        spec: false,
+        merge: false,
+      },
+    });
+    expect(queue.specs[0]).toMatchObject({
+      displayId: `S-${paused.body.id}`,
+      blocking: {
+        downstream: [],
+        finalization: false,
+        pullRequests: false,
+        spec: true,
+        merge: false,
+      },
+    });
+    expect(queue.items[0]).toEqual({ kind: "ticket", id: 1 });
+    expect(queue.items.map((item: Json) => item.kind)).toEqual([
+      "ticket",
+      "pausedSpec",
+    ]);
+  });
+
+  it("ranks a stuck finalization ahead of a failed cleanup", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id, step, state, blocked_reason) VALUES ($1, 1, 'final-review', 'blocked', 'job-failed')",
+      [specId],
+    );
+    const other = await call("POST", "/projects", { name: "other" });
+    await call("POST", `/projects/${other.body.id}/repos`, {
+      url: "git@x:other",
+      name: "other",
+    });
+    const cleaned = await call("POST", "/specs", {
+      projectId: other.body.id,
+      type: "bug",
+      slug: "gone",
+      title: "Gone",
+    });
+    await db.pool.query("UPDATE specs SET state = 'cancelled' WHERE id = $1", [
+      cleaned.body.id,
+    ]);
+    await db.pool.query(
+      `INSERT INTO jobs (type, payload, state, idempotency_key, error)
+       VALUES ('spec-cleanup', $1::jsonb, 'failed', 'cleanup-gone', 'GitHub answered 503')`,
+      [JSON.stringify({ specId: cleaned.body.id })],
+    );
+
+    const queue = (await call("GET", "/blocked")).body;
+    expect(queue.finalizations[0]).toMatchObject({
+      specDisplayId: "S-1",
+      blocking: {
+        downstream: [],
+        finalization: false,
+        pullRequests: true,
+        spec: false,
+        merge: false,
+      },
+    });
+    expect(queue.cleanups[0]).toMatchObject({
+      specDisplayId: `S-${cleaned.body.id}`,
+      blocking: {
+        downstream: [],
+        finalization: false,
+        pullRequests: false,
+        spec: false,
+        merge: false,
+      },
+    });
+    expect(queue.items.map((item: Json) => item.kind)).toEqual([
+      "finalization",
+      "cleanup",
+    ]);
+  });
+
+  it("takes waitingSince from the latest related Run finished_at", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    const finished = new Date("2026-11-01T04:00:00.000Z");
+    await db.pool.query(
+      "UPDATE runs SET finished_at = $1 WHERE ticket_id = 1",
+      [finished],
+    );
+    const queue = (await call("GET", "/blocked")).body;
+    expect(queue.tickets[0].waitingSince).toBe(finished.toISOString());
+  });
+
+  it("keeps an upstream-cancelled ticket in the waiting queue by the unfinished tickets it still blocks", async () => {
+    await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c", { blocked_by: ["b"] }),
+    ]);
+    await stage("implement", GAVE_UP);
+    await call("POST", "/tickets/1/cancel", { cascade: false });
+    const queue = (await call("GET", "/blocked")).body;
+    expect(queue.tickets.map((t: Json) => t.displayId)).toEqual(["T-2"]);
+    expect(queue.tickets[0].blocking.downstream).toEqual(["T-3"]);
+    expect(queue.items[0]).toEqual({ kind: "ticket", id: 2 });
+  });
+
+  it("does not list a pending ticket in the waiting queue", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    const queue = (await call("GET", "/blocked")).body;
+    expect(queue.tickets).toEqual([]);
+    expect(queue.items).toEqual([]);
   });
 
   it("shows a ticket with its runs, findings, gate results and neighbours", async () => {

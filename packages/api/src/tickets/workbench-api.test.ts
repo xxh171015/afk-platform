@@ -124,21 +124,22 @@ describe("GET /workbench", () => {
     const reply = await call("GET", "/workbench");
     expect(reply.status).toBe(200);
     expect(reply.body.waiting.tickets).toEqual([
-      expect.objectContaining({
+      {
         id: ticketId,
         displayId: `T-${ticketId}`,
-        state: "blocked",
+        specId,
+        title: "Ticket a",
         blockedReason: "agent-gave-up",
-      }),
+      },
     ]);
     expect(reply.body.waiting.specs).toEqual([
       {
         id: specId,
         displayId: `S-${specId}`,
         title: "Stuck spec",
-        reason: "the agent time limit of the spec was reached",
       },
     ]);
+    expect(reply.body.waiting.items).toBeUndefined();
     expect(reply.body.running).toEqual([]);
   });
 
@@ -373,5 +374,52 @@ describe("GET /workbench", () => {
     ).toEqual([second, first]);
     expect(completed[0].completedAt).toBe(newer.toISOString());
     expect(completed[1].completedAt).toBe(older.toISOString());
+  });
+
+  it("does not return every historical spec when many merged specs exist", async () => {
+    const projectId = await projectAndRepo();
+    for (let n = 1; n <= 12; n++) {
+      const specId = await confirmedSpec(projectId, `old-${n}`, `Old ${n}`, [
+        ticketFile(`old-${n}`),
+      ]);
+      await db.pool.query("UPDATE specs SET state = 'merged' WHERE id = $1", [
+        specId,
+      ]);
+      await db.pool.query(
+        "UPDATE tickets SET state = 'done' WHERE spec_id = $1",
+        [specId],
+      );
+      await db.pool.query(
+        `INSERT INTO runs (spec_id, repo_id, stage, duration_ms, started_at, finished_at)
+         VALUES ($1, 1, 'implement', 1000, $2, $3)`,
+        [
+          specId,
+          new Date(clock.now().getTime() - 2000),
+          new Date(clock.now().getTime() - 1000),
+        ],
+      );
+    }
+    const runningId = await confirmedSpec(projectId, "now", "Now", [
+      ticketFile("now"),
+    ]);
+    const ticketId = (await call("GET", `/specs/${runningId}`)).body.tickets[0]
+      .id as number;
+    await db.pool.query("UPDATE tickets SET state = 'running' WHERE id = $1", [
+      ticketId,
+    ]);
+
+    const reply = await call("GET", "/workbench");
+    expect(
+      reply.body.running.map((row: { spec: { id: number } }) => row.spec.id),
+    ).toEqual([runningId]);
+    expect(reply.body.recentlyCompleted).toHaveLength(10);
+    expect(reply.body.awaitingAcceptance).toEqual([]);
+    const ids = [
+      ...reply.body.running.map((row: { spec: { id: number } }) => row.spec.id),
+      ...reply.body.recentlyCompleted.map(
+        (row: { spec: { id: number } }) => row.spec.id,
+      ),
+    ];
+    expect(ids).not.toContain(1);
   });
 });
