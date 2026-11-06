@@ -1,9 +1,14 @@
 import { formatDisplayId, isSlowStage, type SpecState } from "@afk/shared";
 import type pg from "pg";
-import { blockedQueue, type Progress, specList } from "./views.ts";
+import {
+  blockedQueue,
+  type Progress,
+  type SpecListItem,
+  specListItems,
+} from "./views.ts";
 
 // The control-tower home: four quadrants a person glances at instead of a spec table
-// (docs/specs/experience-platform.md「工作台与导航」).
+// (docs/specs/experience-platform.md「工作台与导航」). Waiting is the waiting queue without briefs.
 
 export interface WorkbenchSpec {
   id: number;
@@ -14,6 +19,9 @@ export interface WorkbenchSpec {
   state: SpecState;
   pauseReason: string | null;
   project: string;
+  repos: SpecListItem["repos"];
+  startedAt: string;
+  endedAt: string | null;
   progress: Progress;
 }
 
@@ -30,8 +38,23 @@ export interface RunningTicket {
   slow: boolean;
 }
 
+type RankedQueue = Awaited<ReturnType<typeof blockedQueue>>;
+
+function dropBrief<T extends { brief?: unknown }>(item: T): Omit<T, "brief"> {
+  const { brief: _brief, ...rest } = item;
+  return rest;
+}
+
+function slimWaiting(queue: RankedQueue) {
+  return {
+    ...queue,
+    tickets: queue.tickets.map(dropBrief),
+    finalizations: queue.finalizations.map(dropBrief),
+  };
+}
+
 export interface Workbench {
-  waiting: Awaited<ReturnType<typeof blockedQueue>>;
+  waiting: ReturnType<typeof slimWaiting>;
   running: { spec: WorkbenchSpec; tickets: RunningTicket[] }[];
   awaitingAcceptance: {
     spec: WorkbenchSpec;
@@ -66,10 +89,17 @@ function criteriaCounts(content: unknown): {
   };
 }
 
+async function specIdsIn(
+  pool: pg.Pool,
+  sql: string,
+  params: unknown[] = [],
+): Promise<number[]> {
+  const { rows } = await pool.query<{ id: number }>(sql, params);
+  return rows.map((row) => row.id);
+}
+
 export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
-  const list = await specList(pool);
-  const byId = new Map(list.map((spec) => [spec.id, spec]));
-  const waiting = await blockedQueue(pool);
+  const waiting = slimWaiting(await blockedQueue(pool, { brief: false }));
 
   const means = await pool.query<{
     project_id: number;
@@ -137,15 +167,23 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
     ticketsBySpec.set(row.spec_id, listFor);
   }
 
-  const running = list
-    .filter((spec) => spec.state === "running")
-    .map((spec) => ({ spec, tickets: ticketsBySpec.get(spec.id) ?? [] }));
-
-  const reviewSpecs = list.filter(
-    (spec) =>
-      spec.state === "awaiting-review" || spec.state === "partially-merged",
+  const runningIds = await specIdsIn(
+    pool,
+    "SELECT id FROM specs WHERE state = 'running' ORDER BY created_at DESC, id DESC",
   );
-  const reviewIds = reviewSpecs.map((spec) => spec.id);
+  const runningSpecs = await specListItems(pool, runningIds);
+  const running = runningSpecs.map((spec) => ({
+    spec,
+    tickets: ticketsBySpec.get(spec.id) ?? [],
+  }));
+
+  const reviewIds = await specIdsIn(
+    pool,
+    `SELECT id FROM specs
+     WHERE state IN ('awaiting-review', 'partially-merged')
+     ORDER BY created_at DESC, id DESC`,
+  );
+  const reviewSpecs = await specListItems(pool, reviewIds);
   const prCounts = new Map<number, number>();
   const verified = new Map<number, { verified: number; total: number }>();
   if (reviewIds.length > 0) {
@@ -189,8 +227,13 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
     [RECENT_LIMIT],
   );
 
+  const completedSpecs = await specListItems(
+    pool,
+    completedRows.rows.map((row) => row.id),
+  );
+  const completedById = new Map(completedSpecs.map((spec) => [spec.id, spec]));
   const recentlyCompleted = completedRows.rows.flatMap((row) => {
-    const spec = byId.get(row.id);
+    const spec = completedById.get(row.id);
     return spec ? [{ spec, completedAt: row.completed_at.toISOString() }] : [];
   });
 

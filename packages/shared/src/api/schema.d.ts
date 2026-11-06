@@ -603,14 +603,46 @@ export interface paths {
     };
     get: {
       parameters: {
-        query?: never;
+        query?: {
+          limit?: number;
+          cursor?: string;
+          q?: string;
+          state?:
+            | (
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled"
+              )
+            | (
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled"
+              )[];
+          repo?: string;
+          sort?: "startedAt" | "state" | "progress";
+          dir?: "asc" | "desc";
+        };
         header?: never;
         path?: never;
         cookie?: never;
       };
       requestBody?: never;
       responses: {
-        /** @description Every spec, newest first, with the progress of its tickets */
+        /** @description A page of specs, newest first unless sort says otherwise, with the progress of their tickets */
         200: {
           headers: {
             [name: string]: unknown;
@@ -654,6 +686,7 @@ export interface paths {
                   cancelled: number;
                 };
               }[];
+              nextCursor: string | null;
             };
           };
         };
@@ -2128,6 +2161,14 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
                 body: string;
                 acceptanceCriteria: string[];
                 modules: string[];
@@ -2497,8 +2538,17 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               finalizations: {
+                id: number;
                 specId: number;
                 specDisplayId: string;
                 repo: string;
@@ -2549,6 +2599,14 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               mergeOrder: {
                 ordered: string[];
@@ -2932,8 +2990,17 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               finalizations: {
+                id: number;
                 specId: number;
                 specDisplayId: string;
                 repo: string;
@@ -2984,6 +3051,14 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               pullRequests: {
                 specId: number;
@@ -2993,11 +3068,27 @@ export interface paths {
                 url: string;
                 state: string;
                 syncError: string | null;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               cleanups: {
                 specId: number;
                 specDisplayId: string;
                 error: string;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               readyFailures: {
                 specId: number;
@@ -3006,6 +3097,14 @@ export interface paths {
                 number: number;
                 url: string;
                 error: string;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               planning: {
                 specId: number;
@@ -3013,13 +3112,71 @@ export interface paths {
                 title: string;
                 repo: string;
                 files: string[];
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
               specs: {
                 id: number;
                 displayId: string;
                 title: string;
                 reason: string;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
               }[];
+              items: (
+                | {
+                    /** @enum {string} */
+                    kind: "ticket";
+                    id: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "finalization";
+                    id: number;
+                    step: string;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "pullRequest";
+                    specId: number;
+                    repo: string;
+                    number: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "cleanup";
+                    specId: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "readyFailure";
+                    specId: number;
+                    repo: string;
+                    number: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "planning";
+                    specId: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "pausedSpec";
+                    id: number;
+                  }
+              )[];
             };
           };
         };
@@ -3081,102 +3238,31 @@ export interface paths {
                   refs: string[];
                   environment: string[];
                   appended: boolean;
-                  brief: {
-                    run: {
-                      id: number;
-                      displayId: string;
-                    };
-                    stage: string;
-                    result: string | null;
-                    output?: unknown;
-                    logPath: string;
-                    attempts?: {
-                      e2e: {
-                        id: number;
-                        displayId: string;
-                        result: string | null;
-                        testsTotal: number | null;
-                        testsFailed: number | null;
-                        envUpMs: number | null;
-                        refShas: {
-                          [key: string]: string;
-                        } | null;
-                        headSha: string | null;
-                      };
-                      diagnosis: {
-                        result: string | null;
-                        failingRepo: string | null;
-                        evidence: string;
-                        failingTests: string[];
-                      } | null;
-                      fixTicket: {
-                        id: number;
-                        displayId: string;
-                        /** @enum {string} */
-                        state:
-                          | "pending"
-                          | "queued"
-                          | "running"
-                          | "merging"
-                          | "done"
-                          | "blocked"
-                          | "cancelled";
-                        repo: string;
-                      } | null;
-                    }[];
-                  } | null;
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
                 finalizations: {
+                  id: number;
                   specId: number;
                   specDisplayId: string;
                   repo: string;
                   step: string;
                   state: string;
                   blockedReason: string | null;
-                  brief: {
-                    run: {
-                      id: number;
-                      displayId: string;
-                    };
-                    stage: string;
-                    result: string | null;
-                    output?: unknown;
-                    logPath: string;
-                    attempts?: {
-                      e2e: {
-                        id: number;
-                        displayId: string;
-                        result: string | null;
-                        testsTotal: number | null;
-                        testsFailed: number | null;
-                        envUpMs: number | null;
-                        refShas: {
-                          [key: string]: string;
-                        } | null;
-                        headSha: string | null;
-                      };
-                      diagnosis: {
-                        result: string | null;
-                        failingRepo: string | null;
-                        evidence: string;
-                        failingTests: string[];
-                      } | null;
-                      fixTicket: {
-                        id: number;
-                        displayId: string;
-                        /** @enum {string} */
-                        state:
-                          | "pending"
-                          | "queued"
-                          | "running"
-                          | "merging"
-                          | "done"
-                          | "blocked"
-                          | "cancelled";
-                        repo: string;
-                      } | null;
-                    }[];
-                  } | null;
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
                 pullRequests: {
                   specId: number;
@@ -3186,11 +3272,27 @@ export interface paths {
                   url: string;
                   state: string;
                   syncError: string | null;
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
                 cleanups: {
                   specId: number;
                   specDisplayId: string;
                   error: string;
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
                 readyFailures: {
                   specId: number;
@@ -3199,6 +3301,14 @@ export interface paths {
                   number: number;
                   url: string;
                   error: string;
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
                 planning: {
                   specId: number;
@@ -3206,13 +3316,71 @@ export interface paths {
                   title: string;
                   repo: string;
                   files: string[];
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
                 specs: {
                   id: number;
                   displayId: string;
                   title: string;
                   reason: string;
+                  waitingSince?: string;
+                  blocking?: {
+                    downstream: string[];
+                    finalization: boolean;
+                    pullRequests: boolean;
+                    spec: boolean;
+                    merge: boolean;
+                  };
                 }[];
+                items: (
+                  | {
+                      /** @enum {string} */
+                      kind: "ticket";
+                      id: number;
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "finalization";
+                      id: number;
+                      step: string;
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "pullRequest";
+                      specId: number;
+                      repo: string;
+                      number: number;
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "cleanup";
+                      specId: number;
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "readyFailure";
+                      specId: number;
+                      repo: string;
+                      number: number;
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "planning";
+                      specId: number;
+                    }
+                  | {
+                      /** @enum {string} */
+                      kind: "pausedSpec";
+                      id: number;
+                    }
+                )[];
               };
               running: {
                 spec: {

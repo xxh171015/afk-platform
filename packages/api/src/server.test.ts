@@ -41,7 +41,7 @@ describe("the API process", () => {
     expect(HOST).toBe("127.0.0.1");
     expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     const reply = await fetch(`${server.url}/specs`);
-    expect(await reply.json()).toEqual({ specs: [] });
+    expect(await reply.json()).toEqual({ specs: [], nextCursor: null });
   });
 
   it("lets the page on localhost call it from a browser, and nobody else", async () => {

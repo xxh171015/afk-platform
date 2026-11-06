@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { cn } from "./lib/utils.ts";
 import {
-  groupLog,
+  emptyLogCheckpoint,
+  groupedLogFrom,
+  ingestLog,
   LOG_OUTPUT_MAX_LINES,
   LOG_THOUGHT_MAX_LINES,
   type LogAction,
@@ -19,8 +21,9 @@ export const LOG_POLL_MS = 3_000;
 interface Position {
   attempt: number | undefined;
   offset: number;
-  text: string;
 }
+
+const LOG_ROW_PX = 72;
 
 const actionClass: Record<LogAction, string> = {
   读取: "text-terminal-cyan border-terminal-cyan/30",
@@ -40,12 +43,16 @@ export function RunLog({
 }) {
   const api = useApi();
   const scroller = useRef<HTMLDivElement>(null);
+  const checkpoint = useRef(emptyLogCheckpoint());
   const [follow, setFollow] = useState(true);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [clientHeight, setClientHeight] = useState(0);
   const [position, setPosition] = useState<Position>({
     attempt: undefined,
     offset: 0,
-    text: "",
   });
+  const positionRef = useRef(position);
+  positionRef.current = position;
 
   const slice = useQuery({
     queryKey: ["log", runId, position.attempt, position.offset],
@@ -65,40 +72,48 @@ export function RunLog({
   const data = slice.data;
   useEffect(() => {
     if (!data) return;
-    setPosition((current) => {
-      if (current.attempt !== undefined && data.attempt !== current.attempt) {
-        return { attempt: data.attempt, offset: 0, text: "" };
-      }
-      if (data.offset !== current.offset) return current;
-      if (
-        data.nextOffset === current.offset &&
-        current.attempt === data.attempt
-      )
-        return current;
-      return {
-        attempt: data.attempt,
-        offset: data.nextOffset,
-        text: current.text + data.text,
-      };
-    });
+    const current = positionRef.current;
+    if (current.attempt !== undefined && data.attempt !== current.attempt) {
+      checkpoint.current = emptyLogCheckpoint();
+      const next = { attempt: data.attempt, offset: 0 };
+      positionRef.current = next;
+      setPosition(next);
+      return;
+    }
+    if (data.offset !== current.offset) return;
+    if (data.nextOffset === current.offset && current.attempt === data.attempt)
+      return;
+    const caughtUp = Boolean(data.finished && data.nextOffset >= data.size);
+    ingestLog(checkpoint.current, data.text, { flushRemainder: caughtUp });
+    const next = { attempt: data.attempt, offset: data.nextOffset };
+    positionRef.current = next;
+    setPosition(next);
   }, [data]);
 
   const caughtUp = Boolean(data?.finished && data.nextOffset >= data.size);
-  const grouped = groupLog(position.text, { flushRemainder: caughtUp });
+  const grouped = groupedLogFrom(checkpoint.current);
+  const blockCount =
+    grouped.before.length +
+    grouped.after.length +
+    grouped.sessions.reduce((n, session) => n + session.blocks.length, 0);
+  const hasLog = blockCount > 0 || grouped.remainder !== "";
 
   useEffect(() => {
     const el = scroller.current;
-    if (!follow || !el || position.text === "") return;
+    if (!el || (blockCount === 0 && grouped.remainder === "")) return;
+    setClientHeight(el.clientHeight);
+    setScrollTop(el.scrollTop);
+    if (!follow) return;
     el.scrollTop = el.scrollHeight;
-  }, [follow, position.text]);
+  }, [follow, blockCount, grouped.remainder]);
 
-  if (slice.isError && position.text === "")
+  if (slice.isError && !hasLog)
     return (
       <p className="text-sm text-state-blocked" role="alert">
         无法加载日志: {slice.error.message}
       </p>
     );
-  if (position.text === "") {
+  if (!hasLog) {
     return (
       <section
         aria-label="日志查看器"
@@ -147,25 +162,91 @@ export function RunLog({
           const atBottom =
             el.scrollHeight - el.scrollTop - el.clientHeight < 24;
           setFollow(atBottom);
+          setScrollTop(el.scrollTop);
+          setClientHeight(el.clientHeight);
         }}
       >
-        <div className="space-y-2">
-          {grouped.before.map((block) => (
-            <LogBlockView key={block.key} block={block} />
-          ))}
-          {sessions.map((session) => (
-            <SessionView key={session.id} session={session} />
-          ))}
-          {grouped.after.map((block) => (
-            <LogBlockView key={block.key} block={block} />
-          ))}
-        </div>
+        <LogWindow
+          before={grouped.before}
+          sessions={sessions}
+          after={grouped.after}
+          follow={follow}
+          scrollTop={scrollTop}
+          clientHeight={clientHeight}
+        />
       </div>
     </section>
   );
 }
 
-function SessionView({ session }: { session: LogSession }) {
+function LogWindow({
+  before,
+  sessions,
+  after,
+  follow,
+  scrollTop,
+  clientHeight,
+}: {
+  before: LogBlock[];
+  sessions: LogSession[];
+  after: LogBlock[];
+  follow: boolean;
+  scrollTop: number;
+  clientHeight: number;
+}) {
+  const rows: (
+    | { key: string; kind: "block"; block: LogBlock }
+    | { key: string; kind: "session"; session: LogSession }
+  )[] = [
+    ...before.map((block) => ({
+      key: block.key,
+      kind: "block" as const,
+      block,
+    })),
+    ...sessions.flatMap((session) => [
+      {
+        key: `session-${session.id}`,
+        kind: "session" as const,
+        session,
+      },
+      ...session.blocks.map((block) => ({
+        key: block.key,
+        kind: "block" as const,
+        block,
+      })),
+    ]),
+    ...after.map((block) => ({
+      key: block.key,
+      kind: "block" as const,
+      block,
+    })),
+  ];
+  // jsdom and the first layout have no measured height; 36rem matches max-h on the scroller.
+  const viewport = clientHeight > 0 ? clientHeight : 576;
+  const extra = 8;
+  const visible = Math.ceil(viewport / LOG_ROW_PX) + extra * 2;
+  const start = follow
+    ? Math.max(0, rows.length - visible)
+    : Math.max(0, Math.floor(scrollTop / LOG_ROW_PX) - extra);
+  const end = Math.min(rows.length, start + visible);
+  return (
+    <div className="space-y-2">
+      <div style={{ height: start * LOG_ROW_PX }} />
+      {rows
+        .slice(start, end)
+        .map((row) =>
+          row.kind === "session" ? (
+            <SessionHeader key={row.key} session={row.session} />
+          ) : (
+            <LogBlockView key={row.key} block={row.block} />
+          ),
+        )}
+      <div style={{ height: (rows.length - end) * LOG_ROW_PX }} />
+    </div>
+  );
+}
+
+function SessionHeader({ session }: { session: LogSession }) {
   const duration = formatCompactDuration(session.durationMs);
   const heading = [
     session.label,
@@ -174,22 +255,9 @@ function SessionView({ session }: { session: LogSession }) {
     .filter(Boolean)
     .join(" · ");
   return (
-    <details
-      open
-      className="group rounded-md border border-white/10 bg-white/[0.04]"
-    >
-      <summary className="cursor-pointer list-none px-3 py-2 font-sans text-xs text-terminal-muted marker:content-none [&::-webkit-details-marker]:hidden">
-        <span className="inline-flex items-center gap-2">
-          <Chevron />
-          {heading || "会话"}
-        </span>
-      </summary>
-      <div className="space-y-2 border-t border-white/10 px-3 py-2">
-        {session.blocks.map((block) => (
-          <LogBlockView key={block.key} block={block} />
-        ))}
-      </div>
-    </details>
+    <p className="px-3 py-2 font-sans text-xs text-terminal-muted">
+      {heading || "会话"}
+    </p>
   );
 }
 

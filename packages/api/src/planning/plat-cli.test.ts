@@ -65,7 +65,7 @@ async function plat(...args: string[]) {
     stderr: (text) => {
       stderr += text;
     },
-    env: { AFK_API_URL: api.url },
+    env: { AFK_API_URL: api.url, AFK_ACCESS_WAIT_SECONDS: "0" },
     readFile: async (path) => {
       if (path === "docs/agents/issue-tracker.md")
         return await committedTrackerDoc(api.url);
@@ -602,6 +602,22 @@ describe("plat", () => {
       brief: { stage: "implement" },
     });
     expect(json.specs).toEqual([]);
+    expect(json.items[0]).toEqual({ kind: "ticket", id: json.tickets[0].id });
+  });
+
+  it("lists waiting items in the same order as items", async () => {
+    await blockedContract();
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = 1",
+    );
+    const json = JSON.parse((await plat("--json", "blocked")).stdout);
+    const text = await plat("blocked");
+    expect(json.items[0]).toEqual({ kind: "ticket", id: 1 });
+    expect(json.items.map((item: { kind: string }) => item.kind)).toEqual([
+      "ticket",
+      "pausedSpec",
+    ]);
+    expect(text.stdout.split("\n")[0]).toContain("T-1");
   });
 
   it("says so when nothing waits", async () => {

@@ -40,7 +40,9 @@ export const emptyWaiting = {
   pullRequests: [] as unknown[],
   cleanups: [] as unknown[],
   readyFailures: [] as unknown[],
+  planning: [] as unknown[],
   specs: [] as unknown[],
+  items: [] as unknown[],
 };
 
 export const emptyWorkbench = {

@@ -1,5 +1,10 @@
 import type { SpecState } from "@afk/shared";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+} from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ArrowUpDown, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
@@ -103,22 +108,63 @@ function SortHeader({
 export function SpecList() {
   const api = useApi();
   const poll = useResourcePoll(LIST_POLL_MS);
-  const specs = useQuery({
-    queryKey: ["specs"],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/specs");
-      if (!data) throw new Error(describeError(error));
-      return data.specs;
-    },
-    refetchInterval: poll,
-    placeholderData: keepPreviousData,
-  });
-  const all = useMemo(() => specs.data ?? [], [specs.data]);
-
   const [states, setStates] = useState<Set<SpecState>>(new Set());
   const [project, setProject] = useState("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const filters = {
+    q: q.trim() || undefined,
+    state: states.size > 0 ? [...states] : undefined,
+    repo: project === "all" ? undefined : project,
+    sort: sort.key,
+    dir: sort.dir,
+  };
+  const specs = useInfiniteQuery({
+    queryKey: ["specs", filters],
+    queryFn: async ({ pageParam }) => {
+      const { data, error } = await api.GET("/specs", {
+        params: {
+          query: {
+            limit: 50,
+            cursor: pageParam,
+            q: filters.q,
+            state: filters.state,
+            repo: filters.repo,
+            sort: filters.sort,
+            dir: filters.dir,
+          },
+        },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
+  });
+  const all = useMemo(
+    () => specs.data?.pages.flatMap((page) => page.specs) ?? [],
+    [specs.data],
+  );
+  const registered = useQuery({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const { data } = await api.GET("/projects");
+      return data?.projects ?? [];
+    },
+  });
+  const projectViews = useQueries({
+    queries: (registered.data ?? []).map((row) => ({
+      queryKey: ["project", row.id],
+      queryFn: async () => {
+        const { data } = await api.GET("/projects/{projectId}", {
+          params: { path: { projectId: row.id } },
+        });
+        return data;
+      },
+    })),
+  });
 
   const stateCounts = useMemo(() => {
     const m = new Map<SpecState, number>();
@@ -127,41 +173,17 @@ export function SpecList() {
   }, [all]);
   const projects = useMemo(() => {
     const names = new Set<string>();
+    if (project !== "all") names.add(project);
+    for (const view of projectViews) {
+      for (const repo of view.data?.repos ?? [])
+        names.add(repoLabel(repo).label);
+    }
     for (const s of all) {
       for (const repo of s.repos ?? []) names.add(repoLabel(repo).label);
     }
     return [...names].sort();
-  }, [all]);
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const rows = all.filter(
-      (s) =>
-        (states.size === 0 || states.has(s.state)) &&
-        (project === "all" ||
-          (s.repos ?? []).some((repo) => repoLabel(repo).label === project)) &&
-        (needle === "" ||
-          s.title.toLowerCase().includes(needle) ||
-          s.displayId.toLowerCase().includes(needle)),
-    );
-    const dir = sort.dir === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => {
-      if (sort.key === "startedAt") {
-        const d = a.startedAt.localeCompare(b.startedAt);
-        return d !== 0 ? d * dir : (a.id - b.id) * dir;
-      }
-      if (sort.key === "state") {
-        const d = STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state);
-        return d !== 0 ? d * dir : a.displayId.localeCompare(b.displayId);
-      }
-      const ratio = (s: (typeof all)[number]) =>
-        s.progress.total === 0 ? 0 : s.progress.done / s.progress.total;
-      const d = ratio(a) - ratio(b);
-      if (d !== 0) return d * dir;
-      const bd = a.progress.blocked - b.progress.blocked;
-      return bd !== 0 ? bd * dir : a.displayId.localeCompare(b.displayId);
-    });
-  }, [all, states, project, q, sort]);
+  }, [all, project, projectViews]);
+  const filtered = all;
 
   const filtering = states.size > 0 || project !== "all" || q.trim() !== "";
   const clearFilters = () => {
@@ -187,7 +209,7 @@ export function SpecList() {
           <p className="sr-only">加载需求…</p>
           <RowsSkeleton rows={8} />
         </>
-      ) : all.length === 0 ? (
+      ) : all.length === 0 && !filtering ? (
         <EmptyState
           title="还没有需求"
           description={
@@ -230,7 +252,7 @@ export function SpecList() {
               className="flex flex-wrap items-center gap-1 border-0 p-0"
               aria-label="按状态筛选"
             >
-              {STATE_ORDER.filter((st) => stateCounts.has(st)).map((st) => {
+              {STATE_ORDER.map((st) => {
                 const on = states.has(st);
                 return (
                   <button
@@ -254,9 +276,11 @@ export function SpecList() {
                     )}
                   >
                     {specStateLabel(st)}
-                    <span className="tabular text-subtle-foreground">
-                      {stateCounts.get(st)}
-                    </span>
+                    {stateCounts.has(st) ? (
+                      <span className="tabular text-subtle-foreground">
+                        {stateCounts.get(st)}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -403,6 +427,16 @@ export function SpecList() {
               </div>
             </div>
           )}
+          {specs.hasNextPage ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={specs.isFetchingNextPage}
+              onClick={() => void specs.fetchNextPage()}
+            >
+              加载更多
+            </Button>
+          ) : null}
         </div>
       )}
     </Page>

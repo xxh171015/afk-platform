@@ -95,33 +95,71 @@ const RepoIdentity = z.object({
   hostKind: z.enum(HOST_KINDS),
 });
 
-const TicketSummary = z.object({
-  id: Id,
-  displayId: z.string(),
-  specId: Id,
-  specDisplayId: z.string(),
-  title: z.string(),
-  type: z.string(),
-  state: z.enum(TICKET_STATES),
-  blockedReason: z.string().nullable(),
-  repo: z.string(),
-  repoUrl: z.string(),
-  hostKind: z.enum(HOST_KINDS),
-  refs: z.array(z.string()),
-  environment: z.array(z.string()),
-  appended: z.boolean(),
-  brief: Brief,
+const Blocking = z.object({
+  downstream: z.array(z.string()),
+  finalization: z.boolean(),
+  pullRequests: z.boolean(),
+  spec: z.boolean(),
+  merge: z.boolean(),
 });
 
-const Finalization = z.object({
-  specId: Id,
-  specDisplayId: z.string(),
-  repo: z.string(),
-  step: z.string(),
-  state: z.string(),
-  blockedReason: z.string().nullable(),
-  brief: Brief,
+const WaitingFields = z.object({
+  waitingSince: z.string().optional(),
+  blocking: Blocking.optional(),
 });
+
+const WaitingRef = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("ticket"), id: Id }),
+  z.object({ kind: z.literal("finalization"), id: Id, step: z.string() }),
+  z.object({
+    kind: z.literal("pullRequest"),
+    specId: Id,
+    repo: z.string(),
+    number: z.number().int(),
+  }),
+  z.object({ kind: z.literal("cleanup"), specId: Id }),
+  z.object({
+    kind: z.literal("readyFailure"),
+    specId: Id,
+    repo: z.string(),
+    number: z.number().int(),
+  }),
+  z.object({ kind: z.literal("planning"), specId: Id }),
+  z.object({ kind: z.literal("pausedSpec"), id: Id }),
+]);
+
+const TicketSummary = z
+  .object({
+    id: Id,
+    displayId: z.string(),
+    specId: Id,
+    specDisplayId: z.string(),
+    title: z.string(),
+    type: z.string(),
+    state: z.enum(TICKET_STATES),
+    blockedReason: z.string().nullable(),
+    repo: z.string(),
+    repoUrl: z.string(),
+    hostKind: z.enum(HOST_KINDS),
+    refs: z.array(z.string()),
+    environment: z.array(z.string()),
+    appended: z.boolean(),
+    brief: Brief,
+  })
+  .merge(WaitingFields);
+
+const Finalization = z
+  .object({
+    id: Id,
+    specId: Id,
+    specDisplayId: z.string(),
+    repo: z.string(),
+    step: z.string(),
+    state: z.string(),
+    blockedReason: z.string().nullable(),
+    brief: Brief,
+  })
+  .merge(WaitingFields);
 
 const EdgeEnd = z.object({
   id: Id,
@@ -347,11 +385,25 @@ const SpecListItem = z.object({
 const specsRoute = createRoute({
   method: "get",
   path: "/specs",
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      cursor: z.string().min(1).optional(),
+      q: z.string().trim().min(1).max(200).optional(),
+      state: z
+        .union([z.enum(SPEC_STATES), z.array(z.enum(SPEC_STATES))])
+        .optional(),
+      repo: z.string().trim().min(1).max(200).optional(),
+      sort: z.enum(["startedAt", "state", "progress"]).optional(),
+      dir: z.enum(["asc", "desc"]).optional(),
+    }),
+  },
   responses: {
     200: reply(
-      "Every spec, newest first, with the progress of its tickets",
+      "A page of specs, newest first unless sort says otherwise, with the progress of their tickets",
       z.object({
         specs: z.array(SpecListItem),
+        nextCursor: z.string().nullable(),
       }),
     ),
   },
@@ -398,51 +450,67 @@ const BlockedQueue = z.object({
   tickets: z.array(TicketSummary),
   finalizations: z.array(Finalization),
   pullRequests: z.array(
-    z.object({
-      specId: Id,
-      specDisplayId: z.string(),
-      repo: z.string(),
-      number: z.number().int(),
-      url: z.string(),
-      state: z.string(),
-      syncError: z.string().nullable(),
-    }),
+    z
+      .object({
+        specId: Id,
+        specDisplayId: z.string(),
+        repo: z.string(),
+        number: z.number().int(),
+        url: z.string(),
+        state: z.string(),
+        syncError: z.string().nullable(),
+      })
+      .merge(WaitingFields),
   ),
   cleanups: z.array(
-    z.object({
-      specId: Id,
-      specDisplayId: z.string(),
-      error: z.string(),
-    }),
+    z
+      .object({
+        specId: Id,
+        specDisplayId: z.string(),
+        error: z.string(),
+      })
+      .merge(WaitingFields),
   ),
   readyFailures: z.array(
-    z.object({
-      specId: Id,
-      specDisplayId: z.string(),
-      repo: z.string(),
-      number: z.number().int(),
-      url: z.string(),
-      error: z.string(),
-    }),
+    z
+      .object({
+        specId: Id,
+        specDisplayId: z.string(),
+        repo: z.string(),
+        number: z.number().int(),
+        url: z.string(),
+        error: z.string(),
+      })
+      .merge(WaitingFields),
   ),
   // planning docs that did not apply (ADR 0005): a person retries or waives them
   planning: z.array(
-    z.object({
-      specId: Id,
-      specDisplayId: z.string(),
-      title: z.string(),
-      repo: z.string(),
-      files: z.array(z.string()),
-    }),
+    z
+      .object({
+        specId: Id,
+        specDisplayId: z.string(),
+        title: z.string(),
+        repo: z.string(),
+        files: z.array(z.string()),
+      })
+      .merge(WaitingFields),
   ),
   specs: z.array(
-    z.object({
-      id: Id,
-      displayId: z.string(),
-      title: z.string(),
-      reason: z.string(),
-    }),
+    z
+      .object({
+        id: Id,
+        displayId: z.string(),
+        title: z.string(),
+        reason: z.string(),
+      })
+      .merge(WaitingFields),
   ),
+  items: z.array(WaitingRef),
+});
+
+const WorkbenchWaiting = BlockedQueue.extend({
+  tickets: z.array(TicketSummary.omit({ brief: true })),
+  finalizations: z.array(Finalization.omit({ brief: true })),
 });
 
 const blockedRoute = createRoute({
@@ -476,7 +544,7 @@ const workbenchRoute = createRoute({
     200: reply(
       "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
       z.object({
-        waiting: BlockedQueue,
+        waiting: WorkbenchWaiting,
         running: z.array(
           z.object({ spec: SpecListItem, tickets: z.array(RunningTicket) }),
         ),
@@ -734,9 +802,27 @@ export function registerTicketRoutes(
     return view ? c.json(view, 200) : c.json({ error: "no such spec" }, 404);
   });
 
-  app.openapi(specsRoute, async (c) =>
-    c.json({ specs: await specList(pool) }, 200),
-  );
+  app.openapi(specsRoute, async (c) => {
+    const query = c.req.valid("query");
+    const states =
+      query.state === undefined
+        ? undefined
+        : Array.isArray(query.state)
+          ? query.state
+          : [query.state];
+    return c.json(
+      await specList(pool, {
+        limit: query.limit,
+        cursor: query.cursor,
+        q: query.q,
+        states,
+        repo: query.repo,
+        sort: query.sort,
+        dir: query.dir,
+      }),
+      200,
+    );
+  });
 
   app.openapi(searchRoute, async (c) =>
     c.json(await search(pool, c.req.valid("query").q), 200),

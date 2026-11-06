@@ -148,7 +148,7 @@ export function Workbench() {
       title="工作台"
       actions={<StaleNotice error={data ? board.error : null} />}
     >
-      <Onboarding />
+      {data ? <Onboarding /> : null}
       {!data ? (
         <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
           <p className="sr-only">加载工作台…</p>

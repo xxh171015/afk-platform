@@ -103,7 +103,16 @@ export function briefLines(
   ];
 }
 
+interface BlockingLike {
+  downstream: string[];
+  finalization: boolean;
+  pullRequests: boolean;
+  spec: boolean;
+  merge: boolean;
+}
+
 interface TicketLike {
+  id?: number;
   displayId: string;
   specDisplayId: string;
   title: string;
@@ -114,6 +123,8 @@ interface TicketLike {
   environment: string[];
   appended: boolean;
   brief: BriefLike | null;
+  waitingSince?: string;
+  blocking?: BlockingLike;
 }
 
 // The other repos a ticket reads (refs) and starts services of (environment), if it names any.
@@ -140,12 +151,15 @@ const stateOf = (t: Pick<TicketLike, "state" | "blockedReason">) =>
   t.blockedReason ? `${t.state} (${t.blockedReason})` : t.state;
 
 interface FinalizationLike {
+  id?: number;
   specDisplayId: string;
   repo: string;
   step: string;
   state: string;
   blockedReason: string | null;
   brief: BriefLike | null;
+  waitingSince?: string;
+  blocking?: BlockingLike;
 }
 
 const finalState = (f: FinalizationLike) =>
@@ -156,12 +170,15 @@ const pullState = (state: string) =>
   state === "closed" ? "closed without merge" : state;
 
 interface PullRequestProblemLike {
+  specId?: number;
   specDisplayId: string;
   repo: string;
   number: number;
   url: string;
   state: string;
   syncError: string | null;
+  waitingSince?: string;
+  blocking?: BlockingLike;
 }
 
 const pullRequestProblemLines = (p: PullRequestProblemLike): string[] => {
@@ -180,20 +197,204 @@ const pullRequestProblemLines = (p: PullRequestProblemLike): string[] => {
   ];
 };
 
-export function blockedText(queue: {
+type WaitingRef =
+  | { kind: "ticket"; id: number }
+  | { kind: "finalization"; id: number; step: string }
+  | { kind: "pullRequest"; specId: number; repo: string; number: number }
+  | { kind: "cleanup"; specId: number }
+  | { kind: "readyFailure"; specId: number; repo: string; number: number }
+  | { kind: "planning"; specId: number }
+  | { kind: "pausedSpec"; id: number };
+
+interface CleanupLike {
+  specId?: number;
+  specDisplayId: string;
+  error: string;
+  waitingSince?: string;
+  blocking?: BlockingLike;
+}
+
+interface ReadyFailureLike {
+  specId?: number;
+  specDisplayId: string;
+  repo: string;
+  number: number;
+  error: string;
+  waitingSince?: string;
+  blocking?: BlockingLike;
+}
+
+interface PlanningLike {
+  specId?: number;
+  specDisplayId: string;
+  repo: string;
+  files: string[];
+  waitingSince?: string;
+  blocking?: BlockingLike;
+}
+
+interface PausedSpecLike {
+  id?: number;
+  displayId: string;
+  title: string;
+  reason: string;
+  waitingSince?: string;
+  blocking?: BlockingLike;
+}
+
+interface BlockedQueueLike {
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
   pullRequests: PullRequestProblemLike[];
-  cleanups: { specDisplayId: string; error: string }[];
-  readyFailures: {
-    specDisplayId: string;
-    repo: string;
-    number: number;
-    error: string;
-  }[];
-  planning: { specDisplayId: string; repo: string; files: string[] }[];
-  specs: { displayId: string; title: string; reason: string }[];
-}): string {
+  cleanups: CleanupLike[];
+  readyFailures: ReadyFailureLike[];
+  planning: PlanningLike[];
+  specs: PausedSpecLike[];
+  items?: WaitingRef[];
+}
+
+function rankOf(blocking: BlockingLike): number {
+  if (blocking.downstream.length > 0) return 0;
+  if (blocking.finalization || blocking.pullRequests) return 1;
+  if (blocking.spec || blocking.merge) return 2;
+  return 3;
+}
+
+function waitingLines(
+  blocking?: BlockingLike,
+  waitingSince?: string,
+): string[] {
+  if (!blocking) return [];
+  const parts: string[] = [];
+  if (blocking.downstream.length > 0)
+    parts.push(`blocks ${blocking.downstream.join(", ")}`);
+  if (blocking.finalization) parts.push("finalization cannot start");
+  if (blocking.pullRequests) parts.push("blocks opening pull requests");
+  if (blocking.spec) parts.push("blocks the whole spec");
+  if (blocking.merge) parts.push("blocks merge to main");
+  const blockingLine =
+    parts.length > 0
+      ? `    ${parts.join("; ")}`
+      : "    does not block other tickets";
+  if (!waitingSince) return [blockingLine];
+  const rank = rankOf(blocking);
+  const why =
+    rank === 0
+      ? `ranked first: it blocks unfinished downstream tickets, waiting since ${waitingSince}`
+      : rank === 1
+        ? `ranked here: it blocks finalization or opening pull requests, waiting since ${waitingSince}`
+        : rank === 2
+          ? `ranked here: it blocks the spec or merge to main, waiting since ${waitingSince}`
+          : `ranked here: it does not block other work, waiting since ${waitingSince}`;
+  return [blockingLine, `    ${why}`];
+}
+
+function ticketLines(t: TicketLike): string[] {
+  return [
+    `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}  ${t.title}`,
+    ...waitingLines(t.blocking, t.waitingSince),
+    ...briefLines(t.brief, "    "),
+  ];
+}
+
+function finalizationLines(f: FinalizationLike): string[] {
+  return f.step === "final-e2e"
+    ? [
+        `${f.specDisplayId}  e2e before the pull requests: ${finalState(f)}`,
+        ...waitingLines(f.blocking, f.waitingSince),
+        ...briefLines(f.brief, "    "),
+        `    then: plat spec retry-final ${f.specDisplayId} (run it again), or plat spec waive-final ${f.specDisplayId} (open the pull requests anyway; the acceptance pack will say the e2e failed)`,
+      ]
+    : [
+        `${f.specDisplayId}  overall review of ${f.repo}: ${finalState(f)}`,
+        ...waitingLines(f.blocking, f.waitingSince),
+        ...briefLines(f.brief, "    "),
+        `    then: plat spec retry-final ${f.specDisplayId}`,
+      ];
+}
+
+function cleanupLines(c: CleanupLike): string[] {
+  return [
+    `${c.specDisplayId}  clean-up of the spec did not finish: ${c.error}`,
+    ...waitingLines(c.blocking, c.waitingSince),
+    `    branches or pull requests may be left on the code host; try again: plat spec cleanup ${c.specDisplayId}`,
+  ];
+}
+
+function readyFailureLines(r: ReadyFailureLike): string[] {
+  return [
+    `${r.specDisplayId}  ${r.repo} #${r.number} could not be turned ready: ${r.error}`,
+    ...waitingLines(r.blocking, r.waitingSince),
+    "    it is still a draft; turn it ready on the code host once the pull requests it follows are merged",
+  ];
+}
+
+function planningLines(p: PlanningLike): string[] {
+  return [
+    p.files.length > 0
+      ? `${p.specDisplayId}  the planning docs did not apply to ${p.repo}'s default branch: ${p.files.join(", ")}`
+      : `${p.specDisplayId}  the planning commit could not be made in ${p.repo}: its job failed three times (see the job's error)`,
+    ...waitingLines(p.blocking, p.waitingSince),
+    `    no ticket starts until: plat spec retry-planning ${p.specDisplayId} (in ${p.repo}, after pulling its default branch: it puts the docs back to merge, then sends them), or plat spec waive-planning ${p.specDisplayId} (leave them out)`,
+  ];
+}
+
+function pausedSpecLines(s: PausedSpecLike): string[] {
+  return [
+    `${s.displayId}  paused  ${s.title}: ${s.reason}`,
+    ...waitingLines(s.blocking, s.waitingSince),
+  ];
+}
+
+function pullLines(p: PullRequestProblemLike): string[] {
+  return [
+    ...pullRequestProblemLines(p),
+    ...waitingLines(p.blocking, p.waitingSince),
+  ];
+}
+
+function linesFor(ref: WaitingRef, queue: BlockedQueueLike): string[] {
+  if (ref.kind === "ticket") {
+    const ticket = queue.tickets.find((item) => item.id === ref.id);
+    return ticket ? ticketLines(ticket) : [];
+  }
+  if (ref.kind === "finalization") {
+    const item = queue.finalizations.find(
+      (row) => row.id === ref.id && row.step === ref.step,
+    );
+    return item ? finalizationLines(item) : [];
+  }
+  if (ref.kind === "pullRequest") {
+    const item = queue.pullRequests.find(
+      (row) =>
+        row.specId === ref.specId &&
+        row.repo === ref.repo &&
+        row.number === ref.number,
+    );
+    return item ? pullLines(item) : [];
+  }
+  if (ref.kind === "cleanup") {
+    const item = queue.cleanups.find((row) => row.specId === ref.specId);
+    return item ? cleanupLines(item) : [];
+  }
+  if (ref.kind === "readyFailure") {
+    const item = queue.readyFailures.find(
+      (row) =>
+        row.specId === ref.specId &&
+        row.repo === ref.repo &&
+        row.number === ref.number,
+    );
+    return item ? readyFailureLines(item) : [];
+  }
+  if (ref.kind === "planning") {
+    const item = queue.planning.find((row) => row.specId === ref.specId);
+    return item ? planningLines(item) : [];
+  }
+  const spec = queue.specs.find((row) => row.id === ref.id);
+  return spec ? pausedSpecLines(spec) : [];
+}
+
+export function blockedText(queue: BlockedQueueLike): string {
   if (
     queue.tickets.length === 0 &&
     queue.finalizations.length === 0 &&
@@ -205,42 +406,17 @@ export function blockedText(queue: {
   ) {
     return "nothing is waiting for you";
   }
+  if (queue.items) {
+    return queue.items.flatMap((ref) => linesFor(ref, queue)).join("\n");
+  }
   return [
-    ...queue.tickets.flatMap((t) => [
-      `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}  ${t.title}`,
-      ...briefLines(t.brief, "    "),
-    ]),
-    ...queue.finalizations.flatMap((f) =>
-      f.step === "final-e2e"
-        ? [
-            `${f.specDisplayId}  e2e before the pull requests: ${finalState(f)}`,
-            ...briefLines(f.brief, "    "),
-            `    then: plat spec retry-final ${f.specDisplayId} (run it again), or plat spec waive-final ${f.specDisplayId} (open the pull requests anyway; the acceptance pack will say the e2e failed)`,
-          ]
-        : [
-            `${f.specDisplayId}  overall review of ${f.repo}: ${finalState(f)}`,
-            ...briefLines(f.brief, "    "),
-            `    then: plat spec retry-final ${f.specDisplayId}`,
-          ],
-    ),
-    ...queue.pullRequests.flatMap(pullRequestProblemLines),
-    ...queue.cleanups.flatMap((c) => [
-      `${c.specDisplayId}  clean-up of the spec did not finish: ${c.error}`,
-      `    branches or pull requests may be left on the code host; try again: plat spec cleanup ${c.specDisplayId}`,
-    ]),
-    ...queue.readyFailures.flatMap((r) => [
-      `${r.specDisplayId}  ${r.repo} #${r.number} could not be turned ready: ${r.error}`,
-      "    it is still a draft; turn it ready on the code host once the pull requests it follows are merged",
-    ]),
-    ...queue.planning.flatMap((p) => [
-      p.files.length > 0
-        ? `${p.specDisplayId}  the planning docs did not apply to ${p.repo}'s default branch: ${p.files.join(", ")}`
-        : `${p.specDisplayId}  the planning commit could not be made in ${p.repo}: its job failed three times (see the job's error)`,
-      `    no ticket starts until: plat spec retry-planning ${p.specDisplayId} (in ${p.repo}, after pulling its default branch: it puts the docs back to merge, then sends them), or plat spec waive-planning ${p.specDisplayId} (leave them out)`,
-    ]),
-    ...queue.specs.map(
-      (s) => `${s.displayId}  paused  ${s.title}: ${s.reason}`,
-    ),
+    ...queue.tickets.flatMap(ticketLines),
+    ...queue.finalizations.flatMap(finalizationLines),
+    ...queue.pullRequests.flatMap(pullLines),
+    ...queue.cleanups.flatMap(cleanupLines),
+    ...queue.readyFailures.flatMap(readyFailureLines),
+    ...queue.planning.flatMap(planningLines),
+    ...queue.specs.flatMap(pausedSpecLines),
   ].join("\n");
 }
 

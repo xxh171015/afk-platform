@@ -15,7 +15,6 @@ import {
   Sun,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useBlocked } from "./BlockedQueue.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
@@ -27,6 +26,7 @@ import { useChangeFlash } from "./hooks/use-change-flash.ts";
 import { applyTheme, currentTheme, type Theme } from "./lib/theme.ts";
 import { cn } from "./lib/utils.ts";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
+import { useWorkbench } from "./Workbench.tsx";
 import { waitingCount } from "./waiting.ts";
 
 const nav = [
@@ -207,13 +207,13 @@ export function Layout() {
 }
 
 function Chrome() {
-  const queue = useBlocked();
+  const board = useWorkbench();
   const navigate = useNavigate();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const waiting = queue.data ? waitingCount(queue.data) : 0;
+  const waiting = board.data ? waitingCount(board.data.waiting) : 0;
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
