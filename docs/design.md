@@ -485,12 +485,14 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-    ev["触发：票 done、PR 合并、<br/>update-branch 完成、人重试"] --> scan["取所有 pending 的票"]
+    ev["触发：票 done / blocked / 取消、<br/>PR 合并、update-branch 完成、人重试，<br/>同项目别的需求释放名额，每分钟兜底"] --> scan["取所有 pending 的票"]
     scan --> edges{"所有入边都满足？"}
     edges -->|否| wait["保持 pending"]
     edges -->|是| limit{"全局 / 项目 / 仓库<br/>并发和预算有余量？"}
     limit -->|否| wait
-    limit -->|是| q["写入作业，状态 queued"]
+    limit -->|是| turn{"同项目有更该轮到的需求？<br/>（名额更少，或更久没开工）"}
+    turn -->|是| wait
+    turn -->|否| q["写入作业，状态 queued"]
 ```
 
 依赖边什么时候算满足：
@@ -947,6 +949,7 @@ flowchart LR
   - main 一前进，调度器就给所有在跑的集成分支发 update-branch 作业：作业带集成分支的 `lock_key`，把 main 合进候选、跑候选门禁、通过才前移。有冲突时开 merge agent 运行（ticket 为空的 Run）解决后再过门禁。仍失败则 spec 自动 paused 并进入 blocked 队列，暂停派发新票，已经在跑的票继续。
 - **合并到 main**：由人做，平台给出建议顺序；一个需求合并后，其他需求自动 update-branch。
 - **并发和预算**：全局、每项目、每仓库、每台 worker 各设并发上限。Cursor 不报 token 用量，PoC 先按运行时长和次数设上限。
+- **名额在需求之间怎么分**（2026-11-08）：项目的名额由它的各个需求共用。任何事让一个需求跑了一次调度（票 done、blocked、失败、取消，需求取消或暂停），提交后同项目所有 running 的需求各再跑一次，因为释放出来的名额可能正是别的需求在等的；API 另外每分钟对所有 running 的需求跑一次，补上漏掉的触发。几个需求都有能开工的票时轮流拿：手上名额少的先拿，一样多时上次开工更早（或从没开过工）的先拿。已经在跑的票不会被抢走。
 
 两个需求在同一个仓库里并行，A 先合进 main，B 随后 update-branch：
 

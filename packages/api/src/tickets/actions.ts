@@ -536,6 +536,8 @@ export async function cancelSpec(
       { specId },
       inSeconds(now, CLEANUP_GRACE_SECONDS),
     );
+    // The slots its tickets held are free: the other specs of the project get a pass once this commits.
+    await schedulePass(client, specId);
     // What the cleanup is going to close, for the person who cancelled.
     const open = await client.query<OpenPullRequest>(
       `SELECT r.name AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id

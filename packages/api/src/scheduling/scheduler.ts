@@ -23,6 +23,12 @@ import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
 // docs/specs/m1-platform.md「并发与预算默认值」). The scheduler is the only thing that moves a ticket from
 // pending to queued; it re-runs after a confirmation, after a ticket is done, and after a human retry.
+//
+// The project's slots are shared by its specs. Whatever made one spec run a pass (a ticket done, blocked, failed or
+// cancelled, the spec cancelled or paused) may have freed a slot another spec waits for, so once that transaction
+// commits every running spec of the project gets a pass of its own; the API also passes over every running spec
+// now and then, for any trigger that was missed. Specs take turns: a slot goes to the spec holding fewer, and of two
+// holding as many, to the one that started a ticket longer ago.
 
 export interface ScheduledTicket {
   ticketId: number;
@@ -61,22 +67,46 @@ export async function lockSpec(
   await client.query("SELECT 1 FROM specs WHERE id = $1 FOR UPDATE", [specId]);
 }
 
+// Projects whose specs get a pass once the transaction on this connection commits (see the top of the file).
+const projectsToPass = new WeakMap<pg.PoolClient, Set<number>>();
+
+function passProjectAfterCommit(client: pg.PoolClient, projectId: number) {
+  const projects = projectsToPass.get(client) ?? new Set<number>();
+  projects.add(projectId);
+  projectsToPass.set(client, projects);
+}
+
 export async function inTransaction<T>(
   pool: pg.Pool,
   work: (client: pg.PoolClient) => Promise<T>,
+  options: { passProjects?: boolean } = {},
 ): Promise<T> {
   const client = await pool.connect();
+  let result: T;
+  let projects: Set<number> | undefined;
   try {
+    // a transaction opened by hand on this connection may have left some behind
+    projectsToPass.delete(client);
     await client.query("BEGIN");
-    const result = await work(client);
+    result = await work(client);
     await client.query("COMMIT");
-    return result;
+    projects = projectsToPass.get(client);
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
+    projectsToPass.delete(client);
     client.release();
   }
+  if (projects && options.passProjects !== false) {
+    for (const projectId of projects) {
+      // what was committed stands; a pass that fails here is made up by the periodic one
+      await scheduleProject(pool, projectId).catch((error) =>
+        console.error(`scheduling project ${projectId} failed:`, error),
+      );
+    }
+  }
+  return result;
 }
 
 // draft -> planned -> running in one step, one integration branch (spec/<id>/<slug>) per repo the spec touches,
@@ -171,11 +201,53 @@ export async function confirmSpec(
 export async function scheduleSpec(
   pool: pg.Pool,
   specId: number,
+  options: { passProjects?: boolean } = {},
 ): Promise<ScheduleResult> {
-  return inTransaction(pool, async (client) => {
-    await lockSpec(client, specId);
-    return schedulePass(client, specId);
-  });
+  return inTransaction(
+    pool,
+    async (client) => {
+      await lockSpec(client, specId);
+      return schedulePass(client, specId);
+    },
+    options,
+  );
+}
+
+// A pass for every running spec of the project, each in its own transaction (so the spec-then-project lock order
+// holds). Repeated while a round changes something: a spec may have left a slot to one that then paused instead.
+export async function scheduleProject(
+  pool: pg.Pool,
+  projectId: number,
+): Promise<ScheduleResult> {
+  const enqueued: ScheduledTicket[] = [];
+  for (let round = 0; round < 10; round++) {
+    const specs = await pool.query<{ id: number }>(
+      "SELECT id FROM specs WHERE project_id = $1 AND state = 'running' ORDER BY id",
+      [projectId],
+    );
+    let changed = false;
+    for (const { id } of specs.rows) {
+      const pass = await scheduleSpec(pool, id, { passProjects: false });
+      enqueued.push(...pass.enqueued);
+      if (pass.enqueued.length > 0 || pass.paused) changed = true;
+    }
+    if (!changed) break;
+  }
+  return { enqueued, paused: false };
+}
+
+// The periodic pass the API makes over every project with a running spec.
+export async function scheduleRunningSpecs(
+  pool: pg.Pool,
+): Promise<ScheduleResult> {
+  const projects = await pool.query<{ project_id: number }>(
+    "SELECT DISTINCT project_id FROM specs WHERE state = 'running' ORDER BY project_id",
+  );
+  const enqueued: ScheduledTicket[] = [];
+  for (const { project_id } of projects.rows) {
+    enqueued.push(...(await scheduleProject(pool, project_id)).enqueued);
+  }
+  return { enqueued, paused: false };
 }
 
 interface TicketRow {
@@ -202,7 +274,10 @@ export async function schedulePass(
     [specId],
   );
   const row = spec.rows[0];
-  if (row?.state !== "running") return none;
+  if (!row) return none;
+  // whatever brought this pass about may have freed a slot for another spec of the project
+  passProjectAfterCommit(client, row.project_id);
+  if (row.state !== "running") return none;
   // Nothing left to run: the spec moves on to its overall review instead of being scheduled, or, when every
   // ticket was cancelled, is cancelled itself.
   if (await cancelIfAllTicketsCancelled(client, specId)) return none;
@@ -236,6 +311,91 @@ export async function schedulePass(
     return { enqueued: [], paused: true };
   }
 
+  const tickets = await startableTickets(client, specId);
+  const usage = await concurrencyInUse(client, row.project_id);
+  const rivals = await rivalsFor(client, row.project_id, specId);
+  const ownTurn = await client.query<{ last_started_at: Date | null }>(
+    "SELECT last_started_at FROM specs WHERE id = $1",
+    [specId],
+  );
+  const self = {
+    id: specId,
+    lastStartedAt: ownTurn.rows[0]?.last_started_at ?? null,
+  };
+  const enqueued: ScheduledTicket[] = [];
+  for (const ticket of tickets) {
+    const projectUsed = usage.project;
+    const repoUsed = usage.repos.get(ticket.repo_id) ?? 0;
+    const capacity: Capacity[] = [
+      {
+        scope: "project",
+        resource: "concurrency",
+        used: projectUsed,
+        max: limits.projectConcurrency,
+      },
+      {
+        scope: "repo",
+        resource: "concurrency",
+        used: repoUsed,
+        max: limits.repoConcurrency,
+      },
+    ];
+    const verdict = isRunnable({
+      state: ticket.state,
+      edges: ticket.edges,
+      limits: capacity,
+    });
+    if (!verdict.runnable) continue;
+    // a spec that has waited longer, and could start a ticket now, goes first
+    const held = usage.specs.get(specId) ?? 0;
+    const waiting = rivals.some(
+      (rival) =>
+        rival.repos.some(
+          (repo) => (usage.repos.get(repo) ?? 0) < limits.repoConcurrency,
+        ) && goesBefore(rival, usage.specs.get(rival.id) ?? 0, self, held),
+    );
+    if (waiting) break;
+
+    const queued = ticketTransition(ticket.state, { type: "enqueue" });
+    if (!queued.ok) throw new Error(queued.reason);
+    await client.query("UPDATE tickets SET state = $2 WHERE id = $1", [
+      ticket.id,
+      queued.state,
+    ]);
+    const job = await enqueueStageJob(
+      client,
+      {
+        id: ticket.id,
+        specId,
+        repoId: ticket.repo_id,
+        contentVersion: ticket.content_version,
+      },
+      // a ticket that is merged already (its e2e failed, and the fix is done) starts again from its e2e
+      ticket.resume_stage ?? "implement",
+    );
+    usage.project += 1;
+    usage.repos.set(ticket.repo_id, repoUsed + 1);
+    usage.specs.set(specId, held + 1);
+    enqueued.push({
+      ticketId: ticket.id,
+      displayId: formatDisplayId("ticket", ticket.id),
+      jobId: job.id,
+    });
+  }
+  if (enqueued.length > 0) {
+    await client.query(
+      "UPDATE specs SET last_started_at = clock_timestamp() WHERE id = $1",
+      [specId],
+    );
+  }
+  return { enqueued, paused: false };
+}
+
+// The pending tickets of a spec whose edges are satisfied, each with its incoming edges; slots are not looked at.
+async function startableTickets(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<(TicketRow & { edges: IncomingEdge[] })[]> {
   const tickets = await client.query<TicketRow>(
     "SELECT id, repo_id, state, content_version, contract_sha, resume_stage FROM tickets WHERE spec_id = $1 ORDER BY id",
     [specId],
@@ -269,73 +429,85 @@ export async function schedulePass(
     );
     incoming.set(edge.to_ticket_id, list);
   }
-
-  const usage = await concurrencyInUse(client, row.project_id);
-  const enqueued: ScheduledTicket[] = [];
-  for (const ticket of tickets.rows) {
-    if (ticket.state !== "pending") continue;
-    const projectUsed = usage.project;
-    const repoUsed = usage.repos.get(ticket.repo_id) ?? 0;
-    const capacity: Capacity[] = [
-      {
-        scope: "project",
-        resource: "concurrency",
-        used: projectUsed,
-        max: limits.projectConcurrency,
-      },
-      {
-        scope: "repo",
-        resource: "concurrency",
-        used: repoUsed,
-        max: limits.repoConcurrency,
-      },
-    ];
-    const verdict = isRunnable({
-      state: ticket.state,
-      edges: incoming.get(ticket.id) ?? [],
-      limits: capacity,
-    });
-    if (!verdict.runnable) continue;
-
-    const queued = ticketTransition(ticket.state, { type: "enqueue" });
-    if (!queued.ok) throw new Error(queued.reason);
-    await client.query("UPDATE tickets SET state = $2 WHERE id = $1", [
-      ticket.id,
-      queued.state,
-    ]);
-    const job = await enqueueStageJob(
-      client,
-      {
-        id: ticket.id,
-        specId,
-        repoId: ticket.repo_id,
-        contentVersion: ticket.content_version,
-      },
-      // a ticket that is merged already (its e2e failed, and the fix is done) starts again from its e2e
-      ticket.resume_stage ?? "implement",
+  return tickets.rows
+    .map((ticket) => ({ ...ticket, edges: incoming.get(ticket.id) ?? [] }))
+    .filter(
+      (ticket) =>
+        ticket.state === "pending" &&
+        isRunnable({ state: ticket.state, edges: ticket.edges, limits: [] })
+          .runnable,
     );
-    usage.project += 1;
-    usage.repos.set(ticket.repo_id, repoUsed + 1);
-    enqueued.push({
-      ticketId: ticket.id,
-      displayId: formatDisplayId("ticket", ticket.id),
-      jobId: job.id,
-    });
+}
+
+interface Turn {
+  id: number;
+  lastStartedAt: Date | null;
+}
+
+// The other running specs of the project that have a ticket to start, with the repos those tickets are in.
+async function rivalsFor(
+  client: pg.PoolClient,
+  projectId: number,
+  specId: number,
+): Promise<(Turn & { repos: number[] })[]> {
+  const specs = await client.query<{
+    id: number;
+    last_started_at: Date | null;
+  }>(
+    `SELECT id, last_started_at FROM specs WHERE project_id = $1 AND id <> $2 AND state = 'running'
+       AND (planning_state IS NULL OR planning_state NOT IN ('pending', 'blocked'))
+     ORDER BY id`,
+    [projectId, specId],
+  );
+  const rivals: (Turn & { repos: number[] })[] = [];
+  for (const spec of specs.rows) {
+    const repos = [
+      ...new Set(
+        (await startableTickets(client, spec.id)).map((t) => t.repo_id),
+      ),
+    ];
+    if (repos.length > 0)
+      rivals.push({
+        id: spec.id,
+        lastStartedAt: spec.last_started_at,
+        repos,
+      });
   }
-  return { enqueued, paused: false };
+  return rivals;
+}
+
+// Whether `a`, holding `heldA` slots, is owed the next slot before `b`: fewer slots first, then the one that started
+// a ticket longer ago (never counts as longest), then the older spec.
+function goesBefore(a: Turn, heldA: number, b: Turn, heldB: number): boolean {
+  if (heldA !== heldB) return heldA < heldB;
+  const startedA = a.lastStartedAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const startedB = b.lastStartedAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  if (startedA !== startedB) return startedA < startedB;
+  return a.id < b.id;
 }
 
 // A queued or running ticket holds an agent run, whatever spec it belongs to.
 async function concurrencyInUse(client: pg.PoolClient, projectId: number) {
-  const { rows } = await client.query<{ repo_id: number; used: string }>(
-    `SELECT t.repo_id, count(*) AS used FROM tickets t JOIN specs s ON s.id = t.spec_id
-     WHERE s.project_id = $1 AND t.state IN ('queued', 'running') GROUP BY t.repo_id`,
+  const { rows } = await client.query<{
+    spec_id: number;
+    repo_id: number;
+    used: string;
+  }>(
+    `SELECT t.spec_id, t.repo_id, count(*) AS used FROM tickets t JOIN specs s ON s.id = t.spec_id
+     WHERE s.project_id = $1 AND t.state IN ('queued', 'running') GROUP BY t.spec_id, t.repo_id`,
     [projectId],
   );
-  const repos = new Map(rows.map((r) => [r.repo_id, Number(r.used)]));
+  const repos = new Map<number, number>();
+  const specs = new Map<number, number>();
+  for (const row of rows) {
+    const used = Number(row.used);
+    repos.set(row.repo_id, (repos.get(row.repo_id) ?? 0) + used);
+    specs.set(row.spec_id, (specs.get(row.spec_id) ?? 0) + used);
+  }
   return {
-    project: [...repos.values()].reduce((sum, used) => sum + used, 0),
+    project: rows.reduce((sum, row) => sum + Number(row.used), 0),
     repos,
+    specs,
   };
 }
 

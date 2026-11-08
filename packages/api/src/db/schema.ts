@@ -119,6 +119,9 @@ export const specs = pgTable(
     pauseReason: text("pause_reason"),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
+    // When the scheduler last started a ticket of the spec. Of two specs of a project holding as many slots, the one
+    // that started a ticket longer ago (or never) gets the next free slot, so specs take turns.
+    lastStartedAt: timestamp("last_started_at", { withTimezone: true }),
     // The planning repo, named when the spec was created there (`plat spec create` reads it from the tracker doc).
     planningRepoId: integer("planning_repo_id").references(() => repos.id),
     // The planning commit (GLOSSARY Planning commit): made by the platform once the spec is confirmed.

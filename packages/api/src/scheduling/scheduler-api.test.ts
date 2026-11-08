@@ -4,7 +4,11 @@ import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
-import { completeTicket, scheduleSpec } from "./scheduler.ts";
+import {
+  completeTicket,
+  scheduleRunningSpecs,
+  scheduleSpec,
+} from "./scheduler.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -474,6 +478,79 @@ describe("concurrency limits", () => {
       (await post("/projects", { name: "x", limits: { repoConcurrency: 0 } }))
         .status,
     ).toBe(400);
+  });
+});
+
+describe("specs of one project sharing its slots", () => {
+  // Two specs of one project: the first is confirmed and takes the only slot; the second is confirmed after it and
+  // gets nothing. The first spec's tickets come before the second's.
+  async function twoSpecs(first: string[], second: string[]) {
+    const { projectId, specId: a } = await draftSpec(
+      first.map((key) => ticket(key)),
+      { projectConcurrency: 1 },
+    );
+    const other = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "other",
+      title: "Other",
+    });
+    const b = other.body.id;
+    await post(
+      `/specs/${b}/tickets/import`,
+      importBody(b, { tickets: second.map((key) => ticket(key)) }),
+    );
+    expect((await post(`/specs/${a}/confirm`)).body.enqueued).toHaveLength(1);
+    expect((await post(`/specs/${b}/confirm`)).body.enqueued).toEqual([]);
+    return { a, b };
+  }
+
+  it("starts the spec confirmed later once a ticket of the other is done", async () => {
+    await twoSpecs(["a"], ["b"]);
+    expect(await workUntilMerged(new FakeWorker(api.url, "w1", []))).toBe(1);
+    expect(await ticketStates()).toEqual(["1:done", "2:queued"]);
+  });
+
+  it("gives a freed slot to the spec holding fewer, so the two take turns", async () => {
+    await twoSpecs(["a1", "a2"], ["b"]);
+    expect(await workUntilMerged(new FakeWorker(api.url, "w1", []))).toBe(1);
+    expect(await ticketStates()).toEqual(["1:done", "2:pending", "3:queued"]);
+  });
+
+  it("starts the other spec when a ticket of a paused spec ends", async () => {
+    const { a } = await twoSpecs(["a1", "a2"], ["b"]);
+    await db.pool.query("UPDATE specs SET state = 'paused' WHERE id = $1", [a]);
+    expect(await workUntilMerged(new FakeWorker(api.url, "w1", []))).toBe(1);
+    expect(await ticketStates()).toEqual(["1:done", "2:pending", "3:queued"]);
+  });
+
+  it("starts the other spec when a ticket is blocked", async () => {
+    await twoSpecs(["a"], ["b"]);
+    const worker = new FakeWorker(api.url, "w1", []);
+    const claimed = (await worker.claim()).body.job;
+    if (!claimed) throw new Error("no job to claim");
+    const reply = await worker.complete(claimed.id, claimed.attempt, {
+      stage: "implement",
+      outcome: "agent-gave-up",
+    });
+    expect(reply.status).toBe(200);
+    expect(await ticketStates()).toEqual(["1:blocked", "2:queued"]);
+  });
+
+  it("frees a cancelled spec's slots for the others", async () => {
+    const { a } = await twoSpecs(["a"], ["b"]);
+    expect((await post(`/specs/${a}/cancel`)).status).toBe(200);
+    expect(await ticketStates()).toEqual(["1:cancelled", "2:queued"]);
+  });
+
+  it("starts a spec no event scheduled on the next periodic pass", async () => {
+    await twoSpecs(["a"], ["b"]);
+    // the slot is freed behind the scheduler's back, as a missed trigger would leave it
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    expect(await ticketStates()).toEqual(["1:done", "2:pending"]);
+    const passed = await scheduleRunningSpecs(db.pool);
+    expect(passed.enqueued.map((t) => t.ticketId)).toEqual([2]);
+    expect(await ticketStates()).toEqual(["1:done", "2:queued"]);
   });
 });
 
