@@ -10,7 +10,9 @@ import { basicAuth, type GitToken, secretsOf } from "./push.ts";
 export class RepoStore {
   private readonly root: string;
   // The token for the repo at a URL: each repo has its own, since the code host gives a token to one repo at a time.
-  private readonly tokenOf: ((url?: string) => GitToken | undefined) | undefined;
+  private readonly tokenOf:
+    | ((url?: string) => GitToken | undefined)
+    | undefined;
 
   constructor(root: string, tokenOf?: (url?: string) => GitToken | undefined) {
     this.root = root;
