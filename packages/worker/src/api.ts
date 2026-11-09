@@ -166,3 +166,17 @@ export function createWorkerApi(
     },
   };
 }
+
+// At start: the code hosts this worker has credentials for (code-hosts.ts), so the platform knows which repos it can
+// work on and what kind of host each is on.
+export async function reportCodeHosts(
+  baseUrl: string,
+  workerId: string,
+  hosts: { host: string; kind: "github" | "gitlab" }[],
+  client: ApiClient = createApiClient(baseUrl),
+): Promise<void> {
+  const { response } = await client.POST("/worker/hosts", {
+    body: { workerId, hosts },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}

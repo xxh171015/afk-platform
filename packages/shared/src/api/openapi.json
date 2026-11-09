@@ -398,6 +398,47 @@
         }
       }
     },
+    "/hosts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "The code hosts the workers have credentials for, as they last reported them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hosts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "host": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
+                          "workerId": {
+                            "type": "string"
+                          },
+                          "reportedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["host", "kind", "workerId", "reportedAt"]
+                      }
+                    }
+                  },
+                  "required": ["hosts"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects/{projectId}/repos": {
       "post": {
         "parameters": [
@@ -487,7 +528,7 @@
             }
           },
           "409": {
-            "description": "The project already has a repo with this name",
+            "description": "The project already has a repo with this name, or has repos on another kind of code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -1867,6 +1908,65 @@
                     }
                   },
                   "required": ["platformVersion", "skillsSha", "platformCommit"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/hosts": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "hosts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "host": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 253
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        }
+                      },
+                      "required": ["host", "kind"]
+                    },
+                    "maxItems": 100
+                  }
+                },
+                "required": ["workerId", "hosts"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kept: repos on these hosts can be registered and worked on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
                 }
               }
             }

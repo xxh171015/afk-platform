@@ -117,20 +117,17 @@ describe("the GitHub App's access to a repo", () => {
       "backend",
       "https://github.com/acme/backend.git",
     );
+    // a project's repos are on one kind of host: the GitLab one is a project of its own
     const web = ws.checkout("web", "https://gitlab.com/acme/web.git");
 
-    const result = await ws.plat(backend.dir, [
-      "init",
-      "--with",
-      web.dir,
-      "--yes",
-    ]);
-
+    const result = await ws.plat(backend.dir, ["init", "--yes"]);
     expect(result.stdout).toContain(
       "backend: the GitHub App is not checked yet (no worker has answered)",
     );
-    expect(result.stdout).toContain("web: not checked (only GitHub is)");
-    expect(await get("/projects/1/repos/web/access")).toEqual({
+
+    const gitlab = await ws.plat(web.dir, ["init", "--yes"]);
+    expect(gitlab.stdout).toContain("web: not checked (only GitHub is)");
+    expect(await get("/projects/2/repos/web/access")).toEqual({
       state: "unchecked",
     });
   });

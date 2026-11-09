@@ -13,6 +13,7 @@ export interface WorkerConfig {
   model: string;
   cursorApiKey: string;
   credentialsDir: string; // the GitHub App's key and ids
+  gitlabDir: string; // one file per GitLab host, named after it, holding a PAT
 }
 
 export class ConfigError extends Error {
@@ -100,5 +101,7 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
     credentialsDir:
       env.AFK_GITHUB_APP_DIR ||
       join(sources.homedir, ".afk", "secrets", "github-app"),
+    gitlabDir:
+      env.AFK_GITLAB_DIR || join(sources.homedir, ".afk", "secrets", "gitlab"),
   };
 }

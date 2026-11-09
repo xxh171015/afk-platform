@@ -3,10 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import {
+  adapterByHost,
   checkAppAccess,
   createAppTokenSource,
   createGitHubAdapter,
+  hostRepoRef,
   loadAppCredentials,
+  type RepoRef,
+  tokensByHost,
 } from "@afk/host";
 import {
   GateCache,
@@ -17,7 +21,8 @@ import {
   SandcastleGateSandbox,
 } from "@afk/pipeline";
 import { SKILLS_SHA } from "@afk/shared";
-import { createWorkerApi } from "./api.ts";
+import { createWorkerApi, reportCodeHosts } from "./api.ts";
+import { workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
@@ -55,12 +60,25 @@ try {
   fail(...error.problems);
 }
 
-let credentials: ReturnType<typeof loadAppCredentials>;
-try {
-  credentials = loadAppCredentials(config.credentialsDir);
-} catch (error) {
-  fail(`GitHub App credentials in ${config.credentialsDir}: ${reason(error)}`);
+// The GitHub App is there for repos on github.com; a worker for GitLab only goes without it.
+let credentials: ReturnType<typeof loadAppCredentials> | undefined;
+if (existsSync(config.credentialsDir)) {
+  try {
+    credentials = loadAppCredentials(config.credentialsDir);
+  } catch (error) {
+    fail(
+      `GitHub App credentials in ${config.credentialsDir}: ${reason(error)}`,
+    );
+  }
 }
+const codeHosts = workerCodeHosts({
+  githubApp: credentials !== undefined,
+  gitlabDir: config.gitlabDir,
+});
+if (codeHosts.length === 0)
+  fail(
+    `no code host credentials: put the GitHub App credentials in ${config.credentialsDir}, or a GitLab PAT in ${config.gitlabDir}/<host>`,
+  );
 
 // Every agent run and every gate needs the sandbox image, and Docker to run it.
 const image = spawnSync("docker", ["image", "inspect", config.image], {
@@ -82,7 +100,24 @@ try {
   );
 }
 
-const tokens = createAppTokenSource({ credentials });
+// The platform registers repos only on the hosts some worker has credentials for.
+await reportCodeHosts(config.apiUrl, config.workerId, codeHosts).catch(
+  (error) => fail(`could not tell the API the code hosts: ${reason(error)}`),
+);
+// each repo's host calls and tokens go to the credentials of its own host
+const appTokens = credentials
+  ? createAppTokenSource({ credentials })
+  : undefined;
+const tokens = tokensByHost(
+  new Map(appTokens ? [["github.com", appTokens]] : []),
+);
+const hostAdapter = adapterByHost(
+  new Map(
+    appTokens
+      ? [["github.com", createGitHubAdapter({ tokens: appTokens })]]
+      : [],
+  ),
+);
 const api = createWorkerApi(config.apiUrl, config.workerId);
 const repos = new RepoStore(join(config.home, "repos"));
 const snapshots = new SnapshotStore(join(config.home, "snapshots"));
@@ -126,8 +161,13 @@ log(
 await runWorker({
   api,
   host: {
-    adapter: createGitHubAdapter({ tokens }),
-    checkAccess: (repo) => checkAppAccess({ credentials }, repo),
+    adapter: hostAdapter,
+    repoRef: hostRepoRef,
+    ...(credentials
+      ? {
+          checkAccess: (repo: RepoRef) => checkAppAccess({ credentials }, repo),
+        }
+      : {}),
   },
   executor: {
     slots: new SlotManager({
@@ -142,7 +182,7 @@ await runWorker({
     repos,
     snapshots,
     push: pushWithToken,
-    credentials: { tokens },
+    credentials: { tokens, repoRef: hostRepoRef },
     gateCache: new GateCache(),
     docker: realDocker,
     environments: new EnvironmentLimiter(),

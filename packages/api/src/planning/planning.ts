@@ -12,6 +12,7 @@ import {
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import { applyOrigin } from "../events/origin.ts";
+import { hostKindOf, mixedHostsWith } from "../host/code-hosts.ts";
 import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
 import { ensureIntegrationBranches } from "./integration-branches.ts";
@@ -110,7 +111,8 @@ export interface NewRepo {
 export type AddRepoResult =
   | { status: "ok"; repo: { id: number; name: string } }
   | { status: "no-project" }
-  | { status: "name-taken" };
+  | { status: "name-taken" }
+  | { status: "mixed-hosts"; message: string };
 
 export async function addRepo(
   pool: pg.Pool,
@@ -120,6 +122,12 @@ export async function addRepo(
     repo.projectId,
   ]);
   if (project.rowCount === 0) return { status: "no-project" };
+  const hostKind = repo.hostKind ?? (await hostKindOf(pool, repo.url));
+  const mixed = await mixedHostsWith(pool, repo.projectId, {
+    name: repo.name,
+    hostKind,
+  });
+  if (mixed) return { status: "mixed-hosts", message: mixed };
   try {
     const { rows } = await pool.query(
       `INSERT INTO repos (project_id, url, default_branch, name, host_kind) VALUES ($1, $2, COALESCE($3, 'main'), $4, $5)
@@ -129,7 +137,7 @@ export async function addRepo(
         repo.url,
         repo.defaultBranch ?? null,
         repo.name,
-        repo.hostKind ?? hostKindOfUrl(repo.url),
+        hostKind,
       ],
     );
     return { status: "ok", repo: rows[0] };

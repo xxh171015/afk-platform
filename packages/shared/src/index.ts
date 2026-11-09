@@ -51,7 +51,12 @@ export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS } from "./findings.ts";
 export { HOST_CAPABILITY, HOST_JOB_TYPES } from "./host-jobs.ts";
 export type { HostKind } from "./host-kinds.ts";
-export { HOST_KINDS, hostKindOfUrl } from "./host-kinds.ts";
+export {
+  HOST_KIND_LABELS,
+  HOST_KINDS,
+  hostKindOfUrl,
+  mixedHostsProblem,
+} from "./host-kinds.ts";
 export type { InvalidatePayload } from "./invalidate.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
@@ -87,6 +92,7 @@ export {
   ownerHtmlUrl,
   parseRepoUrl,
   repoDisplayName,
+  repoHost,
   repoHtmlUrl,
   treeHtmlUrl,
   tryParseRepoUrl,

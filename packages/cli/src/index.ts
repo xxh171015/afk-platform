@@ -38,6 +38,7 @@ import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
 import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
 import {
+  codeHostProblems,
   hasRegistrations,
   InitError,
   inspectCheckout,
@@ -45,6 +46,8 @@ import {
   planInit,
   planText,
   TRACKER_DOC_PATH,
+  unknownHostProblem,
+  withKnownHostKind,
 } from "./init.ts";
 import {
   dropBackup,
@@ -346,6 +349,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if ((options.name === undefined) === (options.role === undefined)) {
         throw new Failure("give the repo's --name (--role is the older word)");
       }
+      const hosts = await api().GET("/hosts");
+      if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
+      const unknown = unknownHostProblem(
+        options.name ?? options.role,
+        options.url,
+        hosts.data.hosts,
+      );
+      if (unknown) throw new Failure(unknown);
       const { data, response, error } = await api().POST(
         "/projects/{projectId}/repos",
         {
@@ -695,10 +706,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       let plan: ReturnType<typeof planInit>;
       try {
         const cwd = io.cwd ?? process.cwd();
-        const planning = inspectCheckout(".", cwd);
+        const hosts = await client.GET("/hosts");
+        if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
+        const known = hosts.data.hosts;
+        const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
         const others = (options.with as string[]).map((value) => {
           const { path, name } = parseWith(value);
-          return { checkout: inspectCheckout(path, cwd), name };
+          return {
+            checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
+            name,
+          };
         });
         const docPath = join(planning.dir, TRACKER_DOC_PATH);
         const before = existsSync(docPath)
@@ -737,6 +754,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           others,
           contractPath: options.contractPath,
         });
+        // nothing is registered on a host the platform cannot work on, nor a project on two kinds of host
+        const problems = codeHostProblems(plan, known);
+        if (problems.length > 0) throw new Failure(problems.join("\n"));
         if (!json()) io.stdout(`${planText(plan)}\n`);
 
         const registering = hasRegistrations(plan);

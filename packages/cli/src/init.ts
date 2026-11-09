@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import {
   type HostKind,
   hostKindOfUrl,
+  mixedHostsProblem,
+  repoHost,
   repoHtmlUrl,
   tryParseRepoUrl,
 } from "@afk/shared";
@@ -290,4 +292,60 @@ export function parseWith(value: string): { path: string; name?: string } {
   const name = value.slice(at + 1);
   if (name === "") throw new InitError(`--with ${value}: empty name`);
   return { path: value.slice(0, at), name };
+}
+
+export interface KnownHost {
+  host: string;
+  kind: HostKind;
+}
+
+// A checkout is on the kind of host a worker reported for its host; one on a host no worker has credentials for
+// keeps what its address suggests, and codeHostProblems names it.
+export function withKnownHostKind(
+  checkout: Checkout,
+  known: readonly KnownHost[],
+): Checkout {
+  const host = repoHost(checkout.url);
+  const found = known.find((k) => k.host === host);
+  return found ? { ...checkout, hostKind: found.kind } : checkout;
+}
+
+// What stops plat init before it registers anything: a repo on a host no worker has credentials for, or repos on
+// different kinds of host (docs/specs/m3-platform.md「托管类型与接入」). Said in Chinese, with the fix.
+export function codeHostProblems(
+  plan: InitPlan,
+  known: readonly KnownHost[],
+): string[] {
+  const problems: string[] = [];
+  const unknown = plan.repos.filter(
+    (repo) =>
+      !repo.registered &&
+      !known.some((k) => k.host === repoHost(repo.checkout.url)),
+  );
+  if (unknown.length > 0 && known.length === 0)
+    problems.push("还没有 worker 向平台报过它有凭据的主机：先启动 worker。");
+  for (const repo of unknown)
+    problems.push(
+      unknownHostProblem(repo.name, repo.checkout.url, known) as string,
+    );
+  const mixed = mixedHostsProblem(
+    plan.repos.map((repo) => ({
+      name: repo.name,
+      hostKind: repo.checkout.hostKind,
+    })),
+  );
+  if (mixed) problems.push(mixed);
+  return problems;
+}
+
+// A repo on a host no worker has credentials for: what to tell the person; null when a worker has, or when the
+// address names no host (a local path, in tests).
+export function unknownHostProblem(
+  name: string,
+  url: string,
+  known: readonly KnownHost[],
+): string | null {
+  const host = repoHost(url);
+  if (!host || known.some((k) => k.host === host)) return null;
+  return `${name} 在 ${host}，平台没有这台主机的凭据：GitHub 上的仓库要装 GitHub App（\`~/.afk/secrets/github-app\`）；GitLab 上的，把 GitLab 的 PAT 放到 \`~/.afk/secrets/gitlab/${host}\`，重启 worker 后再跑 /afk-setup。`;
 }

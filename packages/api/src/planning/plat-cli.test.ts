@@ -25,6 +25,10 @@ beforeEach(async () => {
   await migrate(db.pool);
   logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   api = await listen(createApp({ pool: db.pool, logDir }));
+  // a worker with the GitHub App has said so
+  await db.pool.query(
+    "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('github.com', 'github', 'w1')",
+  );
   files = {};
   workDir = undefined;
 });
@@ -214,6 +218,9 @@ async function register() {
 
 describe("plat", () => {
   it("registers and changes the host kind of a repo, and tracker-doc follows it", async () => {
+    await db.pool.query(
+      "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('git.example.org', 'gitlab', 'w1')",
+    );
     await plat("project", "create", "shop");
     const add = await plat(
       "repo",
@@ -457,6 +464,27 @@ describe("plat", () => {
     const none = await plat("project", "edit", "1");
     expect(none.code).toBe(1);
     expect(none.stderr).toMatch(/nothing to change/);
+  });
+
+  it("does not add a repo on a host no worker has credentials for, and says how to fix it", async () => {
+    await plat("project", "create", "shop");
+    const added = await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "api",
+      "--url",
+      "https://git.corp.example/team/api.git",
+    );
+    expect(added.code).toBe(1);
+    expect(added.stderr).toContain(
+      "api 在 git.corp.example，平台没有这台主机的凭据",
+    );
+    expect(
+      (await db.pool.query("SELECT count(*)::int AS n FROM repos")).rows[0].n,
+    ).toBe(0);
   });
 
   it("registers a repo by name (role still works) and sets, shows and clears its contract path", async () => {

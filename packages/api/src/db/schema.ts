@@ -585,3 +585,20 @@ export const events = pgTable(
     ),
   ],
 );
+
+// The code hosts the workers have credentials for, as last reported (drizzle/0037_code_hosts.sql).
+export const codeHosts = pgTable(
+  "code_hosts",
+  {
+    host: text("host").primaryKey(),
+    kind: text("kind").notNull(),
+    workerId: text("worker_id").notNull(),
+    reportedAt: timestamp("reported_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check("code_hosts_kind_check", oneOf(t.kind, HOST_KINDS)),
+    check("code_hosts_host_check", sql`${t.host} = lower(${t.host})`),
+  ],
+);

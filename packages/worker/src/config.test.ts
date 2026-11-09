@@ -49,6 +49,7 @@ describe("the worker's configuration", () => {
       model: "some-model",
       cursorApiKey: "key",
       credentialsDir: "/home/me/.afk/secrets/github-app",
+      gitlabDir: "/home/me/.afk/secrets/gitlab",
     });
     expect(config.workerId).not.toBe("");
   });

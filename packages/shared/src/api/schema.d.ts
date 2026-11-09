@@ -202,6 +202,49 @@ export interface paths {
     };
     trace?: never;
   };
+  "/hosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The code hosts the workers have credentials for, as they last reported them */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              hosts: {
+                host: string;
+                /** @enum {string} */
+                kind: "github" | "gitlab";
+                workerId: string;
+                reportedAt: string;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/projects/{projectId}/repos": {
     parameters: {
       query?: never;
@@ -256,7 +299,7 @@ export interface paths {
             };
           };
         };
-        /** @description The project already has a repo with this name */
+        /** @description The project already has a repo with this name, or has repos on another kind of code host */
         409: {
           headers: {
             [name: string]: unknown;
@@ -1139,6 +1182,55 @@ export interface paths {
     };
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/worker/hosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            workerId: string;
+            hosts: {
+              host: string;
+              /** @enum {string} */
+              kind: "github" | "gitlab";
+            }[];
+          };
+        };
+      };
+      responses: {
+        /** @description Kept: repos on these hosts can be registered and worked on */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;

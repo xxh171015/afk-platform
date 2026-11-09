@@ -1,3 +1,4 @@
+import { HOST_KINDS } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
 import type { AppContext } from "../app.ts";
@@ -13,6 +14,7 @@ import {
   recordFinalE2eResult,
 } from "../finalize/final-e2e.ts";
 import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
+import { reportHosts } from "../host/code-hosts.ts";
 import {
   readHostSyncPayload,
   readOpenPrPayload,
@@ -91,6 +93,38 @@ const claimRoute = createRoute({
         "application/json": {
           schema: z.object({ job: ClaimedJob.nullable() }),
         },
+      },
+    },
+  },
+});
+
+const hostsReportRoute = createRoute({
+  method: "post",
+  path: "/worker/hosts",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            workerId: z.string().min(1).max(200),
+            hosts: z
+              .array(
+                z.object({
+                  host: z.string().min(1).max(253),
+                  kind: z.enum(HOST_KINDS),
+                }),
+              )
+              .max(100),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Kept: repos on these hosts can be registered and worked on",
+      content: {
+        "application/json": { schema: z.object({ ok: z.literal(true) }) },
       },
     },
   },
@@ -487,6 +521,13 @@ export function registerWorkerRoutes(
   app: OpenAPIHono,
   context: AppContext,
 ): void {
+  // A worker says at start which code hosts it has credentials for.
+  app.openapi(hostsReportRoute, async (c) => {
+    const { workerId, hosts } = c.req.valid("json");
+    await reportHosts(context.pool, workerId, hosts);
+    return c.json({ ok: true as const }, 200);
+  });
+
   app.openapi(claimRoute, async (c) => {
     const { workerId, capabilities } = c.req.valid("json");
     const job = await claimJob(context.pool, {

@@ -58,7 +58,9 @@ Four processes: Postgres, the API, the page and one worker. All of them listen o
 **Once**
 
 1. Docker Desktop running, and the sandbox image built: `scripts/verify-sandbox-image.sh` (tags `sandcastle:afk-platform`).
-2. GitHub App credentials in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
+2. Credentials for each code host the repos are on; the worker tells the API which hosts it has at start, and `plat init` registers no repo on another host, nor a project whose repos are on two kinds of host.
+   - GitHub: the GitHub App in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
+   - GitLab: a PAT in `~/.afk/secrets/gitlab/<host>` (mode 600), one file per host, named after it (`~/.afk/secrets/gitlab/git.example.com`).
 3. The Cursor key in `~/.afk/env` as `CURSOR_API_KEY=…` (or exported). The worker reads nothing else from that file.
 
 The skills the agents run in the sandbox (implement, tdd, code-review, codebase-design) are in this repo, copied from mattpocock/skills at the pinned SHA: the worker mounts `packages/pipeline/skills/` read-only.
@@ -84,6 +86,7 @@ pnpm worker                   # Ctrl-C aborts the runs in hand and stops; those 
 | `AFK_SANDBOX_IMAGE`                             | `sandcastle:afk-platform`                            |
 | `AFK_WORKER_ID`                                 | the host name                                        |
 | `AFK_GITHUB_APP_DIR`                            | `~/.afk/secrets/github-app`                          |
+| `AFK_GITLAB_DIR`                                | `~/.afk/secrets/gitlab`                              |
 | `CURSOR_API_KEY`, `AFK_MODEL`                   | required                                             |
 
 A worker that is missing any of these, or cannot reach the API, says what is wrong and exits before taking a job. A worker with GitHub App credentials also does the jobs for the code host: opening and following a spec's pull requests, and, once a spec is cancelled or merged, closing its pull requests that are still open and deleting its `spec/*` and `agent/*` branches on the remote (closing a pull request needs the App's `pull_requests: write`, deleting a branch `contents: write`; the App already has both). A worker that was killed leaves its sandbox container running on its slot; the next worker to reuse that slot (after the lease runs out) removes the containers that still mount it before it salvages the slot.
