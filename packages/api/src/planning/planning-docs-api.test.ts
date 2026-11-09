@@ -615,6 +615,13 @@ describe("a planning docs patch that does not apply", () => {
     const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
 
     expect(sent.stdout).toContain("sent again");
+    expect(
+      (
+        await ws.db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "cli", action: "retry-planning" });
     expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
     const [job] = await claimAll(worker);
     expect(job.type).toBe("planning-commit");
@@ -627,6 +634,13 @@ describe("a planning docs patch that does not apply", () => {
     await ws.plat(backend.dir, ["spec", "waive-planning", "S-1"]);
 
     expect(existsSync(join(ws.afkHome, "planning/S-1"))).toBe(false);
+    expect(
+      (
+        await ws.db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "cli", action: "waive-planning" });
   });
 
   it("waive-planning gives the docs up: the planning commit is the default branch's head and the spec says the docs were waived", async () => {

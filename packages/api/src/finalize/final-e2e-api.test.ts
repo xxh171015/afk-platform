@@ -366,6 +366,13 @@ describe("a failed e2e before the pull requests", () => {
     await failed();
     const waived = await call("POST", "/specs/1/final/waive");
     expect(waived.status).toBe(200);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "waive-final" });
     expect(await finalE2e()).toMatchObject({ state: "waived" });
     expect(await queuedOf("open-pr")).toHaveLength(2);
 

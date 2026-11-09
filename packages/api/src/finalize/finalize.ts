@@ -10,6 +10,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
+import { recordAction } from "../events/human-actions.ts";
 import { enqueueOpenPr } from "../host/host-jobs.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
@@ -216,6 +217,12 @@ export async function retryFinalization(
         retried.push(row.step);
       }
     }
+    await recordAction(
+      client,
+      "retry-final",
+      { specId },
+      { retried, note: parkedRetryNote(note) },
+    );
     return { status: "ok", retried };
   });
 }

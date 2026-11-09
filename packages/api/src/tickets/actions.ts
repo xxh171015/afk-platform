@@ -8,6 +8,7 @@ import {
 } from "@afk/shared";
 import { readTicketEditFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
 import {
   CLEANUP_GRACE_SECONDS,
   enqueueSpecCleanup,
@@ -112,6 +113,12 @@ export async function retryTicket(
         parkedRetryNote(note),
       ],
     );
+    await recordAction(
+      client,
+      "retry",
+      { specId: ticket.spec_id, ticketId },
+      { mode, note: parkedRetryNote(note) },
+    );
     await schedulePass(client, ticket.spec_id);
     const after = await client.query<{ state: TicketState }>(
       "SELECT state FROM tickets WHERE id = $1",
@@ -160,6 +167,12 @@ export async function approveProtected(
       [ticketId, next.state, allowed],
     );
     await followApprovedPaths(client, ticketId);
+    await recordAction(
+      client,
+      "approve-protected",
+      { specId: ticket.spec_id, ticketId },
+      { paths: approved },
+    );
     await enqueueStageJob(
       client,
       {
@@ -195,6 +208,12 @@ export async function allowPaths(
       [ticketId, allowed],
     );
     await followApprovedPaths(client, ticketId);
+    await recordAction(
+      client,
+      "allow-paths",
+      { specId: ticket.spec_id, ticketId },
+      { paths },
+    );
     return { status: "ok", allowed };
   });
 }
@@ -303,6 +322,15 @@ export async function editTicket(
       [ticketId, ...changes.map(([, value]) => value)],
     );
     await snapshotTicket(client, ticketId);
+    await recordAction(
+      client,
+      "edit-ticket",
+      { specId: ticket.spec_id, ticketId },
+      {
+        version: updated.rows[0]?.content_version,
+        fields: changes.map(([column]) => column),
+      },
+    );
     return {
       status: "ok",
       contentVersion: updated.rows[0]?.content_version as number,
@@ -408,6 +436,12 @@ export async function cancelTicket(
         }
       }
     }
+    await recordAction(
+      client,
+      "cancel-ticket",
+      { specId: ticket.spec_id, ticketId },
+      { cascade, cancelled: outcome.cancelled, blocked: outcome.blocked },
+    );
     await schedulePass(client, ticket.spec_id);
     return { status: "ok", ...outcome };
   });
@@ -445,6 +479,7 @@ export async function resumeSpec(
       "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
       [specId, next.state, extraSeconds],
     );
+    await recordAction(client, "resume", { specId }, { extraSeconds });
     await schedulePass(client, specId);
     const after = await client.query<{ state: SpecState }>(
       "SELECT state FROM specs WHERE id = $1",
@@ -544,6 +579,12 @@ export async function cancelSpec(
        WHERE p.spec_id = $1 AND p.state = 'open' ORDER BY p.id`,
       [specId],
     );
+    await recordAction(
+      client,
+      "cancel-spec",
+      { specId },
+      { cancelled: cancelled.map((id) => formatDisplayId("ticket", id)) },
+    );
     return {
       status: "ok",
       state: next.state,
@@ -574,6 +615,7 @@ export async function retrySpecCleanup(
     if (waiting.rowCount)
       return refused("a clean-up of this spec is already waiting or running");
     await enqueueSpecCleanup(client, { specId });
+    await recordAction(client, "retry-cleanup", { specId });
     return { status: "ok", queued: true };
   });
 }

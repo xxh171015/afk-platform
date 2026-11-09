@@ -9,6 +9,8 @@ export interface EventOrigin {
   source: EventSource;
   // the job a worker is reporting on: the events of its transaction belong to that job's Run
   jobId?: number;
+  // the machine a person acted from (the page's is the API's own: M3 runs both on one Mac)
+  host?: string;
 }
 
 const current = new AsyncLocalStorage<EventOrigin>();

@@ -253,6 +253,13 @@
       "when": 1794200000000,
       "tag": "0035_events",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794210000000,
+      "tag": "0036_action_events",
+      "breakpoints": true
     }
   ]
 }

@@ -20,6 +20,8 @@ export function createApiClient(
 
 // The header that tells the API a call comes from `plat`.
 export const CLIENT_HEADER = "x-afk-client";
+// The machine plat runs on: with no login in M3 it stands in for who did it.
+export const HOST_HEADER = "x-afk-host";
 export const CLI_HEADERS: Record<string, string> = { [CLIENT_HEADER]: "cli" };
 export type ApiClient = ReturnType<typeof createApiClient>;
 

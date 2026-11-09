@@ -54,6 +54,7 @@ const LATER_THAN_REPO_NAMES = [
   "0033_repo_access",
   "0034_spec_last_started",
   "0035_events",
+  "0036_action_events",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

@@ -128,5 +128,25 @@ export const EVENT_TYPES = [
   "pull-request-ci",
   "pull-request-review",
   "pull-request-sync",
+  // a person's action (HUMAN_ACTIONS), written by the action's code
+  "action",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
+
+// What a person can do from the page or with plat; each is an event of type action.
+export const HUMAN_ACTIONS = [
+  "confirm",
+  "retry",
+  "approve-protected",
+  "allow-paths",
+  "edit-ticket",
+  "cancel-ticket",
+  "resume",
+  "cancel-spec",
+  "retry-final",
+  "waive-final",
+  "retry-cleanup",
+  "retry-planning",
+  "waive-planning",
+] as const;
+export type HumanAction = (typeof HUMAN_ACTIONS)[number];

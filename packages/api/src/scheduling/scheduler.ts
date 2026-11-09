@@ -13,6 +13,7 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
 import { applyOrigin, asSource } from "../events/origin.ts";
 import {
   cancelIfAllTicketsCancelled,
@@ -185,6 +186,7 @@ export async function confirmSpec(
       ],
     );
     if (planning_repo_id !== null) await enqueuePlanningCommit(client, specId);
+    await recordAction(client, "confirm", { specId });
     const scheduled = await schedulePass(client, specId);
     return {
       status: "ok",

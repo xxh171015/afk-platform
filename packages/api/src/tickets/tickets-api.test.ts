@@ -619,6 +619,13 @@ describe("approve-protected", () => {
       status: 200,
       body: { approved: [".github/workflows/ci.yml", "tsconfig.json"] },
     });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "approve-protected" });
     expect(await row(1)).toMatchObject({
       state: "running",
       blocked_reason: null,

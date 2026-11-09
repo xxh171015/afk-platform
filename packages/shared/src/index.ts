@@ -13,6 +13,7 @@ export {
   CLI_HEADERS,
   CLIENT_HEADER,
   createApiClient,
+  HOST_HEADER,
 } from "./api/client.ts";
 export {
   branchNames,
@@ -26,6 +27,7 @@ export type {
   EventSource,
   EventType,
   FailureSource,
+  HumanAction,
   PauseReason,
   ReasonCode,
 } from "./failure-source.ts";
@@ -38,6 +40,7 @@ export {
   FINAL_E2E_BLOCKED_REASONS,
   FINAL_E2E_FAILED,
   failureSourceOf,
+  HUMAN_ACTIONS,
   isPlatformProblem,
   PAUSE_REASONS,
   REASON_CODES,

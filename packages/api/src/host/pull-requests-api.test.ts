@@ -1885,6 +1885,13 @@ describe("cleaning up after a cancelled or merged spec", () => {
   it("queues the cleanup again on a person's word, and it leaves the list while it is queued", async () => {
     await failThreeTimes();
     expect((await call("POST", "/specs/1/cleanup")).status).toBe(200);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "retry-cleanup" });
     expect(await leftover()).toEqual([]);
     expect((await call("POST", "/specs/1/cleanup")).status).toBe(409); // one is already waiting
     const job = await claimCleanup();

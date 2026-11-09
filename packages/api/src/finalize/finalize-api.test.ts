@@ -404,6 +404,13 @@ describe("when it goes wrong", () => {
     expect((await call("POST", "/specs/1/final/retry", { note })).status).toBe(
       200,
     );
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "retry-final" });
     const again = (await claim()) as Claimed;
     const bundleOf = async (job: Claimed) =>
       (await fetch(

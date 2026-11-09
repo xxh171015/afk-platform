@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
@@ -16,6 +16,7 @@ import {
   CLI_HEADERS,
   createApiClient,
   formatDisplayId,
+  HOST_HEADER,
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
@@ -73,6 +74,9 @@ import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
+
+// Every call says it is plat, and from which machine: the API records a person's actions with both.
+const cliHeaders = () => ({ ...CLI_HEADERS, [HOST_HEADER]: hostname() });
 
 export interface Io {
   stdout: (text: string) => void;
@@ -219,7 +223,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         DEFAULT_API_URL,
     );
   const api = (): ApiClient =>
-    createApiClient(apiUrl(), undefined, CLI_HEADERS);
+    createApiClient(apiUrl(), undefined, cliHeaders());
 
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
   program.hook("preAction", async () => {
@@ -630,7 +634,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         cwd: io.cwd ?? process.cwd(),
         encoding: "utf8",
       });
-      const platform = await createApiClient(base, undefined, CLI_HEADERS)
+      const platform = await createApiClient(base, undefined, cliHeaders())
         .GET("/version")
         .then((r) => r.data)
         .catch(() => undefined);
@@ -1611,7 +1615,7 @@ const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
 
 // The platform version answering at `address`, or undefined when nothing does.
 const platformVersionAt = (address: string): Promise<string | undefined> =>
-  createApiClient(address, undefined, CLI_HEADERS)
+  createApiClient(address, undefined, cliHeaders())
     .GET("/version")
     .then((r) => r.data?.platformVersion)
     .catch(() => undefined);
