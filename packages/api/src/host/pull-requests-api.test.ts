@@ -921,6 +921,102 @@ describe("following the pull requests", () => {
     await awaitingReview(["backend", "frontend"]);
     expect(await jobsOf("host-sync")).toHaveLength(1);
   });
+
+  // the events host-sync writes (docs/specs/m3-platform.md「事件表」)
+  const hostEvents = async () =>
+    (
+      await db.pool.query(
+        `SELECT type, from_state, to_state, reason, source, failure_source FROM events
+         WHERE type LIKE 'pull-request%' AND source = 'host-sync' ORDER BY id`,
+      )
+    ).rows;
+  const eventCount = async () =>
+    (await db.pool.query("SELECT count(*)::int AS n FROM events")).rows[0].n;
+
+  it("records what a look found changed, and nothing for a look that found nothing new", async () => {
+    await awaitingReview();
+    const first = await claimOf("host-sync");
+    await worker.complete(first.id, first.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { ci: "success", review: "approved" })],
+    });
+    expect(await hostEvents()).toEqual([
+      expect.objectContaining({
+        type: "pull-request-ci",
+        from_state: "none",
+        to_state: "success",
+      }),
+      expect.objectContaining({
+        type: "pull-request-review",
+        from_state: "none",
+        to_state: "approved",
+      }),
+    ]);
+    const before = await eventCount();
+    clock.advanceSeconds(60);
+    const second = await claimOf("host-sync");
+    await worker.complete(second.id, second.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { ci: "success", review: "approved" })],
+    });
+    expect(await eventCount()).toBe(before);
+  });
+
+  it("records a pull request that cannot be read as an outside service's failure, once, and when it can again", async () => {
+    await awaitingReview();
+    for (const pull of [
+      { id: 1, error: "GitHub answered 502" },
+      { id: 1, error: "GitHub answered 503" },
+      synced(1),
+    ]) {
+      const job = await claimOf("host-sync");
+      await worker.complete(job.id, job.attempt, {
+        stage: "host-sync",
+        pulls: [pull],
+      });
+      clock.advanceSeconds(60);
+    }
+    expect(
+      (await hostEvents()).filter((e) => e.type === "pull-request-sync"),
+    ).toEqual([
+      {
+        type: "pull-request-sync",
+        from_state: "ok",
+        to_state: "error",
+        reason: "sync-error",
+        source: "host-sync",
+        failure_source: "external",
+      },
+      {
+        type: "pull-request-sync",
+        from_state: "error",
+        to_state: "ok",
+        reason: null,
+        source: "host-sync",
+        failure_source: null,
+      },
+    ]);
+  });
+
+  it("records the merge a look found, and the spec's state change with it", async () => {
+    await awaitingReview();
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged" })],
+    });
+    expect(
+      (await hostEvents()).filter((e) => e.type === "pull-request"),
+    ).toMatchObject([{ from_state: "open", to_state: "merged" }]);
+    const spec = await db.pool.query(
+      "SELECT from_state, to_state, source FROM events WHERE type = 'spec' ORDER BY id DESC LIMIT 1",
+    );
+    expect(spec.rows[0]).toEqual({
+      from_state: "awaiting-review",
+      to_state: "merged",
+      source: "host-sync",
+    });
+  });
 });
 
 describe("what waits for a person among the pull requests", () => {

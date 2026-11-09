@@ -13,6 +13,7 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
+import { applyOrigin, asSource } from "../events/origin.ts";
 import {
   cancelIfAllTicketsCancelled,
   startFinalization,
@@ -88,6 +89,7 @@ export async function inTransaction<T>(
     // a transaction opened by hand on this connection may have left some behind
     projectsToPass.delete(client);
     await client.query("BEGIN");
+    await applyOrigin(client);
     result = await work(client);
     await client.query("COMMIT");
     projects = projectsToPass.get(client);
@@ -259,7 +261,15 @@ interface TicketRow {
   resume_stage: "e2e" | null;
 }
 
-export async function schedulePass(
+// Whatever transaction it runs in, what a pass changes is the scheduler's doing.
+export function schedulePass(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<ScheduleResult> {
+  return asSource(client, "scheduler", () => schedulingPass(client, specId));
+}
+
+async function schedulingPass(
   client: pg.PoolClient,
   specId: number,
 ): Promise<ScheduleResult> {

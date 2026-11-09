@@ -9,7 +9,11 @@ export type {
   paths,
   ReadinessTask,
 } from "./api/client.ts";
-export { createApiClient } from "./api/client.ts";
+export {
+  CLI_HEADERS,
+  CLIENT_HEADER,
+  createApiClient,
+} from "./api/client.ts";
 export {
   branchNames,
   isPlatformBranch,
@@ -18,6 +22,26 @@ export {
 } from "./branches.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
+export type {
+  EventSource,
+  EventType,
+  FailureSource,
+  PauseReason,
+  ReasonCode,
+} from "./failure-source.ts";
+export {
+  EVENT_SOURCES,
+  EVENT_TYPES,
+  EXTERNAL_ERROR_PATTERNS,
+  FAILURE_SOURCE_OF_REASON,
+  FAILURE_SOURCES,
+  FINAL_E2E_BLOCKED_REASONS,
+  FINAL_E2E_FAILED,
+  failureSourceOf,
+  isPlatformProblem,
+  PAUSE_REASONS,
+  REASON_CODES,
+} from "./failure-source.ts";
 export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
 export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";

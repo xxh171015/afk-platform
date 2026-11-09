@@ -189,6 +189,38 @@ describe("the queue of what waits for a person", () => {
     ).toBe("/specs/1");
   });
 
+  it("lists the platform's and outside services' problems after the specs', under a heading of their own", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [
+          ticket(1, "agent-gave-up", { failureSource: "agent" }),
+          ticket(2, "job-failed", { failureSource: "external" }),
+        ],
+        items: [
+          { kind: "ticket", id: 1 },
+          { kind: "ticket", id: 2 },
+        ],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    const group = screen.getByRole("region", { name: "平台问题" });
+    expect(within(group).getByTestId("blocked-T-2")).toBeTruthy();
+    expect(within(group).queryByTestId("blocked-T-1")).toBeNull();
+    expect(within(group).getByText("外部服务")).toBeTruthy();
+  });
+
+  it("shows no platform heading when every problem is a spec's own", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [ticket(1, "agent-gave-up", { failureSource: "agent" })],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    expect(screen.queryByRole("region", { name: "平台问题" })).toBeNull();
+  });
+
   it("shows the paths the gate found for protected-path-changed and the gate's log for a failed gate", async () => {
     const { fake } = server(
       queue({

@@ -5,12 +5,22 @@ export type { components, paths } from "./schema.d.ts";
 
 // The one typed client for the platform API; the CLI and the web page both use it.
 // `fetch` can be replaced, which is how the page's tests talk to a fake server.
+// `headers` go with every call: the CLI says it is the CLI, so its changes are recorded as the CLI's.
 export function createApiClient(
   baseUrl: string,
   fetch?: typeof globalThis.fetch,
+  headers?: Record<string, string>,
 ) {
-  return createClient<paths>({ baseUrl, ...(fetch ? { fetch } : {}) });
+  return createClient<paths>({
+    baseUrl,
+    ...(fetch ? { fetch } : {}),
+    ...(headers ? { headers } : {}),
+  });
 }
+
+// The header that tells the API a call comes from `plat`.
+export const CLIENT_HEADER = "x-afk-client";
+export const CLI_HEADERS: Record<string, string> = { [CLIENT_HEADER]: "cli" };
 export type ApiClient = ReturnType<typeof createApiClient>;
 
 // What GET /worker/jobs/{id}/bundle returns: everything a worker renders into /context.

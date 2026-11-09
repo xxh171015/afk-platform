@@ -1,4 +1,5 @@
 import {
+  FAILURE_SOURCES,
   HOST_KINDS,
   PLANNING_STATES,
   REVIEW_AXES,
@@ -106,6 +107,8 @@ const Blocking = z.object({
 const WaitingFields = z.object({
   waitingSince: z.string().optional(),
   blocking: Blocking.optional(),
+  // whose fault it is: the platform's and outside services' problems are listed after the specs' own
+  failureSource: z.enum(FAILURE_SOURCES).nullable().optional(),
 });
 
 const WaitingRef = z.discriminatedUnion("kind", [

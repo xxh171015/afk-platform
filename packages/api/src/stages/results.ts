@@ -580,7 +580,10 @@ async function blockTicket(
 
 // A worker claiming a ticket stage job starts its Run (so there is something to attach logs to while the stage
 // is still going), and for the first stage moves the ticket from queued to running.
-export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
+export async function markClaimed(
+  pool: Pick<pg.Pool, "query">,
+  job: StageJob,
+): Promise<void> {
   const read = readStagePayload(job.payload);
   if (!read) return;
   const { ticketId, stage } = read;
@@ -601,7 +604,7 @@ export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
 
 // A re-claim after a lease ran out finds the Run already there and leaves it be.
 async function startRun(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   ticketId: number,
   jobId: number,
   stage: Stage,

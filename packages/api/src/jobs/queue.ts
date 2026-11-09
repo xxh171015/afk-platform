@@ -1,5 +1,6 @@
 import type { JobState } from "@afk/shared";
 import type pg from "pg";
+import { applyOrigin } from "../events/origin.ts";
 
 // The job queue lives on the `jobs` table (docs/specs/m1-platform.md「作业队列」).
 // Every function takes `now` so lease expiry is decided by the caller's clock, not by waiting.
@@ -81,6 +82,7 @@ export async function claimJob(
   let broken: Error | undefined; // a connection whose ROLLBACK failed must not go back to the pool
   try {
     await client.query("BEGIN");
+    await applyOrigin(client);
     // A lease that ran out puts the job back in the queue; the bumped attempt shuts the old holder out.
     await client.query(
       `UPDATE jobs SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL, attempt = attempt + 1

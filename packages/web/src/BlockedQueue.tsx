@@ -1,3 +1,4 @@
+import { isPlatformProblem } from "@afk/shared";
 import {
   keepPreviousData,
   type QueryClient,
@@ -5,6 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+
 import {
   AlertCircle,
   ExternalLink,
@@ -54,6 +56,7 @@ import { WORKBENCH_KEY } from "./Workbench.tsx";
 import {
   type Blocking,
   blockingCopy,
+  FAILURE_SOURCE_LABELS,
   filterWaiting,
   groupWaitingBySpec,
   matchesFinalization,
@@ -867,7 +870,8 @@ function specIdOf(data: Queue, ref: WaitingRef): number {
   return ref.specId;
 }
 
-function rankFields(data: Queue, ref: WaitingRef) {
+// The queue's row behind a ref.
+function waitingItemOf(data: Queue, ref: WaitingRef) {
   const lookup = () => {
     if (ref.kind === "ticket")
       return data.tickets.find((item) => item.id === ref.id);
@@ -893,7 +897,11 @@ function rankFields(data: Queue, ref: WaitingRef) {
       return (data.planning ?? []).find((item) => item.specId === ref.specId);
     return data.specs.find((item) => item.id === ref.id);
   };
-  const item = lookup();
+  return lookup();
+}
+
+function rankFields(data: Queue, ref: WaitingRef) {
+  const item = waitingItemOf(data, ref);
   const blocking = item?.blocking ?? {
     downstream: [],
     finalization: false,
@@ -982,18 +990,52 @@ function WaitingList({
   bySpec: boolean;
 }) {
   const filtered = filterWaiting(inferredItems(data), type);
-  const items = bySpec
-    ? groupWaitingBySpec(
-        filtered,
-        (item) => specIdOf(data, item),
-        (item) => rankFields(data, item),
-      )
-    : filtered;
+  const sourceOf = (item: WaitingRef) =>
+    waitingItemOf(data, item)?.failureSource ?? null;
+  const ordered = (list: WaitingRef[]) =>
+    bySpec
+      ? groupWaitingBySpec(
+          list,
+          (item) => specIdOf(data, item),
+          (item) => rankFields(data, item),
+        )
+      : list;
+  const own = ordered(
+    filtered.filter((item) => !isPlatformProblem(sourceOf(item))),
+  );
+  const platform = ordered(
+    filtered.filter((item) => isPlatformProblem(sourceOf(item))),
+  );
   return (
-    <div className="space-y-3">
-      {items.map((item) => (
-        <CardFor key={refKey(item)} data={data} item={item} />
-      ))}
+    <div className="space-y-6">
+      <div className="space-y-3">
+        {own.map((item) => (
+          <CardFor key={refKey(item)} data={data} item={item} />
+        ))}
+      </div>
+      {platform.length > 0 ? (
+        <section aria-labelledby="platform-problems" className="space-y-3">
+          <div>
+            <h2
+              id="platform-problems"
+              className="text-[13px] font-medium text-muted-foreground"
+            >
+              平台问题
+            </h2>
+            <p className="text-[12px] text-muted-foreground">
+              平台自己或外部服务（Cursor、代码托管、镜像源）出的问题，不是需求本身的。
+            </p>
+          </div>
+          {platform.map((item) => (
+            <div key={refKey(item)} className="space-y-1">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {FAILURE_SOURCE_LABELS[sourceOf(item) ?? "platform"]}
+              </span>
+              <CardFor data={data} item={item} />
+            </div>
+          ))}
+        </section>
+      ) : null}
     </div>
   );
 }

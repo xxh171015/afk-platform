@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   type ApiClient,
+  CLI_HEADERS,
   createApiClient,
   formatDisplayId,
   HOST_KINDS,
@@ -217,7 +218,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         rememberedApiUrl(afkHome(io.env)) ||
         DEFAULT_API_URL,
     );
-  const api = (): ApiClient => createApiClient(apiUrl());
+  const api = (): ApiClient =>
+    createApiClient(apiUrl(), undefined, CLI_HEADERS);
 
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
   program.hook("preAction", async () => {
@@ -628,7 +630,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         cwd: io.cwd ?? process.cwd(),
         encoding: "utf8",
       });
-      const platform = await createApiClient(base)
+      const platform = await createApiClient(base, undefined, CLI_HEADERS)
         .GET("/version")
         .then((r) => r.data)
         .catch(() => undefined);
@@ -1609,7 +1611,7 @@ const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
 
 // The platform version answering at `address`, or undefined when nothing does.
 const platformVersionAt = (address: string): Promise<string | undefined> =>
-  createApiClient(address)
+  createApiClient(address, undefined, CLI_HEADERS)
     .GET("/version")
     .then((r) => r.data?.platformVersion)
     .catch(() => undefined);

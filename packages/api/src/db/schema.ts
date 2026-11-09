@@ -1,6 +1,10 @@
 import {
   BLOCKED_REASONS,
   EDGE_KINDS,
+  EVENT_SOURCES,
+  EVENT_TYPES,
+  FAILURE_SOURCES,
+  FINAL_E2E_BLOCKED_REASONS,
   FINAL_STEPS,
   FINDING_RESOLUTIONS,
   HOST_KINDS,
@@ -13,6 +17,7 @@ import {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigserial,
   boolean,
   check,
   index,
@@ -344,6 +349,10 @@ export const finalizations = pgTable(
       "finalizations_blocked_reason_check",
       sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
     ),
+    check(
+      "finalizations_blocked_reason_code_check",
+      sql`${t.blockedReason} is null or ${oneOf(t.blockedReason, BLOCKED_REASONS)}`,
+    ),
   ],
 );
 
@@ -376,6 +385,10 @@ export const finalE2e = pgTable(
     check(
       "final_e2e_blocked_reason_check",
       sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
+    ),
+    check(
+      "final_e2e_blocked_reason_code_check",
+      sql`${t.blockedReason} is null or ${oneOf(t.blockedReason, FINAL_E2E_BLOCKED_REASONS)}`,
     ),
   ],
 );
@@ -534,5 +547,41 @@ export const gateResults = pgTable(
       t.kind,
     ),
     check("gate_results_kind_check", oneOf(t.kind, ["gate", "e2e"])),
+  ],
+);
+
+// One state change or a person's action (GLOSSARY Event), only appended. Written by database triggers in the same
+// transaction as the change (drizzle/0035_events.sql); who made it comes from events/origin.ts. Read by the metrics.
+export const events = pgTable(
+  "events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    specId: integer("spec_id"),
+    ticketId: integer("ticket_id"),
+    runId: integer("run_id"),
+    jobId: integer("job_id"),
+    repoId: integer("repo_id"),
+    type: text("type").notNull(),
+    fromState: text("from_state"),
+    toState: text("to_state"),
+    reason: text("reason"),
+    source: text("source"),
+    failureSource: text("failure_source"),
+    data: jsonb("data").notNull().default({}),
+  },
+  (t) => [
+    index("events_spec_idx").on(t.specId, t.id),
+    index("events_ticket_idx").on(t.ticketId, t.id),
+    index("events_at_idx").on(t.at),
+    check("events_type_check", oneOf(t.type, EVENT_TYPES)),
+    check(
+      "events_source_check",
+      sql`${t.source} is null or ${oneOf(t.source, EVENT_SOURCES)}`,
+    ),
+    check(
+      "events_failure_source_check",
+      sql`${t.failureSource} is null or ${oneOf(t.failureSource, FAILURE_SOURCES)}`,
+    ),
   ],
 );

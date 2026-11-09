@@ -2169,6 +2169,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
                 body: string;
                 acceptanceCriteria: string[];
                 modules: string[];
@@ -2546,6 +2553,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               finalizations: {
                 id: number;
@@ -2607,6 +2621,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               mergeOrder: {
                 ordered: string[];
@@ -2998,6 +3019,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               finalizations: {
                 id: number;
@@ -3059,6 +3087,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               pullRequests: {
                 specId: number;
@@ -3076,6 +3111,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               cleanups: {
                 specId: number;
@@ -3089,6 +3131,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               readyFailures: {
                 specId: number;
@@ -3105,6 +3154,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               planning: {
                 specId: number;
@@ -3120,6 +3176,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               specs: {
                 id: number;
@@ -3134,6 +3197,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               items: (
                 | {

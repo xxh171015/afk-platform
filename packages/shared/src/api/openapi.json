@@ -3727,6 +3727,16 @@
                             "merge"
                           ]
                         },
+                        "failureSource": {
+                          "type": ["string", "null"],
+                          "enum": [
+                            "platform",
+                            "external",
+                            "agent",
+                            "spec",
+                            null
+                          ]
+                        },
                         "body": {
                           "type": "string"
                         },
@@ -4739,6 +4749,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -4954,6 +4974,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -6097,6 +6127,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6313,6 +6353,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6385,6 +6435,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6443,6 +6503,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -6503,6 +6573,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -6571,6 +6651,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6630,6 +6720,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },

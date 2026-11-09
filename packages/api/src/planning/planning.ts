@@ -11,7 +11,8 @@ import {
 } from "@afk/shared";
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
-import { schedulePass } from "../scheduling/scheduler.ts";
+import { applyOrigin } from "../events/origin.ts";
+import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
 import { ensureIntegrationBranches } from "./integration-branches.ts";
 
@@ -215,17 +216,20 @@ export async function createSpec(
     planningRepoId = repo.rows[0].id;
   }
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id)
+    // in a transaction, so the spec's first event says who made it
+    const { rows } = await inTransaction(pool, (client) =>
+      client.query(
+        `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id)
        SELECT $1, $2, $3, $4, $5, id, $6 FROM instance RETURNING id`,
-      [
-        spec.projectId,
-        spec.type,
-        spec.slug,
-        spec.title,
-        spec.body ?? "",
-        planningRepoId,
-      ],
+        [
+          spec.projectId,
+          spec.type,
+          spec.slug,
+          spec.title,
+          spec.body ?? "",
+          planningRepoId,
+        ],
+      ),
     );
     const id = rows[0].id as number;
     return {
@@ -265,6 +269,7 @@ export async function importTickets(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyOrigin(client);
     const spec = await client.query(
       "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings FROM specs WHERE id = $1 FOR UPDATE",
       [specId],

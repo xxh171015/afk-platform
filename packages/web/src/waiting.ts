@@ -1,3 +1,4 @@
+import type { FailureSource } from "@afk/shared";
 import { formatShanghaiTime } from "./time.ts";
 
 // How many items sit in the waiting queue: the nav badge and the workbench 等你处理 quadrant share this.
@@ -133,3 +134,10 @@ export function groupWaitingBySpec<T extends WaitingRef>(
     })
     .flat();
 }
+
+export const FAILURE_SOURCE_LABELS: Record<FailureSource, string> = {
+  platform: "平台",
+  external: "外部服务",
+  agent: "agent",
+  spec: "需求本身",
+};

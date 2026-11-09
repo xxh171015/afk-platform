@@ -128,7 +128,7 @@ export async function recordFinalResult(
 
 // A worker claiming a final job starts its Run, as for a ticket stage.
 export async function markFinalClaimed(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   job: StageJob,
 ): Promise<void> {
   const read = readFinalPayload(job.payload);

@@ -1,4 +1,5 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
+import type pg from "pg";
 import type { AppContext } from "../app.ts";
 import {
   aroundJob,
@@ -6,6 +7,7 @@ import {
   snapshotSpecs,
   specIdsOfJob,
 } from "../events/announce.ts";
+import { applyOrigin, withOrigin } from "../events/origin.ts";
 import {
   readFinalE2ePayload,
   recordFinalE2eResult,
@@ -464,6 +466,23 @@ function refusal(outcome: Exclude<HolderOutcome, { status: "ok" }>) {
       } as const);
 }
 
+// A worker's report on a job: what it changes is the worker's doing, and host-sync's when it is a look at the host.
+function inWorkerReport<T>(
+  context: AppContext,
+  jobId: number,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  return inTransaction(context.pool, async (client) => {
+    const job = await client.query<{ type: string }>(
+      "SELECT type FROM jobs WHERE id = $1",
+      [jobId],
+    );
+    const source = job.rows[0]?.type === "host-sync" ? "host-sync" : "worker";
+    await applyOrigin(client, { source, jobId });
+    return work(client);
+  });
+}
+
 export function registerWorkerRoutes(
   app: OpenAPIHono,
   context: AppContext,
@@ -479,8 +498,13 @@ export function registerWorkerRoutes(
     if (!job) return c.json({ job: null }, 200);
     const specIds = await specIdsOfJob(context.pool, job.id);
     const before = await snapshotSpecs(context.pool, specIds);
-    await markClaimed(context.pool, job);
-    await markFinalClaimed(context.pool, job);
+    // the ticket or step starting goes with its Run, and both are the worker's doing
+    await withOrigin({ source: "worker", jobId: job.id }, () =>
+      inTransaction(context.pool, async (client) => {
+        await markClaimed(client, job);
+        await markFinalClaimed(client, job);
+      }),
+    );
     const run = await context.pool.query<{ id: number }>(
       "SELECT id FROM runs WHERE job_id = $1 ORDER BY id DESC LIMIT 1",
       [job.id],
@@ -557,7 +581,7 @@ export function registerWorkerRoutes(
     const { workerId, attempt, result } = c.req.valid("json");
     // The job finishing and the ticket moving on happen together or not at all.
     const outcome = await aroundJob(context, id, () =>
-      inTransaction(context.pool, async (client) => {
+      inWorkerReport(context, id, async (client) => {
         const finished = await completeJob(
           client,
           { jobId: id, workerId, attempt, now: context.clock() },
@@ -741,7 +765,7 @@ export function registerWorkerRoutes(
     const { workerId, attempt, error } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
     const outcome = await aroundJob(context, id, () =>
-      inTransaction(context.pool, async (client) => {
+      inWorkerReport(context, id, async (client) => {
         const failed = await failJob(
           client,
           { jobId: id, workerId, attempt, now: context.clock() },

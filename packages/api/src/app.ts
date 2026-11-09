@@ -1,10 +1,12 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CLIENT_HEADER } from "@afk/shared";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
 import { EventsHub } from "./events/hub.ts";
+import { withOrigin } from "./events/origin.ts";
 import { registerCliRoutes } from "./http/cli-routes.ts";
 import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
@@ -72,6 +74,19 @@ export function createApp(options: AppOptions): OpenAPIHono {
     }
     await next();
   });
+  // Who a request's changes are recorded as (events/origin.ts): a worker, the CLI (it says so), or the page.
+  app.use("*", (c, next) =>
+    withOrigin(
+      {
+        source: c.req.path.startsWith("/worker/")
+          ? "worker"
+          : c.req.header(CLIENT_HEADER) === "cli"
+            ? "cli"
+            : "page",
+      },
+      next,
+    ),
+  );
   // The page runs on another port of the same machine and may read the answers.
   app.use(
     "*",

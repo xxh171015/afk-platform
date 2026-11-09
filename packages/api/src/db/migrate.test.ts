@@ -14,6 +14,7 @@ import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 const ENTITY_TABLES = [
   "acceptance_packs",
   "edges",
+  "events",
   "final_e2e",
   "finalizations",
   "findings",
@@ -48,11 +49,20 @@ const LATER_THAN_REPO_NAMES = [
   "0028_run_axis",
   "0029_repo_host_kind",
   "0030_planning_commit",
+  "0031_retry_note",
+  "0032_planning_docs",
+  "0033_repo_access",
+  "0034_spec_last_started",
+  "0035_events",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
   ...LATER_THAN_REPO_NAMES,
 ];
+
+// A migration after 0030 may need tables the left-out ones make (0035 adds constraints to final_e2e), so the tests
+// that leave out some of 0026–0030 leave those out too.
+const newerThanPlanningCommit = (tag: string) => Number(tag.slice(0, 4)) > 30;
 
 let db: TestDatabase;
 beforeEach(async () => {
@@ -246,7 +256,7 @@ describe("migrating ticket bodies to the issue template", () => {
           "0028_run_axis",
           "0029_repo_host_kind",
           "0030_planning_commit",
-        ].includes(e.tag),
+        ].includes(e.tag) && !newerThanPlanningCommit(e.tag),
     );
     writeFileSync(journalPath, JSON.stringify(journal));
     await migrate(db.pool, before);
@@ -379,7 +389,9 @@ describe("the host kind of a repo", () => {
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
         (e: { tag: string }) =>
-          e.tag !== "0029_repo_host_kind" && e.tag !== "0030_planning_commit",
+          e.tag !== "0029_repo_host_kind" &&
+          e.tag !== "0030_planning_commit" &&
+          !newerThanPlanningCommit(e.tag),
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);

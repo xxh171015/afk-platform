@@ -1,4 +1,4 @@
-import { formatDisplayId, type SpecState } from "@afk/shared";
+import { FINAL_E2E_FAILED, formatDisplayId, type SpecState } from "@afk/shared";
 import type pg from "pg";
 import { startOpeningPullRequests } from "../host/pull-requests.ts";
 import { ticketJobKeyPrefix } from "../jobs/idempotency.ts";
@@ -16,7 +16,6 @@ import type { ActionResult } from "../tickets/actions.ts";
 // not to a ticket (docs/specs/m2-platform.md「收尾、PR 与合并」).
 
 const MAX_JOB_FAILURES = 3;
-export const FINAL_E2E_FAILED = "final-e2e-failed";
 const ENVIRONMENT_FAILED = "integration-environment-failed";
 
 // where a ticket is in the current round

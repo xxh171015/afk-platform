@@ -528,6 +528,16 @@ describe("a planning docs patch that does not apply", () => {
     expect(blocked.stdout).toContain("plat spec waive-planning S-1");
   });
 
+  it("puts the block on the spec: its planning docs did not apply", async () => {
+    await blockedSpec();
+    const event = await ws.db.pool.query(
+      "SELECT reason, failure_source FROM events WHERE type = 'planning' AND to_state = 'blocked'",
+    );
+    expect(event.rows).toEqual([
+      { reason: "planning-conflict", failure_source: "spec" },
+    ]);
+  });
+
   it("retry-planning, in the planning repo, sends the docs again and makes the planning commit again", async () => {
     const { backend, worker } = await blockedSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# mine, merged by hand\n");
@@ -684,6 +694,14 @@ describe("a planning commit the worker cannot make", () => {
     expect((await ws.plat(backend.dir, ["blocked"])).stdout).toContain(
       "S-1  the planning commit could not be made in backend: its job failed three times",
     );
+    // its job failing is no fault of the spec's
+    const event = await ws.db.pool.query(
+      "SELECT reason, failure_source FROM events WHERE type = 'planning' AND to_state = 'blocked'",
+    );
+    expect(event.rows).toEqual([
+      { reason: "job-failed", failure_source: "platform" },
+    ]);
+    expect((await get("/blocked")).planning[0].failureSource).toBe("platform");
   });
 });
 
