@@ -363,12 +363,13 @@ async function buildFinalBundle(
   };
 }
 
-// main into the integration branch: same shape as a ticket merge, but the "agent" side is the default branch
-// and the Run belongs to the spec, not a ticket.
+// main into the integration branch: same shape as a ticket merge. The bundle's agent branch is always the
+// spec's temp branch (a platform branch, so a worker can take a slot). The first locked merge still
+// merge-trees the default branch when that temp does not exist yet. The Run belongs to the spec, not a ticket.
 async function buildUpdateBranchBundle(
   pool: pg.Pool,
   job: { id: number; attempt: number },
-  update: { specId: number; repoId: number },
+  update: { specId: number; repoId: number; fix: boolean; afterFix: boolean },
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
@@ -426,7 +427,9 @@ async function buildUpdateBranchBundle(
     domain: domainOf(row),
     integrationBranch:
       branches.find((b) => b.repoId === row.repo_id)?.branch ?? null,
-    agentBranch: row.default_branch,
+    agentBranch: branchNames(row.branch_namespace).update(
+      formatDisplayId("spec", row.spec_id),
+    ),
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: [],
     contracts: [],

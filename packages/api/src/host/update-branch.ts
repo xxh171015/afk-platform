@@ -1,4 +1,5 @@
 import {
+  AGENT_FAILURES,
   formatDisplayId,
   type PauseReason,
   type SpecState,
@@ -12,7 +13,8 @@ import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
 
 // Merging the default branch into a running spec's integration branch (docs/specs/m3-platform.md「多需求并行」).
 // Host-sync notices a new default SHA; this module queues at most one update-branch per spec × repo, coalesces
-// later advances onto that queued row, and pauses the spec when the merge conflicts or the candidate gate fails.
+// later advances onto that queued row, and on conflict or a failed candidate gate gives a merge agent one try
+// before pausing the spec.
 
 export const UpdateBranchResultSchema = z.object({
   stage: z.literal("update-branch"),
@@ -21,14 +23,45 @@ export const UpdateBranchResultSchema = z.object({
   ...commonFields,
 });
 
+export const UpdateBranchFixResultSchema = z.object({
+  stage: z.literal("update-branch"),
+  outcome: z.enum(["done", ...AGENT_FAILURES]),
+  ...commonFields,
+});
+
+export type UpdateBranchPayload = {
+  specId: number;
+  repoId: number;
+  fix: boolean;
+  afterFix: boolean;
+  mainSha: string | undefined;
+  pauseReason: PauseReason | undefined;
+};
+
+const PAUSE_FROM_MERGE: Record<"conflict" | "gate-failed", PauseReason> = {
+  conflict: "update-branch-conflict",
+  "gate-failed": "update-branch-gate-failed",
+};
+
 export function readUpdateBranchPayload(
   payload: Record<string, unknown>,
-): { specId: number; repoId: number } | undefined {
-  const { specId, repoId, stage, final } = payload;
+): UpdateBranchPayload | undefined {
+  const { specId, repoId, stage, final, mainSha, pauseReason } = payload;
   if (stage !== "update-branch" || final === true) return undefined;
   if (typeof specId !== "number" || typeof repoId !== "number")
     return undefined;
-  return { specId, repoId };
+  return {
+    specId,
+    repoId,
+    fix: payload.fix === true,
+    afterFix: payload.afterFix === true,
+    mainSha: typeof mainSha === "string" ? mainSha : undefined,
+    pauseReason:
+      pauseReason === "update-branch-conflict" ||
+      pauseReason === "update-branch-gate-failed"
+        ? pauseReason
+        : undefined,
+  };
 }
 
 export async function markUpdateBranchClaimed(
@@ -54,32 +87,71 @@ export async function markUpdateBranchClaimed(
 const updateBranchKeyPrefix = (specId: number, repoId: number) =>
   `${formatDisplayId("spec", specId)}:repo-${repoId}:update-branch:`;
 
+async function nextUpdateBranchKey(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<string> {
+  const prefix = updateBranchKeyPrefix(specId, repoId);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return `${prefix}${Number(earlier.rows[0]?.n) + 1}`;
+}
+
 export async function enqueueUpdateBranch(
   client: pg.PoolClient,
-  target: { specId: number; repoId: number; mainSha: string },
+  target: {
+    specId: number;
+    repoId: number;
+    mainSha: string;
+    afterFix?: boolean;
+  },
 ): Promise<void> {
-  const queued = await client.query<{ id: number }>(
-    `SELECT id FROM jobs WHERE type = 'merge' AND state = 'queued'
+  const queued = await client.query<{
+    id: number;
+    after_fix: boolean;
+  }>(
+    `SELECT id, coalesce((payload->>'afterFix')::boolean, false) AS after_fix
+     FROM jobs WHERE type = 'merge' AND state = 'queued'
        AND payload->>'stage' = 'update-branch'
        AND (payload->>'specId')::int = $1 AND (payload->>'repoId')::int = $2
      FOR UPDATE`,
     [target.specId, target.repoId],
   );
   if (queued.rows[0]) {
-    await client.query(
-      `UPDATE jobs SET payload = payload || jsonb_build_object('mainSha', $2::text) WHERE id = $1`,
-      [queued.rows[0].id, target.mainSha],
-    );
+    // An after-fix merge applies the agent's temp branch, not a newer main SHA. Leave it; a later
+    // success compares repos.default_sha and enqueues another first attempt if main moved again.
+    if (!queued.rows[0].after_fix) {
+      await client.query(
+        `UPDATE jobs SET payload = payload || jsonb_build_object('mainSha', $2::text)
+           || CASE WHEN $3::boolean THEN jsonb_build_object('afterFix', true) ELSE '{}'::jsonb END
+         WHERE id = $1`,
+        [queued.rows[0].id, target.mainSha, target.afterFix === true],
+      );
+    }
+    return;
+  }
+  const agent = await client.query<{ id: number; state: string }>(
+    `SELECT id, state FROM jobs WHERE type = 'agent-run' AND state IN ('queued', 'running')
+       AND payload->>'stage' = 'update-branch' AND payload->>'fix' = 'true'
+       AND (payload->>'specId')::int = $1 AND (payload->>'repoId')::int = $2
+     FOR UPDATE`,
+    [target.specId, target.repoId],
+  );
+  if (agent.rows[0]) {
+    if (agent.rows[0].state === "queued") {
+      await client.query(
+        `UPDATE jobs SET payload = payload || jsonb_build_object('mainSha', $2::text) WHERE id = $1`,
+        [agent.rows[0].id, target.mainSha],
+      );
+    }
     return;
   }
   const spec = await client.query<{ slug: string }>(
     "SELECT slug FROM specs WHERE id = $1",
     [target.specId],
-  );
-  const prefix = updateBranchKeyPrefix(target.specId, target.repoId);
-  const earlier = await client.query<{ n: string }>(
-    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
-    [`${prefix}%`],
   );
   await enqueueJob(client, {
     type: "merge",
@@ -88,9 +160,41 @@ export async function enqueueUpdateBranch(
       specId: target.specId,
       repoId: target.repoId,
       mainSha: target.mainSha,
+      ...(target.afterFix ? { afterFix: true } : {}),
     },
     lockKey: `integration:${target.repoId}:spec/${spec.rows[0]?.slug}`,
-    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+    idempotencyKey: await nextUpdateBranchKey(
+      client,
+      target.specId,
+      target.repoId,
+    ),
+  });
+}
+
+async function enqueueUpdateBranchFix(
+  client: pg.PoolClient,
+  target: {
+    specId: number;
+    repoId: number;
+    mainSha: string;
+    pauseReason: PauseReason;
+  },
+): Promise<void> {
+  await enqueueJob(client, {
+    type: "agent-run",
+    payload: {
+      stage: "update-branch",
+      specId: target.specId,
+      repoId: target.repoId,
+      mainSha: target.mainSha,
+      fix: true,
+      pauseReason: target.pauseReason,
+    },
+    idempotencyKey: await nextUpdateBranchKey(
+      client,
+      target.specId,
+      target.repoId,
+    ),
   });
 }
 
@@ -143,6 +247,73 @@ export type RecordUpdateBranchResult =
   | { status: "ignored"; reason: string }
   | { status: "applied" };
 
+async function failQueuedUpdateBranches(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = 'the spec was paused', lease_owner = NULL, lease_expires_at = NULL
+     WHERE state = 'queued' AND payload->>'stage' = 'update-branch'
+       AND (payload->>'specId')::int = $1`,
+    [specId],
+  );
+}
+
+async function pauseForUpdateBranch(
+  client: pg.PoolClient,
+  specId: number,
+  reason: PauseReason,
+): Promise<void> {
+  const paused = specTransition("running", "pause");
+  if (!paused.ok) throw new Error(paused.reason);
+  await client.query(
+    "UPDATE specs SET state = $2, pause_reason = $3 WHERE id = $1",
+    [specId, paused.state, reason],
+  );
+  await failQueuedUpdateBranches(client, specId);
+}
+
+async function takeQueuedMergeSha(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<string | undefined> {
+  const queued = await client.query<{ id: number; sha: string | null }>(
+    `SELECT id, payload->>'mainSha' AS sha FROM jobs
+     WHERE type = 'merge' AND state = 'queued'
+       AND payload->>'stage' = 'update-branch'
+       AND (payload->>'specId')::int = $1 AND (payload->>'repoId')::int = $2
+     FOR UPDATE`,
+    [specId, repoId],
+  );
+  if (!queued.rows[0]) return undefined;
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = 'superseded by a merge agent',
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE id = ANY($1::int[])`,
+    [queued.rows.map((row) => row.id)],
+  );
+  return queued.rows.at(-1)?.sha ?? undefined;
+}
+
+async function enqueueIfMainMoved(
+  client: pg.PoolClient,
+  read: UpdateBranchPayload,
+): Promise<void> {
+  const repo = await client.query<{ default_sha: string | null }>(
+    "SELECT default_sha FROM repos WHERE id = $1",
+    [read.repoId],
+  );
+  const latest = repo.rows[0]?.default_sha;
+  if (latest && latest !== read.mainSha) {
+    await enqueueUpdateBranch(client, {
+      specId: read.specId,
+      repoId: read.repoId,
+      mainSha: latest,
+    });
+  }
+}
+
 export async function recordUpdateBranchResult(
   client: pg.PoolClient,
   job: StageJob,
@@ -155,7 +326,9 @@ export async function recordUpdateBranchResult(
     "SELECT state FROM specs WHERE id = $1",
     [read.specId],
   );
-  const parsed = UpdateBranchResultSchema.safeParse(result);
+  const parsed = read.fix
+    ? UpdateBranchFixResultSchema.safeParse(result)
+    : UpdateBranchResultSchema.safeParse(result);
   const valid = parsed.success ? parsed.data : undefined;
   await writeFacts(
     client,
@@ -178,23 +351,42 @@ export async function recordUpdateBranchResult(
   }
   if (!valid)
     return { status: "ignored", reason: "update-branch result is not valid" };
-  if (valid.outcome === "merged") return { status: "applied" };
-  const reason: PauseReason =
-    valid.outcome === "conflict"
-      ? "update-branch-conflict"
-      : "update-branch-gate-failed";
-  const paused = specTransition("running", "pause");
-  if (!paused.ok) throw new Error(paused.reason);
-  await client.query(
-    "UPDATE specs SET state = $2, pause_reason = $3 WHERE id = $1",
-    [read.specId, paused.state, reason],
-  );
-  await client.query(
-    `UPDATE jobs SET state = 'failed', error = 'the spec was paused', lease_owner = NULL, lease_expires_at = NULL
-     WHERE state = 'queued' AND type = 'merge' AND payload->>'stage' = 'update-branch'
-       AND (payload->>'specId')::int = $1`,
-    [read.specId],
-  );
+  if (read.fix) {
+    if (valid.outcome === "done") {
+      await enqueueUpdateBranch(client, {
+        specId: read.specId,
+        repoId: read.repoId,
+        mainSha: read.mainSha ?? "",
+        afterFix: true,
+      });
+      return { status: "applied" };
+    }
+    await pauseForUpdateBranch(
+      client,
+      read.specId,
+      read.pauseReason ?? "update-branch-conflict",
+    );
+    return { status: "applied" };
+  }
+  if (valid.outcome === "merged") {
+    if (read.afterFix) await enqueueIfMainMoved(client, read);
+    return { status: "applied" };
+  }
+  if (valid.outcome !== "conflict" && valid.outcome !== "gate-failed") {
+    return { status: "ignored", reason: "update-branch result is not valid" };
+  }
+  const reason = PAUSE_FROM_MERGE[valid.outcome];
+  if (read.afterFix) {
+    await pauseForUpdateBranch(client, read.specId, reason);
+    return { status: "applied" };
+  }
+  const laterSha = await takeQueuedMergeSha(client, read.specId, read.repoId);
+  await enqueueUpdateBranchFix(client, {
+    specId: read.specId,
+    repoId: read.repoId,
+    mainSha: laterSha ?? read.mainSha ?? "",
+    pauseReason: reason,
+  });
   return { status: "applied" };
 }
 

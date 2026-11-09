@@ -496,7 +496,7 @@ async function finalRunsOf(pool: pg.Pool, specId: number) {
     `SELECT r.id, r.stage, r.axis, r.result, r.duration_ms, r.started_at, r.finished_at, repo.name AS repo
      FROM runs r JOIN repos repo ON repo.id = r.repo_id
      WHERE r.spec_id = $1 AND r.ticket_id IS NULL
-       AND r.stage IN ('final-review', 'final-fix', 'final-merge', 'final-e2e')
+       AND r.stage IN ('final-review', 'final-fix', 'final-merge', 'final-e2e', 'update-branch')
      ORDER BY r.id`,
     [specId],
   );

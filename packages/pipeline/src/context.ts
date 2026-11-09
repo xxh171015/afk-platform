@@ -45,6 +45,7 @@ function runJson(input: ContextInput) {
     baseSha: run.baseSha,
     branch: run.branch,
     integrationBranch: bundle.integrationBranch,
+    defaultBranch: bundle.repo.defaultBranch,
     allowedProtectedPaths: bundle.allowedProtectedPaths,
     fixCounts: bundle.ticket?.fixCounts ?? null,
     contracts: bundle.contracts.map((c) => ({

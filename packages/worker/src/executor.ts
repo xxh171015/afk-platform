@@ -126,8 +126,12 @@ const runIdOf = (bundle: Bundle): string => {
 };
 
 // The label of what a stage works on (its gate branch is named after it): a ticket, or the overall fix of a spec.
-const subjectLabel = (bundle: Bundle) =>
-  bundle.ticket?.displayId ?? `${bundle.spec.displayId}-final`;
+const subjectLabel = (bundle: Bundle) => {
+  if (bundle.ticket) return bundle.ticket.displayId;
+  if (bundle.job.stage === "update-branch")
+    return `${bundle.spec.displayId}-update`;
+  return `${bundle.spec.displayId}-final`;
+};
 const successful = new Set(["done", "passed", "pass", "merged"]);
 export const isSuccess = (body: StageOutcomeBody) =>
   successful.has(body.outcome);
@@ -237,8 +241,11 @@ async function runStage(
       return gate(deps, context, mainDir, slot);
     case "merge":
     case "final-merge":
-    case "update-branch":
       return merge(deps, context, mainDir, slot);
+    case "update-branch":
+      return context.job.type === "agent-run"
+        ? agentChange(deps, context, mainDir, slot)
+        : merge(deps, context, mainDir, slot);
     case "e2e":
       return e2e(deps, context, mainDir, slot);
     case "diagnose":
@@ -320,6 +327,7 @@ async function agentChange(
     | "gate-fix"
     | "review-fix"
     | "merge-fix"
+    | "update-branch"
     | "final-fix";
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
@@ -776,12 +784,18 @@ async function mergeOnce(
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
   const stage = bundle.job.stage;
+  // A first update-branch has no temp branch yet: merge the default branch. After the merge agent, the temp exists
+  // and is what gets merge-treed into the integration branch.
+  const incoming =
+    stage === "update-branch" && !exists(mainDir, agent)
+      ? bundle.repo.defaultBranch
+      : agent;
 
   // Already merged (a previous attempt got as far as the push): say so instead of merging twice. What the first
   // attempt measured never arrived, so the branch is measured as it is now, and the Run records its head: without
   // that the next gate would be held to an older merge's counts.
-  if (isAncestor(mainDir, agent, integration)) {
-    log(`merge: ${agent} is already part of ${integration}`);
+  if (isAncestor(mainDir, incoming, integration)) {
+    log(`merge: ${incoming} is already part of ${integration}`);
     const head = tip(mainDir, integration);
     const measured = await measureMergedHead(
       deps,
@@ -825,10 +839,10 @@ async function mergeOnce(
   const candidate = mergeCandidate(
     mainDir,
     integration,
-    agent,
+    incoming,
     stage === "update-branch"
-      ? `Merge ${agent} into ${integration}\n\nSpec: ${bundle.spec.displayId}${bundle.run ? `\nRun: ${bundle.run.displayId}` : ""}`
-      : `Merge ${agent} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`,
+      ? `Merge ${incoming} into ${integration}\n\nSpec: ${bundle.spec.displayId}${bundle.run ? `\nRun: ${bundle.run.displayId}` : ""}`
+      : `Merge ${incoming} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`,
   );
   if (candidate.conflict) {
     log(`merge: conflict in ${candidate.files.join(", ")}`);
@@ -837,7 +851,7 @@ async function mergeOnce(
       outcome: "conflict",
       run: {
         output: {
-          failureLog: `# merge conflict\n\n${agent} cannot be merged into ${integration}:\n${candidate.files.map((f) => `- ${f}`).join("\n")}\n`,
+          failureLog: `# merge conflict\n\n${incoming} cannot be merged into ${integration}:\n${candidate.files.map((f) => `- ${f}`).join("\n")}\n`,
         },
       },
     };

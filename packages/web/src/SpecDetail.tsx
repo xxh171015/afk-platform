@@ -42,7 +42,7 @@ import {
   SelectValue,
 } from "./components/ui/select.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
-import { FinalizeProgress } from "./FinalizeProgress.tsx";
+import { FinalizeProgress, UpdateBranchRuns } from "./FinalizeProgress.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
 import { hostKindOf, hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { commitHtmlUrl, treeHtmlUrl } from "./host-links.ts";
@@ -1340,9 +1340,12 @@ function Delivery({
   const prs = list(pullRequests);
   const steps = list(finalizations);
   const runs = list(finalRuns);
-  const hasFinalize = steps.length > 0 || runs.length > 0;
+  const updateRuns = runs.filter((run) => run.stage === "update-branch");
+  const finishRuns = runs.filter((run) => run.stage !== "update-branch");
+  const hasFinalize = steps.length > 0 || finishRuns.length > 0;
+  const hasUpdate = updateRuns.length > 0;
   const hasPrs = prs.length > 0;
-  const nothing = !hasFinalize && !hasPrs && !acceptancePack;
+  const nothing = !hasFinalize && !hasUpdate && !hasPrs && !acceptancePack;
   const prRepos = [
     ...list(mergeOrder?.ordered),
     ...prs.map((pr) => pr.repo),
@@ -1356,10 +1359,16 @@ function Delivery({
           合并顺序被打破：{b.repo} 合在了 {b.skipped.join("、")} 前面。
         </p>
       ))}
+      {hasUpdate ? (
+        <section id="delivery-update-branch" className="mb-8 scroll-mt-6">
+          <h2 className="mb-3 text-sm font-semibold">合 main</h2>
+          <UpdateBranchRuns runs={updateRuns} />
+        </section>
+      ) : null}
       {hasFinalize ? (
         <section id="delivery-finalize" className="mb-8 scroll-mt-6">
           <h2 className="mb-3 text-sm font-semibold">收尾</h2>
-          <FinalizeProgress steps={steps} runs={runs} />
+          <FinalizeProgress steps={steps} runs={finishRuns} />
         </section>
       ) : null}
       {hasPrs ? (

@@ -152,6 +152,14 @@ describe("acquiring a slot", () => {
     expect(slot.dir).toContain(root);
   });
 
+  it("takes an update-branch temp as a ticket branch", async () => {
+    const slot = await acquire(manager(), {
+      ...task(1),
+      ref: "agent/a1b2c3/S-1-update",
+    });
+    expect(slot.dir).toContain(root);
+  });
+
   it("refuses a ref that is not a ticket branch", async () => {
     await expect(
       manager().acquire({ ...task(1), ref: "main" }),

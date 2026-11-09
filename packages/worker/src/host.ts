@@ -155,7 +155,7 @@ export async function runHostTask(
 }
 
 // Closes the spec's open pull requests and deletes its branches. Only what a spec makes is ever deleted
-// (isPlatformBranch: spec/<slug>, agent/T-<n>, agent/S-<n>-final, each with or without the database's id after
+// (isPlatformBranch: spec/<slug>, agent/T-<n>, agent/S-<n>-final, agent/S-<n>-update, each with or without the database's id after
 // the first slash): the API names the branches, and this is the check that a wrong name there cannot reach a
 // default or a release branch. A step that fails does not stop the others (a
 // branch that cannot be deleted must not keep a pull request open); the job then fails, is tried again, and

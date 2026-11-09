@@ -10,8 +10,9 @@ import {
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
-// main 前进后, running specs get one update-branch; later advances coalesce; conflict/gate-fail pause
-// (docs/specs/m3-platform.md「多需求并行」). Host-sync reads default SHAs; paused/cancelled specs are left alone.
+// main 前进后, running specs get one update-branch; later advances coalesce; conflict/gate-fail give a
+// merge agent one try, then pause (docs/specs/m3-platform.md「多需求并行」). Host-sync reads default SHAs;
+// paused/cancelled specs are left alone.
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -131,7 +132,7 @@ async function look(defaults: { repoUrl: string; sha: string }[]) {
 const updateJobs = async () =>
   (
     await db.pool.query(
-      `SELECT state, lock_key, payload, idempotency_key FROM jobs
+      `SELECT type, state, lock_key, payload, idempotency_key FROM jobs
        WHERE payload->>'stage' = 'update-branch' ORDER BY id`,
     )
   ).rows as Json[];
@@ -328,7 +329,7 @@ describe("the update-branch job", () => {
     };
   }
 
-  it("hands the worker a bundle that merges the default branch into the integration branch", async () => {
+  it("hands the worker a bundle on the spec's temp branch, with no ticket", async () => {
     const job = await queuedUpdate();
     expect(job.lockKey).toBe("integration:1:spec/export");
     const bundle = await fetch(
@@ -336,41 +337,126 @@ describe("the update-branch job", () => {
     ).then((r) => r.json());
     expect(bundle.job.stage).toBe("update-branch");
     expect(bundle.ticket).toBeNull();
-    expect(bundle.agentBranch).toBe("main");
+    expect(bundle.agentBranch).toMatch(/^agent\/[0-9a-f]{6}\/S-1-update$/);
+    expect(bundle.repo.defaultBranch).toBe("main");
     expect(bundle.integrationBranch).toContain("spec/");
     expect(bundle.run.displayId).toMatch(/^R-/);
     expect(bundle.spec.displayId).toBe("S-1");
   });
 
-  it("pauses the spec with update-branch-conflict when the merge conflicts", async () => {
+  it("gives a conflict to one merge agent, then a locked merge of that branch, and pauses only the second time", async () => {
     const job = await queuedUpdate();
     expect(
       (
         await agent.complete(job.id, job.attempt, {
           stage: "update-branch",
           outcome: "conflict",
+          run: { output: { failureLog: "# merge conflict\n\nshared.ts\n" } },
         })
       ).status,
     ).toBe(200);
+    expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      type: string;
+      attempt: number;
+      lockKey: string | null;
+      payload: Json;
+    };
+    expect(fix).toMatchObject({
+      type: "agent-run",
+      lockKey: null,
+      payload: { stage: "update-branch", fix: true },
+    });
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${fix.id}/bundle?workerId=a1&attempt=${fix.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.agentBranch).toMatch(/^agent\/[0-9a-f]{6}\/S-1-update$/);
+    expect(bundle.ticket).toBeNull();
+    expect(bundle.failureLog).toBe("# merge conflict\n\nshared.ts\n");
+    expect(
+      (await call("GET", "/specs/1")).body.finalRuns.some(
+        (run: Json) =>
+          run.stage === "update-branch" && run.result === "conflict",
+      ),
+    ).toBe(true);
+
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "done",
+    });
+    const again = (await agent.claim()).body.job as {
+      type: string;
+      lockKey: string | null;
+      payload: Json;
+      id: number;
+      attempt: number;
+    };
+    expect(again).toMatchObject({
+      type: "merge",
+      lockKey: "integration:1:spec/export",
+      payload: { afterFix: true },
+    });
+    const after = await fetch(
+      `${api.url}/worker/jobs/${again.id}/bundle?workerId=a1&attempt=${again.attempt}`,
+    ).then((r) => r.json());
+    expect(after.agentBranch).toBe(bundle.agentBranch);
+
+    await agent.complete(again.id, again.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
     expect(await specRow()).toEqual({
       state: "paused",
       pause_reason: "update-branch-conflict",
     });
   });
 
-  it("pauses the spec with update-branch-gate-failed when the candidate gate fails", async () => {
+  it("pauses with update-branch-gate-failed only after the merge agent has already tried", async () => {
     const job = await queuedUpdate();
-    expect(
-      (
-        await agent.complete(job.id, job.attempt, {
-          stage: "update-branch",
-          outcome: "gate-failed",
-        })
-      ).status,
-    ).toBe(200);
+    await agent.complete(job.id, job.attempt, {
+      stage: "update-branch",
+      outcome: "gate-failed",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "done",
+    });
+    const again = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(again.id, again.attempt, {
+      stage: "update-branch",
+      outcome: "gate-failed",
+    });
     expect(await specRow()).toEqual({
       state: "paused",
       pause_reason: "update-branch-gate-failed",
+    });
+  });
+
+  it("pauses when the merge agent gives up, with the reason the merge had", async () => {
+    const job = await queuedUpdate();
+    await agent.complete(job.id, job.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "agent-gave-up",
+    });
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "update-branch-conflict",
     });
   });
 
@@ -388,14 +474,106 @@ describe("the update-branch job", () => {
       stage: "update-branch",
       outcome: "conflict",
     });
+    // the later SHA is kept for the agent; the extra locked merge is not left to run beside it
+    expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+    expect(await updateJobs()).toMatchObject([
+      { type: "merge", state: "done" },
+      { type: "merge", state: "failed" },
+      { type: "agent-run", state: "queued", payload: { mainSha: "ccc333" } },
+    ]);
+  });
+
+  it("coalesces a later SHA onto the merge agent instead of starting another locked merge", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await look([{ repoUrl, sha: "bbb222" }]);
+    const first = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(first.id, first.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    await look([{ repoUrl, sha: "ddd444" }]);
+    expect(
+      (await updateJobs()).filter(
+        (row) => row.type === "merge" && row.state === "queued",
+      ),
+    ).toEqual([]);
+    expect(
+      (await updateJobs()).find((row) => row.type === "agent-run"),
+    ).toMatchObject({
+      state: "queued",
+      payload: { mainSha: "ddd444" },
+    });
+  });
+
+  it("keeps the spec running when the second merge succeeds, and drops a queued job when the second merge fails", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await look([{ repoUrl, sha: "bbb222" }]);
+    const first = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(first.id, first.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "done",
+    });
+    const again = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(again.id, again.attempt, {
+      stage: "update-branch",
+      outcome: "merged",
+    });
+    expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+
+    await look([{ repoUrl, sha: "eee555" }]);
+    const next = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(next.id, next.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix2 = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix2.id, fix2.attempt, {
+      stage: "update-branch",
+      outcome: "done",
+    });
+    const last = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await look([{ repoUrl, sha: "fff666" }]);
+    await agent.complete(last.id, last.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
     expect(await specRow()).toEqual({
       state: "paused",
       pause_reason: "update-branch-conflict",
     });
-    expect(await updateJobs()).toMatchObject([
-      { state: "done" },
-      { state: "failed" },
-    ]);
+    expect(
+      (await updateJobs()).some(
+        (row) => row.type === "merge" && row.state === "failed",
+      ),
+    ).toBe(true);
   });
 
   it("leaves the spec running when the merge lands", async () => {

@@ -1289,6 +1289,83 @@ describe("the six-step bar and nested pages", () => {
     expect(screen.queryByTestId("finalize-live-backend")).toBeNull();
   });
 
+  it("lists update-branch Runs under 合 main, not as 收尾 steps", async () => {
+    const updateRun = {
+      id: 20,
+      displayId: "R-20",
+      repo: "backend",
+      stage: "update-branch",
+      axis: null,
+      result: "conflict",
+      durationMs: 12_000,
+      startedAt: "2026-11-09T05:08:08.000Z",
+      finishedAt: "2026-11-09T05:08:20.000Z",
+    };
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [ticket(1, "running")],
+            edges: [],
+            finalRuns: [updateRun],
+          }),
+        }),
+      }),
+    );
+    const card = await screen.findByTestId("update-branch-backend");
+    expect(card.textContent).toContain("合 main");
+    expect(
+      screen.getByRole("link", { name: "R-20" }).getAttribute("href"),
+    ).toBe("/runs/20");
+    expect(screen.queryByTestId("delivery-backend")).toBeNull();
+    expect(screen.queryByTestId("finalize-steps-backend")).toBeNull();
+  });
+
+  it("shows the log of an update-branch Run that is going now", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [ticket(1, "running")],
+            edges: [],
+            finalRuns: [
+              {
+                id: 21,
+                displayId: "R-21",
+                repo: "backend",
+                stage: "update-branch",
+                axis: null,
+                result: null,
+                durationMs: null,
+                startedAt: "2026-11-09T05:08:08.000Z",
+                finishedAt: null,
+              },
+            ],
+          }),
+        }),
+        "GET /runs/21/logs": () => ({
+          json: {
+            attempt: 1,
+            offset: 0,
+            nextOffset: 0,
+            size: 0,
+            text: "",
+            finished: false,
+          },
+        }),
+      }),
+    );
+    const card = await screen.findByTestId("update-branch-backend");
+    expect(card.textContent).toMatch(/正在运行 R-21 合 main/);
+    expect(
+      within(card).getByRole("region", { name: "日志查看器" }),
+    ).toBeTruthy();
+  });
+
   it("opens a sheet when a graph node is clicked", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,
