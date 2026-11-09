@@ -3978,12 +3978,84 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
-            extraSeconds: number;
+            extraSeconds?: number;
           };
         };
       };
       responses: {
-        /** @description Running again, with the extra agent time */
+        /** @description Running again; extraSeconds adds agent time when the budget ran out */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled";
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not paused */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/allow": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Running again without extra agent time */
         200: {
           headers: {
             [name: string]: unknown;

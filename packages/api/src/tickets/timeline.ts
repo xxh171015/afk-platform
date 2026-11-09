@@ -1,4 +1,9 @@
-import { formatDisplayId, type HostKind, pullAbbrev } from "@afk/shared";
+import {
+  formatDisplayId,
+  type HostKind,
+  pauseReasonLabel,
+  pullAbbrev,
+} from "@afk/shared";
 import type pg from "pg";
 
 // A spec's timeline reconstructed from what the platform recorded: runs, pull requests, the pack, and the spec
@@ -226,7 +231,9 @@ export async function specTimeline(
     items.push({
       kind: "pause",
       at: spec.created_at.toISOString(),
-      text: spec.pause_reason ? `暂停：${spec.pause_reason}` : "暂停",
+      text: spec.pause_reason
+        ? `暂停：${pauseReasonLabel(spec.pause_reason)}`
+        : "暂停",
     });
 
   items.sort(

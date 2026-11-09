@@ -103,12 +103,12 @@ describe("noticesFromTransition", () => {
       noticesFromTransition(base, {
         ...base,
         specState: "paused",
-        pauseReason: "the agent time limit of the spec was reached",
+        pauseReason: "budget-exhausted",
       }),
     ).toEqual([
       {
         title: "需求已暂停",
-        body: "S-4 导出订单：the agent time limit of the spec was reached\nhttp://127.0.0.1:5173/specs/4",
+        body: "S-4 导出订单：agent 时间用完\nhttp://127.0.0.1:5173/specs/4",
       },
     ]);
     expect(

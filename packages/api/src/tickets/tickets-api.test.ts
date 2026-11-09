@@ -1113,6 +1113,47 @@ describe("resuming a paused spec", () => {
         .status,
     ).toBe(400);
   });
+
+  it("retries without extra time when none is given", async () => {
+    const specId = await pausedSpec();
+    await db.pool.query("UPDATE runs SET duration_ms = 0");
+    const extra = await db.pool.query(
+      "SELECT budget_extra_seconds FROM specs WHERE id = $1",
+      [specId],
+    );
+    const result = await call("POST", `/specs/${specId}/resume`, {});
+    expect(result).toMatchObject({ status: 200, body: { state: "running" } });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT budget_extra_seconds FROM specs WHERE id = $1",
+          [specId],
+        )
+      ).rows[0].budget_extra_seconds,
+    ).toBe(extra.rows[0].budget_extra_seconds);
+  });
+
+  it("lets a person allow it through without extra agent time", async () => {
+    const specId = await pausedSpec();
+    await db.pool.query("UPDATE runs SET duration_ms = 0");
+    const extra = await db.pool.query(
+      "SELECT budget_extra_seconds FROM specs WHERE id = $1",
+      [specId],
+    );
+    const result = await call("POST", `/specs/${specId}/allow`);
+    expect(result).toMatchObject({ status: 200, body: { state: "running" } });
+    const spec = await db.pool.query(
+      "SELECT state, pause_reason, budget_extra_seconds FROM specs WHERE id = $1",
+      [specId],
+    );
+    expect(spec.rows[0]).toEqual({
+      state: "running",
+      pause_reason: null,
+      budget_extra_seconds: extra.rows[0].budget_extra_seconds,
+    });
+    expect((await call("POST", `/specs/${specId}/allow`)).status).toBe(409);
+    expect((await call("POST", "/specs/99/allow")).status).toBe(404);
+  });
 });
 
 describe("the spec list", () => {
@@ -1456,7 +1497,7 @@ describe("what a person sees", () => {
         id: specId,
         displayId: "S-1",
         title: "Spec",
-        reason: "the agent time limit of the spec was reached",
+        reason: "budget-exhausted",
       },
     ]);
   });
@@ -1494,7 +1535,7 @@ describe("what a person sees", () => {
       title: "Paused",
     });
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = $1",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
       [paused.body.id],
     );
 

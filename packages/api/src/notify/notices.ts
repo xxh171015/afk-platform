@@ -1,4 +1,9 @@
-import { formatDisplayId, type HostKind, pullAbbrev } from "@afk/shared";
+import {
+  formatDisplayId,
+  type HostKind,
+  pauseReasonLabel,
+  pullAbbrev,
+} from "@afk/shared";
 import { pageUrl } from "../page-url.ts";
 
 // One macOS banner per listed transition: title is the kind, body is display id + title + one-line reason
@@ -165,7 +170,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
         kind: "spec-paused",
         displayId: spec,
         title: after.specTitle,
-        reason: after.pauseReason ?? "已暂停",
+        reason: pauseReasonLabel(after.pauseReason),
         path: `/specs/${after.specId}`,
       }),
     );

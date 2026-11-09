@@ -654,7 +654,7 @@ describe("the spec page", () => {
           json: view({
             spec: {
               state: "paused",
-              pauseReason: "the agent time limit of the spec was reached",
+              pauseReason: "budget-exhausted",
             },
           }),
         }),
@@ -672,9 +672,7 @@ describe("the spec page", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain(
       "已暂停",
     );
-    expect(
-      screen.getByText(/已暂停: the agent time limit of the spec was reached/),
-    ).toBeTruthy();
+    expect(screen.getByText(/已暂停: agent 时间用完/)).toBeTruthy();
   });
 
   it("shows the overall review of a finalizing spec", async () => {

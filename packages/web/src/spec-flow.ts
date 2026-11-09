@@ -1,5 +1,6 @@
 import {
   type HostKind,
+  pauseReasonLabel,
   pullAbbrev,
   type SpecState,
   type TicketState,
@@ -55,7 +56,7 @@ export function flowBanner(
     return {
       kind: "paused",
       title: "已暂停",
-      ...(pauseReason ? { reason: pauseReason } : {}),
+      ...(pauseReason ? { reason: pauseReasonLabel(pauseReason) } : {}),
     };
   if (state === "cancelled") return { kind: "cancelled", title: "已取消" };
   if (state === "reworking") return { kind: "reworking", title: "返工中" };

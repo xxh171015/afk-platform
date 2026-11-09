@@ -1395,8 +1395,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
-    .command("resume <spec>")
-    .description("let a paused spec go on, with more agent time")
+    .command("retry <spec>")
+    .alias("resume")
+    .description(
+      "let a paused spec go on, adding agent time when the budget ran out",
+    )
     .option(
       "--extra-hours <n>",
       "agent hours to add to the spec's budget (default 1)",
@@ -1406,6 +1409,17 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const { data, response, error } = await api().POST("/specs/{id}/resume", {
         params: { path: { id: specIdOf(id) } },
         body: { extraSeconds: (options.extraHours ?? 1) * 3600 },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+
+  spec
+    .command("allow <spec>")
+    .description("let a paused spec go on without extra agent time")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST("/specs/{id}/allow", {
+        params: { path: { id: specIdOf(id) } },
       });
       if (!data) throw failureFrom(response, error);
       print(data, `${id} is ${data.state}`);

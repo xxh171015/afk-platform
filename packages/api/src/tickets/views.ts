@@ -1118,7 +1118,7 @@ export async function blockedQueue(
       id: s.id as number,
       displayId: formatDisplayId("spec", s.id),
       title: s.title as string,
-      reason: (s.pause_reason as string | null) ?? "paused",
+      reason: s.pause_reason as string,
     })),
   };
   if (options.rank === false) return queue;

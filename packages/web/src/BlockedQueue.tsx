@@ -1,4 +1,4 @@
-import { isPlatformProblem } from "@afk/shared";
+import { isPlatformProblem, pauseReasonLabel } from "@afk/shared";
 import {
   keepPreviousData,
   type QueryClient,
@@ -434,19 +434,34 @@ const MAX_EXTRA_HOURS = 168;
 function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
   const api = useApi();
   const [hours, setHours] = useState("1");
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const seconds = Math.round(Number(hours) * 3600);
   const valid =
     hours.trim() !== "" &&
     Number.isFinite(seconds) &&
     seconds >= 1 &&
     Number(hours) <= MAX_EXTRA_HOURS;
-  const resume = useAction(async (extraSeconds: number) => {
+  const budget = spec.reason === "budget-exhausted";
+  const retry = useAction(async (extraSeconds?: number) => {
     const { data, error } = await api.POST("/specs/{id}/resume", {
       params: { path: { id: spec.id } },
-      body: { extraSeconds },
+      body: extraSeconds ? { extraSeconds } : {},
     });
     if (!data) throw new Error(describeError(error));
   });
+  const allow = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/allow", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
+  const cancel = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/cancel", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
+  const busy = retry.isPending || allow.isPending || cancel.isPending;
   return (
     <Card
       category="paused"
@@ -462,42 +477,96 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
       }
       sub={<span>暂停的需求</span>}
       actions={
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (valid) resume.mutate(seconds);
-          }}
-        >
-          <label
-            htmlFor={`${spec.displayId}-extra-hours`}
-            className="flex items-center gap-2 text-[13px]"
+        <>
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (budget) {
+                if (valid) retry.mutate(seconds);
+              } else retry.mutate(undefined);
+            }}
           >
-            追加
-            <Input
-              id={`${spec.displayId}-extra-hours`}
-              type="number"
-              min={0}
-              max={MAX_EXTRA_HOURS}
-              step={0.5}
-              value={hours}
-              aria-label={`${spec.displayId} 追加的 agent 小时`}
-              onChange={(event) => setHours(event.target.value)}
-              className="h-8 w-20 font-mono tabular"
-            />
-            小时 agent 时间
-          </label>
-          <Button type="submit" size="sm" disabled={resume.isPending || !valid}>
-            <Spinner on={resume.isPending} />
-            {!resume.isPending && <Play />}
-            恢复
-          </Button>
-          <Problem error={resume.error} />
-        </form>
+            {budget ? (
+              <label
+                htmlFor={`${spec.displayId}-extra-hours`}
+                className="flex items-center gap-2 text-[13px]"
+              >
+                追加
+                <Input
+                  id={`${spec.displayId}-extra-hours`}
+                  type="number"
+                  min={0}
+                  max={MAX_EXTRA_HOURS}
+                  step={0.5}
+                  value={hours}
+                  aria-label={`${spec.displayId} 追加的 agent 小时`}
+                  onChange={(event) => setHours(event.target.value)}
+                  className="h-8 w-20 font-mono tabular"
+                />
+                小时 agent 时间
+              </label>
+            ) : null}
+            <Button
+              type="submit"
+              size="sm"
+              disabled={busy || (budget && !valid)}
+            >
+              <Spinner on={retry.isPending} />
+              {!retry.isPending && <Play />}
+              重试
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => allow.mutate()}
+            >
+              <Spinner on={allow.isPending} />
+              放行
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setConfirmCancel(true)}
+            >
+              取消需求
+            </Button>
+            <Problem error={retry.error ?? allow.error ?? cancel.error} />
+          </form>
+          <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>取消 {spec.displayId}？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  未完成的票会取消，已合并的工作留下。取消不可撤销。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={busy}>返回</AlertDialogCancel>
+                <Button
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() =>
+                    cancel.mutate(undefined, {
+                      onSuccess: () => setConfirmCancel(false),
+                    })
+                  }
+                >
+                  <Spinner on={cancel.isPending} />
+                  永久取消 {spec.displayId}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
       }
     >
       <WaitingMeta blocking={spec.blocking} waitingSince={spec.waitingSince} />
-      <p>{spec.reason}</p>
+      <p>{pauseReasonLabel(spec.reason)}</p>
     </Card>
   );
 }

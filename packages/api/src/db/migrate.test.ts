@@ -60,6 +60,7 @@ const LATER_THAN_REPO_NAMES = [
   "0038_host_sync_one_row",
   "0039_host_sync_merge",
   "0040_token_expiry",
+  "0041_pause_reason",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -492,6 +493,49 @@ describe("one host-sync job per project", () => {
           )
         ).rows,
       ).toEqual([{ type: "open-pr", idempotency_key: "S-1:repo-1:open-pr:1" }]);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("pause reasons as codes", () => {
+  it("turns the old free-text pause reason into budget-exhausted and rejects anything else", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => Number(e.tag.slice(0, 4)) < 41,
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+      await db.pool.query(
+        `INSERT INTO specs (project_id, type, slug, title, state, pause_reason) VALUES
+           (1, 'feature', 'out', 'Out', 'paused', 'the agent time limit of the spec was reached'),
+           (1, 'feature', 'gate', 'Gate', 'paused', 'update-branch-gate-failed'),
+           (1, 'feature', 'run', 'Run', 'running', NULL)`,
+      );
+
+      await migrate(db.pool);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT slug, pause_reason FROM specs ORDER BY id",
+          )
+        ).rows,
+      ).toEqual([
+        { slug: "out", pause_reason: "budget-exhausted" },
+        { slug: "gate", pause_reason: "update-branch-gate-failed" },
+        { slug: "run", pause_reason: null },
+      ]);
+      await expect(
+        db.pool.query(
+          "UPDATE specs SET pause_reason = 'the agent time limit of the spec was reached' WHERE slug = 'out'",
+        ),
+      ).rejects.toThrow(/specs_pause_reason_check/);
     } finally {
       rmSync(before, { recursive: true, force: true });
     }

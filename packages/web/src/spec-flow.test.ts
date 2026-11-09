@@ -83,10 +83,10 @@ describe("the six-step bar", () => {
   });
 
   it("names the banner for those exception states", () => {
-    expect(flowBanner("paused", "budget")).toEqual({
+    expect(flowBanner("paused", "budget-exhausted")).toEqual({
       kind: "paused",
       title: "已暂停",
-      reason: "budget",
+      reason: "agent 时间用完",
     });
     expect(flowBanner("cancelled", null)).toEqual({
       kind: "cancelled",

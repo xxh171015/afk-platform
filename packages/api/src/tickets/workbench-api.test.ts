@@ -117,7 +117,7 @@ describe("GET /workbench", () => {
       [ticketId],
     );
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = $1",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
       [specId],
     );
 

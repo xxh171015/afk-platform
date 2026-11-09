@@ -1,5 +1,6 @@
 import {
   formatDisplayId,
+  type HumanAction,
   retryPlan,
   type SpecState,
   specTransition,
@@ -464,10 +465,11 @@ async function lockedSpecState(
   return current.rows[0]?.state;
 }
 
-// A spec the platform paused (its agent time ran out) goes on after a person says how much more it may use.
-export async function resumeSpec(
+// A paused spec goes on: retry may add agent time (the old resume), allow does not.
+async function unpauseSpec(
   pool: pg.Pool,
   specId: number,
+  action: Extract<HumanAction, "retry" | "allow">,
   extraSeconds: number,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return inTransaction(pool, async (client) => {
@@ -479,7 +481,12 @@ export async function resumeSpec(
       "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
       [specId, next.state, extraSeconds],
     );
-    await recordAction(client, "resume", { specId }, { extraSeconds });
+    await recordAction(
+      client,
+      action,
+      { specId },
+      extraSeconds > 0 ? { extraSeconds } : {},
+    );
     await schedulePass(client, specId);
     const after = await client.query<{ state: SpecState }>(
       "SELECT state FROM specs WHERE id = $1",
@@ -487,6 +494,21 @@ export async function resumeSpec(
     );
     return { status: "ok", state: after.rows[0]?.state as SpecState };
   });
+}
+
+export async function resumeSpec(
+  pool: pg.Pool,
+  specId: number,
+  extraSeconds = 0,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return unpauseSpec(pool, specId, "retry", extraSeconds);
+}
+
+export async function allowSpec(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return unpauseSpec(pool, specId, "allow", 0);
 }
 
 // The whole spec is given up. Every ticket that has not finished is cancelled (one under way too), the jobs of the

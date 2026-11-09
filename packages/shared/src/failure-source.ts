@@ -28,6 +28,17 @@ export const PAUSE_REASONS = [
 ] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 
+export const PAUSE_REASON_LABELS: Record<PauseReason, string> = {
+  "budget-exhausted": "agent 时间用完",
+  "update-branch-conflict": "合 main 有冲突",
+  "update-branch-gate-failed": "合 main 后门禁失败",
+};
+
+export function pauseReasonLabel(reason: string | null | undefined): string {
+  if (!reason) return "已暂停";
+  return (PAUSE_REASON_LABELS as Record<string, string>)[reason] ?? reason;
+}
+
 export const REASON_CODES = [
   ...BLOCKED_REASONS,
   FINAL_E2E_FAILED,
@@ -141,7 +152,7 @@ export const HUMAN_ACTIONS = [
   "allow-paths",
   "edit-ticket",
   "cancel-ticket",
-  "resume",
+  "allow",
   "cancel-spec",
   "retry-final",
   "waive-final",

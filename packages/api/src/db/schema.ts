@@ -9,6 +9,7 @@ import {
   FINDING_RESOLUTIONS,
   HOST_KINDS,
   JOB_STATES,
+  PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
   TICKET_STATES,
@@ -120,7 +121,7 @@ export const specs = pgTable(
     // Repos whose pull request was merged before the ones they wait for: [{ repo, skipped: [repo, ...] }]. Kept for
     // good once seen; it does not stop anything.
     orderBroken: jsonb("order_broken").notNull().default([]),
-    // Why the platform paused the spec, shown in the blocked queue.
+    // Why the platform paused the spec (PAUSE_REASONS); the waiting queue shows the Chinese label.
     pauseReason: text("pause_reason"),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
@@ -166,6 +167,10 @@ export const specs = pgTable(
     check(
       "specs_planning_sha_check",
       sql`${t.planningSha} is null or ${t.planningSha} ~ '^[0-9a-f]{40}$'`,
+    ),
+    check(
+      "specs_pause_reason_check",
+      sql`(${t.state} = 'paused') = (${t.pauseReason} is not null) and (${t.pauseReason} is null or ${oneOf(t.pauseReason, PAUSE_REASONS)})`,
     ),
   ],
 );

@@ -477,7 +477,6 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
   });
 
   const specs = queue.specs.map((item) => {
-    // the only pause there is today is the agent time running out (#222 gives each its own code)
     const failureSource = sourceOf(
       PAUSE_REASONS.includes(item.reason as PauseReason)
         ? item.reason

@@ -519,7 +519,10 @@ describe("specs of one project sharing its slots", () => {
 
   it("starts the other spec when a ticket of a paused spec ends", async () => {
     const { a } = await twoSpecs(["a1", "a2"], ["b"]);
-    await db.pool.query("UPDATE specs SET state = 'paused' WHERE id = $1", [a]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
+      [a],
+    );
     expect(await workUntilMerged(new FakeWorker(api.url, "w1", []))).toBe(1);
     expect(await ticketStates()).toEqual(["1:done", "2:pending", "3:queued"]);
   });

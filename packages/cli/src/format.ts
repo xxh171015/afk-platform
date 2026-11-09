@@ -2,6 +2,7 @@ import {
   type AcceptancePackView,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
+  pauseReasonLabel,
   pullPhrase,
 } from "@afk/shared";
 
@@ -342,7 +343,7 @@ function planningLines(p: PlanningLike): string[] {
 
 function pausedSpecLines(s: PausedSpecLike): string[] {
   return [
-    `${s.displayId}  paused  ${s.title}: ${s.reason}`,
+    `${s.displayId}  paused  ${s.title}: ${pauseReasonLabel(s.reason)}`,
     ...waitingLines(s.blocking, s.waitingSince),
   ];
 }
@@ -661,7 +662,9 @@ export function specText(view: {
 }): string {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
-    ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
+    ...(view.spec.pauseReason
+      ? [`paused: ${pauseReasonLabel(view.spec.pauseReason)}`]
+      : []),
     ...(view.spec.planning?.repo
       ? [
           `planning repo ${view.spec.planning.repo}: ${view.spec.planning.state ?? "not confirmed yet"}${view.spec.planning.sha ? ` at ${view.spec.planning.sha}` : ""}${view.spec.planning.conflict.length ? ` (did not apply: ${view.spec.planning.conflict.join(", ")})` : ""}`,

@@ -334,7 +334,7 @@ async function schedulingPass(
     if (!paused.ok) throw new Error(paused.reason);
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = $3 WHERE id = $1",
-      [specId, paused.state, "the agent time limit of the spec was reached"],
+      [specId, paused.state, "budget-exhausted"],
     );
     return { enqueued: [], paused: true };
   }

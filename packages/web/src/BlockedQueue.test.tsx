@@ -566,7 +566,7 @@ describe("paused specs and stopped overall reviews", () => {
     id: 1,
     displayId: "S-1",
     title: "Order export",
-    reason: "the agent time limit of the spec was reached",
+    reason: "budget-exhausted",
   };
   const stopped = {
     id: 1,
@@ -583,7 +583,7 @@ describe("paused specs and stopped overall reviews", () => {
     }),
   };
 
-  it("shows why a spec is paused and resumes it with the agent hours you give", async () => {
+  it("shows why a spec is paused and retries it with the agent hours you give", async () => {
     let current = queue({ specs: [paused] });
     const fake = fakeServer({
       "GET /blocked": () => ({ json: current }),
@@ -596,16 +596,73 @@ describe("paused specs and stopped overall reviews", () => {
     let resumed: unknown;
     renderWithApp(<BlockedQueue />, fake);
     const spec = within(await screen.findByTestId("paused-S-1"));
-    expect(
-      spec.getByText(/the agent time limit of the spec was reached/),
-    ).toBeTruthy();
+    expect(spec.getByText("agent 时间用完")).toBeTruthy();
     expect(spec.queryByLabelText("这一次 Run 的说明")).toBeNull();
     fireEvent.change(spec.getByLabelText("S-1 追加的 agent 小时"), {
       target: { value: "2.5" },
     });
-    fireEvent.click(spec.getByRole("button", { name: "恢复" }));
+    fireEvent.click(spec.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
     expect(resumed).toEqual({ extraSeconds: 9000 });
+  });
+
+  it("retries an update-branch pause without asking for extra hours", async () => {
+    let current = queue({
+      specs: [{ ...paused, reason: "update-branch-conflict" }],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/resume": ({ body }) => {
+        resumed = body;
+        current = queue();
+        return { json: { state: "running" } };
+      },
+    });
+    let resumed: unknown;
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    expect(spec.getByText("合 main 有冲突")).toBeTruthy();
+    expect(spec.queryByLabelText("S-1 追加的 agent 小时")).toBeNull();
+    fireEvent.click(spec.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(resumed).toEqual({});
+  });
+
+  it("lets a person allow a paused spec through, or cancel it", async () => {
+    let current = queue({ specs: [paused] });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/allow": () => {
+        allowed = true;
+        current = queue();
+        return { json: { state: "running" } };
+      },
+      "POST /specs/1/cancel": () => {
+        cancelled = true;
+        current = queue();
+        return {
+          json: { state: "cancelled", cancelled: [], pullRequests: [] },
+        };
+      },
+    });
+    let allowed = false;
+    let cancelled = false;
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    fireEvent.click(spec.getByRole("button", { name: "放行" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(allowed).toBe(true);
+
+    current = queue({ specs: [paused] });
+    renderWithApp(<BlockedQueue />, fake);
+    fireEvent.click(
+      within(await screen.findByTestId("paused-S-1")).getByRole("button", {
+        name: "取消需求",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "永久取消 S-1" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(cancelled).toBe(true);
   });
 
   it("lets the hours field be emptied and typed again, and only accepts what the API accepts", async () => {
@@ -620,7 +677,7 @@ describe("paused specs and stopped overall reviews", () => {
       "S-1 追加的 agent 小时",
     ) as HTMLInputElement;
     const resume = spec.getByRole("button", {
-      name: "恢复",
+      name: "重试",
     }) as HTMLButtonElement;
     const ok = (value: string) => {
       fireEvent.change(field, { target: { value } });
@@ -648,7 +705,7 @@ describe("paused specs and stopped overall reviews", () => {
       target: { value: "0" },
     });
     expect(
-      (spec.getByRole("button", { name: "恢复" }) as HTMLButtonElement)
+      (spec.getByRole("button", { name: "重试" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });
@@ -760,7 +817,7 @@ describe("paused specs and stopped overall reviews", () => {
     renderWithApp(<BlockedQueue />, fake);
     fireEvent.click(
       within(await screen.findByTestId("paused-S-1")).getByRole("button", {
-        name: "恢复",
+        name: "重试",
       }),
     );
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -1055,7 +1112,7 @@ describe("ranked waiting cards", () => {
                 id: 2,
                 displayId: "S-2",
                 title: "Paused other",
-                reason: "the agent time limit of the spec was reached",
+                reason: "budget-exhausted",
                 blocking: blocking({ spec: true }),
                 waitingSince: "2026-10-01T00:00:00.000Z",
               },

@@ -155,18 +155,25 @@ describe("a person's actions", () => {
     expect(history.rows.every((r) => r.at instanceof Date)).toBe(true);
   });
 
-  it("include confirming, resuming and cancelling a spec", async () => {
+  it("include confirming, retrying, allowing and cancelling a spec", async () => {
     await runningSpec(["a"]);
-    await db.pool.query("UPDATE specs SET state = 'paused' WHERE id = 1");
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = 1",
+    );
     expect(
       (await call("POST", "/specs/1/resume", { extraSeconds: 3600 })).status,
     ).toBe(200);
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'update-branch-conflict' WHERE id = 1",
+    );
+    expect((await call("POST", "/specs/1/allow")).status).toBe(200);
     await plat("spec", "cancel", "S-1");
     expect(
       (await actions()).map((e) => [e.source, e.data.action, e.ticket_id]),
     ).toEqual([
       ["page", "confirm", null],
-      ["page", "resume", null],
+      ["page", "retry", null],
+      ["page", "allow", null],
       ["cli", "cancel-spec", null],
     ]);
     expect((await actions())[1].data.extraSeconds).toBe(3600);

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   FAILURE_SOURCE_OF_REASON,
   failureSourceOf,
+  PAUSE_REASONS,
+  pauseReasonLabel,
   REASON_CODES,
 } from "./failure-source.ts";
 
@@ -34,6 +36,23 @@ describe("failure source of a reason code", () => {
 
   it("treats an unknown code as the platform's", () => {
     expect(failureSourceOf("something-new")).toBe("platform");
+  });
+});
+
+describe("pause reason labels", () => {
+  it("names each code in Chinese, and keeps an unknown code as itself", () => {
+    expect(pauseReasonLabel("budget-exhausted")).toBe("agent 时间用完");
+    expect(pauseReasonLabel("update-branch-conflict")).toBe("合 main 有冲突");
+    expect(pauseReasonLabel("update-branch-gate-failed")).toBe(
+      "合 main 后门禁失败",
+    );
+    expect(pauseReasonLabel(null)).toBe("已暂停");
+    expect(pauseReasonLabel("mystery")).toBe("mystery");
+    expect(PAUSE_REASONS.map(pauseReasonLabel)).toEqual([
+      "agent 时间用完",
+      "合 main 有冲突",
+      "合 main 后门禁失败",
+    ]);
   });
 });
 

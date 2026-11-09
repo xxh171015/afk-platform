@@ -636,7 +636,7 @@ describe("plat", () => {
   it("lists waiting items in the same order as items", async () => {
     await blockedContract();
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = 1",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = 1",
     );
     const json = JSON.parse((await plat("--json", "blocked")).stdout);
     const text = await plat("blocked");
@@ -894,19 +894,19 @@ describe("plat", () => {
     expect(bundle.ticket.file).not.toContain(note);
   });
 
-  it("resumes a paused spec with more agent time", async () => {
+  it("retries a paused spec with more agent time, and can allow one through without", async () => {
     await blockedContract();
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached'",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted'",
     );
     expect((await plat("blocked")).stdout).toContain(
-      "S-1  paused  Order export: the agent time limit",
+      "S-1  paused  Order export: agent 时间用完",
     );
     expect((await plat("spec", "show", "S-1")).stdout).toContain(
-      "paused: the agent time limit",
+      "paused: agent 时间用完",
     );
-    const resumed = await plat("spec", "resume", "S-1", "--extra-hours", "2");
-    expect(resumed).toEqual({
+    const retried = await plat("spec", "retry", "S-1", "--extra-hours", "2");
+    expect(retried).toEqual({
       code: 0,
       stdout: "S-1 is running\n",
       stderr: "",
@@ -916,6 +916,19 @@ describe("plat", () => {
     expect((await plat("spec", "resume", "S-1")).stderr).toMatch(
       /not allowed in running/,
     );
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'update-branch-conflict'",
+    );
+    const allowed = await plat("spec", "allow", "S-1");
+    expect(allowed).toEqual({
+      code: 0,
+      stdout: "S-1 is running\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT budget_extra_seconds FROM specs")).rows[0]
+        .budget_extra_seconds,
+    ).toBe(7200);
   });
 
   it("shows a blocked overall review and runs its blocked step again", async () => {

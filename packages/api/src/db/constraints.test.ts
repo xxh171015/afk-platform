@@ -232,6 +232,45 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(await blockE2e("final-e2e-failed")).toBe("ok");
   });
 
+  it("a paused spec must carry a known pause reason, and only a paused spec may", async () => {
+    const { specId } = await seed();
+    expect(
+      await outcome("UPDATE specs SET state = 'paused' WHERE id = $1", [
+        specId,
+      ]),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'paused', pause_reason = 'oops' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+    expect(
+      await outcome(
+        "UPDATE specs SET pause_reason = 'update-branch-conflict' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'running', pause_reason = 'budget-exhausted' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'running', pause_reason = NULL WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+  });
+
   it("a spec's type and state must be known values", async () => {
     const { projectId } = await seed();
     const sql =

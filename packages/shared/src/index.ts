@@ -42,7 +42,9 @@ export {
   failureSourceOf,
   HUMAN_ACTIONS,
   isPlatformProblem,
+  PAUSE_REASON_LABELS,
   PAUSE_REASONS,
+  pauseReasonLabel,
   REASON_CODES,
 } from "./failure-source.ts";
 export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";

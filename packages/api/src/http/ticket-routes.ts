@@ -19,6 +19,7 @@ import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
   allowPaths,
+  allowSpec,
   approveProtected,
   cancelSpec,
   cancelTicket,
@@ -742,14 +743,29 @@ const resumeRoute = createRoute({
             .number()
             .int()
             .min(1)
-            .max(7 * 24 * 3600),
+            .max(7 * 24 * 3600)
+            .optional(),
         }),
       ),
     },
   },
   responses: {
     200: reply(
-      "Running again, with the extra agent time",
+      "Running again; extraSeconds adds agent time when the budget ran out",
+      z.object({ state: z.enum(SPEC_STATES) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not paused", ErrorReply),
+  },
+});
+
+const allowSpecRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/allow",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Running again without extra agent time",
       z.object({ state: z.enum(SPEC_STATES) }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -969,8 +985,19 @@ export function registerTicketRoutes(
       resumeSpec(
         pool,
         c.req.valid("param").id,
-        c.req.valid("json").extraSeconds,
+        c.req.valid("json").extraSeconds ?? 0,
       ),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(allowSpecRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      allowSpec(pool, c.req.valid("param").id),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);
