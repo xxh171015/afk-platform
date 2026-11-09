@@ -206,10 +206,15 @@ export async function reportCleanup(
     salvage: number;
     snapshots: number;
   },
+  freeBytes?: number,
   client: ApiClient = createApiClient(baseUrl),
 ): Promise<void> {
   const { response } = await client.POST("/worker/status", {
-    body: { workerId, cleaned },
+    body: {
+      workerId,
+      cleaned,
+      ...(freeBytes === undefined ? {} : { freeBytes }),
+    },
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }

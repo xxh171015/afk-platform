@@ -2046,6 +2046,10 @@
                       }
                     },
                     "required": ["sandboxLogs", "salvage", "snapshots"]
+                  },
+                  "freeBytes": {
+                    "type": "number",
+                    "minimum": 0
                   }
                 },
                 "required": ["workerId", "cleaned"]
@@ -7336,7 +7340,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
+            "description": "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
             "content": {
               "application/json": {
                 "schema": {
@@ -7954,13 +7958,101 @@
                         },
                         "required": ["spec", "completedAt"]
                       }
+                    },
+                    "status": {
+                      "type": "object",
+                      "properties": {
+                        "logDirBytes": {
+                          "type": "number"
+                        },
+                        "apiFreeBytes": {
+                          "type": "number"
+                        },
+                        "diskLevel": {
+                          "type": "string",
+                          "enum": ["ok", "warn", "stop"]
+                        },
+                        "warnGib": {
+                          "type": "number"
+                        },
+                        "stopGib": {
+                          "type": "number"
+                        },
+                        "lastCleanup": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": ["string", "null"]
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "orphans": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["at", "runs", "orphans"]
+                        },
+                        "workers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reportedAt": {
+                                "type": "string"
+                              },
+                              "freeBytes": {
+                                "type": ["number", "null"]
+                              },
+                              "cleaned": {
+                                "type": "object",
+                                "properties": {
+                                  "sandboxLogs": {
+                                    "type": "integer"
+                                  },
+                                  "salvage": {
+                                    "type": "integer"
+                                  },
+                                  "snapshots": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "sandboxLogs",
+                                  "salvage",
+                                  "snapshots"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reportedAt",
+                              "freeBytes",
+                              "cleaned"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "logDirBytes",
+                        "apiFreeBytes",
+                        "diskLevel",
+                        "warnGib",
+                        "stopGib",
+                        "lastCleanup",
+                        "workers"
+                      ]
                     }
                   },
                   "required": [
                     "waiting",
                     "running",
                     "awaitingAcceptance",
-                    "recentlyCompleted"
+                    "recentlyCompleted",
+                    "status"
                   ]
                 }
               }

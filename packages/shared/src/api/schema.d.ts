@@ -1276,6 +1276,7 @@ export interface paths {
               salvage: number;
               snapshots: number;
             };
+            freeBytes?: number;
           };
         };
       };
@@ -3551,7 +3552,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The four workbench quadrants: waiting, running, awaiting acceptance, recently merged */
+        /** @description The four workbench quadrants plus the status area (disk, workers, last cleanup) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -3741,6 +3742,29 @@ export interface paths {
                 };
                 completedAt: string;
               }[];
+              status: {
+                logDirBytes: number;
+                apiFreeBytes: number;
+                /** @enum {string} */
+                diskLevel: "ok" | "warn" | "stop";
+                warnGib: number;
+                stopGib: number;
+                lastCleanup: {
+                  at: string | null;
+                  runs: number;
+                  orphans: number;
+                };
+                workers: {
+                  id: string;
+                  reportedAt: string;
+                  freeBytes: number | null;
+                  cleaned: {
+                    sandboxLogs: number;
+                    salvage: number;
+                    snapshots: number;
+                  };
+                }[];
+              };
             };
           };
         };

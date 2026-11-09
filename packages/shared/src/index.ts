@@ -22,6 +22,19 @@ export {
   parseTicketBranch,
   SETUP_BRANCH,
 } from "./branches.ts";
+export {
+  advanceDiskAlert,
+  DEFAULT_DISK_STOP_GIB,
+  DEFAULT_DISK_WARN_GIB,
+  DISK_NOTICED,
+  type DiskLevel,
+  type DiskNoticed,
+  diskGib,
+  diskLevel,
+  formatDiskBytes,
+  formatGib,
+  GIB,
+} from "./disk.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
 export type {

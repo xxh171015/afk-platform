@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { fakeServer, renderWithApp } from "./test-utils.tsx";
+import { emptyWorkbench, fakeServer, renderWithApp } from "./test-utils.tsx";
 import {
   EMPTY_COMPLETED,
   EMPTY_REVIEW,
@@ -334,6 +334,50 @@ describe("the workbench", () => {
     const running = within(screen.getByTestId("quadrant-正在运行"));
     expect(running.getByText(/已运行 25 分钟/)).toBeTruthy();
     expect(running.queryByText("偏慢")).toBeNull();
+  });
+
+  it("shows log-dir size, remaining space, worker reports and last cleanup", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            ...emptyWorkbench,
+            status: {
+              logDirBytes: 1024 ** 2,
+              apiFreeBytes: 20 * 1024 ** 3,
+              diskLevel: "ok",
+              warnGib: 10,
+              stopGib: 5,
+              lastCleanup: {
+                at: "2026-06-01T00:00:00.000Z",
+                runs: 4,
+                orphans: 1,
+              },
+              workers: [
+                {
+                  id: "mac",
+                  reportedAt: "2026-06-01T00:00:00.000Z",
+                  freeBytes: 18 * 1024 ** 3,
+                  cleaned: { sandboxLogs: 3, salvage: 1, snapshots: 2 },
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+    const status = await screen.findByTestId("workbench-status");
+    expect(status.textContent).toMatch(/日志目录 1\.0 MiB/);
+    expect(status.textContent).toMatch(/API 剩余 20\.0 GiB/);
+    expect(status.textContent).toMatch(/worker mac 剩余 18\.0 GiB/);
+    expect(status.textContent).toMatch(
+      /上次清理 sandbox-logs 3、salvage 1、snapshots 2/,
+    );
+    expect(status.textContent).toMatch(
+      /最近清理删了 4 个 Run 日志、1 个孤儿目录/,
+    );
   });
 
   it("puts getting the first project on the platform at the top while there is none", async () => {

@@ -25,10 +25,18 @@ import {
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
-import { repoHost, SKILLS_SHA } from "@afk/shared";
+import {
+  DEFAULT_DISK_STOP_GIB,
+  DEFAULT_DISK_WARN_GIB,
+  diskGib,
+  GIB,
+  repoHost,
+  SKILLS_SHA,
+} from "@afk/shared";
 import { createWorkerApi, reportCleanup, reportCodeHosts } from "./api.ts";
 import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
+import { freeBytesOf } from "./disk.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
@@ -169,17 +177,22 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     stop.abort();
   });
 
+let lastCleaned = { sandboxLogs: 0, salvage: 0, snapshots: 0 };
 const sweepHome = async () => {
-  const cleaned = retainWorkerFiles({ home: config.home });
+  lastCleaned = retainWorkerFiles({ home: config.home });
   const parts = [
-    cleaned.sandboxLogs && `${cleaned.sandboxLogs} sandbox-log(s)`,
-    cleaned.salvage && `${cleaned.salvage} salvage`,
-    cleaned.snapshots && `${cleaned.snapshots} snapshot(s)`,
+    lastCleaned.sandboxLogs && `${lastCleaned.sandboxLogs} sandbox-log(s)`,
+    lastCleaned.salvage && `${lastCleaned.salvage} salvage`,
+    lastCleaned.snapshots && `${lastCleaned.snapshots} snapshot(s)`,
   ].filter(Boolean);
   if (parts.length > 0) log(`removed ${parts.join(", ")}`);
-  await reportCleanup(config.apiUrl, config.workerId, cleaned).catch((error) =>
-    log(`could not report cleanup: ${reason(error)}`),
-  );
+  const freeBytes = await freeBytesOf(config.home).catch(() => undefined);
+  await reportCleanup(
+    config.apiUrl,
+    config.workerId,
+    lastCleaned,
+    freeBytes,
+  ).catch((error) => log(`could not report cleanup: ${reason(error)}`));
 };
 await sweepHome();
 const retentionTimer = setInterval(() => void sweepHome(), 24 * 60 * 60 * 1000);
@@ -189,6 +202,19 @@ log(
 );
 await runWorker({
   api,
+  disk: {
+    free: () => freeBytesOf(config.home),
+    warnBelow: diskGib("AFK_DISK_WARN_GIB", DEFAULT_DISK_WARN_GIB) * GIB,
+    stopBelow: diskGib("AFK_DISK_STOP_GIB", DEFAULT_DISK_STOP_GIB) * GIB,
+    report: async (freeBytes) => {
+      await reportCleanup(
+        config.apiUrl,
+        config.workerId,
+        lastCleaned,
+        freeBytes,
+      ).catch((error) => log(`could not report cleanup: ${reason(error)}`));
+    },
+  },
   host: {
     adapter: hostAdapter,
     repoRef: hostRepoRef,

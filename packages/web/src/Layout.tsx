@@ -20,6 +20,7 @@ import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
+import { DiskBanner } from "./DiskBanner.tsx";
 import { EntityCrumbs } from "./EntityCrumbs.tsx";
 import { EventsProvider } from "./EventsProvider.tsx";
 import { HelpDialog } from "./HelpDialog.tsx";
@@ -304,6 +305,7 @@ function Chrome() {
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar onSearch={() => setSearchOpen(true)} waiting={waiting} />
           <TokenExpiryBanner />
+          <DiskBanner />
           <main className="flex-1">
             <Outlet />
           </main>

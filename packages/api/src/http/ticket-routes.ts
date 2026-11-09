@@ -14,6 +14,7 @@ import {
   PullRequestRow,
 } from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
+import { refreshDiskStatus } from "../disk.ts";
 import { aroundSpec, aroundTicket } from "../events/announce.ts";
 import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
@@ -618,12 +619,37 @@ const RunningTicket = z.object({
   slow: z.boolean(),
 });
 
+const WorkbenchStatus = z.object({
+  logDirBytes: z.number(),
+  apiFreeBytes: z.number(),
+  diskLevel: z.enum(["ok", "warn", "stop"]),
+  warnGib: z.number(),
+  stopGib: z.number(),
+  lastCleanup: z.object({
+    at: z.string().nullable(),
+    runs: z.number().int(),
+    orphans: z.number().int(),
+  }),
+  workers: z.array(
+    z.object({
+      id: z.string(),
+      reportedAt: z.string(),
+      freeBytes: z.number().nullable(),
+      cleaned: z.object({
+        sandboxLogs: z.number().int(),
+        salvage: z.number().int(),
+        snapshots: z.number().int(),
+      }),
+    }),
+  ),
+});
+
 const workbenchRoute = createRoute({
   method: "get",
   path: "/workbench",
   responses: {
     200: reply(
-      "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
+      "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
       z.object({
         waiting: WorkbenchWaiting,
         running: z.array(
@@ -640,6 +666,7 @@ const workbenchRoute = createRoute({
         recentlyCompleted: z.array(
           z.object({ spec: SpecListItem, completedAt: z.string() }),
         ),
+        status: WorkbenchStatus,
       }),
     ),
   },
@@ -926,9 +953,14 @@ export function registerTicketRoutes(
 
   app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));
 
-  app.openapi(workbenchRoute, async (c) =>
-    c.json(await workbench(pool, context.clock()), 200),
-  );
+  app.openapi(workbenchRoute, async (c) => {
+    const board = await workbench(pool, context.clock());
+    const sample = await context.statDisk(context.logDir);
+    const status = await refreshDiskStatus(pool, sample, (notice) =>
+      context.notifications.notify(notice),
+    );
+    return c.json({ ...board, status }, 200);
+  });
 
   app.openapi(retryRoute, async (c) => {
     const { id } = c.req.valid("param");

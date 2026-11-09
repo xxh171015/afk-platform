@@ -5,6 +5,7 @@ import { CLIENT_HEADER, HOST_HEADER } from "@afk/shared";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
+import { type DiskSample, sampleDisk, volumeFreeBytes } from "./disk.ts";
 import { EventsHub } from "./events/hub.ts";
 import { withOrigin } from "./events/origin.ts";
 import { registerCliRoutes } from "./http/cli-routes.ts";
@@ -26,6 +27,8 @@ export interface AppOptions {
   leaseSeconds?: number;
   // Where run logs are kept; startServer fills in $AFK_LOG_DIR or ~/.afk/logs/<instance id>.
   logDir?: string;
+  // Tests inject remaining space so GET /workbench does not depend on the machine's disk.
+  statDisk?: (path: string) => Promise<DiskSample>;
   events?: EventsHub;
   notifications?: NotificationChannel;
   sseKeepaliveMs?: number;
@@ -36,6 +39,10 @@ export interface AppContext {
   clock: () => Date;
   leaseSeconds: number;
   logs: LogStore;
+  logDir: string;
+  statDisk: (path: string) => Promise<DiskSample>;
+  // Claim uses this instead of statDisk so a live API does not walk the log dir every poll.
+  freeBytes: (path: string) => Promise<number>;
   events: EventsHub;
   notifications: NotificationChannel;
   sseKeepaliveMs: number;
@@ -47,13 +54,18 @@ const LOCAL_HOST = /^(localhost|127\.0\.0\.1)(:\d+)?$/;
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 export function createApp(options: AppOptions): OpenAPIHono {
+  const logDir = options.logDir ?? mkdtempSync(join(tmpdir(), "afk-logs-"));
+  const injectedStat = options.statDisk;
   const context: AppContext = {
     pool: options.pool,
     clock: options.clock ?? (() => new Date()),
     leaseSeconds: options.leaseSeconds ?? LEASE_SECONDS,
-    logs: new LogStore(
-      options.logDir ?? mkdtempSync(join(tmpdir(), "afk-logs-")),
-    ),
+    logs: new LogStore(logDir),
+    logDir,
+    statDisk: injectedStat ?? sampleDisk,
+    freeBytes: injectedStat
+      ? async (path) => (await injectedStat(path)).freeBytes
+      : volumeFreeBytes,
     events: options.events ?? new EventsHub(),
     notifications: options.notifications ?? silentNotifications,
     sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,

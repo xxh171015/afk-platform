@@ -14,15 +14,24 @@ export async function recordWorkerCleanup(
   workerId: string,
   cleaned: WorkerCleanupReport,
   now: Date = new Date(),
+  freeBytes?: number,
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO workers (id, reported_at, cleaned_sandbox_logs, cleaned_salvage, cleaned_snapshots)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO workers (id, reported_at, cleaned_sandbox_logs, cleaned_salvage, cleaned_snapshots, free_bytes)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (id) DO UPDATE SET
        reported_at = EXCLUDED.reported_at,
        cleaned_sandbox_logs = EXCLUDED.cleaned_sandbox_logs,
        cleaned_salvage = EXCLUDED.cleaned_salvage,
-       cleaned_snapshots = EXCLUDED.cleaned_snapshots`,
-    [workerId, now, cleaned.sandboxLogs, cleaned.salvage, cleaned.snapshots],
+       cleaned_snapshots = EXCLUDED.cleaned_snapshots,
+       free_bytes = COALESCE(EXCLUDED.free_bytes, workers.free_bytes)`,
+    [
+      workerId,
+      now,
+      cleaned.sandboxLogs,
+      cleaned.salvage,
+      cleaned.snapshots,
+      freeBytes ?? null,
+    ],
   );
 }

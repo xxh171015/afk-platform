@@ -2,6 +2,7 @@ import { HOST_KINDS } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
 import type { AppContext } from "../app.ts";
+import { claimsStopped, refreshDiskStatus } from "../disk.ts";
 import {
   aroundJob,
   emitTransition,
@@ -154,6 +155,7 @@ const workerStatusRoute = createRoute({
               salvage: z.number().int().min(0),
               snapshots: z.number().int().min(0),
             }),
+            freeBytes: z.number().nonnegative().optional(),
           }),
         },
       },
@@ -623,13 +625,32 @@ export function registerWorkerRoutes(
   });
 
   app.openapi(workerStatusRoute, async (c) => {
-    const { workerId, cleaned } = c.req.valid("json");
-    await recordWorkerCleanup(context.pool, workerId, cleaned, context.clock());
+    const { workerId, cleaned, freeBytes } = c.req.valid("json");
+    await recordWorkerCleanup(
+      context.pool,
+      workerId,
+      cleaned,
+      context.clock(),
+      freeBytes,
+    );
+    const sample = await context.statDisk(context.logDir);
+    await refreshDiskStatus(context.pool, sample, (notice) =>
+      context.notifications.notify(notice),
+    );
     return c.json({ ok: true as const }, 200);
   });
 
   app.openapi(claimRoute, async (c) => {
     const { workerId, capabilities } = c.req.valid("json");
+    if (
+      await claimsStopped(
+        context.pool,
+        workerId,
+        await context.freeBytes(context.logDir),
+      )
+    ) {
+      return c.json({ job: null }, 200);
+    }
     const job = await claimJob(context.pool, {
       workerId,
       capabilities,

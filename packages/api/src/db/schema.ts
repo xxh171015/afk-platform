@@ -1,5 +1,6 @@
 import {
   BLOCKED_REASONS,
+  DISK_NOTICED,
   EDGE_KINDS,
   EVENT_SOURCES,
   EVENT_TYPES,
@@ -18,6 +19,7 @@ import {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   bigserial,
   boolean,
   check,
@@ -96,10 +98,19 @@ export const instance = pgTable(
     logsPurgedAt: timestamp("logs_purged_at", { withTimezone: true }),
     logsPurgedRuns: integer("logs_purged_runs").notNull().default(0),
     logsPurgedOrphans: integer("logs_purged_orphans").notNull().default(0),
+    // Last sampled size of the log dir and free bytes on that volume; disk_noticed is the last threshold we told.
+    logDirBytes: bigint("log_dir_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
+    logDirFreeBytes: bigint("log_dir_free_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
+    diskNoticed: text("disk_noticed").notNull().default("none"),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
     check("instance_id_check", sql`${t.id} ~ '^[0-9a-f]{6}$'`),
+    check("instance_disk_noticed_check", oneOf(t.diskNoticed, DISK_NOTICED)),
   ],
 );
 
@@ -683,4 +694,6 @@ export const workers = pgTable("workers", {
   cleanedSandboxLogs: integer("cleaned_sandbox_logs").notNull().default(0),
   cleanedSalvage: integer("cleaned_salvage").notNull().default(0),
   cleanedSnapshots: integer("cleaned_snapshots").notNull().default(0),
+  // Free bytes on the worker's home volume, last time it posted /worker/status.
+  freeBytes: bigint("free_bytes", { mode: "number" }),
 });

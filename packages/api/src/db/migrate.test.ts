@@ -69,6 +69,7 @@ const LATER_THAN_REPO_NAMES = [
   "0045_pr_platform_head",
   "0046_log_retention",
   "0047_workers",
+  "0048_disk",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

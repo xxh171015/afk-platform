@@ -1,3 +1,4 @@
+import { GIB } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
@@ -13,7 +14,13 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(createApp({ pool: db.pool, clock: clock.now }));
+  api = await listen(
+    createApp({
+      pool: db.pool,
+      clock: clock.now,
+      statDisk: async () => ({ freeBytes: 20 * GIB, dirBytes: 0 }),
+    }),
+  );
 });
 afterEach(async () => {
   await api.close();
@@ -102,6 +109,15 @@ describe("GET /workbench", () => {
       running: [],
       awaitingAcceptance: [],
       recentlyCompleted: [],
+      status: {
+        logDirBytes: 0,
+        apiFreeBytes: 20 * GIB,
+        diskLevel: "ok",
+        warnGib: 10,
+        stopGib: 5,
+        lastCleanup: { at: null, runs: 0, orphans: 0 },
+        workers: [],
+      },
     });
   });
 
