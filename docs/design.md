@@ -11,6 +11,7 @@
 修订：2026-11-01 按操作体验地图（#125）修订：原则第 4 条改表述不改精神（规划提交、`/context/domain/`）；上下文表补 domain 和 Retry note；确认拆分登记规划 SHA；retry 可带说明。详细设计见 [操作体验 spec](specs/experience-platform.md)。
 
 修订：2026-11-01 在「总体架构」加两张架构图：一张按现有代码（M0–M2），一张叠加 M3–M5。
+修订：2026-11-09 M3 改为先在 Mac 本机用起来（GitLab、多需求并行、基础度量），迁服务器挪到 M4；日志不再换 MinIO。
 
 ## 背景与目标
 
@@ -95,7 +96,7 @@ flowchart LR
 | 沙箱            | 隔离运行 agent（Cursor Agent CLI）                                                                          | 本机 Docker                            |
 | 代码托管适配器  | 开 PR，同步 PR 状态、CI 和评论                                                                              | GitHub（生产换 GitLab CE）             |
 | 页面            | 查看和管理需求、票、运行日志、PR、blocked 队列                                                              | 简单 Web 页面                          |
-| 存储            | 业务数据；日志和上下文文件                                                                                  | Postgres；本地目录（服务器上换 MinIO） |
+| 存储            | 业务数据；日志和上下文文件                                                                                  | Postgres；API 所在机器的磁盘          |
 
 执行层内部：worker 在宿主机上准备好代码、上下文和快照，沙箱只拿到挂载进来的目录。写权限只有一次性的“槽位 clone”一处（见「Git 操作规范」），主 clone 不挂进沙箱，推送凭据只在 worker 手里。
 
@@ -140,7 +141,7 @@ flowchart LR
 
 ### 按现有代码的架构（M0–M2）
 
-下图按 `main` 上的代码画，节点后面是包名或目录，都在 `packages/` 下。只画已经实现的部分：update-branch、trial-merge、rework、GitLab 适配器（目前只登记 host kind）、webhook、MinIO、多 worker、Link 表、`plat context`、事件与插件、信任阶梯、登录与权限都还没有，不在图里。
+下图按 `main` 上的代码画，节点后面是包名或目录，都在 `packages/` 下。只画已经实现的部分：update-branch、trial-merge、rework、GitLab 适配器（目前只登记 host kind）、webhook、多 worker、Link 表、`plat context`、事件与插件、信任阶梯、登录与权限都还没有，不在图里。
 
 ```mermaid
 flowchart TB
@@ -229,7 +230,7 @@ flowchart TB
 
 ### 加上 M3–M5 的目标架构
 
-在上图的基础上叠加「落地路线」的 M3、M4、M5。灰色是已有、不变的；灰底蓝色虚线框是已有、要扩展的，扩展项用“＋（Mx）”标出；蓝、绿、橙分别是 M3、M4、M5 新增的。
+在上图的基础上叠加「落地路线」的 M3、M4、M5（2026-11-09 按 M3 先在 Mac 本机用起来调整）。灰色是已有、不变的；灰底蓝色虚线框是已有、要扩展的，扩展项用“＋（Mx）”标出；蓝、绿、橙分别是 M3、M4、M5 新增的。
 
 ```mermaid
 flowchart TB
@@ -237,22 +238,22 @@ flowchart TB
         direction LR
         cursor["Cursor + skills<br/>规划：grill → to-spec → to-tickets<br/>缺陷：diagnosing-bugs → triage（M4）"]
         cli["plat CLI<br/>规划、处理 blocked、看日志<br/>＋ plat context --files（M4）"]
-        web["平台页面<br/>需求、依赖图、日志、blocked<br/>＋ 潜在冲突、PR / MR 状态（M3）<br/>＋ 追溯视图、指标（M4）"]
+        web["平台页面<br/>需求、依赖图、日志、blocked<br/>＋ 潜在冲突、PR / MR 状态、度量（M3）<br/>＋ 追溯视图（M4）"]
         im["IM 与外部 tracker（M5）<br/>飞书、钉钉、企微、Slack<br/>飞书项目、Jira、Linear"]
     end
 
-    subgraph SRV["平台服务器 · 公司内网（M3 迁入）"]
+    subgraph SRV["控制面 · M3 在 Mac 本机，M4 迁入公司服务器"]
         auth["登录与权限（M5）"]
-        rest["REST + OpenAPI<br/>CLI、页面、worker 共用<br/>＋ GitLab webhook 入口（M3）"]
+        rest["REST + OpenAPI<br/>CLI、页面、worker 共用<br/>＋ GitLab webhook 入口（M4 之后）"]
         subgraph core["领域核心"]
-            plan["规划<br/>导入、追加、改票、确认<br/>＋ 跨 spec 依赖边（M3）<br/>＋ bug spec 指向原 spec（M4）"]
+            plan["规划<br/>导入、追加、改票、确认<br/>＋ 跨 spec 依赖边（M4 之后）<br/>＋ bug spec 指向原 spec（M4）"]
             sched["调度器<br/>可开工实时计算、并发和预算"]
-            queue["作业队列<br/>租约、fencing、幂等、lock_key<br/>＋ 按仓库的能力标签、多 worker（M3）"]
+            queue["作业队列<br/>租约、fencing、幂等、lock_key<br/>＋ 按仓库的能力标签、多 worker（M4）"]
             stages["阶段推进<br/>单票流水线、联调修复票"]
             fin["收尾与验收<br/>final-review / fix / e2e、验收包"]
             hostjobs["托管编排<br/>open-pr、host-sync、spec-cleanup、pr-ready"]
             par["多需求并行（M3）<br/>main 前进 → 各集成分支 update-branch<br/>集成分支前移 → trial-merge 报潜在冲突<br/>update-branch 失败 → spec paused"]
-            rework["PR 评论返工（M3）<br/>awaiting-review → reworking<br/>rework 作业，适配器逐条回复"]
+            rework["PR 评论返工（M4 之后）<br/>awaiting-review → reworking<br/>rework 作业，适配器逐条回复"]
         end
         subgraph trace["追溯与上下文（M4）"]
             link["Link 索引<br/>commit ↔ ticket ↔ spec ↔ PR ↔ bug<br/>以 commit trailer 为准"]
@@ -266,24 +267,24 @@ flowchart TB
             plug["插件<br/>通知、外部 tracker 同步<br/>门禁扩展（安全扫描）、上下文来源"]
             trust["信任阶梯与合并策略<br/>L0 人合并 → L1 低风险 bot 合并 → L2"]
         end
-        pg[("Postgres<br/>现有表<br/>＋ links、pgvector（M4）<br/>＋ 用户、角色、插件配置（M5）")]
+        pg[("Postgres<br/>现有表<br/>＋ 事件表（M3）<br/>＋ links、pgvector（M4）<br/>＋ 用户、角色、插件配置（M5）")]
     end
 
     shared["@afk/shared<br/>状态机、分支命名、校验、schema<br/>＋ 阶段流转改由工作流定义（M5）"]
-    minio[("MinIO（M3）<br/>运行日志、上下文目录<br/>会话记录（M5，换能采集的 agent 后）")]
+    logs[("日志目录（M3 加保留期）<br/>API 写本机磁盘，服务器上是具名卷<br/>需要对象存储时换 SeaweedFS")]
 
-    subgraph WK["构建机 1..n（M3）· Worker + Docker，只出站"]
-        wloop["Worker 循环<br/>claim → bundle → 执行 → 回传<br/>＋ 注册时带能力标签（M3）"]
-        wgit["Git 与本地目录<br/>主 clone、槽位、快照、受限推送<br/>＋ update-branch、trial-merge、rework（M3）"]
+    subgraph WK["Worker + Docker · M3 在 Mac 本机，M4 构建机 1..n、只出站"]
+        wloop["Worker 循环<br/>claim → bundle → 执行 → 回传<br/>＋ 注册时带能力标签（M4）"]
+        wgit["Git 与本地目录<br/>主 clone、槽位、快照、受限推送<br/>＋ update-branch、trial-merge（M3）"]
         pipe["流水线 @afk/pipeline<br/>context、门禁、保护路径、trailer<br/>merge-tree、联调环境、e2e<br/>＋ 按工作流组装阶段（M5）"]
         hostpkg["代码托管适配器 @afk/host<br/>GitHub<br/>＋ GitLab CE 适配器（M3）"]
-        subgraph box["Docker 沙箱 · ＋ 出网白名单、容器加固（M3）"]
+        subgraph box["Docker 沙箱 · ＋ 出网白名单、容器加固（M4）"]
             agent["AFK agent · Cursor Agent CLI<br/>＋ 按项目换 provider：Claude Code、Codex…（M5）"]
         end
         env["联调环境 compose"]
     end
 
-    gl["GitLab CE 17.3.1（M3）<br/>受保护分支：bot 只有 Developer<br/>MR、Pipeline、评论"]
+    gl["GitLab CE 17.3.1（M3）<br/>受保护分支：bot 只有 Developer<br/>MR、Pipeline、approvals，每分钟轮询"]
     gh["GitHub<br/>PoC 仓库"]
     model["模型 API<br/>按合规结论定"]
 
@@ -309,7 +310,7 @@ flowchart TB
     wloop --> wgit
     wloop --> pipe
     wloop --> hostpkg
-    wloop -->|日志、上下文| minio
+    rest -->|运行日志| logs
     pipe --> agent
     pipe --> env
     agent -->|出网白名单| model
@@ -317,7 +318,6 @@ flowchart TB
     wgit --> gh
     hostpkg --> gl
     hostpkg --> gh
-    gl -->|"webhook：MR、Comments、Pipeline"| rest
     shared -.-> SRV
     shared -.-> WK
 
@@ -329,17 +329,18 @@ flowchart TB
     classDef outside fill:#ffffff,stroke:#7d8b99,color:#18212b,stroke-dasharray:4 3
     class sched,stages,fin,env done
     class cursor,cli,web,rest,plan,queue,hostjobs,wloop,wgit,pipe,hostpkg,agent,shared,pg grown
-    class par,rework,minio,gl m3
-    class link,ctxq,know,metric m4
+    class par,logs,gl m3
+    class rework,link,ctxq,know,metric m4
     class auth,im,bus,wf,plug,trust m5
     class gh,model outside
 ```
 
-- **M3**（验收：两个需求同时跑完）：平台服务器加构建机 1..n，worker 只出站拉作业、注册时带能力标签；`@afk/host` 加 GitLab CE 适配器，状态改走 webhook；update-branch、trial-merge、跨 spec 依赖边，页面显示潜在冲突；PR / MR 评论返工；日志和上下文目录换 MinIO；沙箱出网白名单、容器加固。
-- **M4**（验收：bug 一步定位到原需求）：Link 表从合并提交的 trailer 建 commit ↔ ticket ↔ spec ↔ PR ↔ bug；`plat context --files`；bug 类型 spec 指向原 spec、预填指针后走同一条流水线；GLOSSARY、ADR、契约建索引，pgvector 只做补充；返工率等四个指标。
+- **M3**（验收：两个项目的需求在 Mac 上同时跑完，一个在 GitLab、一个在 GitHub，见 [M3 spec](specs/m3-platform.md)）：仍在用户的 Mac 本机；`@afk/host` 加 GitLab CE 适配器，状态每分钟轮询；update-branch、trial-merge，页面显示潜在冲突，需求暂停；事件表和基础度量（失败归因、工期四段）；日志保留和磁盘告警。
+- **M4**（迁服务器）：公司服务器 compose 部署、构建机 1..n，worker 只出站、带能力标签和协议版本；页面登录和 CLI / worker 凭证；飞书通知，通知和时间线改读事件表；沙箱出网白名单、容器加固。
+- **M4 之后**（验收：bug 一步定位到原需求）：Link 表从合并提交的 trailer 建 commit ↔ ticket ↔ spec ↔ PR ↔ bug；`plat context --files`；bug 类型 spec 指向原 spec、预填指针后走同一条流水线；GLOSSARY、ADR、契约建索引，pgvector 只做补充；返工率等四个指标。
 - **M5**（验收：加工作流不改核心代码）：事件总线和插件（通知、外部 tracker 同步、门禁扩展、上下文来源）；工作流按 spec 类型配置，取代写死的阶段流转；agent、模型、沙箱按项目换 provider；信任阶梯；登录与权限。
 
-M2 spec 的 Out of Scope 把 rework、update-branch、trial-merge、多需求并行、跨 spec 边写成“M3 / M4”，这里都归到 M3，因为 M3 的验收要靠它们。登录与权限按 M2 spec 放在 M5，「部署：本机 PoC 到公司服务器」一节写的是上服务器时加，到 M3 时再定。
+M2 spec 的 Out of Scope 把 rework、update-branch、trial-merge、多需求并行、跨 spec 边写成“M3 / M4”：update-branch、trial-merge、多需求并行进 M3；跨 spec 边和 rework 放到 M4 之后。2026-11-09 为了尽快用起来，M3 只在 Mac 本机跑通，迁服务器、登录、飞书通知、出网白名单挪到 M4（见地图 #196）。
 
 ## 领域模型与状态机
 
@@ -946,7 +947,7 @@ flowchart LR
 - **不同需求之间的冲突**：
   - 不同需求的票在各自的集成分支上跑，串行执行并不能避免冲突，所以不按模块串行。
   - 集成分支每前移一次，平台就对同一仓库里其他在跑的集成分支做一次试合并（`git merge-tree`），在页面上显示“潜在冲突”和冲突文件，不阻塞执行。冲突在先合进 main 的一方合并后，由另一方的 update-branch 处理。
-  - main 一前进，调度器就给所有在跑的集成分支发 update-branch 作业：作业带集成分支的 `lock_key`，把 main 合进候选、跑候选门禁、通过才前移。有冲突时开 merge agent 运行（ticket 为空的 Run）解决后再过门禁。仍失败则 spec 自动 paused 并进入 blocked 队列，暂停派发新票，已经在跑的票继续。
+  - main 前进由 host-sync 每分钟读默认分支头发现（不靠 webhook）。running 的需求每次都 update-branch（排队期间 main 又动了就合成一次）；收尾开始时落后 main 就先更新；人正在验收的只在 PR / MR 与 main 冲突时更新。作业带集成分支的 `lock_key`，把 main 合进候选、跑候选门禁、通过才前移；有冲突或门禁不过，开一次 merge agent 运行（ticket 为空的 Run，阶段 `update-branch`）解决后再过门禁。仍失败则 spec 暂停（原因码 `update-branch-conflict` / `update-branch-gate-failed`）进待处理，不派新票、在跑的票跑完；人可以重试、放行或取消。细节见 [M3 spec](specs/m3-platform.md)。
 - **合并到 main**：由人做，平台给出建议顺序；一个需求合并后，其他需求自动 update-branch。
 - **并发和预算**：全局、每项目、每仓库、每台 worker 各设并发上限。Cursor 不报 token 用量，PoC 先按运行时长和次数设上限。
 - **名额在需求之间怎么分**（2026-11-08）：项目的名额由它的各个需求共用。任何事让一个需求跑了一次调度（票 done、blocked、失败、取消，需求取消或暂停），提交后同项目所有 running 的需求各再跑一次，因为释放出来的名额可能正是别的需求在等的；API 另外每分钟对所有 running 的需求跑一次，补上漏掉的触发。几个需求都有能开工的票时轮流拿：手上名额少的先拿，一样多时上次开工更早（或从没开过工）的先拿。已经在跑的票不会被抢走。
@@ -998,9 +999,9 @@ flowchart LR
 |              | GitHub（PoC）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | GitLab CE 17.3.1（生产）                                                              |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | 变更请求     | PR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | MR                                                                                    |
-| 状态同步     | 轮询，每分钟一次，不用把本机暴露到公网                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | webhook：Merge request、Comments、Pipeline 事件                                       |
+| 状态同步     | 轮询，每分钟一次，不用把本机暴露到公网                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 轮询，每分钟一次（webhook 以后再做）                                                  |
 | CI           | GitHub Actions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | GitLab CI                                                                             |
-| bot 账号     | **GitHub App**，装在个人账号上，只勾选需要的仓库（PoC 先只装 `afk-pilot-backend`）。权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读；**不给** Workflows、Administration、Actions 写、Issues、Secrets。不订阅 webhook，状态靠轮询。PR 作者显示为 `<app>[bot]`，与你本人是不同身份。不用机器账号：仓库属于个人账号，fine-grained token 一个只能访问一个所有者的资源，不支持协作者身份，只能退到范围很大的 classic token。凭据（App ID、安装 ID、私钥 PEM）放 `~/.afk/secrets/github-app/`（权限 600，不放 `~/.afk/env`）；worker 用私钥换 installation token（每小时过期），换的时候限定本次任务需要的仓库和权限，缓存到过期前 5 分钟；推送仍通过 `http.extraHeader` 传，M0 用的个人 `GITHUB_TOKEN` 在 App 跑通后废掉。token 不能按分支限权，bot 只写 `agent/*`、`spec/*` 由平台保证                                                                                                                                                                                                                                                 | 项目或组 access token，Developer 角色                                                 |
+| bot 账号     | **GitHub App**，装在个人账号上，只勾选需要的仓库（PoC 先只装 `afk-pilot-backend`）。权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读；**不给** Workflows、Administration、Actions 写、Issues、Secrets。不订阅 webhook，状态靠轮询。PR 作者显示为 `<app>[bot]`，与你本人是不同身份。不用机器账号：仓库属于个人账号，fine-grained token 一个只能访问一个所有者的资源，不支持协作者身份，只能退到范围很大的 classic token。凭据（App ID、安装 ID、私钥 PEM）放 `~/.afk/secrets/github-app/`（权限 600，不放 `~/.afk/env`）；worker 用私钥换 installation token（每小时过期），换的时候限定本次任务需要的仓库和权限，缓存到过期前 5 分钟；推送仍通过 `http.extraHeader` 传，M0 用的个人 `GITHUB_TOKEN` 在 App 跑通后废掉。token 不能按分支限权，bot 只写 `agent/*`、`spec/*` 由平台保证                                                                                                                                                                                                                                                 | bot 用户 + PAT，Developer 角色，PAT 放 `~/.afk/secrets/gitlab/<主机>`                 |
 | 强制由人合并 | **PoC（GitHub 免费个人账号，私有仓库）用不了 ruleset 和分支保护，也没有 bypass 名单**（2026-10-28 对试点仓库实测：接口返回 `Upgrade to GitHub Pro or make this repository public`）。所以改成三层，GitHub 不强制，平台自己保证，已知缺口：(1) worker 里所有 `git push` 走同一个函数，只放行 `refs/heads/agent/*` 和 `refs/heads/spec/*`，其余拒绝；平台代码里不调用任何合并 PR 的接口；两个测试：给这个函数传 `main` 必须报错，代码里搜不到合并接口的调用。(2) 每个仓库放一个检测用的 Actions 工作流，监听 `push` 到 `main`，用 `GET /commits/{sha}/pulls` 查这次提交有没有对应的已合并 PR，没有、或推送者是 bot，就失败并在仓库里开一个 issue；只做事后检测，不阻止，出事后人工回滚。免费个人账号的私有仓库每月 2000 分钟 Actions 额度，这个工作流每次几秒，用不到六分之一；额度用完又没绑支付方式时它会静默不跑，需留意邮件提醒。(3) App 不给 Workflows 权限，据说这样改不了 `.github/workflows/`，bot 出 bug 也关不掉第 2 层（待验证）。以后要 GitHub 真强制，升级 Pro 后加 ruleset：要求经 PR 合并且至少 1 个 approve，bot 不在 bypass 列表，前三层不用改 | 受保护分支：允许 push 设为“无”，允许合并设为 Maintainer。bot 只是 Developer，合不进去 |
 
 GitLab 免费版的 MR 审批是可选的，没有审批也能合并；“必须几人审批”的规则是 Premium 功能。所以在 CE 上靠角色限制来保证由人合并（[受保护分支](https://docs.gitlab.com/user/project/repository/branches/protected/)、[MR 审批](https://docs.gitlab.com/user/project/merge_requests/approvals/)）。Developer 能写所有未受保护的分支，同样由平台保证只写 `agent/*`、`spec/*`。
@@ -1261,7 +1262,7 @@ S-12
 - **语言**：全栈 TypeScript，和 Sandcastle 同语言，worker 直接 import 它当库用。
 - **数据**：Postgres 一个库做业务数据、作业队列（集成分支锁也是作业上的 `lock_key`，不用 advisory lock），后期加 pgvector。队列的语义要求见「作业与恢复」。
 - **Git**：worker 上 git ≥ 2.38（`merge-tree --write-tree`）。
-- **文件**：日志和上下文目录先放本地，服务器上换 MinIO。
+- **文件**：运行日志由 API 写在本机磁盘（服务器上是 compose 具名卷），上下文目录在 worker 上现渲染；暂不上对象存储，需要时首选 SeaweedFS（MinIO 社区版已停止维护）。
 - **接口**：REST + OpenAPI，CLI 和页面共用。M1 的具体选型（Hono、Drizzle、自己实现的作业队列、React Flow 等）和依据见 [`docs/m1-tech-stack.md`](m1-tech-stack.md)。
 - **页面**：React，依赖图用 `@xyflow/react`（React Flow）画。
 - **长任务**：一次 agent 运行要十几分钟到一小时，每一步都要能安全重跑（租约、fencing、幂等键）。MVP 用 Postgres 队列就够；等流程里出现跨天的人工审批等待，再考虑 Temporal 这类工作流引擎。
@@ -1272,15 +1273,15 @@ S-12
 
 ## 部署：本机 PoC 到公司服务器
 
-PoC 和生产跑同一套代码，迁移只改配置。
+PoC 和生产跑同一套代码，迁移只改配置。M3 仍在本机（加上 GitLab），M4 迁到公司服务器。
 
 | 组件                  | PoC（你的机器）                         | 稳定期（公司服务器）           |
 | --------------------- | --------------------------------------- | ------------------------------ |
 | API + 页面 + Postgres | docker compose 一起起，只监听 localhost | 单独一台服务器，加登录和权限   |
 | Worker                | 同一台机器                              | 一台或多台装 Docker 的构建机   |
-| 代码托管              | GitHub，状态轮询，单独的 bot 账号       | 自建 GitLab CE 17.3.1，webhook |
+| 代码托管              | GitHub，状态轮询，单独的 bot 账号；M3 起加 GitLab CE 17.3.1，同样轮询 | 自建 GitLab CE 17.3.1，轮询（webhook 以后再做） |
 | Agent                 | Cursor Agent CLI，走公网                | 按合规结论定                   |
-| 日志、上下文目录      | 本地目录                                | MinIO                          |
+| 日志、上下文目录      | 本地目录                                | 服务器磁盘（具名卷）           |
 | 仓库缓存              | 本地 clone                              | 每台 worker 上各仓库一个镜像   |
 | 密钥                  | worker 的环境文件                       | 按公司方案定                   |
 
@@ -1305,14 +1306,14 @@ flowchart LR
         direction TB
         s1["平台服务器<br/>API + 页面 + Postgres<br/>登录、权限"]
         s2["构建机 1..n<br/>Worker + Docker"]
-        s3[("MinIO<br/>日志、上下文")]
+        s3[("具名卷<br/>运行日志")]
         s2 -->|出站拉作业| s1
-        s2 --> s3
+        s1 --> s3
     end
     gl["GitLab CE 17.3.1"]
     model["模型 API<br/>按合规结论定"]
     s2 -->|push| gl
-    gl -->|webhook| s1
+    s1 -->|轮询| gl
     s2 -->|出网白名单| model
 
     poc -.->|同一套代码，只改配置| prod
@@ -1332,7 +1333,6 @@ flowchart LR
 - [ ] 容器加固：去掉多余 capability、限制进程数和内存（Sandcastle 0.12.0 的 docker 选项只有 `cpus`、`network`、`mounts`、`groups`、`devices`，其余要打补丁或换自定义 provider）
 - [ ] 每个并发沙箱占多少磁盘和 CPU，定出每台 worker 的并发上限
 - [ ] worker 上 git 版本 ≥ 2.38
-- [ ] GitLab webhook 指向平台 API
 - [ ] GitLab squash 提交消息模板包含 `%{all_commits}`（如果用 squash 合并）
 
 ## 已知风险和坑
@@ -1367,7 +1367,7 @@ flowchart LR
 
 ## 落地路线
 
-分六个阶段：M0 不建平台，只验证单票链路；M1 和 M2 在本机完成 PoC；M2 之后、M3 之前补操作体验（控制塔、通知、规划提交），见 [操作体验 spec](specs/experience-platform.md)。M3 起搬到公司服务器。PoC 的真正验收在 M2：一个真实的前后端需求，人只在开头和结尾出现。
+分六个阶段：M0 不建平台，只验证单票链路；M1 和 M2 在本机完成 PoC；M2 之后、M3 之前补操作体验（控制塔、通知、规划提交），见 [操作体验 spec](specs/experience-platform.md)。M3 在本机接上 GitLab、多需求并行和基础度量，M4 起搬到公司服务器。PoC 的真正验收在 M2：一个真实的前后端需求，人只在开头和结尾出现。
 
 ```mermaid
 flowchart TB
@@ -1381,12 +1381,12 @@ flowchart TB
         G2{{"PoC 验收：真实前后端需求<br/>人只在首尾出现"}}
         M0 --> G0 --> M1 --> G1 --> M2 --> G2
     end
-    subgraph SRV["稳定期 · 公司服务器、GitLab CE"]
+    subgraph SRV["稳定期 · GitLab CE，M4 起公司服务器"]
         direction LR
-        M3["M3<br/>迁到公司服务器<br/>GitLab CE 适配器<br/>多 worker 并行"]
-        G3{{"验收：两个需求<br/>同时跑完"}}
-        M4["M4<br/>追溯链接<br/>plat context<br/>bug 关联原需求"]
-        G4{{"验收：bug 一步定位<br/>到原需求"}}
+        M3["M3 · Mac 本机<br/>GitLab CE 适配器<br/>多需求并行、基础度量"]
+        G3{{"验收：两个项目的需求<br/>同时跑完"}}
+        M4["M4<br/>迁到公司服务器、多 worker<br/>登录、飞书、出网白名单<br/>之后：追溯、bug 关联原需求"]
+        G4{{"验收：迁到服务器<br/>细节在 M4 地图里定"}}
         M5["M5<br/>事件与插件<br/>工作流按类型配置<br/>信任阶梯、权限"]
         G5{{"验收：加工作流<br/>不改核心代码"}}
         M3 --> G3 --> M4 --> G4 --> M5 --> G5
@@ -1412,6 +1412,8 @@ M0 第一天先做这几个验证，任何一个不通都要先换方案：
 - [x] 门禁命令能在沙箱里跑，JUnit 结果能拿回来
 
 **M2 的详细范围**见 [M2 spec](specs/m2-platform.md)：多仓库（只有名字）、契约属于提供方仓库、追加与改票、跨仓库上下文和只读快照、联调票与修复票、按契约关系的合并顺序和 `partially-merged`、按仓库的验收包。
+
+**M3 的详细范围**见 [M3 spec](specs/m3-platform.md)：Mac 本机；GitLab CE 适配器（MR、每分钟轮询、接入自检）；update-branch、trial-merge 和需求暂停；事件表、失败归因、工期四段和度量页；日志保留和磁盘告警。
 
 **M1 的详细范围**（本机、GitHub、Cursor agent、单人）：
 
