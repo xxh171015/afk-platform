@@ -524,6 +524,19 @@ describe("taking the result back", () => {
     ).toEqual([]);
   });
 
+  it("does not call master extra when that is the repo's default branch", () => {
+    git(main.dir, ["branch", "-m", "main", "master"]);
+    const slotClone = slotWithBranches(["agent/T-1", "gate/T-1"]);
+    expect(
+      retrieveResult({
+        slotClone,
+        mainClone: main.dir,
+        ref: "agent/T-1",
+        defaultBranch: "master",
+      }).extraRefs,
+    ).toEqual([]);
+  });
+
   it("checks objects while fetching", () => {
     // a slot whose branch points at a commit with a broken tree reference must not get through
     const slotClone = slotWithBranches(["agent/T-1"]);

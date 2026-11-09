@@ -6,6 +6,9 @@ export type { GitHubOptions } from "./github.ts";
 export { createGitHubAdapter } from "./github.ts";
 export type { AppCredentials, AppTokenOptions } from "./github-app.ts";
 export { appJwt, createAppTokenSource } from "./github-app.ts";
+export type { GitLabOptions } from "./gitlab.ts";
+export { createGitLabAdapter } from "./gitlab.ts";
+export { createGitLabTokenSource } from "./gitlab-token.ts";
 export type {
   CiState,
   HostAdapter,

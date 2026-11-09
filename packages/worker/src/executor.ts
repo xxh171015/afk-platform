@@ -167,6 +167,7 @@ export async function executeStage(
     repo: bundle.repo.name,
     ref: bundle.agentBranch,
     integration: bundle.integrationBranch as string,
+    defaultBranch: bundle.repo.defaultBranch,
   });
   if (!slot) throw new NoFreeSlotError("no free slot");
   let body: StageOutcomeBody | undefined;
@@ -397,6 +398,7 @@ async function agentChange(
       mainClone: mainDir,
       ref: agent,
       integration,
+      defaultBranch: bundle.repo.defaultBranch,
       log,
     });
     if (!taken.fetched)

@@ -136,6 +136,33 @@ describe("cutIntegrationBranch", () => {
     );
   });
 
+  it("starts at master when that is the repo's default branch", () => {
+    const frontend = origin({ "src/a.ts": "a\n" });
+    gitOrThrow(frontend.dir, ["branch", "-m", "main", "master"]);
+    const head = gitOrThrow(frontend.dir, ["rev-parse", "HEAD"]);
+    const repos = store();
+    const mainDir = repos.ensure("frontend", frontend.dir, "master");
+    const bundle = bundleFor({
+      repo: {
+        id: 2,
+        name: "frontend",
+        url: frontend.dir,
+        defaultBranch: "master",
+      },
+      integrationBranch: "spec/1/order-export",
+      domain: {
+        repo: "backend",
+        url: "git@x:backend",
+        defaultBranch: "main",
+        sha: "0123456789abcdef0123456789abcdef01234567",
+      },
+    });
+    cutIntegrationBranch(repos, (request) => pushRef(request), mainDir, bundle);
+    expect(gitOrThrow(mainDir, ["rev-parse", "spec/1/order-export"])).toBe(
+      head,
+    );
+  });
+
   it("leaves an integration branch that already exists", () => {
     const planning = origin({ "GLOSSARY.md": "# v1\n" });
     const first = gitOrThrow(planning.dir, ["rev-parse", "HEAD"]);

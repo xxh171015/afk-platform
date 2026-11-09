@@ -7,9 +7,13 @@ import {
   checkAppAccess,
   createAppTokenSource,
   createGitHubAdapter,
+  createGitLabAdapter,
+  createGitLabTokenSource,
+  type HostAdapter,
   hostRepoRef,
   loadAppCredentials,
   type RepoRef,
+  type TokenSource,
   tokensByHost,
 } from "@afk/host";
 import {
@@ -20,9 +24,9 @@ import {
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
-import { SKILLS_SHA } from "@afk/shared";
+import { repoHost, SKILLS_SHA } from "@afk/shared";
 import { createWorkerApi, reportCodeHosts } from "./api.ts";
-import { workerCodeHosts } from "./code-hosts.ts";
+import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
@@ -108,16 +112,27 @@ await reportCodeHosts(config.apiUrl, config.workerId, codeHosts).catch(
 const appTokens = credentials
   ? createAppTokenSource({ credentials })
   : undefined;
-const tokens = tokensByHost(
-  new Map(appTokens ? [["github.com", appTokens]] : []),
+const gitlabFiles = gitlabCredentialFiles(config.gitlabDir);
+const gitlabHosts = new Set(gitlabFiles.map((file) => file.host));
+const tokenSources = new Map<string, TokenSource>(
+  appTokens ? [["github.com", appTokens]] : [],
 );
-const hostAdapter = adapterByHost(
-  new Map(
-    appTokens
-      ? [["github.com", createGitHubAdapter({ tokens: appTokens })]]
-      : [],
-  ),
+const adapters = new Map<string, HostAdapter>(
+  appTokens ? [["github.com", createGitHubAdapter({ tokens: appTokens })]] : [],
 );
+for (const { host, path } of gitlabFiles) {
+  const gitlabTokens = createGitLabTokenSource({ path });
+  tokenSources.set(host, gitlabTokens);
+  adapters.set(
+    host,
+    createGitLabAdapter({
+      tokens: gitlabTokens,
+      apiUrl: `https://${host}/api/v4`,
+    }),
+  );
+}
+const tokens = tokensByHost(tokenSources);
+const hostAdapter = adapterByHost(adapters);
 const api = createWorkerApi(config.apiUrl, config.workerId);
 const repos = new RepoStore(join(config.home, "repos"));
 const snapshots = new SnapshotStore(join(config.home, "snapshots"));
@@ -182,7 +197,12 @@ await runWorker({
     repos,
     snapshots,
     push: pushWithToken,
-    credentials: { tokens, repoRef: hostRepoRef },
+    credentials: {
+      tokens,
+      repoRef: hostRepoRef,
+      gitUser: (url) =>
+        gitlabHosts.has(repoHost(url) ?? "") ? "oauth2" : undefined,
+    },
     gateCache: new GateCache(),
     docker: realDocker,
     environments: new EnvironmentLimiter(),

@@ -1,5 +1,6 @@
 import type { HostAdapter, PullRequestInfo } from "@afk/host";
-import { HostError } from "@afk/host";
+import { createGitLabAdapter, HostError, hostRepoRef } from "@afk/host";
+import { FakeGitLab } from "@afk/host/testing";
 import { describe, expect, it } from "vitest";
 import { InfrastructureError } from "./executor.ts";
 import { runHostTask } from "./host.ts";
@@ -167,6 +168,48 @@ describe("an open-pr task", () => {
     await expect(
       runHostTask({ adapter, repoRef: ref }, open, log),
     ).rejects.toThrow(InfrastructureError);
+  });
+
+  it("opens a pull request onto master through the GitLab adapter", async () => {
+    const gitlab = new FakeGitLab({
+      owner: "xuxinghua",
+      repo: "afk-pilot-backend",
+      token: "glpat-test",
+    });
+    await gitlab.start();
+    try {
+      const adapter = createGitLabAdapter({
+        apiUrl: gitlab.url,
+        tokens: { tokenFor: async () => "glpat-test" },
+      });
+      const result = await runHostTask(
+        { adapter, repoRef: hostRepoRef },
+        {
+          kind: "open-pr",
+          repoUrl: "https://gitlab.example/xuxinghua/afk-pilot-backend.git",
+          base: "master",
+          head: "spec/s-1",
+          title: "S-1 Export",
+          body: "Spec: S-1",
+          draft: true,
+        },
+        log,
+      );
+      expect(result).toMatchObject({
+        stage: "open-pr",
+        outcome: "opened",
+        number: 1,
+        draft: true,
+        state: "open",
+      });
+      expect(gitlab.mergeRequests()[0]).toMatchObject({
+        source: "spec/s-1",
+        target: "master",
+        title: "Draft: S-1 Export",
+      });
+    } finally {
+      await gitlab.stop();
+    }
   });
 });
 

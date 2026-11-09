@@ -1,4 +1,4 @@
-// The code host (GitHub today, GitLab CE later) as the platform sees it: it opens a pull request and reads one
+// The code host (GitHub or GitLab CE) as the platform sees it: it opens a pull request and reads one
 // back. It has no call that merges one: a person does that on the host (docs/design.md「代码托管」).
 
 import type { RepoRef } from "@afk/shared";
@@ -16,8 +16,9 @@ export interface TokenRequest {
   permissions: TokenPermissions;
 }
 
-// Where a token comes from. GitHub: an installation token exchanged with the App's private key. GitLab: a project
-// access token that is simply handed back. Everything that needs a token asks this and nothing else.
+// Where a token comes from. GitHub: an installation token exchanged with the App's private key. GitLab: a PAT
+// reread from ~/.afk/secrets/gitlab/<host> on every call (TokenPermissions are ignored). Everything that needs a
+// token asks this and nothing else.
 export interface TokenSource {
   tokenFor(request: TokenRequest): Promise<string>;
 }

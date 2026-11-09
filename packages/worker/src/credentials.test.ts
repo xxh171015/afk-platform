@@ -7,7 +7,7 @@ import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { withCredentials } from "./credentials.ts";
 import type { ExecutorDeps } from "./executor.ts";
-import type { PushFn } from "./push.ts";
+import type { GitToken, PushFn } from "./push.ts";
 import { RepoStore } from "./repos.ts";
 
 let counter: number;
@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 function deps(over: Partial<ExecutorDeps> = {}) {
-  const pushed: (string | undefined)[] = [];
+  const pushed: (GitToken | undefined)[] = [];
   const push: PushFn = (_request, token) => {
     pushed.push(token);
     return { ok: true };
@@ -71,6 +71,22 @@ describe("a stage's credentials", () => {
     const bound = await withCredentials(base, "x");
     bound.push(request);
     expect(pushed).toEqual(["token-1"]);
+  });
+
+  it("go as oauth2 on a GitLab host", async () => {
+    const { base, pushed } = deps({
+      credentials: {
+        tokens,
+        repoRef: ref,
+        gitUser: () => "oauth2",
+      },
+    });
+    const bound = await withCredentials(
+      base,
+      "https://gitlab.example/me/pilot.git",
+    );
+    bound.push(request);
+    expect(pushed).toEqual([{ user: "oauth2", token: "token-1" }]);
   });
 
   it("are renewed when the stage re-checks its lease before a push", async () => {

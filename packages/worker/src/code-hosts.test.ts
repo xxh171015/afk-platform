@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { workerCodeHosts } from "./code-hosts.ts";
+import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 
 // What a worker tells the platform at start: the code hosts it has credentials for.
 
@@ -34,5 +34,19 @@ describe("the code hosts a worker has credentials for", () => {
         gitlabDir: join(secrets(), "gitlab"),
       }),
     ).toEqual([]);
+  });
+});
+
+describe("gitlabCredentialFiles", () => {
+  it("names each file's host and keeps the path so the PAT can be reread", () => {
+    const root = mkdtempSync(join(tmpdir(), "afk-secrets-"));
+    mkdirSync(join(root, "gitlab"));
+    writeFileSync(join(root, "gitlab", "Git.Corp.Example"), "glpat-x\n");
+    expect(gitlabCredentialFiles(join(root, "gitlab"))).toEqual([
+      {
+        host: "git.corp.example",
+        path: join(root, "gitlab", "Git.Corp.Example"),
+      },
+    ]);
   });
 });

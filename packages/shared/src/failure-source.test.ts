@@ -41,7 +41,7 @@ describe("failure source of a failed job", () => {
   const external = [
     "GitHub answered 502 reading pull request 12",
     "GitHub refused to mark pull request 3 ready (503): Service Unavailable",
-    "GitLab answered 500 opening a merge request for agent/1",
+    "GitLab answered 500 opening a pull request for agent/1",
     "cursor-agent: Authentication required. Please run 'cursor-agent login'",
     "agent run failed: rate limit exceeded, try again later",
     "HTTP 429 Too Many Requests",
