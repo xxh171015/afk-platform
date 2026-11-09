@@ -1050,6 +1050,7 @@ describe("what waits for a person among the pull requests", () => {
         state: "closed",
         syncError: null,
         waitingSince: expect.any(String),
+        failureSource: null,
         blocking: {
           downstream: [],
           finalization: false,
@@ -1871,6 +1872,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
         specDisplayId: "S-1",
         error: "GitHub answered 503",
         waitingSince: expect.any(String),
+        failureSource: "external",
         blocking: {
           downstream: [],
           finalization: false,
@@ -1920,6 +1922,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
         specDisplayId: "S-1",
         error: "GitHub answered 504",
         waitingSince: expect.any(String),
+        failureSource: "external",
         blocking: {
           downstream: [],
           finalization: false,
