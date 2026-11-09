@@ -196,6 +196,22 @@ export const completeJob = (
 export const failJob = (pool: Queryable, call: HolderCall, error: string) =>
   finish(pool, call, "failed", null, error);
 
+// Put a finished job back in the queue (host-sync: the same row looks again a minute later). The attempt is
+// bumped so a complete from the look that just finished cannot be retried against the next one: fencing is the
+// job id and the attempt together, and host-sync keeps the id.
+export async function requeueJob(
+  pool: Queryable,
+  jobId: number,
+  notBefore: Date | null,
+): Promise<void> {
+  await pool.query(
+    `UPDATE jobs SET state = 'queued', not_before = $2, lease_owner = NULL, lease_expires_at = NULL,
+       result = NULL, error = NULL, attempt = attempt + 1
+     WHERE id = $1 AND state IN ('done', 'failed')`,
+    [jobId, notBefore],
+  );
+}
+
 // A read-only version of the fencing check, for calls that must not renew the lease.
 export async function checkHolder(
   pool: Queryable,

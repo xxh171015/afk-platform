@@ -698,7 +698,12 @@ describe("following the pull requests", () => {
     clock.advanceSeconds(59);
     expect((await worker.claim()).body.job).toBeNull();
     clock.advanceSeconds(1);
-    expect((await worker.claim()).body.job?.type).toBe("host-sync");
+    const next = (await worker.claim()).body.job;
+    expect(next).toMatchObject({
+      type: "host-sync",
+      id: job.id,
+      attempt: job.attempt + 1,
+    });
   });
 
   it("marks the spec merged when a person has merged every pull request, and stops looking", async () => {
@@ -716,6 +721,8 @@ describe("following the pull requests", () => {
       pulls: [synced(2, { state: "merged" })],
     });
     expect(await specState()).toBe("merged");
+    expect(second.id).toBe(first.id);
+    expect(await jobsOf("host-sync")).toMatchObject([{ state: "done" }]);
     clock.advanceSeconds(600);
     await claimOf("spec-cleanup"); // the clean-up of the spec; nothing else is looked at
     expect((await worker.claim()).body.job).toBeNull();
@@ -914,12 +921,88 @@ describe("following the pull requests", () => {
     await worker.fail(job.id, job.attempt, "GitHub is down");
     expect((await worker.claim()).body.job).toBeNull();
     clock.advanceSeconds(60);
-    expect((await worker.claim()).body.job?.type).toBe("host-sync");
+    const next = (await worker.claim()).body.job;
+    expect(next).toMatchObject({ type: "host-sync", id: job.id });
   });
 
-  it("keeps one chain of looks per project", async () => {
+  it("keeps one host-sync job per project, put back in the queue after each look", async () => {
     await awaitingReview(["backend", "frontend"]);
+    expect(await jobsOf("host-sync")).toMatchObject([
+      {
+        state: "queued",
+        lock_key: null,
+        payload: { projectId: 1 },
+        idempotency_key: "project-1:host-sync",
+      },
+    ]);
+    const first = await claimOf("host-sync");
+    await worker.complete(first.id, first.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1), synced(2)],
+    });
+    expect(await jobsOf("host-sync")).toMatchObject([
+      {
+        state: "queued",
+        idempotency_key: "project-1:host-sync",
+        payload: { projectId: 1 },
+      },
+    ]);
+    clock.advanceSeconds(60);
+    const second = await claimOf("host-sync");
+    expect(second.id).toBe(first.id);
+  });
+
+  it("takes the same job again when the worker dies and the lease runs out", async () => {
+    await awaitingReview();
+    const first = await claimOf("host-sync");
+    clock.advanceSeconds(121);
+    const second = await claimOf("host-sync");
+    expect(second).toMatchObject({
+      id: first.id,
+      attempt: first.attempt + 1,
+    });
+    expect(
+      (
+        await worker.complete(first.id, first.attempt, {
+          stage: "host-sync",
+          pulls: [synced(1)],
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await worker.complete(second.id, second.attempt, {
+          stage: "host-sync",
+          pulls: [synced(1)],
+        })
+      ).status,
+    ).toBe(200);
     expect(await jobsOf("host-sync")).toHaveLength(1);
+  });
+
+  it("a complete from the last look cannot land on the next one", async () => {
+    await awaitingReview();
+    const first = await claimOf("host-sync");
+    await worker.complete(first.id, first.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1)],
+    });
+    clock.advanceSeconds(60);
+    const second = await claimOf("host-sync");
+    expect(
+      (
+        await worker.complete(first.id, first.attempt, {
+          stage: "host-sync",
+          pulls: [synced(1, { ci: "failure" })],
+        })
+      ).status,
+    ).toBe(409);
+    expect(await pulls()).toMatchObject([{ ci: "pending" }]);
+    await worker.complete(second.id, second.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { ci: "success" })],
+    });
+    expect(await pulls()).toMatchObject([{ ci: "success" }]);
   });
 
   // the events host-sync writes (docs/specs/m3-platform.md「事件表」)

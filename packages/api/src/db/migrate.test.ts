@@ -57,6 +57,7 @@ const LATER_THAN_REPO_NAMES = [
   "0035_events",
   "0036_action_events",
   "0037_code_hosts",
+  "0038_host_sync_one_row",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -418,6 +419,77 @@ describe("the host kind of a repo", () => {
       await expect(
         db.pool.query("UPDATE repos SET host_kind = 'gitea'"),
       ).rejects.toThrow(/repos_host_kind_check/);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("one host-sync job per project", () => {
+  it("drops the old chain of looks, leaves other jobs, and queues one look where a pull request is still followed", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => e.tag !== "0038_host_sync_one_row",
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query(
+        "INSERT INTO projects (name) VALUES ('shop'), ('other')",
+      );
+      await db.pool.query(
+        `INSERT INTO repos (project_id, url, name) VALUES
+           (1, 'https://github.com/me/shop.git', 'backend'),
+           (2, 'https://github.com/me/other.git', 'backend')`,
+      );
+      await db.pool.query(
+        `INSERT INTO specs (project_id, type, slug, title, state) VALUES
+           (1, 'feature', 'export', 'Export', 'awaiting-review'),
+           (2, 'feature', 'done', 'Done', 'merged')`,
+      );
+      await db.pool.query(
+        `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha) VALUES
+           (1, 1, 7, 'https://github.com/me/shop/pull/7', 'open', 'abc'),
+           (2, 2, 8, 'https://github.com/me/other/pull/8', 'merged', 'def')`,
+      );
+      await db.pool.query(
+        `INSERT INTO jobs (type, payload, state, idempotency_key) VALUES
+           ('host-sync', $1::jsonb, 'done', 'project-1:host-sync:1'),
+           ('host-sync', $1::jsonb, 'done', 'project-1:host-sync:2'),
+           ('host-sync', $1::jsonb, 'queued', 'project-1:host-sync:3'),
+           ('host-sync', $2::jsonb, 'done', 'project-2:host-sync:1'),
+           ('open-pr', $3::jsonb, 'queued', 'S-1:repo-1:open-pr:1')`,
+        [
+          JSON.stringify({ projectId: 1 }),
+          JSON.stringify({ projectId: 2 }),
+          JSON.stringify({ specId: 1, repoId: 1 }),
+        ],
+      );
+
+      await migrate(db.pool);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT state, payload, idempotency_key FROM jobs WHERE type = 'host-sync' ORDER BY id",
+          )
+        ).rows,
+      ).toEqual([
+        {
+          state: "queued",
+          payload: { projectId: 1 },
+          idempotency_key: "project-1:host-sync",
+        },
+      ]);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT type, idempotency_key FROM jobs WHERE type <> 'host-sync'",
+          )
+        ).rows,
+      ).toEqual([{ type: "open-pr", idempotency_key: "S-1:repo-1:open-pr:1" }]);
     } finally {
       rmSync(before, { recursive: true, force: true });
     }

@@ -1,11 +1,11 @@
 import { formatDisplayId, HOST_CAPABILITY } from "@afk/shared";
 import type pg from "pg";
-import { enqueueJob } from "../jobs/queue.ts";
+import { enqueueJob, requeueJob } from "../jobs/queue.ts";
 
 // The jobs that talk to the code host. A worker runs them because the host's credentials live there only
-// (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` looks at every
-// pull request of a project that is still open, `patch-pr-body` writes the acceptance pack into a description.
-// None of them holds a lock key.
+// (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` follows every
+// pull request of a project that is still worth a look (one row per project, put back in the queue after each
+// look), `patch-pr-body` writes the acceptance pack into a description. None of them holds a lock key.
 
 export const SYNC_INTERVAL_SECONDS = 60;
 
@@ -138,28 +138,31 @@ export const CLEANUP_RETRY_SECONDS = 60;
 export const inSeconds = (now: Date, seconds: number) =>
   new Date(now.getTime() + seconds * 1000);
 
-// A project has one host-sync chain: each run queues the next one a minute later while a pull request is open.
-// Nothing is queued when one is already waiting or running.
+const hostSyncKey = (projectId: number) => `project-${projectId}:host-sync`;
+
+// A project has one host-sync job. Each look puts that same row back in the queue a minute later while a pull
+// request is still followed; nothing is queued when it is already waiting or running.
 export async function enqueueHostSync(
   client: pg.PoolClient,
   projectId: number,
   notBefore?: Date,
 ): Promise<boolean> {
-  const active = await client.query(
-    `SELECT 1 FROM jobs WHERE type = 'host-sync' AND state IN ('queued', 'running')
-       AND (payload->>'projectId')::int = $1`,
-    [projectId],
+  const key = hostSyncKey(projectId);
+  const existing = await client.query<{ id: number; state: string }>(
+    "SELECT id, state FROM jobs WHERE idempotency_key = $1 FOR UPDATE",
+    [key],
   );
-  if (active.rowCount) return false;
-  const earlier = await client.query<{ n: string }>(
-    "SELECT count(*) AS n FROM jobs WHERE type = 'host-sync' AND (payload->>'projectId')::int = $1",
-    [projectId],
-  );
+  if (existing.rowCount) {
+    const row = existing.rows[0];
+    if (row.state === "queued" || row.state === "running") return false;
+    await requeueJob(client, row.id, notBefore ?? null);
+    return true;
+  }
   await enqueueJob(client, {
     type: "host-sync",
     payload: { projectId },
     requiredCapabilities: [HOST_CAPABILITY],
-    idempotencyKey: `project-${projectId}:host-sync:${Number(earlier.rows[0]?.n) + 1}`,
+    idempotencyKey: key,
     ...(notBefore ? { notBefore } : {}),
   });
   return true;

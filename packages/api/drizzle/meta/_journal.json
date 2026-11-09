@@ -267,6 +267,13 @@
       "when": 1794220000000,
       "tag": "0037_code_hosts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794230000000,
+      "tag": "0038_host_sync_one_row",
+      "breakpoints": true
     }
   ]
 }

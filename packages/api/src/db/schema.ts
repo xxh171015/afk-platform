@@ -301,6 +301,7 @@ export const jobs = pgTable(
     attempt: integer("attempt").notNull().default(1), // fencing token; the first lease is attempt 1
     // One unique key per job. For ticket jobs the queue builds it from (ticket, content version, stage, sequence);
     // the format for jobs without a ticket (finalize, open-pr, host-sync) is the queue's to define (#23).
+    // host-sync is one key per project: the same row is put back in the queue after each look.
     idempotencyKey: text("idempotency_key").notNull().unique(),
     lockKey: text("lock_key"),
     // A queued job is not claimed before this time (host-sync runs a minute after the last one).

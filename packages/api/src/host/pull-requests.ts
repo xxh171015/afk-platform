@@ -465,7 +465,8 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,
-// the spec is merged. While any is still followed (see above), the next look is queued a minute from now.
+// the spec is merged. While any is still followed (see above), the same host-sync job is put back in the queue a
+// minute from now.
 export async function recordHostSync(
   client: pg.PoolClient,
   read: HostSyncPayload,
