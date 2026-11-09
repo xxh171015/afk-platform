@@ -4,6 +4,7 @@ import { createApp } from "./app.ts";
 import { assertMigrated } from "./db/migrate.ts";
 import { defaultLogDir } from "./logs/log-store.ts";
 import { macosNotifications } from "./notify/channel.ts";
+import { scheduleRunningSpecs } from "./scheduling/scheduler.ts";
 
 // The API process. It only listens on this machine (no login: the platform is for one person, docs/specs/
 // m1-platform.md), and it never migrates by itself: it refuses to start on a database that is behind.
@@ -18,6 +19,8 @@ export async function startServer(options: {
   pool: pg.Pool;
   port?: number; // 0 picks a free one
   logDir?: string;
+  // How often every running spec gets a scheduling pass, for a trigger that was missed (0 turns it off).
+  scheduleEveryMs?: number;
 }): Promise<RunningServer> {
   await assertMigrated(options.pool);
   const { rows } = await options.pool.query<{ id: string }>(
@@ -29,17 +32,50 @@ export async function startServer(options: {
     logDir,
     notifications: macosNotifications(),
   });
+  const sweep = periodicScheduling(
+    options.pool,
+    options.scheduleEveryMs ?? 60_000,
+  );
   return new Promise((resolve, reject) => {
     const server = serve(
       { fetch: app.fetch, port: options.port ?? 3000, hostname: HOST },
       (info) => {
         resolve({
           url: `http://${HOST}:${info.port}`,
-          close: () => new Promise((done) => server.close(() => done())),
+          close: async () => {
+            await sweep.stop();
+            await new Promise<void>((done) => server.close(() => done()));
+          },
         });
       },
     );
+    server.once("error", () => void sweep.stop());
     // a port that is taken, or not allowed: say so instead of hanging
     server.once("error", reject);
   });
+}
+
+// Every running spec gets a pass now and then, so a spec no event scheduled still starts. One pass at a time.
+function periodicScheduling(pool: pg.Pool, everyMs: number) {
+  let running: Promise<unknown> = Promise.resolve();
+  let busy = false;
+  const timer =
+    everyMs > 0
+      ? setInterval(() => {
+          if (busy) return;
+          busy = true;
+          running = scheduleRunningSpecs(pool)
+            .catch((error) => console.error("scheduling pass failed:", error))
+            .finally(() => {
+              busy = false;
+            });
+        }, everyMs)
+      : undefined;
+  timer?.unref();
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await running;
+    },
+  };
 }
