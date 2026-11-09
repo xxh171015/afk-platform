@@ -37,6 +37,10 @@ import {
   repoAccessTask,
 } from "../host/repo-access.ts";
 import {
+  markUpdateBranchClaimed,
+  recordUpdateBranchResult,
+} from "../host/update-branch.ts";
+import {
   checkBeforePush,
   checkHolder,
   claimJob,
@@ -324,6 +328,9 @@ const HostTask = z.discriminatedUnion("kind", [
         number: z.number().int(),
       }),
     ),
+    defaults: z
+      .array(z.object({ repoUrl: z.string(), branch: z.string() }))
+      .optional(),
   }),
   z.object({
     kind: z.literal("pr-ready"),
@@ -544,6 +551,7 @@ export function registerWorkerRoutes(
       inTransaction(context.pool, async (client) => {
         await markClaimed(client, job);
         await markFinalClaimed(client, job);
+        await markUpdateBranchClaimed(client, job);
       }),
     );
     const run = await context.pool.query<{ id: number }>(
@@ -646,28 +654,39 @@ export function registerWorkerRoutes(
               : await recordStageResult(client, job.rows[0], result);
           // not a ticket stage: it may be a step of a finalization, or a job for the code host
           if (recorded.status === "no-ticket") {
-            const final = await recordFinalResult(client, job.rows[0], result);
-            if (final.status === "not-final") {
-              const openPr = readOpenPrPayload(job.rows[0]);
-              const sync = readHostSyncPayload(job.rows[0]);
-              const cleanup = readSpecCleanupPayload(job.rows[0]);
-              const ready = readPrReadyPayload(job.rows[0]);
-              const access = readRepoAccessPayload(job.rows[0]);
-              if (access)
-                await recordRepoAccess(
-                  client,
-                  access,
-                  (result ?? {}) as Record<string, unknown>,
-                  context.clock(),
-                  (notice) => context.notifications.notify(notice),
-                );
-              else if (openPr)
-                await recordOpenPr(client, openPr, result, context.clock());
-              else if (sync)
-                await recordHostSync(client, sync, result, context.clock());
-              else if (cleanup)
-                await recordSpecCleanup(client, cleanup, result);
-              else if (ready) await recordPrReady(client, ready, result);
+            const updated = await recordUpdateBranchResult(
+              client,
+              job.rows[0],
+              result,
+            );
+            if (updated.status === "not-update-branch") {
+              const final = await recordFinalResult(
+                client,
+                job.rows[0],
+                result,
+              );
+              if (final.status === "not-final") {
+                const openPr = readOpenPrPayload(job.rows[0]);
+                const sync = readHostSyncPayload(job.rows[0]);
+                const cleanup = readSpecCleanupPayload(job.rows[0]);
+                const ready = readPrReadyPayload(job.rows[0]);
+                const access = readRepoAccessPayload(job.rows[0]);
+                if (access)
+                  await recordRepoAccess(
+                    client,
+                    access,
+                    (result ?? {}) as Record<string, unknown>,
+                    context.clock(),
+                    (notice) => context.notifications.notify(notice),
+                  );
+                else if (openPr)
+                  await recordOpenPr(client, openPr, result, context.clock());
+                else if (sync)
+                  await recordHostSync(client, sync, result, context.clock());
+                else if (cleanup)
+                  await recordSpecCleanup(client, cleanup, result);
+                else if (ready) await recordPrReady(client, ready, result);
+              }
             }
           }
         }

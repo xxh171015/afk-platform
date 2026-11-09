@@ -352,6 +352,25 @@ describe("markReady", () => {
   });
 });
 
+describe("getBranchSha", () => {
+  it("reads the commit the branch is at", async () => {
+    github.setBranchSha("main", "abc123def456");
+    expect(await adapter().getBranchSha({ repo, branch: "main" })).toBe(
+      "abc123def456",
+    );
+    expect(github.tokensIssued.at(-1)?.permissions).toEqual({
+      contents: "read",
+    });
+  });
+
+  it("is a HostError when GitHub has no such branch", async () => {
+    github.missingBranches.add("main");
+    await expect(
+      adapter().getBranchSha({ repo, branch: "main" }),
+    ).rejects.toMatchObject({ name: "HostError", status: 404 });
+  });
+});
+
 describe("deleteBranch", () => {
   it("deletes a branch, and says it is gone when asked again", async () => {
     github.addBranch("spec/s-1");

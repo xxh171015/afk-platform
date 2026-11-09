@@ -61,6 +61,7 @@ const LATER_THAN_REPO_NAMES = [
   "0039_host_sync_merge",
   "0040_token_expiry",
   "0041_pause_reason",
+  "0042_repo_default_sha",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

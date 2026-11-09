@@ -237,6 +237,7 @@ async function runStage(
       return gate(deps, context, mainDir, slot);
     case "merge":
     case "final-merge":
+    case "update-branch":
       return merge(deps, context, mainDir, slot);
     case "e2e":
       return e2e(deps, context, mainDir, slot);
@@ -774,7 +775,7 @@ async function mergeOnce(
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
-  const stage = bundle.job.stage as "merge" | "final-merge";
+  const stage = bundle.job.stage;
 
   // Already merged (a previous attempt got as far as the push): say so instead of merging twice. What the first
   // attempt measured never arrived, so the branch is measured as it is now, and the Run records its head: without
@@ -799,7 +800,7 @@ async function mergeOnce(
   }
 
   const oldTip = tip(mainDir, integration);
-  if (!bundle.ticket) {
+  if (!bundle.ticket && stage !== "update-branch") {
     // The overall fix has no gate of its own before this point, so the protected paths are checked here.
     const touched = checkProtectedPaths({
       changed: changedFiles(mainDir, oldTip, agent),
@@ -825,7 +826,9 @@ async function mergeOnce(
     mainDir,
     integration,
     agent,
-    `Merge ${agent} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`,
+    stage === "update-branch"
+      ? `Merge ${agent} into ${integration}\n\nSpec: ${bundle.spec.displayId}${bundle.run ? `\nRun: ${bundle.run.displayId}` : ""}`
+      : `Merge ${agent} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`,
   );
   if (candidate.conflict) {
     log(`merge: conflict in ${candidate.files.join(", ")}`);

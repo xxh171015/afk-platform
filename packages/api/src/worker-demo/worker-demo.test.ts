@@ -752,7 +752,10 @@ describe("failures of the worker's own", () => {
       job as NonNullable<typeof job>,
     );
     expect(outcome).toBe("failed");
-    const stored = await db.pool.query("SELECT state, error FROM jobs");
+    const stored = await db.pool.query(
+      "SELECT state, error FROM jobs WHERE id = $1",
+      [(job as NonNullable<typeof job>).id],
+    );
     expect(stored.rows[0].state).toBe("failed");
     expect(stored.rows[0].error).toContain("docker daemon not running");
     // the failed task's clone stays for a look

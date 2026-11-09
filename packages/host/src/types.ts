@@ -80,6 +80,8 @@ export interface HostAdapter {
     repo: RepoRef;
     branch: string;
   }): Promise<"deleted" | "gone">;
+  // The commit SHA the default branch (or any other) is at. Used by host-sync to notice main moving.
+  getBranchSha(input: { repo: RepoRef; branch: string }): Promise<string>;
 }
 
 // A call the host refused or could not answer. The message never holds a token. 429 carries Retry-After so

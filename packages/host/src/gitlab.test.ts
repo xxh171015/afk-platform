@@ -323,6 +323,22 @@ describe("closePullRequest", () => {
   });
 });
 
+describe("getBranchSha", () => {
+  it("reads the commit the branch is at", async () => {
+    gitlab.setBranchSha("master", "def789abc012");
+    expect(await adapter().getBranchSha({ repo, branch: "master" })).toBe(
+      "def789abc012",
+    );
+  });
+
+  it("is a HostError when GitLab has no such branch", async () => {
+    gitlab.missingBranches.add("master");
+    await expect(
+      adapter().getBranchSha({ repo, branch: "master" }),
+    ).rejects.toMatchObject({ name: "HostError", status: 404 });
+  });
+});
+
 describe("deleteBranch", () => {
   it("deletes a branch, and says it is gone when GitLab answers 404", async () => {
     gitlab.addBranch("spec/s-1");

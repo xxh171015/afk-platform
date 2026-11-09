@@ -87,8 +87,11 @@ const state = async (id = 1) =>
     )
   ).rows[0];
 const keys = async () =>
-  (await db.pool.query("SELECT idempotency_key, state FROM jobs ORDER BY id"))
-    .rows;
+  (
+    await db.pool.query(
+      "SELECT idempotency_key, state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
+    )
+  ).rows;
 
 async function failNext(error = "docker daemon not running") {
   const job = (await claim()) as Claimed;

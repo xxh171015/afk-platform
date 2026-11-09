@@ -5,6 +5,7 @@ import {
   type TicketState,
 } from "@afk/shared";
 import type pg from "pg";
+import { readUpdateBranchPayload } from "../host/update-branch.ts";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 import { ticketFileOf } from "../tickets/ticket-file.ts";
 import { contractsOf } from "./contracts.ts";
@@ -146,7 +147,7 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   }>(
     `SELECT g.tests_total, g.tests_skipped FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 1`,
     [specId, repoId],
@@ -161,6 +162,8 @@ export async function buildBundle(
   pool: pg.Pool,
   job: { id: number; attempt: number; payload: Record<string, unknown> },
 ): Promise<Bundle | undefined> {
+  const update = readUpdateBranchPayload(job.payload);
+  if (update) return buildUpdateBranchBundle(pool, job, update);
   const final = readFinalPayload(job.payload);
   if (final) return buildFinalBundle(pool, job, final);
   const read = readStagePayload(job.payload);
@@ -356,6 +359,83 @@ async function buildFinalBundle(
       [final.specId, final.repoId],
     ),
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
+    ...runSettings(row.limits, row.default_model),
+  };
+}
+
+// main into the integration branch: same shape as a ticket merge, but the "agent" side is the default branch
+// and the Run belongs to the spec, not a ticket.
+async function buildUpdateBranchBundle(
+  pool: pg.Pool,
+  job: { id: number; attempt: number },
+  update: { specId: number; repoId: number },
+): Promise<Bundle | undefined> {
+  const found = await pool.query(
+    `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
+            s.integration_branches, s.branch_namespace, s.planning_sha, s.planning_repo_id,
+            r.id AS repo_id, r.name, r.url, r.default_branch,
+            pr.name AS planning_repo_name, pr.url AS planning_repo_url,
+            pr.default_branch AS planning_default_branch,
+            p.protected_paths,
+            p.limits, p.default_model
+     FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
+     LEFT JOIN repos pr ON pr.id = s.planning_repo_id
+     WHERE s.id = $1`,
+    [update.specId, update.repoId],
+  );
+  const row = found.rows[0];
+  if (!row) return undefined;
+  const run = await pool.query<{ id: number; retry_note: string | null }>(
+    "SELECT id, retry_note FROM runs WHERE job_id = $1",
+    [job.id],
+  );
+  const failed = await pool.query<{ log: string | null }>(
+    `SELECT output->>'failureLog' AS log FROM runs
+     WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'update-branch' AND result IN ('conflict', 'gate-failed')
+     ORDER BY id DESC LIMIT 1`,
+    [update.specId],
+  );
+  const branches = row.integration_branches as {
+    repoId: number;
+    branch: string;
+  }[];
+  return {
+    job: { id: job.id, stage: "update-branch", attempt: job.attempt },
+    run: run.rows[0]
+      ? {
+          id: run.rows[0].id,
+          displayId: formatDisplayId("run", run.rows[0].id),
+        }
+      : null,
+    ticket: null,
+    specTickets: [],
+    spec: {
+      id: row.spec_id,
+      displayId: formatDisplayId("spec", row.spec_id),
+      slug: row.slug,
+      title: row.spec_title,
+      body: row.spec_body,
+      type: row.spec_type,
+    },
+    repo: {
+      id: row.repo_id,
+      name: row.name,
+      url: row.url,
+      defaultBranch: row.default_branch,
+    },
+    domain: domainOf(row),
+    integrationBranch:
+      branches.find((b) => b.repoId === row.repo_id)?.branch ?? null,
+    agentBranch: row.default_branch,
+    protectedPaths: row.protected_paths,
+    allowedProtectedPaths: [],
+    contracts: [],
+    refs: [],
+    environment: [],
+    note: run.rows[0]?.retry_note ?? null,
+    failureLog: failed.rows[0]?.log ?? null,
+    review: null,
+    gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     ...runSettings(row.limits, row.default_model),
   };
 }

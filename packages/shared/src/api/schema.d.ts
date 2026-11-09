@@ -1707,6 +1707,10 @@ export interface paths {
                     repoUrl: string;
                     number: number;
                   }[];
+                  defaults?: {
+                    repoUrl: string;
+                    branch: string;
+                  }[];
                 }
               | {
                   /** @enum {string} */

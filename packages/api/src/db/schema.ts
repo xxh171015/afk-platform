@@ -66,6 +66,8 @@ export const repos = pgTable(
       .references(() => projects.id),
     url: text("url").notNull(),
     defaultBranch: text("default_branch").notNull().default("main"),
+    // The default branch head last seen by host-sync; null until the first look.
+    defaultSha: text("default_sha"),
     name: text("name").notNull(),
     // Where the repo keeps its contract file, if it owns one; null for a repo that has none.
     contractPath: text("contract_path"),

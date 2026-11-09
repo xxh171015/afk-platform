@@ -72,6 +72,23 @@ describe("mergeCandidate", () => {
     );
   });
 
+  it("keeps Spec and Run trailers on a merge of the default branch into the integration branch", () => {
+    diverged({ "agent.txt": "a\n" }, { "other.txt": "o\n" });
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    repo.commit({ "main.txt": "m\n" }, "main moved");
+    const result = mergeCandidate(
+      repo.dir,
+      "spec/s",
+      "main",
+      "Merge main into spec/s\n\nSpec: S-1\nRun: R-4",
+    );
+    expect(result.conflict).toBe(false);
+    if (result.conflict) return;
+    expect(
+      gitOut(repo.dir, ["log", "-1", "--format=%B", result.candidate]).trim(),
+    ).toBe("Merge main into spec/s\n\nSpec: S-1\nRun: R-4");
+  });
+
   it("tells a conflict from a clean merge and names the conflicting files", () => {
     diverged({ "shared.txt": "agent line\n" }, { "shared.txt": "main line\n" });
     const result = mergeCandidate(repo.dir, "spec/s", "agent/T-1", "m");

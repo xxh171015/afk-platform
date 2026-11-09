@@ -110,7 +110,7 @@ export async function runHostTask(
   }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
   const pulls = [];
-  for (const pull of task.pulls) {
+  for (const pull of task.pulls ?? []) {
     try {
       const info = await deps.adapter.getPullRequest({
         repo: repoRef(pull.repoUrl),
@@ -136,7 +136,22 @@ export async function runHostTask(
       pulls.push({ id: pull.id, error: message.slice(0, 400) });
     }
   }
-  return { stage: "host-sync", pulls };
+  const defaults = [];
+  for (const branch of task.defaults ?? []) {
+    try {
+      const sha = await deps.adapter.getBranchSha({
+        repo: repoRef(branch.repoUrl),
+        branch: branch.branch,
+      });
+      defaults.push({ repoUrl: branch.repoUrl, sha });
+    } catch (error) {
+      if (error instanceof HostError && error.status === 429)
+        throw new InfrastructureError(error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      log(`default branch ${branch.branch} of ${branch.repoUrl}: ${message}`);
+    }
+  }
+  return { stage: "host-sync", pulls, defaults };
 }
 
 // Closes the spec's open pull requests and deletes its branches. Only what a spec makes is ever deleted

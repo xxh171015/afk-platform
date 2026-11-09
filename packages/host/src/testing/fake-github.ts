@@ -56,6 +56,9 @@ export class FakeGitHub {
   readonly files = new Set<string>();
   // The files on other branches, by branch and path (a contents read with `?ref=`).
   readonly branchFiles = new Map<string, Set<string>>();
+  // Default-branch (or any other) SHAs host-sync reads; missingBranches answers 404.
+  private readonly branchShas = new Map<string, string>();
+  readonly missingBranches = new Set<string>();
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
   private readonly branchNames = new Set<string>();
@@ -126,6 +129,9 @@ export class FakeGitHub {
   }
   addBranch(name: string): void {
     this.branchNames.add(name);
+  }
+  setBranchSha(name: string, sha: string): void {
+    this.branchShas.set(name, sha);
   }
   protectBranch(name: string): void {
     this.protectedBranches.add(name);
@@ -326,6 +332,20 @@ export class FakeGitHub {
       return this.json(res, 200, this.render(pull));
     }
     const ref = /^\/git\/refs\/heads\/(.+)$/.exec(rest);
+    const refOne = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
+    const gitRef = ref ?? refOne;
+    if (req.method === "GET" && gitRef) {
+      const branch = decodeURIComponent(gitRef[1] as string);
+      if (this.missingBranches.has(branch))
+        return this.json(res, 404, { message: "Not Found" });
+      const sha =
+        this.branchShas.get(branch) ??
+        createHash("sha1").update(branch).digest("hex");
+      return this.conditional(req, res, {
+        ref: `refs/heads/${branch}`,
+        object: { sha, type: "commit" },
+      });
+    }
     if (req.method === "DELETE" && ref) {
       if (this.refuseBranchDeletes)
         return this.json(res, 403, { message: "Resource not accessible" });

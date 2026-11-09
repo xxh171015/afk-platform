@@ -147,7 +147,8 @@ export const inSeconds = (now: Date, seconds: number) =>
 const hostSyncKey = (projectId: number) => `project-${projectId}:host-sync`;
 
 // A project has one host-sync job. Each look puts that same row back in the queue a minute later while a pull
-// request is still followed; nothing is queued when it is already waiting or running.
+// request is still followed or a spec is running (so main advancing is noticed); nothing is queued when it is
+// already waiting or running.
 export async function enqueueHostSync(
   client: pg.PoolClient,
   projectId: number,
@@ -160,7 +161,16 @@ export async function enqueueHostSync(
   );
   if (existing.rowCount) {
     const row = existing.rows[0];
-    if (row.state === "queued" || row.state === "running") return false;
+    if (row.state === "running") return false;
+    if (row.state === "queued") {
+      // An immediate look (open-pr just landed) should not wait out a poll that was a minute away.
+      if (notBefore === undefined)
+        await client.query(
+          "UPDATE jobs SET not_before = NULL WHERE id = $1 AND state = 'queued'",
+          [row.id],
+        );
+      return false;
+    }
     await requeueJob(client, row.id, notBefore ?? null);
     return true;
   }

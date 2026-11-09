@@ -248,6 +248,17 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
   }
 
   return {
+    async getBranchSha({ repo, branch }) {
+      const path = `/repository/branches/${encodeURIComponent(branch)}`;
+      const read = await call(repo, "GET", path);
+      const sha = (read.body as { commit?: { id?: string } }).commit?.id;
+      if (read.status !== 200 || typeof sha !== "string" || sha === "")
+        throw new HostError(
+          `GitLab answered ${read.status} for GET ${repo.owner}/${repo.name}${path}`,
+          read.status,
+        );
+      return sha;
+    },
     async getPullRequest({ repo, number }) {
       const raw = await read(repo, number);
       const mergedBy = usernameOf(raw.merged_by) ?? usernameOf(raw.merge_user);

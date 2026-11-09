@@ -39,6 +39,9 @@ const noCleanup = {
   updatePullRequestBody: async () => {
     throw new Error("not used");
   },
+  getBranchSha: async () => {
+    throw new Error("not used");
+  },
 };
 const log = () => {};
 const open = {
@@ -259,7 +262,62 @@ describe("a host-sync task", () => {
           mergedByPlatform: false,
         },
       ],
+      defaults: [],
     });
+  });
+
+  it("reads each default branch and reports its sha", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1),
+      getBranchSha: async ({ branch }) => `sha-of-${branch}`,
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      {
+        kind: "host-sync",
+        pulls: [],
+        defaults: [
+          { repoUrl: "https://github.com/me/pilot.git", branch: "main" },
+        ],
+      },
+      log,
+    );
+    expect(result).toEqual({
+      stage: "host-sync",
+      pulls: [],
+      defaults: [
+        { repoUrl: "https://github.com/me/pilot.git", sha: "sha-of-main" },
+      ],
+    });
+  });
+
+  it("omits a default branch it could not read and still reports the others", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1),
+      getBranchSha: async ({ branch }) => {
+        if (branch === "main") throw new HostError("GitHub answered 502", 502);
+        return `sha-of-${branch}`;
+      },
+    };
+    const result = (await runHostTask(
+      { adapter, repoRef: ref },
+      {
+        kind: "host-sync",
+        pulls: [],
+        defaults: [
+          { repoUrl: "https://github.com/me/a.git", branch: "main" },
+          { repoUrl: "https://github.com/me/b.git", branch: "develop" },
+        ],
+      },
+      log,
+    )) as { defaults: Record<string, unknown>[] };
+    expect(result.defaults).toEqual([
+      { repoUrl: "https://github.com/me/b.git", sha: "sha-of-develop" },
+    ]);
   });
 
   it("reports the one it could not read and still the others", async () => {
@@ -362,6 +420,9 @@ describe("a spec-cleanup task", () => {
       deleteBranch: async ({ branch }) => {
         calls.push(`delete ${branch}`);
         return "deleted";
+      },
+      getBranchSha: async () => {
+        throw new Error("not used");
       },
       ...over,
     };

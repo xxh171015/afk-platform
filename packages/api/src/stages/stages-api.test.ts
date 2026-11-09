@@ -166,7 +166,7 @@ describe("the happy path", () => {
     await stage("gate", GATE_PASSED);
     await stage("review", REVIEW_PASS);
     const jobs = await db.pool.query(
-      "SELECT type, lock_key, idempotency_key FROM jobs ORDER BY id",
+      "SELECT type, lock_key, idempotency_key FROM jobs WHERE type <> 'host-sync' ORDER BY id",
     );
     expect(jobs.rows).toEqual([
       {
@@ -811,7 +811,8 @@ describe("the bundle", () => {
 
   it("carries the project's run limits and default model, and the defaults when it sets none", async () => {
     await runningSpec([ticket("a")]);
-    const plain = await bundle((await worker.claim()).body.job as Claimed);
+    const claimed = (await worker.claim()).body.job as Claimed;
+    const plain = await bundle(claimed);
     expect(plain.body).toMatchObject({
       limits: { runIdleSeconds: 600, runWallclockSeconds: 3600 },
       model: null,
@@ -820,9 +821,7 @@ describe("the bundle", () => {
       "UPDATE projects SET default_model = 'composer-2', limits = $1",
       [JSON.stringify({ runIdleSeconds: 30, runWallclockSeconds: 120 })],
     );
-    const job = (await db.pool.query("SELECT id, attempt FROM jobs LIMIT 1"))
-      .rows[0];
-    const tuned = await bundle(job);
+    const tuned = await bundle(claimed);
     expect(tuned.body).toMatchObject({
       limits: { runIdleSeconds: 30, runWallclockSeconds: 120 },
       model: "composer-2",

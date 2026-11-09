@@ -12,6 +12,7 @@ import type pg from "pg";
 import { recordAction } from "../events/human-actions.ts";
 import {
   CLEANUP_GRACE_SECONDS,
+  enqueueHostSync,
   enqueueSpecCleanup,
   inSeconds,
 } from "../host/host-jobs.ts";
@@ -488,11 +489,13 @@ async function unpauseSpec(
       extraSeconds > 0 ? { extraSeconds } : {},
     );
     await schedulePass(client, specId);
-    const after = await client.query<{ state: SpecState }>(
-      "SELECT state FROM specs WHERE id = $1",
+    const after = await client.query<{ state: SpecState; project_id: number }>(
+      "SELECT state, project_id FROM specs WHERE id = $1",
       [specId],
     );
-    return { status: "ok", state: after.rows[0]?.state as SpecState };
+    const row = after.rows[0];
+    if (row?.state === "running") await enqueueHostSync(client, row.project_id);
+    return { status: "ok", state: row?.state as SpecState };
   });
 }
 

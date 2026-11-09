@@ -2877,6 +2877,21 @@
                             },
                             "required": ["id", "repoUrl", "number"]
                           }
+                        },
+                        "defaults": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["repoUrl", "branch"]
+                          }
                         }
                       },
                       "required": ["kind", "pulls"]

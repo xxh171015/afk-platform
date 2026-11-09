@@ -38,6 +38,7 @@ export function adapterByHost(
     markReady: async (input) => of(input.repo).markReady(input),
     closePullRequest: async (input) => of(input.repo).closePullRequest(input),
     deleteBranch: async (input) => of(input.repo).deleteBranch(input),
+    getBranchSha: async (input) => of(input.repo).getBranchSha(input),
   };
 }
 

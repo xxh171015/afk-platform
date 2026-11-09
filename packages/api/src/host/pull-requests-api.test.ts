@@ -128,10 +128,18 @@ async function settledSpec(
     if (waiting.rowCount) break;
     const claimed = (await worker.claim()).body.job as {
       id: number;
+      type: string;
       attempt: number;
       payload: Json;
     } | null;
     if (!claimed) break;
+    if (claimed.type === "host-sync") {
+      await worker.complete(claimed.id, claimed.attempt, {
+        stage: "host-sync",
+        pulls: [],
+      });
+      continue;
+    }
     if (
       claimed.payload.stage === "final-review" &&
       claimed.payload.repoId === holdRepoId
@@ -165,6 +173,16 @@ async function completeIfPatch(job: {
   if (job.type !== "patch-pr-body") return false;
   await worker.complete(job.id, job.attempt, PATCHED);
   return true;
+}
+
+// Host-sync created at confirm has a low id, so a later look can land before pack patches.
+async function expectNothingDue() {
+  for (let i = 0; i < 8; i++) {
+    const job = (await worker.claim()).body.job;
+    if (!job) return;
+    if (await completeIfPatch(job)) continue;
+    expect(job).toBeNull();
+  }
 }
 
 async function syncWith(pulls: Json[]) {
@@ -680,6 +698,7 @@ describe("following the pull requests", () => {
           number: 2,
         },
       ],
+      defaults: [],
     });
   });
 
@@ -695,9 +714,9 @@ describe("following the pull requests", () => {
     ]);
     expect(await specState()).toBe("awaiting-review");
 
-    expect((await worker.claim()).body.job).toBeNull();
+    await expectNothingDue();
     clock.advanceSeconds(59);
-    expect((await worker.claim()).body.job).toBeNull();
+    await expectNothingDue();
     clock.advanceSeconds(1);
     const next = (await worker.claim()).body.job;
     expect(next).toMatchObject({
@@ -920,7 +939,7 @@ describe("following the pull requests", () => {
     await awaitingReview();
     const job = await claimOf("host-sync");
     await worker.fail(job.id, job.attempt, "GitHub is down");
-    expect((await worker.claim()).body.job).toBeNull();
+    await expectNothingDue();
     clock.advanceSeconds(60);
     const next = (await worker.claim()).body.job;
     expect(next).toMatchObject({ type: "host-sync", id: job.id });
@@ -934,9 +953,9 @@ describe("following the pull requests", () => {
       job.attempt,
       "GitLab answered 429; retry after 12s",
     );
-    expect((await worker.claim()).body.job).toBeNull();
+    await expectNothingDue();
     clock.advanceSeconds(11);
-    expect((await worker.claim()).body.job).toBeNull();
+    await expectNothingDue();
     clock.advanceSeconds(1);
     expect((await worker.claim()).body.job).toMatchObject({
       type: "host-sync",
@@ -1178,12 +1197,12 @@ describe("what waits for a person among the pull requests", () => {
     await worker.complete(job.id, job.attempt, opened(1));
   }
   const sync = async (pull: Json) => {
+    clock.advanceSeconds(61);
     const job = await claimOf("host-sync");
     await worker.complete(job.id, job.attempt, {
       stage: "host-sync",
       pulls: [pull],
     });
-    clock.advanceSeconds(60);
   };
   const waiting = async () =>
     (await call("GET", "/blocked")).body.pullRequests as Json[];

@@ -19,6 +19,7 @@ import {
   cancelIfAllTicketsCancelled,
   startFinalization,
 } from "../finalize/start.ts";
+import { enqueueHostSync } from "../host/host-jobs.ts";
 import { redAccessProblem } from "../host/repo-access.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
@@ -123,19 +124,26 @@ export async function confirmSpec(
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, r.name AS planning_repo
+      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, s.project_id, r.name AS planning_repo
        FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1 FOR UPDATE OF s`,
       [specId],
     );
     if (spec.rowCount === 0) return { status: "no-spec" };
-    const { slug, state, branch_namespace, planning_repo_id, planning_repo } =
-      spec.rows[0] as {
-        slug: string;
-        state: SpecState;
-        branch_namespace: string | null;
-        planning_repo_id: number | null;
-        planning_repo: string | null;
-      };
+    const {
+      slug,
+      state,
+      branch_namespace,
+      planning_repo_id,
+      planning_repo,
+      project_id,
+    } = spec.rows[0] as {
+      slug: string;
+      state: SpecState;
+      branch_namespace: string | null;
+      planning_repo_id: number | null;
+      planning_repo: string | null;
+      project_id: number;
+    };
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
       return { status: "not-confirmable", message: planned.reason };
@@ -204,6 +212,7 @@ export async function confirmSpec(
     if (planning_repo_id !== null) await enqueuePlanningCommit(client, specId);
     await recordAction(client, "confirm", { specId });
     const scheduled = await schedulePass(client, specId);
+    if (!scheduled.paused) await enqueueHostSync(client, project_id);
     return {
       status: "ok",
       state: scheduled.paused ? "paused" : running.state,

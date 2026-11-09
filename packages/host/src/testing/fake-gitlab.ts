@@ -39,6 +39,8 @@ export class FakeGitLab {
   hideTokenExpiry = false;
   readonly files = new Set<string>();
   readonly branchFiles = new Map<string, Set<string>>();
+  private readonly branchShas = new Map<string, string>();
+  readonly missingBranches = new Set<string>();
   private readonly mrs: FakeMr[] = [];
   private readonly branchNames = new Set<string>();
   private readonly protectedBranches = new Set<string>();
@@ -75,6 +77,10 @@ export class FakeGitLab {
 
   branches(): string[] {
     return [...this.branchNames].sort();
+  }
+
+  setBranchSha(name: string, sha: string): void {
+    this.branchShas.set(name, sha);
   }
 
   addBranch(name: string): void {
@@ -333,8 +339,19 @@ export class FakeGitLab {
     const branch = /^\/repository\/branches\/(.+)$/.exec(rest);
     if (branch) {
       const name = decodeURIComponent(branch[1] as string);
-      if (req.method === "GET")
-        return this.json(res, 200, { name, can_push: this.canPush });
+      if (req.method === "GET") {
+        if (this.missingBranches.has(name))
+          return this.json(res, 404, { message: "404 Branch Not Found" });
+        return this.json(res, 200, {
+          name,
+          can_push: this.canPush,
+          commit: {
+            id:
+              this.branchShas.get(name) ??
+              createHash("sha1").update(name).digest("hex"),
+          },
+        });
+      }
       if (req.method === "DELETE") {
         if (this.refuseBranchDeletes)
           return this.json(res, 403, { message: "403 Forbidden" });

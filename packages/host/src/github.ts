@@ -39,6 +39,7 @@ const READ: TokenPermissions = {
   checks: "read",
   statuses: "read",
 };
+const BRANCH: TokenPermissions = { contents: "read" };
 
 interface RawPull {
   number: number;
@@ -211,6 +212,17 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
 
   return {
     getPullRequest,
+    async getBranchSha({ repo, branch }) {
+      const path = `/git/ref/heads/${branch.split("/").map(encodeURIComponent).join("/")}`;
+      const read = await call(repo, BRANCH, "GET", path);
+      const sha = (read.body as { object?: { sha?: string } }).object?.sha;
+      if (read.status !== 200 || typeof sha !== "string" || sha === "")
+        throw new HostError(
+          `GitHub answered ${read.status} for GET ${repo.owner}/${repo.name}${path}`,
+          read.status,
+        );
+      return sha;
+    },
     async getPullRequestBody({ repo, number }) {
       const read = await call(
         repo,

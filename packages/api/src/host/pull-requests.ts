@@ -24,6 +24,11 @@ import {
   syncDelaySeconds,
 } from "./host-jobs.ts";
 import { mergeOrderOf } from "./merge-order.ts";
+import {
+  applyDefaultShas,
+  defaultBranchesOfRunningSpecs,
+  projectHasRunningSpecs,
+} from "./update-branch.ts";
 
 // A spec's pull requests: opened once its repos are all finalized, then followed until a person has merged them
 // all. The platform only records what the host says; it has no call that merges (docs/design.md「代码托管」).
@@ -45,6 +50,7 @@ export type HostTask =
   | {
       kind: "host-sync";
       pulls: { id: number; repoUrl: string; number: number }[];
+      defaults: { repoUrl: string; branch: string }[];
     }
   | {
       kind: "pr-ready";
@@ -100,6 +106,14 @@ export const HostSyncResultSchema = z.object({
       z.object({ id: z.number().int(), error: z.string() }),
     ]),
   ),
+  defaults: z
+    .array(
+      z.object({
+        repoUrl: z.string().min(1),
+        sha: z.string().min(1),
+      }),
+    )
+    .optional(),
 });
 
 // Every repo whose branch is settled gets its pull request opened, but only when all of them are: a spec's pull
@@ -233,6 +247,7 @@ export async function buildHostTask(
       repoUrl: p.url,
       number: p.number,
     })),
+    defaults: await defaultBranchesOfRunningSpecs(pool, projectId),
   };
 }
 
@@ -530,6 +545,8 @@ export async function recordHostSync(
     await markMergedWhenAllAre(client, specId);
     await queueReadyPullRequests(client, specId);
   }
+  if (parsed.data.defaults)
+    await applyDefaultShas(client, read.projectId, parsed.data.defaults);
   await scheduleNextSync(client, read.projectId, now);
   return { status: "applied" };
 }
@@ -578,7 +595,8 @@ async function scheduleNextSync(
      WHERE r.project_id = $1 AND ${FOLLOWED_PULL_REQUESTS} LIMIT 1`,
     [projectId],
   );
-  if (open.rowCount)
+  const running = await projectHasRunningSpecs(client, projectId);
+  if (open.rowCount || running)
     await enqueueHostSync(
       client,
       projectId,

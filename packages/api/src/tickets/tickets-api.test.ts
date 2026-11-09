@@ -864,7 +864,7 @@ describe("cancelling a spec", () => {
     Number(
       (
         await db.pool.query(
-          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running') AND type <> 'spec-cleanup'",
+          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running') AND type NOT IN ('spec-cleanup', 'host-sync')",
         )
       ).rows[0].n,
     );

@@ -106,7 +106,7 @@ const chain = () => [
 const jobPayloads = async () =>
   (
     await db.pool.query(
-      "SELECT payload, idempotency_key, state FROM jobs ORDER BY id",
+      "SELECT payload, idempotency_key, state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
     )
   ).rows;
 const ticketStates = async () =>

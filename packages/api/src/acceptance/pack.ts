@@ -298,7 +298,7 @@ export async function buildAcceptancePack(
             g.command_results, g.test_cases
      FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
      ORDER BY r.repo_id, r.id DESC`,
     [specId],
   );
