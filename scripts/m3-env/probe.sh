@@ -47,7 +47,7 @@ section_system() {
   else
     local pretty="未知"
     [[ -r /etc/os-release ]] && pretty=$(. /etc/os-release && echo "$PRETTY_NAME")
-    line "系统：$pretty，内核 $(uname -r)，$(uname -m)"
+    line "系统：${pretty}，内核 $(uname -r)，$(uname -m)"
     line "CPU：$(nproc) 核；内存：$(free -h | awk '/^Mem:/ {print $2 "（可用 " $7 "）"}')"
   fi
   line "根分区：$(df -h / | awk 'NR == 2 {print $2 " 总，" $4 " 可用"}')"
@@ -63,16 +63,16 @@ section_docker() {
     echo; return
   fi
   if version_ge "$server" "25.0.5"; then
-    line "Docker Engine：$server（✅ ≥ 25.0.5，internal 网络不转发外部 DNS）"
+    line "Docker Engine：${server}（✅ ≥ 25.0.5，internal 网络不转发外部 DNS）"
   else
-    line "Docker Engine：$server（⚠ 低于 25.0.5，沙箱出网方案要求升级）"
+    line "Docker Engine：${server}（⚠ 低于 25.0.5，沙箱出网方案要求升级）"
   fi
   line "Compose：$(docker compose version --short 2>/dev/null || echo '❌ 没有 docker compose 插件')"
   local root
   root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)
   line "存储驱动：$(docker info --format '{{.Driver}}' 2>/dev/null)；cgroup：v$(docker info --format '{{.CgroupVersion}}' 2>/dev/null)；Docker 可用 CPU / 内存：$(docker info --format '{{.NCPU}} 核 / {{.MemTotal}}' 2>/dev/null | awk '{printf "%s %s %s %.1f GiB", $1, $2, $3, $4 / 1073741824}')"
   if [[ "$(uname -s)" != "Darwin" ]]; then
-    line "Docker 数据目录：$root（$(df -hT "$root" 2>/dev/null | awk 'NR == 2 {print $2 "，" $3 " 总，" $5 " 可用"}')）"
+    line "Docker 数据目录：${root}（$(df -hT "$root" 2>/dev/null | awk 'NR == 2 {print $2 "，" $3 " 总，" $5 " 可用"}')）"
   fi
   line "镜像源（registry mirrors）：$(docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null)"
   line "守护进程代理：HTTP=$(docker info --format '{{.HTTPProxy}}' 2>/dev/null | mask) HTTPS=$(docker info --format '{{.HTTPSProxy}}' 2>/dev/null | mask) NO_PROXY=$(docker info --format '{{.NoProxy}}' 2>/dev/null)"
@@ -118,9 +118,9 @@ section_container() {
   if ! docker version >/dev/null 2>&1; then line "跳过：docker 不可用"; echo; return; fi
   local started=$SECONDS pulled
   if pulled=$(docker pull -q "$CURL_IMAGE" 2>&1); then
-    line "拉镜像 $CURL_IMAGE：✅ $((SECONDS - started))s（测的是 Docker Hub 或配置的镜像源）"
+    line "拉镜像 ${CURL_IMAGE}：✅ $((SECONDS - started))s（测的是 Docker Hub 或配置的镜像源）"
   else
-    line "拉镜像 $CURL_IMAGE：❌ $(echo "$pulled" | tail -1 | mask | cut -c1-150)"
+    line "拉镜像 ${CURL_IMAGE}：❌ $(echo "$pulled" | tail -1 | mask | cut -c1-150)"
     echo; return
   fi
   echo
@@ -133,7 +133,7 @@ section_container() {
         label="${pair%%|*}"; url="${pair#*|}"
         out=$(curl -sS -o /dev/null -m 10 -w "%{http_code} %{time_total}" "$url" 2>/tmp/err)
         code="${out%% *}"
-        if [ -n "$code" ] && [ "$code" != "000" ]; then echo "| $label | $url | ✅ HTTP $code，${out#* }s |"
+        if [ -n "$code" ] && [ "$code" != "000" ]; then echo "| $label | $url | ✅ HTTP ${code}，${out#* }s |"
         else echo "| $label | $url | ❌ $(tr "\n" " " </tmp/err | cut -c1-120) |"; fi
       done' sh "$@" | mask
   echo
@@ -142,14 +142,14 @@ section_container() {
 section_server() {
   echo "### 服务器网络"
   if has ip; then
-    ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}' | while read -r dev addr; do line "网卡 $dev：$addr"; done
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}' | while read -r dev addr; do line "网卡 ${dev}：$addr"; done
   fi
   line "主机名：$(hostname -f 2>/dev/null || hostname)"
   if has ss; then
     line "已在监听的 TCP 端口：$(ss -ltnH 2>/dev/null | awk '{n = split($4, a, ":"); print a[n]}' | sort -n -u | tr '\n' ' ')"
     local port
     for port in 80 443 3000 5432 8080; do
-      if ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; then line "端口 $port：已被占用"; else line "端口 $port：空闲"; fi
+      if ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; then line "端口 ${port}：已被占用"; else line "端口 ${port}：空闲"; fi
     done
   fi
   if has ufw; then line "ufw：$(sudo -n ufw status 2>/dev/null | head -1 || echo '要 sudo 才能看（sudo ufw status）')"; fi
@@ -213,7 +213,7 @@ EOF
 公司 GitLab|${gitlab%/}/users/sign_in
 平台服务器|${platform%/}/probe-from-$me
 Cursor API|https://api2.cursor.sh
-Cursor agent|https://api5.cursor.sh
+Cursor agent|https://agent.api5.cursor.sh
 Cursor 下载（建镜像用）|https://downloads.cursor.com
 npm|https://registry.npmjs.org/
 Docker Hub|https://registry-1.docker.io/v2/
@@ -222,7 +222,7 @@ GitHub|https://github.com
 EOF
       section_container \
         "Cursor API|https://api2.cursor.sh" \
-        "Cursor agent|https://api5.cursor.sh" \
+        "Cursor agent|https://agent.api5.cursor.sh" \
         "npm|https://registry.npmjs.org/" \
         "公司 GitLab|${gitlab%/}/users/sign_in" \
         "平台服务器|${platform%/}/probe-from-$me-container"

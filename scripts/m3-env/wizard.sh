@@ -327,9 +327,9 @@ dev=$(curl -sS -m 15 -X POST "$GITLAB_URL/oauth/authorize_device" \
   -d "client_id=$OAUTH_CLIENT_ID" -d "scope=read_user" -w '\n%{http_code}' 2>&1 || true)
 dev_code=$(printf '%s' "$dev" | tail -n1)
 if printf '%s' "$dev" | grep -q '"user_code"'; then
-  DEVICE_RESULT="可用（HTTP $dev_code，返回了 user_code）"
+  DEVICE_RESULT="可用（HTTP ${dev_code}，返回了 user_code）"
 else
-  DEVICE_RESULT="不可用（HTTP $dev_code）：$(printf '%s' "$dev" | sed '$d' | tr '\n' ' ' | cut -c1-200)"
+  DEVICE_RESULT="不可用（HTTP ${dev_code}）：$(printf '%s' "$dev" | sed '$d' | tr '\n' ' ' | cut -c1-200)"
 fi
 write_env DEVICE_RESULT "$DEVICE_RESULT"
 
@@ -391,10 +391,10 @@ public="$DIR/results-public.md"
   echo
   echo "## 地址和回答"
   echo
-  echo "- GitLab：$GITLAB_URL；平台服务器：$PLATFORM_URL"
-  echo "- 服务器 HTTPS / 域名：$SERVER_HTTPS；端口谁开：$SERVER_FIREWALL；权限：$SERVER_RIGHTS"
-  echo "- ThinkPad 上网：$THINKPAD_NETWORK；服务器收到 ThinkPad 的请求：$THINKPAD_LISTENER"
-  echo "- Mac 所在网络：$MAC_NETWORK；服务器收到 Mac 的请求：$MAC_LISTENER"
+  echo "- GitLab：${GITLAB_URL}；平台服务器：$PLATFORM_URL"
+  echo "- 服务器 HTTPS / 域名：${SERVER_HTTPS}；端口谁开：${SERVER_FIREWALL}；权限：$SERVER_RIGHTS"
+  echo "- ThinkPad 上网：${THINKPAD_NETWORK}；服务器收到 ThinkPad 的请求：$THINKPAD_LISTENER"
+  echo "- Mac 所在网络：${MAC_NETWORK}；服务器收到 Mac 的请求：$MAC_LISTENER"
   echo "- GitLab webhook 送到服务器：$WEBHOOK_RESULT"
   echo "- GitLab 出站请求：$GL_OUTBOUND"
   echo "- GitLab 限流：$GL_RATE"
