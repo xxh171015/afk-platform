@@ -129,6 +129,14 @@ _Avoid_: 补丁、包装 prompt、fork
 一个 Spec 在一个 Repo 里的分支 `spec/<id>/<slug>`（`<id>` 是数据库的标识，六位十六进制；标识出现之前建的 spec 是 `spec/<slug>`），票合并到这里，最后以 PR 的形式合进 main。票的分支是 `agent/<id>/T-<n>`，总览修复的是 `agent/<id>/S-<n>-final`。
 _Avoid_: 特性分支、feature branch
 
+**Update-branch（更新集成分支）**：
+main 前进后，把 main 合进一个 Spec 的集成分支，门禁通过才前移；合不进去或门禁不过、agent 一次修复后仍不行，Spec 就暂停，等人处理。只更新还在开发的 Spec；人正在验收的，只在它的 PR 与 main 冲突时才更新。
+_Avoid_: rebase、同步分支
+
+**Potential conflict（潜在冲突）**：
+同一 Repo 里两个 Spec 的集成分支试合并会冲突：只是提示，不挡任何事；先合进 main 的一方不受影响，后合并的一方在 Update-branch 时处理。任一方合并或取消、或再试合并不冲突时就消失。
+_Avoid_: 合并冲突（那是已经发生的）、冲突告警
+
 **Lock key（互斥键）**：
 作业上的一个可空标签；带相同键的作业领取时互斥，持有期等于租约期。集成分支锁就是以“仓库:集成分支”为键的互斥键。
 _Avoid_: 分布式锁、advisory lock
