@@ -89,6 +89,7 @@ export interface FinalizationSummary {
   state: string;
   blockedReason: string | null;
   brief: Brief | null;
+  hostKind: HostKind;
   waitingSince?: string;
   blocking?: Blocking;
 }
@@ -101,7 +102,7 @@ async function finalizations(
 ): Promise<FinalizationSummary[]> {
   const { rows } = await pool.query(
     // A review that was not finished when its spec was cancelled is cancelled with it, whatever it was waiting for.
-    `SELECT f.id, f.spec_id, f.step, r.name AS repo,
+    `SELECT f.id, f.spec_id, f.step, r.name AS repo, r.host_kind,
             CASE WHEN f.state <> 'done' AND s.state = 'cancelled' THEN 'cancelled' ELSE f.state END AS state,
             CASE WHEN s.state = 'cancelled' THEN NULL ELSE f.blocked_reason END AS blocked_reason
      FROM finalizations f JOIN repos r ON r.id = f.repo_id JOIN specs s ON s.id = f.spec_id
@@ -117,6 +118,7 @@ async function finalizations(
       step: row.step as string,
       state: row.state as string,
       blockedReason: (row.blocked_reason as string | null) ?? null,
+      hostKind: row.host_kind as HostKind,
       brief:
         includeBrief && row.state === "blocked"
           ? await finalBrief(pool, row.spec_id)
@@ -134,7 +136,9 @@ async function finalE2eSteps(
   includeBrief = true,
 ): Promise<FinalizationSummary[]> {
   const { rows } = await pool.query(
-    `SELECT e.id, e.spec_id, e.state, e.blocked_reason FROM final_e2e e JOIN specs s ON s.id = e.spec_id
+    `SELECT e.id, e.spec_id, e.state, e.blocked_reason,
+            (SELECT r.host_kind FROM repos r WHERE r.project_id = s.project_id ORDER BY r.id LIMIT 1) AS host_kind
+     FROM final_e2e e JOIN specs s ON s.id = e.spec_id
      WHERE ${where} ORDER BY e.id`,
     params,
   );
@@ -161,6 +165,7 @@ async function finalE2eSteps(
         step: "final-e2e",
         state: row.state as string,
         blockedReason: (row.blocked_reason as string | null) ?? null,
+        hostKind: (row.host_kind as HostKind | null) ?? "github",
         brief:
           includeBrief && row.state === "blocked" && run
             ? {
@@ -556,7 +561,7 @@ export async function specView(pool: pg.Pool, specId: number) {
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
             s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo,
-            s.planning_state, s.planning_conflict
+            s.planning_state, s.planning_conflict, s.token_merged
      FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
   );
@@ -619,6 +624,7 @@ export async function specView(pool: pg.Pool, specId: number) {
         row.state === "draft"
           ? prechecksOf(row.planning_repo !== null, warnings)
           : prechecksOf(false, warnings),
+      tokenMerged: row.token_merged as boolean,
     },
     tickets,
     finalizations: [
@@ -979,6 +985,7 @@ export interface PullRequestProblem {
   url: string;
   state: string;
   syncError: string | null;
+  hostKind: HostKind;
   waitingSince?: string;
   blocking?: Blocking;
 }
@@ -989,7 +996,7 @@ async function pullRequestProblems(
   pool: pg.Pool,
 ): Promise<PullRequestProblem[]> {
   const { rows } = await pool.query(
-    `SELECT p.spec_id, r.name AS repo, p.number, p.url, p.state, p.sync_error
+    `SELECT p.spec_id, r.name AS repo, p.number, p.url, p.state, p.sync_error, r.host_kind
      FROM pull_requests p JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
      WHERE ${FOLLOWED_PULL_REQUESTS} AND (p.state = 'closed' OR p.sync_error IS NOT NULL)
      ORDER BY p.id`,
@@ -1002,6 +1009,7 @@ async function pullRequestProblems(
     url: row.url as string,
     state: row.state as string,
     syncError: (row.sync_error as string | null) ?? null,
+    hostKind: row.host_kind as HostKind,
   }));
 }
 
@@ -1009,18 +1017,22 @@ async function pullRequestProblems(
 // the code host. A failure only counts when no cleanup of that spec that is queued, running or done came after it.
 async function cleanupProblems(pool: pg.Pool) {
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (spec_id) spec_id, error FROM (
+    `SELECT DISTINCT ON (j.spec_id) j.spec_id, j.error,
+            (SELECT r.host_kind FROM repos r JOIN specs s ON s.project_id = r.project_id
+             WHERE s.id = j.spec_id ORDER BY r.id LIMIT 1) AS host_kind
+     FROM (
        SELECT (payload->>'specId')::int AS spec_id, error, state, id FROM jobs WHERE type = 'spec-cleanup'
      ) j
      WHERE state = 'failed' AND NOT EXISTS (
        SELECT 1 FROM jobs k WHERE k.type = 'spec-cleanup' AND (k.payload->>'specId')::int = j.spec_id
          AND k.id > j.id AND k.state IN ('queued', 'running', 'done'))
-     ORDER BY spec_id, id DESC`,
+     ORDER BY j.spec_id, j.id DESC`,
   );
   return rows.map((row) => ({
     specId: row.spec_id as number,
     specDisplayId: formatDisplayId("spec", row.spec_id),
     error: (row.error as string | null) ?? "",
+    hostKind: (row.host_kind as HostKind | null) ?? "github",
   }));
 }
 
@@ -1029,7 +1041,7 @@ async function cleanupProblems(pool: pg.Pool) {
 // and no later pr-ready of it is queued, running or done.
 async function readyFailures(pool: pg.Pool) {
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error
+    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error, r.host_kind
      FROM jobs j
      JOIN pull_requests p ON p.id = (j.payload->>'pullId')::int
      JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
@@ -1046,6 +1058,7 @@ async function readyFailures(pool: pg.Pool) {
     number: row.number as number,
     url: row.url as string,
     error: (row.error as string | null) ?? "",
+    hostKind: row.host_kind as HostKind,
   }));
 }
 

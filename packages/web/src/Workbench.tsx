@@ -12,6 +12,7 @@ import { Mono, Pill } from "./components/afk/badges.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
 import { Onboarding } from "./Onboarding.tsx";
@@ -319,7 +320,10 @@ export function Workbench() {
                   title={row.spec.title}
                 >
                   <StatusBadge kind="spec" code={row.spec.state} />
-                  <span>{row.pullRequestCount} 个 PR</span>
+                  <span>
+                    {row.pullRequestCount} 个{" "}
+                    {pullAbbrev(hostKindOfRepos(row.spec.repos))}
+                  </span>
                   <span>
                     验收标准{" "}
                     <Mono>{`${row.verifiedCriteria}/${row.totalCriteria}`}</Mono>

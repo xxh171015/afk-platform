@@ -6,6 +6,7 @@ import {
   flowStepCaption,
   flowStepComplete,
   flowStepHref,
+  flowStepLabel,
   flowStepLocation,
   flowStepReached,
   ticketProgress,
@@ -130,6 +131,12 @@ describe("the six-step bar", () => {
         orderBroken: true,
       }),
     ).toBe("合并顺序被打破");
+  });
+
+  it("says 开 MR on GitLab", () => {
+    expect(flowStepLabel("开 PR", "gitlab")).toBe("开 MR");
+    expect(flowStepLabel("开 PR", "github")).toBe("开 PR");
+    expect(flowStepLabel("收尾", "gitlab")).toBe("收尾");
   });
 
   it("counts live tickets as n/m, ignoring cancelled ones", () => {

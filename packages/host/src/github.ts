@@ -47,6 +47,8 @@ interface RawPull {
   state: "open" | "closed";
   draft?: boolean;
   merged?: boolean;
+  merged_at?: string | null;
+  merged_by?: { login?: string } | null;
   body?: string | null;
   head: { sha: string };
 }
@@ -190,6 +192,9 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       headSha: raw.head.sha,
       ci: await ci(repo, raw.head.sha),
       review: await review(repo, raw.number),
+      mergedBy: raw.merged_by?.login ?? null,
+      mergedAt: raw.merged_at ?? null,
+      mergedByPlatform: false,
     };
   }
 

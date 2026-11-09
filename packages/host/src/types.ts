@@ -35,6 +35,11 @@ export interface PullRequestInfo {
   headSha: string;
   ci: CiState;
   review: ReviewState;
+  // Who the host says merged it, and when (ISO). mergedByPlatform is the token's user, and only when that
+  // user cannot push the default branch (a bot). A personal token would flag every merge a person makes.
+  mergedBy: string | null;
+  mergedAt: string | null;
+  mergedByPlatform: boolean;
 }
 
 export interface OpenPullRequestInput {
@@ -77,13 +82,16 @@ export interface HostAdapter {
   }): Promise<"deleted" | "gone">;
 }
 
-// A call the host refused or could not answer. The message never holds a token.
+// A call the host refused or could not answer. The message never holds a token. 429 carries Retry-After so
+// the next host-sync can wait that long.
 export class HostError extends Error {
   readonly status: number;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfterSeconds?: number) {
     super(message);
     this.name = "HostError";
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }

@@ -22,6 +22,8 @@ const base: Shot = {
   prs: [],
   cleanupFailed: false,
   readyFailedPullIds: [],
+  hostKind: "github",
+  tokenMerged: false,
 };
 
 describe("composeNotice", () => {
@@ -281,6 +283,54 @@ describe("noticesFromTransition", () => {
       {
         title: "待处理",
         body: "S-4 导出订单：PR 读不出\nhttp://127.0.0.1:5173/waiting",
+      },
+    ]);
+  });
+
+  it("says MR on GitLab, including when the platform token merged one", () => {
+    const gitlab: Shot = { ...base, hostKind: "gitlab" };
+    expect(
+      noticesFromTransition(
+        { ...gitlab, specState: "finalizing" },
+        { ...gitlab, specState: "awaiting-review" },
+      ),
+    ).toEqual([
+      {
+        title: "可以来验收了",
+        body: "S-4 导出订单：验收包和 MR 已齐\nhttp://127.0.0.1:5173/specs/4/delivery",
+      },
+    ]);
+    const draft: Shot = {
+      ...gitlab,
+      specState: "awaiting-review",
+      prs: [
+        {
+          id: 2,
+          repo: "frontend",
+          state: "open",
+          draft: true,
+          syncError: null,
+          mergeOrderDraft: true,
+        },
+      ],
+    };
+    expect(
+      noticesFromTransition(draft, {
+        ...draft,
+        prs: [{ ...draft.prs[0], draft: false }],
+      }),
+    ).toEqual([
+      {
+        title: "MR 已转 ready",
+        body: "S-4 导出订单：frontend 的草稿已转 ready\nhttp://127.0.0.1:5173/specs/4/delivery",
+      },
+    ]);
+    expect(
+      noticesFromTransition(gitlab, { ...gitlab, tokenMerged: true }),
+    ).toEqual([
+      {
+        title: "待处理",
+        body: "S-4 导出订单：平台账号合并了 MR\nhttp://127.0.0.1:5173/specs/4/delivery",
       },
     ]);
   });

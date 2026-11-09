@@ -21,6 +21,7 @@ import {
   type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
+  syncDelaySeconds,
 } from "./host-jobs.ts";
 import { mergeOrderOf } from "./merge-order.ts";
 
@@ -68,6 +69,9 @@ const PullFacts = {
   headSha: z.string().min(1),
   ci: z.enum(["none", "pending", "success", "failure"]),
   review: z.enum(["none", "approved", "changes-requested"]),
+  mergedBy: z.string().nullable().optional(),
+  mergedAt: z.string().nullable().optional(),
+  mergedByPlatform: z.boolean().optional(),
 };
 
 export const OpenPrResultSchema = z.object({
@@ -495,8 +499,13 @@ export async function recordHostSync(
       );
       continue;
     }
+    const mergedAt =
+      pull.mergedAt != null && !Number.isNaN(Date.parse(pull.mergedAt))
+        ? pull.mergedAt
+        : null;
     await client.query(
-      `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now()
+      `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now(),
+         merged_at = COALESCE($8::timestamptz, merged_at), merged_by = COALESCE($9, merged_by)
        FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7`,
       [
         pull.id,
@@ -506,8 +515,16 @@ export async function recordHostSync(
         pull.ci,
         pull.review,
         read.projectId,
+        mergedAt,
+        pull.mergedBy ?? null,
       ],
     );
+    if (pull.mergedByPlatform)
+      await client.query(
+        `UPDATE specs SET token_merged = true FROM pull_requests p
+         WHERE specs.id = p.spec_id AND p.id = $1 AND NOT specs.token_merged`,
+        [pull.id],
+      );
   }
   for (const { spec_id: specId } of owners.rows) {
     await markMergedWhenAllAre(client, specId);
@@ -554,6 +571,7 @@ async function scheduleNextSync(
   client: pg.PoolClient,
   projectId: number,
   now: Date,
+  delaySeconds = SYNC_INTERVAL_SECONDS,
 ) {
   const open = await client.query(
     `SELECT 1 FROM pull_requests p JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
@@ -564,9 +582,17 @@ async function scheduleNextSync(
     await enqueueHostSync(
       client,
       projectId,
-      new Date(now.getTime() + SYNC_INTERVAL_SECONDS * 1000),
+      new Date(now.getTime() + delaySeconds * 1000),
     );
 }
 
-// A look at the host that could not be carried out (it was down, the token was refused): try again in a minute.
-export const hostSyncFailed = scheduleNextSync;
+// A look at the host that could not be carried out (it was down, the token was refused): try again in a minute,
+// or after Retry-After when GitLab answered 429.
+export function hostSyncFailed(
+  client: pg.PoolClient,
+  projectId: number,
+  now: Date,
+  error?: string,
+) {
+  return scheduleNextSync(client, projectId, now, syncDelaySeconds(error));
+}

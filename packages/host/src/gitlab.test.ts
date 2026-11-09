@@ -154,6 +154,112 @@ describe("getPullRequest", () => {
       1,
     );
   });
+
+  it("takes CI from head_pipeline", async () => {
+    const a = adapter();
+    await open(a);
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("none");
+    gitlab.setPipeline(1, "running");
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("pending");
+    gitlab.setPipeline(1, "success");
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("success");
+    gitlab.setPipeline(1, "skipped");
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("success");
+    gitlab.setPipeline(1, "failed");
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("failure");
+    gitlab.setPipeline(1, "canceled");
+    expect((await a.getPullRequest({ repo, number: 1 })).ci).toBe("failure");
+  });
+
+  it("treats an approval as approved, and requested_changes as changes-requested", async () => {
+    const a = adapter();
+    await open(a);
+    expect((await a.getPullRequest({ repo, number: 1 })).review).toBe("none");
+    gitlab.approveMr(1, "alice");
+    expect((await a.getPullRequest({ repo, number: 1 })).review).toBe(
+      "approved",
+    );
+    gitlab.setReviewer(1, "bob", "requested_changes");
+    expect((await a.getPullRequest({ repo, number: 1 })).review).toBe(
+      "changes-requested",
+    );
+  });
+
+  it("skips reviewers and approvals when GitLab has no such route", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.hideReviewers = true;
+    gitlab.hideApprovals = true;
+    expect((await a.getPullRequest({ repo, number: 1 })).review).toBe("none");
+  });
+
+  it("does not read comments", async () => {
+    const a = adapter();
+    await open(a);
+    const before = gitlab.requests.length;
+    await a.getPullRequest({ repo, number: 1 });
+    expect(
+      gitlab.requests
+        .slice(before)
+        .some((r) => r.includes("/notes") || r.includes("/discussions")),
+    ).toBe(false);
+  });
+
+  it("reports who merged it and when", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.mergeMr(1, { by: "alice", at: "2026-11-09T10:00:00.000Z" });
+    expect(await a.getPullRequest({ repo, number: 1 })).toMatchObject({
+      state: "merged",
+      mergedBy: "alice",
+      mergedAt: "2026-11-09T10:00:00.000Z",
+      mergedByPlatform: false,
+    });
+  });
+
+  it("does not flag a merge when the token can push the default branch", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.username = "xuxinghua";
+    gitlab.canPush = true;
+    gitlab.mergeMr(1, { by: "xuxinghua" });
+    const before = gitlab.requests.length;
+    expect((await a.getPullRequest({ repo, number: 1 })).mergedByPlatform).toBe(
+      false,
+    );
+    expect(gitlab.requests.slice(before).some((r) => r.endsWith("/user"))).toBe(
+      false,
+    );
+  });
+
+  it("flags a merge by the token user when the token cannot push the default branch", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.username = "bot";
+    gitlab.canPush = false;
+    gitlab.mergeMr(1, { by: "bot" });
+    expect((await a.getPullRequest({ repo, number: 1 })).mergedByPlatform).toBe(
+      true,
+    );
+    gitlab.mergeMr(1, { by: "alice" });
+    expect((await a.getPullRequest({ repo, number: 1 })).mergedByPlatform).toBe(
+      false,
+    );
+  });
+
+  it("throws a HostError with Retry-After when GitLab answers 429", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.rateLimitSeconds = 12;
+    const error = await a.getPullRequest({ repo, number: 1 }).catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error).toMatchObject({
+      status: 429,
+      retryAfterSeconds: 12,
+      message: "GitLab answered 429; retry after 12s",
+    });
+    expect(error.message).not.toContain(token);
+  });
 });
 
 describe("updatePullRequestBody", () => {

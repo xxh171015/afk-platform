@@ -16,6 +16,9 @@ const info = (
   headSha: `sha${number}`,
   ci: "pending",
   review: "none",
+  mergedBy: null,
+  mergedAt: null,
+  mergedByPlatform: false,
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
@@ -240,6 +243,9 @@ describe("a host-sync task", () => {
           headSha: "sha1",
           ci: "pending",
           review: "none",
+          mergedBy: null,
+          mergedAt: null,
+          mergedByPlatform: false,
         },
         {
           id: 2,
@@ -248,6 +254,9 @@ describe("a host-sync task", () => {
           headSha: "sha2",
           ci: "pending",
           review: "none",
+          mergedBy: null,
+          mergedAt: null,
+          mergedByPlatform: false,
         },
       ],
     });
@@ -269,6 +278,53 @@ describe("a host-sync task", () => {
     )) as { pulls: Record<string, unknown>[] };
     expect(result.pulls[0]).toEqual({ id: 1, error: "GitHub answered 502" });
     expect(result.pulls[1]).toMatchObject({ id: 2, state: "open" });
+  });
+
+  it("fails the look when GitLab answers 429, so the next round can wait", async () => {
+    const gitlab = new FakeGitLab({
+      owner: "xuxinghua",
+      repo: "afk-pilot-backend",
+      token: "glpat-test",
+    });
+    await gitlab.start();
+    try {
+      const adapter = createGitLabAdapter({
+        apiUrl: gitlab.url,
+        tokens: { tokenFor: async () => "glpat-test" },
+      });
+      await adapter.openPullRequest({
+        repo: {
+          owner: "xuxinghua",
+          name: "afk-pilot-backend",
+          host: "gitlab.example",
+        },
+        head: "spec/s-1",
+        base: "master",
+        title: "S-1",
+        body: "",
+      });
+      gitlab.rateLimitSeconds = 12;
+      const error = await runHostTask(
+        { adapter, repoRef: hostRepoRef },
+        {
+          kind: "host-sync",
+          pulls: [
+            {
+              id: 1,
+              repoUrl: "https://gitlab.example/xuxinghua/afk-pilot-backend.git",
+              number: 1,
+            },
+          ],
+        },
+        log,
+      ).catch((caught) => caught);
+      expect(error).toBeInstanceOf(InfrastructureError);
+      expect(error).toMatchObject({
+        message: "GitLab answered 429; retry after 12s",
+      });
+    } finally {
+      await gitlab.stop();
+    }
   });
 });
 

@@ -9,6 +9,14 @@ export const HOST_KIND_LABELS: Record<HostKind, string> = {
   gitlab: "GitLab",
 };
 
+// What the pages, notices and acceptance pack call a pull request: MR on GitLab, PR on GitHub. The database
+// and the code still say pull request.
+export const pullAbbrev = (kind: HostKind): "PR" | "MR" =>
+  kind === "gitlab" ? "MR" : "PR";
+
+export const pullPhrase = (kind: HostKind): "pull request" | "merge request" =>
+  kind === "gitlab" ? "merge request" : "pull request";
+
 // The repos of a project are all on one kind of host. When they are not, what to tell the person; null when they are.
 export function mixedHostsProblem(
   repos: readonly { name: string; hostKind: HostKind }[],

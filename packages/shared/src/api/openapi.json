@@ -4596,6 +4596,9 @@
                             },
                             "required": ["code", "level", "message"]
                           }
+                        },
+                        "tokenMerged": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -4614,7 +4617,8 @@
                         "planningSha",
                         "planningRepo",
                         "planning",
-                        "prechecks"
+                        "prechecks",
+                        "tokenMerged"
                       ]
                     },
                     "tickets": {
@@ -5043,6 +5047,10 @@
                             },
                             "required": ["run", "stage", "result", "logPath"]
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -5185,6 +5193,10 @@
                           },
                           "syncError": {
                             "type": ["string", "null"]
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           }
                         },
                         "required": [
@@ -5251,6 +5263,10 @@
                             "required": ["repo", "skipped"]
                           }
                         },
+                        "hostKind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        },
                         "repos": {
                           "type": "array",
                           "items": {
@@ -5307,6 +5323,10 @@
                                   },
                                   "syncError": {
                                     "type": ["string", "null"]
+                                  },
+                                  "hostKind": {
+                                    "type": "string",
+                                    "enum": ["github", "gitlab"]
                                   }
                                 },
                                 "required": [
@@ -6421,6 +6441,10 @@
                             },
                             "required": ["run", "stage", "result", "logPath"]
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6503,6 +6527,10 @@
                           "syncError": {
                             "type": ["string", "null"]
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6571,6 +6599,10 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           },
                           "waitingSince": {
                             "type": "string"
@@ -6641,6 +6673,10 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           },
                           "waitingSince": {
                             "type": "string"

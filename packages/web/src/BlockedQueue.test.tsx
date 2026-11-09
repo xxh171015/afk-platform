@@ -725,6 +725,30 @@ describe("paused specs and stopped overall reviews", () => {
     expect(item.queryByRole("button", { name: "仍然开 PR" })).toBeNull();
   });
 
+  it("says MR on a GitLab spec's e2e before the pull requests", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            finalizations: [
+              {
+                ...stopped,
+                repo: "(integration)",
+                step: "final-e2e",
+                blockedReason: "final-e2e-failed",
+                hostKind: "gitlab",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("final-S-1-(integration)"));
+    expect(item.getByText(/开 MR 前的联调/)).toBeTruthy();
+    expect(item.getByRole("button", { name: "仍然开 MR" })).toBeTruthy();
+  });
+
   it("shows a resume refusal", async () => {
     const fake = fakeServer({
       "GET /blocked": () => ({ json: queue({ specs: [paused] }) }),
@@ -810,6 +834,23 @@ describe("pull requests a person has to look at", () => {
     expect(item.getByText(/读取失败：GitHub answered 404/)).toBeTruthy();
     expect(item.queryByText(/关闭未合并/)).toBeNull();
   });
+
+  it("says MR when the closed pull request is on GitLab", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            pullRequests: [pull({ hostKind: "gitlab" })],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("pull-S-1-backend"));
+    expect(item.getByText(/这个 MR 被关闭了/)).toBeTruthy();
+    expect(item.getByText(/平台从不操作/)).toBeTruthy();
+    expect(item.getByText(/MR，请你决定/)).toBeTruthy();
+  });
 });
 
 describe("a clean-up that did not finish", () => {
@@ -860,6 +901,32 @@ describe("a draft pull request that could not be turned ready", () => {
     const item = within(await screen.findByTestId("ready-S-1-frontend"));
     expect(item.getByText(/refused to mark pull request 2 ready/)).toBeTruthy();
     expect(item.getByText(/仍是 draft/)).toBeTruthy();
+  });
+
+  it("says MR when the draft is on GitLab", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            readyFailures: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "frontend",
+                number: 2,
+                url: "https://gitlab.example/me/shop-frontend/-/merge_requests/2",
+                error: "GitLab refused",
+                hostKind: "gitlab",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("ready-S-1-frontend"));
+    expect(item.getByText(/的 draft MR 没能转为 ready/)).toBeTruthy();
+    expect(item.getByText(/这个 MR 仍是 draft/)).toBeTruthy();
   });
 });
 

@@ -231,6 +231,55 @@ describe("the workbench", () => {
     expect(done.getByText("2026-11-01 18:00")).toBeTruthy();
   });
 
+  it("says MR when the spec's repos are on GitLab", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            waiting: emptyWaiting,
+            running: [],
+            awaitingAcceptance: [
+              {
+                spec: {
+                  id: 5,
+                  displayId: "S-5",
+                  slug: "r",
+                  title: "Ready",
+                  type: "feature",
+                  state: "awaiting-review",
+                  pauseReason: null,
+                  project: "shop",
+                  repos: [
+                    {
+                      name: "backend",
+                      url: "https://gitlab.example/me/shop.git",
+                      hostKind: "gitlab",
+                    },
+                  ],
+                  progress: {
+                    total: 1,
+                    done: 1,
+                    active: 0,
+                    blocked: 0,
+                    pending: 0,
+                    cancelled: 0,
+                  },
+                },
+                pullRequestCount: 2,
+                verifiedCriteria: 1,
+                totalCriteria: 3,
+              },
+            ],
+            recentlyCompleted: [],
+          },
+        }),
+      }),
+    );
+    expect(await screen.findByText(/2 个 MR/)).toBeTruthy();
+  });
+
   it("does not mark a running ticket 偏慢 when there is no peer history", async () => {
     renderWithApp(
       <Workbench />,

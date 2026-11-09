@@ -1440,3 +1440,107 @@ describe("the six-step bar and nested pages", () => {
     ).toContain("开 PR");
   });
 });
+
+describe("a GitLab spec", () => {
+  const gitlab = {
+    repos: [
+      {
+        name: "backend",
+        url: "https://gitlab.example/me/shop.git",
+        hostKind: "gitlab" as const,
+      },
+    ],
+  };
+
+  it("says MR on the flow bar, delivery heading and empty pack", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running", ...gitlab },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            mergeOrder: { ordered: [], after: {}, unordered: ["backend"] },
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("flow-bar");
+    expect(bar.textContent).toContain(
+      "草稿 → 确认 → 运行 → 收尾 → 开 MR → 验收合并",
+    );
+    expect(screen.getByText("还没有验收包。开完 MR 后会生成。")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "PR" })).toBeNull();
+  });
+
+  it("says MR when a pull request exists, and flags a merge by the platform token", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review", tokenMerged: true, ...gitlab },
+            pullRequests: [
+              {
+                order: 1,
+                waitsFor: [],
+                repo: "backend",
+                number: 7,
+                url: "https://gitlab.example/me/shop/-/merge_requests/7",
+                state: "open",
+                draft: false,
+                ci: "success",
+                review: "none",
+                syncError: null,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "MR" })).toBeTruthy();
+    expect(screen.getByTestId("token-merged").textContent).toBe(
+      "平台账号合并了 MR。只有人能合并。",
+    );
+  });
+
+  it("links MR timeline events to GitLab", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: gitlab,
+            pullRequests: [
+              {
+                order: 1,
+                waitsFor: [],
+                repo: "backend",
+                number: 7,
+                url: "https://gitlab.example/me/shop/-/merge_requests/7",
+                state: "open",
+                draft: false,
+                ci: "none",
+                review: "none",
+                syncError: null,
+              },
+            ],
+            timeline: [
+              {
+                kind: "pr-opened",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "backend #7",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findAllByText("开 MR")).toHaveLength(2);
+    const link = screen.getByRole("link", { name: "GitLab" });
+    expect(link.getAttribute("href")).toBe(
+      "https://gitlab.example/me/shop/-/merge_requests/7",
+    );
+  });
+});

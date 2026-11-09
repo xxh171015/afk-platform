@@ -98,9 +98,14 @@ export async function loadShot(
     title: string;
     state: string;
     pause_reason: string | null;
-  }>("SELECT id, title, state, pause_reason FROM specs WHERE id = $1", [
-    specId,
-  ]);
+    token_merged: boolean;
+    host_kind: string | null;
+  }>(
+    `SELECT s.id, s.title, s.state, s.pause_reason, s.token_merged,
+            (SELECT r.host_kind FROM repos r WHERE r.project_id = s.project_id ORDER BY r.id LIMIT 1) AS host_kind
+     FROM specs s WHERE s.id = $1`,
+    [specId],
+  );
   const row = spec.rows[0];
   if (!row) return undefined;
   const tickets = await pool.query<{
@@ -188,6 +193,8 @@ export async function loadShot(
     specTitle: row.title,
     specState: row.state,
     pauseReason: row.pause_reason,
+    hostKind: row.host_kind === "gitlab" ? "gitlab" : "github",
+    tokenMerged: row.token_merged,
     tickets: tickets.rows.map((item) => ({
       id: item.id,
       title: item.title,

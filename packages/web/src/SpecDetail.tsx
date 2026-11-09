@@ -1,4 +1,4 @@
-import type { TicketState } from "@afk/shared";
+import { HOST_KIND_LABELS, type HostKind, type TicketState } from "@afk/shared";
 import {
   Background,
   Controls,
@@ -44,6 +44,7 @@ import {
 import { useResourcePoll } from "./EventsProvider.tsx";
 import { FinalizeProgress } from "./FinalizeProgress.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
+import { hostKindOf, hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { commitHtmlUrl, treeHtmlUrl } from "./host-links.ts";
 import {
   edgeKindLabel,
@@ -66,11 +67,16 @@ import {
   flowStepComplete,
   flowStepHref,
   flowStepIndex,
+  flowStepLabel,
   flowStepLocation,
   flowStepReached,
   ticketProgress,
 } from "./spec-flow.ts";
-import { TIMELINE_LABELS, visibleTimeline } from "./spec-timeline.ts";
+import {
+  TIMELINE_LABELS,
+  timelineLabel,
+  visibleTimeline,
+} from "./spec-timeline.ts";
 import { blockedReasonLabel, ticketStateLabel } from "./status.ts";
 import { peekTicketClick, TicketSheet } from "./TicketDetail.tsx";
 import { formatShanghaiDay, formatShanghaiTime } from "./time.ts";
@@ -397,7 +403,9 @@ function AcceptancePackMeta({
         <section className="mt-4" data-testid="pack-integration">
           <h4>联调</h4>
           {pack.integration.failedBeforePullRequest ? (
-            <p className="error">开 PR 前联调失败</p>
+            <p className="error">
+              开 {pullAbbrev(hostKindOf(pack))} 前联调失败
+            </p>
           ) : null}
           <ul>
             {list(pack.integration.tickets).map((ticket) => (
@@ -528,6 +536,8 @@ export function SpecDetail({
   const banner = flowBanner(spec.state, spec.pauseReason);
   const blocked = tickets.filter((t) => t.state === "blocked");
   const repos = spec.repos ?? [];
+  const hostKind = hostKindOfRepos(repos);
+  const pullWord = pullAbbrev(hostKind);
   const confirmAt = timelineEvents.find(
     (event) => event.kind === "confirm-plan",
   )?.at;
@@ -577,6 +587,11 @@ export function SpecDetail({
         </a>
       </nav>
       <StaleNotice error={view.error} />
+      {spec.tokenMerged ? (
+        <p className="error mb-5" data-testid="token-merged">
+          平台账号合并了 {pullWord}。只有人能合并。
+        </p>
+      ) : null}
       {banner ? (
         <div
           role="status"
@@ -602,7 +617,8 @@ export function SpecDetail({
         data-testid="flow-bar"
       >
         <span className="sr-only">
-          {FLOW_STEPS.join(" → ")} · 票 {progress.done}/{progress.total}
+          {FLOW_STEPS.map((step) => flowStepLabel(step, hostKind)).join(" → ")}{" "}
+          · 票 {progress.done}/{progress.total}
         </span>
         {FLOW_STEPS.map((name, index) => {
           const current = !complete && index === stepIndex;
@@ -626,7 +642,7 @@ export function SpecDetail({
                 >
                   {done ? <Check className="size-3.5" /> : index + 1}
                 </span>
-                {name}
+                {flowStepLabel(name, hostKind)}
               </span>
               {showCaption ? (
                 <span
@@ -731,6 +747,7 @@ export function SpecDetail({
           pullRequests={pullRequests}
           timeline={timeline}
           currentStep={step}
+          hostKind={hostKind}
         />
       ) : null}
       {section === "description" ? (
@@ -759,10 +776,15 @@ export function SpecDetail({
           finalizations={finalizations}
           finalRuns={finalRuns}
           repos={spec.repos ?? []}
+          hostKind={hostKind}
         />
       ) : null}
       {section === "timeline" ? (
-        <TimelinePage events={timeline} pullRequests={pullRequests} />
+        <TimelinePage
+          events={timeline}
+          pullRequests={pullRequests}
+          hostKind={hostKind}
+        />
       ) : null}
       <TicketSheet
         ticketId={openTicket}
@@ -787,6 +809,7 @@ function Overview({
   pullRequests,
   timeline,
   currentStep,
+  hostKind,
 }: {
   spec: SpecView["spec"];
   tickets: SpecView["tickets"];
@@ -801,6 +824,7 @@ function Overview({
   pullRequests: SpecView["pullRequests"];
   timeline: SpecView["timeline"];
   currentStep: string;
+  hostKind: HostKind;
 }) {
   const progress = ticketProgress(tickets);
   const repos = spec.repos ?? [];
@@ -939,7 +963,9 @@ function Overview({
         ) : null}
         {pullRequests.length > 0 ? (
           <div>
-            <dt className="text-xs text-muted-foreground">PR</dt>
+            <dt className="text-xs text-muted-foreground">
+              {pullAbbrev(hostKind)}
+            </dt>
             <dd className="mt-1 flex flex-col gap-1">
               {pullRequests.map((pr) => (
                 <a
@@ -961,9 +987,12 @@ function Overview({
           <div>
             <dt className="text-xs text-muted-foreground">最近事件</dt>
             <dd className="mt-1 text-xs">
-              {TIMELINE_LABELS[
-                lastEvent.kind as keyof typeof TIMELINE_LABELS
-              ] ?? lastEvent.kind}
+              {lastEvent.kind in TIMELINE_LABELS
+                ? timelineLabel(
+                    lastEvent.kind as keyof typeof TIMELINE_LABELS,
+                    hostKind,
+                  )
+                : lastEvent.kind}
               {lastEvent.at ? (
                 <>
                   {" · "}
@@ -1195,9 +1224,11 @@ function TicketsPage({
 function TimelinePage({
   events,
   pullRequests,
+  hostKind,
 }: {
   events: { kind: string; at?: string; text?: string; runId?: number }[];
   pullRequests: SpecView["pullRequests"];
+  hostKind: HostKind;
 }) {
   if (events.length === 0) return <p className="note">还没有时间线事件</p>;
   const days = new Map<string, typeof events>();
@@ -1223,8 +1254,12 @@ function TimelinePage({
           <ol className="timeline-rail">
             {items.map((event) => {
               const label =
-                TIMELINE_LABELS[event.kind as keyof typeof TIMELINE_LABELS] ??
-                event.kind;
+                event.kind in TIMELINE_LABELS
+                  ? timelineLabel(
+                      event.kind as keyof typeof TIMELINE_LABELS,
+                      hostKind,
+                    )
+                  : event.kind;
               const host =
                 event.kind === "pr-opened" ||
                 event.kind === "pr-ready" ||
@@ -1262,7 +1297,7 @@ function TimelinePage({
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-primary hover:underline"
                       >
-                        GitHub
+                        {HOST_KIND_LABELS[hostKind]}
                         <ExternalLink className="size-3" />
                       </a>
                     ) : null}
@@ -1286,6 +1321,7 @@ function Delivery({
   finalizations,
   finalRuns,
   repos: specRepos,
+  hostKind,
 }: Pick<
   SpecView,
   | "pullRequests"
@@ -1294,7 +1330,10 @@ function Delivery({
   | "acceptancePack"
   | "finalizations"
   | "finalRuns"
-> & { repos: NonNullable<SpecView["spec"]["repos"]> }) {
+> & {
+  repos: NonNullable<SpecView["spec"]["repos"]>;
+  hostKind: HostKind;
+}) {
   const repoUrls = new Map(
     list(specRepos).map((repo) => [repo.name, repo.url]),
   );
@@ -1325,7 +1364,7 @@ function Delivery({
       ) : null}
       {hasPrs ? (
         <section id="delivery-prs" className="mb-8 scroll-mt-6">
-          <h2 className="mb-1 text-sm font-semibold">PR</h2>
+          <h2 className="mb-1 text-sm font-semibold">{pullAbbrev(hostKind)}</h2>
           <p className="note mb-3">
             按这个顺序合并；平台从不合入。
             {list(mergeOrder?.ordered).length > 0
@@ -1381,7 +1420,9 @@ function Delivery({
             ))}
           </>
         ) : (
-          <p className="note">还没有验收包。开完 PR 后会生成。</p>
+          <p className="note">
+            还没有验收包。开完 {pullAbbrev(hostKind)} 后会生成。
+          </p>
         )}
       </section>
     </>

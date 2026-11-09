@@ -58,6 +58,7 @@ const LATER_THAN_REPO_NAMES = [
   "0036_action_events",
   "0037_code_hosts",
   "0038_host_sync_one_row",
+  "0039_host_sync_merge",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -433,7 +434,7 @@ describe("one host-sync job per project", () => {
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
       journal.entries = journal.entries.filter(
-        (e: { tag: string }) => e.tag !== "0038_host_sync_one_row",
+        (e: { tag: string }) => Number(e.tag.slice(0, 4)) < 38,
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);

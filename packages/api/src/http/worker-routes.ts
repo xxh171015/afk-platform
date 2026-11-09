@@ -826,7 +826,12 @@ export function registerWorkerRoutes(
           const sync = readHostSyncPayload(job.rows[0]);
           const access = readRepoAccessPayload(job.rows[0]);
           if (failure.status === "not-a-stage" && sync)
-            await hostSyncFailed(client, sync.projectId, context.clock());
+            await hostSyncFailed(
+              client,
+              sync.projectId,
+              context.clock(),
+              error,
+            );
           if (failure.status === "not-a-stage" && access)
             await repoAccessFailed(client, access, error, context.clock());
         }

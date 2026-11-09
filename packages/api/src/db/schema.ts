@@ -145,6 +145,9 @@ export const specs = pgTable(
       .default(false),
     // Parked until the next final Run is claimed, then copied onto that Run and cleared.
     retryNote: text("retry_note"),
+    // The platform token's user merged a pull request. Kept for good. A personal token that can push the
+    // default branch is not flagged: that would mark every merge a person makes.
+    tokenMerged: boolean("token_merged").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -412,6 +415,9 @@ export const pullRequests = pgTable(
     headSha: text("head_sha").notNull(),
     ci: text("ci").notNull().default("none"),
     review: text("review").notNull().default("none"),
+    // Who the host says merged it, and when. The host's timestamp, not when the look ran.
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
+    mergedBy: text("merged_by"),
     // Why the last look at the host failed for this pull request; cleared by the next one that works.
     syncError: text("sync_error"),
     syncedAt: timestamp("synced_at", { withTimezone: true }),

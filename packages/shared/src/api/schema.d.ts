@@ -2568,6 +2568,7 @@ export interface paths {
                   level: "yellow";
                   message: string;
                 }[];
+                tokenMerged: boolean;
               };
               tickets: {
                 id: number;
@@ -2705,6 +2706,8 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -2747,6 +2750,8 @@ export interface paths {
                 /** @enum {string} */
                 review: "none" | "approved" | "changes-requested";
                 syncError: string | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
               }[];
               acceptancePack: {
                 generatedAt: string;
@@ -2761,6 +2766,8 @@ export interface paths {
                   repo: string;
                   skipped: string[];
                 }[];
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 repos: {
                   repo: string;
                   pullRequest: {
@@ -2778,6 +2785,8 @@ export interface paths {
                     /** @enum {string} */
                     review: "none" | "approved" | "changes-requested";
                     syncError: string | null;
+                    /** @enum {string} */
+                    hostKind?: "github" | "gitlab";
                   } | null;
                   gate: {
                     commitSha: string;
@@ -3171,6 +3180,8 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3195,6 +3206,8 @@ export interface paths {
                 url: string;
                 state: string;
                 syncError: string | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3215,6 +3228,8 @@ export interface paths {
                 specId: number;
                 specDisplayId: string;
                 error: string;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3238,6 +3253,8 @@ export interface paths {
                 number: number;
                 url: string;
                 error: string;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];

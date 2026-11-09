@@ -2,6 +2,7 @@ import {
   type AcceptancePackView,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
+  pullPhrase,
 } from "@afk/shared";
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
@@ -518,12 +519,13 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 export function acceptancePackText(pack: AcceptancePackView): string {
   const order = pack.mergeOrder;
   const integration = pack.integration;
+  const phrase = pullPhrase(pack.hostKind === "gitlab" ? "gitlab" : "github");
   return [
     "acceptance pack:",
     // what a person must not miss: the e2e before the pull requests failed and they were let through
     ...(integration?.failedBeforePullRequest
       ? [
-          "  !! the e2e before the pull requests failed; the pull requests were opened anyway",
+          `  !! the e2e before the ${phrase}s failed; the ${phrase}s were opened anyway`,
           ...integration.failedBeforePullRequest.tickets.flatMap((t) => [
             `     ${t.displayId}  ${t.title}: ${t.e2e.displayId} ${t.e2e.result ?? "?"}`,
             ...(t.diagnosis
@@ -543,7 +545,7 @@ export function acceptancePackText(pack: AcceptancePackView): string {
         ]
       : pack.planningDocs?.state === "committed"
         ? [
-            `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s pull request`,
+            `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s ${phrase}`,
           ]
         : []),
     ...pack.orderBroken.map((b) => `  ${brokenOrderLine(b)}`),
@@ -556,8 +558,8 @@ export function acceptancePackText(pack: AcceptancePackView): string {
       return [
         `  ${repo.repo}:`,
         ...(repo.pullRequest
-          ? [`    pull request: ${pullRequestRow(repo.pullRequest)}`]
-          : ["    pull request: none yet"]),
+          ? [`    ${phrase}: ${pullRequestRow(repo.pullRequest)}`]
+          : [`    ${phrase}: none yet`]),
         ...section(
           "acceptance criteria",
           repo.tickets.flatMap((t) => [

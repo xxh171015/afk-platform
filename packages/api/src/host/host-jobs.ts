@@ -9,6 +9,12 @@ import { enqueueJob, requeueJob } from "../jobs/queue.ts";
 
 export const SYNC_INTERVAL_SECONDS = 60;
 
+// GitLab 429: the worker's error says "retry after Ns". Anything else waits the usual minute.
+export function syncDelaySeconds(error?: string): number {
+  const match = /retry after (\d+)s/i.exec(error ?? "");
+  return match ? Number(match[1]) : SYNC_INTERVAL_SECONDS;
+}
+
 export interface OpenPrPayload {
   specId: number;
   repoId: number;

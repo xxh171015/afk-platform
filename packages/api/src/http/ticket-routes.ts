@@ -161,6 +161,7 @@ const Finalization = z
     state: z.string(),
     blockedReason: z.string().nullable(),
     brief: Brief,
+    hostKind: z.enum(HOST_KINDS).optional(),
   })
   .merge(WaitingFields);
 
@@ -323,6 +324,7 @@ const specRoute = createRoute({
               message: z.string(),
             }),
           ),
+          tokenMerged: z.boolean(),
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
@@ -462,6 +464,7 @@ const BlockedQueue = z.object({
         url: z.string(),
         state: z.string(),
         syncError: z.string().nullable(),
+        hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
   ),
@@ -471,6 +474,7 @@ const BlockedQueue = z.object({
         specId: Id,
         specDisplayId: z.string(),
         error: z.string(),
+        hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
   ),
@@ -483,6 +487,7 @@ const BlockedQueue = z.object({
         number: z.number().int(),
         url: z.string(),
         error: z.string(),
+        hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
   ),

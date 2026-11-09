@@ -12,6 +12,9 @@ const info = (url: string): PullRequestInfo => ({
   headSha: "sha",
   ci: "none",
   review: "none",
+  mergedBy: null,
+  mergedAt: null,
+  mergedByPlatform: false,
 });
 
 function fakeAdapter(name: string): HostAdapter {

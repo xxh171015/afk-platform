@@ -56,6 +56,8 @@ export {
   HOST_KINDS,
   hostKindOfUrl,
   mixedHostsProblem,
+  pullAbbrev,
+  pullPhrase,
 } from "./host-kinds.ts";
 export type { InvalidatePayload } from "./invalidate.ts";
 export type { JobState } from "./job-state.ts";

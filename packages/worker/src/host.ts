@@ -122,8 +122,13 @@ export async function runHostTask(
         headSha: info.headSha,
         ci: info.ci,
         review: info.review,
+        mergedBy: info.mergedBy,
+        mergedAt: info.mergedAt,
+        mergedByPlatform: info.mergedByPlatform,
       });
     } catch (error) {
+      if (error instanceof HostError && error.status === 429)
+        throw new InfrastructureError(error.message);
       // one pull request that cannot be read must not hide what the others look like
       const message = error instanceof Error ? error.message : String(error);
       log(`pull request ${pull.number} of ${pull.repoUrl}: ${message}`);

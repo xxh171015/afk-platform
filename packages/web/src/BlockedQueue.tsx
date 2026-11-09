@@ -40,6 +40,7 @@ import { Button } from "./components/ui/button.tsx";
 import { Checkbox } from "./components/ui/checkbox.tsx";
 import { Input } from "./components/ui/input.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { hostKindOf, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { LIST_POLL_MS } from "./live.ts";
@@ -104,16 +105,19 @@ function useAction<Action>(run: (action: Action) => Promise<unknown>) {
 function WaitingMeta({
   blocking,
   waitingSince,
+  hostKind,
 }: {
   blocking?: Blocking;
   waitingSince?: string;
+  hostKind?: string | null;
 }) {
   if (!blocking || !waitingSince) return null;
+  const kind = hostKindOf({ hostKind });
   return (
     <div className="space-y-1 text-[13px]">
-      <p>阻断了什么：{blockingCopy(blocking)}</p>
+      <p>阻断了什么：{blockingCopy(blocking, kind)}</p>
       <p className="text-muted-foreground">
-        为何排在这：{rankCopy(blocking, waitingSince)}
+        为何排在这：{rankCopy(blocking, waitingSince, kind)}
       </p>
     </div>
   );
@@ -418,6 +422,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
       <WaitingMeta
         blocking={ticket.blocking}
         waitingSince={ticket.waitingSince}
+        hostKind={ticket.hostKind}
       />
       <Brief reason={ticket.blockedReason} brief={ticket.brief} />
     </Card>
@@ -520,6 +525,7 @@ function BlockedFinalization({
   });
   const beforePullRequests = item.step === "final-e2e";
   const busy = retry.isPending || waive.isPending;
+  const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
       category="final"
@@ -528,7 +534,9 @@ function BlockedFinalization({
         <>
           <IdChip displayId={item.specDisplayId} id={item.specId} />
           <span>
-            {beforePullRequests ? "开 PR 前的联调" : `${item.repo} 的总览审查`}
+            {beforePullRequests
+              ? `开 ${pr} 前的联调`
+              : `${item.repo} 的总览审查`}
           </span>
           {item.blockedReason ? (
             <ReasonBadge reason={item.blockedReason} />
@@ -564,7 +572,7 @@ function BlockedFinalization({
               disabled={busy}
               onClick={() => setConfirmWaive(true)}
             >
-              仍然开 PR
+              仍然开 {pr}
             </Button>
           ) : null}
           <Problem error={retry.error ?? waive.error} />
@@ -576,10 +584,10 @@ function BlockedFinalization({
           >
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>跳过联调，仍然开 PR？</AlertDialogTitle>
+                <AlertDialogTitle>跳过联调，仍然开 {pr}？</AlertDialogTitle>
                 <AlertDialogDescription>
-                  {item.specDisplayId} 会在联调没通过的情况下继续收尾并开
-                  PR。验收包会在「联调」一节最前面写明这次失败，合并前请务必看到。
+                  {item.specDisplayId} 会在联调没通过的情况下继续收尾并开 {pr}
+                  。验收包会在「联调」一节最前面写明这次失败，合并前请务必看到。
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -594,7 +602,7 @@ function BlockedFinalization({
                   }
                 >
                   <Spinner on={waive.isPending} />
-                  仍然开 PR
+                  仍然开 {pr}
                 </Button>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -602,13 +610,18 @@ function BlockedFinalization({
         </>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       <Brief reason={item.blockedReason} brief={item.brief} />
     </Card>
   );
 }
 
 function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
+  const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
       category="pr"
@@ -649,16 +662,20 @@ function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
         </>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       {item.syncError ? (
         <CollapsibleCode text={`读取失败：${item.syncError}`} />
       ) : null}
       <p className="text-muted-foreground">
         {item.state === "closed"
-          ? "这个 PR 被关闭了，但没有合并。"
-          : "平台读取这个 PR 失败，当前看到的状态可能不是最新的。"}
+          ? `这个 ${pr} 被关闭了，但没有合并。`
+          : `平台读取这个 ${pr} 失败，当前看到的状态可能不是最新的。`}
         平台从不操作
-        PR，请你决定：到代码托管上重新打开它、返工这个需求，或取消它。
+        {pr}，请你决定：到代码托管上重新打开它、返工这个需求，或取消它。
       </p>
       <CopyCommand command={`plat spec cancel ${item.specDisplayId}`} />
     </Card>
@@ -682,10 +699,15 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
         </a>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
-        代码托管上可能还残留着这个需求的分支或 PR。确认后用下面的命令重新清理：
+        代码托管上可能还残留着这个需求的分支或 {pullAbbrev(hostKindOf(item))}
+        。确认后用下面的命令重新清理：
       </p>
       <CopyCommand command={`plat spec cleanup ${item.specDisplayId}`} />
     </Card>
@@ -693,6 +715,7 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
 }
 
 function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
+  const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
       category="ready"
@@ -701,7 +724,7 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
         <>
           <IdChip displayId={item.specDisplayId} id={item.specId} />
           <span>
-            <Mono>{item.repo}</Mono> 的 draft PR 没能转为 ready
+            <Mono>{item.repo}</Mono> 的 draft {pr} 没能转为 ready
           </span>
         </>
       }
@@ -722,11 +745,15 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
         </>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
-        这个 PR 仍是 draft。等排在它前面的 PR 合并后，到代码托管上手动把它转为
-        ready，平台下次同步时会看到。
+        这个 {pr} 仍是 draft。等排在它前面的 {pr}{" "}
+        合并后，到代码托管上手动把它转为 ready，平台下次同步时会看到。
       </p>
     </Card>
   );

@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 
 // A stand-in for the GitLab CE REST calls the adapter uses (17.3.1: create returns 201, a second
 // create for the same source branch is 409 in Chinese, close is state_event, a missing branch is 404).
+// getPullRequest also reads head_pipeline, approvals, reviewers, /user and can_push.
 
 interface FakeMr {
   iid: number;
@@ -13,11 +14,22 @@ interface FakeMr {
   description: string;
   state: "opened" | "closed" | "merged";
   sha: string;
+  pipeline: string | null;
+  mergedBy: string | null;
+  mergedAt: string | null;
+  approvedBy: string[];
+  reviewers: { username: string; state: string }[];
 }
 
 export class FakeGitLab {
   readonly requests: string[] = [];
   refuseBranchDeletes = false;
+  hideApprovals = false;
+  hideReviewers = false;
+  rateLimitSeconds: number | null = null;
+  username = "token-user";
+  canPush = true;
+  defaultBranch = "master";
   private readonly mrs: FakeMr[] = [];
   private readonly branchNames = new Set<string>();
   private readonly protectedBranches = new Set<string>();
@@ -64,8 +76,27 @@ export class FakeGitLab {
     this.protectedBranches.add(name);
   }
 
-  mergeMr(iid: number): void {
-    this.mr(iid).state = "merged";
+  setPipeline(iid: number, status: string | null): void {
+    this.mr(iid).pipeline = status;
+  }
+
+  approveMr(iid: number, username: string): void {
+    const mr = this.mr(iid);
+    if (!mr.approvedBy.includes(username)) mr.approvedBy.push(username);
+  }
+
+  setReviewer(iid: number, username: string, state: string): void {
+    const mr = this.mr(iid);
+    const existing = mr.reviewers.find((row) => row.username === username);
+    if (existing) existing.state = state;
+    else mr.reviewers.push({ username, state });
+  }
+
+  mergeMr(iid: number, extra: { by?: string; at?: string } = {}): void {
+    const mr = this.mr(iid);
+    mr.state = "merged";
+    mr.mergedBy = extra.by ?? mr.mergedBy;
+    mr.mergedAt = extra.at ?? mr.mergedAt ?? "2026-11-09T10:00:00.000Z";
   }
 
   closeMr(iid: number): void {
@@ -84,6 +115,7 @@ export class FakeGitLab {
 
   private render(mr: FakeMr) {
     const draft = this.draft(mr.title);
+    const user = mr.mergedBy ? { username: mr.mergedBy } : null;
     return {
       iid: mr.iid,
       web_url: `https://gitlab.example/${this.options.owner}/${this.options.repo}/-/merge_requests/${mr.iid}`,
@@ -95,10 +127,14 @@ export class FakeGitLab {
       sha: mr.sha,
       source_branch: mr.source,
       target_branch: mr.target,
-      merged_by: null,
-      merge_user: null,
-      head_pipeline: null,
-      reviewers: [],
+      merged_by: user,
+      merge_user: user,
+      merged_at: mr.mergedAt,
+      head_pipeline: mr.pipeline ? { status: mr.pipeline } : null,
+      reviewers: mr.reviewers.map((row) => ({
+        user: { username: row.username },
+        state: row.state,
+      })),
     };
   }
 
@@ -106,8 +142,9 @@ export class FakeGitLab {
     res: import("node:http").ServerResponse,
     status: number,
     body: unknown,
+    headers: Record<string, string> = {},
   ) {
-    res.writeHead(status, { "content-type": "application/json" });
+    res.writeHead(status, { "content-type": "application/json", ...headers });
     res.end(JSON.stringify(body));
   }
 
@@ -124,11 +161,25 @@ export class FakeGitLab {
     if (req.headers["private-token"] !== this.options.token)
       return this.json(res, 401, { message: "401 Unauthorized" });
 
+    if (this.rateLimitSeconds !== null)
+      return this.json(
+        res,
+        429,
+        { message: "429 Too Many Requests" },
+        { "retry-after": String(this.rateLimitSeconds) },
+      );
+
     const url = new URL(req.url ?? "/", "http://gitlab.example");
+    if (req.method === "GET" && url.pathname === "/api/v4/user")
+      return this.json(res, 200, { username: this.username });
+
     const prefix = `/api/v4/projects/${this.projectPath()}`;
     if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`))
       return this.json(res, 404, { message: "404 Project Not Found" });
     const rest = url.pathname.slice(prefix.length);
+
+    if (req.method === "GET" && rest === "")
+      return this.json(res, 200, { default_branch: this.defaultBranch });
 
     if (req.method === "POST" && rest === "/merge_requests") {
       const source = String(body.source_branch ?? "");
@@ -147,6 +198,11 @@ export class FakeGitLab {
         description: String(body.description ?? ""),
         state: "opened",
         sha: createHash("sha1").update(source).digest("hex"),
+        pipeline: null,
+        mergedBy: null,
+        mergedAt: null,
+        approvedBy: [],
+        reviewers: [],
       };
       this.mrs.push(mr);
       return this.json(res, 201, this.render(mr));
@@ -169,6 +225,36 @@ export class FakeGitLab {
       );
     }
 
+    const approvals = /^\/merge_requests\/(\d+)\/approvals$/.exec(rest);
+    if (approvals && req.method === "GET") {
+      if (this.hideApprovals)
+        return this.json(res, 404, { message: "404 Not Found" });
+      const mr = this.mrs.find((m) => m.iid === Number(approvals[1]));
+      if (!mr) return this.json(res, 404, { message: "404 Not found" });
+      return this.json(res, 200, {
+        approved: mr.approvedBy.length > 0,
+        approved_by: mr.approvedBy.map((username) => ({
+          user: { username },
+        })),
+      });
+    }
+
+    const reviewers = /^\/merge_requests\/(\d+)\/reviewers$/.exec(rest);
+    if (reviewers && req.method === "GET") {
+      if (this.hideReviewers)
+        return this.json(res, 404, { message: "404 Not Found" });
+      const mr = this.mrs.find((m) => m.iid === Number(reviewers[1]));
+      if (!mr) return this.json(res, 404, { message: "404 Not found" });
+      return this.json(
+        res,
+        200,
+        mr.reviewers.map((row) => ({
+          user: { username: row.username },
+          state: row.state,
+        })),
+      );
+    }
+
     const one = /^\/merge_requests\/(\d+)$/.exec(rest);
     if (one) {
       const mr = this.mrs.find((m) => m.iid === Number(one[1]));
@@ -185,16 +271,20 @@ export class FakeGitLab {
     }
 
     const branch = /^\/repository\/branches\/(.+)$/.exec(rest);
-    if (req.method === "DELETE" && branch) {
-      if (this.refuseBranchDeletes)
-        return this.json(res, 403, { message: "403 Forbidden" });
+    if (branch) {
       const name = decodeURIComponent(branch[1] as string);
-      if (this.protectedBranches.has(name))
-        return this.json(res, 403, { message: "403 Forbidden" });
-      if (!this.branchNames.delete(name))
-        return this.json(res, 404, { message: "404 Branch Not Found" });
-      res.writeHead(204);
-      return res.end();
+      if (req.method === "GET")
+        return this.json(res, 200, { name, can_push: this.canPush });
+      if (req.method === "DELETE") {
+        if (this.refuseBranchDeletes)
+          return this.json(res, 403, { message: "403 Forbidden" });
+        if (this.protectedBranches.has(name))
+          return this.json(res, 403, { message: "403 Forbidden" });
+        if (!this.branchNames.delete(name))
+          return this.json(res, 404, { message: "404 Branch Not Found" });
+        res.writeHead(204);
+        return res.end();
+      }
     }
 
     return this.json(res, 404, { message: "404 Not Found" });

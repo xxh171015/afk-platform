@@ -158,6 +158,22 @@ describe("renderPackSection", () => {
     expect(section).toContain("/specs/1/delivery");
   });
 
+  it("says merge request on GitLab", () => {
+    const gitlab = pack({
+      hostKind: "gitlab",
+      planningDocs: { repo: "backend", state: "committed" },
+    });
+    expect(renderPackSection(gitlab, "backend", 1).section).toContain(
+      "The first commit of this merge request is the planning docs",
+    );
+    expect(renderPackSection(gitlab, "backend", 1).section).toContain(
+      "Opened although the e2e before the merge requests failed",
+    );
+    expect(renderPackSection(gitlab, "backend", 1).summary).toContain(
+      "too long for a GitLab description",
+    );
+  });
+
   it("puts waived e2e failures at the front of the integration section", () => {
     const { section } = renderPackSection(pack(), "backend", 1);
     const integration = section.slice(section.indexOf("## Integration"));

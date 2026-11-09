@@ -1,4 +1,4 @@
-import { formatDisplayId } from "@afk/shared";
+import { formatDisplayId, type HostKind, pullAbbrev } from "@afk/shared";
 import type pg from "pg";
 
 // A spec's timeline reconstructed from what the platform recorded: runs, pull requests, the pack, and the spec
@@ -182,27 +182,30 @@ export async function specTimeline(
     draft: boolean;
     state: string;
     synced_at: Date;
+    host_kind: HostKind;
   }>(
-    "SELECT number, draft, state, synced_at FROM pull_requests WHERE spec_id = $1 ORDER BY id",
+    `SELECT p.number, p.draft, p.state, p.synced_at, r.host_kind
+     FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.spec_id = $1 ORDER BY p.id`,
     [specId],
   );
   for (const pull of pulls.rows) {
+    const pr = pullAbbrev(pull.host_kind);
     items.push({
       kind: "pr-opened",
       at: pull.synced_at.toISOString(),
-      text: `开 PR #${pull.number}`,
+      text: `开 ${pr} #${pull.number}`,
     });
     if (!pull.draft)
       items.push({
         kind: "pr-ready",
         at: pull.synced_at.toISOString(),
-        text: `PR #${pull.number} 转 ready`,
+        text: `${pr} #${pull.number} 转 ready`,
       });
     if (pull.state === "merged")
       items.push({
         kind: "merged",
         at: pull.synced_at.toISOString(),
-        text: `PR #${pull.number} 合并进 main`,
+        text: `${pr} #${pull.number} 合并进 main`,
       });
   }
 
