@@ -24,6 +24,7 @@ import {
   syncDelaySeconds,
 } from "./host-jobs.ts";
 import { mergeOrderOf } from "./merge-order.ts";
+import { dropPotentialConflicts } from "./trial-merge.ts";
 import {
   applyDefaultShas,
   defaultBranchesToWatch,
@@ -482,7 +483,10 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     specId,
     next.state,
   ]);
-  if (all) await enqueueSpecCleanup(client, { specId });
+  if (all) {
+    await dropPotentialConflicts(client, specId);
+    await enqueueSpecCleanup(client, { specId });
+  }
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,

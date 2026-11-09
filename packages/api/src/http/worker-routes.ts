@@ -37,6 +37,11 @@ import {
   repoAccessTask,
 } from "../host/repo-access.ts";
 import {
+  buildTrialMergeTask,
+  readTrialMergePayload,
+  recordTrialMergeResult,
+} from "../host/trial-merge.ts";
+import {
   markUpdateBranchClaimed,
   recordUpdateBranchResult,
 } from "../host/update-branch.ts";
@@ -429,6 +434,58 @@ const readinessTaskRoute = createRoute({
   },
 });
 
+const trialMergeTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/trial-merge-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What a trial-merge job has to do: merge-tree this spec's integration branch against the other live specs in the same repo, and name any conflicting files",
+      content: {
+        "application/json": {
+          schema: z.object({
+            spec: z.object({
+              id: z.number().int(),
+              displayId: z.string(),
+              title: z.string(),
+            }),
+            repo: z.object({
+              name: z.string(),
+              url: z.string(),
+              defaultBranch: z.string(),
+            }),
+            ours: z.object({
+              specId: z.number().int(),
+              branch: z.string(),
+            }),
+            peers: z.array(
+              z.object({
+                specId: z.number().int(),
+                branch: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "No such job, or not a trial-merge job",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const planningTaskRoute = createRoute({
   method: "get",
   path: "/worker/jobs/{id}/planning-task",
@@ -641,6 +698,11 @@ export function registerWorkerRoutes(
             "SELECT id, type, payload FROM jobs WHERE id = $1",
             [id],
           );
+          const trial = readTrialMergePayload(job.rows[0]);
+          if (trial) {
+            await recordTrialMergeResult(client, job.rows[0], result);
+            return finished;
+          }
           const planning = readPlanningPayload(job.rows[0]);
           // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
           const recorded = planning
@@ -782,6 +844,29 @@ export function registerWorkerRoutes(
     const task = payload && (await readinessGateTask(context.pool, payload));
     if (!task)
       return c.json({ error: "this job is not a readiness gate" }, 404);
+    return c.json(task, 200);
+  });
+
+  app.openapi(trialMergeTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const payload = job.rows[0] && readTrialMergePayload(job.rows[0]);
+    const task = payload && (await buildTrialMergeTask(context.pool, payload));
+    if (!task) return c.json({ error: "this job is not a trial-merge" }, 404);
     return c.json(task, 200);
   });
 

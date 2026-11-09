@@ -12,6 +12,7 @@ import type pg from "pg";
 import { z } from "zod";
 import { recordAction } from "../events/human-actions.ts";
 import { enqueueOpenPr } from "../host/host-jobs.ts";
+import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
@@ -115,6 +116,13 @@ export async function recordFinalResult(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",
       [fin.id],
     );
+    if (valid?.stage === "final-merge") {
+      await enqueueTrialMerge(client, {
+        specId: read.specId,
+        repoId: read.repoId,
+        headSha: valid.headSha,
+      });
+    }
     // the last repo to settle sends all of the spec's pull requests out, after the e2e that comes first when a
     // final fix changed a branch
     await settleFinalization(client, read.specId);

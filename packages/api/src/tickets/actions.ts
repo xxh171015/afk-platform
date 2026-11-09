@@ -17,6 +17,7 @@ import {
   enqueueSpecCleanup,
   inSeconds,
 } from "../host/host-jobs.ts";
+import { dropPotentialConflicts } from "../host/trial-merge.ts";
 import {
   enqueueFinalReviewIfWaiting,
   enqueueUpdateBranch,
@@ -644,6 +645,7 @@ export async function cancelSpec(
        WHERE state IN ('queued', 'running') AND (payload->>'specId')::int = $1`,
       [specId],
     );
+    await dropPotentialConflicts(client, specId);
     await client.query(
       `UPDATE runs SET finished_at = now(), result = 'cancelled',
          duration_ms = LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int,

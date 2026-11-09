@@ -22,6 +22,7 @@ const ENTITY_TABLES = [
   "gate_results",
   "instance",
   "jobs",
+  "potential_conflicts",
   "projects",
   "pull_requests",
   "repos",
@@ -63,6 +64,7 @@ const LATER_THAN_REPO_NAMES = [
   "0041_pause_reason",
   "0042_repo_default_sha",
   "0043_pr_conflicts_with_default",
+  "0044_potential_conflicts",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

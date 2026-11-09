@@ -41,6 +41,10 @@ export type PlanningTask =
 export type ReadinessTask =
   paths["/worker/jobs/{id}/readiness-task"]["get"]["responses"][200]["content"]["application/json"];
 
+// What GET /worker/jobs/{id}/trial-merge-task returns: the branches to merge-tree for a potential conflict.
+export type TrialMergeTask =
+  paths["/worker/jobs/{id}/trial-merge-task"]["get"]["responses"][200]["content"]["application/json"];
+
 // The acceptance pack as GET /specs/{id} returns it. Declared once, in the API; the CLI and the page read this.
 export type AcceptancePackView = NonNullable<
   paths["/specs/{id}"]["get"]["responses"][200]["content"]["application/json"]["acceptancePack"]

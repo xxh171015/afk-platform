@@ -84,7 +84,7 @@ export {
   startEnvironment,
 } from "./integration-env.ts";
 export type { MergeCandidate } from "./merge.ts";
-export { hasRef, isAncestor, mergeCandidate } from "./merge.ts";
+export { hasRef, isAncestor, mergeCandidate, trialMerge } from "./merge.ts";
 export type { ProtectedPathCheck } from "./protected-paths.ts";
 export {
   changedFiles,

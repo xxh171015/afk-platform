@@ -508,6 +508,7 @@ export function SpecDetail({
     acceptancePack,
     timeline: timelineEvents,
     finalRuns,
+    potentialConflicts,
   } = data;
   const timeline = visibleTimeline(timelineEvents);
 
@@ -748,6 +749,7 @@ export function SpecDetail({
           timeline={timeline}
           currentStep={step}
           hostKind={hostKind}
+          potentialConflicts={potentialConflicts ?? []}
         />
       ) : null}
       {section === "description" ? (
@@ -810,6 +812,7 @@ function Overview({
   timeline,
   currentStep,
   hostKind,
+  potentialConflicts,
 }: {
   spec: SpecView["spec"];
   tickets: SpecView["tickets"];
@@ -825,6 +828,7 @@ function Overview({
   timeline: SpecView["timeline"];
   currentStep: string;
   hostKind: HostKind;
+  potentialConflicts: NonNullable<SpecView["potentialConflicts"]>;
 }) {
   const progress = ticketProgress(tickets);
   const repos = spec.repos ?? [];
@@ -915,6 +919,23 @@ function Overview({
                   {spec.planningRepo}
                 </span>
               ) : null}
+            </dd>
+          </div>
+        ) : null}
+        {potentialConflicts.length > 0 ? (
+          <div>
+            <dt className="text-xs text-muted-foreground">潜在冲突</dt>
+            <dd className="mt-1">
+              <ul
+                className="warnings text-state-paused"
+                data-testid="potential-conflicts"
+              >
+                {potentialConflicts.map((conflict) => (
+                  <li key={`${conflict.specId}:${conflict.repoId}`}>
+                    {`和 ${conflict.displayId} ${conflict.title} 在 ${conflict.repo} 有潜在冲突：${conflict.files.join("、")}；后合并的一方在更新集成分支时处理`}
+                  </li>
+                ))}
+              </ul>
             </dd>
           </div>
         ) : null}

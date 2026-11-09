@@ -360,6 +360,16 @@ const specRoute = createRoute({
             finishedAt: z.string().nullable(),
           }),
         ),
+        potentialConflicts: z.array(
+          z.object({
+            specId: Id,
+            displayId: z.string(),
+            title: z.string(),
+            repo: z.string(),
+            repoId: Id,
+            files: z.array(z.string()),
+          }),
+        ),
       }),
     ),
     404: reply("No such spec", ErrorReply),

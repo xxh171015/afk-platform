@@ -3146,6 +3146,146 @@
         }
       }
     },
+    "/worker/jobs/{id}/trial-merge-task": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What a trial-merge job has to do: merge-tree this spec's integration branch against the other live specs in the same repo, and name any conflicting files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "displayId", "title"]
+                    },
+                    "repo": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["name", "url", "defaultBranch"]
+                    },
+                    "ours": {
+                      "type": "object",
+                      "properties": {
+                        "specId": {
+                          "type": "integer"
+                        },
+                        "branch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["specId", "branch"]
+                    },
+                    "peers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["specId", "branch"]
+                      }
+                    }
+                  },
+                  "required": ["spec", "repo", "ours", "peers"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or not a trial-merge job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/{id}/planning-task": {
       "get": {
         "parameters": [
@@ -5897,6 +6037,43 @@
                           "finishedAt"
                         ]
                       }
+                    },
+                    "potentialConflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "repoId": {
+                            "type": "integer"
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "displayId",
+                          "title",
+                          "repo",
+                          "repoId",
+                          "files"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -5909,7 +6086,8 @@
                     "acceptancePack",
                     "edges",
                     "timeline",
-                    "finalRuns"
+                    "finalRuns",
+                    "potentialConflicts"
                   ]
                 }
               }

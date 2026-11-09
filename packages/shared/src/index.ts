@@ -8,6 +8,7 @@ export type {
   PullRequestRowView,
   paths,
   ReadinessTask,
+  TrialMergeTask,
 } from "./api/client.ts";
 export {
   CLI_HEADERS,
@@ -51,7 +52,11 @@ export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
 export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS } from "./findings.ts";
-export { HOST_CAPABILITY, HOST_JOB_TYPES } from "./host-jobs.ts";
+export {
+  HOST_CAPABILITY,
+  HOST_JOB_TYPES,
+  TRIAL_MERGE_JOB,
+} from "./host-jobs.ts";
 export type { HostKind } from "./host-kinds.ts";
 export {
   HOST_KIND_LABELS,

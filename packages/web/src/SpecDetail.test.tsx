@@ -43,6 +43,7 @@ const view = (
     acceptancePack?: unknown;
     timeline?: unknown[];
     finalRuns?: unknown[];
+    potentialConflicts?: unknown[];
     mergeOrder?: {
       ordered: string[];
       after: Record<string, string[]>;
@@ -80,6 +81,7 @@ const view = (
   acceptancePack: over.acceptancePack ?? null,
   timeline: over.timeline ?? [],
   finalRuns: over.finalRuns ?? [],
+  potentialConflicts: over.potentialConflicts ?? [],
 });
 
 const ticketView = (n: number, over: Record<string, unknown> = {}) => ({
@@ -673,6 +675,34 @@ describe("the spec page", () => {
       "已暂停",
     );
     expect(screen.getByText(/已暂停: agent 时间用完/)).toBeTruthy();
+  });
+
+  it("shows a potential conflict with another spec as a hint, not a block", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            potentialConflicts: [
+              {
+                specId: 2,
+                displayId: "S-2",
+                title: "Bulk ship",
+                repo: "backend",
+                repoId: 1,
+                files: ["src/shared.ts", "src/a.ts"],
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const hint = await screen.findByTestId("potential-conflicts");
+    expect(hint.textContent).toBe(
+      "和 S-2 Bulk ship 在 backend 有潜在冲突：src/shared.ts、src/a.ts；后合并的一方在更新集成分支时处理",
+    );
+    expect(screen.queryByText("待处理")).toBeNull();
   });
 
   it("shows the overall review of a finalizing spec", async () => {

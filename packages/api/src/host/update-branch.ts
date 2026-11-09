@@ -11,6 +11,7 @@ import { enqueueJob } from "../jobs/queue.ts";
 import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
+import { enqueueTrialMerge } from "./trial-merge.ts";
 
 // Merging the default branch into a spec's integration branch (docs/specs/m3-platform.md「多需求并行」).
 // Host-sync notices a new default SHA; this module queues at most one update-branch per spec × repo, coalesces
@@ -593,6 +594,11 @@ export async function recordUpdateBranchResult(
         read.mainSha,
       );
     if (read.afterFix) await enqueueIfMainMoved(client, read);
+    await enqueueTrialMerge(client, {
+      specId: read.specId,
+      repoId: read.repoId,
+      headSha: valid.headSha,
+    });
     await enqueueFinalReviewIfWaiting(client, read.specId, read.repoId);
     return { status: "applied" };
   }

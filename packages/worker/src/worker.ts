@@ -3,6 +3,7 @@ import {
   HOST_JOB_TYPES,
   MAX_LOG_CHUNK_BYTES,
   PLANNING_COMMIT_JOB,
+  TRIAL_MERGE_JOB,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { withCredentials } from "./credentials.ts";
@@ -18,6 +19,7 @@ import { type HostDeps, runHostTask } from "./host.ts";
 import { runPlanningCommit } from "./planning.ts";
 import { rawLogSink } from "./raw-log.ts";
 import { READINESS_GATE_JOB, runReadinessGate } from "./readiness.ts";
+import { runTrialMerge } from "./trial-merge.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -149,6 +151,20 @@ export async function processJob(
   let uploader: LogUploader | undefined;
   let stopStreaming = () => {};
   try {
+    if (job.type === TRIAL_MERGE_JOB) {
+      const task = await api.trialMergeTask(job);
+      if (task === "lost") return "abandoned";
+      const deps = await withCredentials(
+        { ...options.executor, api },
+        task.repo.url,
+      );
+      const body = runTrialMerge(deps, task, log);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      log(`trial-merge ${body.peers.length} peers`);
+      return "completed";
+    }
     if (job.type === PLANNING_COMMIT_JOB) {
       const task = await api.planningTask(job);
       if (task === "lost") return "abandoned";

@@ -5,6 +5,7 @@ import {
   type HostTask,
   type PlanningTask,
   type ReadinessTask,
+  type TrialMergeTask,
 } from "@afk/shared";
 
 // The worker talks to the platform over HTTP only (docs/specs/m1-platform.md「worker 专用接口」): it has no
@@ -30,6 +31,7 @@ export interface WorkerApi {
   hostTask(job: ClaimedJob): Promise<HostTask | "lost">;
   planningTask(job: ClaimedJob): Promise<PlanningTask | "lost">;
   readinessTask(job: ClaimedJob): Promise<ReadinessTask | "lost">;
+  trialMergeTask(job: ClaimedJob): Promise<TrialMergeTask | "lost">;
   // Is this job still running under a live lease at this attempt? Throws when the API cannot be asked.
   isHeld(jobId: number, attempt: number): Promise<boolean>;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
@@ -117,6 +119,20 @@ export function createWorkerApi(
       if (data) return data;
       if (holding(response.status) === "lost") return "lost";
       throw new Error(`planning task failed: HTTP ${response.status}`);
+    },
+    async trialMergeTask(job) {
+      const { data, response } = await client.GET(
+        "/worker/jobs/{id}/trial-merge-task",
+        {
+          params: {
+            path: { id: job.id },
+            query: { workerId, attempt: job.attempt },
+          },
+        },
+      );
+      if (data) return data;
+      if (holding(response.status) === "lost") return "lost";
+      throw new Error(`trial-merge task failed: HTTP ${response.status}`);
     },
     async readinessTask(job) {
       const { data, response } = await client.GET(

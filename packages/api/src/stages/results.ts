@@ -15,6 +15,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
+import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueStageJob, readStagePayload } from "../jobs/stage-jobs.ts";
 import {
   finishTicket,
@@ -503,6 +504,12 @@ async function applyDecision(
       await blockTicket(client, ticket, "invalid-output");
     } else if (finished.status !== "ok") {
       throw new Error(`cannot finish ticket ${ticket.id}: ${finished.status}`);
+    } else if (result?.stage === "merge") {
+      await enqueueTrialMerge(client, {
+        specId: ticket.spec_id,
+        repoId: ticket.repo_id,
+        headSha: result.headSha,
+      });
     }
     return;
   }

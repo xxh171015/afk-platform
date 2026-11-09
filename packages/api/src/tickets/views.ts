@@ -11,6 +11,7 @@ import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
+import { potentialConflictsOf } from "../host/trial-merge.ts";
 import {
   type IntegrationAttempt,
   integrationAttempts,
@@ -637,6 +638,7 @@ export async function specView(pool: pg.Pool, specId: number) {
     acceptancePack: await readAcceptancePack(pool, specId),
     timeline: await specTimeline(pool, specId),
     finalRuns: await finalRunsOf(pool, specId),
+    potentialConflicts: await potentialConflictsOf(pool, specId),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),

@@ -1850,6 +1850,87 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/jobs/{id}/trial-merge-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What a trial-merge job has to do: merge-tree this spec's integration branch against the other live specs in the same repo, and name any conflicting files */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              spec: {
+                id: number;
+                displayId: string;
+                title: string;
+              };
+              repo: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+              };
+              ours: {
+                specId: number;
+                branch: string;
+              };
+              peers: {
+                specId: number;
+                branch: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such job, or not a trial-merge job */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/{id}/planning-task": {
     parameters: {
       query?: never;
@@ -2941,6 +3022,14 @@ export interface paths {
                 durationMs: number | null;
                 startedAt: string | null;
                 finishedAt: string | null;
+              }[];
+              potentialConflicts: {
+                specId: number;
+                displayId: string;
+                title: string;
+                repo: string;
+                repoId: number;
+                files: string[];
               }[];
             };
           };

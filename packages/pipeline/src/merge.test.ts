@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ImplementOutputSchema, PROMPTS } from "./agent.ts";
 import { git, gitOut } from "./exec.ts";
-import { hasRef, isAncestor, mergeCandidate } from "./merge.ts";
+import { hasRef, isAncestor, mergeCandidate, trialMerge } from "./merge.ts";
 import { FakeAgentRunner } from "./testing/fakes.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
@@ -175,6 +175,34 @@ describe("mergeCandidate", () => {
     expect(() => mergeCandidate(repo.dir, "spec/s", "agent/nope", "m")).toThrow(
       /merge-tree failed/,
     );
+  });
+});
+
+describe("trialMerge", () => {
+  it("names the files two integration branches would conflict on, and does not make a commit", () => {
+    repo = makeRepo({ "shared.txt": "line\n" });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/a"]);
+    repo.commit({ "shared.txt": "a\n" }, "a");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/b"]);
+    repo.commit({ "shared.txt": "b\n" }, "b");
+    const before = gitOut(repo.dir, ["rev-list", "--all", "--count"]);
+
+    expect(trialMerge(repo.dir, "spec/a", "spec/b")).toEqual({
+      files: ["shared.txt"],
+    });
+    expect(gitOut(repo.dir, ["rev-list", "--all", "--count"])).toBe(before);
+  });
+
+  it("returns no files when the branches do not conflict", () => {
+    repo = makeRepo({ "shared.txt": "line\n" });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/a"]);
+    repo.commit({ "a.txt": "a\n" }, "a");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/b"]);
+    repo.commit({ "b.txt": "b\n" }, "b");
+
+    expect(trialMerge(repo.dir, "spec/a", "spec/b")).toEqual({ files: [] });
   });
 });
 

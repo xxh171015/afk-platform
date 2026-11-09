@@ -451,6 +451,44 @@ export const pullRequests = pgTable(
   ],
 );
 
+// Two specs whose integration branches in one repo would conflict (docs/specs/m3-platform.md「trial-merge」).
+// specIdA < specIdB so each pair has one row; overwritten on the next check.
+export const potentialConflicts = pgTable(
+  "potential_conflicts",
+  {
+    id: serial("id").primaryKey(),
+    specIdA: integer("spec_id_a")
+      .notNull()
+      .references(() => specs.id),
+    specIdB: integer("spec_id_b")
+      .notNull()
+      .references(() => specs.id),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id),
+    files: text("files").array().notNull(),
+    shaA: text("sha_a").notNull(),
+    shaB: text("sha_b").notNull(),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("potential_conflicts_pair_unique").on(
+      t.specIdA,
+      t.specIdB,
+      t.repoId,
+    ),
+    index("potential_conflicts_spec_a_idx").on(t.specIdA),
+    index("potential_conflicts_spec_b_idx").on(t.specIdB),
+    check(
+      "potential_conflicts_ordered_check",
+      sql`${t.specIdA} < ${t.specIdB}`,
+    ),
+    check("potential_conflicts_files_check", sql`cardinality(${t.files}) > 0`),
+  ],
+);
+
 // The acceptance pack of a spec, made when its pull requests are all open (see acceptance/pack.ts).
 export const acceptancePacks = pgTable("acceptance_packs", {
   id: serial("id").primaryKey(),
