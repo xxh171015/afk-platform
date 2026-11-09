@@ -1,19 +1,22 @@
-import { appendFile, mkdir, open, readdir, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 // Run logs as plain files, one per (run, attempt): <dir>/run-<run id>/attempt-<n>.log. A new attempt of a job
 // (its lease ran out and another worker took over) starts a fresh file, so a log never mixes two executions.
-// The HTTP interface does not depend on this being a directory: M3 swaps the store for MinIO.
+// The HTTP interface does not depend on this being a directory: a later store can sit behind the same append
+// and read methods. Object storage is not in use (MinIO's community edition stopped; SeaweedFS if we need it).
 
 export const MAX_LOG_BYTES = 50 * 1024 * 1024; // per run attempt
 
 // $AFK_LOG_DIR as given, else ~/.afk/logs/<instance id>: run numbers restart in every database, so two databases
 // on one machine must not share a directory (their run-1 logs would be appended to one file).
+export const defaultLogsRoot = () => join(homedir(), ".afk", "logs");
+
 export const defaultLogDir = (
   instanceId: string,
   env: NodeJS.ProcessEnv = process.env,
-) => env.AFK_LOG_DIR ?? join(homedir(), ".afk", "logs", instanceId);
+) => env.AFK_LOG_DIR ?? join(defaultLogsRoot(), instanceId);
 
 const isNotFound = (error: unknown) =>
   (error as { code?: string }).code === "ENOENT";
@@ -73,6 +76,18 @@ export class LogStore {
     await mkdir(join(this.dir, `run-${runId}`), { recursive: true });
     await appendFile(this.file(runId, attempt), chunk);
     return { status: "ok", size: size + bytes };
+  }
+
+  async remove(runId: number): Promise<boolean> {
+    const path = join(this.dir, `run-${runId}`);
+    try {
+      await stat(path);
+    } catch (error) {
+      if (isNotFound(error)) return false;
+      throw error;
+    }
+    await rm(path, { recursive: true, force: true });
+    return true;
   }
 
   async size(runId: number, attempt: number): Promise<number> {

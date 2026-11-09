@@ -88,7 +88,7 @@ export {
   LimitOverridesSchema,
   resolveLimits,
 } from "./limits.ts";
-export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
+export { MAX_LOG_CHUNK_BYTES, purgedLogMessage } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
 export {
   lastWeekStarts,

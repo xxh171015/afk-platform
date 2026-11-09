@@ -1,4 +1,5 @@
 import { createPool } from "@afk/shared/db";
+import { defaultLogsRoot } from "./logs/log-store.ts";
 import { startServer } from "./server.ts";
 
 const pool = createPool();
@@ -10,7 +11,11 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
   process.exit(1);
 }
 try {
-  const server = await startServer({ pool, port });
+  const server = await startServer({
+    pool,
+    port,
+    orphanRoot: defaultLogsRoot(),
+  });
   console.log(`afk api listening on ${server.url}`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

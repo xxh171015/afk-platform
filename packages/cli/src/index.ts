@@ -20,6 +20,7 @@ import {
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
+  purgedLogMessage,
   SETUP_BRANCH,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
@@ -1625,6 +1626,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           params: { path: { id: parsed.id }, query: { offset, attempt } },
         });
         if (!data) throw failureFrom(response, error);
+        if (data.purgedAt) {
+          if (json()) {
+            print(
+              {
+                run,
+                attempt: data.attempt,
+                size: data.size,
+                finished: data.finished,
+                text: data.text,
+                purgedAt: data.purgedAt,
+              },
+              "",
+            );
+          } else {
+            io.stdout(`${purgedLogMessage(data.purgedAt)}\n`);
+          }
+          return;
+        }
         attempt = data.attempt;
         text += data.text;
         last = data;

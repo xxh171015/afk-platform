@@ -163,7 +163,7 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 - `POST /worker/jobs/:id/pre-push`：推送前校验并续期。
 - `POST /worker/jobs/:id/complete`、`/fail`：交回阶段结果。
 - `GET /worker/jobs/:id/bundle`：渲染 `/context` 所需数据。
-- `POST /worker/runs/:id/logs`：分块追加日志。**日志由 API 存**（M1 是 API 管理的本地目录，M3 换 MinIO），页面通过 API 读。
+- `POST /worker/runs/:id/logs`：分块追加日志。**日志由 API 存**（API 管理的本地目录；M4 把目录指到 compose 具名卷，不上对象存储），页面通过 API 读。
 
 ### 推送出口与检测
 
@@ -211,7 +211,7 @@ Sandcastle 固定 `0.12.0`。agent 运行用顶层 `run()` + `Output.object`（z
 - `update-branch`、`trial-merge`、多个需求同时跑、跨需求的依赖边（M3）。
 - PR 评论返工 `rework`、bug 类型 spec、`plat context`、追溯反查（M4）。
 - 事件与插件、信任阶梯、权限与登录（M5）。
-- GitLab 适配器、多 worker、MinIO、公司服务器部署（M3）。
+- GitLab 适配器、多 worker、公司服务器部署（M3）。
 - 编辑票、拆票动作、页面上编辑依赖、通知。
 - 向量检索、搜索引擎。
 - 批量合并（等 M1 跑出真实的门禁耗时和合并频率再看）。

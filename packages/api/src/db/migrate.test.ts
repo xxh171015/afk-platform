@@ -66,6 +66,7 @@ const LATER_THAN_REPO_NAMES = [
   "0043_pr_conflicts_with_default",
   "0044_potential_conflicts",
   "0045_pr_platform_head",
+  "0046_log_retention",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",
@@ -108,6 +109,15 @@ describe("migrate", () => {
       "SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations",
     );
     expect(again.rows[0].n).toBe(rows[0].n);
+  });
+
+  it("drops the unused log_url columns", async () => {
+    await migrate(db.pool);
+    const { rows } = await db.pool.query(
+      `SELECT table_name FROM information_schema.columns
+        WHERE column_name = 'log_url' AND table_name IN ('runs', 'gate_results')`,
+    );
+    expect(rows).toEqual([]);
   });
 });
 

@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { LogStore } from "../logs/log-store.ts";
+import { retainLogs } from "../logs/retention.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
 import { type TestTicket, ticketFile } from "../test/ticket-files.ts";
 
@@ -588,6 +590,47 @@ describe("plat", () => {
     expect((await plat("run", "logs", `R-${runId}`, "--from", "-1")).code).toBe(
       1,
     );
+  });
+
+  it("says when a run's log was purged under the retention policy", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    const runId = (
+      await db.pool.query("SELECT id FROM runs WHERE job_id = $1", [job?.id])
+    ).rows[0].id;
+    await fetch(`${api.url}/worker/runs/${runId}/logs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workerId: "w1",
+        attempt: job?.attempt,
+        chunk: "secret\n",
+      }),
+    });
+    await db.pool.query("UPDATE specs SET state = 'cancelled'");
+    await db.pool.query(
+      `UPDATE events SET at = now() - interval '91 days'
+        WHERE type = 'spec' AND to_state = 'cancelled'`,
+    );
+    await retainLogs({
+      pool: db.pool,
+      logs: new LogStore(logDir),
+      now: new Date(),
+    });
+    const text = await plat("run", "logs", `R-${runId}`);
+    expect(text).toMatchObject({ code: 0, stderr: "" });
+    expect(text.stdout).toMatch(
+      /^日志已于 \d{4}-\d{2}-\d{2} 按保留策略清理\n$/,
+    );
+    const asJson = JSON.parse(
+      (await plat("--json", "run", "logs", `R-${runId}`)).stdout,
+    );
+    expect(asJson.purgedAt).toBeTruthy();
+    expect(asJson.text).toBe("");
   });
 
   // T-1 (the contract ticket) is claimed and its agent gives up: blocked, with a brief.

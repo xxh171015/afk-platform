@@ -92,6 +92,10 @@ export const instance = pgTable(
   {
     singleton: boolean("singleton").primaryKey().default(true),
     id: text("id").notNull(),
+    // Last API log-retention sweep: when it ran and how many run directories / leftover run-* it deleted.
+    logsPurgedAt: timestamp("logs_purged_at", { withTimezone: true }),
+    logsPurgedRuns: integer("logs_purged_runs").notNull().default(0),
+    logsPurgedOrphans: integer("logs_purged_orphans").notNull().default(0),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
@@ -146,6 +150,8 @@ export const specs = pgTable(
     planningDocsCommitted: boolean("planning_docs_committed")
       .notNull()
       .default(false),
+    // When this spec's run logs were deleted after the retention period; GET /runs/{id}/logs then says so.
+    logsPurgedAt: timestamp("logs_purged_at", { withTimezone: true }),
     // Parked until the next final Run is claimed, then copied onto that Run and cleared.
     retryNote: text("retry_note"),
     // The platform token's user merged a pull request. Kept for good. A personal token that can push the
@@ -538,7 +544,6 @@ export const runs = pgTable(
     output: jsonb("output"),
     // The Retry note this Run was given, if any; null when the retry had none.
     retryNote: text("retry_note"),
-    logUrl: text("log_url"),
     // The contract SHA used for each providing repo (name -> sha); null when the ticket had no contract edge.
     contractShas: jsonb("contract_shas"),
     // The SHA of the snapshot of each repo the ticket refs that the worker mounted at /refs/<name> (name -> sha).
@@ -596,7 +601,6 @@ export const gateResults = pgTable(
     testsSkipped: integer("tests_skipped"),
     // Every case of the JUnit report ({ name, classname, status }); the acceptance pack checks criteria against it.
     testCases: jsonb("test_cases"),
-    logUrl: text("log_url"),
     createdAt: createdAt(),
   },
   (t) => [

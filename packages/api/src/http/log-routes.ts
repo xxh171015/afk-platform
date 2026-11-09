@@ -84,6 +84,7 @@ const readRoute = createRoute({
             size: z.number().int(),
             text: z.string(),
             finished: z.boolean(),
+            purgedAt: z.string().nullable(),
           }),
         },
       },
@@ -132,11 +133,28 @@ export function registerLogRoutes(app: OpenAPIHono, context: AppContext): void {
     const run = await pool.query<{
       finished_at: Date | null;
       job_attempt: number | null;
+      logs_purged_at: Date | null;
     }>(
-      `SELECT r.finished_at, j.attempt AS job_attempt FROM runs r LEFT JOIN jobs j ON j.id = r.job_id WHERE r.id = $1`,
+      `SELECT r.finished_at, j.attempt AS job_attempt, s.logs_purged_at
+         FROM runs r JOIN specs s ON s.id = r.spec_id
+         LEFT JOIN jobs j ON j.id = r.job_id WHERE r.id = $1`,
       [id],
     );
     if (!run.rows[0]) return c.json({ error: "no such run" }, 404);
+    if (run.rows[0].logs_purged_at) {
+      return c.json(
+        {
+          attempt: requested ?? 1,
+          offset,
+          nextOffset: offset,
+          size: 0,
+          text: "",
+          finished: true,
+          purgedAt: run.rows[0].logs_purged_at.toISOString(),
+        },
+        200,
+      );
+    }
     // Default to the job's current attempt, so a new attempt that has not written yet does not show the old log.
     const attempt =
       requested ??
@@ -145,7 +163,12 @@ export function registerLogRoutes(app: OpenAPIHono, context: AppContext): void {
       1;
     const slice = await logs.read(id, attempt, offset, limit);
     return c.json(
-      { attempt, ...slice, finished: run.rows[0].finished_at !== null },
+      {
+        attempt,
+        ...slice,
+        finished: run.rows[0].finished_at !== null,
+        purgedAt: null,
+      },
       200,
     );
   });

@@ -3728,6 +3728,9 @@
                     },
                     "finished": {
                       "type": "boolean"
+                    },
+                    "purgedAt": {
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -3736,7 +3739,8 @@
                     "nextOffset",
                     "size",
                     "text",
-                    "finished"
+                    "finished",
+                    "purgedAt"
                   ]
                 }
               }

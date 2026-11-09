@@ -2233,6 +2233,7 @@ export interface paths {
               size: number;
               text: string;
               finished: boolean;
+              purgedAt: string | null;
             };
           };
         };
