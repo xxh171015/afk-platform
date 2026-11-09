@@ -74,7 +74,17 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
 | （有联调票时）联调环境 | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加 `npm run e2e`，把 JUnit 写到 `reports/e2e-junit.xml`）。`plat tickets import` 发现缺了又没有票补时会警告。 |
 
-沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`，有 Node 22、npm、pnpm、PostgreSQL）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
+沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`：Node 22、npm、pnpm、PostgreSQL、Playwright Chromium，Cursor CLI 版本锁在 `ARG CURSOR_CLI_VERSION`）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
+
+构建和换版本（在跑 worker 的那台 Mac 上，Docker Desktop 开着）：
+
+```sh
+scripts/check-sandbox-image.sh          # 无人值守：构建、核对工具链、跑本仓库门禁、试点前端门禁和联调 e2e
+# 或
+scripts/verify-sandbox-image.sh         # 逐步确认的同一套检查
+```
+
+默认打标签 `sandcastle:afk-platform`（worker 不设 `AFK_SANDBOX_IMAGE` 时用这个）。换 Cursor CLI 或 Playwright 时改 Dockerfile 里对应的 `ARG`，再跑一次上面的脚本；`PLAYWRIGHT_VERSION` 要和试点前端 `package.json` 的 `@playwright/test` 一致。沙箱里没有 Docker：试点前端的 shop e2e 由检查脚本在宿主机起联调后端，再把容器加入那张网络（`BACKEND_URL=http://backend:8080`）。
 
 ### 1.4 tracker 文档是什么
 

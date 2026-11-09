@@ -9,7 +9,7 @@ export interface WorkerConfig {
   home: string; // slots, main clones, salvage and logs live under it
   workerId: string;
   slots: number;
-  image: string; // the sandbox image
+  image: string; // one image for every project, so the worker does not pick per repo (override with AFK_SANDBOX_IMAGE)
   model: string;
   cursorApiKey: string;
   credentialsDir: string; // the GitHub App's key and ids

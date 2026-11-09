@@ -131,10 +131,11 @@ Single steps: `pnpm typecheck`, `pnpm test`, `pnpm lint`. Tests write JUnit XML 
 
 ## Sandbox image
 
-`.sandcastle/Dockerfile` is the agent sandbox image: the pilot repo's Sandcastle template (Cursor CLI version pinned) plus the PostgreSQL server and pnpm, so the gate's `setup` can start a throwaway Postgres with `scripts/pg-temp.sh`. The sandbox has no Docker, so the image has to be built and checked on a machine that does:
+`.sandcastle/Dockerfile` is the one sandbox image both projects use: Node 22, the pinned Cursor CLI, pnpm, a PostgreSQL server (so this repo's gate can start a throwaway instance with `scripts/pg-temp.sh`), and Playwright Chromium (pilot frontend e2e). The sandbox has no Docker, so the image is built on the worker's machine:
 
 ```sh
-scripts/verify-sandbox-image.sh   # build, time it, run the gate in a fresh container, read JUnit on the host
+scripts/check-sandbox-image.sh    # unattended: build, check the toolchain, run this repo's gate, the pilot frontend gate, and shop e2e
+scripts/verify-sandbox-image.sh   # the same checks, one confirmed stage at a time
 ```
 
-It tests the committed HEAD and writes the results (build time, image size, Cursor CLI and PostgreSQL versions, gate result) to `reports/sandbox-image.env`.
+Both tag `sandcastle:afk-platform` (the worker's default). Bump `ARG CURSOR_CLI_VERSION` or `ARG PLAYWRIGHT_VERSION` in the Dockerfile and rebuild to change versions. Results go to `reports/sandbox-image.env`.
