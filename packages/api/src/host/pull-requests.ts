@@ -396,10 +396,10 @@ export async function recordOpenPr(
   }
   const pr = parsed.data;
   await client.query(
-    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, ci, review, synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, platform_head_sha, ci, review, synced_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, now())
      ON CONFLICT (spec_id, repo_id) DO UPDATE SET number = $3, url = $4, state = $5, draft = $6,
-       head_sha = $7, ci = $8, review = $9, synced_at = now()`,
+       head_sha = $7, platform_head_sha = $7, ci = $8, review = $9, synced_at = now()`,
     [
       read.specId,
       read.repoId,

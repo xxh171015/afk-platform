@@ -69,7 +69,11 @@ async function runningSpec(keys: string[], projectName = "shop") {
   };
 }
 
-async function mergeSpec(specId: number, at: Date) {
+async function mergeSpec(
+  specId: number,
+  at: Date,
+  extra: { platformHead?: boolean } = {},
+) {
   const repoId = (
     await db.pool.query<{ repo_id: number }>(
       "SELECT repo_id FROM tickets WHERE spec_id = $1 LIMIT 1",
@@ -84,6 +88,15 @@ async function mergeSpec(specId: number, at: Date) {
      VALUES ($1, $2, 1, 'https://git.example/pr/1', 'merged', 'aaa', $3, $3)`,
     [specId, repoId, at],
   );
+  if (extra.platformHead !== undefined) {
+    await db.pool.query(
+      `INSERT INTO events (spec_id, repo_id, type, to_state, source, data, at)
+       VALUES ($1, $2, 'pull-request', 'merged', 'host-sync',
+               jsonb_build_object('number', 1, 'headSha', 'aaa', 'platformHead', $3::boolean),
+               $4)`,
+      [specId, repoId, extra.platformHead, at],
+    );
+  }
 }
 
 const thisWeek = (metrics: Json) => metrics.weeks.at(-1);
@@ -101,6 +114,12 @@ describe("GET /metrics", () => {
         platform: null,
         external: null,
         jobPlatform: null,
+      },
+      success: {
+        mergedPulls: 0,
+        mergeRate: null,
+        humanCommitsRate: null,
+        untouchedRate: null,
       },
     });
   });
@@ -202,6 +221,54 @@ describe("GET /metrics", () => {
     expect(week.attribution.needsHuman).toEqual([]);
     expect(week.failureRate.external).toBe(0);
     expect(week.failureRate.platform).toBe(0);
+  });
+
+  it("counts merged and closed pull requests for 合并率", async () => {
+    const merged = await runningSpec(["a"]);
+    await mergeSpec(merged.specId, new Date());
+    const closed = await runningSpec(["b"], "other");
+    const repoId = (
+      await db.pool.query<{ repo_id: number }>(
+        "SELECT repo_id FROM tickets WHERE spec_id = $1 LIMIT 1",
+        [closed.specId],
+      )
+    ).rows[0].repo_id;
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha, synced_at)
+       VALUES ($1, $2, 1, 'https://git.example/pr/2', 'closed', 'bbb', now())`,
+      [closed.specId, repoId],
+    );
+    await db.pool.query(
+      `INSERT INTO events (spec_id, repo_id, type, to_state, source, data)
+       VALUES ($1, $2, 'pull-request', 'closed', 'host-sync', '{"number":1}')`,
+      [closed.specId, repoId],
+    );
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.success.mergedPulls).toBe(1);
+    expect(week.success.mergeRate).toBe(0.5);
+  });
+
+  it("counts 合并前要人补 commit from the merge event's platformHead", async () => {
+    const clean = await runningSpec(["a"]);
+    await mergeSpec(clean.specId, new Date(), { platformHead: true });
+    const extra = await runningSpec(["b"], "other");
+    await mergeSpec(extra.specId, new Date(), { platformHead: false });
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.success.humanCommitsRate).toBe(0.5);
+  });
+
+  it("counts 无人插手 when a merged spec had no action after confirm", async () => {
+    const clean = await runningSpec(["a"]);
+    await mergeSpec(clean.specId, new Date());
+    const nudged = await runningSpec(["b"], "other");
+    await db.pool.query(
+      `INSERT INTO events (spec_id, type, source, data)
+       VALUES ($1, 'action', 'page', '{"action":"retry"}')`,
+      [nudged.specId],
+    );
+    await mergeSpec(nudged.specId, new Date());
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.success.untouchedRate).toBe(0.5);
   });
 
   it("filters by project", async () => {

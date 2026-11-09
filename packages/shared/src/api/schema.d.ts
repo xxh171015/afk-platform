@@ -4496,7 +4496,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The last 12 weeks of lead time, failure attribution and platform failure rate */
+        /** @description The last 12 weeks of lead time, failure attribution, platform failure rate and success standards */
         200: {
           headers: {
             [name: string]: unknown;
@@ -4539,6 +4539,12 @@ export interface paths {
                   platform: number | null;
                   external: number | null;
                   jobPlatform: number | null;
+                };
+                success: {
+                  mergedPulls: number;
+                  mergeRate: number | null;
+                  humanCommitsRate: number | null;
+                  untouchedRate: number | null;
                 };
               }[];
             };

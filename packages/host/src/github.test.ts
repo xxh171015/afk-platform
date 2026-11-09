@@ -125,6 +125,21 @@ describe("getPullRequest", () => {
     expect((await a.getPullRequest({ repo, number: 1 })).state).toBe("merged");
   });
 
+  it("keeps the branch head after merge, including a commit a person pushed", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    github.mergePull(1);
+    expect((await a.getPullRequest({ repo, number: 1 })).headSha).toBe(
+      opened.headSha,
+    );
+    github.reopenPull(1);
+    github.pushCommit(1, "deadbeef");
+    github.mergePull(1);
+    expect((await a.getPullRequest({ repo, number: 1 })).headSha).toBe(
+      "deadbeef",
+    );
+  });
+
   it("tells a closed pull request from a merged one", async () => {
     const a = adapter();
     await open(a);

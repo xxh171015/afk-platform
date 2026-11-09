@@ -8867,7 +8867,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The last 12 weeks of lead time, failure attribution and platform failure rate",
+            "description": "The last 12 weeks of lead time, failure attribution, platform failure rate and success standards",
             "content": {
               "application/json": {
                 "schema": {
@@ -9018,13 +9018,37 @@
                               "external",
                               "jobPlatform"
                             ]
+                          },
+                          "success": {
+                            "type": "object",
+                            "properties": {
+                              "mergedPulls": {
+                                "type": "integer"
+                              },
+                              "mergeRate": {
+                                "type": ["number", "null"]
+                              },
+                              "humanCommitsRate": {
+                                "type": ["number", "null"]
+                              },
+                              "untouchedRate": {
+                                "type": ["number", "null"]
+                              }
+                            },
+                            "required": [
+                              "mergedPulls",
+                              "mergeRate",
+                              "humanCommitsRate",
+                              "untouchedRate"
+                            ]
                           }
                         },
                         "required": [
                           "weekStart",
                           "leadTime",
                           "attribution",
-                          "failureRate"
+                          "failureRate",
+                          "success"
                         ]
                       }
                     }

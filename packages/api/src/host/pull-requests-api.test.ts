@@ -1191,6 +1191,40 @@ describe("following the pull requests", () => {
       source: "host-sync",
     });
   });
+
+  it("records platformHead true when the merged head is the one the platform last pushed", async () => {
+    await awaitingReview();
+    const platformHead = (
+      await db.pool.query<{ platform_head_sha: string }>(
+        "SELECT platform_head_sha FROM pull_requests WHERE id = 1",
+      )
+    ).rows[0].platform_head_sha;
+    expect(platformHead).toBe("sha1");
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged", headSha: platformHead })],
+    });
+    const event = await db.pool.query<{ data: { platformHead?: boolean } }>(
+      `SELECT data FROM events
+       WHERE type = 'pull-request' AND to_state = 'merged' ORDER BY id DESC LIMIT 1`,
+    );
+    expect(event.rows[0].data.platformHead).toBe(true);
+  });
+
+  it("records platformHead false when a person pushed before merge", async () => {
+    await awaitingReview();
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged", headSha: "human-commit" })],
+    });
+    const event = await db.pool.query<{ data: { platformHead?: boolean } }>(
+      `SELECT data FROM events
+       WHERE type = 'pull-request' AND to_state = 'merged' ORDER BY id DESC LIMIT 1`,
+    );
+    expect(event.rows[0].data.platformHead).toBe(false);
+  });
 });
 
 describe("what waits for a person among the pull requests", () => {

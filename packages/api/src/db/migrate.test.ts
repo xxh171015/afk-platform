@@ -65,6 +65,7 @@ const LATER_THAN_REPO_NAMES = [
   "0042_repo_default_sha",
   "0043_pr_conflicts_with_default",
   "0044_potential_conflicts",
+  "0045_pr_platform_head",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

@@ -108,6 +108,10 @@ export class FakeGitLab {
     else mr.reviewers.push({ username, state });
   }
 
+  pushCommit(iid: number, sha: string): void {
+    this.mr(iid).sha = sha;
+  }
+
   mergeMr(iid: number, extra: { by?: string; at?: string } = {}): void {
     const mr = this.mr(iid);
     mr.state = "merged";

@@ -26,6 +26,12 @@ const emptyWeek = (weekStart: string) => ({
     external: null,
     jobPlatform: null,
   },
+  success: {
+    mergedPulls: 0,
+    mergeRate: null,
+    humanCommitsRate: null,
+    untouchedRate: null,
+  },
 });
 
 const weekStarts = lastWeekStarts(new Date("2026-11-09T12:00:00+08:00"));
@@ -60,6 +66,12 @@ const weeks = weekStarts.map((weekStart, i) =>
           external: 0,
           jobPlatform: 0.1,
         },
+        success: {
+          mergedPulls: 2,
+          mergeRate: 0.5,
+          humanCommitsRate: 0.25,
+          untouchedRate: 1,
+        },
       },
 );
 
@@ -72,7 +84,7 @@ const server = () =>
   });
 
 describe("the metrics page", () => {
-  it("shows the three blocks, empty weeks, spec links and the 3% line", async () => {
+  it("shows 工期, 失败归因, 平台故障率, 成功标准, empty weeks, spec links and the 3% line", async () => {
     renderWithApp(<Metrics />, server());
     expect(await screen.findByText("数据从 2026-08-24 起")).toBeTruthy();
     expect(screen.getAllByText("2026-08-24").length).toBeGreaterThan(1);
@@ -95,6 +107,12 @@ describe("the metrics page", () => {
     expect(screen.getByTestId("metrics-failure-rate").textContent).toContain(
       "3%",
     );
+    const success = screen.getByTestId("metrics-success");
+    expect(success.textContent).toContain("合并的 MR / PR");
+    expect(success.textContent).toContain("无人插手");
+    expect(success.textContent).toContain("50.0%");
+    expect(success.textContent).toContain("25.0%");
+    expect(success.textContent).toContain("100.0%");
   });
 
   it("keeps the 3% line in both themes", async () => {

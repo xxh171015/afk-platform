@@ -28,7 +28,7 @@ const metricsRoute = createRoute({
   },
   responses: {
     200: reply(
-      "The last 12 weeks of lead time, failure attribution and platform failure rate",
+      "The last 12 weeks of lead time, failure attribution, platform failure rate and success standards",
       z.object({
         since: z.string().nullable(),
         weeks: z.array(
@@ -59,6 +59,12 @@ const metricsRoute = createRoute({
               platform: z.number().nullable(),
               external: z.number().nullable(),
               jobPlatform: z.number().nullable(),
+            }),
+            success: z.object({
+              mergedPulls: z.number().int(),
+              mergeRate: z.number().nullable(),
+              humanCommitsRate: z.number().nullable(),
+              untouchedRate: z.number().nullable(),
             }),
           }),
         ),

@@ -44,6 +44,12 @@ type Week = {
     external: number | null;
     jobPlatform: number | null;
   };
+  success: {
+    mergedPulls: number;
+    mergeRate: number | null;
+    humanCommitsRate: number | null;
+    untouchedRate: number | null;
+  };
 };
 
 const LEAD_MS: Record<LeadTimeSegment, (week: Week) => number> = {
@@ -164,9 +170,14 @@ export function Metrics() {
         </ul>
       </section>
 
-      <section data-testid="metrics-failure-rate">
+      <section className="mb-8" data-testid="metrics-failure-rate">
         <h2 className="mb-3 text-sm font-semibold">平台故障率</h2>
         <FailureRateChart weeks={weeks} />
+      </section>
+
+      <section data-testid="metrics-success">
+        <h2 className="mb-3 text-sm font-semibold">成功标准</h2>
+        <SuccessTable weeks={weeks} />
       </section>
     </Page>
   );
@@ -288,6 +299,43 @@ function AttributionTable({
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+function SuccessTable({ weeks }: { weeks: Week[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-muted-foreground">
+          <tr>
+            <th className="py-1 pr-3 font-medium">周</th>
+            <th className="py-1 pr-3 font-medium">合并的 MR / PR</th>
+            <th className="py-1 pr-3 font-medium">合并率</th>
+            <th className="py-1 pr-3 font-medium">合并前要人补 commit</th>
+            <th className="py-1 font-medium">无人插手</th>
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((week) => (
+            <tr key={week.weekStart} className="border-t">
+              <td className="py-1 pr-3 font-mono tabular">{week.weekStart}</td>
+              <td className="py-1 pr-3 font-mono tabular">
+                {week.success.mergedPulls}
+              </td>
+              <td className="py-1 pr-3 font-mono tabular">
+                {pct(week.success.mergeRate)}
+              </td>
+              <td className="py-1 pr-3 font-mono tabular">
+                {pct(week.success.humanCommitsRate)}
+              </td>
+              <td className="py-1 font-mono tabular">
+                {pct(week.success.untouchedRate)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

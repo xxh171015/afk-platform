@@ -431,6 +431,9 @@ export const pullRequests = pgTable(
     conflictsWithDefault: boolean("conflicts_with_default")
       .notNull()
       .default(false),
+    // The SHA the platform last pushed to this pull request's head branch. When host-sync records a
+    // merge, the pull-request event stores whether the merged head is this SHA (docs/specs/m3-platform.md「成功标准」).
+    platformHeadSha: text("platform_head_sha"),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
     createdAt: createdAt(),
   },

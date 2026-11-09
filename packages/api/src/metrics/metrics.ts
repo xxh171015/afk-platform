@@ -10,7 +10,7 @@ import {
 import type pg from "pg";
 import { specLeadTime } from "../tickets/lead-time.ts";
 
-// The metrics page: last 12 weeks, three blocks, specs grouped by the week they ended
+// The metrics page: last 12 weeks, three blocks plus 成功标准, specs grouped by the week they ended
 // (docs/specs/m3-platform.md「工期四段与度量页」). Cancelled specs skip 工期 and still count in 失败归因.
 
 export type AttributionRow = {
@@ -46,6 +46,12 @@ export type WeekMetrics = {
     platform: number | null;
     external: number | null;
     jobPlatform: number | null;
+  };
+  success: {
+    mergedPulls: number;
+    mergeRate: number | null;
+    humanCommitsRate: number | null;
+    untouchedRate: number | null;
   };
 };
 
@@ -153,6 +159,22 @@ export async function metricsView(
     : [];
   const failuresBySpec = groupBy(failures, (row) => row.spec_id);
   const jobsBySpec = groupBy(jobs, (row) => row.spec_id);
+  const pulls = await pullOutcomes(pool, projectId);
+  const pullsByWeek = new Map<string, PullOutcome[]>();
+  for (const pull of pulls) {
+    if (!pull.ended_at) continue;
+    const week = weekStartYmd(pull.ended_at);
+    if (!weekSet.has(week)) continue;
+    const list = pullsByWeek.get(week) ?? [];
+    list.push(pull);
+    pullsByWeek.set(week, list);
+  }
+  const touched = await touchedSpecs(
+    pool,
+    ended.rows
+      .filter((row) => row.state === "merged" && row.ended_at)
+      .map((row) => ({ id: row.id, endedAt: row.ended_at as Date })),
+  );
 
   const out: WeekMetrics[] = [];
   for (const weekStart of weeks) {
@@ -166,6 +188,11 @@ export async function metricsView(
       leadTime: await weekLeadTime(pool, now, merged),
       attribution: weekAttribution(specFailures),
       failureRate: weekFailureRate(endedIds, specFailures, specJobs),
+      success: weekSuccess(
+        pullsByWeek.get(weekStart) ?? [],
+        merged.map((row) => row.id),
+        touched,
+      ),
     });
   }
 
@@ -274,6 +301,95 @@ function weekFailureRate(
     platform: share("platform"),
     external: share("external"),
     jobPlatform: finished === 0 ? null : platformJobs / finished,
+  };
+}
+
+type PullOutcome = {
+  spec_id: number;
+  state: string;
+  ended_at: Date | null;
+  platform_head: boolean | null;
+};
+
+async function pullOutcomes(
+  pool: pg.Pool,
+  projectId?: number,
+): Promise<PullOutcome[]> {
+  return (
+    await pool.query<PullOutcome>(
+      `SELECT p.spec_id, p.state,
+              CASE
+                WHEN p.state = 'merged' THEN COALESCE(
+                  p.merged_at,
+                  (SELECT max(e.at) FROM events e
+                   WHERE e.spec_id = p.spec_id AND e.repo_id = p.repo_id
+                     AND e.type = 'pull-request' AND e.to_state = 'merged')
+                )
+                WHEN p.state = 'closed' THEN (
+                  SELECT max(e.at) FROM events e
+                  WHERE e.spec_id = p.spec_id AND e.repo_id = p.repo_id
+                    AND e.type = 'pull-request' AND e.to_state = 'closed'
+                )
+              END AS ended_at,
+              (SELECT (e.data->>'platformHead')::boolean
+               FROM events e
+               WHERE e.spec_id = p.spec_id AND e.repo_id = p.repo_id
+                 AND e.type = 'pull-request' AND e.to_state = 'merged'
+                 AND e.data ? 'platformHead'
+               ORDER BY e.id DESC LIMIT 1) AS platform_head
+       FROM pull_requests p
+       JOIN specs s ON s.id = p.spec_id
+       WHERE p.state IN ('merged', 'closed')
+         AND ($1::int IS NULL OR s.project_id = $1)`,
+      [projectId ?? null],
+    )
+  ).rows;
+}
+
+async function touchedSpecs(
+  pool: pg.Pool,
+  merged: { id: number; endedAt: Date }[],
+): Promise<Set<number>> {
+  if (merged.length === 0) return new Set();
+  const { rows } = await pool.query<{ spec_id: number }>(
+    `SELECT DISTINCT e.spec_id
+     FROM events e
+     JOIN unnest($1::int[], $2::timestamptz[]) AS spec(id, ended_at)
+       ON spec.id = e.spec_id
+     JOIN LATERAL (
+       SELECT min(c.at) AS confirm_at
+       FROM events c
+       WHERE c.spec_id = e.spec_id AND c.type = 'spec' AND c.to_state = 'running'
+     ) c ON true
+     WHERE e.type = 'action'
+       AND (e.data->>'action') IS DISTINCT FROM 'confirm'
+       AND e.at > c.confirm_at
+       AND e.at <= spec.ended_at`,
+    [merged.map((row) => row.id), merged.map((row) => row.endedAt)],
+  );
+  return new Set(rows.map((row) => row.spec_id));
+}
+
+function weekSuccess(
+  pulls: PullOutcome[],
+  mergedSpecIds: number[],
+  touched: Set<number>,
+): WeekMetrics["success"] {
+  const mergedPulls = pulls.filter((pull) => pull.state === "merged");
+  const closed = pulls.filter((pull) => pull.state === "closed").length;
+  const decided = mergedPulls.length + closed;
+  const knownHead = mergedPulls.filter((pull) => pull.platform_head !== null);
+  const extraCommits = knownHead.filter((pull) => pull.platform_head === false);
+  return {
+    mergedPulls: mergedPulls.length,
+    mergeRate: decided === 0 ? null : mergedPulls.length / decided,
+    humanCommitsRate:
+      knownHead.length === 0 ? null : extraCommits.length / knownHead.length,
+    untouchedRate:
+      mergedSpecIds.length === 0
+        ? null
+        : mergedSpecIds.filter((id) => !touched.has(id)).length /
+          mergedSpecIds.length,
   };
 }
 

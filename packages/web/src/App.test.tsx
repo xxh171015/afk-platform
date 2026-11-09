@@ -54,6 +54,12 @@ const server = () =>
             external: null,
             jobPlatform: null,
           },
+          success: {
+            mergedPulls: 0,
+            mergeRate: null,
+            humanCommitsRate: null,
+            untouchedRate: null,
+          },
         })),
       },
     }),

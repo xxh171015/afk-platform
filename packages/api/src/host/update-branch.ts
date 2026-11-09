@@ -586,6 +586,12 @@ export async function recordUpdateBranchResult(
     return { status: "applied" };
   }
   if (valid.outcome === "merged") {
+    if (valid.headSha)
+      await client.query(
+        `UPDATE pull_requests SET platform_head_sha = $3
+         WHERE spec_id = $1 AND repo_id = $2`,
+        [read.specId, read.repoId, valid.headSha],
+      );
     if (read.mainSha)
       await stampIntegrationMainSha(
         client,
