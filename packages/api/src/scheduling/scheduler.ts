@@ -22,6 +22,7 @@ import {
 import { enqueueHostSync } from "../host/host-jobs.ts";
 import { redAccessProblem } from "../host/repo-access.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
+import { integrationBranch } from "../planning/integration-branches.ts";
 import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
@@ -196,16 +197,30 @@ export async function confirmSpec(
         ...(planning_repo_id === null ? [] : [planning_repo_id]),
       ]),
     ].sort((a, b) => a - b);
-    const integrationBranches = repoIds.map((repoId) => ({
+    const shas = await client.query<{
+      id: number;
+      default_sha: string | null;
+    }>("SELECT id, default_sha FROM repos WHERE id = ANY($1::int[])", [
+      repoIds,
+    ]);
+    const shaById = new Map(shas.rows.map((row) => [row.id, row.default_sha]));
+    const storedBranches = repoIds.map((repoId) =>
+      integrationBranch(
+        repoId,
+        branchNames(branch_namespace).integration(slug),
+        shaById.get(repoId),
+      ),
+    );
+    const integrationBranches = storedBranches.map(({ repoId, branch }) => ({
       repoId,
-      branch: branchNames(branch_namespace).integration(slug),
+      branch,
     }));
     await client.query(
       "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4 WHERE id = $1",
       [
         specId,
         running.state,
-        JSON.stringify(integrationBranches),
+        JSON.stringify(storedBranches),
         planning?.patch ? planning.patch : null,
       ],
     );

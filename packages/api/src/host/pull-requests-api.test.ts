@@ -698,7 +698,10 @@ describe("following the pull requests", () => {
           number: 2,
         },
       ],
-      defaults: [],
+      defaults: [
+        { repoUrl: "https://github.com/me/shop-backend.git", branch: "main" },
+        { repoUrl: "https://github.com/me/shop-frontend.git", branch: "main" },
+      ],
     });
   });
 

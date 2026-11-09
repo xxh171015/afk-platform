@@ -52,6 +52,7 @@ interface RawPull {
   merged_by?: { login?: string } | null;
   body?: string | null;
   head: { sha: string };
+  mergeable?: boolean | null;
 }
 
 export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
@@ -196,6 +197,7 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       mergedBy: raw.merged_by?.login ?? null,
       mergedAt: raw.merged_at ?? null,
       mergedByPlatform: false,
+      conflictsWithDefault: raw.mergeable === false,
     };
   }
 

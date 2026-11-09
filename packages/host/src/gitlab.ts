@@ -40,6 +40,7 @@ interface RawMr {
   merged_by?: RawUser | null;
   merge_user?: RawUser | null;
   head_pipeline?: { status?: string } | null;
+  has_conflicts?: boolean;
 }
 
 const projectId = (repo: RepoRef) =>
@@ -104,6 +105,7 @@ function info(
       extra.mergedAt ??
       (typeof raw.merged_at === "string" ? raw.merged_at : null),
     mergedByPlatform: extra.mergedByPlatform ?? false,
+    conflictsWithDefault: raw.has_conflicts === true,
   };
 }
 

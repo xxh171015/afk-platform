@@ -19,6 +19,7 @@ const info = (
   mergedBy: null,
   mergedAt: null,
   mergedByPlatform: false,
+  conflictsWithDefault: false,
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
@@ -249,6 +250,7 @@ describe("a host-sync task", () => {
           mergedBy: null,
           mergedAt: null,
           mergedByPlatform: false,
+          conflictsWithDefault: false,
         },
         {
           id: 2,
@@ -260,9 +262,26 @@ describe("a host-sync task", () => {
           mergedBy: null,
           mergedAt: null,
           mergedByPlatform: false,
+          conflictsWithDefault: false,
         },
       ],
       defaults: [],
+    });
+  });
+
+  it("passes on a conflict with the default branch", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1, { conflictsWithDefault: true }),
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      { kind: "host-sync", pulls: [{ id: 1, repoUrl: "u", number: 1 }] },
+      log,
+    );
+    expect(result).toMatchObject({
+      pulls: [{ id: 1, conflictsWithDefault: true }],
     });
   });
 

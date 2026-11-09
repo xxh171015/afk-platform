@@ -205,6 +205,18 @@ describe("getPullRequest", () => {
     ).toBe(false);
   });
 
+  it("reports a conflict with the default branch from has_conflicts", async () => {
+    const a = adapter();
+    await open(a);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(false);
+    gitlab.setHasConflicts(1, true);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(true);
+  });
+
   it("reports who merged it and when", async () => {
     const a = adapter();
     await open(a);

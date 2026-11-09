@@ -16,6 +16,7 @@ interface FakePull {
   state: "open" | "closed";
   merged: boolean;
   sha: string;
+  mergeable: boolean | null;
 }
 
 export interface FakeReview {
@@ -117,6 +118,9 @@ export class FakeGitHub {
   }
   pushCommit(number: number, sha: string): void {
     this.pull(number).sha = sha;
+  }
+  setMergeable(number: number, mergeable: boolean | null): void {
+    this.pull(number).mergeable = mergeable;
   }
   addReview(number: number, review: FakeReview): void {
     this.reviews.set(number, [...(this.reviews.get(number) ?? []), review]);
@@ -306,6 +310,7 @@ export class FakeGitHub {
         state: "open",
         merged: false,
         sha: createHash("sha1").update(String(body.head)).digest("hex"),
+        mergeable: true,
       };
       this.pulls.push(pull);
       return this.json(res, 201, this.render(pull));
@@ -430,6 +435,7 @@ export class FakeGitHub {
       base: { ref: pull.base },
       title: pull.title,
       body: pull.body,
+      mergeable: pull.mergeable,
     };
   }
 }

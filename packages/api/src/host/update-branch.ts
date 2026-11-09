@@ -8,13 +8,16 @@ import {
 import type pg from "pg";
 import { z } from "zod";
 import { enqueueJob } from "../jobs/queue.ts";
+import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
 
-// Merging the default branch into a running spec's integration branch (docs/specs/m3-platform.md「多需求并行」).
+// Merging the default branch into a spec's integration branch (docs/specs/m3-platform.md「多需求并行」).
 // Host-sync notices a new default SHA; this module queues at most one update-branch per spec × repo, coalesces
 // later advances onto that queued row, and on conflict or a failed candidate gate gives a merge agent one try
-// before pausing the spec.
+// before pausing the spec. Running specs update on every advance; finalizing ones at the start of 收尾 if they
+// are behind; awaiting-review / partially-merged only when the host says the pull request conflicts with the
+// default.
 
 export const UpdateBranchResultSchema = z.object({
   stage: z.literal("update-branch"),
@@ -41,6 +44,19 @@ export type UpdateBranchPayload = {
 const PAUSE_FROM_MERGE: Record<"conflict" | "gate-failed", PauseReason> = {
   conflict: "update-branch-conflict",
   "gate-failed": "update-branch-gate-failed",
+};
+
+const SPECS_THAT_WATCH_MAIN: SpecState[] = [
+  "running",
+  "finalizing",
+  "awaiting-review",
+  "partially-merged",
+];
+
+type IntegrationBranch = {
+  repoId: number;
+  branch: string;
+  mainSha?: string;
 };
 
 export function readUpdateBranchPayload(
@@ -198,33 +214,221 @@ async function enqueueUpdateBranchFix(
   });
 }
 
+async function stampIntegrationMainSha(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+  mainSha: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE specs SET integration_branches = COALESCE((
+       SELECT jsonb_agg(
+         CASE WHEN (elem->>'repoId')::int = $2
+           THEN elem || jsonb_build_object('mainSha', $3::text)
+           ELSE elem
+         END
+         ORDER BY ordinality
+       )
+       FROM jsonb_array_elements(integration_branches) WITH ORDINALITY AS t(elem, ordinality)
+     ), '[]'::jsonb)
+     WHERE id = $1`,
+    [specId, repoId, mainSha],
+  );
+}
+
+async function stampMissingMainSha(
+  client: pg.PoolClient,
+  projectId: number,
+  repoId: number,
+  mainSha: string,
+): Promise<void> {
+  const specs = await client.query<{ id: number }>(
+    `SELECT s.id FROM specs s
+     WHERE s.project_id = $1 AND s.state = ANY($3::text[])
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(s.integration_branches) b
+         WHERE (b->>'repoId')::int = $2 AND b->>'mainSha' IS NULL
+       )
+     ORDER BY s.id`,
+    [projectId, repoId, SPECS_THAT_WATCH_MAIN],
+  );
+  for (const spec of specs.rows)
+    await stampIntegrationMainSha(client, spec.id, repoId, mainSha);
+}
+
+async function updateBranchInFlight(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<boolean> {
+  const found = await client.query(
+    `SELECT 1 FROM jobs
+     WHERE payload->>'stage' = 'update-branch'
+       AND (payload->>'specId')::int = $1 AND (payload->>'repoId')::int = $2
+       AND state IN ('queued', 'running')
+     LIMIT 1`,
+    [specId, repoId],
+  );
+  return (found.rowCount ?? 0) > 0;
+}
+
+async function repoIsBehindMain(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<boolean> {
+  const repo = await client.query<{ default_sha: string | null }>(
+    "SELECT default_sha FROM repos WHERE id = $1",
+    [repoId],
+  );
+  const sha = repo.rows[0]?.default_sha;
+  if (sha == null) return false;
+  const spec = await client.query<{
+    integration_branches: IntegrationBranch[];
+  }>("SELECT integration_branches FROM specs WHERE id = $1", [specId]);
+  const branch = spec.rows[0]?.integration_branches.find(
+    (entry) => entry.repoId === repoId,
+  );
+  return branch?.mainSha !== sha;
+}
+
+// 收尾 waits on update-branch when the spec is behind main or one is already in flight.
+export async function holdFinalReviewForUpdate(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<boolean> {
+  const inFlight = await updateBranchInFlight(client, specId, repoId);
+  const behind = await repoIsBehindMain(client, specId, repoId);
+  if (!inFlight && behind) {
+    const repo = await client.query<{ default_sha: string }>(
+      "SELECT default_sha FROM repos WHERE id = $1",
+      [repoId],
+    );
+    const sha = repo.rows[0]?.default_sha;
+    if (sha)
+      await enqueueUpdateBranch(client, { specId, repoId, mainSha: sha });
+  }
+  return inFlight || behind;
+}
+
+export async function enqueueFinalReviewIfWaiting(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<void> {
+  const spec = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  if (spec.rows[0]?.state !== "finalizing") return;
+  if (await updateBranchInFlight(client, specId, repoId)) return;
+  const fin = await client.query<{ step: string; state: string }>(
+    "SELECT step, state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+    [specId, repoId],
+  );
+  if (fin.rows[0]?.state !== "active" || fin.rows[0]?.step !== "final-review")
+    return;
+  const existing = await client.query(
+    `SELECT 1 FROM jobs
+     WHERE payload->>'stage' = 'final-review'
+       AND (payload->>'specId')::int = $1 AND (payload->>'repoId')::int = $2
+       AND state IN ('queued', 'running')
+     LIMIT 1`,
+    [specId, repoId],
+  );
+  if (existing.rowCount) return;
+  const done = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done'",
+    [specId, repoId],
+  );
+  if (Number(done.rows[0]?.n) === 0) {
+    await client.query(
+      "UPDATE finalizations SET state = 'done' WHERE spec_id = $1 AND repo_id = $2 AND state = 'active'",
+      [specId, repoId],
+    );
+    const { startOpeningPullRequests } = await import("./pull-requests.ts");
+    await startOpeningPullRequests(client, specId);
+    return;
+  }
+  await enqueueFinalJob(client, { specId, repoId }, "final-review");
+}
+
+export async function enqueueIfConflictsWithDefault(
+  client: pg.PoolClient,
+  pull: {
+    id: number;
+    state: string;
+    conflictsWithDefault?: boolean;
+  },
+  alreadyConflicted: boolean,
+): Promise<void> {
+  if (
+    alreadyConflicted ||
+    pull.state !== "open" ||
+    pull.conflictsWithDefault !== true
+  )
+    return;
+  const row = await client.query<{
+    spec_id: number;
+    repo_id: number;
+    state: SpecState;
+    default_sha: string | null;
+  }>(
+    `SELECT p.spec_id, p.repo_id, s.state, r.default_sha
+     FROM pull_requests p
+     JOIN specs s ON s.id = p.spec_id
+     JOIN repos r ON r.id = p.repo_id
+     WHERE p.id = $1`,
+    [pull.id],
+  );
+  const found = row.rows[0];
+  if (
+    !found ||
+    found.default_sha == null ||
+    (found.state !== "awaiting-review" && found.state !== "partially-merged")
+  )
+    return;
+  await enqueueUpdateBranch(client, {
+    specId: found.spec_id,
+    repoId: found.repo_id,
+    mainSha: found.default_sha,
+  });
+}
+
 export async function applyDefaultShas(
   client: pg.PoolClient,
   projectId: number,
   defaults: { repoUrl: string; sha: string }[],
 ): Promise<void> {
-  const running = await client.query<{ id: number }>(
-    "SELECT id FROM specs WHERE project_id = $1 AND state = 'running' ORDER BY id",
-    [projectId],
+  const live = await client.query<{ id: number }>(
+    "SELECT id FROM specs WHERE project_id = $1 AND state = ANY($2::text[]) ORDER BY id",
+    [projectId, SPECS_THAT_WATCH_MAIN],
   );
-  for (const spec of running.rows) await lockSpec(client, spec.id);
+  for (const spec of live.rows) await lockSpec(client, spec.id);
   for (const { repoUrl, sha } of defaults) {
     const repo = await client.query<{ id: number; default_sha: string | null }>(
       "SELECT id, default_sha FROM repos WHERE project_id = $1 AND url = $2 FOR UPDATE",
       [projectId, repoUrl],
     );
     const row = repo.rows[0];
-    if (!row || row.default_sha === sha) continue;
+    if (!row) continue;
     const previous = row.default_sha;
-    await client.query("UPDATE repos SET default_sha = $2 WHERE id = $1", [
-      row.id,
-      sha,
-    ]);
-    // First observation: the spec was already cut from this main; only a later change is "main 前进".
-    if (previous === null) continue;
-    const specs = await client.query<{ id: number }>(
-      `SELECT s.id FROM specs s
-       WHERE s.project_id = $1 AND s.state = 'running'
+    if (previous !== sha) {
+      await client.query("UPDATE repos SET default_sha = $2 WHERE id = $1", [
+        row.id,
+        sha,
+      ]);
+    }
+    // First observation, or main has not moved: specs that never recorded a baseline catch up without
+    // enqueueing. A later change is "main 前进".
+    if (previous === null || previous === sha) {
+      await stampMissingMainSha(client, projectId, row.id, sha);
+      continue;
+    }
+    const specs = await client.query<{ id: number; state: SpecState }>(
+      `SELECT s.id, s.state FROM specs s
+       WHERE s.project_id = $1 AND s.state IN ('running', 'finalizing')
          AND EXISTS (
            SELECT 1 FROM jsonb_array_elements(s.integration_branches) b
            WHERE (b->>'repoId')::int = $2
@@ -233,6 +437,11 @@ export async function applyDefaultShas(
       [projectId, row.id],
     );
     for (const spec of specs.rows) {
+      if (
+        spec.state === "finalizing" &&
+        !(await updateBranchInFlight(client, spec.id, row.id))
+      )
+        continue;
       await enqueueUpdateBranch(client, {
         specId: spec.id,
         repoId: row.id,
@@ -264,8 +473,14 @@ async function pauseForUpdateBranch(
   specId: number,
   reason: PauseReason,
 ): Promise<void> {
-  const paused = specTransition("running", "pause");
-  if (!paused.ok) throw new Error(paused.reason);
+  const current = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  const from = current.rows[0]?.state;
+  if (!from) return;
+  const paused = specTransition(from, "pause");
+  if (!paused.ok) return;
   await client.query(
     "UPDATE specs SET state = $2, pause_reason = $3 WHERE id = $1",
     [specId, paused.state, reason],
@@ -343,10 +558,11 @@ export async function recordUpdateBranchResult(
     valid,
     result,
   );
-  if (spec.rows[0]?.state !== "running") {
+  const specState = spec.rows[0]?.state;
+  if (!specState || !SPECS_THAT_WATCH_MAIN.includes(specState)) {
     return {
       status: "ignored",
-      reason: `update-branch result for a spec that is ${spec.rows[0]?.state}`,
+      reason: `update-branch result for a spec that is ${specState}`,
     };
   }
   if (!valid)
@@ -369,7 +585,15 @@ export async function recordUpdateBranchResult(
     return { status: "applied" };
   }
   if (valid.outcome === "merged") {
+    if (read.mainSha)
+      await stampIntegrationMainSha(
+        client,
+        read.specId,
+        read.repoId,
+        read.mainSha,
+      );
     if (read.afterFix) await enqueueIfMainMoved(client, read);
+    await enqueueFinalReviewIfWaiting(client, read.specId, read.repoId);
     return { status: "applied" };
   }
   if (valid.outcome !== "conflict" && valid.outcome !== "gate-failed") {
@@ -390,7 +614,7 @@ export async function recordUpdateBranchResult(
   return { status: "applied" };
 }
 
-export async function defaultBranchesOfRunningSpecs(
+export async function defaultBranchesToWatch(
   pool: Pick<pg.Pool, "query">,
   projectId: number,
 ): Promise<{ repoUrl: string; branch: string }[]> {
@@ -398,13 +622,13 @@ export async function defaultBranchesOfRunningSpecs(
     `SELECT DISTINCT r.url, r.default_branch
      FROM repos r
      JOIN specs s ON s.project_id = r.project_id
-     WHERE r.project_id = $1 AND s.state = 'running'
+     WHERE r.project_id = $1 AND s.state = ANY($2::text[])
        AND EXISTS (
          SELECT 1 FROM jsonb_array_elements(s.integration_branches) b
          WHERE (b->>'repoId')::int = r.id
        )
      ORDER BY r.url`,
-    [projectId],
+    [projectId, SPECS_THAT_WATCH_MAIN],
   );
   return rows.map((row) => ({ repoUrl: row.url, branch: row.default_branch }));
 }

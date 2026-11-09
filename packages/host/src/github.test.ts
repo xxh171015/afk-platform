@@ -132,6 +132,22 @@ describe("getPullRequest", () => {
     expect((await a.getPullRequest({ repo, number: 1 })).state).toBe("closed");
   });
 
+  it("reports a conflict with the default branch from mergeable === false, not from unknown", async () => {
+    const a = adapter();
+    await open(a);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(false);
+    github.setMergeable(1, null);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(false);
+    github.setMergeable(1, false);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(true);
+  });
+
   it("sums up CI over check runs and commit statuses", async () => {
     const a = adapter();
     const { headSha } = await open(a);

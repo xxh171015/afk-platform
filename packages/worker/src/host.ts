@@ -126,6 +126,7 @@ export async function runHostTask(
         mergedBy: info.mergedBy,
         mergedAt: info.mergedAt,
         mergedByPlatform: info.mergedByPlatform,
+        conflictsWithDefault: info.conflictsWithDefault,
       });
     } catch (error) {
       if (error instanceof HostError && error.status === 429)

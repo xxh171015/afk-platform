@@ -100,7 +100,10 @@ async function runningSpecs(
   };
 }
 
-async function look(defaults: { repoUrl: string; sha: string }[]) {
+async function look(
+  defaults: { repoUrl: string; sha: string }[],
+  pulls: Record<string, unknown>[] = [],
+) {
   for (let i = 0; i < 12; i++) {
     const due = await db.pool.query(
       `SELECT 1 FROM jobs WHERE type = 'host-sync' AND state = 'queued'
@@ -120,13 +123,37 @@ async function look(defaults: { repoUrl: string; sha: string }[]) {
     const claimed = job as { id: number; attempt: number };
     const reply = await host.complete(claimed.id, claimed.attempt, {
       stage: "host-sync",
-      pulls: [],
+      pulls,
       defaults,
     });
     expect(reply.status).toBe(200);
     return;
   }
   throw new Error("no host-sync job");
+}
+
+const pullFacts = (
+  id: number,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  id,
+  state: "open",
+  draft: false,
+  headSha: "sha",
+  ci: "pending",
+  review: "none",
+  conflictsWithDefault: false,
+  ...extra,
+});
+
+async function openPull(specId: number) {
+  const inserted = await db.pool.query<{ id: number }>(
+    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, ci, review)
+     VALUES ($1, 1, 7, 'https://github.com/me/shop-backend/pull/7', 'open', false, 'abc', 'pending', 'none')
+     RETURNING id`,
+    [specId],
+  );
+  return inserted.rows[0]?.id as number;
 }
 
 const updateJobs = async () =>
@@ -162,13 +189,38 @@ describe("host-sync watching default branches", () => {
   });
 
   it("stores the first SHA without enqueueing an update-branch", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { specIds, repoUrl } = await runningSpecs();
     await look([{ repoUrl, sha: "aaa111" }]);
     expect(
       (await db.pool.query("SELECT default_sha FROM repos")).rows[0]
         .default_sha,
     ).toBe("aaa111");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT integration_branches FROM specs WHERE id = $1",
+          [specIds[0]],
+        )
+      ).rows[0].integration_branches,
+    ).toEqual([expect.objectContaining({ repoId: 1, mainSha: "aaa111" })]);
     expect(await updateJobs()).toEqual([]);
+  });
+
+  it("names them for a spec waiting for review", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [specIds[0]],
+    );
+    await openPull(specIds[0] as number);
+    const job = (await host.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    const task = await fetch(
+      `${api.url}/worker/jobs/${job.id}/host-task?workerId=h1&attempt=${job.attempt}`,
+    ).then((r) => r.json());
+    expect(task.defaults).toEqual([{ repoUrl, branch: "main" }]);
   });
 
   it("does not list paused or cancelled specs", async () => {
@@ -316,19 +368,19 @@ describe("enqueueing update-branch when main advances", () => {
   });
 });
 
-describe("the update-branch job", () => {
-  async function queuedUpdate() {
-    const { repoUrl } = await runningSpecs();
-    await look([{ repoUrl, sha: "aaa111" }]);
-    await look([{ repoUrl, sha: "bbb222" }]);
-    return (await agent.claim()).body.job as {
-      id: number;
-      attempt: number;
-      payload: Json;
-      lockKey: string | null;
-    };
-  }
+async function queuedUpdate() {
+  const { repoUrl } = await runningSpecs();
+  await look([{ repoUrl, sha: "aaa111" }]);
+  await look([{ repoUrl, sha: "bbb222" }]);
+  return (await agent.claim()).body.job as {
+    id: number;
+    attempt: number;
+    payload: Json;
+    lockKey: string | null;
+  };
+}
 
+describe("the update-branch job", () => {
   it("hands the worker a bundle on the spec's temp branch, with no ticket", async () => {
     const job = await queuedUpdate();
     expect(job.lockKey).toBe("integration:1:spec/export");
@@ -585,5 +637,214 @@ describe("the update-branch job", () => {
     });
     expect(await specRow()).toEqual({ state: "running", pause_reason: null });
     expect(await updateJobs()).toMatchObject([{ state: "done" }]);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT integration_branches FROM specs WHERE id = 1",
+        )
+      ).rows[0].integration_branches,
+    ).toEqual([expect.objectContaining({ mainSha: "bbb222" })]);
+  });
+});
+
+describe("update-branch during 收尾 and 验收", () => {
+  it("does not update an awaiting-review spec when main moves", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [specIds[0]],
+    );
+    await openPull(specIds[0] as number);
+    await look([{ repoUrl, sha: "bbb222" }]);
+    expect(await updateJobs()).toEqual([]);
+  });
+
+  it("updates an awaiting-review spec when its pull request conflicts with the default branch", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [specIds[0]],
+    );
+    const pullId = await openPull(specIds[0] as number);
+    await look(
+      [{ repoUrl, sha: "aaa111" }],
+      [pullFacts(pullId, { conflictsWithDefault: true })],
+    );
+    expect(await updateJobs()).toMatchObject([
+      {
+        state: "queued",
+        lock_key: "integration:1:spec/export",
+        payload: {
+          stage: "update-branch",
+          specId: specIds[0],
+          repoId: 1,
+          mainSha: "aaa111",
+        },
+      },
+    ]);
+  });
+
+  it("does not update an awaiting-review spec whose pull request is still mergeable", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [specIds[0]],
+    );
+    const pullId = await openPull(specIds[0] as number);
+    await look([{ repoUrl, sha: "aaa111" }], [pullFacts(pullId)]);
+    expect(await updateJobs()).toEqual([]);
+  });
+
+  it("updates a partially-merged spec when an open pull request conflicts", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'partially-merged' WHERE id = $1",
+      [specIds[0]],
+    );
+    const pullId = await openPull(specIds[0] as number);
+    await look(
+      [{ repoUrl, sha: "aaa111" }],
+      [pullFacts(pullId, { conflictsWithDefault: true })],
+    );
+    expect(await updateJobs()).toMatchObject([
+      { payload: { specId: specIds[0], mainSha: "aaa111" } },
+    ]);
+  });
+
+  it("pauses a finalizing spec when the merge agent gives up, and resume returns it to 收尾", async () => {
+    const job = await queuedUpdate();
+    await db.pool.query("UPDATE specs SET state = 'finalizing' WHERE id = 1");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id) VALUES (1, 1)",
+    );
+    await agent.complete(job.id, job.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "agent-gave-up",
+    });
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "update-branch-conflict",
+    });
+    expect((await call("POST", "/specs/1/resume", {})).body.state).toBe(
+      "finalizing",
+    );
+    expect(await specRow()).toEqual({
+      state: "finalizing",
+      pause_reason: null,
+    });
+  });
+
+  it("coalesces a later SHA onto a finalizing spec's in-flight update-branch", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await look([{ repoUrl, sha: "bbb222" }]);
+    const running = (await agent.claim()).body.job;
+    expect(running?.payload).toMatchObject({ stage: "update-branch" });
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
+    await look([{ repoUrl, sha: "ccc333" }]);
+    expect(await updateJobs()).toMatchObject([
+      { state: "running", payload: { mainSha: "bbb222" } },
+      { state: "queued", payload: { mainSha: "ccc333" } },
+    ]);
+  });
+
+  it("does not queue another update-branch after allow while the pull request is still conflicted", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [specIds[0]],
+    );
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, 1)",
+      [specIds[0]],
+    );
+    const pullId = await openPull(specIds[0] as number);
+    await look(
+      [{ repoUrl, sha: "aaa111" }],
+      [pullFacts(pullId, { conflictsWithDefault: true })],
+    );
+    const first = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(first.id, first.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "agent-gave-up",
+    });
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "update-branch-conflict",
+    });
+    expect((await call("POST", `/specs/${specIds[0]}/allow`)).body.state).toBe(
+      "awaiting-review",
+    );
+    await look(
+      [{ repoUrl, sha: "aaa111" }],
+      [pullFacts(pullId, { conflictsWithDefault: true })],
+    );
+    expect(
+      (await updateJobs()).filter((row) => row.state === "queued"),
+    ).toEqual([]);
+  });
+
+  it("queues update-branch again on retry while the pull request is still conflicted", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "aaa111" }]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [specIds[0]],
+    );
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, 1)",
+      [specIds[0]],
+    );
+    const pullId = await openPull(specIds[0] as number);
+    await look(
+      [{ repoUrl, sha: "aaa111" }],
+      [pullFacts(pullId, { conflictsWithDefault: true })],
+    );
+    const first = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(first.id, first.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "agent-gave-up",
+    });
+    expect(
+      (await call("POST", `/specs/${specIds[0]}/resume`, {})).body.state,
+    ).toBe("awaiting-review");
+    expect(
+      (await updateJobs()).filter((row) => row.state === "queued"),
+    ).toMatchObject([{ payload: { specId: specIds[0], mainSha: "aaa111" } }]);
   });
 });

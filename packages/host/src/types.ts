@@ -40,6 +40,9 @@ export interface PullRequestInfo {
   mergedBy: string | null;
   mergedAt: string | null;
   mergedByPlatform: boolean;
+  // The host says this pull request cannot merge because it conflicts with the default branch (GitHub
+  // `mergeable === false`, GitLab `has_conflicts`). Null/unknown is not a conflict.
+  conflictsWithDefault: boolean;
 }
 
 export interface OpenPullRequestInput {

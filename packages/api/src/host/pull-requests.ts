@@ -26,7 +26,8 @@ import {
 import { mergeOrderOf } from "./merge-order.ts";
 import {
   applyDefaultShas,
-  defaultBranchesOfRunningSpecs,
+  defaultBranchesToWatch,
+  enqueueIfConflictsWithDefault,
   projectHasRunningSpecs,
 } from "./update-branch.ts";
 
@@ -78,6 +79,7 @@ const PullFacts = {
   mergedBy: z.string().nullable().optional(),
   mergedAt: z.string().nullable().optional(),
   mergedByPlatform: z.boolean().optional(),
+  conflictsWithDefault: z.boolean().optional(),
 };
 
 export const OpenPrResultSchema = z.object({
@@ -247,7 +249,7 @@ export async function buildHostTask(
       repoUrl: p.url,
       number: p.number,
     })),
-    defaults: await defaultBranchesOfRunningSpecs(pool, projectId),
+    defaults: await defaultBranchesToWatch(pool, projectId),
   };
 }
 
@@ -504,6 +506,8 @@ export async function recordHostSync(
     [parsed.data.pulls.map((p) => p.id), read.projectId],
   );
   for (const { spec_id: specId } of owners.rows) await lockSpec(client, specId);
+  if (parsed.data.defaults)
+    await applyDefaultShas(client, read.projectId, parsed.data.defaults);
   for (const pull of parsed.data.pulls) {
     if ("error" in pull) {
       // kept on the row, so that a pull request the host keeps refusing is not silent
@@ -518,9 +522,14 @@ export async function recordHostSync(
       pull.mergedAt != null && !Number.isNaN(Date.parse(pull.mergedAt))
         ? pull.mergedAt
         : null;
+    const previous = await client.query<{ conflicts_with_default: boolean }>(
+      "SELECT conflicts_with_default FROM pull_requests WHERE id = $1",
+      [pull.id],
+    );
     await client.query(
       `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now(),
-         merged_at = COALESCE($8::timestamptz, merged_at), merged_by = COALESCE($9, merged_by)
+         merged_at = COALESCE($8::timestamptz, merged_at), merged_by = COALESCE($9, merged_by),
+         conflicts_with_default = $10
        FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7`,
       [
         pull.id,
@@ -532,6 +541,7 @@ export async function recordHostSync(
         read.projectId,
         mergedAt,
         pull.mergedBy ?? null,
+        pull.conflictsWithDefault === true,
       ],
     );
     if (pull.mergedByPlatform)
@@ -540,13 +550,16 @@ export async function recordHostSync(
          WHERE specs.id = p.spec_id AND p.id = $1 AND NOT specs.token_merged`,
         [pull.id],
       );
+    await enqueueIfConflictsWithDefault(
+      client,
+      pull,
+      previous.rows[0]?.conflicts_with_default === true,
+    );
   }
   for (const { spec_id: specId } of owners.rows) {
     await markMergedWhenAllAre(client, specId);
     await queueReadyPullRequests(client, specId);
   }
-  if (parsed.data.defaults)
-    await applyDefaultShas(client, read.projectId, parsed.data.defaults);
   await scheduleNextSync(client, read.projectId, now);
   return { status: "applied" };
 }

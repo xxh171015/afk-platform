@@ -427,6 +427,10 @@ export const pullRequests = pgTable(
     mergedBy: text("merged_by"),
     // Why the last look at the host failed for this pull request; cleared by the next one that works.
     syncError: text("sync_error"),
+    // The host says this pull request conflicts with the default branch.
+    conflictsWithDefault: boolean("conflicts_with_default")
+      .notNull()
+      .default(false),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
     createdAt: createdAt(),
   },

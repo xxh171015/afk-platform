@@ -19,6 +19,7 @@ interface FakeMr {
   mergedAt: string | null;
   approvedBy: string[];
   reviewers: { username: string; state: string }[];
+  hasConflicts: boolean;
 }
 
 export class FakeGitLab {
@@ -118,6 +119,10 @@ export class FakeGitLab {
     this.mr(iid).state = "closed";
   }
 
+  setHasConflicts(iid: number, hasConflicts: boolean): void {
+    this.mr(iid).hasConflicts = hasConflicts;
+  }
+
   private mr(iid: number): FakeMr {
     const found = this.mrs.find((m) => m.iid === iid);
     if (!found) throw new Error(`no merge request ${iid}`);
@@ -150,6 +155,7 @@ export class FakeGitLab {
         user: { username: row.username },
         state: row.state,
       })),
+      has_conflicts: mr.hasConflicts,
     };
   }
 
@@ -269,6 +275,7 @@ export class FakeGitLab {
         mergedAt: null,
         approvedBy: [],
         reviewers: [],
+        hasConflicts: false,
       };
       this.mrs.push(mr);
       return this.json(res, 201, this.render(mr));

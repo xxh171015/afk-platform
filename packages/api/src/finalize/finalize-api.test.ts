@@ -161,6 +161,39 @@ const REVIEW_FIX = {
 };
 
 describe("when the overall review starts", () => {
+  it("updates the integration branch before overall review when it is behind main", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE repos SET default_sha = 'bbb222'");
+    await allTicketsDone();
+    expect(await spec()).toBe("finalizing");
+    expect(await fin()).toEqual([
+      { step: "final-review", state: "active", blocked_reason: null },
+    ]);
+    expect(await jobs()).toEqual([]);
+    const job = await claim();
+    expect(job?.payload).toMatchObject({
+      stage: "update-branch",
+      specId: 1,
+      repoId: 1,
+      mainSha: "bbb222",
+    });
+    expect(job?.lockKey).toBe("integration:1:spec/s");
+  });
+
+  it("starts overall review after that update-branch merges", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE repos SET default_sha = 'bbb222'");
+    await allTicketsDone();
+    await step("update-branch", { outcome: "merged", headSha: "updated" });
+    expect(await jobs()).toMatchObject([
+      {
+        type: "agent-run",
+        state: "queued",
+        stage: "final-review",
+      },
+    ]);
+  });
+
   it("not before the last ticket is done, and then exactly once", async () => {
     await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
     await step("implement", SUCCESS.implement as Record<string, unknown>);

@@ -3,6 +3,7 @@ import {
   type HumanAction,
   retryPlan,
   type SpecState,
+  specResumeTarget,
   specTransition,
   type TicketState,
   ticketTransition,
@@ -16,6 +17,11 @@ import {
   enqueueSpecCleanup,
   inSeconds,
 } from "../host/host-jobs.ts";
+import {
+  enqueueFinalReviewIfWaiting,
+  enqueueUpdateBranch,
+  holdFinalReviewForUpdate,
+} from "../host/update-branch.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import {
   inTransaction,
@@ -476,11 +482,22 @@ async function unpauseSpec(
   return inTransaction(pool, async (client) => {
     const state = await lockedSpecState(client, specId);
     if (!state) return { status: "no-ticket" };
-    const next = specTransition(state, "resume");
-    if (!next.ok) return refused(next.reason);
+    const allowed = specTransition(state, "resume");
+    if (!allowed.ok) return refused(allowed.reason);
+    const finals = await client.query(
+      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
+      [specId],
+    );
+    const pulls = await client.query<{
+      state: "open" | "closed" | "merged";
+    }>("SELECT state FROM pull_requests WHERE spec_id = $1", [specId]);
+    const dest = specResumeTarget({
+      hasFinalizations: (finals.rowCount ?? 0) > 0,
+      pullStates: pulls.rows.map((row) => row.state),
+    });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
-      [specId, next.state, extraSeconds],
+      [specId, dest, extraSeconds],
     );
     await recordAction(
       client,
@@ -494,7 +511,51 @@ async function unpauseSpec(
       [specId],
     );
     const row = after.rows[0];
-    if (row?.state === "running") await enqueueHostSync(client, row.project_id);
+    if (
+      row &&
+      (row.state === "running" ||
+        row.state === "finalizing" ||
+        row.state === "awaiting-review" ||
+        row.state === "partially-merged")
+    )
+      await enqueueHostSync(client, row.project_id);
+    if (row?.state === "finalizing") {
+      const repos = await client.query<{ repo_id: number }>(
+        "SELECT repo_id FROM finalizations WHERE spec_id = $1 AND state = 'active' ORDER BY repo_id",
+        [specId],
+      );
+      for (const { repo_id: repoId } of repos.rows) {
+        if (
+          action === "retry" &&
+          (await holdFinalReviewForUpdate(client, specId, repoId))
+        )
+          continue;
+        await enqueueFinalReviewIfWaiting(client, specId, repoId);
+      }
+    }
+    if (
+      action === "retry" &&
+      (row?.state === "awaiting-review" || row?.state === "partially-merged")
+    ) {
+      const conflicted = await client.query<{
+        repo_id: number;
+        default_sha: string | null;
+      }>(
+        `SELECT p.repo_id, r.default_sha
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+         WHERE p.spec_id = $1 AND p.state = 'open' AND p.conflicts_with_default`,
+        [specId],
+      );
+      for (const pr of conflicted.rows) {
+        if (pr.default_sha)
+          await enqueueUpdateBranch(client, {
+            specId,
+            repoId: pr.repo_id,
+            mainSha: pr.default_sha,
+          });
+      }
+    }
+    if (row?.state === "merged") await enqueueSpecCleanup(client, { specId });
     return { status: "ok", state: row?.state as SpecState };
   });
 }

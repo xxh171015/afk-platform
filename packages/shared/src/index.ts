@@ -129,7 +129,7 @@ export { SKILLS_PACKAGE, skillsPackageAt } from "./skills-package.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
 export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
-export { SPEC_STATES, specTransition } from "./spec-state.ts";
+export { SPEC_STATES, specResumeTarget, specTransition } from "./spec-state.ts";
 export type {
   Progress,
   Stage,
