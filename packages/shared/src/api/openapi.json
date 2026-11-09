@@ -8850,6 +8850,192 @@
           }
         }
       }
+    },
+    "/metrics": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": false,
+            "name": "projectId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The last 12 weeks of lead time, failure attribution and platform failure rate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "since": {
+                      "type": ["string", "null"]
+                    },
+                    "weeks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "weekStart": {
+                            "type": "string"
+                          },
+                          "leadTime": {
+                            "type": "object",
+                            "properties": {
+                              "ended": {
+                                "type": "integer"
+                              },
+                              "medianMs": {
+                                "type": ["integer", "null"]
+                              },
+                              "agentMs": {
+                                "type": "integer"
+                              },
+                              "gateMs": {
+                                "type": "integer"
+                              },
+                              "queuedMs": {
+                                "type": "integer"
+                              },
+                              "waitingMs": {
+                                "type": "integer"
+                              },
+                              "specs": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "integer"
+                                    },
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "totalMs": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "displayId",
+                                    "title",
+                                    "totalMs"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "ended",
+                              "medianMs",
+                              "agentMs",
+                              "gateMs",
+                              "queuedMs",
+                              "waitingMs",
+                              "specs"
+                            ]
+                          },
+                          "attribution": {
+                            "type": "object",
+                            "properties": {
+                              "recovered": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string",
+                                      "enum": [
+                                        "platform",
+                                        "external",
+                                        "agent",
+                                        "spec"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "count": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["source", "reason", "count"]
+                                }
+                              },
+                              "needsHuman": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string",
+                                      "enum": [
+                                        "platform",
+                                        "external",
+                                        "agent",
+                                        "spec"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "count": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["source", "reason", "count"]
+                                }
+                              }
+                            },
+                            "required": ["recovered", "needsHuman"]
+                          },
+                          "failureRate": {
+                            "type": "object",
+                            "properties": {
+                              "ended": {
+                                "type": "integer"
+                              },
+                              "platform": {
+                                "type": ["number", "null"]
+                              },
+                              "external": {
+                                "type": ["number", "null"]
+                              },
+                              "jobPlatform": {
+                                "type": ["number", "null"]
+                              }
+                            },
+                            "required": [
+                              "ended",
+                              "platform",
+                              "external",
+                              "jobPlatform"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "weekStart",
+                          "leadTime",
+                          "attribution",
+                          "failureRate"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["since", "weeks"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

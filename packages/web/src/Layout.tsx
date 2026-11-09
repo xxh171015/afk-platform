@@ -6,6 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import {
+  BarChart3,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -34,6 +35,7 @@ const nav = [
   { to: "/", label: "工作台", icon: LayoutDashboard, exact: true },
   { to: "/specs", label: "需求", icon: FileText, exact: false },
   { to: "/waiting", label: "待处理", icon: Inbox, exact: false, badge: true },
+  { to: "/metrics", label: "度量", icon: BarChart3, exact: false },
 ] as const;
 
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {

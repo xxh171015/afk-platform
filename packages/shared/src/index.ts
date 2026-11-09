@@ -90,6 +90,15 @@ export {
 } from "./limits.ts";
 export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
+export {
+  lastWeekStarts,
+  METRICS_TIME_ZONE,
+  METRICS_WEEKS,
+  medianMs,
+  PLATFORM_FAILURE_RATE_LINE,
+  weekStartYmd,
+  ymdInZone,
+} from "./metrics.ts";
 export type { PlanningCommitResult, PlanningState } from "./planning-docs.ts";
 export {
   CONTEXT_DOC_PATHS,

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
 
 describe("keyboard shortcuts", () => {
-  it("maps g h / g b / g s, ⌘K and ?", () => {
+  it("maps g h / g b / g s / g m, ⌘K and ?", () => {
     expect(
       shortcutFromKey({ key: "g", metaKey: false, ctrlKey: false }, false),
     ).toEqual({
@@ -25,6 +25,12 @@ describe("keyboard shortcuts", () => {
       shortcutFromKey({ key: "s", metaKey: false, ctrlKey: false }, true),
     ).toEqual({
       shortcut: { type: "go", to: "/specs" },
+      pendingGo: false,
+    });
+    expect(
+      shortcutFromKey({ key: "m", metaKey: false, ctrlKey: false }, true),
+    ).toEqual({
+      shortcut: { type: "go", to: "/metrics" },
       pendingGo: false,
     });
     expect(

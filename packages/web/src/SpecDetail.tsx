@@ -54,6 +54,7 @@ import { FinalizeProgress, UpdateBranchRuns } from "./FinalizeProgress.tsx";
 import { layoutGraph, STATE_COLORS } from "./graph.ts";
 import { hostKindOf, hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { commitHtmlUrl, treeHtmlUrl } from "./host-links.ts";
+import { LEAD_TIME_BAR } from "./lead-time-bar.ts";
 import {
   edgeKindLabel,
   prCiLabel,
@@ -810,13 +811,6 @@ export function SpecDetail({
     </Page>
   );
 }
-
-const LEAD_TIME_BAR: { key: LeadTimeSegment; cls: string }[] = [
-  { key: "agent", cls: "bg-state-running" },
-  { key: "gate", cls: "bg-state-merging" },
-  { key: "queued", cls: "bg-state-queued" },
-  { key: "waiting", cls: "bg-state-paused" },
-];
 
 function LeadTimeBar({
   leadTime,

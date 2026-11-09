@@ -10,6 +10,7 @@ import { withOrigin } from "./events/origin.ts";
 import { registerCliRoutes } from "./http/cli-routes.ts";
 import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
+import { registerMetricsRoutes } from "./http/metrics-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
 import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
@@ -97,6 +98,7 @@ export function createApp(options: AppOptions): OpenAPIHono {
   registerWorkerRoutes(app, context);
   registerLogRoutes(app, context);
   registerTicketRoutes(app, context);
+  registerMetricsRoutes(app, context);
   registerEventRoutes(app, context);
   return app;
 }

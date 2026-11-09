@@ -11,7 +11,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export type Shortcut =
-  | { type: "go"; to: "/" | "/waiting" | "/specs" }
+  | { type: "go"; to: "/" | "/waiting" | "/specs" | "/metrics" }
   | { type: "search" }
   | { type: "help" };
 
@@ -33,6 +33,8 @@ export function shortcutFromKey(
       return { shortcut: { type: "go", to: "/waiting" }, pendingGo: false };
     if (event.key === "s")
       return { shortcut: { type: "go", to: "/specs" }, pendingGo: false };
+    if (event.key === "m")
+      return { shortcut: { type: "go", to: "/metrics" }, pendingGo: false };
     return { pendingGo: false };
   }
   if (event.key === "g") return { pendingGo: true };
