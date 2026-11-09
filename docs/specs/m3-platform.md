@@ -1,6 +1,6 @@
 # M3 平台：GitLab、多需求并行、基础度量，先在 Mac 本机用起来
 
-2026-11-09 · 草稿，待用户确认后发布。依据：[design.md](../design.md)、[m2-platform.md](m2-platform.md)、[GLOSSARY.md](../../GLOSSARY.md)，以及「AFK 研发平台：走到 M3 可交付实现」地图（#196）上各决策票的结论。术语以 GLOSSARY 为准。
+2026-11-09 · 草稿，待用户确认后发布。2026-11-09 修订：M3 先用用户的个人 GitLab 令牌，bot 账号放到 M4（见「GitLab 令牌」）；前置步骤已做完。依据：[design.md](../design.md)、[m2-platform.md](m2-platform.md)、[GLOSSARY.md](../../GLOSSARY.md)，以及「AFK 研发平台：走到 M3 可交付实现」地图（#196）上各决策票的结论。术语以 GLOSSARY 为准。
 
 ## Problem Statement
 
@@ -15,7 +15,7 @@ M2 在 GitHub 上把一个前后端需求跑到了「人只在首尾出现」，
 
 M3 先在用户的 Mac 本机用起来：控制面和 worker 都在 Mac 上，迁服务器放到 M4。
 
-- **GitLab**：一个项目只在一种托管上，平台按 worker 有凭据的主机认出托管。GitLab 上 bot 是 Developer、用 PAT，推 `agent/*`、`spec/*`，开 MR（draft 用 `Draft:` 前缀），每分钟轮询同步状态，不做 webhook。人来合并靠 GitLab 的分支保护加平台事后检测。
+- **GitLab**：一个项目只在一种托管上，平台按 worker 有凭据的主机认出托管。GitLab 上用 PAT（M3 是用户的个人令牌，M4 换 bot），推 `agent/*`、`spec/*`，开 MR（draft 用 `Draft:` 前缀），每分钟轮询同步状态，不做 webhook。人来合并靠 GitLab 的分支保护加平台事后检测。
 - **多需求并行**：main 前进后，还在开发的需求自动 update-branch（合 main、跑门禁、前移）；合不进或门禁不过，给 agent 一次，还不行就暂停需求等人。集成分支每次前移，对同仓库的其他需求试合并，有冲突在页面上提示。
 - **基础度量**：一张只追加的事件表；每次失败和 blocked 标上来源（平台、外部服务、agent、需求本身）；工期切成 agent、门禁、排队、等人四段；度量页按项目、按周汇总。
 - **日志和磁盘**：日志接口不变（worker 只经 API 交，页面只经 API 读）；加保留期、磁盘告警和工作台上的状态区。
@@ -28,13 +28,13 @@ GitLab
 
 1. As a 开发者, I want 在 GitLab 项目的 checkout 里跑 `/afk-setup` 就能接入, so that 公司 GitLab 上的仓库和 GitHub 上的一样用。
 2. As a 开发者, I want 项目里的仓库在不同托管上、或主机平台不认识时，afk-setup 在登记任何东西之前停下并用中文告诉我怎么修, so that 我不会接入一半。
-3. As a 开发者, I want 接入报告里看到 bot 在每个仓库上的权限（是不是成员、能不能直推默认分支、Developers 能不能合并）和该找谁修, so that 我知道找 Maintainer 改什么。
-4. As a 开发者, I want bot 权限不对时 `plat spec confirm` 拒绝并给出同样的修复提示, so that 需求不会跑到开 MR 时才失败。
+3. As a 开发者, I want 接入报告里看到平台令牌的用户在每个仓库上的权限（是不是成员、能不能直推默认分支、Developers 能不能合并）和该找谁修, so that 我知道找 Maintainer 改什么。
+4. As a 开发者, I want 令牌的用户不是项目成员时 `plat spec confirm` 拒绝并给出同样的修复提示, so that 需求不会跑到开 MR 时才失败。
 5. As a 开发者, I want 平台在 GitLab 上为每个仓库开 MR，有顺序要求的先开成 `Draft:`，提供契约的仓库合并后由平台去掉前缀, so that 合并顺序和 GitHub 上一样。
 6. As a 开发者, I want 页面上看到 MR 的状态、流水线、是否有人批准、是否有人要求修改，每分钟更新, so that 不用来回切 GitLab。
-7. As a 开发者, I want 有人用 bot 身份合并了 MR 时平台标红并通知, so that 「只有人能合并」被破坏时我会知道。
+7. As a 开发者, I want 换成 bot 令牌后（M4），有人用 bot 身份合并了 MR 时平台标红并通知, so that 「只有人能合并」被破坏时我会知道。
 8. As a 开发者, I want 默认分支叫 `master` 的仓库照样能用, so that 不用为平台改团队习惯。
-9. As a 运维（M3 是开发者本人）, I want bot 的 PAT 放在 `~/.afk/secrets/gitlab/<主机>`，换文件就生效，到期前 30 天页面和通知提醒, so that 令牌不会悄悄过期。
+9. As a 运维（M3 是开发者本人）, I want GitLab 的 PAT 放在 `~/.afk/secrets/gitlab/<主机>`，换文件就生效，到期前 30 天页面和通知提醒, so that 令牌不会悄悄过期。
 10. As a 开发者, I want 需求取消或合并后平台关掉它的 MR、删掉它的分支, so that GitLab 上不留垃圾。
 
 多需求并行
@@ -76,9 +76,9 @@ GitLab
 ### 托管类型与接入（「GitLab 适配器：MR 和轮询同步」#204）
 
 - 同一项目的仓库托管类型必须一致。托管类型不再看地址里有没有「gitlab」（`hostKindOfUrl`）：worker 启动时把自己有凭据的主机报给平台（GitHub App → `github.com`；`~/.afk/secrets/gitlab/` 下每个文件一个 GitLab 主机），`plat init` 用仓库地址的主机名问平台。worker 也按主机名为每个仓库挑适配器和凭据，没有就报错。
-- 校验发生在第一次跑 afk-setup（经 `plat init`）和中途加仓库时：主机不认识或项目混用托管，**在登记任何东西之前**停下，用中文说明每个仓库在哪种托管、怎么修（「把 bot 的 PAT 放到 `~/.afk/secrets/gitlab/<主机>`，重启 worker 后再跑 /afk-setup」；混用时「搬到同一种托管，或为它单独建项目」）。
-- GitLab 版接入自检（`repo-access` 推广到 GitLab），加仓库时跑一次、之后每天一次：bot 不是项目成员 → 红；bot 能直推默认分支（`can_push`）→ 红；Developers 能合并 → 只提示。afk-setup 报告表的「GitHub App」列改为「托管」，每条没过的附修复说明和该找谁。**红的拦在 `plat spec confirm`**，修好后重跑 afk-setup 或等每日自检通过。
-- 不改团队的分支保护。bot 推不了默认分支由 GitLab 挡；bot 能经 API 合并，由平台不调合并接口保证（沿用现有测试）。host-sync 读到 MR 的 `merged_by` 是 bot，就在需求上标红并通知。
+- 校验发生在第一次跑 afk-setup（经 `plat init`）和中途加仓库时：主机不认识或项目混用托管，**在登记任何东西之前**停下，用中文说明每个仓库在哪种托管、怎么修（「把 GitLab 的 PAT 放到 `~/.afk/secrets/gitlab/<主机>`，重启 worker 后再跑 /afk-setup」；混用时「搬到同一种托管，或为它单独建项目」）。
+- GitLab 版接入自检（`repo-access` 推广到 GitLab），加仓库时跑一次、之后每天一次：令牌的用户不是项目成员 → 红；令牌的用户能直推默认分支（`can_push`）→ M3 只提示「平台用的是个人令牌：推送和 MR 显示为〈用户〉，平台不调合并接口，但合并者是不是平台检测不出；换 bot 账号放 M4」（M4 换 bot 后改回红）；Developers 能合并 → 只提示。afk-setup 报告表的「GitHub App」列改为「托管」，每条没过的附修复说明和该找谁。**红的拦在 `plat spec confirm`**，修好后重跑 afk-setup 或等每日自检通过。
+- 不改团队的分支保护。平台不推默认分支、不调合并接口，由平台保证（沿用现有测试）；换 bot 后再加上 GitLab 的硬限制。host-sync 读到 MR 的 `merged_by` 是令牌的用户就在需求上标红并通知；令牌能直推默认分支（即个人令牌）时不做这项检测，否则人每次合并都会误报。
 - `packages/worker/src/slots.ts` 写死的 `refs/heads/main` 改成仓库自己的默认分支（试点在 GitLab 上是 `master`）。
 - `plat tracker-doc` 的 GitLab 模板已有；afk-setup、`plat init` 的提示和报告补齐 GitLab 的说法。
 
@@ -91,11 +91,12 @@ GitLab
 - 多层子 group：`RepoRef.owner` 存完整命名空间路径，调用时整体转义；`parseRepoUrl` 支持多层。
 - 页面、通知、验收包在 GitLab 项目上说「MR」，GitHub 上说「PR」；库和代码里仍叫 pull request。
 
-### bot 的 PAT
+### GitLab 令牌
 
-- 放 `~/.afk/secrets/gitlab/<主机名>`（600），worker 每次用前重读，换令牌不用重启。git 推送走 HTTPS Basic 认证（用户名 `oauth2`）。
+- **M3 用用户自己的个人 PAT**（2026-11-09 用户定，为了不等管理员建 bot）：平台的推送、MR 都显示为用户本人；「只有人能合并」只靠平台不调合并接口，事后检测关闭（见上）。M4 换成 bot 用户（Developer）+ PAT，接入自检和事后检测恢复原样。
+- 放 `~/.afk/secrets/gitlab/<主机名>`（600），worker 每次用前重读，换令牌不用重启。git 推送走 HTTPS Basic 认证，用户名 `oauth2`（2026-11-09 在公司 GitLab 上实测可用）。
 - M3 不自动轮换：worker 每天读令牌到期日，剩 30 天在页面和 macOS 通知提醒，人手动换。自动轮换放 M4。
-- `TokenPermissions` 在 GitLab 上忽略：bot 的能力由 Developer 角色决定。
+- `TokenPermissions` 在 GitLab 上忽略：令牌的能力由它的用户在项目里的角色决定。
 
 ### 多需求并行（「多需求并行：update-branch、trial-merge 和需求暂停」#205）
 
@@ -178,14 +179,13 @@ GitLab
 
 照 M1、M2 的三层，尽量用最高的一层：
 
-1. **API 层**（HTTP + 真 Postgres）：托管类型校验（混用、不认识的主机、在登记前拒绝）；`plat spec confirm` 被红的自检拦下；host-sync 每项目一行；MR 状态映射（draft 前缀、approvals、`requested_changes`、`merged_by` 是 bot 时标红）；main 前进 → 哪些需求排 update-branch、排队合并成一次；暂停的三种原因码和重试 / 放行 / 取消；潜在冲突表的增删；事件同事务写入（回滚时事件也没有）；失败来源对应表；工期四段的切分（并行的票、blocked 与运行重叠、取消的需求）；平台故障率和五条成功标准的算法；日志按保留期清理和过期提示；磁盘阈值上报和停领作业。
+1. **API 层**（HTTP + 真 Postgres）：托管类型校验（混用、不认识的主机、在登记前拒绝）；`plat spec confirm` 被红的自检拦下；host-sync 每项目一行；MR 状态映射（draft 前缀、approvals、`requested_changes`、`merged_by` 是令牌的用户时标红，个人令牌时不检测；能直推默认分支只提示、不拦 confirm）；main 前进 → 哪些需求排 update-branch、排队合并成一次；暂停的三种原因码和重试 / 放行 / 取消；潜在冲突表的增删；事件同事务写入（回滚时事件也没有）；失败来源对应表；工期四段的切分（并行的票、blocked 与运行重叠、取消的需求）；平台故障率和五条成功标准的算法；日志按保留期清理和过期提示；磁盘阈值上报和停领作业。
 2. **pipeline / worker 层**（临时 git 仓库，假的 agent 运行器，假的 GitLab HTTP）：GitLab 适配器的每个调用（多层子 group 转义、409、404）；默认分支不是 main 的槽位；update-branch 的 `merge-tree` → 候选门禁 → 前移，冲突走 merge agent；trial-merge 只看冲突；`sandbox-logs` / `salvage` 清理；`compose down --rmi local`（假的 docker 命令执行器）。
 3. **端到端（不进自动化）**：真 Cursor、真 GitLab、真 Docker：验收需求和演练。
 
-GitLab 上还没实测的三项，在 GitLab 适配器第一张实现票的第一步核对，并按结果选退路：
+GitLab 上还没实测的两项，在 GitLab 适配器第一张实现票的第一步核对，并按结果选退路（PAT 走 git HTTPS、用户名 `oauth2` 已实测可用）：
 
-- PAT 走 git HTTPS 的 Basic 认证：默认用户名 `oauth2`；
-- Developer 能否读 `can_push` 和保护设置：读不到时，接入自检改为试推一个临时分支再删掉；
+- Developer 能否读 `can_push` 和保护设置（M3 的个人令牌是 Owner，读得到；换 bot 时再核对）：读不到时，接入自检改为试推一个临时分支再删掉；
 - 17.3.1 上 reviewers 的 `requested_changes`：没有这个字段时，评审状态只看批准。
 
 ## Out of Scope
@@ -197,7 +197,7 @@ GitLab 上还没实测的三项，在 GitLab 适配器第一张实现票的第�
 - GitLab webhook（M3 用轮询）；用 GitLab issue 承载需求和票（沿用 `plat` 导入，平台就是 tracker）。
 - 跨需求依赖边；MR / PR 评论返工（rework）；agent 提供方做成项目配置；#159 每仓库镜像。
 - 流水线基准和回放、review 校准、MR 评审机器人、一句话任务、M4 追溯、M5 事件总线与插件和工作流、信任阶梯、角色权限。
-- PAT 自动轮换、完整的系统状态面板、度量的 CLI 和导出、人工改判失败来源。
+- GitLab bot 账号（M3 先用个人令牌）、PAT 自动轮换、完整的系统状态面板、度量的 CLI 和导出、人工改判失败来源。
 
 ## Further Notes
 
@@ -213,14 +213,11 @@ GitLab 上还没实测的三项，在 GitLab 适配器第一张实现票的第�
 
 第 1 步先做；第 2、3、5、6 步可以并行；第 4 步依赖第 1 步；第 3 步的暂停事件依赖第 1 步。
 
-### 前置（只有人能做）
+### 前置（2026-11-09 已完成）
 
-1. 公司 GitLab 上为 `afk-pilot-backend`、`afk-pilot-frontend` 各建一个项目，从 GitHub 推 `main` 的完整历史，默认分支叫 `master`；分支保护按公司默认（推送 Maintainers，合并 Maintainers + Developers）。如果环境摸底时那个「试点项目」就是它们的副本，直接用。GitHub 上的两个仓库原样保留。
-2. 管理员建 bot 用户，在两个项目里设为 Developer，给 bot 建 PAT（`api`、`read_repository`、`write_repository`，到期日填一年）。
-3. 把 PAT 放到 Mac 的 `~/.afk/secrets/gitlab/<主机>`（600）。
-4. 用户自己的 GitLab 账号能在 Mac 上 `git clone` 这两个项目，用来跑 `/afk-setup` 和规划。
-
-其余都能在 Mac 上由 agent 完成。
+1. 公司 GitLab 上建好 `xuxinghua/afk-pilot-backend`、`xuxinghua/afk-pilot-frontend`（个人命名空间，internal），默认分支 `master`，保护按公司默认（推送 Maintainers，合并 Maintainers + Developers，不允许强推）。`master` 已推入 GitHub `main` 的完整历史（后端 73 个提交、前端 29 个，两边最新提交一致）；GitHub 上的两个仓库原样保留。
+2. 令牌：用户的个人 PAT（用户是两个项目的 Owner），2027-11-09 到期，放在 Mac 的 `~/.afk/secrets/gitlab/<主机>`（600）。bot 账号放到 M4。
+3. 用户自己的 GitLab 账号能在 Mac 上 clone 这两个项目，用来跑 `/afk-setup` 和规划。
 
 ### 验收需求
 
@@ -248,7 +245,7 @@ GitLab 上还没实测的三项，在 GitLab 适配器第一张实现票的第�
 
 - [ ] update-branch 的持锁合并步骤里杀掉 worker：锁随租约释放，重跑后集成分支只前移一次。
 - [ ] 改错或吊销 GitLab PAT：接入自检变红，`plat spec confirm` 被拦，host-sync 出错记为外部服务；换回正确的令牌不用重启 worker。
-- [ ] 用 bot 的令牌经 API 合并一个 MR：host-sync 发现，需求标红并通知。
+- [ ] 用个人令牌时，接入自检对「能直推默认分支」只给提示、不拦 `plat spec confirm`；人合并 MR 不误报。
 - [ ] 把磁盘阈值调到高于剩余空间：横幅、通知、worker 停领新作业；调回后自动恢复。
 - [ ] 把日志保留天数调成 0：结束的需求的日志被清理，页面显示过期提示。
 - [ ] 断开公司网络：host-sync 出错归到外部服务，恢复后自动接着同步。
@@ -256,6 +253,6 @@ GitLab 上还没实测的三项，在 GitLab 适配器第一张实现票的第�
 
 ### 已知的、没有实测过的
 
-- GitLab 上的三项（见 Testing Decisions），在实现第一步核对。
+- GitLab 上的两项（见 Testing Decisions），在实现第一步核对。
 - 合并的沙箱镜像能否同时满足 Playwright 和 afk-platform 的门禁（Postgres 临时实例）；afk-platform 的门禁在沙箱里跑一次要几分钟，比试点慢得多。
 - Mac 的 Docker 虚拟机 7.8 GiB 内存同时跑两个沙箱加一个联调环境是否够用。
