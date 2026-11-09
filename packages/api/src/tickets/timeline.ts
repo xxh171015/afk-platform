@@ -1,4 +1,5 @@
 import {
+  type FailureSource,
   formatDisplayId,
   type HostKind,
   pauseReasonLabel,
@@ -35,6 +36,7 @@ export interface TimelineItem {
   text: string;
   runId?: number;
   ticketId?: number;
+  failureSource?: FailureSource;
 }
 
 const FINAL_STAGES = new Set([
@@ -149,6 +151,21 @@ export async function specTimeline(
     }
   }
 
+  const blockedSources = new Map<number, FailureSource>();
+  const blockedEvents = await pool.query<{
+    ticket_id: number;
+    failure_source: FailureSource | null;
+  }>(
+    `SELECT DISTINCT ON (ticket_id) ticket_id, failure_source
+     FROM events
+     WHERE spec_id = $1 AND type = 'ticket' AND to_state = 'blocked'
+     ORDER BY ticket_id, id DESC`,
+    [specId],
+  );
+  for (const row of blockedEvents.rows) {
+    if (row.failure_source)
+      blockedSources.set(row.ticket_id, row.failure_source);
+  }
   const blocked = await pool.query<{
     id: number;
     blocked_reason: string | null;
@@ -166,6 +183,9 @@ export async function specTimeline(
       at: (row.finished_at ?? spec.created_at).toISOString(),
       text: `${formatDisplayId("ticket", row.id)} 卡住${row.blocked_reason ? `：${row.blocked_reason}` : ""}`,
       ticketId: row.id,
+      ...(blockedSources.get(row.id)
+        ? { failureSource: blockedSources.get(row.id) }
+        : {}),
     });
   }
 
@@ -227,14 +247,24 @@ export async function specTimeline(
       text: "验收包生成",
     });
 
-  if (spec.state === "paused")
+  if (spec.state === "paused") {
+    const pause = (
+      await pool.query<{ at: Date; failure_source: FailureSource | null }>(
+        `SELECT at, failure_source FROM events
+         WHERE spec_id = $1 AND type = 'spec' AND to_state = 'paused'
+         ORDER BY id DESC LIMIT 1`,
+        [specId],
+      )
+    ).rows[0];
     items.push({
       kind: "pause",
-      at: spec.created_at.toISOString(),
+      at: (pause?.at ?? spec.created_at).toISOString(),
       text: spec.pause_reason
         ? `暂停：${pauseReasonLabel(spec.pause_reason)}`
         : "暂停",
+      ...(pause?.failure_source ? { failureSource: pause.failure_source } : {}),
     });
+  }
 
   items.sort(
     (a, b) => a.at.localeCompare(b.at) || a.kind.localeCompare(b.kind),

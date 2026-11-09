@@ -11,6 +11,13 @@ export const FAILURE_SOURCES = [
 ] as const;
 export type FailureSource = (typeof FAILURE_SOURCES)[number];
 
+export const FAILURE_SOURCE_LABELS: Record<FailureSource, string> = {
+  platform: "平台",
+  external: "外部服务",
+  agent: "agent",
+  spec: "需求本身",
+};
+
 // The final e2e before the pull requests failed (finalize/final-e2e.ts).
 export const FINAL_E2E_FAILED = "final-e2e-failed";
 

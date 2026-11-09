@@ -36,6 +36,7 @@ export {
   EVENT_SOURCES,
   EVENT_TYPES,
   EXTERNAL_ERROR_PATTERNS,
+  FAILURE_SOURCE_LABELS,
   FAILURE_SOURCE_OF_REASON,
   FAILURE_SOURCES,
   FINAL_E2E_BLOCKED_REASONS,
@@ -69,6 +70,18 @@ export {
 export type { InvalidatePayload } from "./invalidate.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
+export type {
+  LeadTime,
+  LeadTimeInput,
+  LeadTimeSegment,
+  Span,
+} from "./lead-time.ts";
+export {
+  LEAD_TIME_LABELS,
+  LEAD_TIME_SEGMENTS,
+  leadTime,
+  runLeadSegment,
+} from "./lead-time.ts";
 export type { LimitOverrides, Limits } from "./limits.ts";
 export {
   DEFAULT_LIMITS,

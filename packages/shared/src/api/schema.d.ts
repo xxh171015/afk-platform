@@ -3011,6 +3011,8 @@ export interface paths {
                 text: string;
                 runId?: number;
                 ticketId?: number;
+                /** @enum {string} */
+                failureSource?: "platform" | "external" | "agent" | "spec";
               }[];
               finalRuns: {
                 id: number;
@@ -3031,6 +3033,13 @@ export interface paths {
                 repoId: number;
                 files: string[];
               }[];
+              leadTime: {
+                agentMs: number;
+                gateMs: number;
+                queuedMs: number;
+                waitingMs: number;
+                totalMs: number;
+              } | null;
             };
           };
         };

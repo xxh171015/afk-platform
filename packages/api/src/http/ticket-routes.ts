@@ -343,6 +343,7 @@ const specRoute = createRoute({
             text: z.string(),
             runId: Id.optional(),
             ticketId: Id.optional(),
+            failureSource: z.enum(FAILURE_SOURCES).optional(),
           }),
         ),
         finalRuns: z.array(
@@ -370,6 +371,15 @@ const specRoute = createRoute({
             files: z.array(z.string()),
           }),
         ),
+        leadTime: z
+          .object({
+            agentMs: z.number().int(),
+            gateMs: z.number().int(),
+            queuedMs: z.number().int(),
+            waitingMs: z.number().int(),
+            totalMs: z.number().int(),
+          })
+          .nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -884,7 +894,7 @@ export function registerTicketRoutes(
   });
 
   app.openapi(specRoute, async (c) => {
-    const view = await specView(pool, c.req.valid("param").id);
+    const view = await specView(pool, c.req.valid("param").id, context.clock());
     return view ? c.json(view, 200) : c.json({ error: "no such spec" }, 404);
   });
 

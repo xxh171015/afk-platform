@@ -44,6 +44,13 @@ const view = (
     timeline?: unknown[];
     finalRuns?: unknown[];
     potentialConflicts?: unknown[];
+    leadTime?: {
+      agentMs: number;
+      gateMs: number;
+      queuedMs: number;
+      waitingMs: number;
+      totalMs: number;
+    } | null;
     mergeOrder?: {
       ordered: string[];
       after: Record<string, string[]>;
@@ -82,6 +89,7 @@ const view = (
   timeline: over.timeline ?? [],
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
+  leadTime: over.leadTime ?? null,
 });
 
 const ticketView = (n: number, over: Record<string, unknown> = {}) => ({
@@ -705,6 +713,34 @@ describe("the spec page", () => {
     expect(screen.queryByText("待处理")).toBeNull();
   });
 
+  it("shows the four lead-time segments on the overview", async () => {
+    const hour = 3_600_000;
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            leadTime: {
+              agentMs: 3 * hour,
+              gateMs: hour,
+              queuedMs: hour,
+              waitingMs: 5 * hour,
+              totalMs: 10 * hour,
+            },
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("lead-time");
+    expect(bar.textContent).toContain("工期");
+    expect(bar.textContent).toContain("10h 00m");
+    expect(bar.textContent).toContain("agent");
+    expect(bar.textContent).toContain("门禁");
+    expect(bar.textContent).toContain("排队");
+    expect(bar.textContent).toContain("等人");
+  });
+
   it("shows the overall review of a finalizing spec", async () => {
     renderWithApp(
       <SpecDetail specId={1} section="delivery" />,
@@ -1183,6 +1219,35 @@ describe("the six-step bar and nested pages", () => {
     expect(screen.getByText("2026-11-01 18:00").getAttribute("dateTime")).toBe(
       "2026-11-01T10:00:00.000Z",
     );
+  });
+
+  it("marks blocked and pause timeline events with their failure source", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timeline: [
+              {
+                kind: "ticket-blocked",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "T-1 卡住：gate-failed",
+                failureSource: "agent",
+              },
+              {
+                kind: "pause",
+                at: "2026-11-01T11:00:00.000Z",
+                text: "暂停：合 main 有冲突",
+                failureSource: "spec",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("T-1 卡住：gate-failed")).toBeTruthy();
+    const sources = screen.getAllByTestId("failure-source");
+    expect(sources.map((el) => el.textContent)).toEqual(["agent", "需求本身"]);
   });
 
   it("links PR timeline events to GitHub", async () => {

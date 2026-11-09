@@ -5987,6 +5987,10 @@
                           },
                           "ticketId": {
                             "type": "integer"
+                          },
+                          "failureSource": {
+                            "type": "string",
+                            "enum": ["platform", "external", "agent", "spec"]
                           }
                         },
                         "required": ["kind", "at", "text"]
@@ -6074,6 +6078,33 @@
                           "files"
                         ]
                       }
+                    },
+                    "leadTime": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "agentMs": {
+                          "type": "integer"
+                        },
+                        "gateMs": {
+                          "type": "integer"
+                        },
+                        "queuedMs": {
+                          "type": "integer"
+                        },
+                        "waitingMs": {
+                          "type": "integer"
+                        },
+                        "totalMs": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "agentMs",
+                        "gateMs",
+                        "queuedMs",
+                        "waitingMs",
+                        "totalMs"
+                      ]
                     }
                   },
                   "required": [
@@ -6087,7 +6118,8 @@
                     "edges",
                     "timeline",
                     "finalRuns",
-                    "potentialConflicts"
+                    "potentialConflicts",
+                    "leadTime"
                   ]
                 }
               }

@@ -16,6 +16,7 @@ import {
   type IntegrationAttempt,
   integrationAttempts,
 } from "./integration-attempts.ts";
+import { specLeadTime } from "./lead-time.ts";
 import { ticketFileOf } from "./ticket-file.ts";
 import { specTimeline } from "./timeline.ts";
 import { type Blocking, rankWaitingQueue } from "./waiting-queue.ts";
@@ -558,7 +559,11 @@ async function reposBySpecIds(
   return bySpec;
 }
 
-export async function specView(pool: pg.Pool, specId: number) {
+export async function specView(
+  pool: pg.Pool,
+  specId: number,
+  now: Date = new Date(),
+) {
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
             s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo,
@@ -639,6 +644,7 @@ export async function specView(pool: pg.Pool, specId: number) {
     timeline: await specTimeline(pool, specId),
     finalRuns: await finalRunsOf(pool, specId),
     potentialConflicts: await potentialConflictsOf(pool, specId),
+    leadTime: await specLeadTime(pool, specId, now),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
