@@ -68,6 +68,7 @@ import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { recordJobFailure } from "../stages/failures.ts";
 import { markClaimed, recordStageResult } from "../stages/results.ts";
+import { recordWorkerCleanup } from "../workers.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const ClaimedJob = z.object({
@@ -132,6 +133,35 @@ const hostsReportRoute = createRoute({
   responses: {
     200: {
       description: "Kept: repos on these hosts can be registered and worked on",
+      content: {
+        "application/json": { schema: z.object({ ok: z.literal(true) }) },
+      },
+    },
+  },
+});
+
+const workerStatusRoute = createRoute({
+  method: "post",
+  path: "/worker/status",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            workerId: z.string().min(1).max(200),
+            cleaned: z.object({
+              sandboxLogs: z.number().int().min(0),
+              salvage: z.number().int().min(0),
+              snapshots: z.number().int().min(0),
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Kept for the workbench status area",
       content: {
         "application/json": { schema: z.object({ ok: z.literal(true) }) },
       },
@@ -589,6 +619,12 @@ export function registerWorkerRoutes(
   app.openapi(hostsReportRoute, async (c) => {
     const { workerId, hosts } = c.req.valid("json");
     await reportHosts(context.pool, workerId, hosts);
+    return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(workerStatusRoute, async (c) => {
+    const { workerId, cleaned } = c.req.valid("json");
+    await recordWorkerCleanup(context.pool, workerId, cleaned, context.clock());
     return c.json({ ok: true as const }, 200);
   });
 

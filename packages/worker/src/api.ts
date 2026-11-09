@@ -196,3 +196,20 @@ export async function reportCodeHosts(
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }
+
+// After a home sweep: how many sandbox-logs, salvage dirs and snapshots went, so the status area can show it.
+export async function reportCleanup(
+  baseUrl: string,
+  workerId: string,
+  cleaned: {
+    sandboxLogs: number;
+    salvage: number;
+    snapshots: number;
+  },
+  client: ApiClient = createApiClient(baseUrl),
+): Promise<void> {
+  const { response } = await client.POST("/worker/status", {
+    body: { workerId, cleaned },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}

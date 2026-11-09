@@ -30,6 +30,7 @@ const ENTITY_TABLES = [
   "specs",
   "ticket_versions",
   "tickets",
+  "workers",
 ];
 
 // Tests that migrate "from before" leave out a migration and every one after it: drizzle skips an entry that is
@@ -67,6 +68,7 @@ const LATER_THAN_REPO_NAMES = [
   "0044_potential_conflicts",
   "0045_pr_platform_head",
   "0046_log_retention",
+  "0047_workers",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

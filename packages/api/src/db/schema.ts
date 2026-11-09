@@ -673,3 +673,14 @@ export const codeHosts = pgTable(
     ),
   ],
 );
+
+// One row per worker: last cleanup it reported, for the workbench status area.
+export const workers = pgTable("workers", {
+  id: text("id").primaryKey(),
+  reportedAt: timestamp("reported_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  cleanedSandboxLogs: integer("cleaned_sandbox_logs").notNull().default(0),
+  cleanedSalvage: integer("cleaned_salvage").notNull().default(0),
+  cleanedSnapshots: integer("cleaned_snapshots").notNull().default(0),
+});

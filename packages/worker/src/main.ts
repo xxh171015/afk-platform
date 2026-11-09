@@ -26,15 +26,16 @@ import {
   SandcastleGateSandbox,
 } from "@afk/pipeline";
 import { repoHost, SKILLS_SHA } from "@afk/shared";
-import { createWorkerApi, reportCodeHosts } from "./api.ts";
+import { createWorkerApi, reportCleanup, reportCodeHosts } from "./api.ts";
 import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
+import { retainWorkerFiles } from "./retention.ts";
 import { removeSandboxesUnder } from "./sandboxes.ts";
 import { SlotManager } from "./slots.ts";
-import { pruneSnapshots, SnapshotStore } from "./snapshots.ts";
+import { SnapshotStore } from "./snapshots.ts";
 import { runWorker } from "./worker.ts";
 
 // `pnpm worker`: a worker on this machine, with the real sandbox, the GitHub App and the folders under ~/.afk.
@@ -168,9 +169,21 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     stop.abort();
   });
 
-for (const removed of pruneSnapshots(snapshots.root)) {
-  log(`removed the snapshot ${removed}, unused for a week`);
-}
+const sweepHome = async () => {
+  const cleaned = retainWorkerFiles({ home: config.home });
+  const parts = [
+    cleaned.sandboxLogs && `${cleaned.sandboxLogs} sandbox-log(s)`,
+    cleaned.salvage && `${cleaned.salvage} salvage`,
+    cleaned.snapshots && `${cleaned.snapshots} snapshot(s)`,
+  ].filter(Boolean);
+  if (parts.length > 0) log(`removed ${parts.join(", ")}`);
+  await reportCleanup(config.apiUrl, config.workerId, cleaned).catch((error) =>
+    log(`could not report cleanup: ${reason(error)}`),
+  );
+};
+await sweepHome();
+const retentionTimer = setInterval(() => void sweepHome(), 24 * 60 * 60 * 1000);
+retentionTimer.unref();
 log(
   `worker ${config.workerId}: ${config.slots} slot(s), api ${config.apiUrl}, home ${config.home}`,
 );

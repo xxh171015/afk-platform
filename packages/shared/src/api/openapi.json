@@ -2016,6 +2016,64 @@
         }
       }
     },
+    "/worker/status": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "cleaned": {
+                    "type": "object",
+                    "properties": {
+                      "sandboxLogs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "salvage": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "snapshots": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": ["sandboxLogs", "salvage", "snapshots"]
+                  }
+                },
+                "required": ["workerId", "cleaned"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kept for the workbench status area",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/claim": {
       "post": {
         "requestBody": {

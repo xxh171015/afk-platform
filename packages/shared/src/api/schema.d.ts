@@ -1251,6 +1251,55 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            workerId: string;
+            cleaned: {
+              sandboxLogs: number;
+              salvage: number;
+              snapshots: number;
+            };
+          };
+        };
+      };
+      responses: {
+        /** @description Kept for the workbench status area */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/claim": {
     parameters: {
       query?: never;

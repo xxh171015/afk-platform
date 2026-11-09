@@ -108,9 +108,21 @@ const seedServiceOf = (repoName: string) => `seed-${repoName}`;
 const isSeed = (service: string) => service.startsWith("seed-");
 
 const composeDown = (docker: DockerCli, project: string) =>
-  docker(["compose", "-p", project, "down", "-v", "--remove-orphans"], {
-    timeoutMs: DOWN_TIMEOUT_MS,
-  });
+  docker(
+    [
+      "compose",
+      "-p",
+      project,
+      "down",
+      "-v",
+      "--rmi",
+      "local",
+      "--remove-orphans",
+    ],
+    {
+      timeoutMs: DOWN_TIMEOUT_MS,
+    },
+  );
 
 const tail = (text: string) =>
   text.trimEnd().split("\n").slice(-LOG_TAIL_LINES).join("\n");
@@ -175,6 +187,8 @@ export async function startEnvironment(
     if ((await networkOf(docker, project)) !== undefined) {
       await down();
     }
+    // --rmi local only drops untagged compose images. This run also `docker build -t ${project}-${service}`,
+    // which --rmi local will not remove; those tags are this run's, not the sandbox or a FROM image.
     if (built.length > 0)
       await docker(["rmi", "-f", ...built], { timeoutMs: DOWN_TIMEOUT_MS });
   };
