@@ -425,6 +425,12 @@
                           },
                           "reportedAt": {
                             "type": "string"
+                          },
+                          "tokenExpiresAt": {
+                            "type": "string"
+                          },
+                          "daysLeft": {
+                            "type": "integer"
                           }
                         },
                         "required": ["host", "kind", "workerId", "reportedAt"]
@@ -767,7 +773,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What the last check of the GitHub App's access to the repo found",
+            "description": "What the last check of the bot's access to the repo found",
             "content": {
               "application/json": {
                 "schema": {
@@ -781,8 +787,13 @@
                         "ok",
                         "not-installed",
                         "missing-permissions",
+                        "not-member",
                         "error"
                       ]
+                    },
+                    "hostKind": {
+                      "type": "string",
+                      "enum": ["github", "gitlab"]
                     },
                     "missing": {
                       "type": "array",
@@ -792,6 +803,19 @@
                     },
                     "fixUrl": {
                       "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "fix": {
+                      "type": "string"
+                    },
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["personal-token", "developers-can-merge"]
+                      }
                     },
                     "files": {
                       "type": "object",
@@ -818,7 +842,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["state"]
+                  "required": ["state", "hostKind"]
                 }
               }
             }
@@ -868,7 +892,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+            "description": "A worker with the code host's credentials will check the repo",
             "content": {
               "application/json": {
                 "schema": {
@@ -882,8 +906,13 @@
                         "ok",
                         "not-installed",
                         "missing-permissions",
+                        "not-member",
                         "error"
                       ]
+                    },
+                    "hostKind": {
+                      "type": "string",
+                      "enum": ["github", "gitlab"]
                     },
                     "missing": {
                       "type": "array",
@@ -893,6 +922,19 @@
                     },
                     "fixUrl": {
                       "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "fix": {
+                      "type": "string"
+                    },
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["personal-token", "developers-can-merge"]
+                      }
                     },
                     "files": {
                       "type": "object",
@@ -919,7 +961,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["state"]
+                  "required": ["state", "hostKind"]
                 }
               }
             }

@@ -97,7 +97,7 @@ export interface Io {
   platPath?: string;
 }
 
-// How long plat init waits for a worker to say whether the GitHub App can work on the repos.
+// How long plat init waits for a worker to say whether the GitHub App or GitLab PAT can work on the repos.
 const ACCESS_WAIT_SECONDS = 20;
 
 function accessLine(
@@ -105,26 +105,50 @@ function accessLine(
   access:
     | {
         state: string;
+        hostKind?: string;
         missing?: string[];
         fixUrl?: string;
         message?: string;
+        username?: string;
+        fix?: string;
+        hints?: string[];
       }
     | undefined,
 ): string {
   const whoever = "(whoever runs the platform)";
+  const gitlab = access?.hostKind === "gitlab";
   switch (access?.state) {
-    case "ok":
-      return `${name}: the GitHub App can work here`;
+    case "ok": {
+      if (!gitlab) return `${name}: the GitHub App can work here`;
+      const extra: string[] = [];
+      if (access.hints?.includes("personal-token"))
+        extra.push(
+          `平台用的是个人令牌：推送和 MR 显示为〈${access.username ?? "令牌用户"}〉，平台不调合并接口，但合并者是不是平台检测不出；换 bot 账号放 M4`,
+        );
+      if (access.hints?.includes("developers-can-merge"))
+        extra.push("Developers 能合并默认分支");
+      return extra.length > 0
+        ? `${name}: 托管正常（${extra.join("；")}）`
+        : `${name}: 托管正常`;
+    }
     case "not-installed":
       return `${name}: the GitHub App is not installed on this repo; install it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
     case "missing-permissions":
       return `${name}: the GitHub App lacks ${(access.missing ?? []).join(", ")}; grant it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
+    case "not-member":
+      return `${name}: ${access.fix ?? `请项目 Maintainer 把${access.username ? `〈${access.username}〉` : "令牌用户"}加为 Developer`}`;
     case "error":
-      return `${name}: the GitHub App could not be checked: ${access.message ?? "unknown error"}`;
+      return gitlab
+        ? `${name}: 托管无法检查：${access.message ?? "unknown error"}`
+        : `${name}: the GitHub App could not be checked: ${access.message ?? "unknown error"}`;
     case "pending":
-      return `${name}: the GitHub App is not checked yet (no worker has answered)`;
+      return gitlab
+        ? `${name}: 托管尚未检查（还没有 worker 回答）`
+        : `${name}: the GitHub App is not checked yet (no worker has answered)`;
     default:
-      return `${name}: not checked (only GitHub is)`;
+      return gitlab
+        ? `${name}: 托管尚未检查`
+        : `${name}: the GitHub App is not checked yet (no worker has answered)`;
   }
 }
 

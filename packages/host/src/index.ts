@@ -8,6 +8,8 @@ export type { AppCredentials, AppTokenOptions } from "./github-app.ts";
 export { appJwt, createAppTokenSource } from "./github-app.ts";
 export type { GitLabOptions } from "./gitlab.ts";
 export { createGitLabAdapter } from "./gitlab.ts";
+export type { GitLabAccess, GitLabAccessHint } from "./gitlab-access.ts";
+export { checkGitLabAccess } from "./gitlab-access.ts";
 export { createGitLabTokenSource } from "./gitlab-token.ts";
 export type {
   CiState,

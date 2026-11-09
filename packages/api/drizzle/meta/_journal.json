@@ -281,6 +281,13 @@
       "when": 1794240000000,
       "tag": "0039_host_sync_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794250000000,
+      "tag": "0040_token_expiry",
+      "breakpoints": true
     }
   ]
 }

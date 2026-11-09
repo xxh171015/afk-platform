@@ -26,6 +26,7 @@ import { useChangeFlash } from "./hooks/use-change-flash.ts";
 import { applyTheme, currentTheme, type Theme } from "./lib/theme.ts";
 import { cn } from "./lib/utils.ts";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
+import { TokenExpiryBanner } from "./TokenExpiryBanner.tsx";
 import { useWorkbench } from "./Workbench.tsx";
 import { waitingCount } from "./waiting.ts";
 
@@ -300,6 +301,7 @@ function Chrome() {
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar onSearch={() => setSearchOpen(true)} waiting={waiting} />
+          <TokenExpiryBanner />
           <main className="flex-1">
             <Outlet />
           </main>

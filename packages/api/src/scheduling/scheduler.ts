@@ -19,6 +19,7 @@ import {
   cancelIfAllTicketsCancelled,
   startFinalization,
 } from "../finalize/start.ts";
+import { redAccessProblem } from "../host/repo-access.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 
@@ -164,6 +165,21 @@ export async function confirmSpec(
         message: `${formatDisplayId("spec", specId)} has no tickets to run`,
       };
     }
+    const access = await client.query<{
+      name: string;
+      access: {
+        last?: { state?: string; fix?: string; username?: string };
+      } | null;
+    }>(
+      `SELECT DISTINCT r.name, r.access FROM tickets t JOIN repos r ON r.id = t.repo_id
+       WHERE t.spec_id = $1 ORDER BY r.name`,
+      [specId],
+    );
+    const red = access.rows
+      .map((row) => redAccessProblem(row.name, row.access?.last))
+      .filter((line): line is string => line !== undefined);
+    if (red.length > 0)
+      return { status: "not-confirmable", message: red.join("\n") };
     const running = specTransition(planned.state, "start");
     if (!running.ok) throw new Error(running.reason);
     const repoIds = [

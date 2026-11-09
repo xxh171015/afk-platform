@@ -59,6 +59,7 @@ const LATER_THAN_REPO_NAMES = [
   "0037_code_hosts",
   "0038_host_sync_one_row",
   "0039_host_sync_merge",
+  "0040_token_expiry",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

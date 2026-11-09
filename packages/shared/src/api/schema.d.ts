@@ -231,6 +231,8 @@ export interface paths {
                 kind: "github" | "gitlab";
                 workerId: string;
                 reportedAt: string;
+                tokenExpiresAt?: string;
+                daysLeft?: number;
               }[];
             };
           };
@@ -460,7 +462,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What the last check of the GitHub App's access to the repo found */
+        /** @description What the last check of the bot's access to the repo found */
         200: {
           headers: {
             [name: string]: unknown;
@@ -474,9 +476,15 @@ export interface paths {
                 | "ok"
                 | "not-installed"
                 | "missing-permissions"
+                | "not-member"
                 | "error";
+              /** @enum {string} */
+              hostKind: "github" | "gitlab";
               missing?: string[];
               fixUrl?: string;
+              username?: string;
+              fix?: string;
+              hints?: ("personal-token" | "developers-can-merge")[];
               files?: {
                 gates: boolean;
                 integrationCompose: boolean;
@@ -530,7 +538,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description A worker with the code host's credentials will check the repo (GitLab repos are not checked) */
+        /** @description A worker with the code host's credentials will check the repo */
         200: {
           headers: {
             [name: string]: unknown;
@@ -544,9 +552,15 @@ export interface paths {
                 | "ok"
                 | "not-installed"
                 | "missing-permissions"
+                | "not-member"
                 | "error";
+              /** @enum {string} */
+              hostKind: "github" | "gitlab";
               missing?: string[];
               fixUrl?: string;
+              username?: string;
+              fix?: string;
+              hints?: ("personal-token" | "developers-can-merge")[];
               files?: {
                 gates: boolean;
                 integrationCompose: boolean;

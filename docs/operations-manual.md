@@ -67,7 +67,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 | 条件 | 怎么满足、怎么检查 |
 | --- | --- |
-| GitHub App 已装到这个仓库，有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读 | 开 PR、转 ready、删分支都靠它。`plat init` 每次都让持有 App 凭据的 worker 检查一遍，逐个仓库打印结果；没装或权限不够时给出要打开的页面（由运行平台的人处理）。GitLab 仓库不检查。 |
+| 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。 |
 | 默认分支是 `main`，代码推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。 |
 | `.sandcastle/gates.yaml` | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。 |
 | `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。 |

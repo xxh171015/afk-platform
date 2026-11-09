@@ -200,6 +200,8 @@ const hostsRoute = createRoute({
             kind: z.enum(HOST_KINDS),
             workerId: z.string(),
             reportedAt: z.string(),
+            tokenExpiresAt: z.string().optional(),
+            daysLeft: z.number().int().optional(),
           }),
         ),
       }),
@@ -214,11 +216,16 @@ const RepoAccessView = z.object({
     "ok",
     "not-installed",
     "missing-permissions",
+    "not-member",
     "error",
   ]),
+  hostKind: z.enum(HOST_KINDS),
   missing: z.array(z.string()).optional(),
   fixUrl: z.string().optional(),
-  // When the App can work on the repo: which of its setup files the default branch has.
+  username: z.string().optional(),
+  fix: z.string().optional(),
+  hints: z.array(z.enum(["personal-token", "developers-can-merge"])).optional(),
+  // When the App or PAT can work on the repo: which of its setup files the default branch has.
   files: z
     .object({ gates: z.boolean(), integrationCompose: z.boolean() })
     .optional(),
@@ -239,7 +246,7 @@ const repoAccessRoute = createRoute({
   request: { params: repoAccessParams },
   responses: {
     200: reply(
-      "What the last check of the GitHub App's access to the repo found",
+      "What the last check of the bot's access to the repo found",
       RepoAccessView,
     ),
     404: reply("No such project or repo", ErrorReply),
@@ -252,7 +259,7 @@ const repoAccessCheckRoute = createRoute({
   request: { params: repoAccessParams },
   responses: {
     200: reply(
-      "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+      "A worker with the code host's credentials will check the repo",
       RepoAccessView,
     ),
     404: reply("No such project or repo", ErrorReply),
@@ -587,7 +594,7 @@ export function registerPlanningRoutes(
   });
 
   app.openapi(hostsRoute, async (c) =>
-    c.json({ hosts: await listHosts(pool) }, 200),
+    c.json({ hosts: await listHosts(pool, context.clock()) }, 200),
   );
 
   app.openapi(repoRoute, async (c) => {

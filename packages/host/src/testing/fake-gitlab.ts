@@ -28,8 +28,17 @@ export class FakeGitLab {
   hideReviewers = false;
   rateLimitSeconds: number | null = null;
   username = "token-user";
+  userId = 1;
+  member = true;
   canPush = true;
   defaultBranch = "master";
+  // Maintainers-only merge on a protected default branch; 30 is Developers; false means unprotected.
+  protectDefault = true;
+  mergeAccessLevel = 40;
+  tokenExpiresAt: string | null = null;
+  hideTokenExpiry = false;
+  readonly files = new Set<string>();
+  readonly branchFiles = new Map<string, Set<string>>();
   private readonly mrs: FakeMr[] = [];
   private readonly branchNames = new Set<string>();
   private readonly protectedBranches = new Set<string>();
@@ -171,7 +180,18 @@ export class FakeGitLab {
 
     const url = new URL(req.url ?? "/", "http://gitlab.example");
     if (req.method === "GET" && url.pathname === "/api/v4/user")
-      return this.json(res, 200, { username: this.username });
+      return this.json(res, 200, {
+        id: this.userId,
+        username: this.username,
+      });
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/v4/personal_access_tokens/self"
+    ) {
+      if (this.hideTokenExpiry)
+        return this.json(res, 404, { message: "404 Not Found" });
+      return this.json(res, 200, { expires_at: this.tokenExpiresAt });
+    }
 
     const prefix = `/api/v4/projects/${this.projectPath()}`;
     if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`))
@@ -179,7 +199,47 @@ export class FakeGitLab {
     const rest = url.pathname.slice(prefix.length);
 
     if (req.method === "GET" && rest === "")
-      return this.json(res, 200, { default_branch: this.defaultBranch });
+      return this.json(res, 200, {
+        default_branch: this.defaultBranch,
+        permissions: {
+          project_access: this.member ? { access_level: 30 } : null,
+          group_access: null,
+        },
+      });
+
+    const member = /^\/members\/all\/(\d+)$/.exec(rest);
+    if (member && req.method === "GET") {
+      if (!this.member || Number(member[1]) !== this.userId)
+        return this.json(res, 404, { message: "404 Not found" });
+      return this.json(res, 200, {
+        id: this.userId,
+        username: this.username,
+        access_level: 30,
+      });
+    }
+
+    const protectedBranch = /^\/protected_branches\/(.+)$/.exec(rest);
+    if (protectedBranch && req.method === "GET") {
+      const name = decodeURIComponent(protectedBranch[1] as string);
+      if (!this.protectDefault || name !== this.defaultBranch)
+        return this.json(res, 404, { message: "404 Not found" });
+      return this.json(res, 200, {
+        name,
+        merge_access_levels: [{ access_level: this.mergeAccessLevel }],
+      });
+    }
+
+    const file = /^\/repository\/files\/(.+)$/.exec(rest);
+    if (file && req.method === "GET") {
+      const path = decodeURIComponent(file[1] as string);
+      const ref = url.searchParams.get("ref") ?? this.defaultBranch;
+      const present =
+        (ref === this.defaultBranch && this.files.has(path)) ||
+        (this.branchFiles.get(ref)?.has(path) ?? false);
+      if (!present)
+        return this.json(res, 404, { message: "404 File Not Found" });
+      return this.json(res, 200, { file_path: path });
+    }
 
     if (req.method === "POST" && rest === "/merge_requests") {
       const source = String(body.source_branch ?? "");

@@ -152,6 +152,8 @@ export async function versionWarnings(
 export interface RepoAccessView {
   state: string;
   files?: { gates: boolean; integrationCompose: boolean };
+  username?: string;
+  fix?: string;
 }
 
 const GATES_PATH = ".sandcastle/gates.yaml";
@@ -165,12 +167,18 @@ const COMPOSE_PATH = ".sandcastle/integration/compose.yaml";
 export function unreadyRepos(
   repos: { name: string; url: string; access: RepoAccessView | undefined }[],
 ): string[] {
-  return repos
-    .filter((repo) => repo.access?.files?.gates === false)
-    .map(
-      (repo) =>
+  return repos.flatMap((repo) => {
+    const lines: string[] = [];
+    if (repo.access?.state === "not-member")
+      lines.push(
+        `${repo.name}: ${repo.access.fix ?? `请项目 Maintainer 把${repo.access.username ? `〈${repo.access.username}〉` : "令牌用户"}加为 Developer`}`,
+      );
+    if (repo.access?.files?.gates === false)
+      lines.push(
         `${repo.name} has no ${GATES_PATH} on its default branch or on ${SETUP_BRANCH}, so its tickets cannot pass a gate: set it up with the afk-setup skill, then confirm again`,
-    );
+      );
+    return lines;
+  });
 }
 
 /**

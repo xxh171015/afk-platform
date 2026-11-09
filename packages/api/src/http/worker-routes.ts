@@ -659,6 +659,7 @@ export function registerWorkerRoutes(
                   access,
                   (result ?? {}) as Record<string, unknown>,
                   context.clock(),
+                  (notice) => context.notifications.notify(notice),
                 );
               else if (openPr)
                 await recordOpenPr(client, openPr, result, context.clock());

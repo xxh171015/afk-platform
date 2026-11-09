@@ -5,6 +5,7 @@ import { join, relative } from "node:path";
 import {
   adapterByHost,
   checkAppAccess,
+  checkGitLabAccess,
   createAppTokenSource,
   createGitHubAdapter,
   createGitLabAdapter,
@@ -178,11 +179,23 @@ await runWorker({
   host: {
     adapter: hostAdapter,
     repoRef: hostRepoRef,
-    ...(credentials
-      ? {
-          checkAccess: (repo: RepoRef) => checkAppAccess({ credentials }, repo),
-        }
-      : {}),
+    checkAccess: async (repo: RepoRef) => {
+      const host = repo.host;
+      if (host && gitlabHosts.has(host)) {
+        const file = gitlabFiles.find((row) => row.host === host);
+        if (!file) throw new Error(`this worker has no GitLab PAT for ${host}`);
+        return checkGitLabAccess(
+          {
+            tokens: createGitLabTokenSource({ path: file.path }),
+            apiUrl: `https://${host}/api/v4`,
+          },
+          repo,
+        );
+      }
+      if (!credentials)
+        throw new Error("this worker has no GitHub App credentials");
+      return checkAppAccess({ credentials }, repo);
+    },
   },
   executor: {
     slots: new SlotManager({

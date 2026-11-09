@@ -70,7 +70,7 @@ export const repos = pgTable(
     contractPath: text("contract_path"),
     // Which code host the repo is on: github or gitlab. It picks the seed template of the tracker doc.
     hostKind: text("host_kind").notNull().default("github"),
-    // The last check of the GitHub App's access to the repo, and when a new one was asked for (host/repo-access.ts).
+    // The last check of the bot's access to the repo, and when a new one was asked for (host/repo-access.ts).
     access: jsonb("access"),
     createdAt: createdAt(),
   },
@@ -603,9 +603,17 @@ export const codeHosts = pgTable(
     reportedAt: timestamp("reported_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    tokenExpiresAt: text("token_expires_at"),
+    tokenExpiryNoticedAt: timestamp("token_expiry_noticed_at", {
+      withTimezone: true,
+    }),
   },
   (t) => [
     check("code_hosts_kind_check", oneOf(t.kind, HOST_KINDS)),
     check("code_hosts_host_check", sql`${t.host} = lower(${t.host})`),
+    check(
+      "code_hosts_token_expires_at_check",
+      sql`${t.tokenExpiresAt} is null or ${t.tokenExpiresAt} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
   ],
 );

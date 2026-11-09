@@ -242,6 +242,22 @@ describe("unreadyRepos", () => {
       ]),
     ).toEqual([]);
   });
+
+  it("names a GitLab repo whose token user is not a member, with the same fix confirm shows", () => {
+    expect(
+      unreadyRepos([
+        {
+          name: "web",
+          url: "https://gitlab.com/acme/web.git",
+          access: {
+            state: "not-member",
+            username: "alice",
+            fix: "请项目 Maintainer 把〈alice〉加为 Developer",
+          },
+        },
+      ]),
+    ).toEqual(["web: 请项目 Maintainer 把〈alice〉加为 Developer"]);
+  });
 });
 
 describe("integrationWarnings", () => {
