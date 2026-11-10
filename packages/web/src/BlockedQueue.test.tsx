@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { structuredBrief } from "@afk/shared";
 import {
   cleanup,
   fireEvent,
@@ -25,19 +26,35 @@ const ticket = (
   n: number,
   reason: string,
   over: Record<string, unknown> = {},
-) => ({
-  id: n,
-  displayId: `T-${n}`,
-  specId: 1,
-  specDisplayId: "S-1",
-  title: `Ticket ${n}`,
-  type: "implementation",
-  state: "blocked",
-  blockedReason: reason,
-  repo: "backend",
-  brief: brief(),
-  ...over,
-});
+) => {
+  const { brief: briefOver, structuredBrief: structuredOver, ...rest } = over;
+  const nextBrief =
+    briefOver === undefined
+      ? brief()
+      : (briefOver as ReturnType<typeof brief> | null);
+  return {
+    id: n,
+    displayId: `T-${n}`,
+    specId: 1,
+    specDisplayId: "S-1",
+    title: `Ticket ${n}`,
+    type: "implementation",
+    state: "blocked",
+    blockedReason: reason,
+    repo: "backend",
+    brief: nextBrief,
+    structuredBrief:
+      structuredOver === undefined
+        ? structuredBrief({
+            reason,
+            specDisplayId: "S-1",
+            ticketDisplayId: `T-${n}`,
+            brief: nextBrief,
+          })
+        : structuredOver,
+    ...rest,
+  };
+};
 
 interface Queue {
   tickets: unknown[];
@@ -189,6 +206,85 @@ describe("the queue of what waits for a person", () => {
     ).toBe("/specs/1");
   });
 
+  it("renders the API structured brief instead of interpreting brief.output", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [
+          ticket(1, "gate-failed", {
+            brief: brief({
+              stage: "gate",
+              result: "failed",
+              output: {
+                failureLog: "from-raw-output",
+                detail: "should-not-appear",
+              },
+            }),
+            structuredBrief: {
+              reason: "gate-failed",
+              step: "gate",
+              summary: "门禁失败",
+              evidence: { lastLogLines: "from-api" },
+              recommendedAction: "看失败的测试，修好后带说明重试，保留已有提交",
+              commands: [
+                {
+                  label: "带说明继续",
+                  command: 'plat ticket retry T-1 --mode continue --note "…"',
+                },
+              ],
+            },
+          }),
+        ],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    const note = card("T-1").getByRole("note");
+    expect(note.textContent).toContain("from-api");
+    expect(note.textContent).toContain("看失败的测试");
+    expect(note.textContent).toContain(
+      'plat ticket retry T-1 --mode continue --note "…"',
+    );
+    expect(note.textContent).not.toContain("from-raw-output");
+    expect(note.textContent).not.toContain("should-not-appear");
+    expect(
+      card("T-1").getByRole("button", {
+        name: '复制命令 plat ticket retry T-1 --mode continue --note "…"',
+      }),
+    ).toBeTruthy();
+  });
+
+  it("puts a copy button on every command and does not add write actions for those commands", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [
+          ticket(2, "protected-path-changed"),
+          ticket(3, "contract-change-needed"),
+        ],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-2");
+    expect(
+      card("T-2").getByRole("button", {
+        name: "复制命令 plat ticket approve-protected T-2",
+      }),
+    ).toBeTruthy();
+    expect(
+      card("T-2").getByRole("button", {
+        name: "复制命令 plat ticket retry T-2 --mode continue",
+      }),
+    ).toBeTruthy();
+    expect(
+      card("T-3").getByRole("button", {
+        name: "复制命令 plat tickets import S-1 ~/.afk/planning/S-1/append/ --append",
+      }),
+    ).toBeTruthy();
+    expect(
+      card("T-3").queryByRole("button", { name: "批准这些保护路径" }),
+    ).toBeNull();
+    expect(fake.calls.filter((call) => call.startsWith("POST"))).toEqual([]);
+  });
+
   it("shows the paths the gate found for protected-path-changed and the gate's log for a failed gate", async () => {
     const { fake } = server(
       queue({
@@ -250,6 +346,7 @@ describe("the queue of what waits for a person", () => {
     await screen.findByTestId("blocked-T-5");
     expect(card("T-5").queryByRole("button", { name: /重试/ })).toBeNull();
     expect(card("T-5").getByRole("button", { name: "取消…" })).toBeTruthy();
+    expect(card("T-5").getByRole("note").textContent).toContain("上游已取消");
   });
 });
 
@@ -536,6 +633,11 @@ describe("paused specs and stopped overall reviews", () => {
     title: "Order export",
     reason: "the agent time limit of the spec was reached",
   };
+  const stoppedBrief = brief({
+    stage: "final-merge",
+    result: "gate-failed",
+    output: { failureLog: "# test failed" },
+  });
   const stopped = {
     id: 1,
     specId: 1,
@@ -544,10 +646,12 @@ describe("paused specs and stopped overall reviews", () => {
     step: "final-merge",
     state: "blocked",
     blockedReason: "post-merge-gate-failed",
-    brief: brief({
-      stage: "final-merge",
-      result: "gate-failed",
-      output: { failureLog: "# test failed" },
+    brief: stoppedBrief,
+    structuredBrief: structuredBrief({
+      reason: "post-merge-gate-failed",
+      specDisplayId: "S-1",
+      wrapUpStep: "final-merge",
+      brief: stoppedBrief,
     }),
   };
 

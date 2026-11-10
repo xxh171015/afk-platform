@@ -2161,6 +2161,24 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                structuredBrief: {
+                  reason: string;
+                  step: string;
+                  summary: string;
+                  evidence: {
+                    failingTests?: string[];
+                    command?: string;
+                    lastLogLines?: string;
+                    conflictFiles?: string[];
+                    findingsCount?: number;
+                  };
+                  recommendedAction: string;
+                  commands: {
+                    label: string;
+                    command: string;
+                  }[];
+                  ticketDraft?: string;
+                } | null;
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -2538,6 +2556,24 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                structuredBrief: {
+                  reason: string;
+                  step: string;
+                  summary: string;
+                  evidence: {
+                    failingTests?: string[];
+                    command?: string;
+                    lastLogLines?: string;
+                    conflictFiles?: string[];
+                    findingsCount?: number;
+                  };
+                  recommendedAction: string;
+                  commands: {
+                    label: string;
+                    command: string;
+                  }[];
+                  ticketDraft?: string;
+                } | null;
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -2598,6 +2634,24 @@ export interface paths {
                       repo: string;
                     } | null;
                   }[];
+                } | null;
+                structuredBrief: {
+                  reason: string;
+                  step: string;
+                  summary: string;
+                  evidence: {
+                    failingTests?: string[];
+                    command?: string;
+                    lastLogLines?: string;
+                    conflictFiles?: string[];
+                    findingsCount?: number;
+                  };
+                  recommendedAction: string;
+                  commands: {
+                    label: string;
+                    command: string;
+                  }[];
+                  ticketDraft?: string;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -2990,6 +3044,24 @@ export interface paths {
                     } | null;
                   }[];
                 } | null;
+                structuredBrief: {
+                  reason: string;
+                  step: string;
+                  summary: string;
+                  evidence: {
+                    failingTests?: string[];
+                    command?: string;
+                    lastLogLines?: string;
+                    conflictFiles?: string[];
+                    findingsCount?: number;
+                  };
+                  recommendedAction: string;
+                  commands: {
+                    label: string;
+                    command: string;
+                  }[];
+                  ticketDraft?: string;
+                } | null;
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3050,6 +3122,24 @@ export interface paths {
                       repo: string;
                     } | null;
                   }[];
+                } | null;
+                structuredBrief: {
+                  reason: string;
+                  step: string;
+                  summary: string;
+                  evidence: {
+                    failingTests?: string[];
+                    command?: string;
+                    lastLogLines?: string;
+                    conflictFiles?: string[];
+                    findingsCount?: number;
+                  };
+                  recommendedAction: string;
+                  commands: {
+                    label: string;
+                    command: string;
+                  }[];
+                  ticketDraft?: string;
                 } | null;
                 waitingSince?: string;
                 blocking?: {

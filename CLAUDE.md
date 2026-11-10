@@ -2,11 +2,11 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues for xxh171015/afk-platform, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Specs and tickets live in the AFK platform (the `plat` CLI), not in the code host's issues. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Default vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+The default label strings: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { structuredBrief } from "@afk/shared";
 import {
   cleanup,
   fireEvent,
@@ -351,6 +352,12 @@ describe("the ticket page", () => {
             state: "blocked",
             blockedReason: "gate-failed",
             brief,
+            structuredBrief: structuredBrief({
+              reason: "gate-failed",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-4",
+              brief,
+            }),
           },
         }),
       }),
@@ -366,6 +373,118 @@ describe("the ticket page", () => {
       within(note).getByRole("link", { name: "R-11" }).getAttribute("href"),
     ).toBe("/runs/11");
     expect(screen.getByTitle("gate-failed").textContent).toBe("门禁失败");
+  });
+
+  it("renders the API structured brief instead of interpreting brief.output", async () => {
+    const brief = {
+      run: { id: 11, displayId: "R-11" },
+      stage: "gate",
+      result: "failed",
+      output: { failureLog: "from-raw-output" },
+      logPath: "/runs/11/logs",
+    };
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: {
+            ...view().ticket,
+            state: "blocked",
+            blockedReason: "gate-failed",
+            brief,
+            structuredBrief: {
+              reason: "gate-failed",
+              step: "gate",
+              summary: "门禁失败",
+              evidence: { lastLogLines: "from-api" },
+              recommendedAction: "看失败的测试，修好后带说明重试，保留已有提交",
+              commands: [
+                {
+                  label: "带说明继续",
+                  command: 'plat ticket retry T-4 --mode continue --note "…"',
+                },
+              ],
+            },
+          },
+        }),
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    const note = await screen.findByRole("note");
+    expect(note.textContent).toContain("from-api");
+    expect(note.textContent).not.toContain("from-raw-output");
+    expect(
+      screen.getByRole("button", {
+        name: '复制命令 plat ticket retry T-4 --mode continue --note "…"',
+      }),
+    ).toBeTruthy();
+  });
+
+  it("puts a copy button on every command of a blocked ticket", async () => {
+    const brief = {
+      run: { id: 11, displayId: "R-11" },
+      stage: "gate",
+      result: "protected-path-changed",
+      output: { unapproved: [".github/ci.yml"] },
+      logPath: "/runs/11/logs",
+    };
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: {
+            ...view().ticket,
+            state: "blocked",
+            blockedReason: "protected-path-changed",
+            brief,
+            structuredBrief: structuredBrief({
+              reason: "protected-path-changed",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-4",
+              brief,
+            }),
+          },
+        }),
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    await screen.findByRole("note");
+    expect(
+      screen.getByRole("button", {
+        name: "复制命令 plat ticket approve-protected T-4",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "复制命令 plat ticket retry T-4 --mode continue",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("still shows a structured brief when a blocked ticket has no run", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: {
+            ...view().ticket,
+            state: "blocked",
+            blockedReason: "upstream-cancelled",
+            brief: null,
+            structuredBrief: structuredBrief({
+              reason: "upstream-cancelled",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-4",
+              brief: null,
+            }),
+          },
+        }),
+      }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    const note = await screen.findByRole("note");
+    expect(note.textContent).toContain("上游已取消");
+    expect(note.textContent).toContain("plat ticket cancel T-4");
+    expect(within(note).queryByRole("link", { name: /R-/ })).toBeNull();
   });
 
   it("shows every e2e of an integration ticket with its diagnosis and its fix ticket", async () => {
@@ -526,18 +645,25 @@ describe("the ticket page", () => {
 
   it("lets a pending or blocked ticket be edited, and a blocked one retried with a note", async () => {
     const bodies: Record<string, unknown> = {};
+    const brief = {
+      run: { id: 11, displayId: "R-11" },
+      stage: "gate",
+      result: "failed",
+      output: { failureLog: "# test failed" },
+      logPath: "/runs/11/logs",
+    };
     const blocked = view({
       ticket: {
         ...view().ticket,
         state: "blocked",
         blockedReason: "gate-failed",
-        brief: {
-          run: { id: 11, displayId: "R-11" },
-          stage: "gate",
-          result: "failed",
-          output: { failureLog: "# test failed" },
-          logPath: "/runs/11/logs",
-        },
+        brief,
+        structuredBrief: structuredBrief({
+          reason: "gate-failed",
+          specDisplayId: "S-1",
+          ticketDisplayId: "T-4",
+          brief,
+        }),
       },
     });
     const server = fakeServer({

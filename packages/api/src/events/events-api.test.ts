@@ -227,10 +227,17 @@ describe("notifications on a visible transition", () => {
     expect(payload.ticketId).toBe(job.payload.ticketId);
     expect(payload.specId).toBe(job.payload.specId);
     expect(payload.runId).toEqual(expect.any(Number));
+    const detail = (await (
+      await fetch(`${api.url}/tickets/${job.payload.ticketId}`)
+    ).json()) as {
+      ticket: { structuredBrief: { summary: string } };
+    };
+    const summary = detail.ticket.structuredBrief.summary;
+    expect(summary).toBe("模型放弃");
     expect(notices).toEqual([
       {
         title: "票卡住",
-        body: "T-1 写 CSV：模型放弃\nhttp://127.0.0.1:5173/tickets/1",
+        body: `T-1 写 CSV：${summary}\nhttp://127.0.0.1:5173/tickets/1`,
       },
     ]);
     await stream.close();

@@ -2,6 +2,7 @@ import {
   type AcceptancePackView,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
+  type StructuredBrief,
 } from "@afk/shared";
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
@@ -123,6 +124,7 @@ interface TicketLike {
   environment: string[];
   appended: boolean;
   brief: BriefLike | null;
+  structuredBrief?: StructuredBrief | null;
   waitingSince?: string;
   blocking?: BlockingLike;
 }
@@ -158,6 +160,7 @@ interface FinalizationLike {
   state: string;
   blockedReason: string | null;
   brief: BriefLike | null;
+  structuredBrief?: StructuredBrief | null;
   waitingSince?: string;
   blocking?: BlockingLike;
 }
@@ -289,10 +292,29 @@ function waitingLines(
   return [blockingLine, `    ${why}`];
 }
 
+function structuredBriefLines(
+  brief: StructuredBrief | null | undefined,
+  indent = "    ",
+): string[] {
+  if (!brief) return [];
+  return [
+    `${indent}${brief.summary}`,
+    `${indent}${brief.recommendedAction}`,
+    ...brief.commands.map((item) => `${indent}${item.label}: ${item.command}`),
+    ...(brief.ticketDraft
+      ? brief.ticketDraft
+          .replace(/\n+$/, "")
+          .split("\n")
+          .map((line) => `${indent}${line}`)
+      : []),
+  ];
+}
+
 function ticketLines(t: TicketLike): string[] {
   return [
     `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}  ${t.title}`,
     ...waitingLines(t.blocking, t.waitingSince),
+    ...structuredBriefLines(t.structuredBrief),
     ...briefLines(t.brief, "    "),
   ];
 }
@@ -302,12 +324,14 @@ function finalizationLines(f: FinalizationLike): string[] {
     ? [
         `${f.specDisplayId}  e2e before the pull requests: ${finalState(f)}`,
         ...waitingLines(f.blocking, f.waitingSince),
+        ...structuredBriefLines(f.structuredBrief),
         ...briefLines(f.brief, "    "),
         `    then: plat spec retry-final ${f.specDisplayId} (run it again), or plat spec waive-final ${f.specDisplayId} (open the pull requests anyway; the acceptance pack will say the e2e failed)`,
       ]
     : [
         `${f.specDisplayId}  overall review of ${f.repo}: ${finalState(f)}`,
         ...waitingLines(f.blocking, f.waitingSince),
+        ...structuredBriefLines(f.structuredBrief),
         ...briefLines(f.brief, "    "),
         `    then: plat spec retry-final ${f.specDisplayId}`,
       ];

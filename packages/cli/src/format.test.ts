@@ -116,6 +116,164 @@ describe("an integration ticket", () => {
   });
 });
 
+const emptyQueue = {
+  tickets: [],
+  finalizations: [],
+  pullRequests: [],
+  cleanups: [],
+  readyFailures: [],
+  planning: [],
+  specs: [],
+};
+
+const stuckTicket = (over: Record<string, unknown> = {}) => ({
+  id: 1,
+  displayId: "T-12",
+  specDisplayId: "S-19",
+  title: "Export",
+  state: "blocked",
+  blockedReason: "gate-failed",
+  repo: "backend",
+  refs: [] as string[],
+  environment: [] as string[],
+  appended: false,
+  brief: {
+    run: { displayId: "R-7" },
+    stage: "gate",
+    result: "failed",
+    output: { failureLog: "still boom" },
+  },
+  structuredBrief: {
+    reason: "gate-failed",
+    step: "gate",
+    summary: "门禁失败",
+    evidence: { lastLogLines: "still boom" },
+    recommendedAction: "看失败的测试，修好后带说明重试，保留已有提交",
+    commands: [
+      {
+        label: "带说明继续",
+        command: 'plat ticket retry T-12 --mode continue --note "…"',
+      },
+    ],
+  },
+  ...over,
+});
+
+describe("plat blocked of a stuck ticket", () => {
+  it("prints the structured brief's summary, recommended action and commands, not only the raw stage result", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [stuckTicket()],
+    } as never);
+    expect(text).toContain("门禁失败");
+    expect(text).toContain("看失败的测试，修好后带说明重试，保留已有提交");
+    expect(text).toContain("plat ticket retry T-12 --mode continue");
+    expect(text).toContain('plat ticket retry T-12 --mode continue --note "…"');
+  });
+
+  it("prints approve-protected and the following retry for protected-path-changed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          blockedReason: "protected-path-changed",
+          structuredBrief: {
+            reason: "protected-path-changed",
+            step: "gate",
+            summary: "改了受保护路径",
+            evidence: { lastLogLines: ".github/ci.yml" },
+            recommendedAction: "确认这些路径可以改，或改允许名单后重试",
+            commands: [
+              {
+                label: "批准保护路径",
+                command: "plat ticket approve-protected T-12",
+              },
+              {
+                label: "再重试",
+                command: "plat ticket retry T-12 --mode continue",
+              },
+            ],
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain("plat ticket approve-protected T-12");
+    expect(text).toContain("plat ticket retry T-12 --mode continue");
+  });
+
+  it("prints the append import command for contract-change-needed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          blockedReason: "contract-change-needed",
+          structuredBrief: {
+            reason: "contract-change-needed",
+            step: "implement",
+            summary: "需要改契约",
+            evidence: { lastLogLines: "needs a new field on Order" },
+            recommendedAction: "先改提供方契约票，再继续",
+            commands: [
+              {
+                label: "追加契约票",
+                command:
+                  "plat tickets import S-19 ~/.afk/planning/S-19/append/ --append",
+              },
+            ],
+            ticketDraft: `---
+title: 改契约以继续 T-12
+repo: backend
+type: contract
+blocks: [T-12]
+---
+
+## What to build
+
+needs a new field on Order
+`,
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain(
+      "plat tickets import S-19 ~/.afk/planning/S-19/append/ --append",
+    );
+    expect(text).toContain("title: 改契约以继续 T-12");
+    expect(text).toContain("type: contract");
+    expect(text).toContain("blocks: [T-12]");
+    expect(text).toContain("needs a new field on Order");
+  });
+
+  it("prints a wrap-up step's structured brief the same way", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      finalizations: [
+        {
+          specDisplayId: "S-19",
+          repo: "backend",
+          step: "final-review",
+          state: "blocked",
+          blockedReason: "job-failed",
+          brief: null,
+          structuredBrief: {
+            reason: "job-failed",
+            step: "",
+            summary: "作业失败",
+            evidence: {},
+            recommendedAction: "看作业失败原因，环境好了再重试",
+            commands: [
+              { label: "再跑收尾", command: "plat spec retry-final S-19" },
+            ],
+          },
+        },
+      ],
+    } as never);
+    expect(text).toContain("作业失败");
+    expect(text).toContain("看作业失败原因，环境好了再重试");
+    expect(text).toContain("plat spec retry-final S-19");
+  });
+});
+
 describe("the e2e before the pull requests", () => {
   it("is a blocked step with the two ways forward", () => {
     const text = blockedText({

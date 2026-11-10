@@ -3694,6 +3694,75 @@
                           },
                           "required": ["run", "stage", "result", "logPath"]
                         },
+                        "structuredBrief": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "step": {
+                              "type": "string"
+                            },
+                            "summary": {
+                              "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "properties": {
+                                "failingTests": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "command": {
+                                  "type": "string"
+                                },
+                                "lastLogLines": {
+                                  "type": "string"
+                                },
+                                "conflictFiles": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "findingsCount": {
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            "recommendedAction": {
+                              "type": "string"
+                            },
+                            "commands": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "command": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["label", "command"]
+                              }
+                            },
+                            "ticketDraft": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "reason",
+                            "step",
+                            "summary",
+                            "evidence",
+                            "recommendedAction",
+                            "commands"
+                          ]
+                        },
                         "waitingSince": {
                           "type": "string"
                         },
@@ -3783,6 +3852,7 @@
                         "environment",
                         "appended",
                         "brief",
+                        "structuredBrief",
                         "body",
                         "acceptanceCriteria",
                         "modules",
@@ -4707,6 +4777,75 @@
                             },
                             "required": ["run", "stage", "result", "logPath"]
                           },
+                          "structuredBrief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "failingTests": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "command": {
+                                    "type": "string"
+                                  },
+                                  "lastLogLines": {
+                                    "type": "string"
+                                  },
+                                  "conflictFiles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "findingsCount": {
+                                    "type": "integer"
+                                  }
+                                }
+                              },
+                              "recommendedAction": {
+                                "type": "string"
+                              },
+                              "commands": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["label", "command"]
+                                }
+                              },
+                              "ticketDraft": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason",
+                              "step",
+                              "summary",
+                              "evidence",
+                              "recommendedAction",
+                              "commands"
+                            ]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -4756,7 +4895,8 @@
                           "refs",
                           "environment",
                           "appended",
-                          "brief"
+                          "brief",
+                          "structuredBrief"
                         ]
                       }
                     },
@@ -4923,6 +5063,75 @@
                             },
                             "required": ["run", "stage", "result", "logPath"]
                           },
+                          "structuredBrief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "failingTests": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "command": {
+                                    "type": "string"
+                                  },
+                                  "lastLogLines": {
+                                    "type": "string"
+                                  },
+                                  "conflictFiles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "findingsCount": {
+                                    "type": "integer"
+                                  }
+                                }
+                              },
+                              "recommendedAction": {
+                                "type": "string"
+                              },
+                              "commands": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["label", "command"]
+                                }
+                              },
+                              "ticketDraft": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason",
+                              "step",
+                              "summary",
+                              "evidence",
+                              "recommendedAction",
+                              "commands"
+                            ]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -4965,7 +5174,8 @@
                           "step",
                           "state",
                           "blockedReason",
-                          "brief"
+                          "brief",
+                          "structuredBrief"
                         ]
                       }
                     },
@@ -6065,6 +6275,75 @@
                             },
                             "required": ["run", "stage", "result", "logPath"]
                           },
+                          "structuredBrief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "failingTests": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "command": {
+                                    "type": "string"
+                                  },
+                                  "lastLogLines": {
+                                    "type": "string"
+                                  },
+                                  "conflictFiles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "findingsCount": {
+                                    "type": "integer"
+                                  }
+                                }
+                              },
+                              "recommendedAction": {
+                                "type": "string"
+                              },
+                              "commands": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["label", "command"]
+                                }
+                              },
+                              "ticketDraft": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason",
+                              "step",
+                              "summary",
+                              "evidence",
+                              "recommendedAction",
+                              "commands"
+                            ]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6114,7 +6393,8 @@
                           "refs",
                           "environment",
                           "appended",
-                          "brief"
+                          "brief",
+                          "structuredBrief"
                         ]
                       }
                     },
@@ -6281,6 +6561,75 @@
                             },
                             "required": ["run", "stage", "result", "logPath"]
                           },
+                          "structuredBrief": {
+                            "type": ["object", "null"],
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "failingTests": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "command": {
+                                    "type": "string"
+                                  },
+                                  "lastLogLines": {
+                                    "type": "string"
+                                  },
+                                  "conflictFiles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "findingsCount": {
+                                    "type": "integer"
+                                  }
+                                }
+                              },
+                              "recommendedAction": {
+                                "type": "string"
+                              },
+                              "commands": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["label", "command"]
+                                }
+                              },
+                              "ticketDraft": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reason",
+                              "step",
+                              "summary",
+                              "evidence",
+                              "recommendedAction",
+                              "commands"
+                            ]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6323,7 +6672,8 @@
                           "step",
                           "state",
                           "blockedReason",
-                          "brief"
+                          "brief",
+                          "structuredBrief"
                         ]
                       }
                     },

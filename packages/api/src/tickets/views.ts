@@ -5,6 +5,8 @@ import {
   type ReviewAxis,
   repoDisplayName,
   type SpecState,
+  type StructuredBrief,
+  structuredBrief,
   type TicketState,
 } from "@afk/shared";
 import type pg from "pg";
@@ -34,6 +36,49 @@ export interface Brief {
 }
 
 const GOOD_RESULTS = ["done", "passed", "pass", "merged"];
+
+function structuredBriefFor(input: {
+  reason: string | null;
+  specDisplayId: string;
+  ticketDisplayId?: string;
+  repo?: string;
+  contractBlockedBy?: readonly string[];
+  wrapUpStep?: string;
+  brief: Brief | null;
+}): StructuredBrief | null {
+  if (!input.reason) return null;
+  return structuredBrief({
+    reason: input.reason,
+    specDisplayId: input.specDisplayId,
+    ticketDisplayId: input.ticketDisplayId,
+    repo: input.repo,
+    contractBlockedBy: input.contractBlockedBy,
+    wrapUpStep: input.wrapUpStep,
+    brief: input.brief,
+  });
+}
+
+async function contractUpstreamByTicket(
+  pool: pg.Pool,
+  ticketIds: number[],
+): Promise<Map<number, string[]>> {
+  const byTicket = new Map<number, string[]>();
+  if (ticketIds.length === 0) return byTicket;
+  const { rows } = await pool.query<{
+    to_ticket_id: number;
+    from_ticket_id: number;
+  }>(
+    `SELECT to_ticket_id, from_ticket_id FROM edges
+     WHERE kind = 'contract' AND to_ticket_id = ANY($1) ORDER BY id`,
+    [ticketIds],
+  );
+  for (const row of rows) {
+    const list = byTicket.get(row.to_ticket_id) ?? [];
+    list.push(formatDisplayId("ticket", row.from_ticket_id));
+    byTicket.set(row.to_ticket_id, list);
+  }
+  return byTicket;
+}
 
 async function briefFor(
   pool: pg.Pool,
@@ -89,6 +134,7 @@ export interface FinalizationSummary {
   state: string;
   blockedReason: string | null;
   brief: Brief | null;
+  structuredBrief: StructuredBrief | null;
   waitingSince?: string;
   blocking?: Blocking;
 }
@@ -109,19 +155,34 @@ async function finalizations(
     params,
   );
   return Promise.all(
-    rows.map(async (row) => ({
-      id: row.id as number,
-      specId: row.spec_id as number,
-      specDisplayId: formatDisplayId("spec", row.spec_id),
-      repo: row.repo as string,
-      step: row.step as string,
-      state: row.state as string,
-      blockedReason: (row.blocked_reason as string | null) ?? null,
-      brief:
+    rows.map(async (row) => {
+      const specDisplayId = formatDisplayId("spec", row.spec_id);
+      const blockedReason = (row.blocked_reason as string | null) ?? null;
+      const brief =
         includeBrief && row.state === "blocked"
           ? await finalBrief(pool, row.spec_id)
-          : null,
-    })),
+          : null;
+      return {
+        id: row.id as number,
+        specId: row.spec_id as number,
+        specDisplayId,
+        repo: row.repo as string,
+        step: row.step as string,
+        state: row.state as string,
+        blockedReason,
+        brief,
+        structuredBrief:
+          includeBrief && row.state === "blocked"
+            ? structuredBriefFor({
+                reason: blockedReason,
+                specDisplayId,
+                repo: row.repo as string,
+                wrapUpStep: row.step as string,
+                brief,
+              })
+            : null,
+      };
+    }),
   );
 }
 
@@ -153,24 +214,36 @@ async function finalE2eSteps(
       const attempts = run
         ? await integrationAttempts(pool, run.ticket_id)
         : [];
+      const specDisplayId = formatDisplayId("spec", row.spec_id);
+      const blockedReason = (row.blocked_reason as string | null) ?? null;
+      const brief =
+        includeBrief && row.state === "blocked" && run
+          ? {
+              run: { id: run.id, displayId: formatDisplayId("run", run.id) },
+              stage: run.stage as string,
+              result: run.result as string | null,
+              output: run.output,
+              logPath: `/runs/${run.id}/logs`,
+              ...(attempts.length > 0 ? { attempts } : {}),
+            }
+          : null;
       return {
         id: row.id as number,
         specId: row.spec_id as number,
-        specDisplayId: formatDisplayId("spec", row.spec_id),
+        specDisplayId,
         repo: "(integration)",
         step: "final-e2e",
         state: row.state as string,
-        blockedReason: (row.blocked_reason as string | null) ?? null,
-        brief:
-          includeBrief && row.state === "blocked" && run
-            ? {
-                run: { id: run.id, displayId: formatDisplayId("run", run.id) },
-                stage: run.stage,
-                result: run.result,
-                output: run.output,
-                logPath: `/runs/${run.id}/logs`,
-                ...(attempts.length > 0 ? { attempts } : {}),
-              }
+        blockedReason,
+        brief,
+        structuredBrief:
+          includeBrief && row.state === "blocked"
+            ? structuredBriefFor({
+                reason: blockedReason,
+                specDisplayId,
+                wrapUpStep: "final-e2e",
+                brief,
+              })
             : null,
       };
     }),
@@ -199,6 +272,7 @@ export interface TicketSummary {
   environment: string[];
   appended: boolean;
   brief: Brief | null;
+  structuredBrief: StructuredBrief | null;
   waitingSince?: string;
   blocking?: Blocking;
 }
@@ -215,7 +289,7 @@ async function summaries(
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE ${where} ORDER BY t.id`,
     params,
   );
-  return Promise.all(
+  const items = await Promise.all(
     rows.map(async (row) => ({
       id: row.id as number,
       displayId: formatDisplayId("ticket", row.id),
@@ -240,6 +314,27 @@ async function summaries(
           : null,
     })),
   );
+  if (!includeBrief) {
+    return items.map((item) => ({ ...item, structuredBrief: null }));
+  }
+  const contractBy = await contractUpstreamByTicket(
+    pool,
+    items.filter((item) => item.state === "blocked").map((item) => item.id),
+  );
+  return items.map((item) => ({
+    ...item,
+    structuredBrief:
+      item.state === "blocked"
+        ? structuredBriefFor({
+            reason: item.blockedReason,
+            specDisplayId: item.specDisplayId,
+            ticketDisplayId: item.displayId,
+            repo: item.repo,
+            contractBlockedBy: contractBy.get(item.id) ?? [],
+            brief: item.brief,
+          })
+        : null,
+  }));
 }
 
 // With `version`, the content (title, body, acceptance criteria, modules, approved protected paths) is the one the

@@ -591,6 +591,11 @@ describe("plat", () => {
     expect(text.stdout).toContain(
       "T-1  S-1  blocked (agent-gave-up)  Define the export endpoint",
     );
+    expect(text.stdout).toContain("模型放弃");
+    expect(text.stdout).toContain("看它卡住的地方，带一句话说明后继续");
+    expect(text.stdout).toContain(
+      'plat ticket retry T-1 --mode continue --note "…"',
+    );
     expect(text.stdout).toContain(
       "implement ended agent-gave-up in R-1: needs a decision",
     );
@@ -603,6 +608,38 @@ describe("plat", () => {
     });
     expect(json.specs).toEqual([]);
     expect(json.items[0]).toEqual({ kind: "ticket", id: json.tickets[0].id });
+  });
+
+  it("prints the contract-change-needed ticket draft from the structured brief", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    await worker.complete(job?.id as number, job?.attempt as number, {
+      stage: "implement",
+      outcome: "contract-change-needed",
+      run: {
+        output: {
+          status: "cannot-proceed",
+          blockedReason: "contract-change-needed",
+          detail: "Order needs a note field",
+        },
+      },
+    });
+    const json = JSON.parse((await plat("--json", "blocked")).stdout);
+    const draft = json.tickets[0].structuredBrief.ticketDraft as string;
+    expect(draft).toContain("type: contract");
+    expect(draft).toContain("blocks: [T-1]");
+    expect(draft).toContain("## What to build\n\nOrder needs a note field\n");
+    const text = await plat("blocked");
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("需要改契约");
+    for (const line of draft.replace(/\n+$/, "").split("\n")) {
+      if (line.length === 0) continue;
+      expect(text.stdout).toContain(line);
+    }
   });
 
   it("lists waiting items in the same order as items", async () => {
