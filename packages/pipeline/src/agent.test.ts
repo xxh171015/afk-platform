@@ -344,6 +344,7 @@ describe("the two axes of a review", () => {
     expect(spec).toContain("/context/ticket.md");
     expect(spec).toContain("/context/contract/");
     expect(spec).toMatch(/spec\.md`? 只是背景/);
+    expect(spec).toContain("这张票负责的 User Story");
     expect(spec).toContain("每条验收标准都有测试");
     const finalSpec = readFileSync(PROMPTS.finalReviewSpec, "utf8");
     expect(finalSpec).toContain("/context/spec.md");

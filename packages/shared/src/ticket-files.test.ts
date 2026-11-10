@@ -93,6 +93,16 @@ describe("a ticket file", () => {
       },
     });
   });
+
+  it("reads stories from the front matter when the numbers are written", () => {
+    const ticket = bodyOf(front("stories: [1, 4]\n") + template("- [ ] a\n"));
+    expect(ticket?.stories).toEqual([1, 4]);
+  });
+
+  it("treats a ticket with no stories field as having none", () => {
+    const ticket = bodyOf(front() + template("- [ ] a\n"));
+    expect(ticket?.stories).toEqual([]);
+  });
 });
 
 describe("a refused directory", () => {

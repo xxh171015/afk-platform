@@ -24,6 +24,37 @@ const TESTING_DECISIONS = "Testing Decisions";
  * Notes on a spec body that do not follow the to-spec template: a section missing or renamed, and no seams in
  * Testing Decisions. They are only advice; the spec is stored as written.
  */
+/** Numbered User Stories in the spec body, in the order they are written. */
+export function userStoriesOf(
+  body: string,
+): { number: number; text: string }[] {
+  const heading = specTemplateSections().find((name) =>
+    /^user stories$/i.test(name),
+  );
+  if (!heading) return [];
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const section = new RegExp(
+    `^## ${escaped}\\s*$([\\s\\S]*?)(?=^## |(?![\\s\\S]))`,
+    "m",
+  ).exec(body);
+  if (!section?.[1]) return [];
+  const stories: { number: number; text: string }[] = [];
+  const seen = new Set<number>();
+  for (const line of section[1].split("\n")) {
+    const start = /^(\d+)\.\s+(\S.*)$/.exec(line);
+    if (start) {
+      const number = Number(start[1]);
+      if (seen.has(number)) continue;
+      seen.add(number);
+      stories.push({ number, text: start[2] as string });
+    } else if (line.trim() !== "" && stories.at(-1)) {
+      const last = stories.at(-1);
+      if (last) last.text += `\n${line}`;
+    }
+  }
+  return stories;
+}
+
 export function specTemplateWarnings(body: string): string[] {
   const headings = new Set(h2Names(body));
   const warnings = specTemplateSections()
