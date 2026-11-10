@@ -253,6 +253,38 @@ describe("the queue of what waits for a person", () => {
     ).toBeTruthy();
   });
 
+  it("puts a copy button on every command and does not add write actions for those commands", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [
+          ticket(2, "protected-path-changed"),
+          ticket(3, "contract-change-needed"),
+        ],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-2");
+    expect(
+      card("T-2").getByRole("button", {
+        name: "复制命令 plat ticket approve-protected T-2",
+      }),
+    ).toBeTruthy();
+    expect(
+      card("T-2").getByRole("button", {
+        name: "复制命令 plat ticket retry T-2 --mode continue",
+      }),
+    ).toBeTruthy();
+    expect(
+      card("T-3").getByRole("button", {
+        name: "复制命令 plat tickets import S-1 ~/.afk/planning/S-1/append/ --append",
+      }),
+    ).toBeTruthy();
+    expect(
+      card("T-3").queryByRole("button", { name: "批准这些保护路径" }),
+    ).toBeNull();
+    expect(fake.calls.filter((call) => call.startsWith("POST"))).toEqual([]);
+  });
+
   it("shows the paths the gate found for protected-path-changed and the gate's log for a failed gate", async () => {
     const { fake } = server(
       queue({

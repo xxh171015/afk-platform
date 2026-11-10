@@ -420,6 +420,47 @@ describe("the ticket page", () => {
     ).toBeTruthy();
   });
 
+  it("puts a copy button on every command of a blocked ticket", async () => {
+    const brief = {
+      run: { id: 11, displayId: "R-11" },
+      stage: "gate",
+      result: "protected-path-changed",
+      output: { unapproved: [".github/ci.yml"] },
+      logPath: "/runs/11/logs",
+    };
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: {
+            ...view().ticket,
+            state: "blocked",
+            blockedReason: "protected-path-changed",
+            brief,
+            structuredBrief: structuredBrief({
+              reason: "protected-path-changed",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-4",
+              brief,
+            }),
+          },
+        }),
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    await screen.findByRole("note");
+    expect(
+      screen.getByRole("button", {
+        name: "复制命令 plat ticket approve-protected T-4",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "复制命令 plat ticket retry T-4 --mode continue",
+      }),
+    ).toBeTruthy();
+  });
+
   it("still shows a structured brief when a blocked ticket has no run", async () => {
     const server = fakeServer({
       "GET /tickets/4": () => ({
