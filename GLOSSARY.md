@@ -40,6 +40,10 @@ _Avoid_: 规划 SHA、文档提交、规划分支
 一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
+**User Story（用户故事）**：
+Spec 正文里带编号的一条「谁想要什么、为什么」。Ticket 可以用 `stories` 字段写明自己负责哪几条；一条 User Story 可以由几张票共同负责，也可以没有票专门负责。
+_Avoid_: 需求点、story 编号（不要把 User Story 当 Spec 的叫法）
+
 **Ticket（票）**：
 平台里的一张实现票，属于一个 Spec，只改一个 Repo。只指平台里的这个实体；规划过程中 GitHub Issues 上的决策票不叫 Ticket。正文和 to-tickets 的 issue 模板原文一字不差，验收标准就是正文里 Acceptance criteria 一节的各条，不另写一份。
 _Avoid_: 任务、issue、子票
@@ -168,7 +172,7 @@ _Avoid_: pending 队列、待处理项
 _Avoid_: 推送、提醒
 
 **Finding（意见）**：
-review 意见或门禁失败，以及它的处理结果。
+review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）和「建议」（只写进验收包，由人看）。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，不表示已有人或复审验证过问题确实修好；收尾（final-review）只跑一次，final-fix 之后不复审。
 _Avoid_: 评论、issue
 
 **Review axis（审查轴）**：
