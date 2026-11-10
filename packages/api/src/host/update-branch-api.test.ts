@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
@@ -547,6 +549,12 @@ describe("running specs do not follow every default-branch advance", () => {
     await look([{ repoUrl, sha: "adv001" }]);
     await drainFollowUps();
     expect(await updateJobs()).toHaveLength(0);
+  });
+
+  it("writes in the design that semantic conflicts surface by wrap-up", () => {
+    const design = readFileSync(join(process.cwd(), "docs/design.md"), "utf8");
+    expect(design).toContain("merge-tree 只能发现文本冲突");
+    expect(design).toContain("语义冲突最迟在收尾前暴露");
   });
 });
 
