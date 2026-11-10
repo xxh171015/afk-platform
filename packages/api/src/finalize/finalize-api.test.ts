@@ -284,6 +284,114 @@ describe("the overall review and the one fix", () => {
     expect(await claim()).toBeNull(); // nothing more: each runs once
   });
 
+  it("marks only this wrap-up's must-fix for the same spec and repo; suggestions stay on the pack", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:frontend",
+      name: "frontend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "s",
+      title: "Spec",
+    });
+    await call(
+      "POST",
+      `/specs/${spec.body.id}/tickets/import`,
+      importBody(spec.body.id, {
+        tickets: [
+          ticket("a"),
+          ticket("b", { repo: "frontend", blocked_by: ["a"] }),
+        ],
+      }),
+    );
+    await call("POST", `/specs/${spec.body.id}/confirm`);
+    await step("implement", SUCCESS.implement as Record<string, unknown>);
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    await step("review", {
+      outcome: "pass",
+      findings: [{ kind: "must-fix", body: "ticket leftover" }],
+    });
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    await step("implement", SUCCESS.implement as Record<string, unknown>);
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    await step("review", SUCCESS.review as Record<string, unknown>);
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+
+    await step("final-review", {
+      outcome: "fix",
+      run: { axis: "standards" },
+      findings: [
+        { kind: "must-fix", body: "backend must-fix" },
+        { kind: "suggestion", body: "backend suggestion" },
+      ],
+      extraRuns: [
+        {
+          run: { axis: "spec" },
+          findings: [{ kind: "must-fix", body: "backend spec-axis" }],
+        },
+      ],
+    });
+    await step("final-review", {
+      outcome: "fix",
+      findings: [{ kind: "must-fix", body: "frontend must-fix" }],
+    });
+    await step("final-fix", { outcome: "done" });
+
+    const findings = await db.pool.query(
+      `SELECT rp.name AS repo, r.ticket_id IS NOT NULL AS on_ticket, r.axis, f.kind, f.body, f.resolution
+       FROM findings f JOIN runs r ON r.id = f.run_id JOIN repos rp ON rp.id = r.repo_id
+       ORDER BY f.id`,
+    );
+    expect(findings.rows).toEqual([
+      {
+        repo: "backend",
+        on_ticket: true,
+        axis: null,
+        kind: "must-fix",
+        body: "ticket leftover",
+        resolution: "unhandled",
+      },
+      {
+        repo: "backend",
+        on_ticket: false,
+        axis: "standards",
+        kind: "must-fix",
+        body: "backend must-fix",
+        resolution: "fixed",
+      },
+      {
+        repo: "backend",
+        on_ticket: false,
+        axis: "standards",
+        kind: "suggestion",
+        body: "backend suggestion",
+        resolution: "acceptance-pack",
+      },
+      {
+        repo: "backend",
+        on_ticket: false,
+        axis: "spec",
+        kind: "must-fix",
+        body: "backend spec-axis",
+        resolution: "fixed",
+      },
+      {
+        repo: "frontend",
+        on_ticket: false,
+        axis: null,
+        kind: "must-fix",
+        body: "frontend must-fix",
+        resolution: "unhandled",
+      },
+    ]);
+  });
+
   it("records the Runs of the steps without a ticket, and the review's findings", async () => {
     await toFinalReview();
     await step("final-review", REVIEW_FIX);
@@ -302,7 +410,7 @@ describe("the overall review and the one fix", () => {
       {
         kind: "must-fix",
         body: "src/a.ts:3 a and b disagree on the name",
-        resolution: "unhandled",
+        resolution: "fixed",
       },
     ]);
   });
@@ -351,6 +459,21 @@ describe("when it goes wrong", () => {
     await allTicketsDone();
     await step("final-review", REVIEW_FIX);
   }
+
+  it("leaves wrap-up must-fix findings unhandled when final-fix does not finish", async () => {
+    await toFinalFix();
+    await step("final-fix", { outcome: "agent-gave-up" });
+    const findings = await db.pool.query(
+      "SELECT kind, body, resolution FROM findings f JOIN runs r ON r.id = f.run_id WHERE r.stage = 'final-review'",
+    );
+    expect(findings.rows).toEqual([
+      {
+        kind: "must-fix",
+        body: "src/a.ts:3 a and b disagree on the name",
+        resolution: "unhandled",
+      },
+    ]);
+  });
 
   it("a fix the agent gives up on blocks the finalization with a brief", async () => {
     await toFinalFix();
