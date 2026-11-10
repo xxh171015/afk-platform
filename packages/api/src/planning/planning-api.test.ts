@@ -203,6 +203,58 @@ describe("tickets import", () => {
     );
   });
 
+  const userStoriesBody = [
+    "## User Stories",
+    "",
+    "1. As a splitter, I want to name the User Stories a ticket is for.",
+    "2. As an importer, I want unknown numbers rejected.",
+    "3. As a reviewer, I want the assigned stories as counterparts.",
+    "4. As an author of an infrastructure ticket, I want to omit stories.",
+    "",
+  ].join("\n");
+
+  it("records stories that exist in the spec on the ticket and leaves them off a ticket that omitted them", async () => {
+    const { specId } = await setup();
+    await db.pool.query("UPDATE specs SET body = $2 WHERE id = $1", [
+      specId,
+      userStoriesBody,
+    ]);
+    const ok = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("named", { stories: [1, 4] }), ticket("plain")],
+      }),
+    );
+    expect(ok.status).toBe(200);
+    const named = await fetch(`${api.url}/tickets/1`);
+    const namedBody = (await named.json()) as { ticket: { file: string } };
+    expect(namedBody.ticket.file).toMatch(/stories:/);
+    expect(namedBody.ticket.file).toMatch(/- 1/);
+    expect(namedBody.ticket.file).toMatch(/- 4/);
+    const plain = await fetch(`${api.url}/tickets/2`);
+    const plainBody = (await plain.json()) as { ticket: { file: string } };
+    expect(plainBody.ticket.file).not.toMatch(/^stories:/m);
+  });
+
+  it("rejects the whole import when stories lists numbers the spec does not have, naming those numbers", async () => {
+    const { specId } = await setup();
+    await db.pool.query("UPDATE specs SET body = $2 WHERE id = $1", [
+      specId,
+      userStoriesBody,
+    ]);
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("a", { stories: [1, 9] }), ticket("b")],
+      }),
+    );
+    expect(result.status).toBe(422);
+    expect(result.body.errors.join("\n")).toMatch(/ticket a:.*stories.*\b9\b/);
+    expect(
+      (await db.pool.query("SELECT count(*)::int AS n FROM tickets")).rows[0].n,
+    ).toBe(0);
+  });
+
   it("writes every ticket and edge, returns display ids, and stores no warnings when there are none", async () => {
     const { specId } = await setup();
     const result = await post(

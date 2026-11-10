@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Bundle } from "@afk/shared";
+import { userStoriesOf } from "@afk/shared/spec-template";
+import { storiesOfTicketFile } from "@afk/shared/ticket-files";
 import { git } from "./exec.ts";
 import type { GateConfig } from "./gate.ts";
 
@@ -36,6 +38,24 @@ export function gateForRun(config: GateConfig): RunGate {
     setup: config.setup ?? null,
     commands: config.commands.map(({ name, run }) => ({ name, run })),
   };
+}
+
+const ASSIGNED_STORIES_HEADING = "这张票负责的 User Story";
+
+export function specMarkdownForContext(
+  spec: { displayId: string; title: string; body: string },
+  stories: readonly number[],
+): string {
+  const background = `# ${spec.displayId} ${spec.title}\n\n${spec.body}\n`;
+  if (stories.length === 0) return background;
+  const wanted = new Set(stories);
+  const assigned = userStoriesOf(spec.body).filter((story) =>
+    wanted.has(story.number),
+  );
+  if (assigned.length === 0) return background;
+  return `${background}\n## ${ASSIGNED_STORIES_HEADING}\n\n${assigned
+    .map((story) => `${story.number}. ${story.text}`)
+    .join("\n")}\n`;
 }
 
 function specTicketsMarkdown(bundle: Bundle): string {
@@ -95,7 +115,10 @@ export function renderContext(input: ContextInput): void {
   }
   writeFileSync(
     join(dir, "spec.md"),
-    `# ${bundle.spec.displayId} ${bundle.spec.title}\n\n${bundle.spec.body}\n`,
+    specMarkdownForContext(
+      bundle.spec,
+      bundle.ticket ? storiesOfTicketFile(bundle.ticket.file) : [],
+    ),
   );
   writeFileSync(join(dir, "run.json"), JSON.stringify(runJson(input), null, 2));
   if (bundle.note) {

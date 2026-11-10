@@ -18,6 +18,7 @@ export interface TestTicket {
   contract?: string | string[];
   refs?: string[];
   environment?: string[];
+  stories?: number[];
 }
 
 export interface TestImport {
@@ -47,6 +48,9 @@ export function ticketFile(
     `contract: ${list(contract)}`,
     `refs: ${list(ticket.refs)}`,
     `environment: ${list(ticket.environment)}`,
+    ...(ticket.stories?.length
+      ? [`stories: ${JSON.stringify(ticket.stories)}`]
+      : []),
     `blocked_by: ${list([...(ticket.blocked_by ?? []), ...(extra.blocked_by ?? [])])}`,
     `blocks: ${list(extra.blocks)}`,
     "---",

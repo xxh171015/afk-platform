@@ -201,6 +201,13 @@ describe("the template sources", () => {
 });
 
 describe("the ticket file in the platform part", () => {
+  it("documents the optional stories field as User Story numbers in the spec", () => {
+    const doc = renderTrackerDoc(single, "backend");
+    expect(doc).toMatch(/stories:\s*\[1,\s*4\]/);
+    expect(doc).toMatch(/stories[\s\S]{0,200}User Story/);
+    expect(doc).toMatch(/omit|不写|optional/i);
+  });
+
   // Guard: the example a skill copies must be a file the importer accepts.
   it("is imported by the real ticket file reader", () => {
     const doc = renderTrackerDoc(single, "backend");

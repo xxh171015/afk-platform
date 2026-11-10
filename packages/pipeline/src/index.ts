@@ -31,6 +31,7 @@ export {
   readContract,
   readDomainFiles,
   renderContext,
+  specMarkdownForContext,
 } from "./context.ts";
 export type { ContractCopyProblem, ProvidedContract } from "./contract-copy.ts";
 export { checkContractCopies, copyPathOf } from "./contract-copy.ts";

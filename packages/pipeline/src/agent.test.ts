@@ -343,7 +343,10 @@ describe("the two axes of a review", () => {
     const spec = readFileSync(PROMPTS.reviewSpec, "utf8");
     expect(spec).toContain("/context/ticket.md");
     expect(spec).toContain("/context/contract/");
-    expect(spec).toMatch(/spec\.md`? 只是背景/);
+    expect(spec).toMatch(/spec\.md`? 只是背景，不是审查的对照物/);
+    expect(spec).toContain("这张票负责的 User Story");
+    expect(spec).toMatch(/「这张票负责的 User Story」一节的原文/);
+    expect(spec).toMatch(/也是对照物/);
     expect(spec).toContain("每条验收标准都有测试");
     const finalSpec = readFileSync(PROMPTS.finalReviewSpec, "utf8");
     expect(finalSpec).toContain("/context/spec.md");
