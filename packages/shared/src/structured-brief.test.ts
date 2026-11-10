@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { structuredBrief } from "./structured-brief.ts";
+import { readTicketFiles } from "./ticket-files.ts";
 import { BLOCKED_REASONS } from "./ticket-state.ts";
 
 const source = (
@@ -203,6 +204,39 @@ needs a new field on Order
     });
     expect(brief.ticketDraft).toContain("## What to build\n\n需要改契约\n");
     expect(brief.ticketDraft).not.toContain("blocked_by:");
+  });
+
+  it("produces a contract-change-needed draft the ticket-file reader accepts, with blocks on the stuck ticket", () => {
+    const brief = structuredBrief({
+      reason: "contract-change-needed",
+      ...ids,
+      repo: "backend",
+      contractBlockedBy: ["T-3"],
+      brief: source("implement", {
+        status: "cannot-proceed",
+        blockedReason: "contract-change-needed",
+        detail: "needs a new field on Order",
+      }),
+    });
+    const result = readTicketFiles(
+      [{ name: "amend-contract.md", text: brief.ticketDraft ?? "" }],
+      19,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.errors.join("\n"));
+    expect(result.input.tickets[0]).toMatchObject({
+      key: "amend-contract",
+      type: "contract",
+      title: "改契约以继续 T-12",
+      repo: "backend",
+      blocked_by: ["T-3"],
+    });
+    expect(result.input.tickets[0]?.body).toContain(
+      "## What to build\n\nneeds a new field on Order\n",
+    );
+    expect(result.input.edges).toEqual([
+      { from: "amend-contract", to: "T-12", kind: "blocks" },
+    ]);
   });
 
   it("covers every blocked reason with a Chinese summary, recommended action and a command that names the ticket", () => {

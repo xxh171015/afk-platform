@@ -220,7 +220,17 @@ describe("plat blocked of a stuck ticket", () => {
                   "plat tickets import S-19 ~/.afk/planning/S-19/append/ --append",
               },
             ],
-            ticketDraft: "---\ntitle: 改契约以继续 T-12\n",
+            ticketDraft: `---
+title: 改契约以继续 T-12
+repo: backend
+type: contract
+blocks: [T-12]
+---
+
+## What to build
+
+needs a new field on Order
+`,
           },
         }),
       ],
@@ -229,6 +239,9 @@ describe("plat blocked of a stuck ticket", () => {
       "plat tickets import S-19 ~/.afk/planning/S-19/append/ --append",
     );
     expect(text).toContain("title: 改契约以继续 T-12");
+    expect(text).toContain("type: contract");
+    expect(text).toContain("blocks: [T-12]");
+    expect(text).toContain("needs a new field on Order");
   });
 
   it("prints a wrap-up step's structured brief the same way", () => {

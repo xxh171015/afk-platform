@@ -2027,6 +2027,38 @@ describe("structured brief on blocked tickets", () => {
     expect(detail.body.ticket.structuredBrief).toEqual(brief);
   });
 
+  it("imports that contract-change-needed draft as a contract ticket that blocks the stuck one", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "contract-change-needed",
+      run: {
+        output: {
+          status: "cannot-proceed",
+          blockedReason: "contract-change-needed",
+          detail: "Order needs a note field",
+        },
+      },
+    });
+    const detail = await call("GET", "/tickets/1");
+    const draft = detail.body.ticket.structuredBrief.ticketDraft as string;
+    expect(draft).toContain("## What to build\n\nOrder needs a note field\n");
+    const imported = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      { files: [{ name: "amend-contract.md", text: draft }] },
+    );
+    expect(imported.status).toBe(200);
+    expect(imported.body.tickets).toEqual([
+      { key: "amend-contract", id: 2, displayId: "T-2" },
+    ]);
+    const created = await call("GET", "/tickets/2");
+    expect(created.body.ticket.type).toBe("contract");
+    expect(created.body.ticket.body).toContain("Order needs a note field");
+    expect(created.body.downstream).toEqual([
+      { id: 1, displayId: "T-1", kind: "blocks", state: "blocked" },
+    ]);
+  });
+
   it("returns a structured brief on a stuck wrap-up step", async () => {
     const specId = await runningSpec([ticket("a")]);
     await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");

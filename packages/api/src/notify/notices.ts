@@ -1,9 +1,9 @@
-import { formatDisplayId } from "@afk/shared";
+import { formatDisplayId, structuredBrief } from "@afk/shared";
 import { pageUrl } from "../page-url.ts";
 
 // One macOS banner per listed transition: title is the kind, body is display id + title + one-line reason
-// and a page URL. Not a structured brief and not the pack
-// (docs/specs/experience-platform.md「通知」).
+// and a page URL. A ticket-blocked (or final-blocked) reason is structuredBrief.summary, so the banner
+// says the same thing as the page and plat blocked (docs/specs/experience-platform.md「通知」).
 
 export const NOTICE_KINDS = [
   "ticket-blocked",
@@ -24,24 +24,6 @@ export const NOTICE_TITLES: Record<NoticeKind, string> = {
   "pr-ready": "PR 已转 ready",
   "spec-merged": "需求已合并",
   "waiting-other": "待处理",
-};
-
-const BLOCKED_REASON_LABELS: Record<string, string> = {
-  "gate-failed": "门禁失败",
-  "post-merge-gate-failed": "合并后门禁失败",
-  "merge-conflict": "合并冲突",
-  "protected-path-changed": "改了受保护路径",
-  "contract-copy-mismatch": "契约副本不一致",
-  "no-commits": "没有提交",
-  "agent-gave-up": "模型放弃",
-  "contract-change-needed": "需要改契约",
-  "invalid-output": "输出不合法",
-  timeout: "超时",
-  "integration-loop-exceeded": "联调轮次用尽",
-  "integration-unknown-side": "联调分不清责任仓库",
-  "integration-environment-failed": "联调环境起不来",
-  "upstream-cancelled": "上游已取消",
-  "job-failed": "作业失败",
 };
 
 export interface Notice {
@@ -98,9 +80,18 @@ export interface Shot {
   readyFailedPullIds: number[];
 }
 
-function blockedLabel(reason: string | null): string {
+function blockedSummary(
+  reason: string | null,
+  specDisplayId: string,
+  ticketDisplayId?: string,
+): string {
   if (!reason) return "已卡住";
-  return BLOCKED_REASON_LABELS[reason] ?? reason;
+  return structuredBrief({
+    reason,
+    specDisplayId,
+    ticketDisplayId,
+    brief: null,
+  }).summary;
 }
 
 function isWaitingPull(shot: Shot, pull: ShotPull): boolean {
@@ -123,7 +114,11 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
         kind: "ticket-blocked",
         displayId: formatDisplayId("ticket", ticket.id),
         title: ticket.title,
-        reason: blockedLabel(ticket.blockedReason),
+        reason: blockedSummary(
+          ticket.blockedReason,
+          spec,
+          formatDisplayId("ticket", ticket.id),
+        ),
         path: `/tickets/${ticket.id}`,
       }),
     );
@@ -137,7 +132,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
         kind: "final-blocked",
         displayId: spec,
         title: after.specTitle,
-        reason: blockedLabel(step.blockedReason),
+        reason: blockedSummary(step.blockedReason, spec),
         path: `/specs/${after.specId}/delivery`,
       }),
     );
