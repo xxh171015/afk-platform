@@ -1,4 +1,4 @@
-import type { HostKind } from "@afk/shared";
+import { type HostKind, pullPhrase } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
 import {
@@ -25,17 +25,27 @@ export interface TrackerDocProject {
 
 const HOSTS: Record<
   HostKind,
-  { name: string; cli: string; seed: SnapshotFile }
+  {
+    name: string;
+    cli: string;
+    seed: SnapshotFile;
+    protectedPath: string;
+    protectedExample: string;
+  }
 > = {
   github: {
     name: "GitHub",
     cli: "gh",
     seed: "setup-matt-pocock-skills/issue-tracker-github.md",
+    protectedPath: ".github/**",
+    protectedExample: ".github/CODEOWNERS",
   },
   gitlab: {
     name: "GitLab",
     cli: "glab",
     seed: "setup-matt-pocock-skills/issue-tracker-gitlab.md",
+    protectedPath: ".gitlab-ci.yml",
+    protectedExample: ".gitlab-ci.yml",
   },
 };
 
@@ -75,6 +85,10 @@ export function renderTrackerDoc(
     CONTRACT_REPOS: names(project.repos.filter((r) => r.contractPath)),
     HOST_NAME: host.name,
     HOST_CLI: host.cli,
+    HOST_PR: pullPhrase(repo.hostKind),
+    HOST_PRS: `${pullPhrase(repo.hostKind)}s`,
+    PROTECTED_PATH: host.protectedPath,
+    PROTECTED_EXAMPLE: host.protectedExample,
   };
   const crossRepo =
     project.repos.length > 1 && project.repos.some((r) => r.contractPath);

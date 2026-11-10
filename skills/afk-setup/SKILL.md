@@ -11,11 +11,11 @@ Speak the person's language in chat. Show command output when it carries a probl
 
 **Called mid-planning** (plat said a ticket's repo does not belong to the project): set up that repo and nothing else: register it with `plat init` in the planning repo's checkout, which rewrites the tracker doc there on this machine (not through `afk/setup`), then ready the new repo (sections 3 and 5); then go back to the planning where it stopped and import again.
 
-**A project already set up, on another machine** (`plat init --dry-run` in the planning repo's checkout shows every repo registered, and each repo has `.sandcastle/gates.yaml` on `origin/afk/setup` or its default branch): do only this machine's part: sections 1 and 2, and step 1 of section 4. Push nothing, create no labels and run no gate check; the report is one line saying this machine is ready (in Chinese: 本机已就绪).
+**A project already set up, on another machine** (`plat init --dry-run` in the planning repo's checkout shows every repo registered, and each repo has `.sandcastle/gates.yaml` on `origin/afk/setup` or its default branch): do only this machine's part: sections 1 and 2, and step 1 of section 4. Push nothing and run no gate check; the report is one line saying this machine is ready (in Chinese: 本机已就绪).
 
 ## 1. Tools on this machine
 
-1. **Prerequisites**: `node --version` is 20 or newer, `git --version` works, and `gh auth status` says logged in. For each one missing, say in one line the command the person runs (for example "Node 20+: `brew install node`, or the installer from nodejs.org"; "gh: `gh auth login`"), and stop until they are there. Do not install them or log in for the person.
+1. **Prerequisites**: `node --version` is 20 or newer and `git --version` works. For each one missing, say in one line the command the person runs (for example "Node 20+: `brew install node`, or the installer from nodejs.org"), and stop until they are there. Do not install them for the person.
 2. **The platform's address**: `$AFK_API_URL` when it is set; else, when plat is installed, the one `plat connect` (no address) prints; else `http://127.0.0.1:3000`. It is right when `curl -fsS "<address>/version"` answers. When it does not, ask the person once for the address and check it the same way; when `$AFK_API_URL` is set to an address that does not answer, also tell the person to remove it from their shell configuration, since it comes before the address plat remembers.
 3. **plat**: when there is none, install the platform's copy into a directory already on `PATH` that the person can write to (prefer `~/.local/bin`, then `~/bin`, when on `PATH`; any other directory on `PATH` under the home directory will do):
    `curl -fsSL "<address>/cli/plat.mjs" -o <dir>/plat && chmod +x <dir>/plat`
@@ -26,7 +26,7 @@ Done when `plat version` matches the platform and `plat connect` (no address) sa
 
 ## 2. The repos
 
-The repos are the git checkouts among the workspace folders; read each one's `origin` and default branch. A repo added to the workspace later is set up when planning first needs it (see "Called mid-planning").
+The repos are the git checkouts among the workspace folders; read each one's `origin` and default branch. A repo added to the workspace later is set up when planning first needs it (see "Called mid-planning"). When any origin is GitHub, `gh auth status` must say logged in. If it does not (gh missing or not logged in), say in one line the command the person runs ("gh: `gh auth login`") and stop until it is. Do not install gh or log in for the person. Origins that are all GitLab do not need gh: carry on.
 
 The **planning repo** is where the person plans, decided in this order:
 1. the repo afk-setup is installed in (project level): that is where the person chose to plan; the report says so;
@@ -58,7 +58,6 @@ In the person's own checkout of the planning repo (not a worktree; whatever bran
 
 1. `plat init --yes --with <checkout of each other repo> ...`. It registers what is not registered yet; a registered repo keeps its name and settings. It writes the tracker doc, `docs/agents/domain.md`, `docs/agents/triage-labels.md` and the local rule files `CLAUDE.local.md` (Claude Code) and `.cursor/rules/afk-platform.mdc` (Cursor), which hold the `## Agent skills` section and the planning conventions. It adds them to the repo's `.git/info/exclude`: they stay on this machine and are never committed. Do not move them into `AGENTS.md` or `CLAUDE.md`. A repo that already tracks one of these files (an older setup committed it) keeps it there: plat updates the tracked file and its `next:` line names it; copy that change into the planning repo's `<setup>` and commit it with the setup (section 5), then `git restore` it in the person's checkout.
 2. Each repo's 托管 line comes back. When it is not "can work here" / 「托管正常」, give the person the fix from that line (GitHub: the install/permissions link, for whoever runs the platform; GitLab: who to add as Developer, or the personal-token / Developers-can-merge hint) and carry on with the next steps.
-3. Create the triage labels the planning repo's GitHub lacks: compare `gh label list` with the five in `docs/agents/triage-labels.md` and `gh label create` each missing one.
 
 Done when `plat init` printed the project and every repo is registered.
 

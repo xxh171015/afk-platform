@@ -250,6 +250,25 @@ describe("plat init", () => {
     );
   });
 
+  it("does not print GitHub-only steps for a GitLab project", async () => {
+    const web = checkout("web", "https://gitlab.com/acme/web.git");
+
+    const result = await plat(web.dir, ["init", "--yes"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("GitHub App");
+    expect(result.stdout).not.toContain(".github/**");
+    expect(result.stdout).not.toContain("gh auth");
+    expect(result.stdout).not.toContain("gh label");
+    expect(result.stdout).toContain(
+      "project: new, web (protected paths: .gitlab-ci.yml)",
+    );
+    const doc = trackerDoc(web.dir);
+    const platform = doc.slice(0, doc.indexOf("## On GitLab"));
+    expect(platform).not.toMatch(/pull request/i);
+    expect(platform).not.toContain(".github/");
+  });
+
   it("with --dry-run shows the plan without asking, registers and writes nothing, and succeeds", async () => {
     const backend = checkout("backend", "https://github.com/acme/backend.git", {
       "AGENTS.md": "# agents\n",
