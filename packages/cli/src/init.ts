@@ -17,6 +17,8 @@ export class InitError extends Error {}
 
 export const TRACKER_DOC_PATH = "docs/agents/issue-tracker.md";
 export const DEFAULT_PROTECTED_PATHS = [".github/**"];
+export const defaultProtectedPaths = (hostKind: HostKind): string[] =>
+  hostKind === "gitlab" ? [".gitlab-ci.yml"] : DEFAULT_PROTECTED_PATHS;
 
 // What a repo needs before the platform can take its tickets (GLOSSARY「Repo readiness」). Missing ones are only
 // reported: registering does not depend on them.
@@ -241,7 +243,7 @@ export function planInit(input: {
         : {
             kind: "new",
             name: input.project.newName,
-            protectedPaths: DEFAULT_PROTECTED_PATHS,
+            protectedPaths: defaultProtectedPaths(input.planning.hostKind),
           },
     repos,
   };
