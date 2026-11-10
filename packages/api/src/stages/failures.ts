@@ -2,6 +2,7 @@ import {
   type BlockedReason,
   type TicketState,
   ticketTransition,
+  unrecoverableJobError,
 } from "@afk/shared";
 import type pg from "pg";
 import {
@@ -40,6 +41,8 @@ import { EXPECTED_STATE, type StageJob } from "./results.ts";
 // A worker that cannot carry out a stage reports the job as failed (its sandbox would not start, a push was
 // refused again and again, ...). That is not the ticket's fault, so the stage is queued again; if it keeps
 // failing the ticket is blocked with job-failed and the error in its brief, for a person to look at.
+// Errors that will not recover by running again (Cursor auth, a bad model, a spent quota, a failed
+// integration image build) skip the requeue and block on the first failure.
 export const MAX_JOB_FAILURES = 3;
 
 const JOB_FAILED: BlockedReason = "job-failed";
@@ -92,7 +95,7 @@ export async function recordJobFailure(
   error: string,
   now: Date,
 ): Promise<FailureOutcome> {
-  await finishRun(client, job.id, error);
+  await finishRun(client, job.id, unrecoverableJobError(error) ?? error);
 
   const planning = readPlanningPayload(job);
   if (planning) {
@@ -106,11 +109,11 @@ export async function recordJobFailure(
       : { status: outcome, failures: MAX_JOB_FAILURES };
   }
   const finalE2e = readFinalE2ePayload(job.payload);
-  if (finalE2e) return finalE2eJobFailed(client, finalE2e);
+  if (finalE2e) return finalE2eJobFailed(client, finalE2e, error);
   const stage = readStagePayload(job.payload);
-  if (stage) return ticketStageFailed(client, stage);
+  if (stage) return ticketStageFailed(client, stage, error);
   const final = readFinalPayload(job.payload);
-  if (final) return finalStepFailed(client, final);
+  if (final) return finalStepFailed(client, final, error);
   const openPr = readOpenPrPayload(job);
   if (openPr) return openPrFailed(client, openPr);
   const cleanup = readSpecCleanupPayload(job);
@@ -123,6 +126,7 @@ export async function recordJobFailure(
 async function ticketStageFailed(
   client: pg.PoolClient,
   read: NonNullable<ReturnType<typeof readStagePayload>>,
+  error: string,
 ): Promise<FailureOutcome> {
   const found = await client.query<{ spec_id: number }>(
     "SELECT spec_id FROM tickets WHERE id = $1",
@@ -158,7 +162,8 @@ async function ticketStageFailed(
     }),
     row.job_floor,
   );
-  if (failures < MAX_JOB_FAILURES) {
+  const unrecoverable = Boolean(unrecoverableJobError(error));
+  if (!unrecoverable && failures < MAX_JOB_FAILURES) {
     await enqueueStageJob(
       client,
       {
@@ -173,7 +178,9 @@ async function ticketStageFailed(
   }
   // A ticket that never got to start counts as running now, so that the state machine can block it.
   const from: TicketState = row.state === "queued" ? "running" : row.state;
-  const reason = reasonOfFailed(read.stage, row.type);
+  const reason = unrecoverable
+    ? JOB_FAILED
+    : reasonOfFailed(read.stage, row.type);
   const blocked = ticketTransition(from, { type: "block", reason });
   if (!blocked.ok) throw new Error(blocked.reason);
   await client.query(
@@ -188,6 +195,7 @@ async function ticketStageFailed(
 async function finalStepFailed(
   client: pg.PoolClient,
   read: NonNullable<ReturnType<typeof readFinalPayload>>,
+  error: string,
 ): Promise<FailureOutcome> {
   await lockSpec(client, read.specId);
   const fin = (
@@ -213,7 +221,7 @@ async function finalStepFailed(
     }),
     fin.job_floor,
   );
-  if (failures < MAX_JOB_FAILURES) {
+  if (!unrecoverableJobError(error) && failures < MAX_JOB_FAILURES) {
     await enqueueFinalJob(client, read, read.step);
     return { status: "requeued", failures };
   }
