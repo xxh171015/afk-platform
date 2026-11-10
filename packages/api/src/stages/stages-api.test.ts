@@ -667,6 +667,24 @@ describe("the gate baseline in the bundle", () => {
     const job = (await worker.claim()).body.job as Claimed;
     expect(await baselineOf(job)).toEqual({ tests: 4, skipped: 2 });
   });
+
+  it("lists every merge's measurement with its commit, newest first", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, head_sha) VALUES (1, 1, 'merge', 'merged', 'old'), (1, 1, 'merge', 'merged', 'new')`,
+    );
+    await db.pool.query(
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, tests_total, tests_skipped) VALUES (1, 'old', 'c', 9, 0), (1, 'new', 'c', 4, 2)`,
+    );
+    const job = (await worker.claim()).body.job as Claimed;
+    const body = (await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json())) as { gateBaselines: unknown };
+    expect(body.gateBaselines).toEqual([
+      { sha: "new", tests: 4, skipped: 2 },
+      { sha: "old", tests: 9, skipped: 0 },
+    ]);
+  });
 });
 
 describe("a worker that is faster than the claim bookkeeping", () => {
