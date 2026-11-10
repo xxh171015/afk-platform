@@ -1,8 +1,10 @@
 import { type Io, run } from "@afk/cli";
+import type pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveAcceptancePack } from "../acceptance/pack.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import type { Notice } from "../notify/notices.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import {
   FakeClock,
@@ -17,12 +19,24 @@ let db: TestDatabase;
 let api: RunningApi;
 let worker: FakeWorker;
 let clock: FakeClock;
+let notices: Notice[];
 
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
+  notices = [];
+  api = await listen(
+    testApp({
+      pool: db.pool,
+      clock: clock.now,
+      notifications: {
+        async notify(notice) {
+          notices.push(notice);
+        },
+      },
+    }),
+  );
   worker = new FakeWorker(api.url, "w1", ["host"]);
 });
 afterEach(async () => {
@@ -2215,3 +2229,242 @@ describe("cleaning up after a cancelled or merged spec", () => {
     expect(out).toBe("S-1: clean-up queued\n");
   });
 });
+
+class EventStream {
+  private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
+  private readonly decoder = new TextDecoder();
+  private buffer = "";
+  constructor(response: Response) {
+    const body = response.body;
+    if (!body) throw new Error("no body");
+    this.reader = body.getReader();
+  }
+
+  async nextInvalidate(timeoutMs = 2_000): Promise<Record<string, number>> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const parsed = this.takeInvalidate();
+      if (parsed) return parsed;
+      const remaining = deadline - Date.now();
+      const chunk = await Promise.race([
+        this.reader.read(),
+        new Promise<{ done: true; value: undefined }>((resolve) =>
+          setTimeout(
+            () => resolve({ done: true, value: undefined }),
+            remaining,
+          ),
+        ),
+      ]);
+      if (chunk.value)
+        this.buffer += this.decoder.decode(chunk.value, { stream: true });
+    }
+    throw new Error(`no invalidate in ${this.buffer}`);
+  }
+
+  private takeInvalidate(): Record<string, number> | undefined {
+    const match = this.buffer.match(/event: invalidate\ndata: (\{.*\})\n\n/);
+    if (!match) return undefined;
+    this.buffer = this.buffer.slice((match.index ?? 0) + match[0].length);
+    return JSON.parse(match[1] as string) as Record<string, number>;
+  }
+
+  async close(): Promise<void> {
+    await this.reader.cancel();
+  }
+}
+
+async function openEvents(): Promise<EventStream> {
+  const response = await fetch(`${api.url}/events`);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toMatch(/text\/event-stream/);
+  return new EventStream(response);
+}
+
+// Facts the open-pr job stored; a look that repeats them has found nothing new.
+const asOpened = (id: number, extra: Record<string, unknown> = {}) => ({
+  id,
+  state: "open" as const,
+  draft: false,
+  headSha: `sha${id}`,
+  ci: "none",
+  review: "none",
+  ...extra,
+});
+
+describe("host-sync snapshots and invalidate", () => {
+  async function specWithOpenPr() {
+    const settled = await settledSpec(["backend"]);
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(1));
+    return settled;
+  }
+
+  async function look(pulls: Json[]) {
+    clock.advanceSeconds(61);
+    for (let i = 0; i < 8; i++) {
+      const job = (await worker.claim()).body.job;
+      if (!job) break;
+      if (await completeIfPatch(job)) continue;
+      if (job.type === "host-sync") {
+        await worker.complete(job.id, job.attempt, {
+          stage: "host-sync",
+          pulls,
+        });
+        return;
+      }
+    }
+    throw new Error("no host-sync job");
+  }
+
+  it("does not stream invalidate when a look finds the pull request unchanged", async () => {
+    await specWithOpenPr();
+    const stream = await openEvents();
+    try {
+      await look([asOpened(1)]);
+      await expect(stream.nextInvalidate(200)).rejects.toThrow(/no invalidate/);
+    } finally {
+      await stream.close();
+    }
+  });
+
+  it("streams invalidate and notifies when a pull request's state, CI, review or head changes", async () => {
+    const { specId } = await specWithOpenPr();
+    const stream = await openEvents();
+    try {
+      await look([asOpened(1, { ci: "failure" })]);
+      expect(await stream.nextInvalidate()).toMatchObject({ specId });
+
+      await look([asOpened(1, { ci: "failure", review: "approved" })]);
+      expect(await stream.nextInvalidate()).toMatchObject({ specId });
+
+      await look([
+        asOpened(1, { ci: "failure", review: "approved", headSha: "head-2" }),
+      ]);
+      expect(await stream.nextInvalidate()).toMatchObject({ specId });
+
+      notices.length = 0;
+      await look([
+        asOpened(1, {
+          ci: "failure",
+          review: "approved",
+          headSha: "head-2",
+          state: "closed",
+        }),
+      ]);
+      expect(await stream.nextInvalidate()).toMatchObject({ specId });
+      expect(notices).toEqual([
+        {
+          title: "待处理",
+          body: expect.stringMatching(/S-1 Export orders：PR 被关/),
+        },
+      ]);
+    } finally {
+      await stream.close();
+    }
+  });
+
+  it("does not snapshot cancelled or merged specs: a look's queries stay flat", async () => {
+    await specWithOpenPr();
+    const queries = attachQueryCounter(db.pool);
+    await queries.wrapIdle();
+    await look([asOpened(1)]);
+    queries.reset();
+    await look([asOpened(1)]);
+    const baseline = queries.count();
+
+    await db.pool.query(
+      `INSERT INTO specs (project_id, type, slug, title, state) VALUES
+         (1, 'feature', 'old-merged', 'Old merged', 'merged'),
+         (1, 'feature', 'old-cancelled', 'Old cancelled', 'cancelled')`,
+    );
+
+    queries.reset();
+    await look([asOpened(1)]);
+    expect(queries.count()).toBeLessThanOrEqual(baseline + 2);
+  });
+
+  it("a look's query count does not grow with fifty merged specs", async () => {
+    await specWithOpenPr();
+    const queries = attachQueryCounter(db.pool);
+    await queries.wrapIdle();
+    await look([asOpened(1)]);
+    queries.reset();
+    await look([asOpened(1)]);
+    const baseline = queries.count();
+
+    await db.pool.query(
+      `INSERT INTO specs (project_id, type, slug, title, state)
+       SELECT 1, 'feature', 'merged-' || i, 'Merged ' || i, 'merged'
+       FROM generate_series(1, 50) AS i`,
+    );
+
+    queries.reset();
+    await look([asOpened(1)]);
+    expect(queries.count()).toBeLessThanOrEqual(baseline + 2);
+  });
+});
+
+function attachQueryCounter(pool: pg.Pool) {
+  let n = 0;
+  const origConnect = pool.connect.bind(pool) as {
+    (): Promise<pg.PoolClient>;
+    (
+      cb: (
+        err: Error,
+        client: pg.PoolClient,
+        done: (release?: unknown) => void,
+      ) => void,
+    ): void;
+  };
+  const wrap = (client: pg.PoolClient) => {
+    const marked = client as pg.PoolClient & { _qc?: boolean };
+    if (marked._qc) return client;
+    marked._qc = true;
+    const orig = client.query.bind(client);
+    client.query = ((...args: unknown[]) => {
+      n += 1;
+      return orig(...(args as Parameters<typeof orig>));
+    }) as typeof client.query;
+    return client;
+  };
+  function connect(): Promise<pg.PoolClient>;
+  function connect(
+    cb: (
+      err: Error,
+      client: pg.PoolClient,
+      done: (release?: unknown) => void,
+    ) => void,
+  ): void;
+  function connect(
+    cb?: (
+      err: Error,
+      client: pg.PoolClient,
+      done: (release?: unknown) => void,
+    ) => void,
+  ) {
+    if (cb) {
+      origConnect((err, client, done) => {
+        if (client) wrap(client);
+        cb(err, client, done);
+      });
+      return;
+    }
+    return origConnect().then(wrap);
+  }
+  pool.connect = connect as typeof pool.connect;
+  return {
+    count: () => n,
+    reset: () => {
+      n = 0;
+    },
+    wrapIdle: async () => {
+      const idle = pool.idleCount;
+      const held: pg.PoolClient[] = [];
+      for (let i = 0; i < idle; i++) held.push(await origConnect());
+      for (const client of held) {
+        wrap(client);
+        client.release();
+      }
+    },
+  };
+}

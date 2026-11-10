@@ -81,6 +81,9 @@ export interface ShotPull {
   repo: string;
   state: string;
   draft: boolean;
+  ci: string;
+  review: string;
+  headSha: string;
   syncError: string | null;
   mergeOrderDraft: boolean;
 }
