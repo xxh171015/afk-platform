@@ -23,6 +23,7 @@ import type { ActionResult } from "../tickets/actions.ts";
 
 const MAX_JOB_FAILURES = 3;
 const ENVIRONMENT_FAILED = "integration-environment-failed";
+const JOB_FAILED = "job-failed";
 
 // where a ticket is in the current round
 type Status = "e2e" | "diagnosing" | "passed" | "failed";
@@ -293,13 +294,14 @@ export async function finalE2eJobFailed(
       )
     ).rows[0]?.n,
   );
-  if (!unrecoverableJobError(error) && failures < MAX_JOB_FAILURES) {
+  const unrecoverable = Boolean(unrecoverableJobError(error));
+  if (!unrecoverable && failures < MAX_JOB_FAILURES) {
     await enqueueFor(client, read.specId, ticket, read.stage, read.round);
     return { status: "requeued", failures };
   }
   await client.query(
     "UPDATE final_e2e SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
-    [round.id, ENVIRONMENT_FAILED],
+    [round.id, unrecoverable ? JOB_FAILED : ENVIRONMENT_FAILED],
   );
   return { status: "blocked", failures };
 }
