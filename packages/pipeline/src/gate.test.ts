@@ -187,6 +187,26 @@ describe("command lines", () => {
       rmSync(bin, { recursive: true, force: true });
     }
   });
+
+  it("hands the command to the sandbox as written, with the timeout as an option", async () => {
+    const run = writeJunit(1);
+    const configSha = repoWithGate([{ name: "test", run }]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const opened = sandbox.open.bind(sandbox);
+    const seen: { command: string; timeoutSeconds: number }[] = [];
+    sandbox.open = async (ref) => {
+      const session = await opened(ref);
+      const exec = session.exec.bind(session);
+      session.exec = async (command, options) => {
+        seen.push({ command, timeoutSeconds: options.timeoutSeconds });
+        return exec(command, options);
+      };
+      return session;
+    };
+    const outcome = await gate({ sandbox, configSha });
+    expect(outcome.pass).toBe(true);
+    expect(seen).toEqual([{ command: run, timeoutSeconds: 30 }]);
+  });
 });
 
 describe("losing the job mid-gate", () => {

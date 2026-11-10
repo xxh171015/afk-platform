@@ -137,4 +137,14 @@ describe("Sandcastle stays behind one module, at one version", () => {
     );
     expect(manifest.dependencies["@ai-hero/sandcastle"]).toBe("0.12.0");
   });
+
+  it("the gate sandbox still times commands with GNU timeout inside the image", () => {
+    const src = readFileSync(
+      join(packages, "pipeline", "src", "sandcastle.ts"),
+      "utf8",
+    );
+    expect(src).toMatch(
+      /timeout \$\{options\.timeoutSeconds\} sh -c \$\{shellQuote\(command\)\}/,
+    );
+  });
 });
