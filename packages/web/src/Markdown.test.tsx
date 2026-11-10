@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { SKILLS_SHA } from "@afk/shared";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Markdown } from "./Markdown.tsx";
@@ -10,7 +11,7 @@ describe("Markdown", () => {
     render(
       <Markdown
         source={[
-          "<!-- overlay for mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c -->",
+          `<!-- overlay for mattpocock/skills@${SKILLS_SHA} -->`,
           "",
           "你是一个 AFK 运行里的 agent。",
         ].join("\n")}

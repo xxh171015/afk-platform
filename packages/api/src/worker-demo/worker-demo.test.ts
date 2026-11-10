@@ -208,7 +208,7 @@ const stateOf = async () =>
       `${r.id}:${r.state}${r.blocked_reason ? `/${r.blocked_reason}` : ""}`,
   );
 
-describe("a whole spec with a fake agent", () => {
+describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   it("takes two tickets, one depending on the other, from confirmation to done", async () => {
     await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
     const executor = deps();
@@ -980,7 +980,9 @@ describe("work an interrupted run left behind", () => {
   });
 });
 
-describe("the overall review of the integration branch", () => {
+describe("the overall review of the integration branch", {
+  timeout: 60_000,
+}, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),

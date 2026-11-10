@@ -1952,3 +1952,117 @@ describe("search", () => {
     expect(result.specs[0].displayId).toBe("S-55"); // the newest
   });
 });
+
+describe("structured brief on blocked tickets", () => {
+  async function gateFailed() {
+    await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "boom" } },
+    });
+    await stage("gate-fix", DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "still boom" } },
+    });
+  }
+
+  it("returns the same structured brief on the waiting queue and the ticket, with the retry command filled in", async () => {
+    await gateFailed();
+    const expected = {
+      reason: "gate-failed",
+      step: "gate",
+      summary: "门禁失败",
+      evidence: { lastLogLines: "still boom" },
+      recommendedAction: "看失败的测试，修好后带说明重试，保留已有提交",
+      commands: [
+        {
+          label: "带说明继续",
+          command: 'plat ticket retry T-1 --mode continue --note "…"',
+        },
+      ],
+    };
+    const queue = await call("GET", "/blocked");
+    const detail = await call("GET", "/tickets/1");
+    expect(queue.body.tickets[0].structuredBrief).toEqual(expected);
+    expect(detail.body.ticket.structuredBrief).toEqual(expected);
+    expect(queue.body.tickets[0].brief).toMatchObject({
+      stage: "gate",
+      result: "failed",
+      logPath: expect.stringMatching(/^\/runs\/\d+\/logs$/),
+      run: { displayId: expect.stringMatching(/^R-\d+$/) },
+    });
+    expect(detail.body.ticket.brief.logPath).toBe(
+      queue.body.tickets[0].brief.logPath,
+    );
+  });
+
+  it("attaches a contract-change-needed draft that blocks the ticket", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "contract-change-needed",
+      run: {
+        output: {
+          status: "cannot-proceed",
+          blockedReason: "contract-change-needed",
+          detail: "Order needs a note field",
+        },
+      },
+    });
+    const queue = await call("GET", "/blocked");
+    const detail = await call("GET", "/tickets/1");
+    const brief = queue.body.tickets[0].structuredBrief;
+    expect(brief.summary).toBe("需要改契约");
+    expect(brief.commands).toEqual([
+      {
+        label: "追加契约票",
+        command: "plat tickets import S-1 ~/.afk/planning/S-1/append/ --append",
+      },
+    ]);
+    expect(brief.ticketDraft).toContain("type: contract");
+    expect(brief.ticketDraft).toContain("blocks: [T-1]");
+    expect(brief.ticketDraft).toContain("Order needs a note field");
+    expect(brief.ticketDraft).not.toContain("blocked_by:");
+    expect(detail.body.ticket.structuredBrief).toEqual(brief);
+  });
+
+  it("returns a structured brief on a stuck wrap-up step", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    await db.pool.query("UPDATE specs SET state = 'finalizing'");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id, step, state, blocked_reason) VALUES ($1, 1, 'final-review', 'blocked', 'job-failed')",
+      [specId],
+    );
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.finalizations[0].structuredBrief).toEqual({
+      reason: "job-failed",
+      step: "",
+      summary: "作业失败",
+      evidence: {},
+      recommendedAction: "看作业失败原因，环境好了再重试",
+      commands: [{ label: "再跑收尾", command: "plat spec retry-final S-1" }],
+    });
+    expect(queue.body.finalizations[0].brief).toBeNull();
+  });
+
+  it("lists an upstream-cancelled ticket with a structured brief and no run pointer", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await stage("implement", GAVE_UP);
+    await call("POST", "/tickets/1/cancel", { cascade: false });
+    const queue = await call("GET", "/blocked");
+    const item = queue.body.tickets.find((t: Json) => t.displayId === "T-2");
+    expect(item.brief).toBeNull();
+    expect(item.structuredBrief).toEqual({
+      reason: "upstream-cancelled",
+      step: "",
+      summary: "上游已取消",
+      evidence: {},
+      recommendedAction: "取消这张票，或导入替代票",
+      commands: [{ label: "取消这张票", command: "plat ticket cancel T-2" }],
+    });
+    const detail = await call("GET", "/tickets/2");
+    expect(detail.body.ticket.structuredBrief).toEqual(item.structuredBrief);
+  });
+});

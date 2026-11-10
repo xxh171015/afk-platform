@@ -89,6 +89,29 @@ const Brief = z
   })
   .nullable();
 
+const StructuredBrief = z
+  .object({
+    reason: z.string(),
+    step: z.string(),
+    summary: z.string(),
+    evidence: z.object({
+      failingTests: z.array(z.string()).optional(),
+      command: z.string().optional(),
+      lastLogLines: z.string().optional(),
+      conflictFiles: z.array(z.string()).optional(),
+      findingsCount: z.number().int().optional(),
+    }),
+    recommendedAction: z.string(),
+    commands: z.array(
+      z.object({
+        label: z.string(),
+        command: z.string(),
+      }),
+    ),
+    ticketDraft: z.string().optional(),
+  })
+  .nullable();
+
 const RepoIdentity = z.object({
   name: z.string(),
   url: z.string(),
@@ -145,6 +168,7 @@ const TicketSummary = z
     environment: z.array(z.string()),
     appended: z.boolean(),
     brief: Brief,
+    structuredBrief: StructuredBrief,
   })
   .merge(WaitingFields);
 
@@ -158,6 +182,7 @@ const Finalization = z
     state: z.string(),
     blockedReason: z.string().nullable(),
     brief: Brief,
+    structuredBrief: StructuredBrief,
   })
   .merge(WaitingFields);
 
