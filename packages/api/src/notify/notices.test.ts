@@ -1,3 +1,4 @@
+import { structuredBrief } from "@afk/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { composeNotice, noticesFromTransition, type Shot } from "./notices.ts";
 
@@ -67,10 +68,17 @@ describe("noticesFromTransition", () => {
         },
       ],
     };
+    const summary = structuredBrief({
+      reason: "gate-failed",
+      specDisplayId: "S-4",
+      ticketDisplayId: "T-7",
+      brief: null,
+    }).summary;
+    expect(summary).toBe("门禁失败");
     expect(noticesFromTransition(base, blocked)).toEqual([
       {
         title: "票卡住",
-        body: "T-7 写 CSV：门禁失败\nhttp://127.0.0.1:5173/tickets/7",
+        body: `T-7 写 CSV：${summary}\nhttp://127.0.0.1:5173/tickets/7`,
       },
     ]);
     expect(noticesFromTransition(blocked, blocked)).toEqual([]);
