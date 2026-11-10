@@ -20,10 +20,6 @@ export function normalizeSpecBody(text: string): string {
 
 const TESTING_DECISIONS = "Testing Decisions";
 
-/**
- * Notes on a spec body that do not follow the to-spec template: a section missing or renamed, and no seams in
- * Testing Decisions. They are only advice; the spec is stored as written.
- */
 /** Numbered User Stories in the spec body, in the order they are written. */
 export function userStoriesOf(
   body: string,
@@ -55,6 +51,10 @@ export function userStoriesOf(
   return stories;
 }
 
+/**
+ * Notes on a spec body that do not follow the to-spec template: a section missing or renamed, and no seams in
+ * Testing Decisions. They are only advice; the spec is stored as written.
+ */
 export function specTemplateWarnings(body: string): string[] {
   const headings = new Set(h2Names(body));
   const warnings = specTemplateSections()
