@@ -591,6 +591,11 @@ describe("plat", () => {
     expect(text.stdout).toContain(
       "T-1  S-1  blocked (agent-gave-up)  Define the export endpoint",
     );
+    expect(text.stdout).toContain("模型放弃");
+    expect(text.stdout).toContain("看它卡住的地方，带一句话说明后继续");
+    expect(text.stdout).toContain(
+      'plat ticket retry T-1 --mode continue --note "…"',
+    );
     expect(text.stdout).toContain(
       "implement ended agent-gave-up in R-1: needs a decision",
     );
