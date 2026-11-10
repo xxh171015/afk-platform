@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 import type { Bundle } from "./bundle.ts";
 
@@ -13,7 +17,7 @@ let worker: FakeWorker;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -662,6 +666,24 @@ describe("the gate baseline in the bundle", () => {
     );
     const job = (await worker.claim()).body.job as Claimed;
     expect(await baselineOf(job)).toEqual({ tests: 4, skipped: 2 });
+  });
+
+  it("lists every merge's measurement with its commit, newest first", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, head_sha) VALUES (1, 1, 'merge', 'merged', 'old'), (1, 1, 'merge', 'merged', 'new')`,
+    );
+    await db.pool.query(
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, tests_total, tests_skipped) VALUES (1, 'old', 'c', 9, 0), (1, 'new', 'c', 4, 2)`,
+    );
+    const job = (await worker.claim()).body.job as Claimed;
+    const body = (await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json())) as { gateBaselines: unknown };
+    expect(body.gateBaselines).toEqual([
+      { sha: "new", tests: 4, skipped: 2 },
+      { sha: "old", tests: 9, skipped: 0 },
+    ]);
   });
 });
 

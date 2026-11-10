@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "./app.ts";
 import { migrate } from "./db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "./db/test-db.ts";
-import { listen, type RunningApi } from "./test/fake-worker.ts";
+import { listen, type RunningApi, testApp } from "./test/fake-worker.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -10,7 +9,7 @@ let api: RunningApi;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
 });
 afterEach(async () => {
   await api.close();

@@ -112,6 +112,7 @@ describe("plat init", () => {
       body: {
         id: 1,
         name: "afk-pilot-backend",
+        defaultAgent: null,
         repos: [
           {
             name: "afk-pilot-backend",

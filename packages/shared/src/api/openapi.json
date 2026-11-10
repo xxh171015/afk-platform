@@ -130,6 +130,22 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The default agent is not supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
           }
         }
       },
@@ -210,6 +226,9 @@
                     "name": {
                       "type": "string"
                     },
+                    "defaultAgent": {
+                      "type": ["string", "null"]
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -242,7 +261,7 @@
                       }
                     }
                   },
-                  "required": ["id", "name", "repos"]
+                  "required": ["id", "name", "defaultAgent", "repos"]
                 }
               }
             }
@@ -284,6 +303,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "defaultAgent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
                   "defaultModel": {
                     "type": "string",
                     "minLength": 1,
@@ -375,6 +399,22 @@
                     }
                   },
                   "required": ["id"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The default agent is not supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
                 }
               }
             }
@@ -2755,6 +2795,24 @@
                       },
                       "required": ["tests", "skipped"]
                     },
+                    "gateBaselines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sha": {
+                            "type": "string"
+                          },
+                          "tests": {
+                            "type": "integer"
+                          },
+                          "skipped": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["sha", "tests", "skipped"]
+                      }
+                    },
                     "limits": {
                       "type": "object",
                       "properties": {
@@ -2796,6 +2854,7 @@
                     "note",
                     "failureLog",
                     "gateBaseline",
+                    "gateBaselines",
                     "limits",
                     "model"
                   ]

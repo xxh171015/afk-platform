@@ -673,6 +673,16 @@ async function gate(
     };
   }
 
+  // The ticket's branch is held to the newest baseline it already contains. Merges that landed on the integration
+  // branch after it branched are not its to answer for; the merge stage gates the combination against the newest.
+  const baseline = bundle.gateBaselines.find(
+    (b) => hasRef(mainDir, b.sha) && isAncestor(mainDir, b.sha, agent),
+  );
+  if (!baseline && bundle.gateBaseline)
+    log(
+      "gate: no earlier merge is part of this branch yet, so the test count is not compared here",
+    );
+
   // The gate configuration comes from the integration branch, not from the ticket's branch.
   const outcome = await runGate({
     repoDir: mainDir,
@@ -681,7 +691,7 @@ async function gate(
     ref: agent,
     commitSha: tip(mainDir, agent),
     configSha: tip(mainDir, integration),
-    ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
+    ...(baseline ? { baseline } : {}),
     cache: deps.gateCache,
   });
   if (context.signal.aborted)

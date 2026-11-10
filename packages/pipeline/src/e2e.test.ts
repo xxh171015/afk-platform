@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runE2e } from "./e2e.ts";
 import { gitOut } from "./exec.ts";
@@ -117,5 +120,22 @@ describe("runE2e", () => {
     const outcome = await e2e(fixture, "true", { signal: lost.signal });
     expect(outcome.steps).toEqual([]);
     expect(outcome.pass).toBe(false);
+  });
+
+  it("does not need the host's timeout command", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "afk-no-timeout-"));
+    writeFileSync(join(bin, "timeout"), "#!/bin/sh\nexit 127\n", {
+      mode: 0o755,
+    });
+    const previous = process.env.PATH;
+    process.env.PATH = `${bin}:${previous ?? ""}`;
+    try {
+      const fixture = setup();
+      const outcome = await e2e(fixture, writeReport(junit([{ name: "a" }])));
+      expect(outcome.pass).toBe(true);
+    } finally {
+      process.env.PATH = previous;
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });

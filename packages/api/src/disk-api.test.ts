@@ -1,11 +1,10 @@
 import { GIB } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "./app.ts";
 import { migrate } from "./db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "./db/test-db.ts";
 import { enqueueJob } from "./jobs/queue.ts";
 import type { Notice } from "./notify/notices.ts";
-import { listen, type RunningApi } from "./test/fake-worker.ts";
+import { listen, type RunningApi, testApp } from "./test/fake-worker.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -20,7 +19,7 @@ beforeEach(async () => {
   freeBytes = 20 * GIB;
   workerFree = undefined;
   api = await listen(
-    createApp({
+    testApp({
       pool: db.pool,
       statDisk: async () => ({ freeBytes, dirBytes: 4096 }),
       notifications: {
@@ -114,6 +113,20 @@ describe("disk remaining-space alerts", () => {
       },
     ]);
     expect(notices).toHaveLength(2);
+  });
+
+  it("leases a job when remaining space is injected above 5 GiB", async () => {
+    await enqueueJob(db.pool, {
+      type: "agent-run",
+      idempotencyKey: "disk-plenty",
+    });
+    const reply = await fetch(`${api.url}/worker/jobs/claim`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workerId: "mac", capabilities: [] }),
+    });
+    const body = (await reply.json()) as { job: { type: string } | null };
+    expect(body.job).toMatchObject({ type: "agent-run" });
   });
 
   it("does not lease a job while remaining space is below 5 GiB, then does once it recovers", async () => {

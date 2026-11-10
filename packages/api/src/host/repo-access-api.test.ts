@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import type { Notice } from "../notify/notices.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { type PlatWorkspace, platWorkspace } from "../test/plat-workspace.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -346,7 +350,7 @@ describe("a GitLab PAT's expiry", () => {
     await migrate(db.pool);
     notices = [];
     api = await listen(
-      createApp({
+      testApp({
         pool: db.pool,
         clock: () => now,
         notifications: {

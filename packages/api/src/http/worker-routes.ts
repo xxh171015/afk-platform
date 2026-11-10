@@ -312,6 +312,13 @@ const Bundle = z.object({
   gateBaseline: z
     .object({ tests: z.number().int(), skipped: z.number().int() })
     .nullable(),
+  gateBaselines: z.array(
+    z.object({
+      sha: z.string(),
+      tests: z.number().int(),
+      skipped: z.number().int(),
+    }),
+  ),
   limits: z.object({
     runIdleSeconds: z.number().int(),
     runWallclockSeconds: z.number().int(),

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, gitOut } from "./exec.ts";
 import {
@@ -163,6 +166,47 @@ describe("command lines", () => {
     });
     expect(outcome.steps[0]?.exitCode).toBe(124);
   });
+
+  it("does not need the host's timeout command", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "afk-no-timeout-"));
+    writeFileSync(join(bin, "timeout"), "#!/bin/sh\nexit 127\n", {
+      mode: 0o755,
+    });
+    const previous = process.env.PATH;
+    process.env.PATH = `${bin}:${previous ?? ""}`;
+    try {
+      const configSha = repoWithGate([{ name: "test", run: writeJunit(1) }]);
+      const outcome = await gate({
+        sandbox: new FakeGateSandbox(repo.dir),
+        configSha,
+      });
+      expect(outcome.pass).toBe(true);
+      expect(outcome.steps[0]?.exitCode).toBe(0);
+    } finally {
+      process.env.PATH = previous;
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("hands the command to the sandbox as written, with the timeout as an option", async () => {
+    const run = writeJunit(1);
+    const configSha = repoWithGate([{ name: "test", run }]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const opened = sandbox.open.bind(sandbox);
+    const seen: { command: string; timeoutSeconds: number }[] = [];
+    sandbox.open = async (ref) => {
+      const session = await opened(ref);
+      const exec = session.exec.bind(session);
+      session.exec = async (command, options) => {
+        seen.push({ command, timeoutSeconds: options.timeoutSeconds });
+        return exec(command, options);
+      };
+      return session;
+    };
+    const outcome = await gate({ sandbox, configSha });
+    expect(outcome.pass).toBe(true);
+    expect(seen).toEqual([{ command: run, timeoutSeconds: 30 }]);
+  });
 });
 
 describe("losing the job mid-gate", () => {
@@ -178,8 +222,8 @@ describe("losing the job mid-gate", () => {
       const session = await opened(ref);
       const exec = session.exec.bind(session);
       // the lease is lost while the first command runs
-      session.exec = async (command) => {
-        const result = await exec(command);
+      session.exec = async (command, options) => {
+        const result = await exec(command, options);
         controller.abort();
         return result;
       };

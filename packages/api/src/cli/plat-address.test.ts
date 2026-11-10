@@ -3,10 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { listen, type RunningApi } from "../test/fake-worker.ts";
+import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 
 // plat remembers the platform's address the person confirmed, on the planning machine, so that a platform not on
 // this machine needs no shell setting; --api-url and $AFK_API_URL still come first.
@@ -18,7 +17,7 @@ let home: string;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool, logDir: tmpdir() }));
+  api = await listen(testApp({ pool: db.pool, logDir: tmpdir() }));
   home = mkdtempSync(join(tmpdir(), "afk-home-"));
 });
 afterEach(async () => {
