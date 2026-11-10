@@ -31,28 +31,14 @@ const ENTITY_TABLES = [
 
 // Tests that migrate "from before" leave out a migration and every one after it: drizzle skips an entry that is
 // older than the newest one already applied.
-const LATER_THAN_REPO_NAMES = [
-  "0015_repo_names_and_contracts",
-  "0016_ticket_refs_and_environment",
-  "0017_run_contract_shas",
-  "0018_contract_copy_mismatch",
-  "0019_run_ref_shas",
-  "0020_ticket_appended",
-  "0021_ticket_versions",
-  "0022_spec_order_broken",
-  "0023_e2e_stage",
-  "0024_integration_rounds",
-  "0025_final_e2e",
-  "0026_ticket_template_bodies",
-  "0027_run_prompt",
-  "0028_run_axis",
-  "0029_repo_host_kind",
-  "0030_planning_commit",
-];
-const LATER_THAN_BRANCH_NAMESPACE = [
-  "0014_branch_namespace",
-  ...LATER_THAN_REPO_NAMES,
-];
+function omitFrom<T extends { tag: string }>(
+  entries: T[],
+  startTag: string,
+): T[] {
+  const start = entries.findIndex((entry) => entry.tag === startTag);
+  if (start < 0) throw new Error(`unknown migration ${startTag}`);
+  return entries.slice(0, start);
+}
 
 let db: TestDatabase;
 beforeEach(async () => {
@@ -120,9 +106,7 @@ describe("the id of the database", () => {
       cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-      journal.entries = journal.entries.filter(
-        (e: { tag: string }) => !LATER_THAN_BRANCH_NAMESPACE.includes(e.tag),
-      );
+      journal.entries = omitFrom(journal.entries, "0014_branch_namespace");
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
       await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
@@ -159,8 +143,9 @@ describe("the contract path", () => {
       cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-      journal.entries = journal.entries.filter(
-        (e: { tag: string }) => !LATER_THAN_REPO_NAMES.includes(e.tag),
+      journal.entries = omitFrom(
+        journal.entries,
+        "0015_repo_names_and_contracts",
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
@@ -209,8 +194,9 @@ describe("the contract path of a project that names no repo", () => {
       cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-      journal.entries = journal.entries.filter(
-        (e: { tag: string }) => !LATER_THAN_REPO_NAMES.includes(e.tag),
+      journal.entries = omitFrom(
+        journal.entries,
+        "0015_repo_names_and_contracts",
       );
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
@@ -238,16 +224,7 @@ describe("migrating ticket bodies to the issue template", () => {
     cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
     const journalPath = join(before, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-    journal.entries = journal.entries.filter(
-      (e: { tag: string }) =>
-        ![
-          "0026_ticket_template_bodies",
-          "0027_run_prompt",
-          "0028_run_axis",
-          "0029_repo_host_kind",
-          "0030_planning_commit",
-        ].includes(e.tag),
-    );
+    journal.entries = omitFrom(journal.entries, "0026_ticket_template_bodies");
     writeFileSync(journalPath, JSON.stringify(journal));
     await migrate(db.pool, before);
     await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
@@ -377,10 +354,7 @@ describe("the host kind of a repo", () => {
       cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
       const journalPath = join(before, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-      journal.entries = journal.entries.filter(
-        (e: { tag: string }) =>
-          e.tag !== "0029_repo_host_kind" && e.tag !== "0030_planning_commit",
-      );
+      journal.entries = omitFrom(journal.entries, "0029_repo_host_kind");
       writeFileSync(journalPath, JSON.stringify(journal));
       await migrate(db.pool, before);
       await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");

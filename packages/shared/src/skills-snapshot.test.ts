@@ -30,7 +30,7 @@ describe("what is copied from mattpocock/skills", () => {
   ])("%s is a whole skill, with the upstream license", (dir) => {
     const name = dir.split("/").at(-1);
     const skill = readFileSync(`${repoRoot}${dir}/SKILL.md`, "utf8");
-    expect(skill.startsWith(`---\nname: ${name}\n`)).toBe(true);
+    expect(skill).toMatch(new RegExp(`^---\\n(?:\\n)?name: ${name}\\n`));
     expect(readFileSync(`${repoRoot}${dir}/LICENSE`, "utf8")).toContain(
       "MIT License",
     );
@@ -58,13 +58,14 @@ describe("the pinned SHA", () => {
       .trim()
       .split("\n")
       // the notes on the copies (held to it above), the overlay, which says which skills it was written for (a test
-      // in the pipeline package holds that SHA to the constant), and the tracker-doc templates (a test in the cli
-      // package does the same)
+      // in the pipeline package holds that SHA to the constant), the tracker-doc templates (a test in the cli
+      // package does the same), and the generated tracker doc in this repo
       .filter(
         (file) =>
           !VENDORED_DIRS.some((dir) => file === `${dir}/VENDORED.md`) &&
           !file.startsWith("packages/cli/templates/") &&
-          file !== "packages/pipeline/prompts/overlay.md",
+          file !== "packages/pipeline/prompts/overlay.md" &&
+          file !== "docs/agents/issue-tracker.md",
       );
     expect(tracked).toEqual(["packages/shared/src/skills-sha.ts"]);
   });
