@@ -511,7 +511,7 @@ export async function recordHostSync(
   );
   for (const { spec_id: specId } of owners.rows) await lockSpec(client, specId);
   if (parsed.data.defaults)
-    await applyDefaultShas(client, read.projectId, parsed.data.defaults);
+    await applyDefaultShas(client, read.projectId, parsed.data.defaults, now);
   for (const pull of parsed.data.pulls) {
     if ("error" in pull) {
       // kept on the row, so that a pull request the host keeps refusing is not silent

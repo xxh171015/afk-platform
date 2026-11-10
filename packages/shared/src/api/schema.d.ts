@@ -65,6 +65,8 @@ export interface paths {
               runWallclockSeconds?: number;
               ticketWallclockSeconds?: number;
               specAgentSeconds?: number;
+              updateBranchBehindCommits?: number;
+              updateBranchBehindHours?: number;
             };
           };
         };
@@ -184,6 +186,8 @@ export interface paths {
               runWallclockSeconds?: number;
               ticketWallclockSeconds?: number;
               specAgentSeconds?: number;
+              updateBranchBehindCommits?: number;
+              updateBranchBehindHours?: number;
             };
           };
         };
