@@ -98,6 +98,16 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 2147483647
+                      },
+                      "updateBranchBehindCommits": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "updateBranchBehindHours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
                       }
                     },
                     "additionalProperties": false
@@ -371,6 +381,16 @@
                         "maximum": 2147483647
                       },
                       "specAgentSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "updateBranchBehindCommits": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "updateBranchBehindHours": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 2147483647

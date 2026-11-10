@@ -2,6 +2,7 @@ import {
   AGENT_FAILURES,
   formatDisplayId,
   type PauseReason,
+  resolveLimits,
   type SpecState,
   specTransition,
 } from "@afk/shared";
@@ -16,9 +17,9 @@ import { enqueueTrialMerge } from "./trial-merge.ts";
 // Merging the default branch into a spec's integration branch (docs/specs/m3-platform.md「多需求并行」).
 // Host-sync notices a new default SHA; this module queues at most one update-branch per spec × repo, coalesces
 // later advances onto that queued row, and on conflict or a failed candidate gate gives a merge agent one try
-// before pausing the spec. Running specs update on every advance; finalizing ones at the start of 收尾 if they
-// are behind; awaiting-review / partially-merged only when the host says the pull request conflicts with the
-// default.
+// before pausing the spec. Running specs update when a merge-tree check finds a text conflict, when they lag
+// past the project's commit/hour thresholds, or at the start of 收尾 if they are behind; awaiting-review /
+// partially-merged only when the host says the pull request conflicts with the default.
 
 export const UpdateBranchResultSchema = z.object({
   stage: z.literal("update-branch"),
@@ -58,6 +59,8 @@ type IntegrationBranch = {
   repoId: number;
   branch: string;
   mainSha?: string;
+  behindCommits?: number;
+  caughtUpAt?: string;
 };
 
 export function readUpdateBranchPayload(
@@ -220,12 +223,17 @@ async function stampIntegrationMainSha(
   specId: number,
   repoId: number,
   mainSha: string,
+  now: Date,
 ): Promise<void> {
   await client.query(
     `UPDATE specs SET integration_branches = COALESCE((
        SELECT jsonb_agg(
          CASE WHEN (elem->>'repoId')::int = $2
-           THEN elem || jsonb_build_object('mainSha', $3::text)
+           THEN elem || jsonb_build_object(
+             'mainSha', $3::text,
+             'behindCommits', 0,
+             'caughtUpAt', $4::text
+           )
            ELSE elem
          END
          ORDER BY ordinality
@@ -233,7 +241,7 @@ async function stampIntegrationMainSha(
        FROM jsonb_array_elements(integration_branches) WITH ORDINALITY AS t(elem, ordinality)
      ), '[]'::jsonb)
      WHERE id = $1`,
-    [specId, repoId, mainSha],
+    [specId, repoId, mainSha, now.toISOString()],
   );
 }
 
@@ -242,6 +250,7 @@ async function stampMissingMainSha(
   projectId: number,
   repoId: number,
   mainSha: string,
+  now: Date,
 ): Promise<void> {
   const specs = await client.query<{ id: number }>(
     `SELECT s.id FROM specs s
@@ -254,7 +263,7 @@ async function stampMissingMainSha(
     [projectId, repoId, SPECS_THAT_WATCH_MAIN],
   );
   for (const spec of specs.rows)
-    await stampIntegrationMainSha(client, spec.id, repoId, mainSha);
+    await stampIntegrationMainSha(client, spec.id, repoId, mainSha, now);
 }
 
 async function updateBranchInFlight(
@@ -397,16 +406,89 @@ export async function enqueueIfConflictsWithDefault(
   });
 }
 
+function exceedsLag(
+  branch: IntegrationBranch,
+  sha: string,
+  commitLimit: number,
+  hourLimit: number,
+  now: Date,
+): boolean {
+  if (branch.mainSha === sha) return false;
+  if ((branch.behindCommits ?? 0) >= commitLimit) return true;
+  if (!branch.caughtUpAt) return false;
+  const caught = Date.parse(branch.caughtUpAt);
+  if (Number.isNaN(caught)) return false;
+  return now.getTime() - caught >= hourLimit * 3600 * 1000;
+}
+
+async function considerRunningSpec(
+  client: pg.PoolClient,
+  spec: {
+    id: number;
+    integration_branches: IntegrationBranch[];
+  },
+  repoId: number,
+  sha: string,
+  moved: boolean,
+  commitLimit: number,
+  hourLimit: number,
+  now: Date,
+): Promise<void> {
+  if (await updateBranchInFlight(client, spec.id, repoId)) {
+    if (moved)
+      await enqueueUpdateBranch(client, {
+        specId: spec.id,
+        repoId,
+        mainSha: sha,
+      });
+    return;
+  }
+  const branches = spec.integration_branches.map((entry) => ({ ...entry }));
+  const branch = branches.find((entry) => entry.repoId === repoId);
+  if (!branch) return;
+  if (moved) {
+    branch.behindCommits = (branch.behindCommits ?? 0) + 1;
+    if (!branch.caughtUpAt) branch.caughtUpAt = now.toISOString();
+    await client.query(
+      "UPDATE specs SET integration_branches = $2 WHERE id = $1",
+      [spec.id, JSON.stringify(branches)],
+    );
+  }
+  if (exceedsLag(branch, sha, commitLimit, hourLimit, now)) {
+    await enqueueUpdateBranch(client, {
+      specId: spec.id,
+      repoId,
+      mainSha: sha,
+    });
+    return;
+  }
+  if (!moved) return;
+  await enqueueTrialMerge(client, {
+    specId: spec.id,
+    repoId,
+    checkDefault: true,
+    mainSha: sha,
+  });
+}
+
 export async function applyDefaultShas(
   client: pg.PoolClient,
   projectId: number,
   defaults: { repoUrl: string; sha: string }[],
+  now: Date,
 ): Promise<void> {
   const live = await client.query<{ id: number }>(
     "SELECT id FROM specs WHERE project_id = $1 AND state = ANY($2::text[]) ORDER BY id",
     [projectId, SPECS_THAT_WATCH_MAIN],
   );
   for (const spec of live.rows) await lockSpec(client, spec.id);
+  const project = await client.query<{ limits: unknown }>(
+    "SELECT limits FROM projects WHERE id = $1",
+    [projectId],
+  );
+  const limits = resolveLimits(project.rows[0]?.limits);
+  const commitLimit = limits.updateBranchBehindCommits;
+  const hourLimit = limits.updateBranchBehindHours;
   for (const { repoUrl, sha } of defaults) {
     const repo = await client.query<{ id: number; default_sha: string | null }>(
       "SELECT id, default_sha FROM repos WHERE project_id = $1 AND url = $2 FOR UPDATE",
@@ -421,14 +503,18 @@ export async function applyDefaultShas(
         sha,
       ]);
     }
-    // First observation, or main has not moved: specs that never recorded a baseline catch up without
-    // enqueueing. A later change is "main 前进".
+    const moved = previous !== null && previous !== sha;
+    // First observation, or a spec that never recorded a baseline: catch up without enqueueing.
     if (previous === null || previous === sha) {
-      await stampMissingMainSha(client, projectId, row.id, sha);
-      continue;
+      await stampMissingMainSha(client, projectId, row.id, sha, now);
     }
-    const specs = await client.query<{ id: number; state: SpecState }>(
-      `SELECT s.id, s.state FROM specs s
+    if (previous === null) continue;
+    const specs = await client.query<{
+      id: number;
+      state: SpecState;
+      integration_branches: IntegrationBranch[];
+    }>(
+      `SELECT s.id, s.state, s.integration_branches FROM specs s
        WHERE s.project_id = $1 AND s.state IN ('running', 'finalizing')
          AND EXISTS (
            SELECT 1 FROM jsonb_array_elements(s.integration_branches) b
@@ -438,16 +524,26 @@ export async function applyDefaultShas(
       [projectId, row.id],
     );
     for (const spec of specs.rows) {
-      if (
-        spec.state === "finalizing" &&
-        !(await updateBranchInFlight(client, spec.id, row.id))
-      )
+      if (spec.state === "finalizing") {
+        if (moved && (await updateBranchInFlight(client, spec.id, row.id))) {
+          await enqueueUpdateBranch(client, {
+            specId: spec.id,
+            repoId: row.id,
+            mainSha: sha,
+          });
+        }
         continue;
-      await enqueueUpdateBranch(client, {
-        specId: spec.id,
-        repoId: row.id,
-        mainSha: sha,
-      });
+      }
+      await considerRunningSpec(
+        client,
+        spec,
+        row.id,
+        sha,
+        moved,
+        commitLimit,
+        hourLimit,
+        now,
+      );
     }
   }
 }
@@ -534,6 +630,7 @@ export async function recordUpdateBranchResult(
   client: pg.PoolClient,
   job: StageJob,
   result: unknown,
+  now: Date,
 ): Promise<RecordUpdateBranchResult> {
   const read = readUpdateBranchPayload(job.payload);
   if (!read) return { status: "not-update-branch" };
@@ -598,6 +695,7 @@ export async function recordUpdateBranchResult(
         read.specId,
         read.repoId,
         read.mainSha,
+        now,
       );
     if (read.afterFix) await enqueueIfMainMoved(client, read);
     await enqueueTrialMerge(client, {

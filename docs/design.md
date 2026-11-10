@@ -252,7 +252,7 @@ flowchart TB
             stages["阶段推进<br/>单票流水线、联调修复票"]
             fin["收尾与验收<br/>final-review / fix / e2e、验收包"]
             hostjobs["托管编排<br/>open-pr、host-sync、spec-cleanup、pr-ready"]
-            par["多需求并行（M3）<br/>main 前进 → 各集成分支 update-branch<br/>集成分支前移 → trial-merge 报潜在冲突<br/>update-branch 失败 → spec paused"]
+            par["多需求并行（M3）<br/>main 前进 → 冲突或落后才 update-branch<br/>集成分支前移 → trial-merge 报潜在冲突<br/>update-branch 失败 → spec paused"]
             rework["PR 评论返工（M4 之后）<br/>awaiting-review → reworking<br/>rework 作业，适配器逐条回复"]
         end
         subgraph trace["追溯与上下文（M4）"]
@@ -556,7 +556,7 @@ sequenceDiagram
     H->>G: 合前端 PR
     G-->>A: 同步状态，spec merged
     end
-    A->>A: 其他在跑的 spec 发 update-branch
+    A->>A: 其他在跑的 spec 按冲突或落后跟进
 ```
 
 ## 单票执行流水线
@@ -947,8 +947,8 @@ flowchart LR
 - **不同需求之间的冲突**：
   - 不同需求的票在各自的集成分支上跑，串行执行并不能避免冲突，所以不按模块串行。
   - 集成分支每前移一次，平台就对同一仓库里其他在跑的集成分支做一次试合并（`git merge-tree`），在页面上显示“潜在冲突”和冲突文件，不阻塞执行。冲突在先合进 main 的一方合并后，由另一方的 update-branch 处理。
-  - main 前进由 host-sync 每分钟读默认分支头发现（不靠 webhook）。running 的需求每次都 update-branch（排队期间 main 又动了就合成一次）；收尾开始时落后 main 就先更新；人正在验收的只在 PR / MR 与 main 冲突时更新。作业带集成分支的 `lock_key`，把 main 合进候选、跑候选门禁、通过才前移；有冲突或门禁不过，开一次 merge agent 运行（ticket 为空的 Run，阶段 `update-branch`）解决后再过门禁。仍失败则 spec 暂停（原因码 `update-branch-conflict` / `update-branch-gate-failed`）进待处理，不派新票、在跑的票跑完；人可以重试、放行或取消。细节见 [M3 spec](specs/m3-platform.md)。
-- **合并到 main**：由人做，平台给出建议顺序；一个需求合并后，其他需求自动 update-branch。
+  - main 前进由 host-sync 每分钟读默认分支头发现（不靠 webhook）。running 的需求不再每次都 update-branch，只在三种情况更新：(a) 用不跑门禁的 merge-tree 检查发现和默认分支会文本冲突；(b) 进入收尾前（落后 main 就先更新，现有行为）；(c) 落后超过 N 个提交或 T 小时，二者先到先触发，默认 15 个提交或 6 小时，项目设置里可改。排队期间 main 又动了就合成一次。awaiting-review / partially-merged 只在 PR / MR 与 main 冲突时更新。merge-tree 只能发现文本冲突；「合上之后门禁才挂」的语义冲突最迟在收尾前暴露。作业带集成分支的 `lock_key`，把 main 合进候选、跑候选门禁、通过才前移；有冲突或门禁不过，开一次 merge agent 运行（ticket 为空的 Run，阶段 `update-branch`）解决后再过门禁。仍失败则 spec 暂停（原因码 `update-branch-conflict` / `update-branch-gate-failed`）进待处理，不派新票、在跑的票跑完；人可以重试、放行或取消。细节见 [M3 spec](specs/m3-platform.md)。
+- **合并到 main**：由人做，平台给出建议顺序；一个需求合并后，其他需求若会和默认分支冲突或已落后过阈值则 update-branch。
 - **并发和预算**：全局、每项目、每仓库、每台 worker 各设并发上限。Cursor 不报 token 用量，PoC 先按运行时长和次数设上限。
 - **名额在需求之间怎么分**（2026-11-08）：项目的名额由它的各个需求共用。任何事让一个需求跑了一次调度（票 done、blocked、失败、取消，需求取消或暂停），提交后同项目所有 running 的需求各再跑一次，因为释放出来的名额可能正是别的需求在等的；API 另外每分钟对所有 running 的需求跑一次，补上漏掉的触发。几个需求都有能开工的票时轮流拿：手上名额少的先拿，一样多时上次开工更早（或从没开过工）的先拿。已经在跑的票不会被抢走。
 

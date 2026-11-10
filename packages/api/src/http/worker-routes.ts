@@ -784,6 +784,7 @@ export function registerWorkerRoutes(
               client,
               job.rows[0],
               result,
+              context.clock(),
             );
             if (updated.status === "not-update-branch") {
               const final = await recordFinalResult(

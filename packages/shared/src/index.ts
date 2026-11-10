@@ -67,6 +67,7 @@ export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS, findingResolutionPhrase } from "./findings.ts";
 export {
+  DEFAULT_BRANCH_PEER_SPEC_ID,
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   TRIAL_MERGE_JOB,

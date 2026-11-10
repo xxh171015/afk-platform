@@ -16,6 +16,8 @@ describe("resolveLimits", () => {
       runWallclockSeconds: 3600,
       ticketWallclockSeconds: 10_800,
       specAgentSeconds: 43_200,
+      updateBranchBehindCommits: 15,
+      updateBranchBehindHours: 6,
     });
   });
 
