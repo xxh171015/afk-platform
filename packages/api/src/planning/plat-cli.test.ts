@@ -468,6 +468,117 @@ describe("plat", () => {
     expect(none.stderr).toMatch(/nothing to change/);
   });
 
+  it("refuses project create with --default-agent claude-code and says only Cursor is supported", async () => {
+    const refused = await plat(
+      "project",
+      "create",
+      "shop",
+      "--default-agent",
+      "claude-code",
+    );
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("目前只支持 Cursor");
+    expect(
+      Number(
+        (await db.pool.query("SELECT count(*) FROM projects")).rows[0].count,
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses project edit with --default-agent claude-code and leaves the stored value", async () => {
+    await plat("project", "create", "shop");
+    await db.pool.query(
+      "UPDATE projects SET default_agent = 'codex' WHERE id = 1",
+    );
+    const refused = await plat(
+      "project",
+      "edit",
+      "1",
+      "--default-agent",
+      "claude-code",
+    );
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("目前只支持 Cursor");
+    expect(
+      (await db.pool.query("SELECT default_agent FROM projects WHERE id = 1"))
+        .rows[0].default_agent,
+    ).toBe("codex");
+  });
+
+  it("accepts --default-agent cursor and omitting it on project create and edit", async () => {
+    const omitted = await plat("project", "create", "plain");
+    expect(omitted).toEqual({
+      code: 0,
+      stdout: "project 1 plain\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT default_agent FROM projects WHERE id = 1"))
+        .rows[0].default_agent,
+    ).toBeNull();
+
+    const created = await plat(
+      "project",
+      "create",
+      "shop",
+      "--default-agent",
+      "cursor",
+    );
+    expect(created).toEqual({
+      code: 0,
+      stdout: "project 2 shop\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT default_agent FROM projects WHERE id = 2"))
+        .rows[0].default_agent,
+    ).toBe("cursor");
+
+    const edited = await plat(
+      "project",
+      "edit",
+      "1",
+      "--default-agent",
+      "cursor",
+    );
+    expect(edited).toEqual({
+      code: 0,
+      stdout: "project 1 updated\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT default_agent FROM projects WHERE id = 1"))
+        .rows[0].default_agent,
+    ).toBe("cursor");
+  });
+
+  it("leaves an existing unsupported default agent stored and marks it inactive in project show", async () => {
+    await plat("project", "create", "shop", "--default-agent", "cursor");
+    await db.pool.query(
+      "UPDATE projects SET default_agent = 'claude-code' WHERE id = 1",
+    );
+
+    const shown = await plat("project", "show", "1");
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain("claude-code");
+    expect(shown.stdout).toContain("当前不生效");
+    expect(
+      (await db.pool.query("SELECT default_agent FROM projects WHERE id = 1"))
+        .rows[0].default_agent,
+    ).toBe("claude-code");
+
+    await plat("project", "create", "plain");
+    const unset = await plat("project", "show", "2");
+    expect(unset.code).toBe(0);
+    expect(unset.stdout).not.toContain("当前不生效");
+
+    await plat("project", "edit", "2", "--default-agent", "cursor");
+    const cursor = await plat("project", "show", "2");
+    expect(cursor.code).toBe(0);
+    expect(cursor.stdout).toContain("cursor");
+    expect(cursor.stdout).not.toContain("当前不生效");
+  });
+
   it("does not add a repo on a host no worker has credentials for, and says how to fix it", async () => {
     await plat("project", "create", "shop");
     const added = await plat(

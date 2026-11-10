@@ -9,6 +9,19 @@ import {
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
 
+export function projectText(project: {
+  id: number;
+  name: string;
+  defaultAgent: string | null;
+}): string {
+  const lines = [`project ${project.id} ${project.name}`];
+  if (project.defaultAgent !== null) {
+    const inactive = project.defaultAgent === "cursor" ? "" : "（当前不生效）";
+    lines.push(`default-agent: ${project.defaultAgent}${inactive}`);
+  }
+  return lines.join("\n");
+}
+
 // One e2e of an integration ticket, with the diagnosis after it and the fix ticket that came of it.
 interface AttemptLike {
   e2e: {

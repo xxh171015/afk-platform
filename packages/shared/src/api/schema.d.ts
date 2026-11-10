@@ -82,6 +82,17 @@ export interface paths {
             };
           };
         };
+        /** @description The default agent is not supported */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
       };
     };
     delete?: never;
@@ -117,6 +128,7 @@ export interface paths {
             "application/json": {
               id: number;
               name: string;
+              defaultAgent: string | null;
               repos: {
                 name: string;
                 url: string;
@@ -158,6 +170,7 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
+            defaultAgent?: string;
             defaultModel?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
@@ -184,6 +197,17 @@ export interface paths {
           content: {
             "application/json": {
               id: number;
+            };
+          };
+        };
+        /** @description The default agent is not supported */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
             };
           };
         };
