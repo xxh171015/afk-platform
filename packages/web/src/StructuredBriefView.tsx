@@ -1,20 +1,18 @@
+import type { StructuredBrief } from "@afk/shared";
 import { Mono } from "./components/afk/badges.tsx";
-import { CollapsibleCode } from "./components/afk/code.tsx";
+import { CollapsibleCode, CopyCommand } from "./components/afk/code.tsx";
 import { stageLabel } from "./lib/labels.ts";
 import { paths } from "./paths.ts";
-import type { StructuredBrief } from "./structured-brief.ts";
 
 export function StructuredBriefView({
   brief,
-  runId,
-  runDisplayId,
+  run,
 }: {
   brief: StructuredBrief;
-  runId: number;
-  runDisplayId?: string;
+  run?: { id: number; displayId: string } | null;
 }) {
   const { evidence } = brief;
-  const stepMeaning = stageLabel[brief.step];
+  const stepMeaning = brief.step ? stageLabel[brief.step] : undefined;
   return (
     <section
       aria-label="为什么卡住"
@@ -23,10 +21,12 @@ export function StructuredBriefView({
     >
       <h2 className="text-sm font-semibold">为什么卡住</h2>
       <p className="leading-6">{brief.summary}</p>
-      <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        失败步骤 <Mono title={stepMeaning}>{brief.step}</Mono>
-        {stepMeaning ? <span>{stepMeaning}</span> : null}
-      </p>
+      {brief.step ? (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          失败步骤 <Mono title={stepMeaning}>{brief.step}</Mono>
+          {stepMeaning ? <span>{stepMeaning}</span> : null}
+        </p>
+      ) : null}
       <div className="space-y-3 border-l border-border pl-3">
         {evidence.failingTests ? (
           <div>
@@ -69,17 +69,41 @@ export function StructuredBriefView({
         {evidence.findingsCount !== undefined ? (
           <p className="text-xs">意见条数：{evidence.findingsCount}</p>
         ) : null}
-        <p className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-muted-foreground">查看运行证据</span>
-          <a href={paths.run(runId)} className="text-primary hover:underline">
-            {runDisplayId ?? `R-${runId}`}
-          </a>
-        </p>
+        {run ? (
+          <p className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted-foreground">查看运行证据</span>
+            <a
+              href={paths.run(run.id)}
+              className="text-primary hover:underline"
+            >
+              {run.displayId}
+            </a>
+          </p>
+        ) : null}
       </div>
       <p className="leading-6 text-muted-foreground">
         <span className="font-medium text-foreground">推荐动作：</span>
         {brief.recommendedAction}
       </p>
+      {brief.commands.length > 0 ? (
+        <div className="space-y-2">
+          <h3 className="text-xs font-medium">可复制的命令</h3>
+          <ul className="space-y-2">
+            {brief.commands.map((item) => (
+              <li key={item.command} className="space-y-1">
+                <p className="text-xs text-muted-foreground">{item.label}</p>
+                <CopyCommand command={item.command} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {brief.ticketDraft ? (
+        <div>
+          <h3 className="mb-1 text-xs font-medium">契约票草稿</h3>
+          <CollapsibleCode text={brief.ticketDraft} />
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -63,7 +63,6 @@ import { RelativeTime } from "./RelativeTime.tsx";
 import { RetryNoteField, retryTicketBody } from "./RetryNote.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
-import { structuredBrief } from "./structured-brief.ts";
 import { TicketEdit } from "./TicketEdit.tsx";
 import { formatSeconds } from "./time.ts";
 
@@ -434,13 +433,14 @@ function TicketContent({
       : undefined;
   return (
     <>
-      {ticket.brief && ticket.blockedReason ? (
+      {ticket.structuredBrief ? (
         <section className="mb-6 space-y-3 border-l-2 border-destructive bg-destructive/5 p-4">
-          <ReasonBadge reason={ticket.blockedReason} />
+          {ticket.blockedReason ? (
+            <ReasonBadge reason={ticket.blockedReason} />
+          ) : null}
           <StructuredBriefView
-            brief={structuredBrief(ticket.blockedReason, ticket.brief)}
-            runId={ticket.brief.run.id}
-            runDisplayId={ticket.brief.run.displayId}
+            brief={ticket.structuredBrief}
+            run={ticket.brief?.run}
           />
           {ticket.state === "blocked" ? (
             <TicketRetry

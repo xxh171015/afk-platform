@@ -107,6 +107,14 @@ export {
   STAGES,
 } from "./stage-flow.ts";
 export type {
+  StructuredBrief,
+  StructuredBriefCommand,
+  StructuredBriefEvidence,
+  StructuredBriefInput,
+  StructuredBriefSource,
+} from "./structured-brief.ts";
+export { structuredBrief } from "./structured-brief.ts";
+export type {
   FixAttempt,
   FixCounts,
   FixKind,

@@ -48,7 +48,6 @@ import {
   retryTicketBody,
 } from "./RetryNote.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
-import { structuredBrief } from "./structured-brief.ts";
 import { WaitingTicketEdit } from "./TicketEdit.tsx";
 import { WORKBENCH_KEY } from "./Workbench.tsx";
 import {
@@ -117,20 +116,14 @@ function WaitingMeta({
 }
 
 function Brief({
-  reason,
   brief,
+  structuredBrief,
 }: {
-  reason: string | null;
   brief: Queue["tickets"][number]["brief"];
+  structuredBrief: Queue["tickets"][number]["structuredBrief"];
 }) {
-  if (!brief || !reason) return null;
-  return (
-    <StructuredBriefView
-      brief={structuredBrief(reason, brief)}
-      runId={brief.run.id}
-      runDisplayId={brief.run.displayId}
-    />
-  );
+  if (!structuredBrief) return null;
+  return <StructuredBriefView brief={structuredBrief} run={brief?.run} />;
 }
 
 function Problem({ error }: { error: unknown }) {
@@ -416,7 +409,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
         blocking={ticket.blocking}
         waitingSince={ticket.waitingSince}
       />
-      <Brief reason={ticket.blockedReason} brief={ticket.brief} />
+      <Brief brief={ticket.brief} structuredBrief={ticket.structuredBrief} />
     </Card>
   );
 }
@@ -600,7 +593,7 @@ function BlockedFinalization({
       }
     >
       <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
-      <Brief reason={item.blockedReason} brief={item.brief} />
+      <Brief brief={item.brief} structuredBrief={item.structuredBrief} />
     </Card>
   );
 }
