@@ -227,6 +227,8 @@ const RunView = RunRow.extend({
   prompt: z.string().nullable(),
   output: z.unknown().nullable(),
   commits: z.array(z.string()),
+  // the standards-source files a Standards review used; null on every other Run
+  sources: z.array(z.string()).nullable(),
   repoUrl: z.string(),
   hostKind: z.enum(HOST_KINDS),
 });

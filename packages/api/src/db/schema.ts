@@ -542,6 +542,8 @@ export const runs = pgTable(
     skillsSha: text("skills_sha"),
     // Which axis of a review this Run reviewed (standards | spec); null for every other Run
     axis: text("axis"),
+    // The standards-source files a Standards review used; null on every other Run
+    sources: text("sources").array(),
     prompt: text("prompt"), // the whole prompt the agent was given: the overlay and the stage's own
     cursorCliVersion: text("cursor_cli_version"),
     branch: text("branch"),

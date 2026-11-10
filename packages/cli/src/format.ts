@@ -616,6 +616,13 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           ),
         ),
         ...section(
+          "standards sources",
+          (repo.standardsSources ?? []).map(
+            (item) =>
+              `      ${item.ticket ?? "spec"} ${item.run} ${item.stage}: ${item.sources.join(", ")}`,
+          ),
+        ),
+        ...section(
           "scope creep (not asked for)",
           repo.scopeCreep.map(
             (s) => `      ${s.ticket ?? "spec"} ${s.run}: ${s.body}`,

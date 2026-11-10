@@ -18,6 +18,8 @@ export interface AxisReview {
   suggestions: string[];
   scopeCreep: string[];
   uncertainties: string[];
+  // files the Standards axis used as standards sources; Spec leaves this off
+  sources?: string[];
 }
 
 // The two results as a review-fix reads them (review.json): every must-fix with the axis it came from, and the two

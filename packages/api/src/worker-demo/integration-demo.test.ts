@@ -220,6 +220,7 @@ const PASS = {
   mustFix: [],
   suggestions: [],
   uncertainties: [],
+  sources: ["AGENTS.md"],
 };
 
 function executor(): Omit<ExecutorDeps, "api"> {

@@ -66,7 +66,7 @@ Done when `plat init` printed the project and every repo is registered.
 For every repo, in its `<setup>`:
 
 - **Gate**: write `.sandcastle/gates.yaml` following [gates.md](gates.md), unless one is there already.
-- **AGENTS.md**: the agent that implements tickets reads it. When the repo has one (or a `CLAUDE.md`), keep it and add only what is missing: how to run the tests, how to run a single test file, and the section "Running unattended": nobody answers questions during a run; when a decision only a person can make comes up, the agent reports `cannot-proceed` and ends. Without one, write it from the code: what the repo is, where things live, how to run it, its conventions, and how to run a single test file.
+- **AGENTS.md**: the agent that implements tickets reads it. When the repo has one (or a `CLAUDE.md`), keep it and add only what is missing: how to run the tests, how to run a single test file, the repo's existing standards documents (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, and files under `docs/` that say how to write code) listed as a fallback for Standards review, and the section "Running unattended": nobody answers questions during a run; when a decision only a person can make comes up, the agent reports `cannot-proceed` and ends. Without one, write it from the code: what the repo is, where things live, how to run it, its conventions, how to run a single test file, and those existing standards documents.
 
 End-to-end tests against other repos are not set up here: a spec that needs them adds what they need as tickets (the tracker doc's "Integration tickets").
 

@@ -598,6 +598,44 @@ describe("a review of two axes", () => {
       "merge",
     );
   });
+
+  it("records the Standards sources on the Run, including CONTRIBUTING.md when that was the hard rule", async () => {
+    await reviewed(
+      axisOutput("fix", {
+        mustFix: [
+          { file: "src/x.ts", problem: "CONTRIBUTING.md: no default exports" },
+        ],
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+      }),
+      axisOutput("pass"),
+      "fix",
+    );
+    const runs = await db.pool.query(
+      "SELECT id, axis, sources FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(runs.rows).toEqual([
+      {
+        id: expect.any(Number),
+        axis: "standards",
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+      },
+      { id: expect.any(Number), axis: "spec", sources: null },
+    ]);
+    const detail = await call("GET", `/runs/${runs.rows[0].id}`);
+    expect(detail.body.sources).toEqual(["AGENTS.md", "CONTRIBUTING.md"]);
+    expect(detail.body.output.sources).toEqual([
+      "AGENTS.md",
+      "CONTRIBUTING.md",
+    ]);
+    const findings = (await call("GET", "/tickets/1")).body.findings;
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        axis: "standards",
+        kind: "must-fix",
+        body: "src/x.ts CONTRIBUTING.md: no default exports",
+      }),
+    );
+  });
 });
 
 describe("approve-protected", () => {
