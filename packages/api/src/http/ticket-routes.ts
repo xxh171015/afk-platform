@@ -1,4 +1,5 @@
 import {
+  FAILURE_SOURCES,
   HOST_KINDS,
   PLANNING_STATES,
   REVIEW_AXES,
@@ -13,11 +14,13 @@ import {
   PullRequestRow,
 } from "../acceptance/pack.ts";
 import type { AppContext } from "../app.ts";
+import { refreshDiskStatus } from "../disk.ts";
 import { aroundSpec, aroundTicket } from "../events/announce.ts";
 import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
 import {
   allowPaths,
+  allowSpec,
   approveProtected,
   cancelSpec,
   cancelTicket,
@@ -129,6 +132,8 @@ const Blocking = z.object({
 const WaitingFields = z.object({
   waitingSince: z.string().optional(),
   blocking: Blocking.optional(),
+  // whose fault it is: the platform's and outside services' problems are listed after the specs' own
+  failureSource: z.enum(FAILURE_SOURCES).nullable().optional(),
 });
 
 const WaitingRef = z.discriminatedUnion("kind", [
@@ -183,6 +188,7 @@ const Finalization = z
     blockedReason: z.string().nullable(),
     brief: Brief,
     structuredBrief: StructuredBrief,
+    hostKind: z.enum(HOST_KINDS).optional(),
   })
   .merge(WaitingFields);
 
@@ -345,6 +351,7 @@ const specRoute = createRoute({
               message: z.string(),
             }),
           ),
+          tokenMerged: z.boolean(),
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
@@ -362,6 +369,7 @@ const specRoute = createRoute({
             text: z.string(),
             runId: Id.optional(),
             ticketId: Id.optional(),
+            failureSource: z.enum(FAILURE_SOURCES).optional(),
           }),
         ),
         finalRuns: z.array(
@@ -379,6 +387,25 @@ const specRoute = createRoute({
             finishedAt: z.string().nullable(),
           }),
         ),
+        potentialConflicts: z.array(
+          z.object({
+            specId: Id,
+            displayId: z.string(),
+            title: z.string(),
+            repo: z.string(),
+            repoId: Id,
+            files: z.array(z.string()),
+          }),
+        ),
+        leadTime: z
+          .object({
+            agentMs: z.number().int(),
+            gateMs: z.number().int(),
+            queuedMs: z.number().int(),
+            waitingMs: z.number().int(),
+            totalMs: z.number().int(),
+          })
+          .nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -484,6 +511,7 @@ const BlockedQueue = z.object({
         url: z.string(),
         state: z.string(),
         syncError: z.string().nullable(),
+        hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
   ),
@@ -493,6 +521,7 @@ const BlockedQueue = z.object({
         specId: Id,
         specDisplayId: z.string(),
         error: z.string(),
+        hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
   ),
@@ -505,6 +534,7 @@ const BlockedQueue = z.object({
         number: z.number().int(),
         url: z.string(),
         error: z.string(),
+        hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
   ),
@@ -614,12 +644,37 @@ const RunningTicket = z.object({
   slow: z.boolean(),
 });
 
+const WorkbenchStatus = z.object({
+  logDirBytes: z.number(),
+  apiFreeBytes: z.number(),
+  diskLevel: z.enum(["ok", "warn", "stop"]),
+  warnGib: z.number(),
+  stopGib: z.number(),
+  lastCleanup: z.object({
+    at: z.string().nullable(),
+    runs: z.number().int(),
+    orphans: z.number().int(),
+  }),
+  workers: z.array(
+    z.object({
+      id: z.string(),
+      reportedAt: z.string(),
+      freeBytes: z.number().nullable(),
+      cleaned: z.object({
+        sandboxLogs: z.number().int(),
+        salvage: z.number().int(),
+        snapshots: z.number().int(),
+      }),
+    }),
+  ),
+});
+
 const workbenchRoute = createRoute({
   method: "get",
   path: "/workbench",
   responses: {
     200: reply(
-      "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
+      "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
       z.object({
         waiting: WorkbenchWaiting,
         running: z.array(
@@ -636,6 +691,7 @@ const workbenchRoute = createRoute({
         recentlyCompleted: z.array(
           z.object({ spec: SpecListItem, completedAt: z.string() }),
         ),
+        status: WorkbenchStatus,
       }),
     ),
   },
@@ -759,14 +815,29 @@ const resumeRoute = createRoute({
             .number()
             .int()
             .min(1)
-            .max(7 * 24 * 3600),
+            .max(7 * 24 * 3600)
+            .optional(),
         }),
       ),
     },
   },
   responses: {
     200: reply(
-      "Running again, with the extra agent time",
+      "Running again; extraSeconds adds agent time when the budget ran out",
+      z.object({ state: z.enum(SPEC_STATES) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec is not paused", ErrorReply),
+  },
+});
+
+const allowSpecRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/allow",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Running again without extra agent time",
       z.object({ state: z.enum(SPEC_STATES) }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -875,7 +946,7 @@ export function registerTicketRoutes(
   });
 
   app.openapi(specRoute, async (c) => {
-    const view = await specView(pool, c.req.valid("param").id);
+    const view = await specView(pool, c.req.valid("param").id, context.clock());
     return view ? c.json(view, 200) : c.json({ error: "no such spec" }, 404);
   });
 
@@ -907,9 +978,14 @@ export function registerTicketRoutes(
 
   app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));
 
-  app.openapi(workbenchRoute, async (c) =>
-    c.json(await workbench(pool, context.clock()), 200),
-  );
+  app.openapi(workbenchRoute, async (c) => {
+    const board = await workbench(pool, context.clock());
+    const sample = await context.statDisk(context.logDir);
+    const status = await refreshDiskStatus(pool, sample, (notice) =>
+      context.notifications.notify(notice),
+    );
+    return c.json({ ...board, status }, 200);
+  });
 
   app.openapi(retryRoute, async (c) => {
     const { id } = c.req.valid("param");
@@ -986,8 +1062,19 @@ export function registerTicketRoutes(
       resumeSpec(
         pool,
         c.req.valid("param").id,
-        c.req.valid("json").extraSeconds,
+        c.req.valid("json").extraSeconds ?? 0,
       ),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(allowSpecRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      allowSpec(pool, c.req.valid("param").id),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such spec" }, 404);

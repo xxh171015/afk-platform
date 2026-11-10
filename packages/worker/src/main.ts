@@ -3,10 +3,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import {
+  adapterByHost,
   checkAppAccess,
+  checkGitLabAccess,
   createAppTokenSource,
   createGitHubAdapter,
+  createGitLabAdapter,
+  createGitLabTokenSource,
+  type HostAdapter,
+  hostRepoRef,
   loadAppCredentials,
+  type RepoRef,
+  type TokenSource,
+  tokensByHost,
 } from "@afk/host";
 import {
   GateCache,
@@ -16,15 +25,25 @@ import {
   type SandcastleConfig,
   SandcastleGateSandbox,
 } from "@afk/pipeline";
-import { SKILLS_SHA } from "@afk/shared";
-import { createWorkerApi } from "./api.ts";
+import {
+  DEFAULT_DISK_STOP_GIB,
+  DEFAULT_DISK_WARN_GIB,
+  diskGib,
+  GIB,
+  repoHost,
+  SKILLS_SHA,
+} from "@afk/shared";
+import { createWorkerApi, reportCleanup, reportCodeHosts } from "./api.ts";
+import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
+import { freeBytesOf } from "./disk.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
 import { RepoStore } from "./repos.ts";
+import { retainWorkerFiles } from "./retention.ts";
 import { removeSandboxesUnder } from "./sandboxes.ts";
 import { SlotManager } from "./slots.ts";
-import { pruneSnapshots, SnapshotStore } from "./snapshots.ts";
+import { SnapshotStore } from "./snapshots.ts";
 import { runWorker } from "./worker.ts";
 
 // `pnpm worker`: a worker on this machine, with the real sandbox, the GitHub App and the folders under ~/.afk.
@@ -55,12 +74,25 @@ try {
   fail(...error.problems);
 }
 
-let credentials: ReturnType<typeof loadAppCredentials>;
-try {
-  credentials = loadAppCredentials(config.credentialsDir);
-} catch (error) {
-  fail(`GitHub App credentials in ${config.credentialsDir}: ${reason(error)}`);
+// The GitHub App is there for repos on github.com; a worker for GitLab only goes without it.
+let credentials: ReturnType<typeof loadAppCredentials> | undefined;
+if (existsSync(config.credentialsDir)) {
+  try {
+    credentials = loadAppCredentials(config.credentialsDir);
+  } catch (error) {
+    fail(
+      `GitHub App credentials in ${config.credentialsDir}: ${reason(error)}`,
+    );
+  }
 }
+const codeHosts = workerCodeHosts({
+  githubApp: credentials !== undefined,
+  gitlabDir: config.gitlabDir,
+});
+if (codeHosts.length === 0)
+  fail(
+    `no code host credentials: put the GitHub App credentials in ${config.credentialsDir}, or a GitLab PAT in ${config.gitlabDir}/<host>`,
+  );
 
 // Every agent run and every gate needs the sandbox image, and Docker to run it.
 const image = spawnSync("docker", ["image", "inspect", config.image], {
@@ -82,7 +114,35 @@ try {
   );
 }
 
-const tokens = createAppTokenSource({ credentials });
+// The platform registers repos only on the hosts some worker has credentials for.
+await reportCodeHosts(config.apiUrl, config.workerId, codeHosts).catch(
+  (error) => fail(`could not tell the API the code hosts: ${reason(error)}`),
+);
+// each repo's host calls and tokens go to the credentials of its own host
+const appTokens = credentials
+  ? createAppTokenSource({ credentials })
+  : undefined;
+const gitlabFiles = gitlabCredentialFiles(config.gitlabDir);
+const gitlabHosts = new Set(gitlabFiles.map((file) => file.host));
+const tokenSources = new Map<string, TokenSource>(
+  appTokens ? [["github.com", appTokens]] : [],
+);
+const adapters = new Map<string, HostAdapter>(
+  appTokens ? [["github.com", createGitHubAdapter({ tokens: appTokens })]] : [],
+);
+for (const { host, path } of gitlabFiles) {
+  const gitlabTokens = createGitLabTokenSource({ path });
+  tokenSources.set(host, gitlabTokens);
+  adapters.set(
+    host,
+    createGitLabAdapter({
+      tokens: gitlabTokens,
+      apiUrl: `https://${host}/api/v4`,
+    }),
+  );
+}
+const tokens = tokensByHost(tokenSources);
+const hostAdapter = adapterByHost(adapters);
 const api = createWorkerApi(config.apiUrl, config.workerId);
 const repos = new RepoStore(join(config.home, "repos"));
 const snapshots = new SnapshotStore(join(config.home, "snapshots"));
@@ -117,23 +177,70 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     stop.abort();
   });
 
-for (const removed of pruneSnapshots(snapshots.root)) {
-  log(`removed the snapshot ${removed}, unused for a week`);
-}
+let lastCleaned = { sandboxLogs: 0, salvage: 0, snapshots: 0 };
+const sweepHome = async () => {
+  lastCleaned = retainWorkerFiles({ home: config.home });
+  const parts = [
+    lastCleaned.sandboxLogs && `${lastCleaned.sandboxLogs} sandbox-log(s)`,
+    lastCleaned.salvage && `${lastCleaned.salvage} salvage`,
+    lastCleaned.snapshots && `${lastCleaned.snapshots} snapshot(s)`,
+  ].filter(Boolean);
+  if (parts.length > 0) log(`removed ${parts.join(", ")}`);
+  const freeBytes = await freeBytesOf(config.home).catch(() => undefined);
+  await reportCleanup(
+    config.apiUrl,
+    config.workerId,
+    lastCleaned,
+    freeBytes,
+  ).catch((error) => log(`could not report cleanup: ${reason(error)}`));
+};
+await sweepHome();
+const retentionTimer = setInterval(() => void sweepHome(), 24 * 60 * 60 * 1000);
+retentionTimer.unref();
 log(
   `worker ${config.workerId}: ${config.slots} slot(s), api ${config.apiUrl}, home ${config.home}`,
 );
 await runWorker({
   api,
+  disk: {
+    free: () => freeBytesOf(config.home),
+    warnBelow: diskGib("AFK_DISK_WARN_GIB", DEFAULT_DISK_WARN_GIB) * GIB,
+    stopBelow: diskGib("AFK_DISK_STOP_GIB", DEFAULT_DISK_STOP_GIB) * GIB,
+    report: async (freeBytes) => {
+      await reportCleanup(
+        config.apiUrl,
+        config.workerId,
+        lastCleaned,
+        freeBytes,
+      ).catch((error) => log(`could not report cleanup: ${reason(error)}`));
+    },
+  },
   host: {
-    adapter: createGitHubAdapter({ tokens }),
-    checkAccess: (repo) => checkAppAccess({ credentials }, repo),
+    adapter: hostAdapter,
+    repoRef: hostRepoRef,
+    checkAccess: async (repo: RepoRef) => {
+      const host = repo.host;
+      if (host && gitlabHosts.has(host)) {
+        const file = gitlabFiles.find((row) => row.host === host);
+        if (!file) throw new Error(`this worker has no GitLab PAT for ${host}`);
+        return checkGitLabAccess(
+          {
+            tokens: createGitLabTokenSource({ path: file.path }),
+            apiUrl: `https://${host}/api/v4`,
+          },
+          repo,
+        );
+      }
+      if (!credentials)
+        throw new Error("this worker has no GitHub App credentials");
+      return checkAppAccess({ credentials }, repo);
+    },
   },
   executor: {
     slots: new SlotManager({
       root: slotsRoot,
       count: config.slots,
-      mainCloneFor: (name) => repos.dirFor(name),
+      mainCloneFor: (name, url) => repos.dirFor(name, url),
       salvageDir: join(config.home, "salvage"),
       isHeld: (jobId, attempt) => api.isHeld(jobId, attempt),
       removeSandboxes: (dir) => removeSandboxesUnder(dir, undefined, log),
@@ -142,7 +249,12 @@ await runWorker({
     repos,
     snapshots,
     push: pushWithToken,
-    credentials: { tokens },
+    credentials: {
+      tokens,
+      repoRef: hostRepoRef,
+      gitUser: (url) =>
+        gitlabHosts.has(repoHost(url) ?? "") ? "oauth2" : undefined,
+    },
     gateCache: new GateCache(),
     docker: realDocker,
     environments: new EnvironmentLimiter(),

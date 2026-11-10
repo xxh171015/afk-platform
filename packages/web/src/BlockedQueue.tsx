@@ -1,3 +1,4 @@
+import { isPlatformProblem, pauseReasonLabel } from "@afk/shared";
 import {
   keepPreviousData,
   type QueryClient,
@@ -5,6 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+
 import {
   AlertCircle,
   ExternalLink,
@@ -38,6 +40,7 @@ import { Button } from "./components/ui/button.tsx";
 import { Checkbox } from "./components/ui/checkbox.tsx";
 import { Input } from "./components/ui/input.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { hostKindOf, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { LIST_POLL_MS } from "./live.ts";
@@ -53,6 +56,7 @@ import { WORKBENCH_KEY } from "./Workbench.tsx";
 import {
   type Blocking,
   blockingCopy,
+  FAILURE_SOURCE_LABELS,
   filterWaiting,
   groupWaitingBySpec,
   matchesFinalization,
@@ -100,16 +104,19 @@ function useAction<Action>(run: (action: Action) => Promise<unknown>) {
 function WaitingMeta({
   blocking,
   waitingSince,
+  hostKind,
 }: {
   blocking?: Blocking;
   waitingSince?: string;
+  hostKind?: string | null;
 }) {
   if (!blocking || !waitingSince) return null;
+  const kind = hostKindOf({ hostKind });
   return (
     <div className="space-y-1 text-[13px]">
-      <p>阻断了什么：{blockingCopy(blocking)}</p>
+      <p>阻断了什么：{blockingCopy(blocking, kind)}</p>
       <p className="text-muted-foreground">
-        为何排在这：{rankCopy(blocking, waitingSince)}
+        为何排在这：{rankCopy(blocking, waitingSince, kind)}
       </p>
     </div>
   );
@@ -408,6 +415,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
       <WaitingMeta
         blocking={ticket.blocking}
         waitingSince={ticket.waitingSince}
+        hostKind={ticket.hostKind}
       />
       <Brief brief={ticket.brief} structuredBrief={ticket.structuredBrief} />
     </Card>
@@ -419,19 +427,34 @@ const MAX_EXTRA_HOURS = 168;
 function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
   const api = useApi();
   const [hours, setHours] = useState("1");
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const seconds = Math.round(Number(hours) * 3600);
   const valid =
     hours.trim() !== "" &&
     Number.isFinite(seconds) &&
     seconds >= 1 &&
     Number(hours) <= MAX_EXTRA_HOURS;
-  const resume = useAction(async (extraSeconds: number) => {
+  const budget = spec.reason === "budget-exhausted";
+  const retry = useAction(async (extraSeconds?: number) => {
     const { data, error } = await api.POST("/specs/{id}/resume", {
       params: { path: { id: spec.id } },
-      body: { extraSeconds },
+      body: extraSeconds ? { extraSeconds } : {},
     });
     if (!data) throw new Error(describeError(error));
   });
+  const allow = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/allow", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
+  const cancel = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/cancel", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
+  const busy = retry.isPending || allow.isPending || cancel.isPending;
   return (
     <Card
       category="paused"
@@ -447,42 +470,96 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
       }
       sub={<span>暂停的需求</span>}
       actions={
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (valid) resume.mutate(seconds);
-          }}
-        >
-          <label
-            htmlFor={`${spec.displayId}-extra-hours`}
-            className="flex items-center gap-2 text-[13px]"
+        <>
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (budget) {
+                if (valid) retry.mutate(seconds);
+              } else retry.mutate(undefined);
+            }}
           >
-            追加
-            <Input
-              id={`${spec.displayId}-extra-hours`}
-              type="number"
-              min={0}
-              max={MAX_EXTRA_HOURS}
-              step={0.5}
-              value={hours}
-              aria-label={`${spec.displayId} 追加的 agent 小时`}
-              onChange={(event) => setHours(event.target.value)}
-              className="h-8 w-20 font-mono tabular"
-            />
-            小时 agent 时间
-          </label>
-          <Button type="submit" size="sm" disabled={resume.isPending || !valid}>
-            <Spinner on={resume.isPending} />
-            {!resume.isPending && <Play />}
-            恢复
-          </Button>
-          <Problem error={resume.error} />
-        </form>
+            {budget ? (
+              <label
+                htmlFor={`${spec.displayId}-extra-hours`}
+                className="flex items-center gap-2 text-[13px]"
+              >
+                追加
+                <Input
+                  id={`${spec.displayId}-extra-hours`}
+                  type="number"
+                  min={0}
+                  max={MAX_EXTRA_HOURS}
+                  step={0.5}
+                  value={hours}
+                  aria-label={`${spec.displayId} 追加的 agent 小时`}
+                  onChange={(event) => setHours(event.target.value)}
+                  className="h-8 w-20 font-mono tabular"
+                />
+                小时 agent 时间
+              </label>
+            ) : null}
+            <Button
+              type="submit"
+              size="sm"
+              disabled={busy || (budget && !valid)}
+            >
+              <Spinner on={retry.isPending} />
+              {!retry.isPending && <Play />}
+              重试
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => allow.mutate()}
+            >
+              <Spinner on={allow.isPending} />
+              放行
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setConfirmCancel(true)}
+            >
+              取消需求
+            </Button>
+            <Problem error={retry.error ?? allow.error ?? cancel.error} />
+          </form>
+          <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>取消 {spec.displayId}？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  未完成的票会取消，已合并的工作留下。取消不可撤销。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={busy}>返回</AlertDialogCancel>
+                <Button
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() =>
+                    cancel.mutate(undefined, {
+                      onSuccess: () => setConfirmCancel(false),
+                    })
+                  }
+                >
+                  <Spinner on={cancel.isPending} />
+                  永久取消 {spec.displayId}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
       }
     >
       <WaitingMeta blocking={spec.blocking} waitingSince={spec.waitingSince} />
-      <p>{spec.reason}</p>
+      <p>{pauseReasonLabel(spec.reason)}</p>
     </Card>
   );
 }
@@ -510,6 +587,7 @@ function BlockedFinalization({
   });
   const beforePullRequests = item.step === "final-e2e";
   const busy = retry.isPending || waive.isPending;
+  const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
       category="final"
@@ -518,7 +596,9 @@ function BlockedFinalization({
         <>
           <IdChip displayId={item.specDisplayId} id={item.specId} />
           <span>
-            {beforePullRequests ? "开 PR 前的联调" : `${item.repo} 的总览审查`}
+            {beforePullRequests
+              ? `开 ${pr} 前的联调`
+              : `${item.repo} 的总览审查`}
           </span>
           {item.blockedReason ? (
             <ReasonBadge reason={item.blockedReason} />
@@ -554,7 +634,7 @@ function BlockedFinalization({
               disabled={busy}
               onClick={() => setConfirmWaive(true)}
             >
-              仍然开 PR
+              仍然开 {pr}
             </Button>
           ) : null}
           <Problem error={retry.error ?? waive.error} />
@@ -566,10 +646,10 @@ function BlockedFinalization({
           >
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>跳过联调，仍然开 PR？</AlertDialogTitle>
+                <AlertDialogTitle>跳过联调，仍然开 {pr}？</AlertDialogTitle>
                 <AlertDialogDescription>
-                  {item.specDisplayId} 会在联调没通过的情况下继续收尾并开
-                  PR。验收包会在「联调」一节最前面写明这次失败，合并前请务必看到。
+                  {item.specDisplayId} 会在联调没通过的情况下继续收尾并开 {pr}
+                  。验收包会在「联调」一节最前面写明这次失败，合并前请务必看到。
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -584,7 +664,7 @@ function BlockedFinalization({
                   }
                 >
                   <Spinner on={waive.isPending} />
-                  仍然开 PR
+                  仍然开 {pr}
                 </Button>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -592,13 +672,18 @@ function BlockedFinalization({
         </>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       <Brief brief={item.brief} structuredBrief={item.structuredBrief} />
     </Card>
   );
 }
 
 function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
+  const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
       category="pr"
@@ -639,16 +724,20 @@ function StuckPullRequest({ item }: { item: Queue["pullRequests"][number] }) {
         </>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       {item.syncError ? (
         <CollapsibleCode text={`读取失败：${item.syncError}`} />
       ) : null}
       <p className="text-muted-foreground">
         {item.state === "closed"
-          ? "这个 PR 被关闭了，但没有合并。"
-          : "平台读取这个 PR 失败，当前看到的状态可能不是最新的。"}
+          ? `这个 ${pr} 被关闭了，但没有合并。`
+          : `平台读取这个 ${pr} 失败，当前看到的状态可能不是最新的。`}
         平台从不操作
-        PR，请你决定：到代码托管上重新打开它、返工这个需求，或取消它。
+        {pr}，请你决定：到代码托管上重新打开它、返工这个需求，或取消它。
       </p>
       <CopyCommand command={`plat spec cancel ${item.specDisplayId}`} />
     </Card>
@@ -672,10 +761,15 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
         </a>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
-        代码托管上可能还残留着这个需求的分支或 PR。确认后用下面的命令重新清理：
+        代码托管上可能还残留着这个需求的分支或 {pullAbbrev(hostKindOf(item))}
+        。确认后用下面的命令重新清理：
       </p>
       <CopyCommand command={`plat spec cleanup ${item.specDisplayId}`} />
     </Card>
@@ -683,6 +777,7 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
 }
 
 function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
+  const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
       category="ready"
@@ -691,7 +786,7 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
         <>
           <IdChip displayId={item.specDisplayId} id={item.specId} />
           <span>
-            <Mono>{item.repo}</Mono> 的 draft PR 没能转为 ready
+            <Mono>{item.repo}</Mono> 的 draft {pr} 没能转为 ready
           </span>
         </>
       }
@@ -712,11 +807,15 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
         </>
       }
     >
-      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      <WaitingMeta
+        blocking={item.blocking}
+        waitingSince={item.waitingSince}
+        hostKind={item.hostKind}
+      />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
-        这个 PR 仍是 draft。等排在它前面的 PR 合并后，到代码托管上手动把它转为
-        ready，平台下次同步时会看到。
+        这个 {pr} 仍是 draft。等排在它前面的 {pr}{" "}
+        合并后，到代码托管上手动把它转为 ready，平台下次同步时会看到。
       </p>
     </Card>
   );
@@ -860,7 +959,8 @@ function specIdOf(data: Queue, ref: WaitingRef): number {
   return ref.specId;
 }
 
-function rankFields(data: Queue, ref: WaitingRef) {
+// The queue's row behind a ref.
+function waitingItemOf(data: Queue, ref: WaitingRef) {
   const lookup = () => {
     if (ref.kind === "ticket")
       return data.tickets.find((item) => item.id === ref.id);
@@ -886,7 +986,11 @@ function rankFields(data: Queue, ref: WaitingRef) {
       return (data.planning ?? []).find((item) => item.specId === ref.specId);
     return data.specs.find((item) => item.id === ref.id);
   };
-  const item = lookup();
+  return lookup();
+}
+
+function rankFields(data: Queue, ref: WaitingRef) {
+  const item = waitingItemOf(data, ref);
   const blocking = item?.blocking ?? {
     downstream: [],
     finalization: false,
@@ -975,18 +1079,52 @@ function WaitingList({
   bySpec: boolean;
 }) {
   const filtered = filterWaiting(inferredItems(data), type);
-  const items = bySpec
-    ? groupWaitingBySpec(
-        filtered,
-        (item) => specIdOf(data, item),
-        (item) => rankFields(data, item),
-      )
-    : filtered;
+  const sourceOf = (item: WaitingRef) =>
+    waitingItemOf(data, item)?.failureSource ?? null;
+  const ordered = (list: WaitingRef[]) =>
+    bySpec
+      ? groupWaitingBySpec(
+          list,
+          (item) => specIdOf(data, item),
+          (item) => rankFields(data, item),
+        )
+      : list;
+  const own = ordered(
+    filtered.filter((item) => !isPlatformProblem(sourceOf(item))),
+  );
+  const platform = ordered(
+    filtered.filter((item) => isPlatformProblem(sourceOf(item))),
+  );
   return (
-    <div className="space-y-3">
-      {items.map((item) => (
-        <CardFor key={refKey(item)} data={data} item={item} />
-      ))}
+    <div className="space-y-6">
+      <div className="space-y-3">
+        {own.map((item) => (
+          <CardFor key={refKey(item)} data={data} item={item} />
+        ))}
+      </div>
+      {platform.length > 0 ? (
+        <section aria-labelledby="platform-problems" className="space-y-3">
+          <div>
+            <h2
+              id="platform-problems"
+              className="text-[13px] font-medium text-muted-foreground"
+            >
+              平台问题
+            </h2>
+            <p className="text-[12px] text-muted-foreground">
+              平台自己或外部服务（Cursor、代码托管、镜像源）出的问题，不是需求本身的。
+            </p>
+          </div>
+          {platform.map((item) => (
+            <div key={refKey(item)} className="space-y-1">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {FAILURE_SOURCE_LABELS[sourceOf(item) ?? "platform"]}
+              </span>
+              <CardFor data={data} item={item} />
+            </div>
+          ))}
+        </section>
+      ) : null}
     </div>
   );
 }

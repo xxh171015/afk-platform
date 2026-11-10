@@ -40,6 +40,7 @@ describe("renderContext", () => {
       baseSha: "abc123",
       branch: "agent/T-123",
       integrationBranch: "spec/order-export",
+      defaultBranch: "main",
       allowedProtectedPaths: [],
       fixCounts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
       contracts: [],

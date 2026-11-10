@@ -5,6 +5,7 @@ import {
   type HostTask,
   type PlanningTask,
   type ReadinessTask,
+  type TrialMergeTask,
 } from "@afk/shared";
 
 // The worker talks to the platform over HTTP only (docs/specs/m1-platform.md「worker 专用接口」): it has no
@@ -30,6 +31,7 @@ export interface WorkerApi {
   hostTask(job: ClaimedJob): Promise<HostTask | "lost">;
   planningTask(job: ClaimedJob): Promise<PlanningTask | "lost">;
   readinessTask(job: ClaimedJob): Promise<ReadinessTask | "lost">;
+  trialMergeTask(job: ClaimedJob): Promise<TrialMergeTask | "lost">;
   // Is this job still running under a live lease at this attempt? Throws when the API cannot be asked.
   isHeld(jobId: number, attempt: number): Promise<boolean>;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
@@ -118,6 +120,20 @@ export function createWorkerApi(
       if (holding(response.status) === "lost") return "lost";
       throw new Error(`planning task failed: HTTP ${response.status}`);
     },
+    async trialMergeTask(job) {
+      const { data, response } = await client.GET(
+        "/worker/jobs/{id}/trial-merge-task",
+        {
+          params: {
+            path: { id: job.id },
+            query: { workerId, attempt: job.attempt },
+          },
+        },
+      );
+      if (data) return data;
+      if (holding(response.status) === "lost") return "lost";
+      throw new Error(`trial-merge task failed: HTTP ${response.status}`);
+    },
     async readinessTask(job) {
       const { data, response } = await client.GET(
         "/worker/jobs/{id}/readiness-task",
@@ -165,4 +181,40 @@ export function createWorkerApi(
       return holding(status);
     },
   };
+}
+
+// At start: the code hosts this worker has credentials for (code-hosts.ts), so the platform knows which repos it can
+// work on and what kind of host each is on.
+export async function reportCodeHosts(
+  baseUrl: string,
+  workerId: string,
+  hosts: { host: string; kind: "github" | "gitlab" }[],
+  client: ApiClient = createApiClient(baseUrl),
+): Promise<void> {
+  const { response } = await client.POST("/worker/hosts", {
+    body: { workerId, hosts },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+// After a home sweep: how many sandbox-logs, salvage dirs and snapshots went, so the status area can show it.
+export async function reportCleanup(
+  baseUrl: string,
+  workerId: string,
+  cleaned: {
+    sandboxLogs: number;
+    salvage: number;
+    snapshots: number;
+  },
+  freeBytes?: number,
+  client: ApiClient = createApiClient(baseUrl),
+): Promise<void> {
+  const { response } = await client.POST("/worker/status", {
+    body: {
+      workerId,
+      cleaned,
+      ...(freeBytes === undefined ? {} : { freeBytes }),
+    },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }

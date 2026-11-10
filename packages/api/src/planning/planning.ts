@@ -11,7 +11,9 @@ import {
 } from "@afk/shared";
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
-import { schedulePass } from "../scheduling/scheduler.ts";
+import { applyOrigin } from "../events/origin.ts";
+import { hostKindOf, mixedHostsWith } from "../host/code-hosts.ts";
+import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
 import { ensureIntegrationBranches } from "./integration-branches.ts";
 
@@ -109,7 +111,8 @@ export interface NewRepo {
 export type AddRepoResult =
   | { status: "ok"; repo: { id: number; name: string } }
   | { status: "no-project" }
-  | { status: "name-taken" };
+  | { status: "name-taken" }
+  | { status: "mixed-hosts"; message: string };
 
 export async function addRepo(
   pool: pg.Pool,
@@ -119,6 +122,12 @@ export async function addRepo(
     repo.projectId,
   ]);
   if (project.rowCount === 0) return { status: "no-project" };
+  const hostKind = repo.hostKind ?? (await hostKindOf(pool, repo.url));
+  const mixed = await mixedHostsWith(pool, repo.projectId, {
+    name: repo.name,
+    hostKind,
+  });
+  if (mixed) return { status: "mixed-hosts", message: mixed };
   try {
     const { rows } = await pool.query(
       `INSERT INTO repos (project_id, url, default_branch, name, host_kind) VALUES ($1, $2, COALESCE($3, 'main'), $4, $5)
@@ -128,7 +137,7 @@ export async function addRepo(
         repo.url,
         repo.defaultBranch ?? null,
         repo.name,
-        repo.hostKind ?? hostKindOfUrl(repo.url),
+        hostKind,
       ],
     );
     return { status: "ok", repo: rows[0] };
@@ -215,17 +224,20 @@ export async function createSpec(
     planningRepoId = repo.rows[0].id;
   }
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id)
+    // in a transaction, so the spec's first event says who made it
+    const { rows } = await inTransaction(pool, (client) =>
+      client.query(
+        `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id)
        SELECT $1, $2, $3, $4, $5, id, $6 FROM instance RETURNING id`,
-      [
-        spec.projectId,
-        spec.type,
-        spec.slug,
-        spec.title,
-        spec.body ?? "",
-        planningRepoId,
-      ],
+        [
+          spec.projectId,
+          spec.type,
+          spec.slug,
+          spec.title,
+          spec.body ?? "",
+          planningRepoId,
+        ],
+      ),
     );
     const id = rows[0].id as number;
     return {
@@ -265,6 +277,7 @@ export async function importTickets(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyOrigin(client);
     const spec = await client.query(
       "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings FROM specs WHERE id = $1 FOR UPDATE",
       [specId],

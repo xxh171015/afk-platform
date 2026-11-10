@@ -50,6 +50,20 @@ export const emptyWorkbench = {
   running: [] as unknown[],
   awaitingAcceptance: [] as unknown[],
   recentlyCompleted: [] as unknown[],
+  status: {
+    logDirBytes: 0,
+    apiFreeBytes: 20 * 1024 ** 3,
+    diskLevel: "ok" as const,
+    warnGib: 10,
+    stopGib: 5,
+    lastCleanup: { at: null as string | null, runs: 0, orphans: 0 },
+    workers: [] as Array<{
+      id: string;
+      reportedAt: string;
+      freeBytes: number | null;
+      cleaned: { sandboxLogs: number; salvage: number; snapshots: number };
+    }>,
+  },
 };
 
 // A stand-in for the platform API: `routes` maps "METHOD /path" to what it answers. Every call is recorded.

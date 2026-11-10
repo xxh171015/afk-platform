@@ -12,6 +12,7 @@ describe("branch names", () => {
     expect(a.integration("export")).toBe("spec/a1b2c3/export");
     expect(a.ticket("T-5")).toBe("agent/a1b2c3/T-5");
     expect(a.final("S-2")).toBe("agent/a1b2c3/S-2-final");
+    expect(a.update("S-2")).toBe("agent/a1b2c3/S-2-update");
     expect(b.ticket("T-5")).not.toBe(a.ticket("T-5"));
     expect(b.integration("export")).not.toBe(a.integration("export"));
   });
@@ -21,6 +22,7 @@ describe("branch names", () => {
     expect(old.integration("export")).toBe("spec/export");
     expect(old.ticket("T-5")).toBe("agent/T-5");
     expect(old.final("S-2")).toBe("agent/S-2-final");
+    expect(old.update("S-2")).toBe("agent/S-2-update");
   });
 });
 
@@ -31,8 +33,10 @@ describe("isPlatformBranch", () => {
     "spec/a1b2c3/export",
     "agent/T-5",
     "agent/S-2-final",
+    "agent/S-2-update",
     "agent/a1b2c3/T-5",
     "agent/a1b2c3/S-2-final",
+    "agent/a1b2c3/S-2-update",
   ])("accepts %s", (name) => {
     expect(isPlatformBranch(name)).toBe(true);
   });
@@ -65,6 +69,8 @@ describe("parseTicketBranch", () => {
     expect(parseTicketBranch("agent/a1b2c3/T-12")).toBe("T-12");
     expect(parseTicketBranch("agent/S-3-final")).toBe("S-3-final");
     expect(parseTicketBranch("agent/a1b2c3/S-3-final")).toBe("S-3-final");
+    expect(parseTicketBranch("agent/S-3-update")).toBe("S-3-update");
+    expect(parseTicketBranch("agent/a1b2c3/S-3-update")).toBe("S-3-update");
   });
 
   it("is undefined for anything else", () => {

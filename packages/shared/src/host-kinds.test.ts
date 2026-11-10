@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { HOST_KINDS, hostKindOfUrl } from "./host-kinds.ts";
+import {
+  HOST_KINDS,
+  hostKindOfUrl,
+  pullAbbrev,
+  pullPhrase,
+} from "./host-kinds.ts";
 
 describe("hostKindOfUrl", () => {
   it("knows the code hosts the platform has a seed template for", () => {
@@ -14,5 +19,14 @@ describe("hostKindOfUrl", () => {
     ["https://git.example.org/acme/api.git", "github"],
   ])("reads %s as %s", (url, kind) => {
     expect(hostKindOfUrl(url)).toBe(kind);
+  });
+});
+
+describe("pullAbbrev", () => {
+  it("says MR on GitLab and PR on GitHub", () => {
+    expect(pullAbbrev("gitlab")).toBe("MR");
+    expect(pullAbbrev("github")).toBe("PR");
+    expect(pullPhrase("gitlab")).toBe("merge request");
+    expect(pullPhrase("github")).toBe("pull request");
   });
 });

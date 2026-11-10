@@ -1,3 +1,4 @@
+import { purgedLogMessage } from "@afk/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
@@ -65,6 +66,7 @@ export function RunLog({
     },
     refetchInterval: (query) => {
       const data = query.state.data;
+      if (data?.purgedAt) return false;
       return data?.finished && data.nextOffset >= data.size ? false : pollMs;
     },
   });
@@ -113,6 +115,13 @@ export function RunLog({
         无法加载日志: {slice.error.message}
       </p>
     );
+  if (data?.purgedAt && !hasLog) {
+    return (
+      <p className="text-sm text-terminal-muted">
+        {purgedLogMessage(data.purgedAt)}
+      </p>
+    );
+  }
   if (!hasLog) {
     return (
       <section

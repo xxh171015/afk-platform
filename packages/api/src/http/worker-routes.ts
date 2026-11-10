@@ -1,16 +1,21 @@
+import { HOST_KINDS } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
+import type pg from "pg";
 import type { AppContext } from "../app.ts";
+import { claimsStopped, refreshDiskStatus } from "../disk.ts";
 import {
   aroundJob,
   emitTransition,
   snapshotSpecs,
   specIdsOfJob,
 } from "../events/announce.ts";
+import { applyOrigin, withOrigin } from "../events/origin.ts";
 import {
   readFinalE2ePayload,
   recordFinalE2eResult,
 } from "../finalize/final-e2e.ts";
 import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
+import { reportHosts } from "../host/code-hosts.ts";
 import {
   readHostSyncPayload,
   readOpenPrPayload,
@@ -32,6 +37,15 @@ import {
   repoAccessFailed,
   repoAccessTask,
 } from "../host/repo-access.ts";
+import {
+  buildTrialMergeTask,
+  readTrialMergePayload,
+  recordTrialMergeResult,
+} from "../host/trial-merge.ts";
+import {
+  markUpdateBranchClaimed,
+  recordUpdateBranchResult,
+} from "../host/update-branch.ts";
 import {
   checkBeforePush,
   checkHolder,
@@ -55,6 +69,7 @@ import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { recordJobFailure } from "../stages/failures.ts";
 import { markClaimed, recordStageResult } from "../stages/results.ts";
+import { recordWorkerCleanup } from "../workers.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const ClaimedJob = z.object({
@@ -89,6 +104,68 @@ const claimRoute = createRoute({
         "application/json": {
           schema: z.object({ job: ClaimedJob.nullable() }),
         },
+      },
+    },
+  },
+});
+
+const hostsReportRoute = createRoute({
+  method: "post",
+  path: "/worker/hosts",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            workerId: z.string().min(1).max(200),
+            hosts: z
+              .array(
+                z.object({
+                  host: z.string().min(1).max(253),
+                  kind: z.enum(HOST_KINDS),
+                }),
+              )
+              .max(100),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Kept: repos on these hosts can be registered and worked on",
+      content: {
+        "application/json": { schema: z.object({ ok: z.literal(true) }) },
+      },
+    },
+  },
+});
+
+const workerStatusRoute = createRoute({
+  method: "post",
+  path: "/worker/status",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            workerId: z.string().min(1).max(200),
+            cleaned: z.object({
+              sandboxLogs: z.number().int().min(0),
+              salvage: z.number().int().min(0),
+              snapshots: z.number().int().min(0),
+            }),
+            freeBytes: z.number().nonnegative().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Kept for the workbench status area",
+      content: {
+        "application/json": { schema: z.object({ ok: z.literal(true) }) },
       },
     },
   },
@@ -288,6 +365,9 @@ const HostTask = z.discriminatedUnion("kind", [
         number: z.number().int(),
       }),
     ),
+    defaults: z
+      .array(z.object({ repoUrl: z.string(), branch: z.string() }))
+      .optional(),
   }),
   z.object({
     kind: z.literal("pr-ready"),
@@ -386,6 +466,58 @@ const readinessTaskRoute = createRoute({
   },
 });
 
+const trialMergeTaskRoute = createRoute({
+  method: "get",
+  path: "/worker/jobs/{id}/trial-merge-task",
+  request: {
+    params: z.object({ id: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    query: z.object({
+      workerId: z.string().min(1).max(200),
+      attempt: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: {
+      description:
+        "What a trial-merge job has to do: merge-tree this spec's integration branch against the other live specs in the same repo, and name any conflicting files",
+      content: {
+        "application/json": {
+          schema: z.object({
+            spec: z.object({
+              id: z.number().int(),
+              displayId: z.string(),
+              title: z.string(),
+            }),
+            repo: z.object({
+              name: z.string(),
+              url: z.string(),
+              defaultBranch: z.string(),
+            }),
+            ours: z.object({
+              specId: z.number().int(),
+              branch: z.string(),
+            }),
+            peers: z.array(
+              z.object({
+                specId: z.number().int(),
+                branch: z.string(),
+              }),
+            ),
+          }),
+        },
+      },
+    },
+    404: {
+      description: "No such job, or not a trial-merge job",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+    409: {
+      description: "Not the lease holder at the current attempt (fencing)",
+      content: { "application/json": { schema: ErrorReply } },
+    },
+  },
+});
+
 const planningTaskRoute = createRoute({
   method: "get",
   path: "/worker/jobs/{id}/planning-task",
@@ -464,12 +596,61 @@ function refusal(outcome: Exclude<HolderOutcome, { status: "ok" }>) {
       } as const);
 }
 
+// A worker's report on a job: what it changes is the worker's doing, and host-sync's when it is a look at the host.
+function inWorkerReport<T>(
+  context: AppContext,
+  jobId: number,
+  work: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  return inTransaction(context.pool, async (client) => {
+    const job = await client.query<{ type: string }>(
+      "SELECT type FROM jobs WHERE id = $1",
+      [jobId],
+    );
+    const source = job.rows[0]?.type === "host-sync" ? "host-sync" : "worker";
+    await applyOrigin(client, { source, jobId });
+    return work(client);
+  });
+}
+
 export function registerWorkerRoutes(
   app: OpenAPIHono,
   context: AppContext,
 ): void {
+  // A worker says at start which code hosts it has credentials for.
+  app.openapi(hostsReportRoute, async (c) => {
+    const { workerId, hosts } = c.req.valid("json");
+    await reportHosts(context.pool, workerId, hosts);
+    return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(workerStatusRoute, async (c) => {
+    const { workerId, cleaned, freeBytes } = c.req.valid("json");
+    await recordWorkerCleanup(
+      context.pool,
+      workerId,
+      cleaned,
+      context.clock(),
+      freeBytes,
+    );
+    const sample = await context.statDisk(context.logDir);
+    await refreshDiskStatus(context.pool, sample, (notice) =>
+      context.notifications.notify(notice),
+    );
+    return c.json({ ok: true as const }, 200);
+  });
+
   app.openapi(claimRoute, async (c) => {
     const { workerId, capabilities } = c.req.valid("json");
+    if (
+      await claimsStopped(
+        context.pool,
+        workerId,
+        await context.freeBytes(context.logDir),
+      )
+    ) {
+      return c.json({ job: null }, 200);
+    }
     const job = await claimJob(context.pool, {
       workerId,
       capabilities,
@@ -479,8 +660,14 @@ export function registerWorkerRoutes(
     if (!job) return c.json({ job: null }, 200);
     const specIds = await specIdsOfJob(context.pool, job.id);
     const before = await snapshotSpecs(context.pool, specIds);
-    await markClaimed(context.pool, job);
-    await markFinalClaimed(context.pool, job);
+    // the ticket or step starting goes with its Run, and both are the worker's doing
+    await withOrigin({ source: "worker", jobId: job.id }, () =>
+      inTransaction(context.pool, async (client) => {
+        await markClaimed(client, job);
+        await markFinalClaimed(client, job);
+        await markUpdateBranchClaimed(client, job);
+      }),
+    );
     const run = await context.pool.query<{ id: number }>(
       "SELECT id FROM runs WHERE job_id = $1 ORDER BY id DESC LIMIT 1",
       [job.id],
@@ -557,7 +744,7 @@ export function registerWorkerRoutes(
     const { workerId, attempt, result } = c.req.valid("json");
     // The job finishing and the ticket moving on happen together or not at all.
     const outcome = await aroundJob(context, id, () =>
-      inTransaction(context.pool, async (client) => {
+      inWorkerReport(context, id, async (client) => {
         const finished = await completeJob(
           client,
           { jobId: id, workerId, attempt, now: context.clock() },
@@ -568,6 +755,11 @@ export function registerWorkerRoutes(
             "SELECT id, type, payload FROM jobs WHERE id = $1",
             [id],
           );
+          const trial = readTrialMergePayload(job.rows[0]);
+          if (trial) {
+            await recordTrialMergeResult(client, job.rows[0], result);
+            return finished;
+          }
           const planning = readPlanningPayload(job.rows[0]);
           // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
           const recorded = planning
@@ -581,27 +773,39 @@ export function registerWorkerRoutes(
               : await recordStageResult(client, job.rows[0], result);
           // not a ticket stage: it may be a step of a finalization, or a job for the code host
           if (recorded.status === "no-ticket") {
-            const final = await recordFinalResult(client, job.rows[0], result);
-            if (final.status === "not-final") {
-              const openPr = readOpenPrPayload(job.rows[0]);
-              const sync = readHostSyncPayload(job.rows[0]);
-              const cleanup = readSpecCleanupPayload(job.rows[0]);
-              const ready = readPrReadyPayload(job.rows[0]);
-              const access = readRepoAccessPayload(job.rows[0]);
-              if (access)
-                await recordRepoAccess(
-                  client,
-                  access,
-                  (result ?? {}) as Record<string, unknown>,
-                  context.clock(),
-                );
-              else if (openPr)
-                await recordOpenPr(client, openPr, result, context.clock());
-              else if (sync)
-                await recordHostSync(client, sync, result, context.clock());
-              else if (cleanup)
-                await recordSpecCleanup(client, cleanup, result);
-              else if (ready) await recordPrReady(client, ready, result);
+            const updated = await recordUpdateBranchResult(
+              client,
+              job.rows[0],
+              result,
+            );
+            if (updated.status === "not-update-branch") {
+              const final = await recordFinalResult(
+                client,
+                job.rows[0],
+                result,
+              );
+              if (final.status === "not-final") {
+                const openPr = readOpenPrPayload(job.rows[0]);
+                const sync = readHostSyncPayload(job.rows[0]);
+                const cleanup = readSpecCleanupPayload(job.rows[0]);
+                const ready = readPrReadyPayload(job.rows[0]);
+                const access = readRepoAccessPayload(job.rows[0]);
+                if (access)
+                  await recordRepoAccess(
+                    client,
+                    access,
+                    (result ?? {}) as Record<string, unknown>,
+                    context.clock(),
+                    (notice) => context.notifications.notify(notice),
+                  );
+                else if (openPr)
+                  await recordOpenPr(client, openPr, result, context.clock());
+                else if (sync)
+                  await recordHostSync(client, sync, result, context.clock());
+                else if (cleanup)
+                  await recordSpecCleanup(client, cleanup, result);
+                else if (ready) await recordPrReady(client, ready, result);
+              }
             }
           }
         }
@@ -700,6 +904,29 @@ export function registerWorkerRoutes(
     return c.json(task, 200);
   });
 
+  app.openapi(trialMergeTaskRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt } = c.req.valid("query");
+    const holder = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (holder.status !== "ok") {
+      const { body, status } = refusal(holder);
+      return c.json(body, status);
+    }
+    const job = await context.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE id = $1", [id]);
+    const payload = job.rows[0] && readTrialMergePayload(job.rows[0]);
+    const task = payload && (await buildTrialMergeTask(context.pool, payload));
+    if (!task) return c.json({ error: "this job is not a trial-merge" }, 404);
+    return c.json(task, 200);
+  });
+
   app.openapi(planningTaskRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { workerId, attempt } = c.req.valid("query");
@@ -741,7 +968,7 @@ export function registerWorkerRoutes(
     const { workerId, attempt, error } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
     const outcome = await aroundJob(context, id, () =>
-      inTransaction(context.pool, async (client) => {
+      inWorkerReport(context, id, async (client) => {
         const failed = await failJob(
           client,
           { jobId: id, workerId, attempt, now: context.clock() },
@@ -761,7 +988,12 @@ export function registerWorkerRoutes(
           const sync = readHostSyncPayload(job.rows[0]);
           const access = readRepoAccessPayload(job.rows[0]);
           if (failure.status === "not-a-stage" && sync)
-            await hostSyncFailed(client, sync.projectId, context.clock());
+            await hostSyncFailed(
+              client,
+              sync.projectId,
+              context.clock(),
+              error,
+            );
           if (failure.status === "not-a-stage" && access)
             await repoAccessFailed(client, access, error, context.clock());
         }

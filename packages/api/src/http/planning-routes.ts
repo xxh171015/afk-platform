@@ -11,6 +11,7 @@ import {
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type { AppContext } from "../app.ts";
 import { aroundSpec } from "../events/announce.ts";
+import { listHosts } from "../host/code-hosts.ts";
 import {
   readRepoAccess,
   repoIdByName,
@@ -179,7 +180,32 @@ const repoRoute = createRoute({
   responses: {
     201: reply("Created", z.object({ id: Id, name: z.string() })),
     404: reply("No such project", ErrorReply),
-    409: reply("The project already has a repo with this name", ErrorReply),
+    409: reply(
+      "The project already has a repo with this name, or has repos on another kind of code host",
+      ErrorReply,
+    ),
+  },
+});
+
+const hostsRoute = createRoute({
+  method: "get",
+  path: "/hosts",
+  responses: {
+    200: reply(
+      "The code hosts the workers have credentials for, as they last reported them",
+      z.object({
+        hosts: z.array(
+          z.object({
+            host: z.string(),
+            kind: z.enum(HOST_KINDS),
+            workerId: z.string(),
+            reportedAt: z.string(),
+            tokenExpiresAt: z.string().optional(),
+            daysLeft: z.number().int().optional(),
+          }),
+        ),
+      }),
+    ),
   },
 });
 
@@ -190,11 +216,16 @@ const RepoAccessView = z.object({
     "ok",
     "not-installed",
     "missing-permissions",
+    "not-member",
     "error",
   ]),
+  hostKind: z.enum(HOST_KINDS),
   missing: z.array(z.string()).optional(),
   fixUrl: z.string().optional(),
-  // When the App can work on the repo: which of its setup files the default branch has.
+  username: z.string().optional(),
+  fix: z.string().optional(),
+  hints: z.array(z.enum(["personal-token", "developers-can-merge"])).optional(),
+  // When the App or PAT can work on the repo: which of its setup files the default branch has.
   files: z
     .object({ gates: z.boolean(), integrationCompose: z.boolean() })
     .optional(),
@@ -215,7 +246,7 @@ const repoAccessRoute = createRoute({
   request: { params: repoAccessParams },
   responses: {
     200: reply(
-      "What the last check of the GitHub App's access to the repo found",
+      "What the last check of the bot's access to the repo found",
       RepoAccessView,
     ),
     404: reply("No such project or repo", ErrorReply),
@@ -228,7 +259,7 @@ const repoAccessCheckRoute = createRoute({
   request: { params: repoAccessParams },
   responses: {
     200: reply(
-      "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+      "A worker with the code host's credentials will check the repo",
       RepoAccessView,
     ),
     404: reply("No such project or repo", ErrorReply),
@@ -562,6 +593,10 @@ export function registerPlanningRoutes(
     return c.json({ id: projectId }, 200);
   });
 
+  app.openapi(hostsRoute, async (c) =>
+    c.json({ hosts: await listHosts(pool, context.clock()) }, 200),
+  );
+
   app.openapi(repoRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const { name, role, url, defaultBranch, hostKind } = c.req.valid("json");
@@ -581,6 +616,8 @@ export function registerPlanningRoutes(
         409,
       );
     }
+    if (result.status === "mixed-hosts")
+      return c.json({ error: result.message }, 409);
     return c.json(result.repo, 201);
   });
 

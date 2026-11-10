@@ -422,19 +422,20 @@ describe("classifyDiagnoseRun", () => {
   });
 });
 
-const STAGES_OF_A_TICKET = [
+const STAGES_WITH_PROMPTS = [
   "implement",
   "review",
   "gate-fix",
   "review-fix",
   "merge-fix",
+  "update-branch",
   "final-review",
   "final-fix",
   "diagnose",
 ] as const;
 
 describe("the prompts", () => {
-  const whole = (stage: (typeof STAGES_OF_A_TICKET)[number]) =>
+  const whole = (stage: (typeof STAGES_WITH_PROMPTS)[number]) =>
     composePrompt(promptFor(stage));
 
   it("exist, and ask for the structured output the schemas accept", () => {
@@ -445,6 +446,7 @@ describe("the prompts", () => {
       "gate-fix",
       "review-fix",
       "merge-fix",
+      "update-branch",
       "final-fix",
     ] as const) {
       const prompt = whole(stage);
@@ -463,7 +465,7 @@ describe("the prompts", () => {
 
   it("is the overlay and then the stage's own prompt, for every stage", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8").trimEnd();
-    for (const stage of STAGES_OF_A_TICKET) {
+    for (const stage of STAGES_WITH_PROMPTS) {
       const prompt = whole(stage);
       expect(prompt.startsWith(overlay)).toBe(true);
       expect(prompt.endsWith(readFileSync(promptFor(stage), "utf8"))).toBe(
@@ -478,7 +480,7 @@ describe("the prompts", () => {
   });
 
   it("never says red, green, refactor: the loop is red → green only", () => {
-    for (const stage of STAGES_OF_A_TICKET)
+    for (const stage of STAGES_WITH_PROMPTS)
       expect(whole(stage)).not.toMatch(/红 → 绿 → 重构|red.green.refactor/i);
     expect(whole("implement")).toContain("只做红 → 绿");
   });
@@ -554,6 +556,7 @@ describe("the prompts", () => {
     expect(whole("final-fix")).toContain("不论来自哪一轴");
     for (const file of [
       PROMPTS.mergeFix,
+      PROMPTS.updateBranch,
       PROMPTS.integrationImplement,
       PROMPTS.diagnose,
     ])
@@ -561,6 +564,9 @@ describe("the prompts", () => {
         "/home/agent/.cursor/skills/",
       );
     expect(readFileSync(PROMPTS.mergeFix, "utf8")).toContain("不读 skill");
+    expect(readFileSync(PROMPTS.updateBranch, "utf8")).toContain(
+      "git merge <defaultBranch>",
+    );
   });
 
   it("makes the reviews run code-review from the fixed point in run.json", () => {
@@ -595,6 +601,7 @@ describe("the prompts", () => {
     expect(promptFor("gate-fix")).toBe(PROMPTS.gateFix);
     expect(promptFor("review-fix")).toBe(PROMPTS.reviewFix);
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
+    expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
   });
 
   it("gives an integration ticket's implement its own prompt, which says to write the e2e against the real services", () => {

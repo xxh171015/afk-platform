@@ -1,19 +1,47 @@
 import { type HostKind, hostKindOfUrl } from "./host-kinds.ts";
 
 export interface RepoRef {
-  owner: string;
+  owner: string; // the namespace: one segment on GitHub, nested groups (a/b/c) on GitLab
   name: string;
+  // the code host, where a worker with credentials for several picks the one the repo is on
+  host?: string;
 }
 
-// https://github.com/o/n(.git), git@github.com:o/n.git, ssh://git@github.com/o/n.git
-export function parseRepoUrl(url: string): RepoRef {
+interface Address {
+  host: string;
+  path: string[]; // the namespace (one segment on GitHub, any number of nested groups on GitLab), then the repo
+}
+
+// https://host/o/n(.git), git@host:o/n.git, ssh://git@host(:port)/o/n.git; on GitLab o may be a/b/c.
+function readAddress(url: string): Address | null {
+  const trimmed = url.trim();
   const match =
-    /^(?:https?:\/\/[^/]+\/|ssh:\/\/[^/]+\/|[^@/\s]+@[^:/\s]+:)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(
-      url.trim(),
-    );
-  if (!match?.[1] || !match[2])
+    /^(?:https?|ssh):\/\/(?:[^@/\s]+@)?([^/:\s]+)(?::\d+)?\/(\S+)$/i.exec(
+      trimmed,
+    ) ?? /^[^@/\s]+@([^:/\s]+):(\S+)$/.exec(trimmed);
+  if (!match?.[1] || !match[2]) return null;
+  const path = match[2]
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "")
+    .split("/");
+  if (path.length < 2 || path.some((segment) => segment === "")) return null;
+  return { host: match[1].toLowerCase(), path };
+}
+
+export function parseRepoUrl(url: string): RepoRef {
+  const address = readAddress(url);
+  if (!address)
     throw new RangeError(`not a repository address: ${JSON.stringify(url)}`);
-  return { owner: match[1], name: match[2] };
+  return {
+    owner: address.path.slice(0, -1).join("/"),
+    name: address.path.at(-1) as string,
+  };
+}
+
+// The code host a repo is on, by its name in the address (lower case, no port); null for no repository address.
+// The platform knows a host's kind from the workers that have credentials for it.
+export function repoHost(url: string): string | null {
+  return readAddress(url)?.host ?? null;
 }
 
 export function tryParseRepoUrl(url: string): RepoRef | null {
@@ -24,15 +52,12 @@ export function tryParseRepoUrl(url: string): RepoRef | null {
   }
 }
 
+// Where the repo's pages are: the https address keeps its port, an ssh one is browsed at its host.
 function originOf(cloneUrl: string): string | null {
-  const trimmed = cloneUrl.trim();
-  const https = /^(https?):\/\/([^/]+)\//i.exec(trimmed);
-  if (https) return `https://${https[2]}`;
-  const ssh = /^ssh:\/\/(?:[^@/]+@)?([^/]+)\//i.exec(trimmed);
-  if (ssh) return `https://${ssh[1]}`;
-  const scp = /^[^@/\s]+@([^:/\s]+):/.exec(trimmed);
-  if (scp) return `https://${scp[1]}`;
-  return null;
+  const https = /^https?:\/\/(?:[^@/]+@)?([^/]+)\//i.exec(cloneUrl.trim());
+  if (https) return `https://${https[1]}`;
+  const host = repoHost(cloneUrl);
+  return host ? `https://${host}` : null;
 }
 
 function browseRoot(

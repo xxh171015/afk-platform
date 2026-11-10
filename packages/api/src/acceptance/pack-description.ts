@@ -1,4 +1,9 @@
-import { formatDisplayId } from "@afk/shared";
+import {
+  formatDisplayId,
+  HOST_KIND_LABELS,
+  type HostKind,
+  pullPhrase,
+} from "@afk/shared";
 import { pageUrl } from "../page-url.ts";
 import type { AcceptancePack } from "./pack.ts";
 
@@ -17,11 +22,12 @@ export function renderPackSection(
 ): { section: string; summary: string } {
   const delivery = specDeliveryUrl(specId);
   const spec = formatDisplayId("spec", specId);
+  const kind: HostKind = pack.hostKind ?? "github";
   const section = [
-    planningDocsLines(pack, repo),
+    planningDocsLines(pack, repo, kind),
     mergeOrderLines(pack),
     repoLines(pack, repo),
-    integrationLines(pack),
+    integrationLines(pack, kind),
     `See ${spec} on the platform: ${delivery}`,
   ]
     .filter((block) => block.length > 0)
@@ -31,7 +37,7 @@ export function renderPackSection(
   const unverified = criteria.filter((c) => c.status === "unverified").length;
   const verified = criteria.filter((c) => c.status === "verified").length;
   const summary = [
-    `The acceptance pack for ${spec} ${repo} is too long for a GitHub description.`,
+    `The acceptance pack for ${spec} ${repo} is too long for a ${HOST_KIND_LABELS[kind]} description.`,
     mergeOrderLines(pack),
     `Acceptance criteria: ${unverified} unverified, ${verified} verified.`,
     `See ${spec} on the platform: ${delivery}`,
@@ -40,12 +46,17 @@ export function renderPackSection(
 }
 
 // Only in the planning repo's pull request: that is where the planning docs are, or would have been.
-function planningDocsLines(pack: AcceptancePack, repo: string): string {
+function planningDocsLines(
+  pack: AcceptancePack,
+  repo: string,
+  kind: HostKind,
+): string {
   const docs = pack.planningDocs;
   if (!docs || docs.repo !== repo || docs.state === "unchanged") return "";
+  const phrase = pullPhrase(kind);
   return docs.state === "waived"
-    ? "## Planning docs\n\n**Left out**: the planning docs did not apply to the default branch and were given up, so this pull request does not carry them."
-    : "## Planning docs\n\nThe first commit of this pull request is the planning docs (glossary, ADRs) the spec was planned with, committed by the platform.";
+    ? `## Planning docs\n\n**Left out**: the planning docs did not apply to the default branch and were given up, so this ${phrase} does not carry them.`
+    : `## Planning docs\n\nThe first commit of this ${phrase} is the planning docs (glossary, ADRs) the spec was planned with, committed by the platform.`;
 }
 
 function mergeOrderLines(pack: AcceptancePack): string {
@@ -133,12 +144,15 @@ function uncertaintyLines(section: AcceptancePack["repos"][number]): string {
   ].join("\n");
 }
 
-function integrationLines(pack: AcceptancePack): string {
+function integrationLines(pack: AcceptancePack, kind: HostKind): string {
   const integration = pack.integration;
   if (!integration) return "";
   const lines = ["## Integration"];
   if (integration.failedBeforePullRequest) {
-    lines.push("", "Opened although the e2e before the pull requests failed:");
+    lines.push(
+      "",
+      `Opened although the e2e before the ${pullPhrase(kind)}s failed:`,
+    );
     for (const ticket of integration.failedBeforePullRequest.tickets) {
       lines.push(
         `- ${ticket.displayId} ${ticket.title}: ${ticket.e2e.displayId} ${ticket.e2e.result ?? "?"}`,

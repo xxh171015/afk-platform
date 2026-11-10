@@ -188,3 +188,88 @@ function StepItem({
     </li>
   );
 }
+
+// Runs that merged the default branch into a spec still in development, shown apart from 收尾 so they
+// are not mistaken for finishing steps.
+export function UpdateBranchRuns({ runs }: { runs: readonly FinalRunRow[] }) {
+  const now = useNow(runs.some((run) => run.result === null));
+  const repos = [...new Set(runs.map((run) => run.repo))];
+  return (
+    <>
+      {repos.map((repo) => {
+        const ofRepo = runs.filter((run) => run.repo === repo);
+        const live = ofRepo.find((run) => run.result === null);
+        return (
+          <div
+            key={repo}
+            className="mb-3 rounded-md border bg-card p-4"
+            data-testid={`update-branch-${repo}`}
+          >
+            <h3 className="mb-3 text-sm font-medium">{repo}</h3>
+            {live ? (
+              <div className="mb-3 space-y-2">
+                <p className="text-xs">
+                  正在运行{" "}
+                  <a
+                    href={paths.run(live.id)}
+                    className="font-mono text-primary"
+                  >
+                    {live.displayId}
+                  </a>{" "}
+                  {stageLabel[live.stage] ?? live.stage}
+                  {live.startedAt
+                    ? ` · 已运行 ${formatSeconds(runElapsedMs(live, now))}`
+                    : ""}
+                </p>
+                <RunLog runId={live.id} />
+              </div>
+            ) : null}
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[520px] text-left text-xs">
+                <thead className="border-b bg-surface text-muted-foreground">
+                  <tr>
+                    <th className="p-2.5 font-medium">编号</th>
+                    <th className="p-2.5 font-medium">步骤</th>
+                    <th className="p-2.5 font-medium">结果</th>
+                    <th className="p-2.5 font-medium">耗时</th>
+                    <th className="p-2.5 font-medium">开始时间</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {ofRepo.map((run) => (
+                    <tr key={run.id} className="relative hover:bg-accent">
+                      <td className="p-2.5">
+                        <a
+                          href={paths.run(run.id)}
+                          className="after:absolute after:inset-0 font-mono text-xs text-primary hover:underline"
+                        >
+                          {run.displayId}
+                        </a>
+                      </td>
+                      <td className="p-2.5" title={run.stage}>
+                        {stageText(run)}
+                      </td>
+                      <td className="p-2.5" title={run.result ?? "running"}>
+                        {resultText(run.result)}
+                      </td>
+                      <td className="whitespace-nowrap p-2.5">
+                        {formatSeconds(runElapsedMs(run, now))}
+                      </td>
+                      <td className="whitespace-nowrap p-2.5">
+                        {run.startedAt ? (
+                          <RelativeTime iso={run.startedAt} />
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}

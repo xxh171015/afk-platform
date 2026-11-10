@@ -2,6 +2,8 @@ import {
   type AcceptancePackView,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
+  pauseReasonLabel,
+  pullPhrase,
   type StructuredBrief,
 } from "@afk/shared";
 
@@ -365,7 +367,7 @@ function planningLines(p: PlanningLike): string[] {
 
 function pausedSpecLines(s: PausedSpecLike): string[] {
   return [
-    `${s.displayId}  paused  ${s.title}: ${s.reason}`,
+    `${s.displayId}  paused  ${s.title}: ${pauseReasonLabel(s.reason)}`,
     ...waitingLines(s.blocking, s.waitingSince),
   ];
 }
@@ -542,12 +544,13 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 export function acceptancePackText(pack: AcceptancePackView): string {
   const order = pack.mergeOrder;
   const integration = pack.integration;
+  const phrase = pullPhrase(pack.hostKind === "gitlab" ? "gitlab" : "github");
   return [
     "acceptance pack:",
     // what a person must not miss: the e2e before the pull requests failed and they were let through
     ...(integration?.failedBeforePullRequest
       ? [
-          "  !! the e2e before the pull requests failed; the pull requests were opened anyway",
+          `  !! the e2e before the ${phrase}s failed; the ${phrase}s were opened anyway`,
           ...integration.failedBeforePullRequest.tickets.flatMap((t) => [
             `     ${t.displayId}  ${t.title}: ${t.e2e.displayId} ${t.e2e.result ?? "?"}`,
             ...(t.diagnosis
@@ -567,7 +570,7 @@ export function acceptancePackText(pack: AcceptancePackView): string {
         ]
       : pack.planningDocs?.state === "committed"
         ? [
-            `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s pull request`,
+            `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s ${phrase}`,
           ]
         : []),
     ...pack.orderBroken.map((b) => `  ${brokenOrderLine(b)}`),
@@ -580,8 +583,8 @@ export function acceptancePackText(pack: AcceptancePackView): string {
       return [
         `  ${repo.repo}:`,
         ...(repo.pullRequest
-          ? [`    pull request: ${pullRequestRow(repo.pullRequest)}`]
-          : ["    pull request: none yet"]),
+          ? [`    ${phrase}: ${pullRequestRow(repo.pullRequest)}`]
+          : [`    ${phrase}: none yet`]),
         ...section(
           "acceptance criteria",
           repo.tickets.flatMap((t) => [
@@ -683,7 +686,9 @@ export function specText(view: {
 }): string {
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
-    ...(view.spec.pauseReason ? [`paused: ${view.spec.pauseReason}`] : []),
+    ...(view.spec.pauseReason
+      ? [`paused: ${pauseReasonLabel(view.spec.pauseReason)}`]
+      : []),
     ...(view.spec.planning?.repo
       ? [
           `planning repo ${view.spec.planning.repo}: ${view.spec.planning.state ?? "not confirmed yet"}${view.spec.planning.sha ? ` at ${view.spec.planning.sha}` : ""}${view.spec.planning.conflict.length ? ` (did not apply: ${view.spec.planning.conflict.join(", ")})` : ""}`,

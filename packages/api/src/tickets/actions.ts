@@ -1,18 +1,28 @@
 import {
   formatDisplayId,
+  type HumanAction,
   retryPlan,
   type SpecState,
+  specResumeTarget,
   specTransition,
   type TicketState,
   ticketTransition,
 } from "@afk/shared";
 import { readTicketEditFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
 import {
   CLEANUP_GRACE_SECONDS,
+  enqueueHostSync,
   enqueueSpecCleanup,
   inSeconds,
 } from "../host/host-jobs.ts";
+import { dropPotentialConflicts } from "../host/trial-merge.ts";
+import {
+  enqueueFinalReviewIfWaiting,
+  enqueueUpdateBranch,
+  holdFinalReviewForUpdate,
+} from "../host/update-branch.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import {
   inTransaction,
@@ -112,6 +122,12 @@ export async function retryTicket(
         parkedRetryNote(note),
       ],
     );
+    await recordAction(
+      client,
+      "retry",
+      { specId: ticket.spec_id, ticketId },
+      { mode, note: parkedRetryNote(note) },
+    );
     await schedulePass(client, ticket.spec_id);
     const after = await client.query<{ state: TicketState }>(
       "SELECT state FROM tickets WHERE id = $1",
@@ -160,6 +176,12 @@ export async function approveProtected(
       [ticketId, next.state, allowed],
     );
     await followApprovedPaths(client, ticketId);
+    await recordAction(
+      client,
+      "approve-protected",
+      { specId: ticket.spec_id, ticketId },
+      { paths: approved },
+    );
     await enqueueStageJob(
       client,
       {
@@ -195,6 +217,12 @@ export async function allowPaths(
       [ticketId, allowed],
     );
     await followApprovedPaths(client, ticketId);
+    await recordAction(
+      client,
+      "allow-paths",
+      { specId: ticket.spec_id, ticketId },
+      { paths },
+    );
     return { status: "ok", allowed };
   });
 }
@@ -303,6 +331,15 @@ export async function editTicket(
       [ticketId, ...changes.map(([, value]) => value)],
     );
     await snapshotTicket(client, ticketId);
+    await recordAction(
+      client,
+      "edit-ticket",
+      { specId: ticket.spec_id, ticketId },
+      {
+        version: updated.rows[0]?.content_version,
+        fields: changes.map(([column]) => column),
+      },
+    );
     return {
       status: "ok",
       contentVersion: updated.rows[0]?.content_version as number,
@@ -408,6 +445,12 @@ export async function cancelTicket(
         }
       }
     }
+    await recordAction(
+      client,
+      "cancel-ticket",
+      { specId: ticket.spec_id, ticketId },
+      { cascade, cancelled: outcome.cancelled, blocked: outcome.blocked },
+    );
     await schedulePass(client, ticket.spec_id);
     return { status: "ok", ...outcome };
   });
@@ -430,28 +473,107 @@ async function lockedSpecState(
   return current.rows[0]?.state;
 }
 
-// A spec the platform paused (its agent time ran out) goes on after a person says how much more it may use.
-export async function resumeSpec(
+// A paused spec goes on: retry may add agent time (the old resume), allow does not.
+async function unpauseSpec(
   pool: pg.Pool,
   specId: number,
+  action: Extract<HumanAction, "retry" | "allow">,
   extraSeconds: number,
 ): Promise<ActionResult<{ state: SpecState }>> {
   return inTransaction(pool, async (client) => {
     const state = await lockedSpecState(client, specId);
     if (!state) return { status: "no-ticket" };
-    const next = specTransition(state, "resume");
-    if (!next.ok) return refused(next.reason);
-    await client.query(
-      "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
-      [specId, next.state, extraSeconds],
-    );
-    await schedulePass(client, specId);
-    const after = await client.query<{ state: SpecState }>(
-      "SELECT state FROM specs WHERE id = $1",
+    const allowed = specTransition(state, "resume");
+    if (!allowed.ok) return refused(allowed.reason);
+    const finals = await client.query(
+      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
       [specId],
     );
-    return { status: "ok", state: after.rows[0]?.state as SpecState };
+    const pulls = await client.query<{
+      state: "open" | "closed" | "merged";
+    }>("SELECT state FROM pull_requests WHERE spec_id = $1", [specId]);
+    const dest = specResumeTarget({
+      hasFinalizations: (finals.rowCount ?? 0) > 0,
+      pullStates: pulls.rows.map((row) => row.state),
+    });
+    await client.query(
+      "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
+      [specId, dest, extraSeconds],
+    );
+    await recordAction(
+      client,
+      action,
+      { specId },
+      extraSeconds > 0 ? { extraSeconds } : {},
+    );
+    await schedulePass(client, specId);
+    const after = await client.query<{ state: SpecState; project_id: number }>(
+      "SELECT state, project_id FROM specs WHERE id = $1",
+      [specId],
+    );
+    const row = after.rows[0];
+    if (
+      row &&
+      (row.state === "running" ||
+        row.state === "finalizing" ||
+        row.state === "awaiting-review" ||
+        row.state === "partially-merged")
+    )
+      await enqueueHostSync(client, row.project_id);
+    if (row?.state === "finalizing") {
+      const repos = await client.query<{ repo_id: number }>(
+        "SELECT repo_id FROM finalizations WHERE spec_id = $1 AND state = 'active' ORDER BY repo_id",
+        [specId],
+      );
+      for (const { repo_id: repoId } of repos.rows) {
+        if (
+          action === "retry" &&
+          (await holdFinalReviewForUpdate(client, specId, repoId))
+        )
+          continue;
+        await enqueueFinalReviewIfWaiting(client, specId, repoId);
+      }
+    }
+    if (
+      action === "retry" &&
+      (row?.state === "awaiting-review" || row?.state === "partially-merged")
+    ) {
+      const conflicted = await client.query<{
+        repo_id: number;
+        default_sha: string | null;
+      }>(
+        `SELECT p.repo_id, r.default_sha
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+         WHERE p.spec_id = $1 AND p.state = 'open' AND p.conflicts_with_default`,
+        [specId],
+      );
+      for (const pr of conflicted.rows) {
+        if (pr.default_sha)
+          await enqueueUpdateBranch(client, {
+            specId,
+            repoId: pr.repo_id,
+            mainSha: pr.default_sha,
+          });
+      }
+    }
+    if (row?.state === "merged") await enqueueSpecCleanup(client, { specId });
+    return { status: "ok", state: row?.state as SpecState };
   });
+}
+
+export async function resumeSpec(
+  pool: pg.Pool,
+  specId: number,
+  extraSeconds = 0,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return unpauseSpec(pool, specId, "retry", extraSeconds);
+}
+
+export async function allowSpec(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ state: SpecState }>> {
+  return unpauseSpec(pool, specId, "allow", 0);
 }
 
 // The whole spec is given up. Every ticket that has not finished is cancelled (one under way too), the jobs of the
@@ -523,6 +645,7 @@ export async function cancelSpec(
        WHERE state IN ('queued', 'running') AND (payload->>'specId')::int = $1`,
       [specId],
     );
+    await dropPotentialConflicts(client, specId);
     await client.query(
       `UPDATE runs SET finished_at = now(), result = 'cancelled',
          duration_ms = LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int,
@@ -543,6 +666,12 @@ export async function cancelSpec(
       `SELECT r.name AS repo, p.number, p.url FROM pull_requests p JOIN repos r ON r.id = p.repo_id
        WHERE p.spec_id = $1 AND p.state = 'open' ORDER BY p.id`,
       [specId],
+    );
+    await recordAction(
+      client,
+      "cancel-spec",
+      { specId },
+      { cancelled: cancelled.map((id) => formatDisplayId("ticket", id)) },
     );
     return {
       status: "ok",
@@ -574,6 +703,7 @@ export async function retrySpecCleanup(
     if (waiting.rowCount)
       return refused("a clean-up of this spec is already waiting or running");
     await enqueueSpecCleanup(client, { specId });
+    await recordAction(client, "retry-cleanup", { specId });
     return { status: "ok", queued: true };
   });
 }

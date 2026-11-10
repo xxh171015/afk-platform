@@ -111,6 +111,28 @@ describe("the log of a run", () => {
     expect(state.asked.every((q) => q.attempt === null)).toBe(true);
   });
 
+  it("says when the log was purged under the retention policy", async () => {
+    const server = fakeServer({
+      "GET /runs/5/logs": () => ({
+        json: {
+          attempt: 1,
+          offset: 0,
+          nextOffset: 0,
+          size: 0,
+          text: "",
+          finished: true,
+          purgedAt: "2026-04-01T00:00:00.000Z",
+        },
+      }),
+    });
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    expect(
+      await screen.findByText("日志已于 2026-04-01 按保留策略清理"),
+    ).toBeTruthy();
+    expect(screen.queryByText("还没有日志。")).toBeNull();
+    expect(screen.queryByText(/无法加载日志/)).toBeNull();
+  });
+
   it("says it is loading, and says what went wrong", async () => {
     const server = fakeServer({
       "GET /runs/5/logs": () => ({

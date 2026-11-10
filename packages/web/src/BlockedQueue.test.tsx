@@ -285,6 +285,38 @@ describe("the queue of what waits for a person", () => {
     expect(fake.calls.filter((call) => call.startsWith("POST"))).toEqual([]);
   });
 
+  it("lists the platform's and outside services' problems after the specs', under a heading of their own", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [
+          ticket(1, "agent-gave-up", { failureSource: "agent" }),
+          ticket(2, "job-failed", { failureSource: "external" }),
+        ],
+        items: [
+          { kind: "ticket", id: 1 },
+          { kind: "ticket", id: 2 },
+        ],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    const group = screen.getByRole("region", { name: "平台问题" });
+    expect(within(group).getByTestId("blocked-T-2")).toBeTruthy();
+    expect(within(group).queryByTestId("blocked-T-1")).toBeNull();
+    expect(within(group).getByText("外部服务")).toBeTruthy();
+  });
+
+  it("shows no platform heading when every problem is a spec's own", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [ticket(1, "agent-gave-up", { failureSource: "agent" })],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    expect(screen.queryByRole("region", { name: "平台问题" })).toBeNull();
+  });
+
   it("shows the paths the gate found for protected-path-changed and the gate's log for a failed gate", async () => {
     const { fake } = server(
       queue({
@@ -631,7 +663,7 @@ describe("paused specs and stopped overall reviews", () => {
     id: 1,
     displayId: "S-1",
     title: "Order export",
-    reason: "the agent time limit of the spec was reached",
+    reason: "budget-exhausted",
   };
   const stoppedBrief = brief({
     stage: "final-merge",
@@ -655,7 +687,7 @@ describe("paused specs and stopped overall reviews", () => {
     }),
   };
 
-  it("shows why a spec is paused and resumes it with the agent hours you give", async () => {
+  it("shows why a spec is paused and retries it with the agent hours you give", async () => {
     let current = queue({ specs: [paused] });
     const fake = fakeServer({
       "GET /blocked": () => ({ json: current }),
@@ -668,16 +700,73 @@ describe("paused specs and stopped overall reviews", () => {
     let resumed: unknown;
     renderWithApp(<BlockedQueue />, fake);
     const spec = within(await screen.findByTestId("paused-S-1"));
-    expect(
-      spec.getByText(/the agent time limit of the spec was reached/),
-    ).toBeTruthy();
+    expect(spec.getByText("agent 时间用完")).toBeTruthy();
     expect(spec.queryByLabelText("这一次 Run 的说明")).toBeNull();
     fireEvent.change(spec.getByLabelText("S-1 追加的 agent 小时"), {
       target: { value: "2.5" },
     });
-    fireEvent.click(spec.getByRole("button", { name: "恢复" }));
+    fireEvent.click(spec.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
     expect(resumed).toEqual({ extraSeconds: 9000 });
+  });
+
+  it("retries an update-branch pause without asking for extra hours", async () => {
+    let current = queue({
+      specs: [{ ...paused, reason: "update-branch-conflict" }],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/resume": ({ body }) => {
+        resumed = body;
+        current = queue();
+        return { json: { state: "running" } };
+      },
+    });
+    let resumed: unknown;
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    expect(spec.getByText("合 main 有冲突")).toBeTruthy();
+    expect(spec.queryByLabelText("S-1 追加的 agent 小时")).toBeNull();
+    fireEvent.click(spec.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(resumed).toEqual({});
+  });
+
+  it("lets a person allow a paused spec through, or cancel it", async () => {
+    let current = queue({ specs: [paused] });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/allow": () => {
+        allowed = true;
+        current = queue();
+        return { json: { state: "running" } };
+      },
+      "POST /specs/1/cancel": () => {
+        cancelled = true;
+        current = queue();
+        return {
+          json: { state: "cancelled", cancelled: [], pullRequests: [] },
+        };
+      },
+    });
+    let allowed = false;
+    let cancelled = false;
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    fireEvent.click(spec.getByRole("button", { name: "放行" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(allowed).toBe(true);
+
+    current = queue({ specs: [paused] });
+    renderWithApp(<BlockedQueue />, fake);
+    fireEvent.click(
+      within(await screen.findByTestId("paused-S-1")).getByRole("button", {
+        name: "取消需求",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "永久取消 S-1" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(cancelled).toBe(true);
   });
 
   it("lets the hours field be emptied and typed again, and only accepts what the API accepts", async () => {
@@ -692,7 +781,7 @@ describe("paused specs and stopped overall reviews", () => {
       "S-1 追加的 agent 小时",
     ) as HTMLInputElement;
     const resume = spec.getByRole("button", {
-      name: "恢复",
+      name: "重试",
     }) as HTMLButtonElement;
     const ok = (value: string) => {
       fireEvent.change(field, { target: { value } });
@@ -720,7 +809,7 @@ describe("paused specs and stopped overall reviews", () => {
       target: { value: "0" },
     });
     expect(
-      (spec.getByRole("button", { name: "恢复" }) as HTMLButtonElement)
+      (spec.getByRole("button", { name: "重试" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });
@@ -797,6 +886,30 @@ describe("paused specs and stopped overall reviews", () => {
     expect(item.queryByRole("button", { name: "仍然开 PR" })).toBeNull();
   });
 
+  it("says MR on a GitLab spec's e2e before the pull requests", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            finalizations: [
+              {
+                ...stopped,
+                repo: "(integration)",
+                step: "final-e2e",
+                blockedReason: "final-e2e-failed",
+                hostKind: "gitlab",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("final-S-1-(integration)"));
+    expect(item.getByText(/开 MR 前的联调/)).toBeTruthy();
+    expect(item.getByRole("button", { name: "仍然开 MR" })).toBeTruthy();
+  });
+
   it("shows a resume refusal", async () => {
     const fake = fakeServer({
       "GET /blocked": () => ({ json: queue({ specs: [paused] }) }),
@@ -808,7 +921,7 @@ describe("paused specs and stopped overall reviews", () => {
     renderWithApp(<BlockedQueue />, fake);
     fireEvent.click(
       within(await screen.findByTestId("paused-S-1")).getByRole("button", {
-        name: "恢复",
+        name: "重试",
       }),
     );
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -882,6 +995,23 @@ describe("pull requests a person has to look at", () => {
     expect(item.getByText(/读取失败：GitHub answered 404/)).toBeTruthy();
     expect(item.queryByText(/关闭未合并/)).toBeNull();
   });
+
+  it("says MR when the closed pull request is on GitLab", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            pullRequests: [pull({ hostKind: "gitlab" })],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("pull-S-1-backend"));
+    expect(item.getByText(/这个 MR 被关闭了/)).toBeTruthy();
+    expect(item.getByText(/平台从不操作/)).toBeTruthy();
+    expect(item.getByText(/MR，请你决定/)).toBeTruthy();
+  });
 });
 
 describe("a clean-up that did not finish", () => {
@@ -932,6 +1062,32 @@ describe("a draft pull request that could not be turned ready", () => {
     const item = within(await screen.findByTestId("ready-S-1-frontend"));
     expect(item.getByText(/refused to mark pull request 2 ready/)).toBeTruthy();
     expect(item.getByText(/仍是 draft/)).toBeTruthy();
+  });
+
+  it("says MR when the draft is on GitLab", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            readyFailures: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "frontend",
+                number: 2,
+                url: "https://gitlab.example/me/shop-frontend/-/merge_requests/2",
+                error: "GitLab refused",
+                hostKind: "gitlab",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("ready-S-1-frontend"));
+    expect(item.getByText(/的 draft MR 没能转为 ready/)).toBeTruthy();
+    expect(item.getByText(/这个 MR 仍是 draft/)).toBeTruthy();
   });
 });
 
@@ -1060,7 +1216,7 @@ describe("ranked waiting cards", () => {
                 id: 2,
                 displayId: "S-2",
                 title: "Paused other",
-                reason: "the agent time limit of the spec was reached",
+                reason: "budget-exhausted",
                 blocking: blocking({ spec: true }),
                 waitingSince: "2026-10-01T00:00:00.000Z",
               },

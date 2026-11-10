@@ -1,4 +1,11 @@
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +20,7 @@ import {
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 import { LogStore } from "./log-store.ts";
+import { retainLogs } from "./retention.ts";
 
 let db: TestDatabase;
 let api: RunningApi;
@@ -55,6 +63,7 @@ interface Slice {
   size: number;
   text: string;
   finished: boolean;
+  purgedAt: string | null;
   error?: string;
 }
 async function readLog(runId: number, query = "") {
@@ -79,7 +88,7 @@ async function appendLog(
 }
 
 // A running spec with one ticket; claiming its implement job starts the Run.
-async function claimedRun(worker: FakeWorker) {
+async function claimedRun(worker: FakeWorker, slug = "s") {
   const project = await post("/projects", { name: "shop" });
   await post(`/projects/${project.body.id}/repos`, {
     url: "git@x:backend",
@@ -88,7 +97,7 @@ async function claimedRun(worker: FakeWorker) {
   const spec = await post("/specs", {
     projectId: project.body.id,
     type: "feature",
-    slug: "s",
+    slug,
     title: "S",
   });
   await post(
@@ -168,6 +177,7 @@ describe("appending and reading", () => {
       size: 23,
       text: "first line\nsecond line\n",
       finished: false,
+      purgedAt: null,
     });
 
     const rest = await readLog(runId, "?offset=11");
@@ -351,5 +361,145 @@ describe("the log store", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("log retention", () => {
+  const DAY = 24 * 60 * 60;
+
+  async function specIdOf(runId: number) {
+    const { rows } = await db.pool.query<{ spec_id: number }>(
+      "SELECT spec_id FROM runs WHERE id = $1",
+      [runId],
+    );
+    return rows[0].spec_id;
+  }
+
+  async function cancelAt(specId: number, at: Date) {
+    await db.pool.query("UPDATE specs SET state = 'cancelled' WHERE id = $1", [
+      specId,
+    ]);
+    await db.pool.query(
+      `UPDATE events SET at = $2 WHERE spec_id = $1 AND type = 'spec' AND to_state = 'cancelled'`,
+      [specId, at],
+    );
+  }
+
+  function sweep() {
+    return retainLogs({
+      pool: db.pool,
+      logs: new LogStore(logDir),
+      now: clock.now(),
+      retentionDays: 90,
+    });
+  }
+
+  it("deletes logs of a spec cancelled 90 days ago and leaves newer ones", async () => {
+    const expired = new FakeWorker(api.url, "e", []);
+    const kept = new FakeWorker(api.url, "k", []);
+    const oldRun = await claimedRun(expired, "old");
+    const liveRun = await claimedRun(kept, "live");
+    await appendLog(oldRun.runId, "e", 1, "old log\n");
+    await appendLog(liveRun.runId, "k", 1, "live log\n");
+
+    await cancelAt(await specIdOf(oldRun.runId), clock.now());
+    clock.advanceSeconds(89 * DAY);
+    await sweep();
+    expect((await readLog(oldRun.runId)).body.text).toBe("old log\n");
+    expect((await readLog(liveRun.runId)).body.text).toBe("live log\n");
+    expect((await readLog(oldRun.runId)).body.purgedAt).toBeNull();
+
+    clock.advanceSeconds(DAY);
+    await sweep();
+    const purged = await readLog(oldRun.runId);
+    expect(purged.status).toBe(200);
+    expect(purged.body).toMatchObject({
+      text: "",
+      size: 0,
+      purgedAt: clock.now().toISOString(),
+    });
+    await expect(
+      readFile(join(logDir, `run-${oldRun.runId}`, "attempt-1.log"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readLog(liveRun.runId)).body.text).toBe("live log\n");
+    const stats = await db.pool.query<{ logs_purged_runs: number }>(
+      "SELECT logs_purged_runs FROM instance",
+    );
+    expect(stats.rows[0].logs_purged_runs).toBe(1);
+  });
+
+  it("deletes logs of a spec merged 90 days ago", async () => {
+    const worker = new FakeWorker(api.url, "m", []);
+    const { runId } = await claimedRun(worker, "merged");
+    await appendLog(runId, "m", 1, "merged log\n");
+    const specId = await specIdOf(runId);
+    const { rows } = await db.pool.query<{ repo_id: number }>(
+      "SELECT repo_id FROM runs WHERE id = $1",
+      [runId],
+    );
+    const at = clock.now();
+    await db.pool.query("UPDATE specs SET state = 'merged' WHERE id = $1", [
+      specId,
+    ]);
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha, synced_at, merged_at)
+       VALUES ($1, $2, 1, 'http://x/1', 'merged', 'abc', $3, $3)`,
+      [specId, rows[0].repo_id, at],
+    );
+    clock.advanceSeconds(90 * DAY);
+    await sweep();
+    expect((await readLog(runId)).status).toBe(200);
+    expect((await readLog(runId)).body.purgedAt).toBe(
+      clock.now().toISOString(),
+    );
+    expect((await readLog(runId)).body.text).toBe("");
+  });
+});
+
+describe("orphan run directories at the logs root", () => {
+  it("removes run-* directories there and leaves instance subdirectories alone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "afk-log-root-"));
+    try {
+      await mkdir(join(root, "run-3"));
+      await appendFile(join(root, "run-3", "old.log"), "x");
+      await mkdir(join(root, "a1b2c3", "run-9"), { recursive: true });
+      await appendFile(join(root, "a1b2c3", "run-9", "attempt-1.log"), "keep");
+      await appendFile(join(root, "run-notes"), "not a dir");
+      await mkdir(join(root, "other"));
+      const result = await retainLogs({
+        pool: db.pool,
+        logs: new LogStore(logDir),
+        now: clock.now(),
+        logDir,
+        orphanRoot: root,
+      });
+      expect(result.purgedOrphans).toBe(1);
+      const left = await readdir(root);
+      expect(left).toEqual(
+        expect.arrayContaining(["a1b2c3", "run-notes", "other"]),
+      );
+      expect(left).not.toContain("run-3");
+      expect(
+        await readFile(join(root, "a1b2c3", "run-9", "attempt-1.log"), "utf8"),
+      ).toBe("keep");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat the live log directory's run-* as orphans", async () => {
+    await mkdir(join(logDir, "run-99"));
+    await appendFile(join(logDir, "run-99", "live.log"), "keep");
+    const result = await retainLogs({
+      pool: db.pool,
+      logs: new LogStore(logDir),
+      now: clock.now(),
+      logDir,
+      orphanRoot: logDir,
+    });
+    expect(result.purgedOrphans).toBe(0);
+    expect(await readFile(join(logDir, "run-99", "live.log"), "utf8")).toBe(
+      "keep",
+    );
   });
 });

@@ -1,5 +1,6 @@
-import { formatDisplayId, type SpecState } from "@afk/shared";
+import { FINAL_E2E_FAILED, formatDisplayId, type SpecState } from "@afk/shared";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
 import { startOpeningPullRequests } from "../host/pull-requests.ts";
 import { ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
@@ -16,7 +17,6 @@ import type { ActionResult } from "../tickets/actions.ts";
 // not to a ticket (docs/specs/m2-platform.md「收尾、PR 与合并」).
 
 const MAX_JOB_FAILURES = 3;
-export const FINAL_E2E_FAILED = "final-e2e-failed";
 const ENVIRONMENT_FAILED = "integration-environment-failed";
 
 // where a ticket is in the current round
@@ -341,6 +341,7 @@ export async function waiveFinalE2e(
       "UPDATE final_e2e SET state = 'waived', blocked_reason = NULL WHERE id = $1",
       [round.id],
     );
+    await recordAction(client, "waive-final", { specId });
     await startOpeningPullRequests(client, specId);
     return { status: "ok", waived: true };
   });

@@ -53,6 +53,18 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
   await migrate(db.pool);
   const logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   const api = await listen(createApp({ pool: db.pool, logDir }));
+  // the hosts a worker with a GitHub App and a gitlab.com PAT reports at start
+  await fetch(`${api.url}/worker/hosts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workerId: "w1",
+      hosts: [
+        { host: "github.com", kind: "github" },
+        { host: "gitlab.com", kind: "gitlab" },
+      ],
+    }),
+  });
   const root = await mkdtemp(join(tmpdir(), "afk-work-"));
   const afkHome = join(root, ".afk");
   const cleanups: (() => void)[] = [];

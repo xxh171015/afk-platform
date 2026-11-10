@@ -8,16 +8,19 @@ import {
   writeFileSync,
 } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   type ApiClient,
+  CLI_HEADERS,
   createApiClient,
   formatDisplayId,
+  HOST_HEADER,
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
   parseDisplayId,
+  purgedLogMessage,
   SETUP_BRANCH,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
@@ -36,6 +39,7 @@ import { planAgentDocs } from "./agent-docs.ts";
 import { blockedText, specText, ticketText } from "./format.ts";
 import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
 import {
+  codeHostProblems,
   hasRegistrations,
   InitError,
   inspectCheckout,
@@ -43,6 +47,8 @@ import {
   planInit,
   planText,
   TRACKER_DOC_PATH,
+  unknownHostProblem,
+  withKnownHostKind,
 } from "./init.ts";
 import {
   dropBackup,
@@ -73,6 +79,9 @@ import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
 
+// Every call says it is plat, and from which machine: the API records a person's actions with both.
+const cliHeaders = () => ({ ...CLI_HEADERS, [HOST_HEADER]: hostname() });
+
 export interface Io {
   stdout: (text: string) => void;
   stderr: (text: string) => void;
@@ -89,7 +98,7 @@ export interface Io {
   platPath?: string;
 }
 
-// How long plat init waits for a worker to say whether the GitHub App can work on the repos.
+// How long plat init waits for a worker to say whether the GitHub App or GitLab PAT can work on the repos.
 const ACCESS_WAIT_SECONDS = 20;
 
 function accessLine(
@@ -97,26 +106,50 @@ function accessLine(
   access:
     | {
         state: string;
+        hostKind?: string;
         missing?: string[];
         fixUrl?: string;
         message?: string;
+        username?: string;
+        fix?: string;
+        hints?: string[];
       }
     | undefined,
 ): string {
   const whoever = "(whoever runs the platform)";
+  const gitlab = access?.hostKind === "gitlab";
   switch (access?.state) {
-    case "ok":
-      return `${name}: the GitHub App can work here`;
+    case "ok": {
+      if (!gitlab) return `${name}: the GitHub App can work here`;
+      const extra: string[] = [];
+      if (access.hints?.includes("personal-token"))
+        extra.push(
+          `平台用的是个人令牌：推送和 MR 显示为〈${access.username ?? "令牌用户"}〉，平台不调合并接口，但合并者是不是平台检测不出；换 bot 账号放 M4`,
+        );
+      if (access.hints?.includes("developers-can-merge"))
+        extra.push("Developers 能合并默认分支");
+      return extra.length > 0
+        ? `${name}: 托管正常（${extra.join("；")}）`
+        : `${name}: 托管正常`;
+    }
     case "not-installed":
       return `${name}: the GitHub App is not installed on this repo; install it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
     case "missing-permissions":
       return `${name}: the GitHub App lacks ${(access.missing ?? []).join(", ")}; grant it ${whoever}: ${access.fixUrl ?? ""}`.trimEnd();
+    case "not-member":
+      return `${name}: ${access.fix ?? `请项目 Maintainer 把${access.username ? `〈${access.username}〉` : "令牌用户"}加为 Developer`}`;
     case "error":
-      return `${name}: the GitHub App could not be checked: ${access.message ?? "unknown error"}`;
+      return gitlab
+        ? `${name}: 托管无法检查：${access.message ?? "unknown error"}`
+        : `${name}: the GitHub App could not be checked: ${access.message ?? "unknown error"}`;
     case "pending":
-      return `${name}: the GitHub App is not checked yet (no worker has answered)`;
+      return gitlab
+        ? `${name}: 托管尚未检查（还没有 worker 回答）`
+        : `${name}: the GitHub App is not checked yet (no worker has answered)`;
     default:
-      return `${name}: not checked (only GitHub is)`;
+      return gitlab
+        ? `${name}: 托管尚未检查`
+        : `${name}: the GitHub App is not checked yet (no worker has answered)`;
   }
 }
 
@@ -217,7 +250,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         rememberedApiUrl(afkHome(io.env)) ||
         DEFAULT_API_URL,
     );
-  const api = (): ApiClient => createApiClient(apiUrl());
+  const api = (): ApiClient =>
+    createApiClient(apiUrl(), undefined, cliHeaders());
 
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
   program.hook("preAction", async () => {
@@ -340,6 +374,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if ((options.name === undefined) === (options.role === undefined)) {
         throw new Failure("give the repo's --name (--role is the older word)");
       }
+      const hosts = await api().GET("/hosts");
+      if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
+      const unknown = unknownHostProblem(
+        options.name ?? options.role,
+        options.url,
+        hosts.data.hosts,
+      );
+      if (unknown) throw new Failure(unknown);
       const { data, response, error } = await api().POST(
         "/projects/{projectId}/repos",
         {
@@ -628,7 +670,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         cwd: io.cwd ?? process.cwd(),
         encoding: "utf8",
       });
-      const platform = await createApiClient(base)
+      const platform = await createApiClient(base, undefined, cliHeaders())
         .GET("/version")
         .then((r) => r.data)
         .catch(() => undefined);
@@ -689,10 +731,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       let plan: ReturnType<typeof planInit>;
       try {
         const cwd = io.cwd ?? process.cwd();
-        const planning = inspectCheckout(".", cwd);
+        const hosts = await client.GET("/hosts");
+        if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
+        const known = hosts.data.hosts;
+        const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
         const others = (options.with as string[]).map((value) => {
           const { path, name } = parseWith(value);
-          return { checkout: inspectCheckout(path, cwd), name };
+          return {
+            checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
+            name,
+          };
         });
         const docPath = join(planning.dir, TRACKER_DOC_PATH);
         const before = existsSync(docPath)
@@ -731,6 +779,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           others,
           contractPath: options.contractPath,
         });
+        // nothing is registered on a host the platform cannot work on, nor a project on two kinds of host
+        const problems = codeHostProblems(plan, known);
+        if (problems.length > 0) throw new Failure(problems.join("\n"));
         if (!json()) io.stdout(`${planText(plan)}\n`);
 
         const registering = hasRegistrations(plan);
@@ -1345,8 +1396,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
-    .command("resume <spec>")
-    .description("let a paused spec go on, with more agent time")
+    .command("retry <spec>")
+    .alias("resume")
+    .description(
+      "let a paused spec go on, adding agent time when the budget ran out",
+    )
     .option(
       "--extra-hours <n>",
       "agent hours to add to the spec's budget (default 1)",
@@ -1356,6 +1410,17 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const { data, response, error } = await api().POST("/specs/{id}/resume", {
         params: { path: { id: specIdOf(id) } },
         body: { extraSeconds: (options.extraHours ?? 1) * 3600 },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+
+  spec
+    .command("allow <spec>")
+    .description("let a paused spec go on without extra agent time")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST("/specs/{id}/allow", {
+        params: { path: { id: specIdOf(id) } },
       });
       if (!data) throw failureFrom(response, error);
       print(data, `${id} is ${data.state}`);
@@ -1561,6 +1626,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           params: { path: { id: parsed.id }, query: { offset, attempt } },
         });
         if (!data) throw failureFrom(response, error);
+        if (data.purgedAt) {
+          if (json()) {
+            print(
+              {
+                run,
+                attempt: data.attempt,
+                size: data.size,
+                finished: data.finished,
+                text: data.text,
+                purgedAt: data.purgedAt,
+              },
+              "",
+            );
+          } else {
+            io.stdout(`${purgedLogMessage(data.purgedAt)}\n`);
+          }
+          return;
+        }
         attempt = data.attempt;
         text += data.text;
         last = data;
@@ -1609,7 +1692,7 @@ const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
 
 // The platform version answering at `address`, or undefined when nothing does.
 const platformVersionAt = (address: string): Promise<string | undefined> =>
-  createApiClient(address)
+  createApiClient(address, undefined, cliHeaders())
     .GET("/version")
     .then((r) => r.data?.platformVersion)
     .catch(() => undefined);

@@ -1,5 +1,6 @@
 import {
   type AppAccess,
+  type GitLabAccess,
   type HostAdapter,
   HostError,
   parseRepoUrl,
@@ -17,8 +18,8 @@ import { InfrastructureError } from "./executor.ts";
 export interface HostDeps {
   adapter: HostAdapter;
   repoRef?: (url: string) => RepoRef;
-  // whether the GitHub App can work on a repo (checkAppAccess); absent where the host is not GitHub
-  checkAccess?: (repo: RepoRef) => Promise<AppAccess>;
+  // whether the GitHub App or GitLab PAT can work on a repo; absent where this worker has no credentials to check
+  checkAccess?: (repo: RepoRef) => Promise<AppAccess | GitLabAccess>;
 }
 
 export async function runHostTask(
@@ -94,22 +95,22 @@ export async function runHostTask(
   }
   if (task.kind === "repo-access") {
     if (!deps.checkAccess)
-      throw new InfrastructureError("this worker cannot check a GitHub App");
+      throw new InfrastructureError("this worker cannot check repo access");
     try {
       const access = await deps.checkAccess(repoRef(task.repoUrl));
-      log(`the GitHub App on ${task.repoUrl}: ${access.state}`);
+      log(`access on ${task.repoUrl}: ${access.state}`);
       return { stage: "repo-access", ...access };
     } catch (error) {
       throw new InfrastructureError(
         error instanceof HostError || error instanceof RangeError
           ? error.message
-          : `could not check the GitHub App: ${String(error)}`,
+          : `could not check repo access: ${String(error)}`,
       );
     }
   }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
   const pulls = [];
-  for (const pull of task.pulls) {
+  for (const pull of task.pulls ?? []) {
     try {
       const info = await deps.adapter.getPullRequest({
         repo: repoRef(pull.repoUrl),
@@ -122,19 +123,40 @@ export async function runHostTask(
         headSha: info.headSha,
         ci: info.ci,
         review: info.review,
+        mergedBy: info.mergedBy,
+        mergedAt: info.mergedAt,
+        mergedByPlatform: info.mergedByPlatform,
+        conflictsWithDefault: info.conflictsWithDefault,
       });
     } catch (error) {
+      if (error instanceof HostError && error.status === 429)
+        throw new InfrastructureError(error.message);
       // one pull request that cannot be read must not hide what the others look like
       const message = error instanceof Error ? error.message : String(error);
       log(`pull request ${pull.number} of ${pull.repoUrl}: ${message}`);
       pulls.push({ id: pull.id, error: message.slice(0, 400) });
     }
   }
-  return { stage: "host-sync", pulls };
+  const defaults = [];
+  for (const branch of task.defaults ?? []) {
+    try {
+      const sha = await deps.adapter.getBranchSha({
+        repo: repoRef(branch.repoUrl),
+        branch: branch.branch,
+      });
+      defaults.push({ repoUrl: branch.repoUrl, sha });
+    } catch (error) {
+      if (error instanceof HostError && error.status === 429)
+        throw new InfrastructureError(error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      log(`default branch ${branch.branch} of ${branch.repoUrl}: ${message}`);
+    }
+  }
+  return { stage: "host-sync", pulls, defaults };
 }
 
 // Closes the spec's open pull requests and deletes its branches. Only what a spec makes is ever deleted
-// (isPlatformBranch: spec/<slug>, agent/T-<n>, agent/S-<n>-final, each with or without the database's id after
+// (isPlatformBranch: spec/<slug>, agent/T-<n>, agent/S-<n>-final, agent/S-<n>-update, each with or without the database's id after
 // the first slash): the API names the branches, and this is the check that a wrong name there cannot reach a
 // default or a release branch. A step that fails does not stop the others (a
 // branch that cannot be deleted must not keep a pull request open); the job then fails, is tried again, and

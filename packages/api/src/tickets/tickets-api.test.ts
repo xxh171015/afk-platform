@@ -619,6 +619,13 @@ describe("approve-protected", () => {
       status: 200,
       body: { approved: [".github/workflows/ci.yml", "tsconfig.json"] },
     });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "approve-protected" });
     expect(await row(1)).toMatchObject({
       state: "running",
       blocked_reason: null,
@@ -857,7 +864,7 @@ describe("cancelling a spec", () => {
     Number(
       (
         await db.pool.query(
-          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running') AND type <> 'spec-cleanup'",
+          "SELECT count(*) AS n FROM jobs WHERE state IN ('queued', 'running') AND type NOT IN ('spec-cleanup', 'host-sync')",
         )
       ).rows[0].n,
     );
@@ -1105,6 +1112,47 @@ describe("resuming a paused spec", () => {
       (await call("POST", `/specs/${specId}/resume`, { extraSeconds: 0 }))
         .status,
     ).toBe(400);
+  });
+
+  it("retries without extra time when none is given", async () => {
+    const specId = await pausedSpec();
+    await db.pool.query("UPDATE runs SET duration_ms = 0");
+    const extra = await db.pool.query(
+      "SELECT budget_extra_seconds FROM specs WHERE id = $1",
+      [specId],
+    );
+    const result = await call("POST", `/specs/${specId}/resume`, {});
+    expect(result).toMatchObject({ status: 200, body: { state: "running" } });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT budget_extra_seconds FROM specs WHERE id = $1",
+          [specId],
+        )
+      ).rows[0].budget_extra_seconds,
+    ).toBe(extra.rows[0].budget_extra_seconds);
+  });
+
+  it("lets a person allow it through without extra agent time", async () => {
+    const specId = await pausedSpec();
+    await db.pool.query("UPDATE runs SET duration_ms = 0");
+    const extra = await db.pool.query(
+      "SELECT budget_extra_seconds FROM specs WHERE id = $1",
+      [specId],
+    );
+    const result = await call("POST", `/specs/${specId}/allow`);
+    expect(result).toMatchObject({ status: 200, body: { state: "running" } });
+    const spec = await db.pool.query(
+      "SELECT state, pause_reason, budget_extra_seconds FROM specs WHERE id = $1",
+      [specId],
+    );
+    expect(spec.rows[0]).toEqual({
+      state: "running",
+      pause_reason: null,
+      budget_extra_seconds: extra.rows[0].budget_extra_seconds,
+    });
+    expect((await call("POST", `/specs/${specId}/allow`)).status).toBe(409);
+    expect((await call("POST", "/specs/99/allow")).status).toBe(404);
   });
 });
 
@@ -1449,7 +1497,7 @@ describe("what a person sees", () => {
         id: specId,
         displayId: "S-1",
         title: "Spec",
-        reason: "the agent time limit of the spec was reached",
+        reason: "budget-exhausted",
       },
     ]);
   });
@@ -1487,7 +1535,7 @@ describe("what a person sees", () => {
       title: "Paused",
     });
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = $1",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
       [paused.body.id],
     );
 

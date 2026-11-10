@@ -1,8 +1,14 @@
 import {
+  DEFAULT_DISK_WARN_GIB,
+  type DiskLevel,
+  diskLevel,
+  formatGib,
+  GIB,
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   MAX_LOG_CHUNK_BYTES,
   PLANNING_COMMIT_JOB,
+  TRIAL_MERGE_JOB,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { withCredentials } from "./credentials.ts";
@@ -18,6 +24,7 @@ import { type HostDeps, runHostTask } from "./host.ts";
 import { runPlanningCommit } from "./planning.ts";
 import { rawLogSink } from "./raw-log.ts";
 import { READINESS_GATE_JOB, runReadinessGate } from "./readiness.ts";
+import { runTrialMerge } from "./trial-merge.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -34,6 +41,14 @@ export interface WorkerOptions {
   stopWhenIdle?: boolean; // return as soon as a claim finds nothing (tests, one-shot runs)
   signal?: AbortSignal; // stop: claim nothing more and abandon the jobs in hand
   log?: (line: string) => void;
+  // Home disk: below stopBelow the loop waits instead of claiming (a running job still finishes). A report on
+  // each ok/warn/stop change is how the API learns this worker's remaining space for the banner.
+  disk?: {
+    free: () => Promise<number>;
+    stopBelow: number;
+    warnBelow?: number;
+    report?: (freeBytes: number) => Promise<void>;
+  };
 }
 
 const MAX_FAILED_HEARTBEATS = 3;
@@ -59,7 +74,27 @@ export async function runWorker(
 ): Promise<{ jobs: number }> {
   let jobs = 0;
   const loop = async () => {
+    let lastDiskLevel: DiskLevel | undefined;
     while (!options.signal?.aborted) {
+      if (options.disk) {
+        const free = await options.disk.free();
+        const level = diskLevel(
+          free,
+          options.disk.warnBelow ?? DEFAULT_DISK_WARN_GIB * GIB,
+          options.disk.stopBelow,
+        );
+        if (level !== lastDiskLevel) {
+          lastDiskLevel = level;
+          await options.disk.report?.(free);
+        }
+        if (level === "stop") {
+          options.log?.(
+            `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
+          );
+          await sleep(options.pollMs ?? 2_000, options.signal);
+          continue;
+        }
+      }
       const job = await options.api.claim([
         ...(options.capabilities ?? []),
         ...(options.host ? [HOST_CAPABILITY] : []),
@@ -149,6 +184,20 @@ export async function processJob(
   let uploader: LogUploader | undefined;
   let stopStreaming = () => {};
   try {
+    if (job.type === TRIAL_MERGE_JOB) {
+      const task = await api.trialMergeTask(job);
+      if (task === "lost") return "abandoned";
+      const deps = await withCredentials(
+        { ...options.executor, api },
+        task.repo.url,
+      );
+      const body = runTrialMerge(deps, task, log);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      log(`trial-merge ${body.peers.length} peers`);
+      return "completed";
+    }
     if (job.type === PLANNING_COMMIT_JOB) {
       const task = await api.planningTask(job);
       if (task === "lost") return "abandoned";

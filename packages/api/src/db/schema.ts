@@ -1,10 +1,16 @@
 import {
   BLOCKED_REASONS,
+  DISK_NOTICED,
   EDGE_KINDS,
+  EVENT_SOURCES,
+  EVENT_TYPES,
+  FAILURE_SOURCES,
+  FINAL_E2E_BLOCKED_REASONS,
   FINAL_STEPS,
   FINDING_RESOLUTIONS,
   HOST_KINDS,
   JOB_STATES,
+  PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
   TICKET_STATES,
@@ -13,6 +19,8 @@ import {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
+  bigserial,
   boolean,
   check,
   index,
@@ -60,12 +68,14 @@ export const repos = pgTable(
       .references(() => projects.id),
     url: text("url").notNull(),
     defaultBranch: text("default_branch").notNull().default("main"),
+    // The default branch head last seen by host-sync; null until the first look.
+    defaultSha: text("default_sha"),
     name: text("name").notNull(),
     // Where the repo keeps its contract file, if it owns one; null for a repo that has none.
     contractPath: text("contract_path"),
     // Which code host the repo is on: github or gitlab. It picks the seed template of the tracker doc.
     hostKind: text("host_kind").notNull().default("github"),
-    // The last check of the GitHub App's access to the repo, and when a new one was asked for (host/repo-access.ts).
+    // The last check of the bot's access to the repo, and when a new one was asked for (host/repo-access.ts).
     access: jsonb("access"),
     createdAt: createdAt(),
   },
@@ -84,10 +94,23 @@ export const instance = pgTable(
   {
     singleton: boolean("singleton").primaryKey().default(true),
     id: text("id").notNull(),
+    // Last API log-retention sweep: when it ran and how many run directories / leftover run-* it deleted.
+    logsPurgedAt: timestamp("logs_purged_at", { withTimezone: true }),
+    logsPurgedRuns: integer("logs_purged_runs").notNull().default(0),
+    logsPurgedOrphans: integer("logs_purged_orphans").notNull().default(0),
+    // Last sampled size of the log dir and free bytes on that volume; disk_noticed is the last threshold we told.
+    logDirBytes: bigint("log_dir_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
+    logDirFreeBytes: bigint("log_dir_free_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
+    diskNoticed: text("disk_noticed").notNull().default("none"),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
     check("instance_id_check", sql`${t.id} ~ '^[0-9a-f]{6}$'`),
+    check("instance_disk_noticed_check", oneOf(t.diskNoticed, DISK_NOTICED)),
   ],
 );
 
@@ -115,7 +138,7 @@ export const specs = pgTable(
     // Repos whose pull request was merged before the ones they wait for: [{ repo, skipped: [repo, ...] }]. Kept for
     // good once seen; it does not stop anything.
     orderBroken: jsonb("order_broken").notNull().default([]),
-    // Why the platform paused the spec, shown in the blocked queue.
+    // Why the platform paused the spec (PAUSE_REASONS); the waiting queue shows the Chinese label.
     pauseReason: text("pause_reason"),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
@@ -138,8 +161,13 @@ export const specs = pgTable(
     planningDocsCommitted: boolean("planning_docs_committed")
       .notNull()
       .default(false),
+    // When this spec's run logs were deleted after the retention period; GET /runs/{id}/logs then says so.
+    logsPurgedAt: timestamp("logs_purged_at", { withTimezone: true }),
     // Parked until the next final Run is claimed, then copied onto that Run and cleared.
     retryNote: text("retry_note"),
+    // The platform token's user merged a pull request. Kept for good. A personal token that can push the
+    // default branch is not flagged: that would mark every merge a person makes.
+    tokenMerged: boolean("token_merged").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -158,6 +186,10 @@ export const specs = pgTable(
     check(
       "specs_planning_sha_check",
       sql`${t.planningSha} is null or ${t.planningSha} ~ '^[0-9a-f]{40}$'`,
+    ),
+    check(
+      "specs_pause_reason_check",
+      sql`(${t.state} = 'paused') = (${t.pauseReason} is not null) and (${t.pauseReason} is null or ${oneOf(t.pauseReason, PAUSE_REASONS)})`,
     ),
   ],
 );
@@ -296,6 +328,7 @@ export const jobs = pgTable(
     attempt: integer("attempt").notNull().default(1), // fencing token; the first lease is attempt 1
     // One unique key per job. For ticket jobs the queue builds it from (ticket, content version, stage, sequence);
     // the format for jobs without a ticket (finalize, open-pr, host-sync) is the queue's to define (#23).
+    // host-sync is one key per project: the same row is put back in the queue after each look.
     idempotencyKey: text("idempotency_key").notNull().unique(),
     lockKey: text("lock_key"),
     // A queued job is not claimed before this time (host-sync runs a minute after the last one).
@@ -344,6 +377,10 @@ export const finalizations = pgTable(
       "finalizations_blocked_reason_check",
       sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
     ),
+    check(
+      "finalizations_blocked_reason_code_check",
+      sql`${t.blockedReason} is null or ${oneOf(t.blockedReason, BLOCKED_REASONS)}`,
+    ),
   ],
 );
 
@@ -377,6 +414,10 @@ export const finalE2e = pgTable(
       "final_e2e_blocked_reason_check",
       sql`(${t.state} = 'blocked') = (${t.blockedReason} is not null)`,
     ),
+    check(
+      "final_e2e_blocked_reason_code_check",
+      sql`${t.blockedReason} is null or ${oneOf(t.blockedReason, FINAL_E2E_BLOCKED_REASONS)}`,
+    ),
   ],
 );
 
@@ -398,8 +439,18 @@ export const pullRequests = pgTable(
     headSha: text("head_sha").notNull(),
     ci: text("ci").notNull().default("none"),
     review: text("review").notNull().default("none"),
+    // Who the host says merged it, and when. The host's timestamp, not when the look ran.
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
+    mergedBy: text("merged_by"),
     // Why the last look at the host failed for this pull request; cleared by the next one that works.
     syncError: text("sync_error"),
+    // The host says this pull request conflicts with the default branch.
+    conflictsWithDefault: boolean("conflicts_with_default")
+      .notNull()
+      .default(false),
+    // The SHA the platform last pushed to this pull request's head branch. When host-sync records a
+    // merge, the pull-request event stores whether the merged head is this SHA (docs/specs/m3-platform.md「成功标准」).
+    platformHeadSha: text("platform_head_sha"),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -417,6 +468,44 @@ export const pullRequests = pgTable(
       "pull_requests_review_check",
       oneOf(t.review, ["none", "approved", "changes-requested"]),
     ),
+  ],
+);
+
+// Two specs whose integration branches in one repo would conflict (docs/specs/m3-platform.md「trial-merge」).
+// specIdA < specIdB so each pair has one row; overwritten on the next check.
+export const potentialConflicts = pgTable(
+  "potential_conflicts",
+  {
+    id: serial("id").primaryKey(),
+    specIdA: integer("spec_id_a")
+      .notNull()
+      .references(() => specs.id),
+    specIdB: integer("spec_id_b")
+      .notNull()
+      .references(() => specs.id),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id),
+    files: text("files").array().notNull(),
+    shaA: text("sha_a").notNull(),
+    shaB: text("sha_b").notNull(),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique("potential_conflicts_pair_unique").on(
+      t.specIdA,
+      t.specIdB,
+      t.repoId,
+    ),
+    index("potential_conflicts_spec_a_idx").on(t.specIdA),
+    index("potential_conflicts_spec_b_idx").on(t.specIdB),
+    check(
+      "potential_conflicts_ordered_check",
+      sql`${t.specIdA} < ${t.specIdB}`,
+    ),
+    check("potential_conflicts_files_check", sql`cardinality(${t.files}) > 0`),
   ],
 );
 
@@ -466,7 +555,6 @@ export const runs = pgTable(
     output: jsonb("output"),
     // The Retry note this Run was given, if any; null when the retry had none.
     retryNote: text("retry_note"),
-    logUrl: text("log_url"),
     // The contract SHA used for each providing repo (name -> sha); null when the ticket had no contract edge.
     contractShas: jsonb("contract_shas"),
     // The SHA of the snapshot of each repo the ticket refs that the worker mounted at /refs/<name> (name -> sha).
@@ -524,7 +612,6 @@ export const gateResults = pgTable(
     testsSkipped: integer("tests_skipped"),
     // Every case of the JUnit report ({ name, classname, status }); the acceptance pack checks criteria against it.
     testCases: jsonb("test_cases"),
-    logUrl: text("log_url"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -536,3 +623,77 @@ export const gateResults = pgTable(
     check("gate_results_kind_check", oneOf(t.kind, ["gate", "e2e"])),
   ],
 );
+
+// One state change or a person's action (GLOSSARY Event), only appended. Written by database triggers in the same
+// transaction as the change (drizzle/0035_events.sql); who made it comes from events/origin.ts. Read by the metrics.
+export const events = pgTable(
+  "events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    specId: integer("spec_id"),
+    ticketId: integer("ticket_id"),
+    runId: integer("run_id"),
+    jobId: integer("job_id"),
+    repoId: integer("repo_id"),
+    type: text("type").notNull(),
+    fromState: text("from_state"),
+    toState: text("to_state"),
+    reason: text("reason"),
+    source: text("source"),
+    failureSource: text("failure_source"),
+    data: jsonb("data").notNull().default({}),
+  },
+  (t) => [
+    index("events_spec_idx").on(t.specId, t.id),
+    index("events_ticket_idx").on(t.ticketId, t.id),
+    index("events_at_idx").on(t.at),
+    check("events_type_check", oneOf(t.type, EVENT_TYPES)),
+    check(
+      "events_source_check",
+      sql`${t.source} is null or ${oneOf(t.source, EVENT_SOURCES)}`,
+    ),
+    check(
+      "events_failure_source_check",
+      sql`${t.failureSource} is null or ${oneOf(t.failureSource, FAILURE_SOURCES)}`,
+    ),
+  ],
+);
+
+// The code hosts the workers have credentials for, as last reported (drizzle/0037_code_hosts.sql).
+export const codeHosts = pgTable(
+  "code_hosts",
+  {
+    host: text("host").primaryKey(),
+    kind: text("kind").notNull(),
+    workerId: text("worker_id").notNull(),
+    reportedAt: timestamp("reported_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    tokenExpiresAt: text("token_expires_at"),
+    tokenExpiryNoticedAt: timestamp("token_expiry_noticed_at", {
+      withTimezone: true,
+    }),
+  },
+  (t) => [
+    check("code_hosts_kind_check", oneOf(t.kind, HOST_KINDS)),
+    check("code_hosts_host_check", sql`${t.host} = lower(${t.host})`),
+    check(
+      "code_hosts_token_expires_at_check",
+      sql`${t.tokenExpiresAt} is null or ${t.tokenExpiresAt} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
+  ],
+);
+
+// One row per worker: last cleanup it reported, for the workbench status area.
+export const workers = pgTable("workers", {
+  id: text("id").primaryKey(),
+  reportedAt: timestamp("reported_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  cleanedSandboxLogs: integer("cleaned_sandbox_logs").notNull().default(0),
+  cleanedSalvage: integer("cleaned_salvage").notNull().default(0),
+  cleanedSnapshots: integer("cleaned_snapshots").notNull().default(0),
+  // Free bytes on the worker's home volume, last time it posted /worker/status.
+  freeBytes: bigint("free_bytes", { mode: "number" }),
+});

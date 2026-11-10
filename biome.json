@@ -9,6 +9,7 @@
       "!**/node_modules",
       "!**/dist",
       "!packages/shared/skills-snapshot",
+      "!packages/pipeline/skills",
       "!packages/web/src/routeTree.gen.ts"
     ]
   },

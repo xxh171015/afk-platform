@@ -1,5 +1,6 @@
 import type { HostAdapter, PullRequestInfo } from "@afk/host";
-import { HostError } from "@afk/host";
+import { createGitLabAdapter, HostError, hostRepoRef } from "@afk/host";
+import { FakeGitLab } from "@afk/host/testing";
 import { describe, expect, it } from "vitest";
 import { InfrastructureError } from "./executor.ts";
 import { runHostTask } from "./host.ts";
@@ -15,6 +16,10 @@ const info = (
   headSha: `sha${number}`,
   ci: "pending",
   review: "none",
+  mergedBy: null,
+  mergedAt: null,
+  mergedByPlatform: false,
+  conflictsWithDefault: false,
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
@@ -33,6 +38,9 @@ const noCleanup = {
     throw new Error("not used");
   },
   updatePullRequestBody: async () => {
+    throw new Error("not used");
+  },
+  getBranchSha: async () => {
     throw new Error("not used");
   },
 };
@@ -168,6 +176,48 @@ describe("an open-pr task", () => {
       runHostTask({ adapter, repoRef: ref }, open, log),
     ).rejects.toThrow(InfrastructureError);
   });
+
+  it("opens a pull request onto master through the GitLab adapter", async () => {
+    const gitlab = new FakeGitLab({
+      owner: "xuxinghua",
+      repo: "afk-pilot-backend",
+      token: "glpat-test",
+    });
+    await gitlab.start();
+    try {
+      const adapter = createGitLabAdapter({
+        apiUrl: gitlab.url,
+        tokens: { tokenFor: async () => "glpat-test" },
+      });
+      const result = await runHostTask(
+        { adapter, repoRef: hostRepoRef },
+        {
+          kind: "open-pr",
+          repoUrl: "https://gitlab.example/xuxinghua/afk-pilot-backend.git",
+          base: "master",
+          head: "spec/s-1",
+          title: "S-1 Export",
+          body: "Spec: S-1",
+          draft: true,
+        },
+        log,
+      );
+      expect(result).toMatchObject({
+        stage: "open-pr",
+        outcome: "opened",
+        number: 1,
+        draft: true,
+        state: "open",
+      });
+      expect(gitlab.mergeRequests()[0]).toMatchObject({
+        source: "spec/s-1",
+        target: "master",
+        title: "Draft: S-1 Export",
+      });
+    } finally {
+      await gitlab.stop();
+    }
+  });
 });
 
 describe("a host-sync task", () => {
@@ -197,6 +247,10 @@ describe("a host-sync task", () => {
           headSha: "sha1",
           ci: "pending",
           review: "none",
+          mergedBy: null,
+          mergedAt: null,
+          mergedByPlatform: false,
+          conflictsWithDefault: false,
         },
         {
           id: 2,
@@ -205,9 +259,84 @@ describe("a host-sync task", () => {
           headSha: "sha2",
           ci: "pending",
           review: "none",
+          mergedBy: null,
+          mergedAt: null,
+          mergedByPlatform: false,
+          conflictsWithDefault: false,
         },
       ],
+      defaults: [],
     });
+  });
+
+  it("passes on a conflict with the default branch", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1, { conflictsWithDefault: true }),
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      { kind: "host-sync", pulls: [{ id: 1, repoUrl: "u", number: 1 }] },
+      log,
+    );
+    expect(result).toMatchObject({
+      pulls: [{ id: 1, conflictsWithDefault: true }],
+    });
+  });
+
+  it("reads each default branch and reports its sha", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1),
+      getBranchSha: async ({ branch }) => `sha-of-${branch}`,
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      {
+        kind: "host-sync",
+        pulls: [],
+        defaults: [
+          { repoUrl: "https://github.com/me/pilot.git", branch: "main" },
+        ],
+      },
+      log,
+    );
+    expect(result).toEqual({
+      stage: "host-sync",
+      pulls: [],
+      defaults: [
+        { repoUrl: "https://github.com/me/pilot.git", sha: "sha-of-main" },
+      ],
+    });
+  });
+
+  it("omits a default branch it could not read and still reports the others", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1),
+      getBranchSha: async ({ branch }) => {
+        if (branch === "main") throw new HostError("GitHub answered 502", 502);
+        return `sha-of-${branch}`;
+      },
+    };
+    const result = (await runHostTask(
+      { adapter, repoRef: ref },
+      {
+        kind: "host-sync",
+        pulls: [],
+        defaults: [
+          { repoUrl: "https://github.com/me/a.git", branch: "main" },
+          { repoUrl: "https://github.com/me/b.git", branch: "develop" },
+        ],
+      },
+      log,
+    )) as { defaults: Record<string, unknown>[] };
+    expect(result.defaults).toEqual([
+      { repoUrl: "https://github.com/me/b.git", sha: "sha-of-develop" },
+    ]);
   });
 
   it("reports the one it could not read and still the others", async () => {
@@ -226,6 +355,53 @@ describe("a host-sync task", () => {
     )) as { pulls: Record<string, unknown>[] };
     expect(result.pulls[0]).toEqual({ id: 1, error: "GitHub answered 502" });
     expect(result.pulls[1]).toMatchObject({ id: 2, state: "open" });
+  });
+
+  it("fails the look when GitLab answers 429, so the next round can wait", async () => {
+    const gitlab = new FakeGitLab({
+      owner: "xuxinghua",
+      repo: "afk-pilot-backend",
+      token: "glpat-test",
+    });
+    await gitlab.start();
+    try {
+      const adapter = createGitLabAdapter({
+        apiUrl: gitlab.url,
+        tokens: { tokenFor: async () => "glpat-test" },
+      });
+      await adapter.openPullRequest({
+        repo: {
+          owner: "xuxinghua",
+          name: "afk-pilot-backend",
+          host: "gitlab.example",
+        },
+        head: "spec/s-1",
+        base: "master",
+        title: "S-1",
+        body: "",
+      });
+      gitlab.rateLimitSeconds = 12;
+      const error = await runHostTask(
+        { adapter, repoRef: hostRepoRef },
+        {
+          kind: "host-sync",
+          pulls: [
+            {
+              id: 1,
+              repoUrl: "https://gitlab.example/xuxinghua/afk-pilot-backend.git",
+              number: 1,
+            },
+          ],
+        },
+        log,
+      ).catch((caught) => caught);
+      expect(error).toBeInstanceOf(InfrastructureError);
+      expect(error).toMatchObject({
+        message: "GitLab answered 429; retry after 12s",
+      });
+    } finally {
+      await gitlab.stop();
+    }
   });
 });
 
@@ -263,6 +439,9 @@ describe("a spec-cleanup task", () => {
       deleteBranch: async ({ branch }) => {
         calls.push(`delete ${branch}`);
         return "deleted";
+      },
+      getBranchSha: async () => {
+        throw new Error("not used");
       },
       ...over,
     };

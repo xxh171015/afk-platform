@@ -1,4 +1,11 @@
-import { formatDisplayId } from "@afk/shared";
+import {
+  type FailureSource,
+  failureSourceOf,
+  formatDisplayId,
+  isPlatformProblem,
+  PAUSE_REASONS,
+  type PauseReason,
+} from "@afk/shared";
 import type pg from "pg";
 
 // Computed each time the waiting queue is read: what an item blocks, and how long it has waited.
@@ -32,6 +39,8 @@ export type WaitingRef =
 export interface WaitingFields {
   waitingSince: string;
   blocking: Blocking;
+  // whose fault it is; null when nobody's (a pull request closed by a person)
+  failureSource: FailureSource | null;
 }
 
 export function rankOf(blocking: Blocking): number {
@@ -41,10 +50,18 @@ export function rankOf(blocking: Blocking): number {
   return 3;
 }
 
-export function compareWaiting(
-  a: { blocking: Blocking; waitingSince: string; serialId: number },
-  b: { blocking: Blocking; waitingSince: string; serialId: number },
-): number {
+interface Rankable {
+  blocking: Blocking;
+  waitingSince: string;
+  serialId: number;
+  failureSource: FailureSource | null;
+}
+
+export function compareWaiting(a: Rankable, b: Rankable): number {
+  const groups =
+    Number(isPlatformProblem(a.failureSource)) -
+    Number(isPlatformProblem(b.failureSource));
+  if (groups !== 0) return groups;
   const ranks = rankOf(a.blocking) - rankOf(b.blocking);
   if (ranks !== 0) return ranks;
   const waited = a.waitingSince.localeCompare(b.waitingSince);
@@ -60,6 +77,9 @@ function iso(value: Date | string | null | undefined, fallback: Date): string {
   }
   return fallback.toISOString();
 }
+
+const sourceOf = (reason: string | null, error?: string) =>
+  reason ? failureSourceOf(reason, error) : null;
 
 async function timesById(
   pool: pg.Pool,
@@ -115,6 +135,7 @@ export interface RankableQueue {
   tickets: {
     id: number;
     specId: number;
+    blockedReason: string | null;
     waitingSince?: string;
     blocking?: Blocking;
   }[];
@@ -122,6 +143,7 @@ export interface RankableQueue {
     id: number;
     specId: number;
     step: string;
+    blockedReason: string | null;
     waitingSince?: string;
     blocking?: Blocking;
   }[];
@@ -129,11 +151,13 @@ export interface RankableQueue {
     specId: number;
     repo: string;
     number: number;
+    syncError: string | null;
     waitingSince?: string;
     blocking?: Blocking;
   }[];
   cleanups: {
     specId: number;
+    error: string;
     waitingSince?: string;
     blocking?: Blocking;
   }[];
@@ -141,16 +165,19 @@ export interface RankableQueue {
     specId: number;
     repo: string;
     number: number;
+    error: string;
     waitingSince?: string;
     blocking?: Blocking;
   }[];
   planning: {
     specId: number;
+    files: string[];
     waitingSince?: string;
     blocking?: Blocking;
   }[];
   specs: {
     id: number;
+    reason: string;
     waitingSince?: string;
     blocking?: Blocking;
   }[];
@@ -182,6 +209,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
     finalCreated,
     finalFinished,
     e2eFinished,
+    ticketSources,
     openBySpec,
     downstreamById,
     pullTimes,
@@ -235,6 +263,22 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
        GROUP BY t.spec_id`,
       specIds,
     ),
+    // as it was recorded when the ticket was blocked; a ticket blocked before events were kept has none
+    (async () => {
+      const map = new Map<number, FailureSource | null>();
+      if (ticketIds.length === 0) return map;
+      const { rows } = await pool.query<{
+        ticket_id: number;
+        failure_source: FailureSource | null;
+      }>(
+        `SELECT DISTINCT ON (ticket_id) ticket_id, failure_source FROM events
+         WHERE type = 'ticket' AND to_state = 'blocked' AND ticket_id = ANY($1)
+         ORDER BY ticket_id, id DESC`,
+        [ticketIds],
+      );
+      for (const row of rows) map.set(row.ticket_id, row.failure_source);
+      return map;
+    })(),
     (async () => {
       const map = new Map<number, number>();
       if (specIds.length === 0) return map;
@@ -305,12 +349,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
   ]);
 
   const now = new Date();
-  const ranked: {
-    ref: WaitingRef;
-    blocking: Blocking;
-    waitingSince: string;
-    serialId: number;
-  }[] = [];
+  const ranked: (Rankable & { ref: WaitingRef })[] = [];
 
   const tickets = queue.tickets.map((ticket) => {
     const blockedDownstream = downstreamById.get(ticket.id) ?? [];
@@ -323,13 +362,17 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       ticketFinished.get(ticket.id) ?? ticketCreated.get(ticket.id),
       now,
     );
+    const failureSource = ticketSources.has(ticket.id)
+      ? (ticketSources.get(ticket.id) ?? null)
+      : sourceOf(ticket.blockedReason);
     ranked.push({
       ref: { kind: "ticket", id: ticket.id },
       blocking,
       waitingSince,
       serialId: ticket.id,
+      failureSource,
     });
-    return { ...ticket, waitingSince, blocking };
+    return { ...ticket, waitingSince, blocking, failureSource };
   });
 
   const finalizations = queue.finalizations.map((item) => {
@@ -339,16 +382,20 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
         ? e2eFinished.get(item.specId)
         : finalFinished.get(item.specId);
     const waitingSince = iso(related ?? finalCreated.get(item.id), now);
+    const failureSource = sourceOf(item.blockedReason);
     ranked.push({
       ref: { kind: "finalization", id: item.id, step: item.step },
       blocking,
       waitingSince,
       serialId: item.id,
+      failureSource,
     });
-    return { ...item, waitingSince, blocking };
+    return { ...item, waitingSince, blocking, failureSource };
   });
 
   const pullRequests = queue.pullRequests.map((item) => {
+    // closed by a person is nobody's failure; one the host will not answer for is the host's
+    const failureSource = item.syncError ? sourceOf("sync-error") : null;
     const blocking: Blocking = { ...NO_BLOCKING, merge: true };
     const waitingSince = iso(
       pullTimes.get(`${item.specId}:${item.repo}:${item.number}`),
@@ -364,11 +411,13 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       blocking,
       waitingSince,
       serialId: item.number,
+      failureSource,
     });
-    return { ...item, waitingSince, blocking };
+    return { ...item, waitingSince, blocking, failureSource };
   });
 
   const cleanups = queue.cleanups.map((item) => {
+    const failureSource = sourceOf("job-failed", item.error);
     const blocking = { ...NO_BLOCKING };
     const waitingSince = iso(
       cleanupTimes.get(item.specId),
@@ -379,11 +428,13 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       blocking,
       waitingSince,
       serialId: item.specId,
+      failureSource,
     });
-    return { ...item, waitingSince, blocking };
+    return { ...item, waitingSince, blocking, failureSource };
   });
 
   const readyFailures = queue.readyFailures.map((item) => {
+    const failureSource = sourceOf("job-failed", item.error);
     const blocking: Blocking = { ...NO_BLOCKING, merge: true };
     const waitingSince = iso(
       readyTimes.get(`${item.specId}:${item.repo}:${item.number}`) ??
@@ -400,11 +451,16 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       blocking,
       waitingSince,
       serialId: item.number,
+      failureSource,
     });
-    return { ...item, waitingSince, blocking };
+    return { ...item, waitingSince, blocking, failureSource };
   });
 
   const planning = queue.planning.map((item) => {
+    // no files: the planning commit's job kept failing, not the patch
+    const failureSource = sourceOf(
+      item.files.length > 0 ? "planning-conflict" : "job-failed",
+    );
     const blocking: Blocking = { ...NO_BLOCKING, spec: true };
     const waitingSince = iso(
       specFinished.get(item.specId) ?? specCreated.get(item.specId),
@@ -415,11 +471,17 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       blocking,
       waitingSince,
       serialId: item.specId,
+      failureSource,
     });
-    return { ...item, waitingSince, blocking };
+    return { ...item, waitingSince, blocking, failureSource };
   });
 
   const specs = queue.specs.map((item) => {
+    const failureSource = sourceOf(
+      PAUSE_REASONS.includes(item.reason as PauseReason)
+        ? item.reason
+        : "budget-exhausted",
+    );
     const blocking: Blocking = { ...NO_BLOCKING, spec: true };
     const waitingSince = iso(
       specFinished.get(item.id) ?? specCreated.get(item.id),
@@ -430,8 +492,9 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       blocking,
       waitingSince,
       serialId: item.id,
+      failureSource,
     });
-    return { ...item, waitingSince, blocking };
+    return { ...item, waitingSince, blocking, failureSource };
   });
 
   ranked.sort(compareWaiting);

@@ -9,3 +9,7 @@ export const HOST_JOB_TYPES = [
   "repo-access",
 ] as const;
 export const HOST_CAPABILITY = "host";
+
+// A trial-merge job merge-trees two specs' integration branches. It is not a job for the code host:
+// any worker can claim it, and it has no lock key.
+export const TRIAL_MERGE_JOB = "trial-merge";

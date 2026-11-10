@@ -224,7 +224,7 @@ function executor(): Omit<ExecutorDeps, "api"> {
     slots: new SlotManager({
       root: join(home, "slots"),
       count: 4,
-      mainCloneFor: (repo) => repos.dirFor(repo),
+      mainCloneFor: (repo, url) => repos.dirFor(repo, url),
       salvageDir: join(home, "salvage"),
       isHeld: async () => true,
     }),

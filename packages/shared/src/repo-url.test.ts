@@ -4,6 +4,7 @@ import {
   ownerHtmlUrl,
   parseRepoUrl,
   repoDisplayName,
+  repoHost,
   repoHtmlUrl,
   treeHtmlUrl,
   tryParseRepoUrl,
@@ -24,13 +25,47 @@ describe("parseRepoUrl", () => {
       { owner: "me", name: "afk-pilot-backend" },
     ],
     ["ssh://git@github.com/me/x.git", { owner: "me", name: "x" }],
+    // GitLab's nested groups: the whole namespace is the owner
+    [
+      "https://git.corp.example/team/sub/deeper/api.git",
+      { owner: "team/sub/deeper", name: "api" },
+    ],
+    [
+      "git@git.corp.example:team/sub/api.git",
+      { owner: "team/sub", name: "api" },
+    ],
+    [
+      "ssh://git@git.corp.example:2222/team/sub/api.git",
+      { owner: "team/sub", name: "api" },
+    ],
   ])("reads %s", (url, expected) => {
     expect(parseRepoUrl(url)).toEqual(expected);
+  });
+
+  it("writes a nested group's address back as it was", () => {
+    const url = "https://git.corp.example/team/sub/api.git";
+    expect(repoHtmlUrl(url)).toBe("https://git.corp.example/team/sub/api");
+    expect(repoDisplayName(url)).toBe("team/sub/api");
   });
 
   it("refuses what is not a repository address", () => {
     expect(() => parseRepoUrl("/srv/git/repo.git")).toThrow(RangeError);
     expect(tryParseRepoUrl("/srv/git/repo.git")).toBeNull();
+  });
+});
+
+describe("repoHost", () => {
+  it.each([
+    ["https://github.com/me/x.git", "github.com"],
+    ["https://GitLab.Corp.Example/team/sub/api.git", "gitlab.corp.example"],
+    ["git@git.corp.example:team/api.git", "git.corp.example"],
+    ["ssh://git@git.corp.example:2222/team/api.git", "git.corp.example"],
+  ])("finds the host of %s", (url, host) => {
+    expect(repoHost(url)).toBe(host);
+  });
+
+  it("is null for what is not a repository address", () => {
+    expect(repoHost("/srv/git/repo.git")).toBeNull();
   });
 });
 

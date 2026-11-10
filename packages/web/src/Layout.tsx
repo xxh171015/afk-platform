@@ -6,6 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import {
+  BarChart3,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -19,6 +20,7 @@ import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
+import { DiskBanner } from "./DiskBanner.tsx";
 import { EntityCrumbs } from "./EntityCrumbs.tsx";
 import { EventsProvider } from "./EventsProvider.tsx";
 import { HelpDialog } from "./HelpDialog.tsx";
@@ -26,6 +28,7 @@ import { useChangeFlash } from "./hooks/use-change-flash.ts";
 import { applyTheme, currentTheme, type Theme } from "./lib/theme.ts";
 import { cn } from "./lib/utils.ts";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
+import { TokenExpiryBanner } from "./TokenExpiryBanner.tsx";
 import { useWorkbench } from "./Workbench.tsx";
 import { waitingCount } from "./waiting.ts";
 
@@ -33,6 +36,7 @@ const nav = [
   { to: "/", label: "工作台", icon: LayoutDashboard, exact: true },
   { to: "/specs", label: "需求", icon: FileText, exact: false },
   { to: "/waiting", label: "待处理", icon: Inbox, exact: false, badge: true },
+  { to: "/metrics", label: "度量", icon: BarChart3, exact: false },
 ] as const;
 
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {
@@ -300,6 +304,8 @@ function Chrome() {
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar onSearch={() => setSearchOpen(true)} waiting={waiting} />
+          <TokenExpiryBanner />
+          <DiskBanner />
           <main className="flex-1">
             <Outlet />
           </main>

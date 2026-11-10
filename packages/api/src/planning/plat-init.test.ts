@@ -27,6 +27,63 @@ async function project(id: number) {
 const trackerDoc = (dir: string) =>
   readFileSync(join(dir, "docs/agents/issue-tracker.md"), "utf8");
 
+describe("plat init on a code host the platform cannot work on", () => {
+  const projects = async () =>
+    (await (await fetch(`${ws.api.url}/projects`)).json()).projects;
+
+  it("stops before registering anything, and says where to put the GitLab token", async () => {
+    const api = checkout("api", "https://git.corp.example/team/sub/api.git");
+    const result = await plat(api.dir, ["init", "--yes"]);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain(
+      "api 在 git.corp.example，平台没有这台主机的凭据",
+    );
+    expect(result.stderr).toContain(
+      "把 GitLab 的 PAT 放到 `~/.afk/secrets/gitlab/git.corp.example`，重启 worker 后再跑 /afk-setup",
+    );
+    expect(await projects()).toEqual([]);
+  });
+
+  it("stops before registering anything when the repos are on different kinds of host", async () => {
+    const backend = checkout("backend", "https://github.com/acme/backend.git");
+    const frontend = checkout(
+      "frontend",
+      "https://gitlab.com/acme/frontend.git",
+    );
+    const result = await plat(backend.dir, [
+      "init",
+      "--with",
+      frontend.dir,
+      "--yes",
+    ]);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("backend 在 GitHub，frontend 在 GitLab");
+    expect(result.stderr).toContain("搬到同一种托管，或为它单独建项目");
+    expect(await projects()).toEqual([]);
+  });
+
+  it("registers a repo on a GitLab host whose name does not say so as GitLab, nested groups and all", async () => {
+    await fetch(`${ws.api.url}/worker/hosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workerId: "w1",
+        hosts: [{ host: "git.corp.example", kind: "gitlab" }],
+      }),
+    });
+    const api = checkout("api", "git@git.corp.example:team/sub/api.git");
+    const result = await plat(api.dir, ["init", "--yes"]);
+    expect(result.stderr).toBe("");
+    expect((await project(1)).body.repos).toMatchObject([
+      {
+        name: "api",
+        url: "https://git.corp.example/team/sub/api.git",
+        hostKind: "gitlab",
+      },
+    ]);
+  });
+});
+
 describe("plat init", () => {
   it("registers a new project with the planning repo and the repos given, and writes the tracker doc", async () => {
     const backend = checkout(
