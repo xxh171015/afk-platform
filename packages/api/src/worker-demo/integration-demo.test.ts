@@ -29,10 +29,14 @@ import {
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { FakeClock, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeClock,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 // An integration ticket from import to done, with a real Postgres, the HTTP API, real git, slots and snapshots,
@@ -96,7 +100,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   await db.pool.query("UPDATE instance SET id = $1", [ID]);
-  api = await listen(createApp({ pool: db.pool, clock: new FakeClock().now }));
+  api = await listen(testApp({ pool: db.pool, clock: new FakeClock().now }));
   home = mkdtempSync(join(tmpdir(), "afk-int-home-"));
   backendSeed = makeRepo({
     ".sandcastle/gates.yaml": GATES,

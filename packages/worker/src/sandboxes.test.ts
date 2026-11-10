@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -82,7 +82,7 @@ describe("removeSandboxesUnder", () => {
   });
 
   it("resolves the symlink through the nearest parent that exists when the slot directory is already gone", () => {
-    const base = mkdtempSync(join(tmpdir(), "afk-sandboxes-"));
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "afk-sandboxes-")));
     const real = join(base, "real");
     mkdirSync(real, { recursive: true });
     symlinkSync(real, join(base, "link"));
@@ -93,7 +93,7 @@ describe("removeSandboxesUnder", () => {
   });
 
   it("finds a container whose mount docker reports under the real path of a symlinked directory", () => {
-    const base = mkdtempSync(join(tmpdir(), "afk-sandboxes-"));
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "afk-sandboxes-")));
     const real = join(base, "real");
     mkdirSync(join(real, "0"), { recursive: true });
     symlinkSync(real, join(base, "link"));
@@ -101,5 +101,13 @@ describe("removeSandboxesUnder", () => {
     expect(removeSandboxesUnder(join(base, "link", "0"), fake.docker)).toEqual([
       "a1",
     ]);
+  });
+
+  it("matches a docker mount reported under the real path of the temp directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "afk-sandboxes-"));
+    const fake = fakeDocker({
+      a1: [`${realpathSync(dir)}/backend/.git`],
+    });
+    expect(removeSandboxesUnder(dir, fake.docker)).toEqual(["a1"]);
   });
 });

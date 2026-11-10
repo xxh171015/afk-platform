@@ -5,10 +5,9 @@ import { join } from "node:path";
 import { type Io, run } from "@afk/cli";
 import { gitOrThrow } from "@afk/pipeline";
 import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { listen, type RunningApi } from "./fake-worker.ts";
+import { listen, type RunningApi, testApp } from "./fake-worker.ts";
 
 // The real HTTP API and a real Postgres, with `plat` run in real git checkouts whose origin is a GitHub address
 // that git rewrites (url.<bare>.insteadOf) to a local bare repo, so pushes and ls-remote work offline.
@@ -52,7 +51,7 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
   const db = await createTestDatabase();
   await migrate(db.pool);
   const logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
-  const api = await listen(createApp({ pool: db.pool, logDir }));
+  const api = await listen(testApp({ pool: db.pool, logDir }));
   // the hosts a worker with a GitHub App and a gitlab.com PAT reports at start
   await fetch(`${api.url}/worker/hosts`, {
     method: "POST",

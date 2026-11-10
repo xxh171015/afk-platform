@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import type { Notice } from "../notify/notices.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
@@ -16,7 +20,7 @@ beforeEach(async () => {
   await migrate(db.pool);
   notices = [];
   api = await listen(
-    createApp({
+    testApp({
       pool: db.pool,
       sseKeepaliveMs: 40,
       notifications: {
