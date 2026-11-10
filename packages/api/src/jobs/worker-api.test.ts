@@ -397,6 +397,65 @@ describe("claiming at the same moment", () => {
   });
 });
 
+describe("claiming fairly across projects", () => {
+  async function specOf(name: string) {
+    const project = (await fetch(`${api.url}/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => r.json())) as { id: number };
+    const spec = (await fetch(`${api.url}/specs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: project.id,
+        type: "feature",
+        slug: name,
+        title: name,
+      }),
+    }).then((r) => r.json())) as { id: number };
+    return spec.id;
+  }
+
+  it("still claims the other project's job while one project has a pile of merge jobs", async () => {
+    const busy = await specOf("busy");
+    const other = await specOf("other");
+    for (const key of ["m1", "m2", "m3", "m4", "m5"]) {
+      await enqueue(key, {
+        type: "merge",
+        payload: { specId: busy, stage: "merge" },
+      });
+    }
+    await enqueue("other-job", {
+      payload: { specId: other, stage: "implement" },
+    });
+    const seen: number[] = [];
+    for (let n = 0; n < 3; n++) {
+      const holder = worker(`w${n}`);
+      const job = (await holder.claim()).body.job as ClaimedJob;
+      seen.push((job.payload as { specId: number }).specId);
+      await holder.complete(job.id, job.attempt);
+    }
+    expect(seen).toContain(other);
+  });
+
+  it("lets one project fill every slot when no other project has work", async () => {
+    const busy = await specOf("busy");
+    for (const key of ["m1", "m2", "m3"]) {
+      await enqueue(key, {
+        type: "merge",
+        payload: { specId: busy, stage: "merge" },
+      });
+    }
+    const got = await Promise.all([worker("w1").claim(), worker("w2").claim()]);
+    const jobs = got.flatMap((reply) =>
+      reply.body.job ? [reply.body.job] : [],
+    );
+    expect(jobs).toHaveLength(2);
+    expect(new Set(jobs.map((job) => job.id)).size).toBe(2);
+  });
+});
+
 describe("bad input", () => {
   it("numbers that do not fit the database are a 400, not a server error", async () => {
     const w = worker();

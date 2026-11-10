@@ -452,6 +452,21 @@ describe("concurrency limits", () => {
     expect(confirmed.body.enqueued).toEqual([]);
   });
 
+  it("does not count a merging ticket against the project's concurrency", async () => {
+    const { specId } = await draftSpec(independent(2), {
+      projectConcurrency: 1,
+    });
+    expect((await post(`/specs/${specId}/confirm`)).body.enqueued).toHaveLength(
+      1,
+    );
+    expect(await ticketStates()).toEqual(["1:queued", "2:pending"]);
+    await db.pool.query("UPDATE tickets SET state = 'merging' WHERE id = 1");
+    expect(await scheduleSpec(db.pool, specId)).toMatchObject({
+      enqueued: [{ ticketId: 2 }],
+    });
+    expect(await ticketStates()).toEqual(["1:merging", "2:queued"]);
+  });
+
   it("honours the project's own limits", async () => {
     const { specId } = await draftSpec(independent(3), {
       repoConcurrency: 1,
