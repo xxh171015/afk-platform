@@ -51,6 +51,18 @@ export function userStoriesOf(
   return stories;
 }
 
+/** User Story numbers no ticket's `stories` names. Empty when no ticket wrote `stories`; that list would have no information. */
+export function uncoveredUserStories(
+  specBody: string,
+  ticketsStories: readonly (readonly number[])[],
+): number[] {
+  if (!ticketsStories.some((stories) => stories.length > 0)) return [];
+  const covered = new Set(ticketsStories.flat());
+  return userStoriesOf(specBody)
+    .filter((story) => !covered.has(story.number))
+    .map((story) => story.number);
+}
+
 /**
  * Notes on a spec body that do not follow the to-spec template: a section missing or renamed, and no seams in
  * Testing Decisions. They are only advice; the spec is stored as written.

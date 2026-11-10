@@ -9,6 +9,7 @@ import {
   structuredBrief,
   type TicketState,
 } from "@afk/shared";
+import { uncoveredUserStories } from "@afk/shared/spec-template";
 import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
@@ -483,9 +484,26 @@ export const PAGE_CONFIRM_WITHOUT_PLANNING_DOCS: SpecPrecheck = {
     "页面确认时不会带上本地的规划文档改动；要带上，在规划仓库里运行 plat spec confirm",
 };
 
+// Confirm-time only: User Stories no ticket named. Yellow; confirm still goes through.
+function uncoveredStoriesPrecheck(
+  specBody: string,
+  ticketsStories: readonly (readonly number[])[],
+): SpecPrecheck[] {
+  const uncovered = uncoveredUserStories(specBody, ticketsStories);
+  if (uncovered.length === 0) return [];
+  return [
+    {
+      code: "uncovered-user-stories",
+      level: "yellow",
+      message: `这几条 User Story 没有任何票负责：${uncovered.join(", ")}`,
+    },
+  ];
+}
+
 function prechecksOf(
   hasPlanningRepo: boolean,
   warnings: { type?: string; message?: string }[],
+  extras: SpecPrecheck[] = [],
 ): SpecPrecheck[] {
   return [
     ...(hasPlanningRepo ? [PAGE_CONFIRM_WITHOUT_PLANNING_DOCS] : []),
@@ -500,6 +518,7 @@ function prechecksOf(
           ]
         : [],
     ),
+    ...extras,
   ];
 }
 
@@ -675,6 +694,14 @@ export async function specView(
     [specId],
   );
   const warnings = row.import_warnings as { type?: string; message?: string }[];
+  const ticketStories = await pool.query<{ stories: number[] }>(
+    "SELECT stories FROM tickets WHERE spec_id = $1",
+    [specId],
+  );
+  const uncovered = uncoveredStoriesPrecheck(
+    row.body as string,
+    ticketStories.rows.map((ticket) => ticket.stories),
+  );
   const planningSha = (row.planning_sha as string | null) ?? null;
   const projectRepos = await pool.query<{
     id: number;
@@ -723,7 +750,7 @@ export async function specView(
       },
       prechecks:
         row.state === "draft"
-          ? prechecksOf(row.planning_repo !== null, warnings)
+          ? prechecksOf(row.planning_repo !== null, warnings, uncovered)
           : prechecksOf(false, warnings),
       tokenMerged: row.token_merged as boolean,
     },

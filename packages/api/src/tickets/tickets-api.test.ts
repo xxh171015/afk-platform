@@ -1888,6 +1888,98 @@ describe("what a person sees", () => {
   });
 });
 
+describe("prechecks before confirm", () => {
+  const fiveStories = [
+    "## User Stories",
+    "",
+    "1. As a splitter, I want to name the User Stories a ticket is for.",
+    "2. As an importer, I want unknown numbers rejected.",
+    "3. As a reviewer, I want the assigned stories as counterparts.",
+    "4. As an author of an infrastructure ticket, I want to omit stories.",
+    "5. As a planner, I want uncovered User Stories listed before confirm.",
+    "",
+  ].join("\n");
+
+  async function draftWith(
+    tickets: Record<string, unknown>[],
+    body = fiveStories,
+  ) {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "s",
+      title: "Spec",
+      body,
+    });
+    expect(
+      (
+        await call(
+          "POST",
+          `/specs/${spec.body.id}/tickets/import`,
+          importBody(spec.body.id, { tickets }),
+        )
+      ).status,
+    ).toBe(200);
+    return spec.body.id as number;
+  }
+
+  it("when tickets' stories cover only 3 of 5 User Stories, prechecks name the other 2 as having no ticket responsible", async () => {
+    const specId = await draftWith([
+      ticket("a", { stories: [1, 3] }),
+      ticket("b", { stories: [4] }),
+    ]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.spec.prechecks).toEqual(
+      expect.arrayContaining([
+        {
+          code: "uncovered-user-stories",
+          level: "yellow",
+          message: "这几条 User Story 没有任何票负责：2, 5",
+        },
+      ]),
+    );
+  });
+
+  it("still confirms a draft that has the uncovered-User-Story precheck", async () => {
+    const specId = await draftWith([
+      ticket("a", { stories: [1, 3] }),
+      ticket("b", { stories: [4] }),
+    ]);
+    const confirmed = await call("POST", `/specs/${specId}/confirm`);
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.state).toBe("running");
+  });
+
+  it("omits the uncovered-User-Story precheck when no ticket wrote stories", async () => {
+    const specId = await draftWith([ticket("a"), ticket("b")]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(
+      view.body.spec.prechecks.filter(
+        (p: { code: string }) => p.code === "uncovered-user-stories",
+      ),
+    ).toEqual([]);
+  });
+
+  it("omits the uncovered-User-Story precheck when every User Story has a ticket", async () => {
+    const specId = await draftWith([
+      ticket("a", { stories: [1, 2, 3] }),
+      ticket("b", { stories: [4, 5] }),
+    ]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(
+      view.body.spec.prechecks.filter(
+        (p: { code: string }) => p.code === "uncovered-user-stories",
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("search", () => {
   async function twoSpecs() {
     await runningSpec([
