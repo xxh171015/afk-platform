@@ -1,7 +1,6 @@
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveAcceptancePack } from "../acceptance/pack.ts";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
@@ -10,6 +9,7 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -22,7 +22,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(createApp({ pool: db.pool, clock: clock.now }));
+  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
   worker = new FakeWorker(api.url, "w1", ["host"]);
 });
 afterEach(async () => {

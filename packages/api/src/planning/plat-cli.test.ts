@@ -6,12 +6,16 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { LogStore } from "../logs/log-store.ts";
 import { retainLogs } from "../logs/retention.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { type TestTicket, ticketFile } from "../test/ticket-files.ts";
 
 // The plat commands against the real HTTP API and a real Postgres.
@@ -26,7 +30,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
-  api = await listen(createApp({ pool: db.pool, logDir }));
+  api = await listen(testApp({ pool: db.pool, logDir }));
   // a worker with the GitHub App has said so
   await db.pool.query(
     "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('github.com', 'github', 'w1')",

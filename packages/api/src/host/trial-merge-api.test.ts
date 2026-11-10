@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { enqueueJob } from "../jobs/queue.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 // trial-merge (docs/specs/m3-platform.md「trial-merge」): after an integration branch moves, a worker
@@ -17,7 +21,7 @@ let worker: FakeWorker;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {

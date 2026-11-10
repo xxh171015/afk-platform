@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import {
@@ -7,6 +6,7 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -25,7 +25,7 @@ beforeEach(async () => {
   await migrate(db.pool);
   clock = new FakeClock();
   api = await listen(
-    createApp({ pool: db.pool, clock: clock.now, leaseSeconds: 3600 }),
+    testApp({ pool: db.pool, clock: clock.now, leaseSeconds: 3600 }),
   );
   host = new FakeWorker(api.url, "h1", ["host"]);
   agent = new FakeWorker(api.url, "a1", []);
