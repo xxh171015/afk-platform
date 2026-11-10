@@ -59,6 +59,7 @@ export async function createProject(
 export type ProjectEdit = Partial<
   Pick<
     NewProject,
+    | "defaultAgent"
     | "defaultModel"
     | "protectedPaths"
     | "maxConcurrency"
@@ -82,6 +83,7 @@ export async function editProject(
       `${column} = ${expression.replace("$", `$${values.length}`)}`,
     );
   };
+  if (edit.defaultAgent !== undefined) set("default_agent", edit.defaultAgent);
   if (edit.defaultModel !== undefined) set("default_model", edit.defaultModel);
   if (edit.protectedPaths !== undefined)
     set("protected_paths", edit.protectedPaths);
