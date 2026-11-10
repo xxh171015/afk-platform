@@ -8,7 +8,7 @@ import {
 } from "@afk/shared";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { ErrorState, RowsSkeleton } from "./components/afk/states.tsx";
@@ -70,9 +70,39 @@ function pct(n: number | null): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+function weekLabel(weekStart: string): string {
+  return weekStart.slice(5);
+}
+
+function leadTotal(week: Week): number {
+  return (
+    week.leadTime.agentMs +
+    week.leadTime.gateMs +
+    week.leadTime.queuedMs +
+    week.leadTime.waitingMs
+  );
+}
+
+function defaultLeadWeekIndex(weeks: Week[]): number {
+  for (let i = weeks.length - 1; i >= 0; i--) {
+    const week = weeks[i];
+    if (week && week.leadTime.ended > 0) return i;
+  }
+  return Math.max(0, weeks.length - 1);
+}
+
+function attributionWeeks(weeks: Week[]): Week[] {
+  return weeks.filter(
+    (week) =>
+      week.attribution.needsHuman.length > 0 ||
+      week.attribution.recovered.length > 0,
+  );
+}
+
 export function Metrics() {
   const api = useApi();
   const [projectId, setProjectId] = useState<string>("all");
+  const [leadWeek, setLeadWeek] = useState(0);
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: async () => {
@@ -95,6 +125,13 @@ export function Metrics() {
     },
   });
 
+  const weeks = metrics.data?.weeks ?? [];
+  useEffect(() => {
+    const next = metrics.data?.weeks;
+    if (!next?.length) return;
+    setLeadWeek(defaultLeadWeekIndex(next));
+  }, [metrics.data]);
+
   if (metrics.isPending)
     return (
       <Page title="度量">
@@ -113,7 +150,9 @@ export function Metrics() {
       </Page>
     );
 
-  const weeks = metrics.data.weeks;
+  const selected = weeks[Math.min(leadWeek, Math.max(0, weeks.length - 1))];
+  const failedWeeks = attributionWeeks(weeks);
+
   return (
     <Page
       title="度量"
@@ -123,74 +162,144 @@ export function Metrics() {
           : "还没有度量数据"
       }
       actions={
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">项目</span>
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-sm"
-            value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
-            aria-label="项目"
+        <div
+          role="tablist"
+          aria-label="项目"
+          className="inline-flex rounded-md border bg-surface p-0.5"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={projectId === "all"}
+            onClick={() => setProjectId("all")}
+            className={cn(
+              "flex h-7 items-center rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
+              projectId === "all" && "bg-background text-foreground shadow-sm",
+            )}
           >
-            <option value="all">全部</option>
-            {(projects.data ?? []).map((project) => (
-              <option key={project.id} value={String(project.id)}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            全部
+          </button>
+          {(projects.data ?? []).map((project) => (
+            <button
+              key={project.id}
+              type="button"
+              role="tab"
+              aria-selected={projectId === String(project.id)}
+              onClick={() => setProjectId(String(project.id))}
+              className={cn(
+                "flex h-7 items-center rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
+                projectId === String(project.id) &&
+                  "bg-background text-foreground shadow-sm",
+              )}
+            >
+              {project.name}
+            </button>
+          ))}
+        </div>
       }
     >
-      <section className="mb-8" data-testid="metrics-lead-time">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-          <BarChart3 className="size-4" />
-          工期
-        </h2>
-        <p className="mb-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-          {LEAD_TIME_BAR.map((seg) => (
-            <span key={seg.key} className="inline-flex items-center gap-1">
-              <span className={cn("size-2 rounded-sm", seg.cls)} />
-              {LEAD_TIME_LABELS[seg.key]}
-            </span>
-          ))}
-        </p>
-        <ul className="space-y-3">
-          {weeks.map((week) => (
-            <LeadWeek key={week.weekStart} week={week} />
-          ))}
-        </ul>
-      </section>
+      <div className="grid gap-8 lg:grid-cols-2">
+        <section data-testid="metrics-lead-time">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+            <BarChart3 className="size-4" />
+            工期
+          </h2>
+          <p className="mb-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+            {LEAD_TIME_BAR.map((seg) => (
+              <span key={seg.key} className="inline-flex items-center gap-1">
+                <span className={cn("size-2 rounded-sm", seg.cls)} />
+                {LEAD_TIME_LABELS[seg.key]}
+              </span>
+            ))}
+          </p>
+          <LeadTimeChart
+            weeks={weeks}
+            selected={leadWeek}
+            onSelect={setLeadWeek}
+          />
+          {selected ? <LeadWeekDetail week={selected} /> : null}
+        </section>
 
-      <section className="mb-8" data-testid="metrics-attribution">
-        <h2 className="mb-3 text-sm font-semibold">失败归因</h2>
-        <ul className="space-y-4">
-          {weeks.map((week) => (
-            <WeekAttribution key={week.weekStart} week={week} />
-          ))}
-        </ul>
-      </section>
+        <section data-testid="metrics-attribution">
+          <h2 className="mb-3 text-sm font-semibold">失败归因</h2>
+          {failedWeeks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">无</p>
+          ) : (
+            <ul className="space-y-4">
+              {failedWeeks.map((week) => (
+                <WeekAttribution key={week.weekStart} week={week} />
+              ))}
+            </ul>
+          )}
+        </section>
 
-      <section className="mb-8" data-testid="metrics-failure-rate">
-        <h2 className="mb-3 text-sm font-semibold">平台故障率</h2>
-        <FailureRateChart weeks={weeks} />
-      </section>
+        <section data-testid="metrics-failure-rate">
+          <h2 className="mb-3 text-sm font-semibold">平台故障率</h2>
+          <FailureRateChart weeks={weeks} />
+        </section>
 
-      <section data-testid="metrics-success">
-        <h2 className="mb-3 text-sm font-semibold">成功标准</h2>
-        <SuccessTable weeks={weeks} />
-      </section>
+        <section data-testid="metrics-success">
+          <h2 className="mb-3 text-sm font-semibold">成功标准</h2>
+          <SuccessTable weeks={weeks} />
+        </section>
+      </div>
     </Page>
   );
 }
 
-function LeadWeek({ week }: { week: Week }) {
-  const total =
-    week.leadTime.agentMs +
-    week.leadTime.gateMs +
-    week.leadTime.queuedMs +
-    week.leadTime.waitingMs;
+function LeadTimeChart({
+  weeks,
+  selected,
+  onSelect,
+}: {
+  weeks: Week[];
+  selected: number;
+  onSelect: (index: number) => void;
+}) {
   return (
-    <li>
+    <div className="flex items-end gap-1" data-testid="lead-time-chart">
+      {weeks.map((week, index) => {
+        const total = leadTotal(week);
+        return (
+          <button
+            key={week.weekStart}
+            type="button"
+            aria-pressed={selected === index}
+            aria-label={`工期 ${week.weekStart}`}
+            onClick={() => onSelect(index)}
+            className={cn(
+              "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-sm pb-0.5",
+              selected === index && "bg-muted",
+            )}
+          >
+            <div className="flex h-32 w-full flex-col-reverse overflow-hidden rounded-sm bg-muted">
+              {total > 0
+                ? LEAD_TIME_BAR.map((seg) => {
+                    const ms = LEAD_MS[seg.key](week);
+                    return ms > 0 ? (
+                      <div
+                        key={seg.key}
+                        className={cn("w-full", seg.cls)}
+                        style={{ height: `${(ms / total) * 100}%` }}
+                        title={`${LEAD_TIME_LABELS[seg.key]} ${formatCompactDuration(ms)}`}
+                      />
+                    ) : null;
+                  })
+                : null}
+            </div>
+            <span className="font-mono text-[10px] tabular text-muted-foreground">
+              {weekLabel(week.weekStart)}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function LeadWeekDetail({ week }: { week: Week }) {
+  return (
+    <div className="mt-3">
       <div className="mb-1 flex flex-wrap items-baseline gap-2 text-xs">
         <span className="font-mono tabular">{week.weekStart}</span>
         <span className="text-muted-foreground">
@@ -199,21 +308,6 @@ function LeadWeek({ week }: { week: Week }) {
             ? ` · 中位 ${formatCompactDuration(week.leadTime.medianMs)}`
             : ""}
         </span>
-      </div>
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-        {total > 0
-          ? LEAD_TIME_BAR.map((seg) => {
-              const ms = LEAD_MS[seg.key](week);
-              return ms > 0 ? (
-                <div
-                  key={seg.key}
-                  className={cn("h-full", seg.cls)}
-                  style={{ width: `${(ms / total) * 100}%` }}
-                  title={`${LEAD_TIME_LABELS[seg.key]} ${formatCompactDuration(ms)}`}
-                />
-              ) : null;
-            })
-          : null}
       </div>
       {week.leadTime.specs.length > 0 ? (
         <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -231,31 +325,18 @@ function LeadWeek({ week }: { week: Week }) {
       ) : (
         <p className="mt-1 text-xs text-muted-foreground">无</p>
       )}
-    </li>
+    </div>
   );
 }
 
 function WeekAttribution({ week }: { week: Week }) {
-  const empty =
-    week.attribution.needsHuman.length === 0 &&
-    week.attribution.recovered.length === 0;
   return (
     <li>
       <div className="mb-1 font-mono text-xs tabular">{week.weekStart}</div>
-      {empty ? (
-        <p className="text-sm text-muted-foreground">无</p>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <AttributionTable
-            title="要人处理"
-            rows={week.attribution.needsHuman}
-          />
-          <AttributionTable
-            title="自动恢复"
-            rows={week.attribution.recovered}
-          />
-        </div>
-      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <AttributionTable title="要人处理" rows={week.attribution.needsHuman} />
+        <AttributionTable title="自动恢复" rows={week.attribution.recovered} />
+      </div>
     </li>
   );
 }
@@ -381,6 +462,16 @@ function FailureRateChart({ weeks }: { weeks: Week[] }) {
             </div>
           ))}
         </div>
+      </div>
+      <div className="mt-1 flex gap-1 px-2">
+        {weeks.map((week) => (
+          <span
+            key={week.weekStart}
+            className="min-w-0 flex-1 text-center font-mono text-[10px] tabular text-muted-foreground"
+          >
+            {weekLabel(week.weekStart)}
+          </span>
+        ))}
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
         虚线 3% · 平台 · 外部服务 · 作业失败率

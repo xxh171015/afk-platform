@@ -84,16 +84,21 @@ const server = () =>
   });
 
 describe("the metrics page", () => {
-  it("shows 工期, 失败归因, 平台故障率, 成功标准, empty weeks, spec links and the 3% line", async () => {
+  it("shows 工期, 失败归因, 平台故障率, 成功标准, spec links and the 3% line", async () => {
     renderWithApp(<Metrics />, server());
     expect(await screen.findByText("数据从 2026-08-24 起")).toBeTruthy();
-    expect(screen.getAllByText("2026-08-24").length).toBeGreaterThan(1);
-    expect(screen.getByTestId("metrics-lead-time").textContent).toContain("无");
+    expect(screen.getByTestId("metrics-success").textContent).toContain(
+      "2026-08-24",
+    );
+    expect(screen.getByTestId("lead-time-chart")).toBeTruthy();
     expect(
       screen
         .getByRole("link", { name: "S-1 Order export" })
         .getAttribute("href"),
     ).toBe("/specs/1");
+    expect(screen.getByTestId("metrics-lead-time").textContent).not.toContain(
+      "无",
+    );
     expect(screen.getByTestId("metrics-attribution").textContent).toContain(
       "要人处理",
     );
@@ -103,9 +108,15 @@ describe("the metrics page", () => {
     expect(screen.getByTestId("metrics-attribution").textContent).toContain(
       "模型放弃",
     );
+    expect(screen.getByTestId("metrics-attribution").textContent).not.toContain(
+      weekStarts[0],
+    );
     expect(screen.getByTestId("failure-rate-line")).toBeTruthy();
     expect(screen.getByTestId("metrics-failure-rate").textContent).toContain(
       "3%",
+    );
+    expect(screen.getByTestId("metrics-failure-rate").textContent).toContain(
+      weekStarts[0]?.slice(5),
     );
     const success = screen.getByTestId("metrics-success");
     expect(success.textContent).toContain("合并的 MR / PR");
@@ -135,8 +146,44 @@ describe("the metrics page", () => {
       }),
     });
     renderWithApp(<Metrics />, fake);
-    const select = await screen.findByRole("combobox", { name: "项目" });
-    fireEvent.change(select, { target: { value: "1" } });
+    fireEvent.click(await screen.findByRole("tab", { name: "shop" }));
     await waitFor(() => expect(projectId).toBe("1"));
+  });
+
+  it("defaults to the latest week with ended specs and switches the list on click", async () => {
+    const first = weekStarts[0] as string;
+    const custom = weeks.map((week, i) =>
+      i === 0
+        ? {
+            ...week,
+            leadTime: {
+              ...week.leadTime,
+              ended: 1,
+              specs: [
+                {
+                  id: 2,
+                  displayId: "S-2",
+                  title: "Old spec",
+                  totalMs: 1,
+                },
+              ],
+            },
+          }
+        : week,
+    );
+    const fake = fakeServer({
+      "GET /metrics": () => ({ json: { since: "2026-08-24", weeks: custom } }),
+      "GET /projects": () => ({
+        json: { projects: [{ id: 1, name: "shop" }] },
+      }),
+    });
+    renderWithApp(<Metrics />, fake);
+    expect(
+      await screen.findByRole("link", { name: "S-1 Order export" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "S-2 Old spec" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: `工期 ${first}` }));
+    expect(screen.getByRole("link", { name: "S-2 Old spec" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "S-1 Order export" })).toBeNull();
   });
 });
