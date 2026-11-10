@@ -240,7 +240,7 @@ await runWorker({
     slots: new SlotManager({
       root: slotsRoot,
       count: config.slots,
-      mainCloneFor: (name) => repos.dirFor(name),
+      mainCloneFor: (name, url) => repos.dirFor(name, url),
       salvageDir: join(config.home, "salvage"),
       isHeld: (jobId, attempt) => api.isHeld(jobId, attempt),
       removeSandboxes: (dir) => removeSandboxesUnder(dir, undefined, log),

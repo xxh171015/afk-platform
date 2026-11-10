@@ -70,6 +70,7 @@ const LATER_THAN_REPO_NAMES = [
   "0046_log_retention",
   "0047_workers",
   "0048_disk",
+  "0049_gitlab_auth_external",
 ];
 const LATER_THAN_BRANCH_NAMESPACE = [
   "0014_branch_namespace",

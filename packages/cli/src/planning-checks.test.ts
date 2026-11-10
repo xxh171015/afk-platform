@@ -258,6 +258,24 @@ describe("unreadyRepos", () => {
       ]),
     ).toEqual(["web: 请项目 Maintainer 把〈alice〉加为 Developer"]);
   });
+
+  it("names a GitLab repo whose PAT check failed, so confirm cannot start", () => {
+    expect(
+      unreadyRepos([
+        {
+          name: "backend",
+          url: "https://gitlab.example/acme/backend.git",
+          access: {
+            state: "error",
+            hostKind: "gitlab",
+            message: "GitLab did not describe the token's user: HTTP 401",
+          },
+        },
+      ]),
+    ).toEqual([
+      "backend: 托管无法检查：GitLab did not describe the token's user: HTTP 401",
+    ]);
+  });
 });
 
 describe("integrationWarnings", () => {

@@ -261,6 +261,7 @@ describe("the failure source the database works out", () => {
     null,
     "",
     "GitHub answered 502 reading pull request 12",
+    "GitLab did not describe the token's user: HTTP 401",
     "GitHub answered 404 reading pull request 512",
     "GitHub refused to mark pull request 3 ready (503): x",
     "cursor-agent: Authentication required",

@@ -344,6 +344,13 @@
       "when": 1794330000000,
       "tag": "0048_disk",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794340000000,
+      "tag": "0049_gitlab_auth_external",
+      "breakpoints": true
     }
   ]
 }

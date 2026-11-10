@@ -169,6 +169,7 @@ export async function executeStage(
     jobId: context.job.id,
     attempt: context.job.attempt,
     repo: bundle.repo.name,
+    repoUrl: bundle.repo.url,
     ref: bundle.agentBranch,
     integration: bundle.integrationBranch as string,
     defaultBranch: bundle.repo.defaultBranch,

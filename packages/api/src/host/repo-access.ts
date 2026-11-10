@@ -137,10 +137,25 @@ const keep = (db: Queryable, repoId: number, last: Record<string, unknown>) =>
 
 export function redAccessProblem(
   name: string,
-  access: { state?: string; fix?: string; username?: string } | undefined,
+  access:
+    | {
+        state?: string;
+        fix?: string;
+        username?: string;
+        message?: string;
+        hostKind?: string;
+      }
+    | undefined,
 ): string | undefined {
-  if (access?.state !== "not-member") return undefined;
-  return `${name}: ${access.fix ?? `请项目 Maintainer 把${access.username ? `〈${access.username}〉` : "令牌用户"}加为 Developer`}`;
+  if (access?.state === "not-member")
+    return `${name}: ${access.fix ?? `请项目 Maintainer 把${access.username ? `〈${access.username}〉` : "令牌用户"}加为 Developer`}`;
+  if (access?.state === "error") {
+    const detail = access.message ?? "unknown error";
+    return access.hostKind === "gitlab"
+      ? `${name}: 托管无法检查：${detail}`
+      : `${name}: the GitHub App could not be checked: ${detail}`;
+  }
+  return undefined;
 }
 
 export async function recordRepoAccess(

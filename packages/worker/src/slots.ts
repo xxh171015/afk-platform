@@ -25,6 +25,7 @@ export interface SlotTask {
   jobId: number;
   attempt: number;
   repo: string; // directory name of the repo, e.g. "backend"
+  repoUrl?: string; // the origin, so two backends on different hosts do not share a main clone
   ref: string; // the ticket's branch, agent/<id>/T-123: the only ref that is ever taken back
   integration?: string; // the branch it was made from, put in the slot on purpose: not an extra ref
   defaultBranch?: string; // the repo's own default branch; the slot has it as plumbing, not extra
@@ -37,7 +38,7 @@ export interface SlotLock extends SlotTask {
 export interface SlotManagerOptions {
   root: string;
   count: number;
-  mainCloneFor(repo: string): string;
+  mainCloneFor(repo: string, url?: string): string;
   salvageDir: string; // where diffs of uncommitted work, and clones that could not be emptied, are kept
   // Does the API still consider (job, attempt) the live holder? A lock whose job lost its lease is a zombie.
   // If the API cannot be asked, the lock is assumed to be held: never destroy work on a guess.
@@ -214,7 +215,7 @@ export class SlotManager {
     const tmp = `${lastPath}.tmp`;
     writeFileSync(tmp, JSON.stringify(task));
     renameSync(tmp, lastPath);
-    const main = this.options.mainCloneFor(task.repo);
+    const main = this.options.mainCloneFor(task.repo, task.repoUrl);
     gitOrThrow(dir, [
       "clone",
       "--quiet",
@@ -252,7 +253,7 @@ export class SlotManager {
     if (existsSync(clone)) {
       const taken = retrieveResult({
         slotClone: clone,
-        mainClone: this.options.mainCloneFor(previous.repo),
+        mainClone: this.options.mainCloneFor(previous.repo, previous.repoUrl),
         ref: previous.ref,
         ...(previous.integration ? { integration: previous.integration } : {}),
         ...(previous.defaultBranch

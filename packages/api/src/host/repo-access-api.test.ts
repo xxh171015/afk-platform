@@ -246,6 +246,63 @@ describe("GitLab repo access", () => {
     expect(allowed.status).toBe(200);
   });
 
+  it("blocks confirm when the GitLab PAT check failed", async () => {
+    const web = ws.checkout("web", "https://gitlab.com/acme/web.git");
+    await ws.plat(web.dir, ["init", "--yes"]);
+    const { job } = await claimAccessJob();
+    await worker.fail(
+      job.id,
+      job.attempt,
+      "GitLab did not describe the token's user: HTTP 401",
+    );
+
+    const project = await fetch(`${ws.api.url}/projects`).then((r) => r.json());
+    const spec = await fetch(`${ws.api.url}/specs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: project.projects[0].id,
+        type: "feature",
+        slug: "notes",
+        title: "Notes",
+      }),
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+    expect(spec.status).toBe(201);
+    const imported = await fetch(
+      `${ws.api.url}/specs/${spec.body.id}/tickets/import`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          importBody(spec.body.id, {
+            tickets: [
+              {
+                key: "a",
+                repo: "web",
+                type: "implementation",
+                title: "write it",
+                modules: ["src/**"],
+                acceptance: ["it works"],
+              },
+            ],
+          }),
+        ),
+      },
+    );
+    expect(imported.status).toBe(200);
+
+    const blocked = await fetch(`${ws.api.url}/specs/${spec.body.id}/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({
+      error:
+        "web: 托管无法检查：GitLab did not describe the token's user: HTTP 401",
+    });
+  });
+
   it("queues the next check a day later, and plat init runs that waiting check now", async () => {
     const web = ws.checkout("web", "https://gitlab.com/acme/web.git");
     await ws.plat(web.dir, ["init", "--yes"]);

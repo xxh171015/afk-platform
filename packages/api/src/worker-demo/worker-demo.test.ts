@@ -167,7 +167,7 @@ function deps(
     slots: new SlotManager({
       root: join(home, "slots"),
       count: 3,
-      mainCloneFor: (repo) => repos.dirFor(repo),
+      mainCloneFor: (repo, url) => repos.dirFor(repo, url),
       salvageDir: join(home, "salvage"),
       isHeld: async () => true,
     }),

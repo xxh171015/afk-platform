@@ -154,6 +154,8 @@ export interface RepoAccessView {
   files?: { gates: boolean; integrationCompose: boolean };
   username?: string;
   fix?: string;
+  hostKind?: string;
+  message?: string;
 }
 
 const GATES_PATH = ".sandcastle/gates.yaml";
@@ -173,6 +175,14 @@ export function unreadyRepos(
       lines.push(
         `${repo.name}: ${repo.access.fix ?? `请项目 Maintainer 把${repo.access.username ? `〈${repo.access.username}〉` : "令牌用户"}加为 Developer`}`,
       );
+    if (repo.access?.state === "error") {
+      const detail = repo.access.message ?? "unknown error";
+      lines.push(
+        repo.access.hostKind === "gitlab"
+          ? `${repo.name}: 托管无法检查：${detail}`
+          : `${repo.name}: the GitHub App could not be checked: ${detail}`,
+      );
+    }
     if (repo.access?.files?.gates === false)
       lines.push(
         `${repo.name} has no ${GATES_PATH} on its default branch or on ${SETUP_BRANCH}, so its tickets cannot pass a gate: set it up with the afk-setup skill, then confirm again`,

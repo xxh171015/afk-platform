@@ -93,8 +93,8 @@ export const FAILURE_SOURCE_OF_REASON: Record<
 // code host, a package registry or image registry that could not be reached. Matched case-insensitively. Written so
 // JavaScript and Postgres (~*) read them alike: the events trigger matches the same list (drizzle/0035_events.sql).
 export const EXTERNAL_ERROR_PATTERNS = [
-  "(github|gitlab).*(answered |http |[(])5[0-9][0-9]([^0-9]|$)",
-  "authentication required|not authenticated|cursor-agent login|unauthorized",
+  "(github|gitlab).*(answered |http |[(])(401|403|5[0-9][0-9])([^0-9]|$)",
+  "authentication required|not authenticated|cursor-agent login|unauthorized|invalid username or token",
   "rate.?limit|too many requests|usage limit|http 429",
   "enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake timeout",
   "err_pnpm_meta_fetch_fail|registry\\.npmjs\\.org|registry\\.npmmirror\\.com",

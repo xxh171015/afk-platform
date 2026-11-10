@@ -176,16 +176,27 @@ export async function confirmSpec(
     }
     const access = await client.query<{
       name: string;
+      host_kind: string;
       access: {
-        last?: { state?: string; fix?: string; username?: string };
+        last?: {
+          state?: string;
+          fix?: string;
+          username?: string;
+          message?: string;
+        };
       } | null;
     }>(
-      `SELECT DISTINCT r.name, r.access FROM tickets t JOIN repos r ON r.id = t.repo_id
+      `SELECT DISTINCT r.name, r.host_kind, r.access FROM tickets t JOIN repos r ON r.id = t.repo_id
        WHERE t.spec_id = $1 ORDER BY r.name`,
       [specId],
     );
     const red = access.rows
-      .map((row) => redAccessProblem(row.name, row.access?.last))
+      .map((row) =>
+        redAccessProblem(row.name, {
+          ...row.access?.last,
+          hostKind: row.host_kind,
+        }),
+      )
       .filter((line): line is string => line !== undefined);
     if (red.length > 0)
       return { status: "not-confirmable", message: red.join("\n") };
