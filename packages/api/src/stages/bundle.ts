@@ -98,6 +98,9 @@ export interface Bundle {
   // What the last merge into the integration branch measured: a gate may not find fewer tests or more skipped ones
   // than this. Null before the spec has merged anything.
   gateBaseline: { tests: number; skipped: number } | null;
+  // Every merge's measurement, newest first, with the commit it was taken at. A ticket's own gate is held only to
+  // the newest one its branch already contains: merges that landed after it branched are not its to answer for.
+  gateBaselines: { sha: string; tests: number; skipped: number }[];
   // The project's say over how a run is carried out: how long an agent may be silent or run in all, and the model
   // it uses (null: the worker's own AFK_MODEL).
   limits: {
@@ -156,6 +159,26 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   return row
     ? { tests: row.tests_total, skipped: row.tests_skipped ?? 0 }
     : null;
+}
+
+async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
+  const { rows } = await pool.query<{
+    sha: string;
+    tests_total: number;
+    tests_skipped: number | null;
+  }>(
+    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped FROM runs r
+     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
+       AND g.tests_total IS NOT NULL
+     ORDER BY r.id DESC LIMIT 50`,
+    [specId, repoId],
+  );
+  return rows.map((r) => ({
+    sha: r.sha,
+    tests: r.tests_total,
+    skipped: r.tests_skipped ?? 0,
+  }));
 }
 
 export async function buildBundle(
@@ -267,6 +290,7 @@ export async function buildBundle(
       ticketId,
     ]),
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
+    gateBaselines: await gateBaselinesFor(pool, row.spec_id, row.repo_id),
     ...runSettings(row.limits, row.default_model),
   };
 }
@@ -359,6 +383,7 @@ async function buildFinalBundle(
       [final.specId, final.repoId],
     ),
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
+    gateBaselines: await gateBaselinesFor(pool, final.specId, final.repoId),
     ...runSettings(row.limits, row.default_model),
   };
 }
@@ -439,6 +464,7 @@ async function buildUpdateBranchBundle(
     failureLog: failed.rows[0]?.log ?? null,
     review: null,
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
+    gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
     ...runSettings(row.limits, row.default_model),
   };
 }

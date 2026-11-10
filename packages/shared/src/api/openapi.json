@@ -2755,6 +2755,24 @@
                       },
                       "required": ["tests", "skipped"]
                     },
+                    "gateBaselines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sha": {
+                            "type": "string"
+                          },
+                          "tests": {
+                            "type": "integer"
+                          },
+                          "skipped": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["sha", "tests", "skipped"]
+                      }
+                    },
                     "limits": {
                       "type": "object",
                       "properties": {
@@ -2796,6 +2814,7 @@
                     "note",
                     "failureLog",
                     "gateBaseline",
+                    "gateBaselines",
                     "limits",
                     "model"
                   ]

@@ -1670,6 +1670,11 @@ export interface paths {
                 tests: number;
                 skipped: number;
               } | null;
+              gateBaselines: {
+                sha: string;
+                tests: number;
+                skipped: number;
+              }[];
               limits: {
                 runIdleSeconds: number;
                 runWallclockSeconds: number;

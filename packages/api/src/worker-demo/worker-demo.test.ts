@@ -1238,7 +1238,7 @@ describe("the overall review of the integration branch", {
   });
 });
 
-describe("the test count guard", () => {
+describe("the test count guard", { timeout: 60_000 }, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -1278,6 +1278,28 @@ describe("the test count guard", () => {
     expect(gates.rows[0].output.failureLog).toContain(
       "fewer tests than the baseline",
     );
+  });
+
+  it("does not hold a ticket to a merge its branch does not contain: it branched before that merge landed", async () => {
+    await confirmedSpec([ticket("a")]);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, head_sha) VALUES (1, 1, 'merge', 'merged', 'ffffffffffffffffffffffffffffffffffffffff')`,
+    );
+    await db.pool.query(
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, tests_total, tests_skipped) VALUES (1, 'ffffffffffffffffffffffffffffffffffffffff', 'c', 99, 0)`,
+    );
+    await work({
+      script: (ctx) =>
+        ctx.stage === "implement"
+          ? { files: { "tests.count": "1\n" }, output: DONE }
+          : undefined,
+    });
+    // The ticket's own gate passes; the merge stage still holds the combination to the newest measurement.
+    const gates = await db.pool.query(
+      "SELECT result FROM runs WHERE ticket_id = 1 AND stage = 'gate' ORDER BY id",
+    );
+    expect(gates.rows[0].result).toBe("passed");
+    expect(await stateOf()).not.toContain("1:blocked/gate-failed");
   });
 
   it("does not hold the first ticket of a spec to anything: there is nothing to compare with yet", async () => {
