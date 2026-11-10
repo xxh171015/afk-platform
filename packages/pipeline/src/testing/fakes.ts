@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -11,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "../agent.ts";
-import { git, gitOrThrow } from "../exec.ts";
+import { exec, git, gitOrThrow } from "../exec.ts";
 import type { GateSandbox, SandboxPlacement, SandboxSession } from "../gate.ts";
 import type { DockerCli, DockerResult } from "../integration-env.ts";
 
@@ -183,15 +182,17 @@ export class FakeGateSandbox implements GateSandbox {
       ref,
     ]);
     return {
-      exec: async (command) => {
-        const result = spawnSync("sh", ["-c", command], {
+      // GNU timeout is not on every host; time the process in Node and use
+      // timeout(1)'s exit 124 when it is killed.
+      exec: async (command, options) => {
+        const result = exec("sh", ["-c", command], {
           cwd: worktree,
-          encoding: "utf8",
           env: { ...process.env, ...placement?.env }, // what docker({ env }) sets inside the container
+          timeoutMs: options.timeoutSeconds * 1000,
         });
         return {
-          exitCode: result.status ?? -1,
-          output: (result.stdout ?? "") + (result.stderr ?? ""),
+          exitCode: result.timedOut ? 124 : result.code,
+          output: result.out,
         };
       },
       readFile: async (path) => {

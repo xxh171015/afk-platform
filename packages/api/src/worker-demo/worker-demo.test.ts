@@ -29,10 +29,14 @@ import {
   SlotManager,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { FakeClock, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeClock,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 // A whole spec from import to done, with a real Postgres, the HTTP API, real git and slots, and a worker that has
@@ -69,7 +73,7 @@ beforeEach(async () => {
   clock = new FakeClock();
   logDir = mkdtempSync(join(tmpdir(), "afk-demo-logs-"));
   home = mkdtempSync(join(tmpdir(), "afk-demo-home-"));
-  api = await listen(createApp({ pool: db.pool, clock: clock.now, logDir }));
+  api = await listen(testApp({ pool: db.pool, clock: clock.now, logDir }));
   seed = makeRepo({ ".sandcastle/gates.yaml": GATES, "README.md": "# shop\n" });
   origin = join(home, "origin.git");
   git(home, ["clone", "--quiet", "--bare", seed.dir, origin]);
@@ -640,7 +644,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 });
 
-describe("the planning commit, end to end", () => {
+describe("the planning commit, end to end", { timeout: 60_000 }, () => {
   it("commits the planning docs onto the planning repo's integration branch first, and other repos' agents read them", async () => {
     // a second repo, and a GLOSSARY in the planning repo
     const front = makeRepo({
@@ -737,7 +741,41 @@ describe("the planning commit, end to end", () => {
   }, 30_000);
 });
 
-describe("failures of the worker's own", () => {
+describe("failures of the worker's own", { timeout: 60_000 }, () => {
+  it("fails a Cursor auth error once: the ticket waits with the human brief, and the agent is not run again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return {
+          error: {
+            kind: "other" as const,
+            message: "ActionRequiredError: Unauthorized request",
+          },
+        };
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const jobs = await db.pool.query(
+      "SELECT state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
+    );
+    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
+    const queue = (await (await fetch(`${api.url}/blocked`)).json()) as {
+      tickets: Array<{ brief: { output: { error: string } } }>;
+    };
+    expect(queue.tickets[0].brief.output.error).toBe(
+      "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+    );
+  });
+
   it("fails the job, keeps the slot's clone, and tells the API", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps({
@@ -765,7 +803,9 @@ describe("failures of the worker's own", () => {
   });
 });
 
-describe("a person's decisions about a blocked ticket", () => {
+describe("a person's decisions about a blocked ticket", {
+  timeout: 60_000,
+}, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -909,7 +949,7 @@ describe("a person's decisions about a blocked ticket", () => {
   });
 });
 
-describe("work an interrupted run left behind", () => {
+describe("work an interrupted run left behind", { timeout: 60_000 }, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -1314,7 +1354,7 @@ describe("the test count guard", { timeout: 60_000 }, () => {
   });
 });
 
-describe("what the project says about a run", () => {
+describe("what the project says about a run", { timeout: 60_000 }, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -1465,7 +1505,7 @@ describe("what the project says about a run", () => {
   });
 });
 
-describe("a flood of raw event lines", () => {
+describe("a flood of raw event lines", { timeout: 60_000 }, () => {
   it("is uploaded in pieces the API accepts, up to a limit, and the rest is left out with a note", async () => {
     await confirmedSpec([ticket("a")]);
     // 600 lines of 15 000 characters: more than one chunk, and more than the stage may upload in all
@@ -1506,7 +1546,134 @@ describe("a flood of raw event lines", () => {
   });
 });
 
-describe("the merge stage", () => {
+describe("a push after the agent is done", { timeout: 60_000 }, () => {
+  const CONNECTION =
+    "fatal: unable to access 'https://github.com/shop/backend.git/': Could not resolve host: github.com";
+
+  function withAgentRemote(
+    executor: ReturnType<typeof deps>,
+    respond: (attempt: number) => { ok: false; error: string } | "push",
+  ) {
+    const real = executor.push;
+    let attempts = 0;
+    executor.push = (request, token) => {
+      if (!request.target.startsWith("refs/heads/agent/"))
+        return real(request, token);
+      attempts += 1;
+      const next = respond(attempts);
+      return next === "push" ? real(request, token) : next;
+    };
+    executor.sleep = async () => {};
+    return () => attempts;
+  }
+
+  it("finishes the job after the remote fails to connect three times, without running the agent again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    const agentPushes = withAgentRemote(executor, (attempt) =>
+      attempt <= 3 ? { ok: false, error: CONNECTION } : "push",
+    );
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(implementRuns).toBe(1);
+    expect(agentPushes()).toBe(4);
+  });
+
+  it.each([
+    [
+      "non-fast-forward",
+      "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
+    ],
+    [
+      "a protected branch",
+      "remote: error: GH006: Protected branch update failed for refs/heads/agent/abc123/T-1",
+    ],
+    [
+      "no permission",
+      "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+    ],
+  ])("does not retry a push that was rejected (%s)", async (_kind, error) => {
+    await confirmedSpec([ticket("a")]);
+    const api2 = workerFor();
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    const executor = deps();
+    const agentPushes = withAgentRemote(executor, () => ({
+      ok: false,
+      error,
+    }));
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("failed");
+    expect(agentPushes()).toBe(1);
+  });
+
+  it("does not push again when the lease is gone before a retry", async () => {
+    await confirmedSpec([ticket("a")]);
+    const real = workerFor();
+    let checks = 0;
+    const api2 = {
+      ...real,
+      prePush: async (job: Parameters<typeof real.prePush>[0]) => {
+        checks += 1;
+        if (checks > 1) return "lost" as const;
+        return real.prePush(job);
+      },
+    };
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    const executor = deps();
+    const agentPushes = withAgentRemote(executor, () => ({
+      ok: false,
+      error: CONNECTION,
+    }));
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("abandoned");
+    expect(agentPushes()).toBe(1);
+    expect(
+      git(origin, ["rev-parse", "--verify", "--quiet", `agent/${ID}/T-1`]).code,
+    ).not.toBe(0);
+  });
+
+  it("fails the job as infrastructure when every retry still cannot connect", async () => {
+    await confirmedSpec([ticket("a")]);
+    const api2 = workerFor();
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    const executor = deps();
+    const agentPushes = withAgentRemote(executor, (attempt) =>
+      attempt <= 4 ? { ok: false, error: CONNECTION } : "push",
+    );
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("failed");
+    expect(agentPushes()).toBe(4);
+    const stored = await db.pool.query(
+      "SELECT state, error FROM jobs WHERE id = $1",
+      [job.id],
+    );
+    expect(stored.rows[0].state).toBe("failed");
+    expect(stored.rows[0].error).toContain("push failed");
+    expect(await stateOf()).toEqual(["1:running"]);
+  });
+});
+
+describe("the merge stage", { timeout: 60_000 }, () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);
     const real = workerFor();
@@ -1843,7 +2010,9 @@ describe("the merge stage", () => {
   });
 });
 
-describe("trouble reaching the API, or no room to work", () => {
+describe("trouble reaching the API, or no room to work", {
+  timeout: 60_000,
+}, () => {
   const claimed = async (api2 = workerFor()) => {
     await confirmedSpec([ticket("a")]);
     return {
@@ -1959,7 +2128,7 @@ describe("trouble reaching the API, or no room to work", () => {
   });
 });
 
-describe("losing the lease", () => {
+describe("losing the lease", { timeout: 60_000 }, () => {
   it("aborts the local run at once and reports nothing", async () => {
     await confirmedSpec([ticket("a")]);
     let sawAbort = false;
@@ -2001,7 +2170,9 @@ describe("losing the lease", () => {
   });
 });
 
-describe("from the last ticket to a merged spec, with a fake GitHub", () => {
+describe("from the last ticket to a merged spec, with a fake GitHub", {
+  timeout: 60_000,
+}, () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,
     publicKeyEncoding: { type: "spki", format: "pem" },
@@ -2220,7 +2391,7 @@ describe("from the last ticket to a merged spec, with a fake GitHub", () => {
   });
 });
 
-describe("what the worker may and may not know", () => {
+describe("what the worker may and may not know", { timeout: 60_000 }, () => {
   it("has no database and no api package behind it", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");

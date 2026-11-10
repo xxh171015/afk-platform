@@ -1,4 +1,5 @@
 import {
+  findingResolutionPhrase,
   formatDisplayId,
   HOST_KINDS,
   type HostKind,
@@ -636,6 +637,10 @@ async function withLiveFacts(
       .map((section) => ({
         ...section,
         pullRequest: pulls.find((p) => p.repo === section.repo) ?? null,
+        findings: section.findings.map((finding) => ({
+          ...finding,
+          resolution: findingResolutionPhrase(finding.resolution),
+        })),
       }))
       .sort((a, b) => rank(a.repo) - rank(b.repo)),
   };

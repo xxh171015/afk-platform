@@ -5,7 +5,7 @@
 1. 读 `/context/failure/gate.log`、`/context/ticket.md`（这张票原本要做什么）、`/context/spec.md`、`/context/contract/<仓库名>/`（如果有，只读）和仓库根目录的 `AGENTS.md`。
 2. 读 `/home/agent/.cursor/skills/tdd/SKILL.md`，照它修：先写一个**会失败的测试**把问题复现出来，再修到它通过；只做红 → 绿，不重构。门禁失败本身就是一条失败的检查时，先确认你能在本地复现它。不要读 `diagnosing-bugs`。
 3. 修代码，不要靠删除或跳过测试、改配置来让门禁通过。
-4. `npm run typecheck` 和 `npm test` 都要通过，再提交。
+4. 提交前按 `/context/run.json` 的 `gate` 逐条跑通，再提交。`setup` 只列出来，不要求你自己再跑。
 
 ## 结果
 

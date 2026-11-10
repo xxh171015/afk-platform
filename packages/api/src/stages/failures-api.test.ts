@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import {
@@ -7,6 +6,7 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -19,7 +19,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(createApp({ pool: db.pool, clock: clock.now }));
+  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -101,6 +101,32 @@ async function failNext(error = "docker daemon not running") {
 }
 
 describe("a job the worker could not carry out", () => {
+  it("still requeues a network error, and blocks only after the third failure", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext(
+      "fatal: unable to access 'https://github.com/x.git/': Could not resolve host: github.com",
+    );
+    expect((await state()).state).toBe("running");
+    expect((await keys()).map((k) => k.state)).toEqual(["failed", "queued"]);
+    await failNext(
+      "Failed to connect to github.com port 443: Connection timed out",
+    );
+    expect((await state()).state).toBe("running");
+    await failNext(
+      "fatal: unable to access: Failed to connect to github.com port 443 after 135002 ms: Couldn't connect to server",
+    );
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect((await keys()).map((k) => k.state)).toEqual([
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    expect(await claim()).toBeNull();
+  });
+
   it("is queued again, under a new key, and the ticket stays where it was", async () => {
     await runningSpec([ticket("a")]);
     const failed = await failNext();
@@ -136,6 +162,68 @@ describe("a job the worker could not carry out", () => {
       Number((await db.pool.query("SELECT count(*) FROM runs")).rows[0].count),
     ).toBe(2);
   });
+
+  it("blocks on a Cursor auth error at the first failure, with the human brief, and does not requeue", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext("ActionRequiredError: Unauthorized request");
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
+    expect(await claim()).toBeNull();
+
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      displayId: "T-1",
+      blockedReason: "job-failed",
+      failureSource: "external",
+      brief: {
+        stage: "implement",
+        result: "job-failed",
+        output: {
+          error:
+            "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+        },
+      },
+    });
+  });
+
+  it.each([
+    [
+      "an invalid model name",
+      "Error: unknown model 'claude-code'",
+      "模型名无效，检查项目的默认模型或 AFK_MODEL",
+    ],
+    [
+      "a spent Cursor quota",
+      "Error: quota exceeded: usage limit reached",
+      "Cursor 额度用完，充值或换模型后再试",
+    ],
+    [
+      "an integration image that would not build",
+      "docker build of backend (backend) failed (exit 1):\nERROR: failed to solve",
+      "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
+    ],
+  ] as const)(
+    "blocks once on %s, as an outside service, and does not requeue",
+    async (_kind, error, brief) => {
+      await runningSpec([ticket("a")]);
+      await failNext(error);
+      expect(await state()).toEqual({
+        state: "blocked",
+        blocked_reason: "job-failed",
+      });
+      expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
+      expect(await claim()).toBeNull();
+      const queue = await call("GET", "/blocked");
+      expect(queue.body.tickets[0]).toMatchObject({
+        blockedReason: "job-failed",
+        failureSource: "external",
+        brief: { output: { error: brief } },
+      });
+    },
+  );
 
   it("blocks the ticket with job-failed after the third failure, with the error in its brief", async () => {
     await runningSpec([ticket("a")]);
@@ -327,6 +415,35 @@ describe("a step of the overall review that could not be carried out", () => {
       });
     }
   }
+
+  it("blocks the finalization at the first Cursor auth error, with the human brief", async () => {
+    await toFinalReview();
+    await failNext("ActionRequiredError: Unauthorized request");
+    expect(
+      (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
+        .rows[0],
+    ).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.finalizations[0]).toMatchObject({
+      blockedReason: "job-failed",
+      brief: {
+        result: "job-failed",
+        output: {
+          error:
+            "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+        },
+      },
+    });
+    const recorded = await db.pool.query(
+      `SELECT failure_source FROM events
+       WHERE type = 'finalization' AND to_state = 'blocked' ORDER BY id DESC LIMIT 1`,
+    );
+    expect(recorded.rows[0].failure_source).toBe("external");
+  });
 
   it("is queued again, and blocks the finalization after three failures", async () => {
     await toFinalReview();

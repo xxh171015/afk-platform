@@ -12,7 +12,7 @@ by what the skill is working on:
 | code-review: find the spec                            | the platform  | `plat`         |
 | wayfinder: the map and its tickets                    | {{HOST_NAME}} | `{{HOST_CLI}}` |
 | triage: labels, needs-info, ready-for-agent on issues | {{HOST_NAME}} | `{{HOST_CLI}}` |
-| pull requests treated as requests                     | {{HOST_NAME}} | `{{HOST_CLI}}` |
+| {{HOST_PRS}} treated as requests                      | {{HOST_NAME}} | `{{HOST_CLI}}` |
 
 The platform has no labels and no comments, which is why triage and wayfinder stay on {{HOST_NAME}}. Each part
 below is complete for its side; do not look for either one elsewhere.

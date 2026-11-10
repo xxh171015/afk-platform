@@ -22,6 +22,7 @@ import {
   ImplementOutputSchema,
   OVERLAY_FILE,
   overlaySkillsSha,
+  PROMPT_DIR,
   PROMPTS,
   promptFor,
   type ReviewOutput,
@@ -505,8 +506,17 @@ describe("the prompts", () => {
       "/context/domain/",
       "/context/note.md",
       "不当成改票",
+      "单个测试文件怎么跑看仓库的 `AGENTS.md`",
     ])
       expect(overlay).toContain(word);
+  });
+
+  it("has afk-setup write how to run a single test file into AGENTS.md", () => {
+    const skill = readFileSync(
+      join(PROMPT_DIR, "../../../skills/afk-setup/SKILL.md"),
+      "utf8",
+    );
+    expect(skill).toMatch(/AGENTS\.md[\s\S]*how to run a single test file/);
   });
 
   it("is written for the skills SHA the platform pins, which the mounted skills were copied at", () => {
@@ -602,6 +612,42 @@ describe("the prompts", () => {
     expect(promptFor("review-fix")).toBe(PROMPTS.reviewFix);
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
     expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
+  });
+
+  const CODE_CHANGING_PROMPTS = [
+    PROMPTS.implement,
+    PROMPTS.integrationImplement,
+    PROMPTS.gateFix,
+    PROMPTS.reviewFix,
+    PROMPTS.mergeFix,
+    PROMPTS.finalFix,
+    PROMPTS.updateBranch,
+    PROMPTS.diagnose,
+  ] as const;
+
+  it("tells every code-changing stage to run the named commands in run.json's gate", () => {
+    expect(CODE_CHANGING_PROMPTS).toHaveLength(8);
+    for (const file of CODE_CHANGING_PROMPTS) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("/context/run.json");
+      expect(prompt).toMatch(/`gate`/);
+      expect(prompt).toMatch(/setup/);
+    }
+  });
+
+  it("names no concrete build or test command; a mention of AGENTS.md is not a violation", () => {
+    const promptsDir = join(OVERLAY_FILE, "..");
+    const banned =
+      /\b(?:npm|npx|pnpm|yarn|bun|mvn|gradlew?|cargo|pytest|dotnet)\b|\bmake\b|\bgo\s+test\b/i;
+    for (const file of readdirSync(promptsDir).filter((name) =>
+      name.endsWith(".md"),
+    )) {
+      const hits = readFileSync(join(promptsDir, file), "utf8")
+        .split("\n")
+        .filter((line) => !line.includes("AGENTS.md"))
+        .filter((line) => banned.test(line));
+      expect(hits, file).toEqual([]);
+    }
   });
 
   it("gives an integration ticket's implement its own prompt, which says to write the e2e against the real services", () => {

@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
@@ -12,7 +16,7 @@ let worker: FakeWorker;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -261,12 +265,22 @@ describe("GET /metrics", () => {
     const clean = await runningSpec(["a"]);
     await mergeSpec(clean.specId, new Date());
     const nudged = await runningSpec(["b"], "other");
+    const confirmAt = (
+      await db.pool.query<{ at: Date }>(
+        `SELECT at FROM events
+         WHERE spec_id = $1 AND type = 'spec' AND to_state = 'running'
+         ORDER BY id LIMIT 1`,
+        [nudged.specId],
+      )
+    ).rows[0].at;
+    // now() vs Date() in the same millisecond can put the retry after merged_at.
+    const actionAt = new Date(confirmAt.getTime() + 60_000);
     await db.pool.query(
-      `INSERT INTO events (spec_id, type, source, data)
-       VALUES ($1, 'action', 'page', '{"action":"retry"}')`,
-      [nudged.specId],
+      `INSERT INTO events (spec_id, type, source, data, at)
+       VALUES ($1, 'action', 'page', '{"action":"retry"}', $2)`,
+      [nudged.specId, actionAt],
     );
-    await mergeSpec(nudged.specId, new Date());
+    await mergeSpec(nudged.specId, new Date(actionAt.getTime() + 60_000));
     const week = thisWeek((await call("GET", "/metrics")).body);
     expect(week.success.untouchedRate).toBe(0.5);
   });

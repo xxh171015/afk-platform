@@ -1,7 +1,6 @@
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveAcceptancePack } from "../acceptance/pack.ts";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
@@ -10,6 +9,7 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -22,7 +22,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(createApp({ pool: db.pool, clock: clock.now }));
+  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
   worker = new FakeWorker(api.url, "w1", ["host"]);
 });
 afterEach(async () => {
@@ -1584,6 +1584,44 @@ describe("the acceptance pack", () => {
       { source: "T-1 review", text: "the ticket does not say the date format" },
       { source: "S-1 final review", text: "migration order" },
     ]);
+  });
+
+  it("after final-fix is done, wrap-up must-fix findings are handed to fix in the pack and pull request, not unhandled", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [ticket("a", "backend")],
+      stages: {
+        ...stages,
+        "final-review": {
+          outcome: "fix",
+          findings: [{ kind: "must-fix", body: "names disagree" }],
+        },
+        "final-fix": { outcome: "done" },
+        "final-merge": { outcome: "merged", headSha: "settled" },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    const wrapUp = acceptancePack.repos[0].findings.filter(
+      (f: Json) => f.stage === "final-review",
+    );
+    expect(wrapUp).toEqual([
+      {
+        ticket: null,
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "final-review",
+        kind: "must-fix",
+        body: "names disagree",
+        resolution: "已交给 fix 处理",
+        axis: null,
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain(
+      "[已交给 fix 处理] spec final-review must-fix: names disagree",
+    );
+    expect(task.section).not.toContain("unhandled");
   });
 
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {

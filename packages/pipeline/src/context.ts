@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Bundle } from "@afk/shared";
 import { git } from "./exec.ts";
+import type { GateConfig } from "./gate.ts";
 
 // Renders /context for an agent run (docs/design.md「Agent 与 skills 对接」): the files the agent reads, and
 // nothing else. The prompt only points at them.
@@ -21,6 +22,20 @@ export interface ContextInput {
   contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
   // Planning commit files (GLOSSARY.md, docs/adr/**). Omit for the planning repo's own tickets.
   domain?: { path: string; content: string }[];
+  // This repo's gate at the trusted commit: named commands, setup listed on its own.
+  gate?: GateConfig;
+}
+
+export type RunGate = {
+  setup: string | null;
+  commands: { name: string; run: string }[];
+};
+
+export function gateForRun(config: GateConfig): RunGate {
+  return {
+    setup: config.setup ?? null,
+    commands: config.commands.map(({ name, run }) => ({ name, run })),
+  };
 }
 
 function specTicketsMarkdown(bundle: Bundle): string {
@@ -56,6 +71,7 @@ function runJson(input: ContextInput) {
     domain: input.domain?.length
       ? input.domain.map((file) => domainFile(file.path))
       : null,
+    ...(input.gate ? { gate: gateForRun(input.gate) } : {}),
   };
 }
 

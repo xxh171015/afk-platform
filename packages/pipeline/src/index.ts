@@ -25,8 +25,13 @@ export {
   reviewFindings,
   writePrompt,
 } from "./agent.ts";
-export type { ContextInput, RunFacts } from "./context.ts";
-export { readContract, readDomainFiles, renderContext } from "./context.ts";
+export type { ContextInput, RunFacts, RunGate } from "./context.ts";
+export {
+  gateForRun,
+  readContract,
+  readDomainFiles,
+  renderContext,
+} from "./context.ts";
 export type { ContractCopyProblem, ProvidedContract } from "./contract-copy.ts";
 export { checkContractCopies, copyPathOf } from "./contract-copy.ts";
 export type {

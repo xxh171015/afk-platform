@@ -33,6 +33,13 @@ export interface GitLabAccessOptions {
   fetch?: typeof fetch;
 }
 
+export type GitLabTokenIdentity = {
+  username: string;
+  userId: number;
+  // omitted when GitLab did not say; null when the PAT has no expiry
+  tokenExpiresAt?: string | null;
+};
+
 const projectId = (repo: RepoRef) =>
   encodeURIComponent(`${repo.owner}/${repo.name}`);
 
@@ -40,21 +47,24 @@ function notMemberFix(username: string): string {
   return `请项目 Maintainer 把〈${username}〉加为 Developer`;
 }
 
-export async function checkGitLabAccess(
-  options: GitLabAccessOptions,
-  repo: RepoRef,
-): Promise<GitLabAccess> {
-  const apiUrl = options.apiUrl.replace(/\/+$/, "");
-  const doFetch = options.fetch ?? fetch;
-  const token = await options.tokens.tokenFor({ repo, permissions: {} });
-  const get = async (path: string) => {
+function gitlabGet(apiUrl: string, token: string, doFetch: typeof fetch) {
+  return async (path: string) => {
     const response = await doFetch(`${apiUrl}${path}`, {
       headers: { "PRIVATE-TOKEN": token },
     });
     const body: unknown = await response.json().catch(() => ({}));
     return { status: response.status, body };
   };
+}
 
+// The PAT's user and expiry, from GET /user and GET /personal_access_tokens/self. No repo is needed.
+export async function describeGitLabToken(options: {
+  token: string;
+  apiUrl: string;
+  fetch?: typeof fetch;
+}): Promise<GitLabTokenIdentity> {
+  const apiUrl = options.apiUrl.replace(/\/+$/, "");
+  const get = gitlabGet(apiUrl, options.token, options.fetch ?? fetch);
   const user = await get("/user");
   if (user.status !== 200)
     throw new HostError(
@@ -76,6 +86,27 @@ export async function checkGitLabAccess(
     if (value === null) return null;
     return typeof value === "string" ? value : undefined;
   })();
+
+  return {
+    username,
+    userId,
+    ...(tokenExpiresAt !== undefined ? { tokenExpiresAt } : {}),
+  };
+}
+
+export async function checkGitLabAccess(
+  options: GitLabAccessOptions,
+  repo: RepoRef,
+): Promise<GitLabAccess> {
+  const apiUrl = options.apiUrl.replace(/\/+$/, "");
+  const doFetch = options.fetch ?? fetch;
+  const token = await options.tokens.tokenFor({ repo, permissions: {} });
+  const get = gitlabGet(apiUrl, token, doFetch);
+  const { username, userId, tokenExpiresAt } = await describeGitLabToken({
+    token,
+    apiUrl,
+    fetch: doFetch,
+  });
 
   const member = await get(
     `/projects/${projectId(repo)}/members/all/${userId}`,

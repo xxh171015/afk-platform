@@ -1,4 +1,9 @@
-import { FINAL_E2E_FAILED, formatDisplayId, type SpecState } from "@afk/shared";
+import {
+  FINAL_E2E_FAILED,
+  formatDisplayId,
+  type SpecState,
+  unrecoverableJobError,
+} from "@afk/shared";
 import type pg from "pg";
 import { recordAction } from "../events/human-actions.ts";
 import { startOpeningPullRequests } from "../host/pull-requests.ts";
@@ -255,10 +260,12 @@ async function settleRound(
 }
 
 // A job of the step failed on the worker (the environment would not come up, mostly): tried again, and after three
-// failures in a row the step is blocked.
+// failures in a row the step is blocked. An unrecoverable error (a failed image build, a dead Cursor key) blocks
+// at once.
 export async function finalE2eJobFailed(
   client: pg.PoolClient,
   read: FinalE2ePayload,
+  error: string,
 ): Promise<
   { status: "ignored" } | { status: "requeued" | "blocked"; failures: number }
 > {
@@ -286,7 +293,7 @@ export async function finalE2eJobFailed(
       )
     ).rows[0]?.n,
   );
-  if (failures < MAX_JOB_FAILURES) {
+  if (!unrecoverableJobError(error) && failures < MAX_JOB_FAILURES) {
     await enqueueFor(client, read.specId, ticket, read.stage, read.round);
     return { status: "requeued", failures };
   }

@@ -5,7 +5,6 @@ import {
   junitCounts,
   readGateConfig,
   type StepOutcome,
-  shellQuote,
   type TestCase,
 } from "./gate.ts";
 
@@ -80,9 +79,9 @@ export async function runE2e(input: RunE2eInput): Promise<E2eOutcome> {
     for (const step of steps) {
       if (input.signal?.aborted) break;
       const started = Date.now();
-      const result = await session.exec(
-        `timeout ${step.timeoutSeconds} sh -c ${shellQuote(step.run)}`,
-      );
+      const result = await session.exec(step.run, {
+        timeoutSeconds: step.timeoutSeconds,
+      });
       outcomes.push({
         name: step.name,
         exitCode: result.exitCode,

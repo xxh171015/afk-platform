@@ -112,6 +112,7 @@ describe("plat init", () => {
       body: {
         id: 1,
         name: "afk-pilot-backend",
+        defaultAgent: null,
         repos: [
           {
             name: "afk-pilot-backend",
@@ -247,6 +248,25 @@ describe("plat init", () => {
     expect(existsSync(join(backend.dir, "docs/agents/issue-tracker.md"))).toBe(
       false,
     );
+  });
+
+  it("does not print GitHub-only steps for a GitLab project", async () => {
+    const web = checkout("web", "https://gitlab.com/acme/web.git");
+
+    const result = await plat(web.dir, ["init", "--yes"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("GitHub App");
+    expect(result.stdout).not.toContain(".github/**");
+    expect(result.stdout).not.toContain("gh auth");
+    expect(result.stdout).not.toContain("gh label");
+    expect(result.stdout).toContain(
+      "project: new, web (protected paths: .gitlab-ci.yml)",
+    );
+    const doc = trackerDoc(web.dir);
+    const platform = doc.slice(0, doc.indexOf("## On GitLab"));
+    expect(platform).not.toMatch(/pull request/i);
+    expect(platform).not.toContain(".github/");
   });
 
   it("with --dry-run shows the plan without asking, registers and writes nothing, and succeeds", async () => {
