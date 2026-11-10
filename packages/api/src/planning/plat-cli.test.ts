@@ -390,6 +390,52 @@ describe("plat", () => {
     );
   });
 
+  it("prints uncovered User Stories as a yellow precheck and still confirms", async () => {
+    await register();
+    await db.pool.query("UPDATE specs SET body = $1", [
+      SPEC_BODY.replace(
+        "## User Stories\n\ntext.\n",
+        [
+          "## User Stories",
+          "",
+          "1. As a splitter, I want to name the User Stories a ticket is for.",
+          "2. As an importer, I want unknown numbers rejected.",
+          "3. As a reviewer, I want the assigned stories as counterparts.",
+          "4. As an author of an infrastructure ticket, I want to omit stories.",
+          "5. As a planner, I want uncovered User Stories listed before confirm.",
+          "",
+        ].join("\n"),
+      ),
+    ]);
+    putTickets("tickets", [
+      {
+        key: "a",
+        repo: "backend",
+        type: "implementation",
+        title: "A",
+        modules: ["src/a/**"],
+        acceptance: ["ok"],
+        stories: [1, 3],
+      },
+      {
+        key: "b",
+        repo: "backend",
+        type: "implementation",
+        title: "B",
+        modules: ["src/b/**"],
+        acceptance: ["ok"],
+        stories: [4],
+      },
+    ]);
+    expect((await plat("tickets", "import", "S-1", "tickets")).code).toBe(0);
+    const confirmed = await plat("spec", "confirm", "S-1");
+    expect(confirmed.code).toBe(0);
+    expect(confirmed.stderr).toContain(
+      "yellow: 这几条 User Story 没有任何票负责：2, 5",
+    );
+    expect(confirmed.stdout).toContain("S-1 is running");
+  });
+
   it("passes --limit overrides to the project", async () => {
     await plat(
       "project",
