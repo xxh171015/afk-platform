@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readContract, readDomainFiles, renderContext } from "./context.ts";
 import { bundleFor } from "./fixtures.ts";
+import { readGateConfig } from "./gate.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
 const dirs: string[] = [];
@@ -163,6 +164,35 @@ describe("renderContext", () => {
       { repo: "backend", sha: "c0ffee", file: "contract/backend/openapi.yaml" },
       { repo: "payments", sha: "beef", file: "contract/payments/openapi.yaml" },
     ]);
+  });
+
+  it("puts a make-test repo's named gate commands in run.json, with setup on its own and no npm", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "setup: make setup",
+        "commands:",
+        "  - name: test",
+        "    run: make test",
+        "    timeoutSeconds: 60",
+        "    junit: reports/junit.xml",
+        "",
+      ].join("\n"),
+    });
+    const dir = ctxDir();
+    renderContext({
+      dir,
+      bundle: bundleFor(),
+      run,
+      gate: readGateConfig(repo.dir, "main"),
+    });
+    const json = JSON.parse(read(dir, "run.json")) as {
+      gate: unknown;
+    };
+    expect(json.gate).toEqual({
+      setup: "make setup",
+      commands: [{ name: "test", run: "make test" }],
+    });
+    expect(JSON.stringify(json)).not.toMatch(/\bnpm\b/);
   });
 });
 

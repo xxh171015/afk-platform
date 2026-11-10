@@ -1586,6 +1586,44 @@ describe("the acceptance pack", () => {
     ]);
   });
 
+  it("after final-fix is done, wrap-up must-fix findings are handed to fix in the pack and pull request, not unhandled", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [ticket("a", "backend")],
+      stages: {
+        ...stages,
+        "final-review": {
+          outcome: "fix",
+          findings: [{ kind: "must-fix", body: "names disagree" }],
+        },
+        "final-fix": { outcome: "done" },
+        "final-merge": { outcome: "merged", headSha: "settled" },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    const wrapUp = acceptancePack.repos[0].findings.filter(
+      (f: Json) => f.stage === "final-review",
+    );
+    expect(wrapUp).toEqual([
+      {
+        ticket: null,
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "final-review",
+        kind: "must-fix",
+        body: "names disagree",
+        resolution: "已交给 fix 处理",
+        axis: null,
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain(
+      "[已交给 fix 处理] spec final-review must-fix: names disagree",
+    );
+    expect(task.section).not.toContain("unhandled");
+  });
+
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {
     const { acceptancePack } = await packOf();
     expect(acceptancePack.repos[0].gate).toEqual({

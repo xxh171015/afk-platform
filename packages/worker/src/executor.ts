@@ -28,6 +28,7 @@ import {
   projectOf,
   promptFor,
   ReviewOutputSchema,
+  readGateConfig,
   reclaimEnvironments,
   renderContext,
   reviewFindings,
@@ -279,10 +280,12 @@ function renderFor(
   context: StageContext,
   baseSha: string,
   ctxRoot: string,
+  mainDir: string,
 ) {
   const { bundle } = context;
   const dir = join(ctxRoot, "context");
   const domainFiles = fetchDomain(deps.repos, bundle.domain, bundle.repo.name);
+  const integration = bundle.integrationBranch;
   renderContext({
     dir,
     bundle,
@@ -297,6 +300,9 @@ function renderFor(
       ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
       : {}),
     ...(domainFiles ? { domain: domainFiles } : {}),
+    ...(integration
+      ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
+      : {}),
   });
   return dir;
 }
@@ -360,7 +366,7 @@ async function agentChange(
       : before;
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
     const inEnvironment =
       bundle.ticket?.type === "integration" && bundle.environment.length > 0;
     const given = writePrompt(
@@ -522,7 +528,7 @@ async function review(
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
   try {
     bringBranches(slot, mainDir, [...branches.values()]);
-    const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
     const { refs, refShas } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     const runs = await Promise.all(
@@ -1086,7 +1092,7 @@ async function diagnose(
   const head = tip(mainDir, integration);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, head, tmp);
+    const ctxDir = renderFor(deps, context, head, tmp, mainDir);
     const given = writePrompt(tmp, promptFor("diagnose"));
     const { refs } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);

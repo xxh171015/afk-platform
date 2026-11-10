@@ -414,6 +414,18 @@ export async function writeFacts(
       [owner.ticket_id],
     );
   }
+  if (stage === "final-fix" && result?.outcome === "done") {
+    // Same meaning of `fixed` as ticket-level review-fix: the wrap-up's must-fix were handed to
+    // this fix, which reported done. Suggestions stay on the acceptance pack.
+    await client.query(
+      `UPDATE findings SET resolution = 'fixed' WHERE resolution = 'unhandled' AND kind = 'must-fix'
+       AND run_id IN (
+         SELECT id FROM runs
+         WHERE spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-review'
+       )`,
+      [owner.spec_id, owner.repo_id],
+    );
+  }
   await insertFindings(client, runId, result?.findings ?? []);
   // the other axes of a review: a Run each, which belongs to no job of its own
   for (const extra of result?.extraRuns ?? []) {

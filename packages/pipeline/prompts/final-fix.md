@@ -5,7 +5,7 @@
 1. 读 `/context/review.json`（整体审查的结果；`mustFix` 每一项都要处理，不论来自哪一轴，不要顺手做 `suggestions`）、`/context/spec.md` 和 `/context/tickets.md`（需求背景，以及每张票的验收标准，修完后它们都必须还成立）、`/context/run.json`（集成分支的名字和基准提交）、`/context/failure/gate.log`（如果有：上一次合并这个修复时门禁或冲突的记录）和仓库根目录的 `AGENTS.md`。
 2. 当前分支就是从集成分支切出来的，在上面改，只改 `mustFix` 需要的地方，改动要小。
 3. 读 `/home/agent/.cursor/skills/tdd/SKILL.md`，照它修：为每个问题先写一个**会失败的测试**，再修到它通过；只做红 → 绿，不重构。不要读 `diagnosing-bugs`。
-4. `npm run typecheck` 和 `npm test` 都要通过，再提交。
+4. 提交前按 `/context/run.json` 的 `gate` 逐条跑通，再提交。`setup` 只列出来，不要求你自己再跑。
 
 ## 结果
 

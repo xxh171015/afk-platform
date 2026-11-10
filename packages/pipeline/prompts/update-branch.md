@@ -6,7 +6,7 @@
 
 1. 读 `/context/run.json`：`integrationBranch` 是集成分支，`defaultBranch` 是要合进来的默认分支，`branch` 是你工作的临时分支。再读 `/context/spec.md` 弄清这个需求的意图，以及仓库根目录的 `AGENTS.md`。没有 `/context/ticket.md`。
 2. 执行 `git merge <defaultBranch>`，解决冲突，保留两边的意图。
-3. `npm run typecheck` 和 `npm test` 都要通过，再提交。
+3. 提交前按 `/context/run.json` 的 `gate` 逐条跑通，再提交。`setup` 只列出来，不要求你自己再跑。
 
 ## 结果
 

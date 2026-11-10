@@ -351,6 +351,13 @@
       "when": 1794340000000,
       "tag": "0049_gitlab_auth_external",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794350000000,
+      "tag": "0050_final_fix_findings",
+      "breakpoints": true
     }
   ]
 }
