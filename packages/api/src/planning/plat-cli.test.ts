@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { LogStore } from "../logs/log-store.ts";
+import { retainLogs } from "../logs/retention.ts";
 import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
 import { type TestTicket, ticketFile } from "../test/ticket-files.ts";
 
@@ -25,6 +27,10 @@ beforeEach(async () => {
   await migrate(db.pool);
   logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   api = await listen(createApp({ pool: db.pool, logDir }));
+  // a worker with the GitHub App has said so
+  await db.pool.query(
+    "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('github.com', 'github', 'w1')",
+  );
   files = {};
   workDir = undefined;
 });
@@ -214,6 +220,9 @@ async function register() {
 
 describe("plat", () => {
   it("registers and changes the host kind of a repo, and tracker-doc follows it", async () => {
+    await db.pool.query(
+      "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('git.example.org', 'gitlab', 'w1')",
+    );
     await plat("project", "create", "shop");
     const add = await plat(
       "repo",
@@ -459,6 +468,27 @@ describe("plat", () => {
     expect(none.stderr).toMatch(/nothing to change/);
   });
 
+  it("does not add a repo on a host no worker has credentials for, and says how to fix it", async () => {
+    await plat("project", "create", "shop");
+    const added = await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "api",
+      "--url",
+      "https://git.corp.example/team/api.git",
+    );
+    expect(added.code).toBe(1);
+    expect(added.stderr).toContain(
+      "api 在 git.corp.example，平台没有这台主机的凭据",
+    );
+    expect(
+      (await db.pool.query("SELECT count(*)::int AS n FROM repos")).rows[0].n,
+    ).toBe(0);
+  });
+
   it("registers a repo by name (role still works) and sets, shows and clears its contract path", async () => {
     await plat("project", "create", "shop");
     const add = (...flags: string[]) =>
@@ -562,6 +592,47 @@ describe("plat", () => {
     );
   });
 
+  it("says when a run's log was purged under the retention policy", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    const runId = (
+      await db.pool.query("SELECT id FROM runs WHERE job_id = $1", [job?.id])
+    ).rows[0].id;
+    await fetch(`${api.url}/worker/runs/${runId}/logs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workerId: "w1",
+        attempt: job?.attempt,
+        chunk: "secret\n",
+      }),
+    });
+    await db.pool.query("UPDATE specs SET state = 'cancelled'");
+    await db.pool.query(
+      `UPDATE events SET at = now() - interval '91 days'
+        WHERE type = 'spec' AND to_state = 'cancelled'`,
+    );
+    await retainLogs({
+      pool: db.pool,
+      logs: new LogStore(logDir),
+      now: new Date(),
+    });
+    const text = await plat("run", "logs", `R-${runId}`);
+    expect(text).toMatchObject({ code: 0, stderr: "" });
+    expect(text.stdout).toMatch(
+      /^日志已于 \d{4}-\d{2}-\d{2} 按保留策略清理\n$/,
+    );
+    const asJson = JSON.parse(
+      (await plat("--json", "run", "logs", `R-${runId}`)).stdout,
+    );
+    expect(asJson.purgedAt).toBeTruthy();
+    expect(asJson.text).toBe("");
+  });
+
   // T-1 (the contract ticket) is claimed and its agent gives up: blocked, with a brief.
   async function blockedContract() {
     await register();
@@ -645,7 +716,7 @@ describe("plat", () => {
   it("lists waiting items in the same order as items", async () => {
     await blockedContract();
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached' WHERE id = 1",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = 1",
     );
     const json = JSON.parse((await plat("--json", "blocked")).stdout);
     const text = await plat("blocked");
@@ -903,19 +974,19 @@ describe("plat", () => {
     expect(bundle.ticket.file).not.toContain(note);
   });
 
-  it("resumes a paused spec with more agent time", async () => {
+  it("retries a paused spec with more agent time, and can allow one through without", async () => {
     await blockedContract();
     await db.pool.query(
-      "UPDATE specs SET state = 'paused', pause_reason = 'the agent time limit of the spec was reached'",
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted'",
     );
     expect((await plat("blocked")).stdout).toContain(
-      "S-1  paused  Order export: the agent time limit",
+      "S-1  paused  Order export: agent 时间用完",
     );
     expect((await plat("spec", "show", "S-1")).stdout).toContain(
-      "paused: the agent time limit",
+      "paused: agent 时间用完",
     );
-    const resumed = await plat("spec", "resume", "S-1", "--extra-hours", "2");
-    expect(resumed).toEqual({
+    const retried = await plat("spec", "retry", "S-1", "--extra-hours", "2");
+    expect(retried).toEqual({
       code: 0,
       stdout: "S-1 is running\n",
       stderr: "",
@@ -925,6 +996,19 @@ describe("plat", () => {
     expect((await plat("spec", "resume", "S-1")).stderr).toMatch(
       /not allowed in running/,
     );
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'update-branch-conflict'",
+    );
+    const allowed = await plat("spec", "allow", "S-1");
+    expect(allowed).toEqual({
+      code: 0,
+      stdout: "S-1 is running\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT budget_extra_seconds FROM specs")).rows[0]
+        .budget_extra_seconds,
+    ).toBe(7200);
   });
 
   it("shows a blocked overall review and runs its blocked step again", async () => {

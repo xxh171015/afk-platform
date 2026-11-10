@@ -13,13 +13,16 @@ import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 
 const ENTITY_TABLES = [
   "acceptance_packs",
+  "code_hosts",
   "edges",
+  "events",
   "final_e2e",
   "finalizations",
   "findings",
   "gate_results",
   "instance",
   "jobs",
+  "potential_conflicts",
   "projects",
   "pull_requests",
   "repos",
@@ -27,6 +30,7 @@ const ENTITY_TABLES = [
   "specs",
   "ticket_versions",
   "tickets",
+  "workers",
 ];
 
 // Tests that migrate "from before" leave out a migration and every one after it: drizzle skips an entry that is
@@ -72,6 +76,15 @@ describe("migrate", () => {
       "SELECT count(*)::int AS n FROM drizzle.__drizzle_migrations",
     );
     expect(again.rows[0].n).toBe(rows[0].n);
+  });
+
+  it("drops the unused log_url columns", async () => {
+    await migrate(db.pool);
+    const { rows } = await db.pool.query(
+      `SELECT table_name FROM information_schema.columns
+        WHERE column_name = 'log_url' AND table_name IN ('runs', 'gate_results')`,
+    );
+    expect(rows).toEqual([]);
   });
 });
 
@@ -377,6 +390,120 @@ describe("the host kind of a repo", () => {
       await expect(
         db.pool.query("UPDATE repos SET host_kind = 'gitea'"),
       ).rejects.toThrow(/repos_host_kind_check/);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("one host-sync job per project", () => {
+  it("drops the old chain of looks, leaves other jobs, and queues one look where a pull request is still followed", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => Number(e.tag.slice(0, 4)) < 38,
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query(
+        "INSERT INTO projects (name) VALUES ('shop'), ('other')",
+      );
+      await db.pool.query(
+        `INSERT INTO repos (project_id, url, name) VALUES
+           (1, 'https://github.com/me/shop.git', 'backend'),
+           (2, 'https://github.com/me/other.git', 'backend')`,
+      );
+      await db.pool.query(
+        `INSERT INTO specs (project_id, type, slug, title, state) VALUES
+           (1, 'feature', 'export', 'Export', 'awaiting-review'),
+           (2, 'feature', 'done', 'Done', 'merged')`,
+      );
+      await db.pool.query(
+        `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha) VALUES
+           (1, 1, 7, 'https://github.com/me/shop/pull/7', 'open', 'abc'),
+           (2, 2, 8, 'https://github.com/me/other/pull/8', 'merged', 'def')`,
+      );
+      await db.pool.query(
+        `INSERT INTO jobs (type, payload, state, idempotency_key) VALUES
+           ('host-sync', $1::jsonb, 'done', 'project-1:host-sync:1'),
+           ('host-sync', $1::jsonb, 'done', 'project-1:host-sync:2'),
+           ('host-sync', $1::jsonb, 'queued', 'project-1:host-sync:3'),
+           ('host-sync', $2::jsonb, 'done', 'project-2:host-sync:1'),
+           ('open-pr', $3::jsonb, 'queued', 'S-1:repo-1:open-pr:1')`,
+        [
+          JSON.stringify({ projectId: 1 }),
+          JSON.stringify({ projectId: 2 }),
+          JSON.stringify({ specId: 1, repoId: 1 }),
+        ],
+      );
+
+      await migrate(db.pool);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT state, payload, idempotency_key FROM jobs WHERE type = 'host-sync' ORDER BY id",
+          )
+        ).rows,
+      ).toEqual([
+        {
+          state: "queued",
+          payload: { projectId: 1 },
+          idempotency_key: "project-1:host-sync",
+        },
+      ]);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT type, idempotency_key FROM jobs WHERE type <> 'host-sync'",
+          )
+        ).rows,
+      ).toEqual([{ type: "open-pr", idempotency_key: "S-1:repo-1:open-pr:1" }]);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("pause reasons as codes", () => {
+  it("turns the old free-text pause reason into budget-exhausted and rejects anything else", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (e: { tag: string }) => Number(e.tag.slice(0, 4)) < 41,
+      );
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+      await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+      await db.pool.query(
+        `INSERT INTO specs (project_id, type, slug, title, state, pause_reason) VALUES
+           (1, 'feature', 'out', 'Out', 'paused', 'the agent time limit of the spec was reached'),
+           (1, 'feature', 'gate', 'Gate', 'paused', 'update-branch-gate-failed'),
+           (1, 'feature', 'run', 'Run', 'running', NULL)`,
+      );
+
+      await migrate(db.pool);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT slug, pause_reason FROM specs ORDER BY id",
+          )
+        ).rows,
+      ).toEqual([
+        { slug: "out", pause_reason: "budget-exhausted" },
+        { slug: "gate", pause_reason: "update-branch-gate-failed" },
+        { slug: "run", pause_reason: null },
+      ]);
+      await expect(
+        db.pool.query(
+          "UPDATE specs SET pause_reason = 'the agent time limit of the spec was reached' WHERE slug = 'out'",
+        ),
+      ).rejects.toThrow(/specs_pause_reason_check/);
     } finally {
       rmSync(before, { recursive: true, force: true });
     }

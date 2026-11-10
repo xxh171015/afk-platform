@@ -9,15 +9,24 @@ import { exec } from "@afk/pipeline";
 const ALLOWED =
   /^refs\/heads\/(agent|spec)\/[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 
-// What the host wants in the Authorization header for an installation token.
-// The token and its encoded form: neither may appear in anything that is logged or thrown.
-export const secretsOf = (token: string) => [
-  token,
-  Buffer.from(`x-access-token:${token}`).toString("base64"),
-];
+// A token for git over HTTPS, with the user name its host wants beside it: a GitHub App's installation token goes
+// with x-access-token (a bare string means that), a GitLab PAT with oauth2.
+export type GitToken = string | { user: string; token: string };
 
-export const basicAuth = (token: string) =>
-  `basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+const userAndToken = (token: GitToken) =>
+  typeof token === "string" ? { user: "x-access-token", token } : token;
+
+// The token and its encoded form: neither may appear in anything that is logged or thrown.
+export const secretsOf = (credential: GitToken) => {
+  const { user, token } = userAndToken(credential);
+  return [token, Buffer.from(`${user}:${token}`).toString("base64")];
+};
+
+// What the host wants in the Authorization header.
+export const basicAuth = (credential: GitToken) => {
+  const { user, token } = userAndToken(credential);
+  return `basic ${Buffer.from(`${user}:${token}`).toString("base64")}`;
+};
 
 export interface PushRequest {
   repoDir: string;
@@ -30,7 +39,7 @@ export interface PushRequest {
 }
 
 export interface PushOptions {
-  token?: string; // sent as an extra header; never written to .git/config or put in a URL, and scrubbed from output
+  token?: GitToken; // sent as an extra header; never written to .git/config or put in a URL, and scrubbed from output
 }
 
 export type PushResult = { ok: true } | { ok: false; error: string };
@@ -106,7 +115,7 @@ export function pushRef(
 }
 
 // The token is the one the stage holds at the moment of the push; a PushFn that has none of its own uses it.
-export type PushFn = (request: PushRequest, token?: string) => PushResult;
+export type PushFn = (request: PushRequest, token?: GitToken) => PushResult;
 
 export const pushWithToken: PushFn = (request, token) =>
   pushRef(request, token ? { token } : {});

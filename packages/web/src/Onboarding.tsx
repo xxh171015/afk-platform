@@ -148,6 +148,7 @@ function accessStatus(
     | {
         state: string;
         files?: { gates?: boolean; integrationCompose?: boolean };
+        hints?: string[];
       }
     | undefined,
   pending: boolean,
@@ -158,9 +159,11 @@ function accessStatus(
   if (!access) return "尚未检查";
   if (access.state === "unchecked") return "尚未检查";
   if (access.state === "pending") return "检查中";
-  if (access.state === "ok") return "通过";
+  if (access.state === "ok")
+    return access.hints && access.hints.length > 0 ? "提示" : "通过";
   if (access.state === "not-installed") return "未安装 App";
   if (access.state === "missing-permissions") return "权限不足";
+  if (access.state === "not-member") return "不是项目成员";
   if (access.state === "error") return "失败";
   return access.state;
 }
@@ -177,7 +180,6 @@ function RepoAccessRow({
   const gitlab = repo.hostKind === "gitlab";
   const access = useQuery({
     queryKey: ["onboarding", "access", projectId, repo.name],
-    enabled: !gitlab,
     queryFn: async () => {
       const { data, error } = await api.GET(
         "/projects/{projectId}/repos/{name}/access",
@@ -205,6 +207,9 @@ function RepoAccessRow({
   });
   const files =
     access.data && "files" in access.data ? access.data.files : undefined;
+  const hints =
+    access.data && "hints" in access.data ? access.data.hints : undefined;
+  const fix = access.data && "fix" in access.data ? access.data.fix : undefined;
   return (
     <li className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -213,24 +218,30 @@ function RepoAccessRow({
           {gitlab ? "（GitLab）" : ""}
         </span>
         <span className="font-mono text-[11px] text-muted-foreground">
-          {gitlab
-            ? "仅 GitHub 可查"
-            : accessStatus(access.data, access.isPending, access.isError)}
+          {accessStatus(access.data, access.isPending, access.isError)}
         </span>
-        {!gitlab ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={check.isPending}
-            onClick={() => check.mutate()}
-          >
-            现在检查
-          </Button>
-        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={check.isPending}
+          onClick={() => check.mutate()}
+        >
+          现在检查
+        </Button>
       </div>
-      {gitlab ? (
-        <p className="text-muted-foreground">这项检查仅 GitHub 可查。</p>
+      {fix ? <p className="text-muted-foreground">{fix}</p> : null}
+      {hints?.includes("personal-token") ? (
+        <p className="text-muted-foreground">
+          平台用的是个人令牌：推送和 MR 显示为
+          {access.data && "username" in access.data && access.data.username
+            ? `〈${access.data.username}〉`
+            : "令牌用户"}
+          ，平台不调合并接口，但合并者是不是平台检测不出；换 bot 账号放 M4
+        </p>
+      ) : null}
+      {hints?.includes("developers-can-merge") ? (
+        <p className="text-muted-foreground">Developers 能合并默认分支</p>
       ) : null}
       {files ? (
         <p className="text-muted-foreground">

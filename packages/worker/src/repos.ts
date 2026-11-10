@@ -1,8 +1,22 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, gitOrThrow, hasRef } from "@afk/pipeline";
-import { redactSecrets } from "@afk/shared";
-import { basicAuth, secretsOf } from "./push.ts";
+import { redactSecrets, repoHost, tryParseRepoUrl } from "@afk/shared";
+import { basicAuth, type GitToken, secretsOf } from "./push.ts";
+
+// Two projects can both name a repo `backend` on different hosts; a directory of just the name would fetch the
+// first origin for both. Host+owner when the URL names a code host, otherwise a hash of the URL (local test paths).
+function cloneDirName(name: string, url?: string): string {
+  if (!url) return `${name}.git`;
+  const host = repoHost(url);
+  const parsed = tryParseRepoUrl(url);
+  if (host && parsed) {
+    return `${host}--${parsed.owner.replaceAll("/", "-")}--${name}.git`;
+  }
+  const hash = createHash("sha256").update(url).digest("hex").slice(0, 12);
+  return `${name}-${hash}.git`;
+}
 
 // The worker's main clones, one per repo, kept bare: they hold the branches every slot clone starts from.
 // They follow origin for the default branch and the integration branches; ticket branches only move forward.
@@ -10,15 +24,17 @@ import { basicAuth, secretsOf } from "./push.ts";
 export class RepoStore {
   private readonly root: string;
   // The token for the repo at a URL: each repo has its own, since the code host gives a token to one repo at a time.
-  private readonly tokenOf: ((url?: string) => string | undefined) | undefined;
+  private readonly tokenOf:
+    | ((url?: string) => GitToken | undefined)
+    | undefined;
 
-  constructor(root: string, tokenOf?: (url?: string) => string | undefined) {
+  constructor(root: string, tokenOf?: (url?: string) => GitToken | undefined) {
     this.root = root;
     this.tokenOf = tokenOf;
   }
 
   // The same clones, reached with a token. It is read at each use, because a stage can outlive one token.
-  withToken(tokenOf: (url?: string) => string | undefined): RepoStore {
+  withToken(tokenOf: (url?: string) => GitToken | undefined): RepoStore {
     return new RepoStore(this.root, tokenOf);
   }
 
@@ -33,13 +49,13 @@ export class RepoStore {
     };
   }
 
-  dirFor(name: string): string {
-    return join(this.root, `${name}.git`);
+  dirFor(name: string, url?: string): string {
+    return join(this.root, cloneDirName(name, url));
   }
 
   // Clones on first use, then brings the branches the pipeline cares about up to date.
   ensure(name: string, url: string, defaultBranch: string): string {
-    const dir = this.dirFor(name);
+    const dir = this.dirFor(name, url);
     if (!existsSync(dir)) {
       mkdirSync(dirname(dir), { recursive: true });
       this.run(this.root, ["clone", "--quiet", "--bare", url, dir], url);

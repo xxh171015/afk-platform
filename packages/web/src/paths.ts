@@ -3,6 +3,7 @@
 export const PAGE_PATHS = [
   "/",
   "/waiting",
+  "/metrics",
   "/specs",
   "/specs/$specId",
   "/specs/$specId/description",
@@ -16,6 +17,7 @@ export const PAGE_PATHS = [
 export const paths = {
   home: "/",
   waiting: "/waiting",
+  metrics: "/metrics",
   specs: "/specs",
   spec: (id: number | string) => `/specs/${id}`,
   specDescription: (id: number | string) => `/specs/${id}/description`,

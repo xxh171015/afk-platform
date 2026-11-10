@@ -215,7 +215,13 @@ describe("starting an environment", () => {
     });
     const [first] = fake.calls;
     expect(first?.slice(0, 3)).toEqual(["compose", "-p", "afk-r-9"]);
-    expect(first?.slice(-3)).toEqual(["down", "-v", "--remove-orphans"]);
+    expect(first?.slice(-5)).toEqual([
+      "down",
+      "-v",
+      "--rmi",
+      "local",
+      "--remove-orphans",
+    ]);
     const firstBuild = fake.calls.findIndex((c) => c[0] === "build");
     expect(firstBuild).toBeGreaterThan(0);
   });
@@ -251,9 +257,11 @@ describe("stopping an environment", () => {
     fake.calls.length = 0;
     await env.stop();
     expect(fake.calls[0]?.slice(0, 3)).toEqual(["compose", "-p", "afk-r-9"]);
-    expect(fake.calls[0]?.slice(-3)).toEqual([
+    expect(fake.calls[0]?.slice(-5)).toEqual([
       "down",
       "-v",
+      "--rmi",
+      "local",
       "--remove-orphans",
     ]);
     expect(fake.only("rmi")).toEqual([["rmi", "-f", "afk-r-9-backend"]]);
@@ -313,7 +321,16 @@ describe("reclaiming the environments of workers that were killed", () => {
     });
     expect(reclaimed).toEqual(["afk-r-3"]);
     expect(fake.only("compose")).toEqual([
-      ["compose", "-p", "afk-r-3", "down", "-v", "--remove-orphans"],
+      [
+        "compose",
+        "-p",
+        "afk-r-3",
+        "down",
+        "-v",
+        "--rmi",
+        "local",
+        "--remove-orphans",
+      ],
     ]);
     expect(fake.only("ps")[0]).toEqual([
       "ps",
@@ -344,7 +361,16 @@ describe("reclaiming the environments of workers that were killed", () => {
     });
     expect(reclaimed).toEqual(["afk-r-3"]);
     expect(fake.only("compose")).toEqual([
-      ["compose", "-p", "afk-r-3", "down", "-v", "--remove-orphans"],
+      [
+        "compose",
+        "-p",
+        "afk-r-3",
+        "down",
+        "-v",
+        "--rmi",
+        "local",
+        "--remove-orphans",
+      ],
     ]);
   });
 

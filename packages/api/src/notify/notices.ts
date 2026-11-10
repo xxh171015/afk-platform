@@ -1,4 +1,10 @@
-import { formatDisplayId, structuredBrief } from "@afk/shared";
+import {
+  formatDisplayId,
+  type HostKind,
+  pauseReasonLabel,
+  pullAbbrev,
+  structuredBrief,
+} from "@afk/shared";
 import { pageUrl } from "../page-url.ts";
 
 // One macOS banner per listed transition: title is the kind, body is display id + title + one-line reason
@@ -26,6 +32,14 @@ export const NOTICE_TITLES: Record<NoticeKind, string> = {
   "waiting-other": "待处理",
 };
 
+export function noticeTitle(
+  kind: NoticeKind,
+  hostKind: HostKind = "github",
+): string {
+  if (kind === "pr-ready") return `${pullAbbrev(hostKind)} 已转 ready`;
+  return NOTICE_TITLES[kind];
+}
+
 export interface Notice {
   title: string;
   body: string;
@@ -39,9 +53,12 @@ export interface NoticeDraft {
   path: string;
 }
 
-export function composeNotice(draft: NoticeDraft): Notice {
+export function composeNotice(
+  draft: NoticeDraft,
+  hostKind: HostKind = "github",
+): Notice {
   return {
-    title: NOTICE_TITLES[draft.kind],
+    title: noticeTitle(draft.kind, hostKind),
     body: `${draft.displayId} ${draft.title}：${draft.reason}\n${pageUrl(draft.path)}`,
   };
 }
@@ -78,6 +95,8 @@ export interface Shot {
   prs: ShotPull[];
   cleanupFailed: boolean;
   readyFailedPullIds: number[];
+  hostKind: HostKind;
+  tokenMerged: boolean;
 }
 
 function blockedSummary(
@@ -105,12 +124,15 @@ function isWaitingPull(shot: Shot, pull: ShotPull): boolean {
 export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
   const out: Notice[] = [];
   const spec = formatDisplayId("spec", after.specId);
+  const hostKind = after.hostKind ?? "github";
+  const pr = pullAbbrev(hostKind);
+  const notice = (draft: NoticeDraft) => composeNotice(draft, hostKind);
 
   for (const ticket of after.tickets) {
     const prev = before.tickets.find((row) => row.id === ticket.id);
     if (ticket.state !== "blocked" || prev?.state === "blocked") continue;
     out.push(
-      composeNotice({
+      notice({
         kind: "ticket-blocked",
         displayId: formatDisplayId("ticket", ticket.id),
         title: ticket.title,
@@ -128,7 +150,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
     const prev = before.finals.find((row) => row.key === step.key);
     if (step.state !== "blocked" || prev?.state === "blocked") continue;
     out.push(
-      composeNotice({
+      notice({
         kind: "final-blocked",
         displayId: spec,
         title: after.specTitle,
@@ -140,11 +162,11 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
 
   if (after.specState === "paused" && before.specState !== "paused") {
     out.push(
-      composeNotice({
+      notice({
         kind: "spec-paused",
         displayId: spec,
         title: after.specTitle,
-        reason: after.pauseReason ?? "已暂停",
+        reason: pauseReasonLabel(after.pauseReason),
         path: `/specs/${after.specId}`,
       }),
     );
@@ -155,11 +177,11 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
     before.specState !== "awaiting-review"
   ) {
     out.push(
-      composeNotice({
+      notice({
         kind: "awaiting-review",
         displayId: spec,
         title: after.specTitle,
-        reason: "验收包和 PR 已齐",
+        reason: `验收包和 ${pr} 已齐`,
         path: `/specs/${after.specId}/delivery`,
       }),
     );
@@ -169,7 +191,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
     const prev = before.prs.find((row) => row.id === pull.id);
     if (prev?.draft && !pull.draft && prev.mergeOrderDraft) {
       out.push(
-        composeNotice({
+        notice({
           kind: "pr-ready",
           displayId: spec,
           title: after.specTitle,
@@ -182,7 +204,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
 
   if (after.specState === "merged" && before.specState !== "merged") {
     out.push(
-      composeNotice({
+      notice({
         kind: "spec-merged",
         displayId: spec,
         title: after.specTitle,
@@ -197,21 +219,21 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
     if (!isWaitingPull(after, pull)) continue;
     if (pull.state === "closed" && prev?.state !== "closed") {
       out.push(
-        composeNotice({
+        notice({
           kind: "waiting-other",
           displayId: spec,
           title: after.specTitle,
-          reason: "PR 被关",
+          reason: `${pr} 被关`,
           path: "/waiting",
         }),
       );
     } else if (pull.syncError && !prev?.syncError) {
       out.push(
-        composeNotice({
+        notice({
           kind: "waiting-other",
           displayId: spec,
           title: after.specTitle,
-          reason: "PR 读不出",
+          reason: `${pr} 读不出`,
           path: "/waiting",
         }),
       );
@@ -220,7 +242,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
 
   if (after.cleanupFailed && !before.cleanupFailed) {
     out.push(
-      composeNotice({
+      notice({
         kind: "waiting-other",
         displayId: spec,
         title: after.specTitle,
@@ -233,12 +255,24 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
   for (const pullId of after.readyFailedPullIds) {
     if (before.readyFailedPullIds.includes(pullId)) continue;
     out.push(
-      composeNotice({
+      notice({
         kind: "waiting-other",
         displayId: spec,
         title: after.specTitle,
         reason: "转 ready 三次失败",
         path: "/waiting",
+      }),
+    );
+  }
+
+  if (after.tokenMerged && !before.tokenMerged) {
+    out.push(
+      notice({
+        kind: "waiting-other",
+        displayId: spec,
+        title: after.specTitle,
+        reason: `平台账号合并了 ${pr}`,
+        path: `/specs/${after.specId}/delivery`,
       }),
     );
   }

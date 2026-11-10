@@ -33,6 +33,37 @@ const server = () =>
   fakeServer({
     "GET /workbench": () => ({ json: emptyWorkbench }),
     "GET /blocked": () => ({ json: emptyWaiting }),
+    "GET /metrics": () => ({
+      json: {
+        since: null,
+        weeks: Array.from({ length: 12 }, () => ({
+          weekStart: "2026-11-09",
+          leadTime: {
+            ended: 0,
+            medianMs: null,
+            agentMs: 0,
+            gateMs: 0,
+            queuedMs: 0,
+            waitingMs: 0,
+            specs: [],
+          },
+          attribution: { recovered: [], needsHuman: [] },
+          failureRate: {
+            ended: 0,
+            platform: null,
+            external: null,
+            jobPlatform: null,
+          },
+          success: {
+            mergedPulls: 0,
+            mergeRate: null,
+            humanCommitsRate: null,
+            untouchedRate: null,
+          },
+        })),
+      },
+    }),
+    "GET /projects": () => ({ json: { projects: [] } }),
     "GET /search": () => ({
       json: {
         specs: [
@@ -367,6 +398,9 @@ describe("the app", () => {
     expect(
       screen.getAllByRole("link", { name: "需求" })[0]?.getAttribute("href"),
     ).toBe("/specs");
+    expect(
+      screen.getAllByRole("link", { name: "度量" })[0]?.getAttribute("href"),
+    ).toBe("/metrics");
   });
 
   it("counts waiting from the workbench without loading briefs", async () => {
@@ -439,7 +473,7 @@ describe("the app", () => {
     expect(await screen.findByText("没有这个页面")).toBeTruthy();
   });
 
-  it("goes home, to waiting and to specs with g h / g b / g s", async () => {
+  it("goes home, to waiting, specs and metrics with g h / g b / g s / g m", async () => {
     const { router } = renderApp(server(), "/specs");
     expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "g" });
@@ -453,6 +487,11 @@ describe("the app", () => {
     fireEvent.keyDown(window, { key: "g" });
     fireEvent.keyDown(window, { key: "s" });
     await waitFor(() => expect(router.state.location.pathname).toBe("/specs"));
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "m" });
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/metrics"),
+    );
   });
 
   it("does not fire page shortcuts while typing in a field", async () => {

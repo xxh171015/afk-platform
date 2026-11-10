@@ -16,6 +16,7 @@ interface FakePull {
   state: "open" | "closed";
   merged: boolean;
   sha: string;
+  mergeable: boolean | null;
 }
 
 export interface FakeReview {
@@ -56,6 +57,9 @@ export class FakeGitHub {
   readonly files = new Set<string>();
   // The files on other branches, by branch and path (a contents read with `?ref=`).
   readonly branchFiles = new Map<string, Set<string>>();
+  // Default-branch (or any other) SHAs host-sync reads; missingBranches answers 404.
+  private readonly branchShas = new Map<string, string>();
+  readonly missingBranches = new Set<string>();
   now: () => number = () => Date.now();
   private readonly pulls: FakePull[] = [];
   private readonly branchNames = new Set<string>();
@@ -115,6 +119,9 @@ export class FakeGitHub {
   pushCommit(number: number, sha: string): void {
     this.pull(number).sha = sha;
   }
+  setMergeable(number: number, mergeable: boolean | null): void {
+    this.pull(number).mergeable = mergeable;
+  }
   addReview(number: number, review: FakeReview): void {
     this.reviews.set(number, [...(this.reviews.get(number) ?? []), review]);
   }
@@ -126,6 +133,9 @@ export class FakeGitHub {
   }
   addBranch(name: string): void {
     this.branchNames.add(name);
+  }
+  setBranchSha(name: string, sha: string): void {
+    this.branchShas.set(name, sha);
   }
   protectBranch(name: string): void {
     this.protectedBranches.add(name);
@@ -300,6 +310,7 @@ export class FakeGitHub {
         state: "open",
         merged: false,
         sha: createHash("sha1").update(String(body.head)).digest("hex"),
+        mergeable: true,
       };
       this.pulls.push(pull);
       return this.json(res, 201, this.render(pull));
@@ -326,6 +337,20 @@ export class FakeGitHub {
       return this.json(res, 200, this.render(pull));
     }
     const ref = /^\/git\/refs\/heads\/(.+)$/.exec(rest);
+    const refOne = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
+    const gitRef = ref ?? refOne;
+    if (req.method === "GET" && gitRef) {
+      const branch = decodeURIComponent(gitRef[1] as string);
+      if (this.missingBranches.has(branch))
+        return this.json(res, 404, { message: "Not Found" });
+      const sha =
+        this.branchShas.get(branch) ??
+        createHash("sha1").update(branch).digest("hex");
+      return this.conditional(req, res, {
+        ref: `refs/heads/${branch}`,
+        object: { sha, type: "commit" },
+      });
+    }
     if (req.method === "DELETE" && ref) {
       if (this.refuseBranchDeletes)
         return this.json(res, 403, { message: "Resource not accessible" });
@@ -410,6 +435,7 @@ export class FakeGitHub {
       base: { ref: pull.base },
       title: pull.title,
       body: pull.body,
+      mergeable: pull.mergeable,
     };
   }
 }

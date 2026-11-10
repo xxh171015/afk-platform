@@ -70,8 +70,8 @@ export const DiagnoseOutputSchema = z.object({
 export type DiagnoseOutput = z.infer<typeof DiagnoseOutputSchema>;
 
 export interface AgentRunOptions<Schema extends z.ZodType> {
-  stage: Stage | FinalStep;
-  branch: string; // the ticket's branch, created from baseBranch when it does not exist
+  stage: Stage | FinalStep | "update-branch";
+  branch: string; // the agent's branch, created from baseBranch when it does not exist
   baseBranch: string;
   promptFile: string;
   ctxDir: string; // mounted read-only as /context
@@ -261,6 +261,7 @@ export const PROMPTS = {
   gateFix: join(PROMPT_DIR, "gate-fix.md"),
   reviewFix: join(PROMPT_DIR, "review-fix.md"),
   mergeFix: join(PROMPT_DIR, "merge-fix.md"),
+  updateBranch: join(PROMPT_DIR, "update-branch.md"),
   reviewStandards: join(PROMPT_DIR, "review-standards.md"),
   reviewSpec: join(PROMPT_DIR, "review-spec.md"),
   finalReviewStandards: join(PROMPT_DIR, "final-review-standards.md"),
@@ -301,6 +302,7 @@ export function promptFor(
     | "gate-fix"
     | "review-fix"
     | "merge-fix"
+    | "update-branch"
     | "final-review"
     | "final-fix"
     | "diagnose",
@@ -329,5 +331,7 @@ export function promptFor(
       return PROMPTS.reviewFix;
     case "merge-fix":
       return PROMPTS.mergeFix;
+    case "update-branch":
+      return PROMPTS.updateBranch;
   }
 }

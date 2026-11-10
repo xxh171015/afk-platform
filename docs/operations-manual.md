@@ -67,14 +67,24 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 | 条件 | 怎么满足、怎么检查 |
 | --- | --- |
-| GitHub App 已装到这个仓库，有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读 | 开 PR、转 ready、删分支都靠它。`plat init` 每次都让持有 App 凭据的 worker 检查一遍，逐个仓库打印结果；没装或权限不够时给出要打开的页面（由运行平台的人处理）。GitLab 仓库不检查。 |
+| 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。 |
 | 默认分支是 `main`，代码推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。 |
 | `.sandcastle/gates.yaml` | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。 |
 | `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。 |
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
 | （有联调票时）联调环境 | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加 `npm run e2e`，把 JUnit 写到 `reports/e2e-junit.xml`）。`plat tickets import` 发现缺了又没有票补时会警告。 |
 
-沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`，有 Node 22、npm、pnpm、PostgreSQL）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
+沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`：Node 22、npm、pnpm、PostgreSQL、Playwright Chromium，Cursor CLI 版本锁在 `ARG CURSOR_CLI_VERSION`）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
+
+构建和换版本（在跑 worker 的那台 Mac 上，Docker Desktop 开着）：
+
+```sh
+scripts/check-sandbox-image.sh          # 无人值守：构建、核对工具链、跑本仓库门禁、试点前端门禁和联调 e2e
+# 或
+scripts/verify-sandbox-image.sh         # 逐步确认的同一套检查
+```
+
+默认打标签 `sandcastle:afk-platform`（worker 不设 `AFK_SANDBOX_IMAGE` 时用这个）。换 Cursor CLI 或 Playwright 时改 Dockerfile 里对应的 `ARG`，再跑一次上面的脚本；`PLAYWRIGHT_VERSION` 要和试点前端 `package.json` 的 `@playwright/test` 一致。沙箱里没有 Docker：试点前端的 shop e2e 由检查脚本在宿主机起联调后端，再把容器加入那张网络（`BACKEND_URL=http://backend:8080`）。
 
 ### 1.4 tracker 文档是什么
 

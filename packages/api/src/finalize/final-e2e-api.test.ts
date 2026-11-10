@@ -155,6 +155,25 @@ const DIAGNOSIS = {
   },
 };
 
+async function skipHostSync(job: Claimed) {
+  if (job.type !== "host-sync") return false;
+  await worker.complete(job.id, job.attempt, {
+    stage: "host-sync",
+    pulls: [],
+  });
+  return true;
+}
+
+async function claimSkippingHostSync() {
+  for (let i = 0; i < 8; i++) {
+    const job = (await worker.claim()).body.job as Claimed | null;
+    if (!job) return null;
+    if (await skipHostSync(job)) continue;
+    return job;
+  }
+  return null;
+}
+
 // What the worker answers to each job; undefined asks the test to look at the job first (it stays running).
 interface Plan {
   // the final-review of a repo, in order of the repos' ids (backend 1, frontend 2)
@@ -177,6 +196,7 @@ async function drive(plan: Plan = {}) {
     if (waiting.rowCount) break;
     const job = (await worker.claim()).body.job as Claimed | null;
     if (!job) break;
+    if (await skipHostSync(job)) continue;
     seen.push(job);
     const { stage } = job.payload;
     let result: Record<string, unknown>;
@@ -273,7 +293,7 @@ describe("the e2e before the pull requests", () => {
     await runningSpec();
     const held = [] as Claimed[];
     for (let i = 0; i < 40 && held.length === 0; i++) {
-      const job = (await worker.claim()).body.job as Claimed | null;
+      const job = await claimSkippingHostSync();
       if (!job) break;
       if (job.payload.finalE2e) {
         held.push(job);
@@ -366,11 +386,18 @@ describe("a failed e2e before the pull requests", () => {
     await failed();
     const waived = await call("POST", "/specs/1/final/waive");
     expect(waived.status).toBe(200);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "waive-final" });
     expect(await finalE2e()).toMatchObject({ state: "waived" });
     expect(await queuedOf("open-pr")).toHaveLength(2);
 
     for (const repoId of [1, 2]) {
-      const job = (await worker.claim()).body.job as Claimed;
+      const job = (await claimSkippingHostSync()) as Claimed;
       expect(job.type).toBe("open-pr");
       await worker.complete(job.id, job.attempt, {
         stage: "open-pr",
@@ -421,7 +448,7 @@ describe("a failed e2e before the pull requests", () => {
     // get to the final e2e job
     const seen: Claimed[] = [];
     for (let i = 0; i < 60; i++) {
-      const job = (await worker.claim()).body.job as Claimed | null;
+      const job = await claimSkippingHostSync();
       if (!job) break;
       if (job.payload.finalE2e) {
         seen.push(job);
@@ -468,7 +495,7 @@ describe("the integration section of the acceptance pack", () => {
     await runningSpec();
     await drive(plan);
     for (const repoId of [1, 2]) {
-      const job = (await worker.claim()).body.job as Claimed;
+      const job = (await claimSkippingHostSync()) as Claimed;
       await worker.complete(job.id, job.attempt, {
         stage: "open-pr",
         outcome: "opened",
@@ -511,7 +538,7 @@ describe("the integration section of the acceptance pack", () => {
   it("has none for a spec without integration tickets", async () => {
     await runningSpec(false);
     await drive();
-    const job = (await worker.claim()).body.job as Claimed;
+    const job = (await claimSkippingHostSync()) as Claimed;
     await worker.complete(job.id, job.attempt, {
       stage: "open-pr",
       outcome: "opened",

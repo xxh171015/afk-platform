@@ -6,6 +6,7 @@ import {
   type PlanningCommitResult,
 } from "@afk/shared";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
 import { enqueueJob, type Queryable } from "../jobs/queue.ts";
 import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 
@@ -193,6 +194,11 @@ export async function actOnBlockedPlanning(
     await enqueuePlanningCommit(client, specId, {
       waived: action.kind === "waive",
     });
+    await recordAction(
+      client,
+      action.kind === "retry" ? "retry-planning" : "waive-planning",
+      { specId },
+    );
     return { status: "ok" };
   });
 }

@@ -111,6 +111,28 @@ describe("the log of a run", () => {
     expect(state.asked.every((q) => q.attempt === null)).toBe(true);
   });
 
+  it("says when the log was purged under the retention policy", async () => {
+    const server = fakeServer({
+      "GET /runs/5/logs": () => ({
+        json: {
+          attempt: 1,
+          offset: 0,
+          nextOffset: 0,
+          size: 0,
+          text: "",
+          finished: true,
+          purgedAt: "2026-04-01T00:00:00.000Z",
+        },
+      }),
+    });
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    expect(
+      await screen.findByText("日志已于 2026-04-01 按保留策略清理"),
+    ).toBeTruthy();
+    expect(screen.queryByText("还没有日志。")).toBeNull();
+    expect(screen.queryByText(/无法加载日志/)).toBeNull();
+  });
+
   it("says it is loading, and says what went wrong", async () => {
     const server = fakeServer({
       "GET /runs/5/logs": () => ({
@@ -196,6 +218,33 @@ describe("the log of a run", () => {
     write("later line\n");
     await waitFor(() => expect(log()).toContain("later line"));
     expect(el.scrollTop).toBe(stayed);
+  });
+
+  it("shows assistant prose without expanding the raw event", async () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { content: "I will read the ticket first." },
+    });
+    const { server } = growingLog(`${line}\n`);
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() =>
+      expect(screen.getByText("I will read the ticket first.")).toBeTruthy(),
+    );
+    expect(screen.getByText("原始事件").closest("details")?.open).toBe(false);
+  });
+
+  it("keeps an in-progress tool open", async () => {
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "c1",
+      session_id: "s1",
+      tool_call: { shellToolCall: { args: { command: "pnpm test" } } },
+    });
+    const { server } = growingLog(`${line}\n`);
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() => expect(screen.getByText("进行中")).toBeTruthy());
+    expect(screen.getByText("进行中").closest("details")?.open).toBe(true);
   });
 
   it("shows thinking as prose and keeps a long command output collapsed with a leftover count", async () => {

@@ -398,6 +398,53 @@
         }
       }
     },
+    "/hosts": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "The code hosts the workers have credentials for, as they last reported them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hosts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "host": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
+                          "workerId": {
+                            "type": "string"
+                          },
+                          "reportedAt": {
+                            "type": "string"
+                          },
+                          "tokenExpiresAt": {
+                            "type": "string"
+                          },
+                          "daysLeft": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["host", "kind", "workerId", "reportedAt"]
+                      }
+                    }
+                  },
+                  "required": ["hosts"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects/{projectId}/repos": {
       "post": {
         "parameters": [
@@ -487,7 +534,7 @@
             }
           },
           "409": {
-            "description": "The project already has a repo with this name",
+            "description": "The project already has a repo with this name, or has repos on another kind of code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -726,7 +773,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What the last check of the GitHub App's access to the repo found",
+            "description": "What the last check of the bot's access to the repo found",
             "content": {
               "application/json": {
                 "schema": {
@@ -740,8 +787,13 @@
                         "ok",
                         "not-installed",
                         "missing-permissions",
+                        "not-member",
                         "error"
                       ]
+                    },
+                    "hostKind": {
+                      "type": "string",
+                      "enum": ["github", "gitlab"]
                     },
                     "missing": {
                       "type": "array",
@@ -751,6 +803,19 @@
                     },
                     "fixUrl": {
                       "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "fix": {
+                      "type": "string"
+                    },
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["personal-token", "developers-can-merge"]
+                      }
                     },
                     "files": {
                       "type": "object",
@@ -777,7 +842,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["state"]
+                  "required": ["state", "hostKind"]
                 }
               }
             }
@@ -827,7 +892,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A worker with the code host's credentials will check the repo (GitLab repos are not checked)",
+            "description": "A worker with the code host's credentials will check the repo",
             "content": {
               "application/json": {
                 "schema": {
@@ -841,8 +906,13 @@
                         "ok",
                         "not-installed",
                         "missing-permissions",
+                        "not-member",
                         "error"
                       ]
+                    },
+                    "hostKind": {
+                      "type": "string",
+                      "enum": ["github", "gitlab"]
                     },
                     "missing": {
                       "type": "array",
@@ -852,6 +922,19 @@
                     },
                     "fixUrl": {
                       "type": "string"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "fix": {
+                      "type": "string"
+                    },
+                    "hints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["personal-token", "developers-can-merge"]
+                      }
                     },
                     "files": {
                       "type": "object",
@@ -878,7 +961,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["state"]
+                  "required": ["state", "hostKind"]
                 }
               }
             }
@@ -1874,6 +1957,127 @@
         }
       }
     },
+    "/worker/hosts": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "hosts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "host": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 253
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        }
+                      },
+                      "required": ["host", "kind"]
+                    },
+                    "maxItems": 100
+                  }
+                },
+                "required": ["workerId", "hosts"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kept: repos on these hosts can be registered and worked on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/status": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "cleaned": {
+                    "type": "object",
+                    "properties": {
+                      "sandboxLogs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "salvage": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "snapshots": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": ["sandboxLogs", "salvage", "snapshots"]
+                  },
+                  "freeBytes": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": ["workerId", "cleaned"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Kept for the workbench status area",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/claim": {
       "post": {
         "requestBody": {
@@ -2735,6 +2939,21 @@
                             },
                             "required": ["id", "repoUrl", "number"]
                           }
+                        },
+                        "defaults": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["repoUrl", "branch"]
+                          }
                         }
                       },
                       "required": ["kind", "pulls"]
@@ -2956,6 +3175,146 @@
           },
           "404": {
             "description": "No such job, or not a readiness-gate job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/worker/jobs/{id}/trial-merge-task": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "attempt",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What a trial-merge job has to do: merge-tree this spec's integration branch against the other live specs in the same repo, and name any conflicting files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "displayId": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "displayId", "title"]
+                    },
+                    "repo": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["name", "url", "defaultBranch"]
+                    },
+                    "ours": {
+                      "type": "object",
+                      "properties": {
+                        "specId": {
+                          "type": "integer"
+                        },
+                        "branch": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["specId", "branch"]
+                    },
+                    "peers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "branch": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["specId", "branch"]
+                      }
+                    }
+                  },
+                  "required": ["spec", "repo", "ours", "peers"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or not a trial-merge job",
             "content": {
               "application/json": {
                 "schema": {
@@ -3431,6 +3790,9 @@
                     },
                     "finished": {
                       "type": "boolean"
+                    },
+                    "purgedAt": {
+                      "type": ["string", "null"]
                     }
                   },
                   "required": [
@@ -3439,7 +3801,8 @@
                     "nextOffset",
                     "size",
                     "text",
-                    "finished"
+                    "finished",
+                    "purgedAt"
                   ]
                 }
               }
@@ -3794,6 +4157,16 @@
                             "pullRequests",
                             "spec",
                             "merge"
+                          ]
+                        },
+                        "failureSource": {
+                          "type": ["string", "null"],
+                          "enum": [
+                            "platform",
+                            "external",
+                            "agent",
+                            "spec",
+                            null
                           ]
                         },
                         "body": {
@@ -4556,6 +4929,9 @@
                             },
                             "required": ["code", "level", "message"]
                           }
+                        },
+                        "tokenMerged": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -4574,7 +4950,8 @@
                         "planningSha",
                         "planningRepo",
                         "planning",
-                        "prechecks"
+                        "prechecks",
+                        "tokenMerged"
                       ]
                     },
                     "tickets": {
@@ -4878,6 +5255,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -5132,6 +5519,10 @@
                               "commands"
                             ]
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -5163,6 +5554,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -5265,6 +5666,10 @@
                           },
                           "syncError": {
                             "type": ["string", "null"]
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           }
                         },
                         "required": [
@@ -5331,6 +5736,10 @@
                             "required": ["repo", "skipped"]
                           }
                         },
+                        "hostKind": {
+                          "type": "string",
+                          "enum": ["github", "gitlab"]
+                        },
                         "repos": {
                           "type": "array",
                           "items": {
@@ -5387,6 +5796,10 @@
                                   },
                                   "syncError": {
                                     "type": ["string", "null"]
+                                  },
+                                  "hostKind": {
+                                    "type": "string",
+                                    "enum": ["github", "gitlab"]
                                   }
                                 },
                                 "required": [
@@ -5850,6 +6263,10 @@
                           },
                           "ticketId": {
                             "type": "integer"
+                          },
+                          "failureSource": {
+                            "type": "string",
+                            "enum": ["platform", "external", "agent", "spec"]
                           }
                         },
                         "required": ["kind", "at", "text"]
@@ -5900,6 +6317,70 @@
                           "finishedAt"
                         ]
                       }
+                    },
+                    "potentialConflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "repoId": {
+                            "type": "integer"
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "displayId",
+                          "title",
+                          "repo",
+                          "repoId",
+                          "files"
+                        ]
+                      }
+                    },
+                    "leadTime": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "agentMs": {
+                          "type": "integer"
+                        },
+                        "gateMs": {
+                          "type": "integer"
+                        },
+                        "queuedMs": {
+                          "type": "integer"
+                        },
+                        "waitingMs": {
+                          "type": "integer"
+                        },
+                        "totalMs": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "agentMs",
+                        "gateMs",
+                        "queuedMs",
+                        "waitingMs",
+                        "totalMs"
+                      ]
                     }
                   },
                   "required": [
@@ -5912,7 +6393,9 @@
                     "acceptancePack",
                     "edges",
                     "timeline",
-                    "finalRuns"
+                    "finalRuns",
+                    "potentialConflicts",
+                    "leadTime"
                   ]
                 }
               }
@@ -6376,6 +6859,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6630,6 +7123,10 @@
                               "commands"
                             ]
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6661,6 +7158,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -6703,6 +7210,10 @@
                           "syncError": {
                             "type": ["string", "null"]
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6735,6 +7246,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6761,6 +7282,10 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
                           },
                           "waitingSince": {
                             "type": "string"
@@ -6793,6 +7318,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -6822,6 +7357,10 @@
                           "error": {
                             "type": "string"
                           },
+                          "hostKind": {
+                            "type": "string",
+                            "enum": ["github", "gitlab"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6853,6 +7392,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -6921,6 +7470,16 @@
                               "spec",
                               "merge"
                             ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
                           }
                         },
                         "required": [
@@ -6980,6 +7539,16 @@
                               "pullRequests",
                               "spec",
                               "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
                             ]
                           }
                         },
@@ -7121,7 +7690,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "The four workbench quadrants: waiting, running, awaiting acceptance, recently merged",
+            "description": "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
             "content": {
               "application/json": {
                 "schema": {
@@ -7739,13 +8308,101 @@
                         },
                         "required": ["spec", "completedAt"]
                       }
+                    },
+                    "status": {
+                      "type": "object",
+                      "properties": {
+                        "logDirBytes": {
+                          "type": "number"
+                        },
+                        "apiFreeBytes": {
+                          "type": "number"
+                        },
+                        "diskLevel": {
+                          "type": "string",
+                          "enum": ["ok", "warn", "stop"]
+                        },
+                        "warnGib": {
+                          "type": "number"
+                        },
+                        "stopGib": {
+                          "type": "number"
+                        },
+                        "lastCleanup": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": ["string", "null"]
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "orphans": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["at", "runs", "orphans"]
+                        },
+                        "workers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reportedAt": {
+                                "type": "string"
+                              },
+                              "freeBytes": {
+                                "type": ["number", "null"]
+                              },
+                              "cleaned": {
+                                "type": "object",
+                                "properties": {
+                                  "sandboxLogs": {
+                                    "type": "integer"
+                                  },
+                                  "salvage": {
+                                    "type": "integer"
+                                  },
+                                  "snapshots": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "sandboxLogs",
+                                  "salvage",
+                                  "snapshots"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reportedAt",
+                              "freeBytes",
+                              "cleaned"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "logDirBytes",
+                        "apiFreeBytes",
+                        "diskLevel",
+                        "warnGib",
+                        "stopGib",
+                        "lastCleanup",
+                        "workers"
+                      ]
                     }
                   },
                   "required": [
                     "waiting",
                     "running",
                     "awaitingAcceptance",
-                    "recentlyCompleted"
+                    "recentlyCompleted",
+                    "status"
                   ]
                 }
               }
@@ -8231,15 +8888,92 @@
                     "minimum": 1,
                     "maximum": 604800
                   }
-                },
-                "required": ["extraSeconds"]
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Running again, with the extra agent time",
+            "description": "Running again; extraSeconds adds agent time when the budget ran out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "planned",
+                        "running",
+                        "finalizing",
+                        "awaiting-review",
+                        "partially-merged",
+                        "reworking",
+                        "merged",
+                        "paused",
+                        "cancelled"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/allow": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Running again without extra agent time",
             "content": {
               "application/json": {
                 "schema": {
@@ -8614,6 +9348,216 @@
                     }
                   },
                   "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": false,
+            "name": "projectId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The last 12 weeks of lead time, failure attribution, platform failure rate and success standards",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "since": {
+                      "type": ["string", "null"]
+                    },
+                    "weeks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "weekStart": {
+                            "type": "string"
+                          },
+                          "leadTime": {
+                            "type": "object",
+                            "properties": {
+                              "ended": {
+                                "type": "integer"
+                              },
+                              "medianMs": {
+                                "type": ["integer", "null"]
+                              },
+                              "agentMs": {
+                                "type": "integer"
+                              },
+                              "gateMs": {
+                                "type": "integer"
+                              },
+                              "queuedMs": {
+                                "type": "integer"
+                              },
+                              "waitingMs": {
+                                "type": "integer"
+                              },
+                              "specs": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "integer"
+                                    },
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    },
+                                    "totalMs": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "displayId",
+                                    "title",
+                                    "totalMs"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "ended",
+                              "medianMs",
+                              "agentMs",
+                              "gateMs",
+                              "queuedMs",
+                              "waitingMs",
+                              "specs"
+                            ]
+                          },
+                          "attribution": {
+                            "type": "object",
+                            "properties": {
+                              "recovered": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string",
+                                      "enum": [
+                                        "platform",
+                                        "external",
+                                        "agent",
+                                        "spec"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "count": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["source", "reason", "count"]
+                                }
+                              },
+                              "needsHuman": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string",
+                                      "enum": [
+                                        "platform",
+                                        "external",
+                                        "agent",
+                                        "spec"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "type": "string"
+                                    },
+                                    "count": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["source", "reason", "count"]
+                                }
+                              }
+                            },
+                            "required": ["recovered", "needsHuman"]
+                          },
+                          "failureRate": {
+                            "type": "object",
+                            "properties": {
+                              "ended": {
+                                "type": "integer"
+                              },
+                              "platform": {
+                                "type": ["number", "null"]
+                              },
+                              "external": {
+                                "type": ["number", "null"]
+                              },
+                              "jobPlatform": {
+                                "type": ["number", "null"]
+                              }
+                            },
+                            "required": [
+                              "ended",
+                              "platform",
+                              "external",
+                              "jobPlatform"
+                            ]
+                          },
+                          "success": {
+                            "type": "object",
+                            "properties": {
+                              "mergedPulls": {
+                                "type": "integer"
+                              },
+                              "mergeRate": {
+                                "type": ["number", "null"]
+                              },
+                              "humanCommitsRate": {
+                                "type": ["number", "null"]
+                              },
+                              "untouchedRate": {
+                                "type": ["number", "null"]
+                              }
+                            },
+                            "required": [
+                              "mergedPulls",
+                              "mergeRate",
+                              "humanCommitsRate",
+                              "untouchedRate"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "weekStart",
+                          "leadTime",
+                          "attribution",
+                          "failureRate",
+                          "success"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["since", "weeks"]
                 }
               }
             }

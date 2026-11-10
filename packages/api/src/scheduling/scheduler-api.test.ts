@@ -106,7 +106,7 @@ const chain = () => [
 const jobPayloads = async () =>
   (
     await db.pool.query(
-      "SELECT payload, idempotency_key, state FROM jobs ORDER BY id",
+      "SELECT payload, idempotency_key, state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
     )
   ).rows;
 const ticketStates = async () =>
@@ -519,7 +519,10 @@ describe("specs of one project sharing its slots", () => {
 
   it("starts the other spec when a ticket of a paused spec ends", async () => {
     const { a } = await twoSpecs(["a1", "a2"], ["b"]);
-    await db.pool.query("UPDATE specs SET state = 'paused' WHERE id = $1", [a]);
+    await db.pool.query(
+      "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
+      [a],
+    );
     expect(await workUntilMerged(new FakeWorker(api.url, "w1", []))).toBe(1);
     expect(await ticketStates()).toEqual(["1:done", "2:pending", "3:queued"]);
   });

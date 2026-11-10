@@ -206,6 +206,71 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     ).toBe(CHECK_VIOLATION);
   });
 
+  it("a blocked overall review step and a blocked final e2e must carry a known reason code", async () => {
+    const { specId, repoId } = await seed();
+    const finalization = await insert(
+      "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, $2)",
+      [specId, repoId],
+    );
+    const block = (reason: string) =>
+      outcome(
+        "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+        [finalization, reason],
+      );
+    expect(await block("the review went wrong")).toBe(CHECK_VIOLATION);
+    expect(await block("merge-conflict")).toBe("ok");
+
+    const e2e = await insert("INSERT INTO final_e2e (spec_id) VALUES ($1)", [
+      specId,
+    ]);
+    const blockE2e = (reason: string) =>
+      outcome(
+        "UPDATE final_e2e SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+        [e2e, reason],
+      );
+    expect(await blockE2e("gate-failed")).toBe(CHECK_VIOLATION);
+    expect(await blockE2e("final-e2e-failed")).toBe("ok");
+  });
+
+  it("a paused spec must carry a known pause reason, and only a paused spec may", async () => {
+    const { specId } = await seed();
+    expect(
+      await outcome("UPDATE specs SET state = 'paused' WHERE id = $1", [
+        specId,
+      ]),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'paused', pause_reason = 'oops' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+    expect(
+      await outcome(
+        "UPDATE specs SET pause_reason = 'update-branch-conflict' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'running', pause_reason = 'budget-exhausted' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "UPDATE specs SET state = 'running', pause_reason = NULL WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+  });
+
   it("a spec's type and state must be known values", async () => {
     const { projectId } = await seed();
     const sql =

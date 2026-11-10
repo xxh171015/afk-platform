@@ -16,6 +16,10 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   api = await listen(createApp({ pool: db.pool }));
+  // plat repo add refuses a github.com URL until a worker has reported that host
+  await db.pool.query(
+    "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('github.com', 'github', 'w1')",
+  );
 });
 afterEach(async () => {
   await api.close();

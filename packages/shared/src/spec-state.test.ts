@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { specTransition } from "./spec-state.ts";
+import { specResumeTarget, specTransition } from "./spec-state.ts";
 
 describe("specTransition: forward path", () => {
   it.each([
@@ -25,6 +25,43 @@ describe("specTransition: pause, resume, cancel", () => {
       ok: true,
       state: "running",
     });
+  });
+
+  it.each(["finalizing", "awaiting-review", "partially-merged"] as const)(
+    "pauses a %s spec",
+    (from) => {
+      expect(specTransition(from, "pause")).toEqual({
+        ok: true,
+        state: "paused",
+      });
+    },
+  );
+
+  it("resumes a paused spec to 收尾 or 验收 when those had already started", () => {
+    expect(specResumeTarget({ hasFinalizations: false, pullStates: [] })).toBe(
+      "running",
+    );
+    expect(specResumeTarget({ hasFinalizations: true, pullStates: [] })).toBe(
+      "finalizing",
+    );
+    expect(
+      specResumeTarget({
+        hasFinalizations: true,
+        pullStates: ["open"],
+      }),
+    ).toBe("awaiting-review");
+    expect(
+      specResumeTarget({
+        hasFinalizations: true,
+        pullStates: ["merged", "open"],
+      }),
+    ).toBe("partially-merged");
+    expect(
+      specResumeTarget({
+        hasFinalizations: true,
+        pullStates: ["merged"],
+      }),
+    ).toBe("merged");
   });
 
   it.each([
@@ -58,7 +95,7 @@ describe("specTransition: illegal moves", () => {
     ["planned", "all-tickets-done"],
     ["running", "pr-opened"],
     ["running", "resume"],
-    ["finalizing", "pause"],
+    ["finalizing", "all-tickets-done"],
     ["awaiting-review", "start"],
     ["paused", "all-tickets-done"],
     ["merged", "resume"],

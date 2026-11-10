@@ -125,11 +125,42 @@ describe("getPullRequest", () => {
     expect((await a.getPullRequest({ repo, number: 1 })).state).toBe("merged");
   });
 
+  it("keeps the branch head after merge, including a commit a person pushed", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    github.mergePull(1);
+    expect((await a.getPullRequest({ repo, number: 1 })).headSha).toBe(
+      opened.headSha,
+    );
+    github.reopenPull(1);
+    github.pushCommit(1, "deadbeef");
+    github.mergePull(1);
+    expect((await a.getPullRequest({ repo, number: 1 })).headSha).toBe(
+      "deadbeef",
+    );
+  });
+
   it("tells a closed pull request from a merged one", async () => {
     const a = adapter();
     await open(a);
     github.closePull(1);
     expect((await a.getPullRequest({ repo, number: 1 })).state).toBe("closed");
+  });
+
+  it("reports a conflict with the default branch from mergeable === false, not from unknown", async () => {
+    const a = adapter();
+    await open(a);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(false);
+    github.setMergeable(1, null);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(false);
+    github.setMergeable(1, false);
+    expect(
+      (await a.getPullRequest({ repo, number: 1 })).conflictsWithDefault,
+    ).toBe(true);
   });
 
   it("sums up CI over check runs and commit statuses", async () => {
@@ -349,6 +380,25 @@ describe("markReady", () => {
       /Resource not accessible/,
     );
     expect(github.pullRequests()[0]?.draft).toBe(true);
+  });
+});
+
+describe("getBranchSha", () => {
+  it("reads the commit the branch is at", async () => {
+    github.setBranchSha("main", "abc123def456");
+    expect(await adapter().getBranchSha({ repo, branch: "main" })).toBe(
+      "abc123def456",
+    );
+    expect(github.tokensIssued.at(-1)?.permissions).toEqual({
+      contents: "read",
+    });
+  });
+
+  it("is a HostError when GitHub has no such branch", async () => {
+    github.missingBranches.add("main");
+    await expect(
+      adapter().getBranchSha({ repo, branch: "main" }),
+    ).rejects.toMatchObject({ name: "HostError", status: 404 });
   });
 });
 

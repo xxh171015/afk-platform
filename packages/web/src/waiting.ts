@@ -1,4 +1,7 @@
+import { FAILURE_SOURCE_LABELS, type HostKind, pullAbbrev } from "@afk/shared";
 import { formatShanghaiTime } from "./time.ts";
+
+export { FAILURE_SOURCE_LABELS };
 
 // How many items sit in the waiting queue: the nav badge and the workbench 等你处理 quadrant share this.
 
@@ -46,22 +49,30 @@ export function rankOf(blocking: Blocking): number {
   return 3;
 }
 
-export function blockingCopy(blocking: Blocking): string {
+export function blockingCopy(
+  blocking: Blocking,
+  hostKind: HostKind = "github",
+): string {
   const parts: string[] = [];
   if (blocking.downstream.length > 0)
     parts.push(`挡住 ${blocking.downstream.join("、")}`);
   if (blocking.finalization) parts.push("收尾未开始");
-  if (blocking.pullRequests) parts.push("挡住开 PR");
+  if (blocking.pullRequests) parts.push(`挡住开 ${pullAbbrev(hostKind)}`);
   if (blocking.spec) parts.push("挡住整份需求");
   if (blocking.merge) parts.push("挡住合并进 main");
   return parts.length > 0 ? parts.join("；") : "不挡住其他票";
 }
 
-export function rankCopy(blocking: Blocking, waitingSince: string): string {
+export function rankCopy(
+  blocking: Blocking,
+  waitingSince: string,
+  hostKind: HostKind = "github",
+): string {
   const since = formatShanghaiTime(waitingSince);
   const rank = rankOf(blocking);
   if (rank === 0) return `排在前面：挡住尚未完成的下游票。从 ${since} 起等。`;
-  if (rank === 1) return `排在这：挡住收尾或开 PR。从 ${since} 起等。`;
+  if (rank === 1)
+    return `排在这：挡住收尾或开 ${pullAbbrev(hostKind)}。从 ${since} 起等。`;
   if (rank === 2)
     return `排在这：挡住整份需求或合并进 main。从 ${since} 起等。`;
   return `排在这：没有挡住其他事项。从 ${since} 起等。`;

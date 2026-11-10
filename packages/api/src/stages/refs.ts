@@ -17,7 +17,7 @@ async function reposNamed(
   }>(
     `SELECT r.name, r.url, r.default_branch,
             (SELECT m.head_sha FROM runs m
-             WHERE m.spec_id = t.spec_id AND m.repo_id = r.id AND m.stage IN ('merge', 'final-merge') AND m.result = 'merged'
+             WHERE m.spec_id = t.spec_id AND m.repo_id = r.id AND m.stage IN ('merge', 'final-merge', 'update-branch') AND m.result = 'merged'
              ORDER BY m.id DESC LIMIT 1) AS sha
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id

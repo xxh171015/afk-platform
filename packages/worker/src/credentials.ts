@@ -1,5 +1,6 @@
 import { parseRepoUrl, type RepoRef, type TokenSource } from "@afk/host";
 import type { ExecutorDeps } from "./executor.ts";
+import type { GitToken } from "./push.ts";
 
 // A stage that works on a repo gets a token for it (Contents: write, nothing else) and uses it to clone, fetch and
 // push. A stage can last longer than a token, so the token is renewed whenever the stage re-checks its lease just
@@ -8,6 +9,8 @@ export interface Credentials {
   tokens: TokenSource;
   // GitHub URL -> owner and name; replaced in tests whose "GitHub" is a directory.
   repoRef?: (url: string) => RepoRef;
+  // The user name git sends with a repo's token: oauth2 on a GitLab host; x-access-token (GitHub) when absent.
+  gitUser?: (url: string) => string | undefined;
 }
 
 // `others` are the URLs of the other repos the stage reads (the ones a ticket refs, builds its environment from or takes
@@ -18,7 +21,11 @@ export async function withCredentials(
   others: readonly string[] = [],
 ): Promise<ExecutorDeps> {
   if (!deps.credentials) return deps;
-  const { tokens, repoRef = parseRepoUrl } = deps.credentials;
+  const { tokens, repoRef = parseRepoUrl, gitUser } = deps.credentials;
+  const forGit = (url: string, token: string): GitToken => {
+    const user = gitUser?.(url);
+    return user ? { user, token } : token;
+  };
   const readOnly = [...new Set(others)].filter((url) => url !== repoUrl);
   const mintOwn = () =>
     tokens.tokenFor({
@@ -44,10 +51,10 @@ export async function withCredentials(
     ...deps,
     repos: deps.repos.withToken((url) =>
       url === undefined || url === repoUrl
-        ? current
-        : (read.get(url) ?? current),
+        ? forGit(repoUrl, current)
+        : forGit(url, read.get(url) ?? current),
     ),
-    push: (request) => deps.push(request, current),
+    push: (request) => deps.push(request, forGit(repoUrl, current)),
     api: {
       async prePush(job) {
         const holding = await deps.api.prePush(job);

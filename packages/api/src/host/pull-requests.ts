@@ -21,8 +21,16 @@ import {
   type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
+  syncDelaySeconds,
 } from "./host-jobs.ts";
 import { mergeOrderOf } from "./merge-order.ts";
+import { dropPotentialConflicts } from "./trial-merge.ts";
+import {
+  applyDefaultShas,
+  defaultBranchesToWatch,
+  enqueueIfConflictsWithDefault,
+  projectHasRunningSpecs,
+} from "./update-branch.ts";
 
 // A spec's pull requests: opened once its repos are all finalized, then followed until a person has merged them
 // all. The platform only records what the host says; it has no call that merges (docs/design.md「代码托管」).
@@ -44,6 +52,7 @@ export type HostTask =
   | {
       kind: "host-sync";
       pulls: { id: number; repoUrl: string; number: number }[];
+      defaults: { repoUrl: string; branch: string }[];
     }
   | {
       kind: "pr-ready";
@@ -68,6 +77,10 @@ const PullFacts = {
   headSha: z.string().min(1),
   ci: z.enum(["none", "pending", "success", "failure"]),
   review: z.enum(["none", "approved", "changes-requested"]),
+  mergedBy: z.string().nullable().optional(),
+  mergedAt: z.string().nullable().optional(),
+  mergedByPlatform: z.boolean().optional(),
+  conflictsWithDefault: z.boolean().optional(),
 };
 
 export const OpenPrResultSchema = z.object({
@@ -96,6 +109,14 @@ export const HostSyncResultSchema = z.object({
       z.object({ id: z.number().int(), error: z.string() }),
     ]),
   ),
+  defaults: z
+    .array(
+      z.object({
+        repoUrl: z.string().min(1),
+        sha: z.string().min(1),
+      }),
+    )
+    .optional(),
 });
 
 // Every repo whose branch is settled gets its pull request opened, but only when all of them are: a spec's pull
@@ -229,6 +250,7 @@ export async function buildHostTask(
       repoUrl: p.url,
       number: p.number,
     })),
+    defaults: await defaultBranchesToWatch(pool, projectId),
   };
 }
 
@@ -374,10 +396,10 @@ export async function recordOpenPr(
   }
   const pr = parsed.data;
   await client.query(
-    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, ci, review, synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, platform_head_sha, ci, review, synced_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, now())
      ON CONFLICT (spec_id, repo_id) DO UPDATE SET number = $3, url = $4, state = $5, draft = $6,
-       head_sha = $7, ci = $8, review = $9, synced_at = now()`,
+       head_sha = $7, platform_head_sha = $7, ci = $8, review = $9, synced_at = now()`,
     [
       read.specId,
       read.repoId,
@@ -461,11 +483,15 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     specId,
     next.state,
   ]);
-  if (all) await enqueueSpecCleanup(client, { specId });
+  if (all) {
+    await dropPotentialConflicts(client, specId);
+    await enqueueSpecCleanup(client, { specId });
+  }
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,
-// the spec is merged. While any is still followed (see above), the next look is queued a minute from now.
+// the spec is merged. While any is still followed (see above), the same host-sync job is put back in the queue a
+// minute from now.
 export async function recordHostSync(
   client: pg.PoolClient,
   read: HostSyncPayload,
@@ -484,6 +510,8 @@ export async function recordHostSync(
     [parsed.data.pulls.map((p) => p.id), read.projectId],
   );
   for (const { spec_id: specId } of owners.rows) await lockSpec(client, specId);
+  if (parsed.data.defaults)
+    await applyDefaultShas(client, read.projectId, parsed.data.defaults);
   for (const pull of parsed.data.pulls) {
     if ("error" in pull) {
       // kept on the row, so that a pull request the host keeps refusing is not silent
@@ -494,8 +522,18 @@ export async function recordHostSync(
       );
       continue;
     }
+    const mergedAt =
+      pull.mergedAt != null && !Number.isNaN(Date.parse(pull.mergedAt))
+        ? pull.mergedAt
+        : null;
+    const previous = await client.query<{ conflicts_with_default: boolean }>(
+      "SELECT conflicts_with_default FROM pull_requests WHERE id = $1",
+      [pull.id],
+    );
     await client.query(
-      `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now()
+      `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now(),
+         merged_at = COALESCE($8::timestamptz, merged_at), merged_by = COALESCE($9, merged_by),
+         conflicts_with_default = $10
        FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7`,
       [
         pull.id,
@@ -505,7 +543,21 @@ export async function recordHostSync(
         pull.ci,
         pull.review,
         read.projectId,
+        mergedAt,
+        pull.mergedBy ?? null,
+        pull.conflictsWithDefault === true,
       ],
+    );
+    if (pull.mergedByPlatform)
+      await client.query(
+        `UPDATE specs SET token_merged = true FROM pull_requests p
+         WHERE specs.id = p.spec_id AND p.id = $1 AND NOT specs.token_merged`,
+        [pull.id],
+      );
+    await enqueueIfConflictsWithDefault(
+      client,
+      pull,
+      previous.rows[0]?.conflicts_with_default === true,
     );
   }
   for (const { spec_id: specId } of owners.rows) {
@@ -553,19 +605,29 @@ async function scheduleNextSync(
   client: pg.PoolClient,
   projectId: number,
   now: Date,
+  delaySeconds = SYNC_INTERVAL_SECONDS,
 ) {
   const open = await client.query(
     `SELECT 1 FROM pull_requests p JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
      WHERE r.project_id = $1 AND ${FOLLOWED_PULL_REQUESTS} LIMIT 1`,
     [projectId],
   );
-  if (open.rowCount)
+  const running = await projectHasRunningSpecs(client, projectId);
+  if (open.rowCount || running)
     await enqueueHostSync(
       client,
       projectId,
-      new Date(now.getTime() + SYNC_INTERVAL_SECONDS * 1000),
+      new Date(now.getTime() + delaySeconds * 1000),
     );
 }
 
-// A look at the host that could not be carried out (it was down, the token was refused): try again in a minute.
-export const hostSyncFailed = scheduleNextSync;
+// A look at the host that could not be carried out (it was down, the token was refused): try again in a minute,
+// or after Retry-After when GitLab answered 429.
+export function hostSyncFailed(
+  client: pg.PoolClient,
+  projectId: number,
+  now: Date,
+  error?: string,
+) {
+  return scheduleNextSync(client, projectId, now, syncDelaySeconds(error));
+}

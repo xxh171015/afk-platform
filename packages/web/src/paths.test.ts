@@ -6,6 +6,7 @@ describe("shareable addresses", () => {
     expect(PAGE_PATHS).toEqual([
       "/",
       "/waiting",
+      "/metrics",
       "/specs",
       "/specs/$specId",
       "/specs/$specId/description",

@@ -33,12 +33,13 @@ const TRANSITIONS: Partial<
   draft: { "confirm-plan": "planned" },
   planned: { start: "running" },
   running: { "all-tickets-done": "finalizing", pause: "paused" },
-  finalizing: { "pr-opened": "awaiting-review" },
+  finalizing: { "pr-opened": "awaiting-review", pause: "paused" },
   "awaiting-review": {
     "some-prs-merged": "partially-merged",
     "all-prs-merged": "merged",
+    pause: "paused",
   },
-  "partially-merged": { "all-prs-merged": "merged" },
+  "partially-merged": { "all-prs-merged": "merged", pause: "paused" },
   paused: { resume: "running" },
 };
 
@@ -56,4 +57,19 @@ export function specTransition(
   if (!state)
     return { ok: false, reason: `${event} is not allowed in ${from}` };
   return { ok: true, state };
+}
+
+// Where a paused spec goes on resume: 收尾 (finalizing) and 验收 (awaiting-review / partially-merged)
+// keep their place; everyone else returns to running.
+export function specResumeTarget(input: {
+  hasFinalizations: boolean;
+  pullStates: readonly ("open" | "closed" | "merged")[];
+}): SpecState {
+  if (!input.hasFinalizations) return "running";
+  const live = input.pullStates.filter((state) => state !== "closed");
+  if (live.length === 0) return "finalizing";
+  const merged = live.filter((state) => state === "merged").length;
+  if (merged === 0) return "awaiting-review";
+  if (merged === live.length) return "merged";
+  return "partially-merged";
 }

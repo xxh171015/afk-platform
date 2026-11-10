@@ -15,6 +15,7 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
+import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueStageJob, readStagePayload } from "../jobs/stage-jobs.ts";
 import {
   finishTicket,
@@ -46,7 +47,6 @@ const RunFacts = z.object({
   durationApiMs: z.number().int().min(0).optional(),
   tokenUsage: z.unknown().optional(),
   output: z.unknown().optional(),
-  logUrl: z.string().optional(),
   refShas: z.record(z.string(), z.string()).optional(),
   // an e2e's JUnit counts and how long the environment took to come up
   testsTotal: z.number().int().min(0).optional(),
@@ -74,7 +74,6 @@ const GateFacts = z.object({
     )
     .max(20_000)
     .optional(),
-  logUrl: z.string().optional(),
 });
 
 const FindingFacts = z.object({
@@ -331,7 +330,6 @@ export async function writeFacts(
     run?.result ?? result?.outcome ?? "invalid-output",
     // what the agent said; for an unusable result, the raw payload so the problem can be seen
     JSON.stringify(result ? (run?.output ?? null) : (raw ?? null)),
-    run?.logUrl ?? null,
     run?.startedAt ?? null,
     run?.finishedAt ?? null,
   ];
@@ -340,8 +338,8 @@ export async function writeFacts(
   let inserted = await client.query<{ id: number }>(
     `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, axis = $5, prompt = $6, cursor_cli_version = $7,
        branch = $8, base_sha = $9, head_sha = $10, commits = $11, duration_ms = $12, duration_api_ms = $13,
-       token_usage = $14, result = $15, output = $16, log_url = $17, started_at = COALESCE($18, started_at),
-       finished_at = COALESCE($19, now())
+       token_usage = $14, result = $15, output = $16, started_at = COALESCE($17, started_at),
+       finished_at = COALESCE($18, now())
      WHERE job_id = $1 RETURNING id`,
     [job.id, ...facts],
   );
@@ -349,8 +347,8 @@ export async function writeFacts(
     inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
          axis, prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms,
-         token_usage, result, output, log_url, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, COALESCE($25, now()))
+         token_usage, result, output, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, COALESCE($24, now()))
        RETURNING id`,
       [
         owner.spec_id,
@@ -387,11 +385,11 @@ export async function writeFacts(
     const gate = result.gate;
     // The same commit can be gated again (a rerun after a restart): the latest facts win.
     await client.query(
-      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, log_url, kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (repo_id, commit_sha, kind) DO UPDATE SET config_sha = EXCLUDED.config_sha,
          command_results = EXCLUDED.command_results, tests_total = EXCLUDED.tests_total,
-         tests_skipped = EXCLUDED.tests_skipped, test_cases = EXCLUDED.test_cases, log_url = EXCLUDED.log_url`,
+         tests_skipped = EXCLUDED.tests_skipped, test_cases = EXCLUDED.test_cases`,
       [
         owner.repo_id,
         gate.commitSha,
@@ -400,7 +398,6 @@ export async function writeFacts(
         gate.testsTotal ?? null,
         gate.testsSkipped ?? null,
         gate.testCases === undefined ? null : JSON.stringify(gate.testCases),
-        gate.logUrl ?? null,
         gate.kind,
       ],
     );
@@ -503,6 +500,12 @@ async function applyDecision(
       await blockTicket(client, ticket, "invalid-output");
     } else if (finished.status !== "ok") {
       throw new Error(`cannot finish ticket ${ticket.id}: ${finished.status}`);
+    } else if (result?.stage === "merge") {
+      await enqueueTrialMerge(client, {
+        specId: ticket.spec_id,
+        repoId: ticket.repo_id,
+        headSha: result.headSha,
+      });
     }
     return;
   }
@@ -580,7 +583,10 @@ async function blockTicket(
 
 // A worker claiming a ticket stage job starts its Run (so there is something to attach logs to while the stage
 // is still going), and for the first stage moves the ticket from queued to running.
-export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
+export async function markClaimed(
+  pool: Pick<pg.Pool, "query">,
+  job: StageJob,
+): Promise<void> {
   const read = readStagePayload(job.payload);
   if (!read) return;
   const { ticketId, stage } = read;
@@ -601,7 +607,7 @@ export async function markClaimed(pool: pg.Pool, job: StageJob): Promise<void> {
 
 // A re-claim after a lease ran out finds the Run already there and leaves it be.
 async function startRun(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   ticketId: number,
   jobId: number,
   stage: Stage,

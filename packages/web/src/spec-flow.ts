@@ -1,4 +1,10 @@
-import type { SpecState, TicketState } from "@afk/shared";
+import {
+  type HostKind,
+  pauseReasonLabel,
+  pullAbbrev,
+  type SpecState,
+  type TicketState,
+} from "@afk/shared";
 
 // Human six-step bar for a spec, not the state machine drawn as-is
 // (docs/specs/experience-platform.md「信息架构」).
@@ -13,6 +19,10 @@ export const FLOW_STEPS = [
 ] as const;
 
 export type FlowStep = (typeof FLOW_STEPS)[number];
+
+export function flowStepLabel(step: FlowStep, hostKind: HostKind): string {
+  return step === "开 PR" ? `开 ${pullAbbrev(hostKind)}` : step;
+}
 
 export type FlowFacts = {
   pullRequests: number;
@@ -46,7 +56,7 @@ export function flowBanner(
     return {
       kind: "paused",
       title: "已暂停",
-      ...(pauseReason ? { reason: pauseReason } : {}),
+      ...(pauseReason ? { reason: pauseReasonLabel(pauseReason) } : {}),
     };
   if (state === "cancelled") return { kind: "cancelled", title: "已取消" };
   if (state === "reworking") return { kind: "reworking", title: "返工中" };

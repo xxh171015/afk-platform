@@ -166,6 +166,7 @@ function staticCrumbs(
 ): { label: ReactNode; to?: string }[] | null {
   if (path === "/") return [{ label: "工作台" }];
   if (path === "/waiting") return [{ label: "待处理" }];
+  if (path === "/metrics") return [{ label: "度量" }];
   if (path === "/specs") return [{ label: "需求" }];
   return null;
 }

@@ -1,4 +1,10 @@
-import { formatDisplayId } from "@afk/shared";
+import {
+  type FailureSource,
+  formatDisplayId,
+  type HostKind,
+  pauseReasonLabel,
+  pullAbbrev,
+} from "@afk/shared";
 import type pg from "pg";
 
 // A spec's timeline reconstructed from what the platform recorded: runs, pull requests, the pack, and the spec
@@ -30,6 +36,7 @@ export interface TimelineItem {
   text: string;
   runId?: number;
   ticketId?: number;
+  failureSource?: FailureSource;
 }
 
 const FINAL_STAGES = new Set([
@@ -144,6 +151,21 @@ export async function specTimeline(
     }
   }
 
+  const blockedSources = new Map<number, FailureSource>();
+  const blockedEvents = await pool.query<{
+    ticket_id: number;
+    failure_source: FailureSource | null;
+  }>(
+    `SELECT DISTINCT ON (ticket_id) ticket_id, failure_source
+     FROM events
+     WHERE spec_id = $1 AND type = 'ticket' AND to_state = 'blocked'
+     ORDER BY ticket_id, id DESC`,
+    [specId],
+  );
+  for (const row of blockedEvents.rows) {
+    if (row.failure_source)
+      blockedSources.set(row.ticket_id, row.failure_source);
+  }
   const blocked = await pool.query<{
     id: number;
     blocked_reason: string | null;
@@ -161,6 +183,9 @@ export async function specTimeline(
       at: (row.finished_at ?? spec.created_at).toISOString(),
       text: `${formatDisplayId("ticket", row.id)} 卡住${row.blocked_reason ? `：${row.blocked_reason}` : ""}`,
       ticketId: row.id,
+      ...(blockedSources.get(row.id)
+        ? { failureSource: blockedSources.get(row.id) }
+        : {}),
     });
   }
 
@@ -182,27 +207,30 @@ export async function specTimeline(
     draft: boolean;
     state: string;
     synced_at: Date;
+    host_kind: HostKind;
   }>(
-    "SELECT number, draft, state, synced_at FROM pull_requests WHERE spec_id = $1 ORDER BY id",
+    `SELECT p.number, p.draft, p.state, p.synced_at, r.host_kind
+     FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.spec_id = $1 ORDER BY p.id`,
     [specId],
   );
   for (const pull of pulls.rows) {
+    const pr = pullAbbrev(pull.host_kind);
     items.push({
       kind: "pr-opened",
       at: pull.synced_at.toISOString(),
-      text: `开 PR #${pull.number}`,
+      text: `开 ${pr} #${pull.number}`,
     });
     if (!pull.draft)
       items.push({
         kind: "pr-ready",
         at: pull.synced_at.toISOString(),
-        text: `PR #${pull.number} 转 ready`,
+        text: `${pr} #${pull.number} 转 ready`,
       });
     if (pull.state === "merged")
       items.push({
         kind: "merged",
         at: pull.synced_at.toISOString(),
-        text: `PR #${pull.number} 合并进 main`,
+        text: `${pr} #${pull.number} 合并进 main`,
       });
   }
 
@@ -219,12 +247,24 @@ export async function specTimeline(
       text: "验收包生成",
     });
 
-  if (spec.state === "paused")
+  if (spec.state === "paused") {
+    const pause = (
+      await pool.query<{ at: Date; failure_source: FailureSource | null }>(
+        `SELECT at, failure_source FROM events
+         WHERE spec_id = $1 AND type = 'spec' AND to_state = 'paused'
+         ORDER BY id DESC LIMIT 1`,
+        [specId],
+      )
+    ).rows[0];
     items.push({
       kind: "pause",
-      at: spec.created_at.toISOString(),
-      text: spec.pause_reason ? `暂停：${spec.pause_reason}` : "暂停",
+      at: (pause?.at ?? spec.created_at).toISOString(),
+      text: spec.pause_reason
+        ? `暂停：${pauseReasonLabel(spec.pause_reason)}`
+        : "暂停",
+      ...(pause?.failure_source ? { failureSource: pause.failure_source } : {}),
     });
+  }
 
   items.sort(
     (a, b) => a.at.localeCompare(b.at) || a.kind.localeCompare(b.kind),

@@ -43,6 +43,14 @@ const view = (
     acceptancePack?: unknown;
     timeline?: unknown[];
     finalRuns?: unknown[];
+    potentialConflicts?: unknown[];
+    leadTime?: {
+      agentMs: number;
+      gateMs: number;
+      queuedMs: number;
+      waitingMs: number;
+      totalMs: number;
+    } | null;
     mergeOrder?: {
       ordered: string[];
       after: Record<string, string[]>;
@@ -80,6 +88,8 @@ const view = (
   acceptancePack: over.acceptancePack ?? null,
   timeline: over.timeline ?? [],
   finalRuns: over.finalRuns ?? [],
+  potentialConflicts: over.potentialConflicts ?? [],
+  leadTime: over.leadTime ?? null,
 });
 
 const ticketView = (n: number, over: Record<string, unknown> = {}) => ({
@@ -654,7 +664,7 @@ describe("the spec page", () => {
           json: view({
             spec: {
               state: "paused",
-              pauseReason: "the agent time limit of the spec was reached",
+              pauseReason: "budget-exhausted",
             },
           }),
         }),
@@ -672,9 +682,63 @@ describe("the spec page", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain(
       "已暂停",
     );
-    expect(
-      screen.getByText(/已暂停: the agent time limit of the spec was reached/),
-    ).toBeTruthy();
+    expect(screen.getByText(/已暂停: agent 时间用完/)).toBeTruthy();
+  });
+
+  it("shows a potential conflict with another spec as a hint, not a block", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            potentialConflicts: [
+              {
+                specId: 2,
+                displayId: "S-2",
+                title: "Bulk ship",
+                repo: "backend",
+                repoId: 1,
+                files: ["src/shared.ts", "src/a.ts"],
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const hint = await screen.findByTestId("potential-conflicts");
+    expect(hint.textContent).toBe(
+      "和 S-2 Bulk ship 在 backend 有潜在冲突：src/shared.ts、src/a.ts；后合并的一方在更新集成分支时处理",
+    );
+    expect(screen.queryByText("待处理")).toBeNull();
+  });
+
+  it("shows the four lead-time segments on the overview", async () => {
+    const hour = 3_600_000;
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            leadTime: {
+              agentMs: 3 * hour,
+              gateMs: hour,
+              queuedMs: hour,
+              waitingMs: 5 * hour,
+              totalMs: 10 * hour,
+            },
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("lead-time");
+    expect(bar.textContent).toContain("工期");
+    expect(bar.textContent).toContain("10h 00m");
+    expect(bar.textContent).toContain("agent");
+    expect(bar.textContent).toContain("门禁");
+    expect(bar.textContent).toContain("排队");
+    expect(bar.textContent).toContain("等人");
   });
 
   it("shows the overall review of a finalizing spec", async () => {
@@ -1157,6 +1221,35 @@ describe("the six-step bar and nested pages", () => {
     );
   });
 
+  it("marks blocked and pause timeline events with their failure source", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timeline: [
+              {
+                kind: "ticket-blocked",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "T-1 卡住：gate-failed",
+                failureSource: "agent",
+              },
+              {
+                kind: "pause",
+                at: "2026-11-01T11:00:00.000Z",
+                text: "暂停：合 main 有冲突",
+                failureSource: "spec",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("T-1 卡住：gate-failed")).toBeTruthy();
+    const sources = screen.getAllByTestId("failure-source");
+    expect(sources.map((el) => el.textContent)).toEqual(["agent", "需求本身"]);
+  });
+
   it("links PR timeline events to GitHub", async () => {
     renderWithApp(
       <SpecDetail specId={1} section="timeline" />,
@@ -1289,6 +1382,83 @@ describe("the six-step bar and nested pages", () => {
       within(live).getByRole("region", { name: "日志查看器" }),
     ).toBeTruthy();
     expect(screen.queryByTestId("finalize-live-backend")).toBeNull();
+  });
+
+  it("lists update-branch Runs under 合 main, not as 收尾 steps", async () => {
+    const updateRun = {
+      id: 20,
+      displayId: "R-20",
+      repo: "backend",
+      stage: "update-branch",
+      axis: null,
+      result: "conflict",
+      durationMs: 12_000,
+      startedAt: "2026-11-09T05:08:08.000Z",
+      finishedAt: "2026-11-09T05:08:20.000Z",
+    };
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [ticket(1, "running")],
+            edges: [],
+            finalRuns: [updateRun],
+          }),
+        }),
+      }),
+    );
+    const card = await screen.findByTestId("update-branch-backend");
+    expect(card.textContent).toContain("合 main");
+    expect(
+      screen.getByRole("link", { name: "R-20" }).getAttribute("href"),
+    ).toBe("/runs/20");
+    expect(screen.queryByTestId("delivery-backend")).toBeNull();
+    expect(screen.queryByTestId("finalize-steps-backend")).toBeNull();
+  });
+
+  it("shows the log of an update-branch Run that is going now", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [ticket(1, "running")],
+            edges: [],
+            finalRuns: [
+              {
+                id: 21,
+                displayId: "R-21",
+                repo: "backend",
+                stage: "update-branch",
+                axis: null,
+                result: null,
+                durationMs: null,
+                startedAt: "2026-11-09T05:08:08.000Z",
+                finishedAt: null,
+              },
+            ],
+          }),
+        }),
+        "GET /runs/21/logs": () => ({
+          json: {
+            attempt: 1,
+            offset: 0,
+            nextOffset: 0,
+            size: 0,
+            text: "",
+            finished: false,
+          },
+        }),
+      }),
+    );
+    const card = await screen.findByTestId("update-branch-backend");
+    expect(card.textContent).toMatch(/正在运行 R-21 合 main/);
+    expect(
+      within(card).getByRole("region", { name: "日志查看器" }),
+    ).toBeTruthy();
   });
 
   it("opens a sheet when a graph node is clicked", async () => {
@@ -1438,5 +1608,109 @@ describe("the six-step bar and nested pages", () => {
     expect(
       second.querySelector('[data-current="true"]')?.textContent,
     ).toContain("开 PR");
+  });
+});
+
+describe("a GitLab spec", () => {
+  const gitlab = {
+    repos: [
+      {
+        name: "backend",
+        url: "https://gitlab.example/me/shop.git",
+        hostKind: "gitlab" as const,
+      },
+    ],
+  };
+
+  it("says MR on the flow bar, delivery heading and empty pack", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running", ...gitlab },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            mergeOrder: { ordered: [], after: {}, unordered: ["backend"] },
+          }),
+        }),
+      }),
+    );
+    const bar = await screen.findByTestId("flow-bar");
+    expect(bar.textContent).toContain(
+      "草稿 → 确认 → 运行 → 收尾 → 开 MR → 验收合并",
+    );
+    expect(screen.getByText("还没有验收包。开完 MR 后会生成。")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "PR" })).toBeNull();
+  });
+
+  it("says MR when a pull request exists, and flags a merge by the platform token", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review", tokenMerged: true, ...gitlab },
+            pullRequests: [
+              {
+                order: 1,
+                waitsFor: [],
+                repo: "backend",
+                number: 7,
+                url: "https://gitlab.example/me/shop/-/merge_requests/7",
+                state: "open",
+                draft: false,
+                ci: "success",
+                review: "none",
+                syncError: null,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "MR" })).toBeTruthy();
+    expect(screen.getByTestId("token-merged").textContent).toBe(
+      "平台账号合并了 MR。只有人能合并。",
+    );
+  });
+
+  it("links MR timeline events to GitLab", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: gitlab,
+            pullRequests: [
+              {
+                order: 1,
+                waitsFor: [],
+                repo: "backend",
+                number: 7,
+                url: "https://gitlab.example/me/shop/-/merge_requests/7",
+                state: "open",
+                draft: false,
+                ci: "none",
+                review: "none",
+                syncError: null,
+              },
+            ],
+            timeline: [
+              {
+                kind: "pr-opened",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "backend #7",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findAllByText("开 MR")).toHaveLength(2);
+    const link = screen.getByRole("link", { name: "GitLab" });
+    expect(link.getAttribute("href")).toBe(
+      "https://gitlab.example/me/shop/-/merge_requests/7",
+    );
   });
 });

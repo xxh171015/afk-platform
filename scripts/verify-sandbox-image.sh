@@ -200,7 +200,7 @@ finish() {
 
 run_wizard() {
 
-TOTAL_STAGES=5
+TOTAL_STAGES=7
 # Results go to their own file, never the real .env (the library defaults ENV_FILE to .env).
 ENV_FILE="reports/sandbox-image.env"
 mkdir -p "$(dirname "$ENV_FILE")"
@@ -209,7 +209,7 @@ IMAGE="${IMAGE:-sandcastle:afk-platform}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DOCKERFILE="$REPO_ROOT/.sandcastle/Dockerfile"
 
-banner "Verify the sandbox image on this Mac (#20)"
+banner "Verify the sandbox image on this Mac (#233)"
 
 # ── 1 ──────────────────────────────────────────────────────────────────────
 stage "Preflight"
@@ -246,8 +246,9 @@ pause
 
 # ── 3 ──────────────────────────────────────────────────────────────────────
 stage "Check what is inside the image"
-say "Confirms the pinned Cursor CLI and the PostgreSQL server are really there."
-PINNED_CURSOR="$(sed -n 's/^ARG CURSOR_CLI_VERSION=//p' "$DOCKERFILE")"
+say "Confirms the pinned Cursor CLI, PostgreSQL, pnpm and Playwright Chromium are really there."
+PINNED_CURSOR="$(sed -n 's/^ARG CURSOR_CLI_VERSION=//p' "$DOCKERFILE" | head -n1)"
+PINNED_PLAYWRIGHT="$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$DOCKERFILE" | head -n1)"
 CURSOR_CLI_VERSION="$(docker run --rm --entrypoint agent "$IMAGE" --version | tr -d '\r' | tail -n1)" \
   || { warn "agent --version failed inside the image"; exit 1; }
 say "Cursor CLI: $CURSOR_CLI_VERSION   (pinned in Dockerfile: $PINNED_CURSOR)"
@@ -257,8 +258,13 @@ POSTGRES_VERSION="$(docker run --rm --entrypoint bash "$IMAGE" -c 'bin=$(ls /usr
 say "PostgreSQL: $POSTGRES_VERSION"
 note "compose.yaml runs postgres:16 for local dev; the image installs Debian's version. Note any mismatch in the issue."
 docker run --rm --entrypoint bash "$IMAGE" -c 'echo "pnpm $(pnpm --version), node $(node --version)"' | sed 's/^/  /'
+CHROMIUM="$(docker run --rm --entrypoint bash "$IMAGE" -c 'ls -d /home/agent/.cache/ms-playwright/chromium-* | head -1')" \
+  || { warn "Playwright Chromium is not in the image"; exit 1; }
+say "Playwright $PINNED_PLAYWRIGHT Chromium: $CHROMIUM"
 write_env CURSOR_CLI_VERSION "$CURSOR_CLI_VERSION"
 write_env POSTGRES_VERSION "$POSTGRES_VERSION"
+write_env PLAYWRIGHT_VERSION "$PINNED_PLAYWRIGHT"
+write_env CHROMIUM "$CHROMIUM"
 pause
 
 # ── 4 ──────────────────────────────────────────────────────────────────────
@@ -287,7 +293,7 @@ else
 fi
 write_env GATE_SECONDS "$(( $(date +%s) - gate_start ))"
 write_env GATE_RESULT "$GATE_RESULT"
-[[ "$GATE_RESULT" == pass ]] || { warn "Gate failed: paste the output above into #20."; exit 1; }
+[[ "$GATE_RESULT" == pass ]] || warn "Platform gate failed: paste the output into #233. Later stages still run."
 pause
 
 # ── 5 ──────────────────────────────────────────────────────────────────────
@@ -295,15 +301,65 @@ stage "Read the JUnit report from the host"
 say "The report was written inside the container: it must be readable out here."
 JUNIT="$WORK/repo/reports/junit.xml"
 if [[ ! -r "$JUNIT" ]]; then
-  warn "No readable $JUNIT: the gate passed but JUnit did not reach the host."
-  exit 1
+  warn "No readable $JUNIT: the gate did not write JUnit to the host."
+else
+  TESTS="$(grep -o 'tests="[0-9]*"' "$JUNIT" | head -n1 | tr -dc '0-9' || true)"
+  [[ -n "$TESTS" ]] || { warn "JUnit has no tests= attribute: open $JUNIT and check it."; TESTS=unknown; }
+  say "JUnit found: $JUNIT (tests=$TESTS)"
+  write_env JUNIT_TESTS "$TESTS"
+  write_env JUNIT_READABLE_ON_HOST yes
 fi
-TESTS="$(grep -o 'tests="[0-9]*"' "$JUNIT" | head -n1 | tr -dc '0-9' || true)"
-[[ -n "$TESTS" ]] || { warn "JUnit has no tests= attribute: open $JUNIT and check it."; TESTS=unknown; }
-say "JUnit found: $JUNIT (tests=$TESTS)"
-write_env JUNIT_TESTS "$TESTS"
-write_env JUNIT_READABLE_ON_HOST yes
-say "Paste the contents of $ENV_FILE into issue #20, then close it if you are happy."
+pause
+
+# ── 6 ──────────────────────────────────────────────────────────────────────
+stage "Run the pilot frontend gate"
+say "Clones afk-pilot-frontend and runs its gates.yaml (npm ci, typecheck, contract, test, build)."
+FRONTEND_URL="${AFK_PILOT_FRONTEND:-https://github.com/xxh171015/afk-pilot-frontend.git}"
+frontend_nwo="${FRONTEND_URL#https://github.com/}"
+frontend_nwo="${frontend_nwo%.git}"
+if [[ "$FRONTEND_URL" == https://github.com/* ]]; then
+  gh repo clone "$frontend_nwo" "$WORK/frontend" -- --depth 1 --quiet
+else
+  git clone --quiet --depth 1 "$FRONTEND_URL" "$WORK/frontend"
+fi
+FRONTEND_GATE='set -euo pipefail
+cd /home/agent/workspace
+npm ci
+timeout 300 npm run typecheck
+timeout 120 npm run contract:check
+timeout 600 npm test
+timeout 300 npm run build'
+fe_start=$(date +%s)
+if docker run --rm -v "$WORK/frontend:/home/agent/workspace" --entrypoint bash "$IMAGE" -c "$FRONTEND_GATE"; then
+  FRONTEND_GATE_RESULT=pass
+else
+  FRONTEND_GATE_RESULT=fail
+fi
+write_env FRONTEND_GATE_SECONDS "$(( $(date +%s) - fe_start ))"
+write_env FRONTEND_GATE_RESULT "$FRONTEND_GATE_RESULT"
+[[ "$FRONTEND_GATE_RESULT" == pass ]] || warn "Frontend gate failed: paste the output into #233."
+pause
+
+# ── 7 ──────────────────────────────────────────────────────────────────────
+stage "Launch Chromium from the image cache"
+say "Shop e2e needs the integration backend on the host (the sandbox has no Docker). scripts/check-sandbox-image.sh clones afk-pilot-backend, seeds it, and runs Playwright on that network. This launch is the image-level proof that Chromium is installed."
+CHROMIUM_SMOKE='set -euo pipefail
+bin=$(find /home/agent/.cache/ms-playwright -type f -name chrome | head -1)
+test -n "$bin"
+"$bin" --headless --disable-gpu --no-sandbox --screenshot=/tmp/blank.png about:blank
+test -s /tmp/blank.png
+echo chromium-launched'
+smoke_start=$(date +%s)
+mkdir -p "$WORK/smoke"
+if docker run --rm -v "$WORK/smoke:/home/agent/workspace" --entrypoint bash "$IMAGE" -c "$CHROMIUM_SMOKE"; then
+  CHROMIUM_SMOKE_RESULT=pass
+else
+  CHROMIUM_SMOKE_RESULT=fail
+fi
+write_env CHROMIUM_SMOKE_SECONDS "$(( $(date +%s) - smoke_start ))"
+write_env CHROMIUM_SMOKE_RESULT "$CHROMIUM_SMOKE_RESULT"
+[[ "$CHROMIUM_SMOKE_RESULT" == pass ]] || warn "Chromium did not launch: paste the output into #233."
+say "Paste the contents of $ENV_FILE into issue #233, then close it if you are happy."
 
 finish
 }

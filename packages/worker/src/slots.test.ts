@@ -152,6 +152,14 @@ describe("acquiring a slot", () => {
     expect(slot.dir).toContain(root);
   });
 
+  it("takes an update-branch temp as a ticket branch", async () => {
+    const slot = await acquire(manager(), {
+      ...task(1),
+      ref: "agent/a1b2c3/S-1-update",
+    });
+    expect(slot.dir).toContain(root);
+  });
+
   it("refuses a ref that is not a ticket branch", async () => {
     await expect(
       manager().acquire({ ...task(1), ref: "main" }),
@@ -521,6 +529,19 @@ describe("taking the result back", () => {
     expect(
       retrieveResult({ slotClone, mainClone: main.dir, ref: "agent/T-1" })
         .extraRefs,
+    ).toEqual([]);
+  });
+
+  it("does not call master extra when that is the repo's default branch", () => {
+    git(main.dir, ["branch", "-m", "main", "master"]);
+    const slotClone = slotWithBranches(["agent/T-1", "gate/T-1"]);
+    expect(
+      retrieveResult({
+        slotClone,
+        mainClone: main.dir,
+        ref: "agent/T-1",
+        defaultBranch: "master",
+      }).extraRefs,
     ).toEqual([]);
   });
 

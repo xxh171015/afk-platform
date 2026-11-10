@@ -1,4 +1,10 @@
-import { formatDisplayId, REVIEW_AXES, type ReviewAxis } from "@afk/shared";
+import {
+  formatDisplayId,
+  HOST_KINDS,
+  type HostKind,
+  REVIEW_AXES,
+  type ReviewAxis,
+} from "@afk/shared";
 import { z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { enqueuePackDescriptions } from "../host/host-jobs.ts";
@@ -27,6 +33,7 @@ export const PullRequestRow = z.object({
   ci: z.enum(["none", "pending", "success", "failure"]),
   review: z.enum(["none", "approved", "changes-requested"]),
   syncError: z.string().nullable(),
+  hostKind: z.enum(HOST_KINDS).optional(),
 });
 export type PullRequestRow = z.infer<typeof PullRequestRow>;
 
@@ -153,6 +160,7 @@ export const AcceptancePack = z.object({
   generatedAt: z.string(),
   mergeOrder: MergeOrderView,
   orderBroken: OrderBroken,
+  hostKind: z.enum(HOST_KINDS).optional(),
   repos: z.array(RepoSection),
   integration: IntegrationSection.nullable().optional(), // none for a spec without integration tickets
   cancelledTickets: z.array(
@@ -178,7 +186,7 @@ export async function pullRequestRows(
   specId: number,
 ): Promise<PullRequestRow[]> {
   const { rows } = await pool.query(
-    `SELECT r.id AS repo_id, r.name, p.number, p.url, p.state, p.draft, p.ci, p.review, p.sync_error
+    `SELECT r.id AS repo_id, r.name, p.number, p.url, p.state, p.draft, p.ci, p.review, p.sync_error, r.host_kind
      FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.spec_id = $1`,
     [specId],
   );
@@ -200,6 +208,7 @@ export async function pullRequestRows(
       ci: row.ci,
       review: row.review,
       syncError: row.sync_error ?? null,
+      hostKind: row.host_kind as HostKind,
     }));
 }
 
@@ -289,7 +298,7 @@ export async function buildAcceptancePack(
             g.command_results, g.test_cases
      FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
      ORDER BY r.repo_id, r.id DESC`,
     [specId],
   );
@@ -594,8 +603,10 @@ async function withLiveFacts(
     planning_state: string | null;
     planning_docs_committed: boolean;
     planning_repo: string | null;
+    host_kind: HostKind | null;
   }>(
-    `SELECT s.order_broken, s.planning_state, s.planning_docs_committed, r.name AS planning_repo
+    `SELECT s.order_broken, s.planning_state, s.planning_docs_committed, r.name AS planning_repo,
+            (SELECT repo.host_kind FROM repos repo WHERE repo.project_id = s.project_id ORDER BY repo.id LIMIT 1) AS host_kind
      FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
   );
@@ -604,6 +615,7 @@ async function withLiveFacts(
     pulls.find((p) => p.repo === repo)?.order ?? Number.MAX_SAFE_INTEGER;
   return {
     ...pack,
+    hostKind: planning?.host_kind ?? "github",
     mergeOrder: await mergeOrderOf(pool, specId),
     orderBroken: planning?.order_broken ?? [],
     planningDocs:

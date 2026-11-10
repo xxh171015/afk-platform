@@ -4,6 +4,48 @@ export type MergeCandidate =
   | { conflict: false; candidate: string; tree: string }
   | { conflict: true; files: string[]; detail: string };
 
+function mergeTree(
+  repoDir: string,
+  a: string,
+  b: string,
+):
+  | { conflict: false; tree: string }
+  | { conflict: true; tree: string; files: string[]; detail: string } {
+  const merged = git(repoDir, [
+    "merge-tree",
+    "--write-tree",
+    "--name-only",
+    "--no-messages",
+    a,
+    b,
+  ]);
+  const [firstLine, ...rest] = merged.stdout.trim().split("\n");
+  // Exit 1 means a conflict only when git still printed the (conflicted) tree; a ref that does not exist also
+  // exits 1, with nothing on stdout.
+  if (merged.code === 1 && /^[0-9a-f]{40,64}$/.test(firstLine ?? "")) {
+    return {
+      conflict: true,
+      tree: firstLine as string,
+      files: rest,
+      detail: merged.out.slice(0, 600),
+    };
+  }
+  if (merged.code !== 0) {
+    throw new Error(`git merge-tree failed: ${merged.out.slice(0, 400)}`);
+  }
+  return { conflict: false, tree: firstLine as string };
+}
+
+// Whether two integration branches would conflict, and on which files: no commit, no gate, no lock.
+export function trialMerge(
+  repoDir: string,
+  ours: string,
+  theirs: string,
+): { files: string[] } {
+  const merged = mergeTree(repoDir, ours, theirs);
+  return { files: merged.conflict ? merged.files : [] };
+}
+
 // The merge of the integration branch and a ticket branch as a commit that nothing points at yet, built from
 // refs alone (no checkout, no working tree): `git merge-tree --write-tree` then `git commit-tree`. The
 // candidate gate runs on it; only a passing candidate moves the integration branch.
@@ -13,25 +55,11 @@ export function mergeCandidate(
   agentRef: string,
   message: string,
 ): MergeCandidate {
-  const merged = git(repoDir, [
-    "merge-tree",
-    "--write-tree",
-    "--name-only",
-    "--no-messages",
-    integrationRef,
-    agentRef,
-  ]);
-  const [firstLine, ...rest] = merged.stdout.trim().split("\n");
-  // Exit 1 means a conflict only when git still printed the (conflicted) tree; a ref that does not exist also
-  // exits 1, with nothing on stdout.
-  if (merged.code === 1 && /^[0-9a-f]{40,64}$/.test(firstLine ?? "")) {
-    const files = rest;
-    return { conflict: true, files, detail: merged.out.slice(0, 600) };
+  const merged = mergeTree(repoDir, integrationRef, agentRef);
+  if (merged.conflict) {
+    return { conflict: true, files: merged.files, detail: merged.detail };
   }
-  if (merged.code !== 0) {
-    throw new Error(`git merge-tree failed: ${merged.out.slice(0, 400)}`);
-  }
-  const tree = merged.stdout.trim().split("\n")[0] as string;
+  const { tree } = merged;
   const candidate = gitOrThrow(
     repoDir,
     [

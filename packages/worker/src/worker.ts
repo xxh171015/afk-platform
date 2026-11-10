@@ -1,8 +1,14 @@
 import {
+  DEFAULT_DISK_WARN_GIB,
+  type DiskLevel,
+  diskLevel,
+  formatGib,
+  GIB,
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   MAX_LOG_CHUNK_BYTES,
   PLANNING_COMMIT_JOB,
+  TRIAL_MERGE_JOB,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { withCredentials } from "./credentials.ts";
@@ -18,6 +24,7 @@ import { type HostDeps, runHostTask } from "./host.ts";
 import { runPlanningCommit } from "./planning.ts";
 import { rawLogSink } from "./raw-log.ts";
 import { READINESS_GATE_JOB, runReadinessGate } from "./readiness.ts";
+import { runTrialMerge } from "./trial-merge.ts";
 
 // The worker loop: claim a job, get its bundle, run one stage, hand back the facts. While it works it renews
 // the lease; when the API says the lease is gone it stops the local run at once (AbortSignal) and reports nothing.
@@ -28,16 +35,26 @@ export interface WorkerOptions {
   capabilities?: string[];
   host?: HostDeps; // the code host: a worker that has it also takes the host jobs
   heartbeatMs?: number; // the lease is 120 s; the design renews every 30 s
-  logFlushMs?: number; // how often a running stage uploads what it has logged so far
+  logFlushMs?: number; // how often a running stage uploads what it has logged so far; default 400 ms
   pollMs?: number; // wait between claims when the queue is empty
   concurrency?: number; // jobs at once; no more than there are slots
   stopWhenIdle?: boolean; // return as soon as a claim finds nothing (tests, one-shot runs)
   signal?: AbortSignal; // stop: claim nothing more and abandon the jobs in hand
   log?: (line: string) => void;
+  // Home disk: below stopBelow the loop waits instead of claiming (a running job still finishes). A report on
+  // each ok/warn/stop change is how the API learns this worker's remaining space for the banner.
+  disk?: {
+    free: () => Promise<number>;
+    stopBelow: number;
+    warnBelow?: number;
+    report?: (freeBytes: number) => Promise<void>;
+  };
 }
 
 const MAX_FAILED_HEARTBEATS = 3;
 const COMPLETE_ATTEMPTS = 3;
+export const DEFAULT_LOG_FLUSH_MS = 400;
+export const LOG_FLUSH_BYTES = 64 * 1024;
 
 export type JobOutcome = "completed" | "failed" | "abandoned";
 
@@ -59,7 +76,27 @@ export async function runWorker(
 ): Promise<{ jobs: number }> {
   let jobs = 0;
   const loop = async () => {
+    let lastDiskLevel: DiskLevel | undefined;
     while (!options.signal?.aborted) {
+      if (options.disk) {
+        const free = await options.disk.free();
+        const level = diskLevel(
+          free,
+          options.disk.warnBelow ?? DEFAULT_DISK_WARN_GIB * GIB,
+          options.disk.stopBelow,
+        );
+        if (level !== lastDiskLevel) {
+          lastDiskLevel = level;
+          await options.disk.report?.(free);
+        }
+        if (level === "stop") {
+          options.log?.(
+            `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
+          );
+          await sleep(options.pollMs ?? 2_000, options.signal);
+          continue;
+        }
+      }
       const job = await options.api.claim([
         ...(options.capabilities ?? []),
         ...(options.host ? [HOST_CAPABILITY] : []),
@@ -77,22 +114,35 @@ export async function runWorker(
   return { jobs };
 }
 
-// Buffers log lines and uploads them in chunks; a flush also happens when the stage ends.
-class LogUploader {
+// Buffers log lines and uploads them in chunks; a flush also happens when the
+// buffer crosses 64 KiB, and when the stage ends.
+export class LogUploader {
   private readonly send: (chunk: string) => Promise<unknown>;
   private buffer: string[] = [];
+  private bufferedBytes = 0;
+  private chain: Promise<void> = Promise.resolve();
 
   constructor(send: (chunk: string) => Promise<unknown>) {
     this.send = send;
   }
 
   add = (line: string) => {
-    this.buffer.push(line.endsWith("\n") ? line : `${line}\n`);
+    const text = line.endsWith("\n") ? line : `${line}\n`;
+    this.buffer.push(text);
+    this.bufferedBytes += Buffer.byteLength(text);
+    if (this.bufferedBytes >= LOG_FLUSH_BYTES) void this.flush();
   };
 
-  async flush() {
+  flush = (): Promise<void> => {
+    const next = this.chain.then(() => this.flushNow());
+    this.chain = next.catch(() => undefined);
+    return next;
+  };
+
+  private async flushNow() {
     const lines = this.buffer;
     this.buffer = [];
+    this.bufferedBytes = 0;
     // the API takes no more than a chunk's worth at once, and raw events can come fast
     let chunk = "";
     let size = 0;
@@ -149,6 +199,20 @@ export async function processJob(
   let uploader: LogUploader | undefined;
   let stopStreaming = () => {};
   try {
+    if (job.type === TRIAL_MERGE_JOB) {
+      const task = await api.trialMergeTask(job);
+      if (task === "lost") return "abandoned";
+      const deps = await withCredentials(
+        { ...options.executor, api },
+        task.repo.url,
+      );
+      const body = runTrialMerge(deps, task, log);
+      if (lost.signal.aborted) return "abandoned";
+      if ((await handOver(options, job, body, log)) !== "held")
+        return "abandoned";
+      log(`trial-merge ${body.peers.length} peers`);
+      return "completed";
+    }
     if (job.type === PLANNING_COMMIT_JOB) {
       const task = await api.planningTask(job);
       if (task === "lost") return "abandoned";
@@ -199,7 +263,7 @@ export async function processJob(
     const upload = uploader;
     const streaming = setInterval(
       () => void upload.flush(),
-      options.logFlushMs ?? 5_000,
+      options.logFlushMs ?? DEFAULT_LOG_FLUSH_MS,
     );
     stopStreaming = () => clearInterval(streaming);
     const stageLog = (line: string) => {

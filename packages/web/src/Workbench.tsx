@@ -1,3 +1,4 @@
+import { formatDiskBytes, formatGib } from "@afk/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   Activity,
@@ -12,6 +13,7 @@ import { Mono, Pill } from "./components/afk/badges.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
 import { Onboarding } from "./Onboarding.tsx";
@@ -319,7 +321,10 @@ export function Workbench() {
                   title={row.spec.title}
                 >
                   <StatusBadge kind="spec" code={row.spec.state} />
-                  <span>{row.pullRequestCount} 个 PR</span>
+                  <span>
+                    {row.pullRequestCount} 个{" "}
+                    {pullAbbrev(hostKindOfRepos(row.spec.repos))}
+                  </span>
                   <span>
                     验收标准{" "}
                     <Mono>{`${row.verifiedCriteria}/${row.totalCriteria}`}</Mono>
@@ -352,6 +357,53 @@ export function Workbench() {
           </Quadrant>
         </div>
       )}
+      {data?.status ? <StatusArea status={data.status} /> : null}
     </Page>
+  );
+}
+
+function StatusArea({
+  status,
+}: {
+  status: {
+    logDirBytes: number;
+    apiFreeBytes: number;
+    lastCleanup: { at: string | null; runs: number; orphans: number };
+    workers: Array<{
+      id: string;
+      reportedAt: string;
+      freeBytes: number | null;
+      cleaned: { sandboxLogs: number; salvage: number; snapshots: number };
+    }>;
+  };
+}) {
+  return (
+    <footer
+      data-testid="workbench-status"
+      className="mt-8 space-y-1 border-t pt-3 text-xs text-muted-foreground"
+    >
+      <p>
+        日志目录 {formatDiskBytes(status.logDirBytes)} · API 剩余{" "}
+        {formatGib(status.apiFreeBytes)}
+      </p>
+      {status.workers.length === 0 ? (
+        <p>还没有 worker 上报</p>
+      ) : (
+        status.workers.map((worker) => (
+          <p key={worker.id}>
+            worker {worker.id} 剩余{" "}
+            {worker.freeBytes === null ? "未知" : formatGib(worker.freeBytes)}
+            {" · 上报 "}
+            <RelativeTime iso={worker.reportedAt} />
+            {` · 上次清理 sandbox-logs ${worker.cleaned.sandboxLogs}、salvage ${worker.cleaned.salvage}、snapshots ${worker.cleaned.snapshots}`}
+          </p>
+        ))
+      )}
+      <p>
+        {status.lastCleanup.at
+          ? `最近清理删了 ${status.lastCleanup.runs} 个 Run 日志、${status.lastCleanup.orphans} 个孤儿目录`
+          : "还没有做过日志清理"}
+      </p>
+    </footer>
   );
 }

@@ -10,7 +10,9 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
+import { recordAction } from "../events/human-actions.ts";
 import { enqueueOpenPr } from "../host/host-jobs.ts";
+import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
@@ -114,6 +116,13 @@ export async function recordFinalResult(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",
       [fin.id],
     );
+    if (valid?.stage === "final-merge") {
+      await enqueueTrialMerge(client, {
+        specId: read.specId,
+        repoId: read.repoId,
+        headSha: valid.headSha,
+      });
+    }
     // the last repo to settle sends all of the spec's pull requests out, after the e2e that comes first when a
     // final fix changed a branch
     await settleFinalization(client, read.specId);
@@ -128,7 +137,7 @@ export async function recordFinalResult(
 
 // A worker claiming a final job starts its Run, as for a ticket stage.
 export async function markFinalClaimed(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   job: StageJob,
 ): Promise<void> {
   const read = readFinalPayload(job.payload);
@@ -216,6 +225,12 @@ export async function retryFinalization(
         retried.push(row.step);
       }
     }
+    await recordAction(
+      client,
+      "retry-final",
+      { specId },
+      { retried, note: parkedRetryNote(note) },
+    );
     return { status: "ok", retried };
   });
 }

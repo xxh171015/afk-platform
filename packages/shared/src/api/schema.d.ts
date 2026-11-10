@@ -202,6 +202,51 @@ export interface paths {
     };
     trace?: never;
   };
+  "/hosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The code hosts the workers have credentials for, as they last reported them */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              hosts: {
+                host: string;
+                /** @enum {string} */
+                kind: "github" | "gitlab";
+                workerId: string;
+                reportedAt: string;
+                tokenExpiresAt?: string;
+                daysLeft?: number;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/projects/{projectId}/repos": {
     parameters: {
       query?: never;
@@ -256,7 +301,7 @@ export interface paths {
             };
           };
         };
-        /** @description The project already has a repo with this name */
+        /** @description The project already has a repo with this name, or has repos on another kind of code host */
         409: {
           headers: {
             [name: string]: unknown;
@@ -417,7 +462,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What the last check of the GitHub App's access to the repo found */
+        /** @description What the last check of the bot's access to the repo found */
         200: {
           headers: {
             [name: string]: unknown;
@@ -431,9 +476,15 @@ export interface paths {
                 | "ok"
                 | "not-installed"
                 | "missing-permissions"
+                | "not-member"
                 | "error";
+              /** @enum {string} */
+              hostKind: "github" | "gitlab";
               missing?: string[];
               fixUrl?: string;
+              username?: string;
+              fix?: string;
+              hints?: ("personal-token" | "developers-can-merge")[];
               files?: {
                 gates: boolean;
                 integrationCompose: boolean;
@@ -487,7 +538,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description A worker with the code host's credentials will check the repo (GitLab repos are not checked) */
+        /** @description A worker with the code host's credentials will check the repo */
         200: {
           headers: {
             [name: string]: unknown;
@@ -501,9 +552,15 @@ export interface paths {
                 | "ok"
                 | "not-installed"
                 | "missing-permissions"
+                | "not-member"
                 | "error";
+              /** @enum {string} */
+              hostKind: "github" | "gitlab";
               missing?: string[];
               fixUrl?: string;
+              username?: string;
+              fix?: string;
+              hints?: ("personal-token" | "developers-can-merge")[];
               files?: {
                 gates: boolean;
                 integrationCompose: boolean;
@@ -1145,6 +1202,105 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/hosts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            workerId: string;
+            hosts: {
+              host: string;
+              /** @enum {string} */
+              kind: "github" | "gitlab";
+            }[];
+          };
+        };
+      };
+      responses: {
+        /** @description Kept: repos on these hosts can be registered and worked on */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/worker/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            workerId: string;
+            cleaned: {
+              sandboxLogs: number;
+              salvage: number;
+              snapshots: number;
+            };
+            freeBytes?: number;
+          };
+        };
+      };
+      responses: {
+        /** @description Kept for the workbench status area */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/claim": {
     parameters: {
       query?: never;
@@ -1601,6 +1757,10 @@ export interface paths {
                     repoUrl: string;
                     number: number;
                   }[];
+                  defaults?: {
+                    repoUrl: string;
+                    branch: string;
+                  }[];
                 }
               | {
                   /** @enum {string} */
@@ -1709,6 +1869,87 @@ export interface paths {
           };
         };
         /** @description No such job, or not a readiness-gate job */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/worker/jobs/{id}/trial-merge-task": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          workerId: string;
+          attempt: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description What a trial-merge job has to do: merge-tree this spec's integration branch against the other live specs in the same repo, and name any conflicting files */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              spec: {
+                id: number;
+                displayId: string;
+                title: string;
+              };
+              repo: {
+                name: string;
+                url: string;
+                defaultBranch: string;
+              };
+              ours: {
+                specId: number;
+                branch: string;
+              };
+              peers: {
+                specId: number;
+                branch: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such job, or not a trial-merge job */
         404: {
           headers: {
             [name: string]: unknown;
@@ -2042,6 +2283,7 @@ export interface paths {
               size: number;
               text: string;
               finished: boolean;
+              purgedAt: string | null;
             };
           };
         };
@@ -2187,6 +2429,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
                 body: string;
                 acceptanceCriteria: string[];
                 modules: string[];
@@ -2487,6 +2736,7 @@ export interface paths {
                   level: "yellow";
                   message: string;
                 }[];
+                tokenMerged: boolean;
               };
               tickets: {
                 id: number;
@@ -2582,6 +2832,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               finalizations: {
                 id: number;
@@ -2653,6 +2910,8 @@ export interface paths {
                   }[];
                   ticketDraft?: string;
                 } | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -2661,6 +2920,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               mergeOrder: {
                 ordered: string[];
@@ -2688,6 +2954,8 @@ export interface paths {
                 /** @enum {string} */
                 review: "none" | "approved" | "changes-requested";
                 syncError: string | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
               }[];
               acceptancePack: {
                 generatedAt: string;
@@ -2702,6 +2970,8 @@ export interface paths {
                   repo: string;
                   skipped: string[];
                 }[];
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 repos: {
                   repo: string;
                   pullRequest: {
@@ -2719,6 +2989,8 @@ export interface paths {
                     /** @enum {string} */
                     review: "none" | "approved" | "changes-requested";
                     syncError: string | null;
+                    /** @enum {string} */
+                    hostKind?: "github" | "gitlab";
                   } | null;
                   gate: {
                     commitSha: string;
@@ -2844,6 +3116,8 @@ export interface paths {
                 text: string;
                 runId?: number;
                 ticketId?: number;
+                /** @enum {string} */
+                failureSource?: "platform" | "external" | "agent" | "spec";
               }[];
               finalRuns: {
                 id: number;
@@ -2856,6 +3130,21 @@ export interface paths {
                 startedAt: string | null;
                 finishedAt: string | null;
               }[];
+              potentialConflicts: {
+                specId: number;
+                displayId: string;
+                title: string;
+                repo: string;
+                repoId: number;
+                files: string[];
+              }[];
+              leadTime: {
+                agentMs: number;
+                gateMs: number;
+                queuedMs: number;
+                waitingMs: number;
+                totalMs: number;
+              } | null;
             };
           };
         };
@@ -3070,6 +3359,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               finalizations: {
                 id: number;
@@ -3141,6 +3437,8 @@ export interface paths {
                   }[];
                   ticketDraft?: string;
                 } | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3149,6 +3447,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               pullRequests: {
                 specId: number;
@@ -3158,6 +3463,8 @@ export interface paths {
                 url: string;
                 state: string;
                 syncError: string | null;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3166,11 +3473,20 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               cleanups: {
                 specId: number;
                 specDisplayId: string;
                 error: string;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3179,6 +3495,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               readyFailures: {
                 specId: number;
@@ -3187,6 +3510,8 @@ export interface paths {
                 number: number;
                 url: string;
                 error: string;
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3195,6 +3520,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               planning: {
                 specId: number;
@@ -3210,6 +3542,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               specs: {
                 id: number;
@@ -3224,6 +3563,13 @@ export interface paths {
                   spec: boolean;
                   merge: boolean;
                 };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
               }[];
               items: (
                 | {
@@ -3296,7 +3642,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The four workbench quadrants: waiting, running, awaiting acceptance, recently merged */
+        /** @description The four workbench quadrants plus the status area (disk, workers, last cleanup) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -3486,6 +3832,29 @@ export interface paths {
                 };
                 completedAt: string;
               }[];
+              status: {
+                logDirBytes: number;
+                apiFreeBytes: number;
+                /** @enum {string} */
+                diskLevel: "ok" | "warn" | "stop";
+                warnGib: number;
+                stopGib: number;
+                lastCleanup: {
+                  at: string | null;
+                  runs: number;
+                  orphans: number;
+                };
+                workers: {
+                  id: string;
+                  reportedAt: string;
+                  freeBytes: number | null;
+                  cleaned: {
+                    sandboxLogs: number;
+                    salvage: number;
+                    snapshots: number;
+                  };
+                }[];
+              };
             };
           };
         };
@@ -3875,12 +4244,84 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
-            extraSeconds: number;
+            extraSeconds?: number;
           };
         };
       };
       responses: {
-        /** @description Running again, with the extra agent time */
+        /** @description Running again; extraSeconds adds agent time when the budget ran out */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "draft"
+                | "planned"
+                | "running"
+                | "finalizing"
+                | "awaiting-review"
+                | "partially-merged"
+                | "reworking"
+                | "merged"
+                | "paused"
+                | "cancelled";
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not paused */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/allow": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Running again without extra agent time */
         200: {
           headers: {
             [name: string]: unknown;
@@ -4195,6 +4636,88 @@ export interface paths {
         };
       };
     };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/metrics": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: {
+          projectId?: number;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The last 12 weeks of lead time, failure attribution, platform failure rate and success standards */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              since: string | null;
+              weeks: {
+                weekStart: string;
+                leadTime: {
+                  ended: number;
+                  medianMs: number | null;
+                  agentMs: number;
+                  gateMs: number;
+                  queuedMs: number;
+                  waitingMs: number;
+                  specs: {
+                    id: number;
+                    displayId: string;
+                    title: string;
+                    totalMs: number;
+                  }[];
+                };
+                attribution: {
+                  recovered: {
+                    /** @enum {string} */
+                    source: "platform" | "external" | "agent" | "spec";
+                    reason: string;
+                    count: number;
+                  }[];
+                  needsHuman: {
+                    /** @enum {string} */
+                    source: "platform" | "external" | "agent" | "spec";
+                    reason: string;
+                    count: number;
+                  }[];
+                };
+                failureRate: {
+                  ended: number;
+                  platform: number | null;
+                  external: number | null;
+                  jobPlatform: number | null;
+                };
+                success: {
+                  mergedPulls: number;
+                  mergeRate: number | null;
+                  humanCommitsRate: number | null;
+                  untouchedRate: number | null;
+                };
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;

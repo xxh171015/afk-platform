@@ -543,15 +543,15 @@ describe("project view", () => {
       name: "web",
       hostKind: "gitlab",
     });
-    await post(`/projects/${id}/repos`, {
+    expect(await hostKinds(id)).toEqual(["api:gitlab", "web:gitlab"]);
+    // no worker named git.example.org and the address does not say: GitHub, in a project of its own
+    const other = (await post("/projects", { name: "other" })).body
+      .id as number;
+    await post(`/projects/${other}/repos`, {
       url: "https://git.example.org/acme/app.git",
       name: "app",
     });
-    expect(await hostKinds(id)).toEqual([
-      "api:gitlab",
-      "web:gitlab",
-      "app:github",
-    ]);
+    expect(await hostKinds(other)).toEqual(["app:github"]);
   });
 
   it("changes a repo's host kind, and refuses a kind that does not exist", async () => {

@@ -8,34 +8,110 @@ export type {
   PullRequestRowView,
   paths,
   ReadinessTask,
+  TrialMergeTask,
 } from "./api/client.ts";
-export { createApiClient } from "./api/client.ts";
+export {
+  CLI_HEADERS,
+  CLIENT_HEADER,
+  createApiClient,
+  HOST_HEADER,
+} from "./api/client.ts";
 export {
   branchNames,
   isPlatformBranch,
   parseTicketBranch,
   SETUP_BRANCH,
 } from "./branches.ts";
+export {
+  advanceDiskAlert,
+  DEFAULT_DISK_STOP_GIB,
+  DEFAULT_DISK_WARN_GIB,
+  DISK_NOTICED,
+  type DiskLevel,
+  type DiskNoticed,
+  diskGib,
+  diskLevel,
+  formatDiskBytes,
+  formatGib,
+  GIB,
+} from "./disk.ts";
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
+export type {
+  EventSource,
+  EventType,
+  FailureSource,
+  HumanAction,
+  PauseReason,
+  ReasonCode,
+} from "./failure-source.ts";
+export {
+  EVENT_SOURCES,
+  EVENT_TYPES,
+  EXTERNAL_ERROR_PATTERNS,
+  FAILURE_SOURCE_LABELS,
+  FAILURE_SOURCE_OF_REASON,
+  FAILURE_SOURCES,
+  FINAL_E2E_BLOCKED_REASONS,
+  FINAL_E2E_FAILED,
+  failureSourceOf,
+  HUMAN_ACTIONS,
+  isPlatformProblem,
+  PAUSE_REASON_LABELS,
+  PAUSE_REASONS,
+  pauseReasonLabel,
+  REASON_CODES,
+} from "./failure-source.ts";
 export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
 export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS } from "./findings.ts";
-export { HOST_CAPABILITY, HOST_JOB_TYPES } from "./host-jobs.ts";
+export {
+  HOST_CAPABILITY,
+  HOST_JOB_TYPES,
+  TRIAL_MERGE_JOB,
+} from "./host-jobs.ts";
 export type { HostKind } from "./host-kinds.ts";
-export { HOST_KINDS, hostKindOfUrl } from "./host-kinds.ts";
+export {
+  HOST_KIND_LABELS,
+  HOST_KINDS,
+  hostKindOfUrl,
+  mixedHostsProblem,
+  pullAbbrev,
+  pullPhrase,
+} from "./host-kinds.ts";
 export type { InvalidatePayload } from "./invalidate.ts";
 export type { JobState } from "./job-state.ts";
 export { JOB_STATES } from "./job-state.ts";
+export type {
+  LeadTime,
+  LeadTimeInput,
+  LeadTimeSegment,
+  Span,
+} from "./lead-time.ts";
+export {
+  LEAD_TIME_LABELS,
+  LEAD_TIME_SEGMENTS,
+  leadTime,
+  runLeadSegment,
+} from "./lead-time.ts";
 export type { LimitOverrides, Limits } from "./limits.ts";
 export {
   DEFAULT_LIMITS,
   LimitOverridesSchema,
   resolveLimits,
 } from "./limits.ts";
-export { MAX_LOG_CHUNK_BYTES } from "./logs.ts";
+export { MAX_LOG_CHUNK_BYTES, purgedLogMessage } from "./logs.ts";
 export { type MergeOrder, mergeOrder } from "./merge-order.ts";
+export {
+  lastWeekStarts,
+  METRICS_TIME_ZONE,
+  METRICS_WEEKS,
+  medianMs,
+  PLATFORM_FAILURE_RATE_LINE,
+  weekStartYmd,
+  ymdInZone,
+} from "./metrics.ts";
 export type { PlanningCommitResult, PlanningState } from "./planning-docs.ts";
 export {
   CONTEXT_DOC_PATHS,
@@ -60,6 +136,7 @@ export {
   ownerHtmlUrl,
   parseRepoUrl,
   repoDisplayName,
+  repoHost,
   repoHtmlUrl,
   treeHtmlUrl,
   tryParseRepoUrl,
@@ -92,7 +169,7 @@ export { SKILLS_PACKAGE, skillsPackageAt } from "./skills-package.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
 export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
-export { SPEC_STATES, specTransition } from "./spec-state.ts";
+export { SPEC_STATES, specResumeTarget, specTransition } from "./spec-state.ts";
 export type {
   Progress,
   Stage,

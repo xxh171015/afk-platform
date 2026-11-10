@@ -167,13 +167,17 @@ describe("getting a project onto the platform from the control tower", () => {
     );
     expect(fake.calls).not.toContain("GET /projects/1/repos/backend/access");
     fireEvent.click(entry);
-    await screen.findByRole("button", { name: "现在检查" });
+    const checkButtons = await screen.findAllByRole("button", {
+      name: "现在检查",
+    });
+    expect(checkButtons).toHaveLength(2);
     expect(fake.calls).toContain("GET /projects/1/repos/backend/access");
+    expect(fake.calls).toContain("GET /projects/1/repos/other/access");
     expect(fake.calls).not.toContain(
       "POST /projects/1/repos/backend/access-check",
     );
-    expect(screen.getByText("这项检查仅 GitHub 可查。")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "现在检查" }));
+    expect(screen.queryByText("这项检查仅 GitHub 可查。")).toBeNull();
+    fireEvent.click(checkButtons[0] as HTMLElement);
     await waitFor(() =>
       expect(fake.calls).toContain(
         "POST /projects/1/repos/backend/access-check",

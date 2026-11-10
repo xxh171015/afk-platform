@@ -5,7 +5,7 @@ import type { BundleContract } from "./bundle.ts";
 // downstream contract ticket among the ticket's upstreams in that repo. The import guarantees those upstreams
 // form a chain, so "most downstream" is the one the others lead to.
 export async function contractsOf(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   ticketId: number,
 ): Promise<BundleContract[]> {
   const { rows } = await pool.query<{

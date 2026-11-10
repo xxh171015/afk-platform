@@ -13,11 +13,16 @@ import {
   ticketTransition,
 } from "@afk/shared";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
+import { applyOrigin, asSource } from "../events/origin.ts";
 import {
   cancelIfAllTicketsCancelled,
   startFinalization,
 } from "../finalize/start.ts";
+import { enqueueHostSync } from "../host/host-jobs.ts";
+import { redAccessProblem } from "../host/repo-access.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
+import { integrationBranch } from "../planning/integration-branches.ts";
 import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
@@ -88,6 +93,7 @@ export async function inTransaction<T>(
     // a transaction opened by hand on this connection may have left some behind
     projectsToPass.delete(client);
     await client.query("BEGIN");
+    await applyOrigin(client);
     result = await work(client);
     await client.query("COMMIT");
     projects = projectsToPass.get(client);
@@ -119,19 +125,26 @@ export async function confirmSpec(
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, r.name AS planning_repo
+      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, s.project_id, r.name AS planning_repo
        FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1 FOR UPDATE OF s`,
       [specId],
     );
     if (spec.rowCount === 0) return { status: "no-spec" };
-    const { slug, state, branch_namespace, planning_repo_id, planning_repo } =
-      spec.rows[0] as {
-        slug: string;
-        state: SpecState;
-        branch_namespace: string | null;
-        planning_repo_id: number | null;
-        planning_repo: string | null;
-      };
+    const {
+      slug,
+      state,
+      branch_namespace,
+      planning_repo_id,
+      planning_repo,
+      project_id,
+    } = spec.rows[0] as {
+      slug: string;
+      state: SpecState;
+      branch_namespace: string | null;
+      planning_repo_id: number | null;
+      planning_repo: string | null;
+      project_id: number;
+    };
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
       return { status: "not-confirmable", message: planned.reason };
@@ -161,6 +174,32 @@ export async function confirmSpec(
         message: `${formatDisplayId("spec", specId)} has no tickets to run`,
       };
     }
+    const access = await client.query<{
+      name: string;
+      host_kind: string;
+      access: {
+        last?: {
+          state?: string;
+          fix?: string;
+          username?: string;
+          message?: string;
+        };
+      } | null;
+    }>(
+      `SELECT DISTINCT r.name, r.host_kind, r.access FROM tickets t JOIN repos r ON r.id = t.repo_id
+       WHERE t.spec_id = $1 ORDER BY r.name`,
+      [specId],
+    );
+    const red = access.rows
+      .map((row) =>
+        redAccessProblem(row.name, {
+          ...row.access?.last,
+          hostKind: row.host_kind,
+        }),
+      )
+      .filter((line): line is string => line !== undefined);
+    if (red.length > 0)
+      return { status: "not-confirmable", message: red.join("\n") };
     const running = specTransition(planned.state, "start");
     if (!running.ok) throw new Error(running.reason);
     const repoIds = [
@@ -169,21 +208,37 @@ export async function confirmSpec(
         ...(planning_repo_id === null ? [] : [planning_repo_id]),
       ]),
     ].sort((a, b) => a - b);
-    const integrationBranches = repoIds.map((repoId) => ({
+    const shas = await client.query<{
+      id: number;
+      default_sha: string | null;
+    }>("SELECT id, default_sha FROM repos WHERE id = ANY($1::int[])", [
+      repoIds,
+    ]);
+    const shaById = new Map(shas.rows.map((row) => [row.id, row.default_sha]));
+    const storedBranches = repoIds.map((repoId) =>
+      integrationBranch(
+        repoId,
+        branchNames(branch_namespace).integration(slug),
+        shaById.get(repoId),
+      ),
+    );
+    const integrationBranches = storedBranches.map(({ repoId, branch }) => ({
       repoId,
-      branch: branchNames(branch_namespace).integration(slug),
+      branch,
     }));
     await client.query(
       "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4 WHERE id = $1",
       [
         specId,
         running.state,
-        JSON.stringify(integrationBranches),
+        JSON.stringify(storedBranches),
         planning?.patch ? planning.patch : null,
       ],
     );
     if (planning_repo_id !== null) await enqueuePlanningCommit(client, specId);
+    await recordAction(client, "confirm", { specId });
     const scheduled = await schedulePass(client, specId);
+    if (!scheduled.paused) await enqueueHostSync(client, project_id);
     return {
       status: "ok",
       state: scheduled.paused ? "paused" : running.state,
@@ -259,7 +314,15 @@ interface TicketRow {
   resume_stage: "e2e" | null;
 }
 
-export async function schedulePass(
+// Whatever transaction it runs in, what a pass changes is the scheduler's doing.
+export function schedulePass(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<ScheduleResult> {
+  return asSource(client, "scheduler", () => schedulingPass(client, specId));
+}
+
+async function schedulingPass(
   client: pg.PoolClient,
   specId: number,
 ): Promise<ScheduleResult> {
@@ -306,7 +369,7 @@ export async function schedulePass(
     if (!paused.ok) throw new Error(paused.reason);
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = $3 WHERE id = $1",
-      [specId, paused.state, "the agent time limit of the spec was reached"],
+      [specId, paused.state, "budget-exhausted"],
     );
     return { enqueued: [], paused: true };
   }

@@ -246,6 +246,111 @@
       "when": 1794137901640,
       "tag": "0034_spec_last_started",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0035_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794210000000,
+      "tag": "0036_action_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794220000000,
+      "tag": "0037_code_hosts",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794230000000,
+      "tag": "0038_host_sync_one_row",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794240000000,
+      "tag": "0039_host_sync_merge",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794250000000,
+      "tag": "0040_token_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794260000000,
+      "tag": "0041_pause_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794270000000,
+      "tag": "0042_repo_default_sha",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794280000000,
+      "tag": "0043_pr_conflicts_with_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794290000000,
+      "tag": "0044_potential_conflicts",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0045_pr_platform_head",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1794310000000,
+      "tag": "0046_log_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794320000000,
+      "tag": "0047_workers",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794330000000,
+      "tag": "0048_disk",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794340000000,
+      "tag": "0049_gitlab_auth_external",
+      "breakpoints": true
     }
   ]
 }

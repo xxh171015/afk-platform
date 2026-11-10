@@ -58,7 +58,9 @@ Four processes: Postgres, the API, the page and one worker. All of them listen o
 **Once**
 
 1. Docker Desktop running, and the sandbox image built: `scripts/verify-sandbox-image.sh` (tags `sandcastle:afk-platform`).
-2. GitHub App credentials in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
+2. Credentials for each code host the repos are on; the worker tells the API which hosts it has at start, and `plat init` registers no repo on another host, nor a project whose repos are on two kinds of host.
+   - GitHub: the GitHub App in `~/.afk/secrets/github-app/`: `private-key.pem` (mode 600) and `app.json` = `{"appId":"…","installationId":"…"}`. Check them with `node scripts/check-github-app.ts <owner>/<repo>`.
+   - GitLab: a PAT in `~/.afk/secrets/gitlab/<host>` (mode 600), one file per host, named after it (`~/.afk/secrets/gitlab/git.example.com`).
 3. The Cursor key in `~/.afk/env` as `CURSOR_API_KEY=…` (or exported). The worker reads nothing else from that file.
 
 The skills the agents run in the sandbox (implement, tdd, code-review, codebase-design) are in this repo, copied from mattpocock/skills at the pinned SHA: the worker mounts `packages/pipeline/skills/` read-only.
@@ -84,11 +86,12 @@ pnpm worker                   # Ctrl-C aborts the runs in hand and stops; those 
 | `AFK_SANDBOX_IMAGE`                             | `sandcastle:afk-platform`                            |
 | `AFK_WORKER_ID`                                 | the host name                                        |
 | `AFK_GITHUB_APP_DIR`                            | `~/.afk/secrets/github-app`                          |
+| `AFK_GITLAB_DIR`                                | `~/.afk/secrets/gitlab`                              |
 | `CURSOR_API_KEY`, `AFK_MODEL`                   | required                                             |
 
 A worker that is missing any of these, or cannot reach the API, says what is wrong and exits before taking a job. A worker with GitHub App credentials also does the jobs for the code host: opening and following a spec's pull requests, and, once a spec is cancelled or merged, closing its pull requests that are still open and deleting its `spec/*` and `agent/*` branches on the remote (closing a pull request needs the App's `pull_requests: write`, deleting a branch `contents: write`; the App already has both). A worker that was killed leaves its sandbox container running on its slot; the next worker to reuse that slot (after the lease runs out) removes the containers that still mount it before it salvages the slot.
 
-How a run is carried out comes from the project, per job, not from the worker: `--limit runIdleSeconds=…` (an agent silent for that long is stopped; default 600) and `--limit runWallclockSeconds=…` (a run's total time; default 3600) on `plat project create` or `plat project edit`, and the project's default model (`--default-model` on the same commands; `AFK_MODEL` is what a project without one gets; the Run records the model it used). Cursor's raw event lines go to the run's log (`plat run logs R-…`) with the worker's `CURSOR_API_KEY` replaced by `***`; a line is cut at 16 KB, and a stage uploads at most 8 MB of them. The full stream also stays on the worker, unredacted, under `$AFK_HOME/sandbox-logs/` (keep that folder private: a tool that echoed the key puts it there).
+How a run is carried out comes from the project, per job, not from the worker: `--limit runIdleSeconds=…` (an agent silent for that long is stopped; default 600) and `--limit runWallclockSeconds=…` (a run's total time; default 3600) on `plat project create` or `plat project edit`, and the project's default model (`--default-model` on the same commands; `AFK_MODEL` is what a project without one gets; the Run records the model it used). Cursor's raw event lines go to the run's log (`plat run logs R-…`) with the worker's `CURSOR_API_KEY` replaced by `***`; a line that would exceed 16 KB is compacted into still-parseable JSON (tool output truncated), and a stage uploads at most 8 MB of them. The full stream also stays on the worker, unredacted, under `$AFK_HOME/sandbox-logs/` (keep that folder private: a tool that echoed the key puts it there).
 
 Branch names carry the database's id (six hex digits, made once by the migration, kept in the `instance` table) so that two databases working on one repository never make the same branch: `spec/<id>/<slug>`, `agent/<id>/T-<n>`, `agent/<id>/S-<n>-final`. A spec made before the ids existed keeps `spec/<slug>`, `agent/T-<n>`, `agent/S-<n>-final`. Upgrade the API and its workers together: a worker and an API from before and after this change do not understand each other's bundles.
 
@@ -128,10 +131,11 @@ Single steps: `pnpm typecheck`, `pnpm test`, `pnpm lint`. Tests write JUnit XML 
 
 ## Sandbox image
 
-`.sandcastle/Dockerfile` is the agent sandbox image: the pilot repo's Sandcastle template (Cursor CLI version pinned) plus the PostgreSQL server and pnpm, so the gate's `setup` can start a throwaway Postgres with `scripts/pg-temp.sh`. The sandbox has no Docker, so the image has to be built and checked on a machine that does:
+`.sandcastle/Dockerfile` is the one sandbox image both projects use: Node 22, the pinned Cursor CLI, pnpm, a PostgreSQL server (so this repo's gate can start a throwaway instance with `scripts/pg-temp.sh`), and Playwright Chromium (pilot frontend e2e). The sandbox has no Docker, so the image is built on the worker's machine:
 
 ```sh
-scripts/verify-sandbox-image.sh   # build, time it, run the gate in a fresh container, read JUnit on the host
+scripts/check-sandbox-image.sh    # unattended: build, check the toolchain, run this repo's gate, the pilot frontend gate, and shop e2e
+scripts/verify-sandbox-image.sh   # the same checks, one confirmed stage at a time
 ```
 
-It tests the committed HEAD and writes the results (build time, image size, Cursor CLI and PostgreSQL versions, gate result) to `reports/sandbox-image.env`.
+Both tag `sandcastle:afk-platform` (the worker's default). Bump `ARG CURSOR_CLI_VERSION` or `ARG PLAYWRIGHT_VERSION` in the Dockerfile and rebuild to change versions. Results go to `reports/sandbox-image.env`.
