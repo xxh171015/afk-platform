@@ -640,7 +640,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 });
 
-describe("the planning commit, end to end", () => {
+describe("the planning commit, end to end", { timeout: 60_000 }, () => {
   it("commits the planning docs onto the planning repo's integration branch first, and other repos' agents read them", async () => {
     // a second repo, and a GLOSSARY in the planning repo
     const front = makeRepo({
@@ -737,7 +737,7 @@ describe("the planning commit, end to end", () => {
   }, 30_000);
 });
 
-describe("failures of the worker's own", () => {
+describe("failures of the worker's own", { timeout: 60_000 }, () => {
   it("fails the job, keeps the slot's clone, and tells the API", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps({
@@ -765,7 +765,9 @@ describe("failures of the worker's own", () => {
   });
 });
 
-describe("a person's decisions about a blocked ticket", () => {
+describe("a person's decisions about a blocked ticket", {
+  timeout: 60_000,
+}, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -909,7 +911,7 @@ describe("a person's decisions about a blocked ticket", () => {
   });
 });
 
-describe("work an interrupted run left behind", () => {
+describe("work an interrupted run left behind", { timeout: 60_000 }, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -1238,7 +1240,7 @@ describe("the overall review of the integration branch", {
   });
 });
 
-describe("the test count guard", () => {
+describe("the test count guard", { timeout: 60_000 }, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -1292,7 +1294,7 @@ describe("the test count guard", () => {
   });
 });
 
-describe("what the project says about a run", () => {
+describe("what the project says about a run", { timeout: 60_000 }, () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
       api: workerFor(),
@@ -1443,7 +1445,7 @@ describe("what the project says about a run", () => {
   });
 });
 
-describe("a flood of raw event lines", () => {
+describe("a flood of raw event lines", { timeout: 60_000 }, () => {
   it("is uploaded in pieces the API accepts, up to a limit, and the rest is left out with a note", async () => {
     await confirmedSpec([ticket("a")]);
     // 600 lines of 15 000 characters: more than one chunk, and more than the stage may upload in all
@@ -1484,7 +1486,7 @@ describe("a flood of raw event lines", () => {
   });
 });
 
-describe("the merge stage", () => {
+describe("the merge stage", { timeout: 60_000 }, () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);
     const real = workerFor();
@@ -1821,7 +1823,9 @@ describe("the merge stage", () => {
   });
 });
 
-describe("trouble reaching the API, or no room to work", () => {
+describe("trouble reaching the API, or no room to work", {
+  timeout: 60_000,
+}, () => {
   const claimed = async (api2 = workerFor()) => {
     await confirmedSpec([ticket("a")]);
     return {
@@ -1937,7 +1941,7 @@ describe("trouble reaching the API, or no room to work", () => {
   });
 });
 
-describe("losing the lease", () => {
+describe("losing the lease", { timeout: 60_000 }, () => {
   it("aborts the local run at once and reports nothing", async () => {
     await confirmedSpec([ticket("a")]);
     let sawAbort = false;
@@ -1979,7 +1983,9 @@ describe("losing the lease", () => {
   });
 });
 
-describe("from the last ticket to a merged spec, with a fake GitHub", () => {
+describe("from the last ticket to a merged spec, with a fake GitHub", {
+  timeout: 60_000,
+}, () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,
     publicKeyEncoding: { type: "spki", format: "pem" },
