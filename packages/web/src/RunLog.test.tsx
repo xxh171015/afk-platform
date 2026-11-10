@@ -220,6 +220,33 @@ describe("the log of a run", () => {
     expect(el.scrollTop).toBe(stayed);
   });
 
+  it("shows assistant prose without expanding the raw event", async () => {
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { content: "I will read the ticket first." },
+    });
+    const { server } = growingLog(`${line}\n`);
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() =>
+      expect(screen.getByText("I will read the ticket first.")).toBeTruthy(),
+    );
+    expect(screen.getByText("原始事件").closest("details")?.open).toBe(false);
+  });
+
+  it("keeps an in-progress tool open", async () => {
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "c1",
+      session_id: "s1",
+      tool_call: { shellToolCall: { args: { command: "pnpm test" } } },
+    });
+    const { server } = growingLog(`${line}\n`);
+    renderWithApp(<RunLog runId={5} pollMs={20} />, server);
+    await waitFor(() => expect(screen.getByText("进行中")).toBeTruthy());
+    expect(screen.getByText("进行中").closest("details")?.open).toBe(true);
+  });
+
   it("shows thinking as prose and keeps a long command output collapsed with a leftover count", async () => {
     const output = Array.from({ length: 25 }, (_, i) => `line-${i + 1}`).join(
       "\n",

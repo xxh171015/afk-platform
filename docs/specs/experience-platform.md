@@ -142,12 +142,13 @@ type StructuredBrief = {
 | `readToolCall` / `globToolCall` / `grepToolCall` / `lsToolCall` / `semSearchToolCall` / `deleteToolCall`            | 读取；grep 标题去掉 `\.` `\b` 这类正则转义 |
 | `editToolCall`                                                                                                      | 修改                                       |
 | `shellToolCall`                                                                                                     | 运行命令                                   |
-| `assistant` 且文本在 `message.content`                                                                              | agent 说明                                 |
+| `assistant` 且文本在 `message.content`                                                                              | agent 说明，正文默认展开；「原始事件」默认收起 |
 | `result`                                                                                                            | 会话头「工作了 …」（`duration_ms`）        |
 | `system` / `user` / `retry` / `connection` / `interaction_query` / `getMcpToolsToolCall` / `hookAdditionalContexts` | 不上屏（prompt 在页签里）                  |
 | worker 前缀行（`gate:` / `implement:` / `e2e:` / `merge:` / `environment:` / `result:` / `final-review:` 等）       | 运行命令                                   |
 | `--- name ---` 及其后直到下一前缀或 JSON 的输出                                                                     | 挂在该步下，默认收起                       |
-| 其余 JSON                                                                                                           | agent 说明；卡内「原始事件」默认可展开     |
+| 被 16 KB 切断、无法 `JSON.parse` 的 `tool_call` 行                                                                  | 从行首恢复 `call_id` / 工具 / args，并回已有工具卡；对不上才标「截断的事件」 |
+| 其余 JSON                                                                                                           | agent 说明（标题用 `type` / 工具名）；卡内「原始事件」默认可展开 |
 
 没有顶层 `name`，没有 `writeToolCall`。review / final-review 两轴共用一份日志、行上没有轴标签：按 `session_id` 分成 Standards / Spec 两段（从被隐藏的 `user` 文案认轴）。继续 `GET /runs/{id}/logs?offset=`，跑完停。日志区限高、内部滚动，下面三个页签不用把整份日志翻完。未结束时跟到底，人往上翻就停。
 
@@ -187,7 +188,7 @@ type StructuredBrief = {
 - 前端失效对应查询；只要带了任一 id，同时失效工作台和待处理。三个 id 都空时只失效工作台和待处理。
 - API 在提交了页面能看见的状态变化时发（票 / Spec / Run / 待处理 / PR）。**不**在日志 chunk 追加时发。
 - 单进程内存订阅。每 15 秒一条 SSE comment 保活。
-- SSE 连着时，资源查询关掉 `refetchInterval`。断线：列表和工作台 5 秒、详情 3 秒（与现在相同）。日志始终 3 秒 offset，直到 `finished && nextOffset >= size`。
+- SSE 连着时，资源查询关掉 `refetchInterval`。断线：列表和工作台 5 秒、详情 3 秒（与现在相同）。日志始终 800ms offset（追加仍不发 `invalidate`），直到 `finished && nextOffset >= size`。
 - 一次失败的请求不能把正在看的页抹掉。
 
 ### 规划提交（[规划产出的规范文档怎么进到 agent 面前](https://github.com/xxh171015/afk-platform/issues/131)、[ADR 0003](../adr/0003-pointers-not-copies-include-sandbox-mounts.md)）

@@ -25,6 +25,51 @@ describe("sanitizeRawLine", () => {
     expect(cut).not.toContain("SSSS");
     expect(cut.length).toBe(MAX_RAW_LINE_CHARS + " [line cut]".length);
   });
+
+  it("compacts an oversized Cursor tool_call into parseable JSON, after secrets are gone", () => {
+    const secret = "key_abcdef0123456789";
+    const callId = "call-1\nfc_abc";
+    const stdout = `CURSOR_API_KEY=${secret}\n${"x".repeat(20_000)}`;
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "completed",
+      call_id: callId,
+      session_id: "s1",
+      tool_call: {
+        shellToolCall: {
+          args: { command: "git diff HEAD", description: "Diff files" },
+          result: {
+            success: {
+              stdout,
+              interleavedOutput: stdout,
+            },
+          },
+        },
+      },
+    });
+    expect(line.length).toBeGreaterThan(MAX_RAW_LINE_CHARS);
+    const out = sanitizeRawLine(line, [secret]);
+    expect(out.length).toBeLessThanOrEqual(MAX_RAW_LINE_CHARS);
+    expect(out).not.toContain(secret);
+    expect(out).not.toContain("[line cut]");
+    const parsed = JSON.parse(out) as {
+      call_id: string;
+      tool_call: {
+        shellToolCall: {
+          args: { command: string };
+          result: { success: { stdout?: string; interleavedOutput?: string } };
+        };
+      };
+    };
+    expect(parsed.call_id).toBe(callId);
+    expect(parsed.tool_call.shellToolCall.args.command).toBe("git diff HEAD");
+    expect(
+      parsed.tool_call.shellToolCall.result.success.interleavedOutput,
+    ).toBe(undefined);
+    expect(parsed.tool_call.shellToolCall.result.success.stdout).toContain(
+      "已截断",
+    );
+  });
 });
 
 describe("rawLogSink", () => {

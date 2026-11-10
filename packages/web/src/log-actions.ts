@@ -136,13 +136,22 @@ export function displayGrepPattern(pattern: string): string {
 export function truncateLines(
   text: string,
   max: number,
-): { visible: string; hidden: number } {
-  if (text === "") return { visible: "", hidden: 0 };
+  from: "start" | "end" = "start",
+): { visible: string; hidden: number; rest: string } {
+  if (text === "") return { visible: "", hidden: 0, rest: "" };
   const lines = text.split("\n");
-  if (lines.length <= max) return { visible: text, hidden: 0 };
+  if (lines.length <= max) return { visible: text, hidden: 0, rest: "" };
+  if (from === "end") {
+    return {
+      visible: lines.slice(-max).join("\n"),
+      hidden: lines.length - max,
+      rest: lines.slice(0, -max).join("\n"),
+    };
+  }
   return {
     visible: lines.slice(0, max).join("\n"),
     hidden: lines.length - max,
+    rest: lines.slice(max).join("\n"),
   };
 }
 
@@ -315,8 +324,22 @@ export function ingestLog(
       checkpoint.dump.body.push(line);
       continue;
     }
-    // A raw line cut at 16 KiB is not valid JSON; don't put the blob in the title.
+    // A raw line cut at 16 KiB is not valid JSON. Recover type/call_id/args from the
+    // prefix and fold it into the matching tool card when we can.
     if (line.startsWith("{") || line.startsWith("[")) {
+      const recovered = recoverCutEvent(line);
+      if (recovered) {
+        flushDump(checkpoint, key);
+        checkpoint.seenCursor = true;
+        ingestCursor(
+          recovered,
+          line,
+          checkpoint.sessions,
+          checkpoint.sessionOrder,
+          key,
+        );
+        continue;
+      }
       bucket().push({
         key: key("cut"),
         kind: "assistant",
@@ -349,7 +372,9 @@ export function groupedLogFrom(checkpoint: LogCheckpoint): GroupedLog {
   const view = cloneCheckpoint(checkpoint);
   const key = nextKeyOf(view);
   flushDump(view, key);
-  for (const session of view.sessions.values()) flushThought(session, key);
+  for (const session of view.sessions.values()) {
+    flushThought(session, key, false);
+  }
   return {
     remainder: view.remainder,
     before: view.before,
@@ -380,10 +405,22 @@ function ingestCursor(
   sessionOrder: string[],
   key: (prefix: string) => string,
 ): void {
-  const sessionId =
+  let sessionId =
     typeof parsed.session_id === "string" && parsed.session_id !== ""
       ? parsed.session_id
       : "_";
+  const callId =
+    typeof parsed.call_id === "string" && parsed.call_id !== ""
+      ? parsed.call_id
+      : undefined;
+  if (sessionId === "_" && callId) {
+    for (const [id, session] of sessions) {
+      if (session.tools.has(callId)) {
+        sessionId = id;
+        break;
+      }
+    }
+  }
   const session = sessionOf(sessions, sessionOrder, sessionId);
   const type = typeof parsed.type === "string" ? parsed.type : "";
 
@@ -426,8 +463,8 @@ function ingestCursor(
         key: key("assistant"),
         kind: "assistant",
         action: "agent 说明",
-        title: text,
-        body: "",
+        title: firstLine(text),
+        body: text,
         extra: null,
         durationMs: null,
         completed: true,
@@ -441,7 +478,7 @@ function ingestCursor(
     key: key("other"),
     kind: "assistant",
     action: "agent 说明",
-    title: line,
+    title: otherTitle(parsed),
     body: "",
     extra: null,
     durationMs: null,
@@ -465,12 +502,15 @@ function ingestTool(
   const fields = toolFields(wrap, inner);
   const started = parsed.subtype === "started";
   const completed = parsed.subtype === "completed" || parsed.subtype == null;
+  const cut = line.includes("[line cut]");
+  const cutBody = cut && completed ? "输出过长，未完整上传" : "";
   const existing = session.tools.get(callId);
   if (existing) {
     existing.raw = joinRaw(existing.raw, line);
     if (fields.title) existing.title = fields.title;
     if (fields.extra) existing.extra = fields.extra;
     if (fields.body) existing.body = fields.body;
+    else if (cutBody && existing.body === "") existing.body = cutBody;
     if (completed) existing.completed = true;
     return;
   }
@@ -479,7 +519,7 @@ function ingestTool(
     kind: wrap === "updateTodosToolCall" ? "assistant" : "tool",
     action: actionForWrap(wrap),
     title: fields.title,
-    body: fields.body,
+    body: fields.body || cutBody,
     extra: fields.extra,
     durationMs: toolDurationMs(inner),
     completed,
@@ -536,6 +576,7 @@ function appendThought(
 function flushThought(
   session: SessionState,
   key: (prefix: string) => string,
+  completed = true,
 ): void {
   const thought = session.openThought;
   if (!thought) return;
@@ -553,7 +594,7 @@ function flushThought(
     body: thought.text,
     extra: null,
     durationMs,
-    completed: true,
+    completed,
     raw: thought.raw.join("\n"),
   });
 }
@@ -811,4 +852,147 @@ function errorMessage(value: unknown): string | undefined {
 
 function joinRaw(existing: string | null, line: string): string {
   return existing ? `${existing}\n${line}` : line;
+}
+
+function firstLine(text: string): string {
+  const nl = text.indexOf("\n");
+  return nl === -1 ? text : text.slice(0, nl);
+}
+
+function otherTitle(parsed: Record<string, unknown>): string {
+  const wrap = wrappingKey(parsed.tool_call);
+  if (wrap) return wrappingTitle(wrap);
+  if (typeof parsed.type === "string" && parsed.type !== "") return parsed.type;
+  return "未知事件";
+}
+
+function recoverCutEvent(line: string): Record<string, unknown> | undefined {
+  const cutAt = line.lastIndexOf(" [line cut]");
+  const source = cutAt >= 0 ? line.slice(0, cutAt) : line;
+  if (!source.startsWith("{")) return undefined;
+  const type = readJsonStringField(source, "type");
+  const subtype = readJsonStringField(source, "subtype");
+  const callId = readJsonStringField(source, "call_id");
+  const sessionId = readJsonStringField(source, "session_id");
+  const wrap = wrappingKeyFromPrefix(source);
+  if (!wrap && !callId) return undefined;
+  const parsed: Record<string, unknown> = {};
+  if (type) parsed.type = type;
+  if (subtype) parsed.subtype = subtype;
+  if (callId) parsed.call_id = callId;
+  if (sessionId) parsed.session_id = sessionId;
+  if (wrap) {
+    const args = readArgsObject(source);
+    parsed.tool_call = { [wrap]: args ? { args } : {} };
+  }
+  return parsed;
+}
+
+function wrappingKeyFromPrefix(source: string): string | undefined {
+  const matches = [...source.matchAll(/"(\w+ToolCall)"/g)].map((m) => m[1]);
+  return matches.find((name) => !TOOL_META.has(name));
+}
+
+function readJsonStringField(source: string, key: string): string | undefined {
+  const needle = `"${key}":"`;
+  const start = source.indexOf(needle);
+  if (start < 0) return undefined;
+  return readJsonStringAt(source, start + needle.length - 1);
+}
+
+function readJsonStringAt(
+  source: string,
+  quoteIndex: number,
+): string | undefined {
+  if (source[quoteIndex] !== '"') return undefined;
+  let i = quoteIndex + 1;
+  let out = "";
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '"') return out;
+    if (ch === "\\") {
+      const next = source[i + 1];
+      if (next === undefined) return out;
+      if (next === "u") {
+        const hex = source.slice(i + 2, i + 6);
+        if (hex.length < 4) return out;
+        out += String.fromCharCode(Number.parseInt(hex, 16));
+        i += 6;
+        continue;
+      }
+      const escaped: Record<string, string> = {
+        n: "\n",
+        t: "\t",
+        r: "\r",
+        b: "\b",
+        f: "\f",
+        '"': '"',
+        "\\": "\\",
+        "/": "/",
+      };
+      out += escaped[next] ?? next;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+function readArgsObject(source: string): Record<string, unknown> | undefined {
+  const idx = source.indexOf('"args":');
+  if (idx < 0) return undefined;
+  const brace = source.indexOf("{", idx);
+  if (brace < 0) return undefined;
+  const balanced = readBalancedJson(source, brace);
+  if (balanced) {
+    const parsed = parseJsonObject(balanced);
+    if (parsed) return parsed;
+  }
+  const args: Record<string, string> = {};
+  const window = source.slice(idx);
+  for (const field of [
+    "path",
+    "command",
+    "pattern",
+    "globPattern",
+    "query",
+    "description",
+  ]) {
+    const value = readJsonStringField(window, field);
+    if (value !== undefined) args[field] = value;
+  }
+  return Object.keys(args).length > 0 ? args : undefined;
+}
+
+function readBalancedJson(source: string, start: number): string | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return undefined;
 }

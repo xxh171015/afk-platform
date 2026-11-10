@@ -17,7 +17,7 @@ import {
 import { Markdown } from "./Markdown.tsx";
 import { formatCompactDuration } from "./time.ts";
 
-export const LOG_POLL_MS = 3_000;
+export const LOG_POLL_MS = 800;
 
 interface Position {
   attempt: number | undefined;
@@ -232,7 +232,7 @@ function LogWindow({
   ];
   // jsdom and the first layout have no measured height; 36rem matches max-h on the scroller.
   const viewport = clientHeight > 0 ? clientHeight : 576;
-  const extra = 8;
+  const extra = follow ? 16 : 8;
   const visible = Math.ceil(viewport / LOG_ROW_PX) + extra * 2;
   const start = follow
     ? Math.max(0, rows.length - visible)
@@ -271,40 +271,48 @@ function SessionHeader({ session }: { session: LogSession }) {
 }
 
 function LogBlockView({ block }: { block: LogBlock }) {
-  if (block.kind === "assistant" && block.body === "" && !block.raw) {
+  if (block.kind === "assistant") {
+    const source = block.body !== "" ? block.body : block.title;
     return (
-      <div className="flex items-start gap-3">
-        <ActionBadge action={block.action} />
-        <div className="min-w-0 flex-1 font-sans text-[13px] leading-6">
-          <Markdown source={block.title} />
+      <div className="min-w-0">
+        <div className="flex items-start gap-3">
+          <ActionBadge action={block.action} />
+          <div className="min-w-0 flex-1 font-sans text-[13px] leading-6">
+            <Markdown source={source} />
+          </div>
         </div>
+        <RawEvent raw={block.raw} />
       </div>
     );
   }
   if (block.kind === "thought") {
-    const { visible, hidden } = truncateLines(
+    const { visible, hidden, rest } = truncateLines(
       block.body,
       LOG_THOUGHT_MAX_LINES,
+      block.completed ? "start" : "end",
     );
     const duration = formatCompactDuration(block.durationMs);
     return (
-      <details open={hidden === 0} className="group min-w-0">
-        <summary className="flex cursor-pointer list-none items-start gap-3 marker:content-none [&::-webkit-details-marker]:hidden">
-          <Chevron />
-          <span className="font-sans text-[13px] text-terminal-muted">
-            思考{duration ? ` ${duration}` : ""}
-          </span>
-        </summary>
+      <div className="min-w-0">
+        <p className="font-sans text-[13px] text-terminal-muted">
+          思考{duration ? ` ${duration}` : ""}
+          {!block.completed ? " · 进行中" : ""}
+        </p>
         <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-[13px] leading-6">
           {visible}
         </pre>
         {hidden > 0 ? (
-          <p className="mt-1 font-sans text-[11px] text-terminal-muted">
-            还有 {hidden} 行
-          </p>
+          <details className="mt-1">
+            <summary className="cursor-pointer font-sans text-[11px] text-terminal-muted">
+              还有 {hidden} 行
+            </summary>
+            <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-[13px] leading-6">
+              {rest}
+            </pre>
+          </details>
         ) : null}
         <RawEvent raw={block.raw} />
-      </details>
+      </div>
     );
   }
 
@@ -336,6 +344,11 @@ function LogBlockView({ block }: { block: LogBlock }) {
         {block.extra ? (
           <span className="max-w-[40%] truncate text-terminal-muted">
             {block.extra}
+          </span>
+        ) : null}
+        {!block.completed ? (
+          <span className="shrink-0 font-sans text-[11px] text-terminal-muted">
+            进行中
           </span>
         ) : null}
       </summary>

@@ -538,6 +538,64 @@ describe("groupLog", () => {
       grouped.before.map((block) => `${block.title}:${block.raw !== null}`),
     ).toEqual(["implement: running:false", "截断的事件:true"]);
   });
+
+  it("merges a cut tool completed line into the started card", () => {
+    const callId = "call-abc-41\nfc_0b9f";
+    const started = `${JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: callId,
+      session_id: "s1",
+      tool_call: {
+        shellToolCall: {
+          args: { command: "git diff HEAD", description: "Diff files" },
+        },
+      },
+    })}\n`;
+    const completed = `{"type":"tool_call","subtype":"completed","call_id":${JSON.stringify(callId)},"tool_call":{"shellToolCall":{"args":{"command":"git diff HEAD","description":"Diff files"},"result":{"success":{"stdout":"${"x".repeat(80)} [line cut]\n`;
+    let checkpoint = emptyLogCheckpoint();
+    checkpoint = ingestLog(checkpoint, started);
+    checkpoint = ingestLog(checkpoint, completed, { flushRemainder: true });
+    const blocks = groupedLogFrom(checkpoint).sessions[0]?.blocks ?? [];
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      action: "运行命令",
+      title: "Diff files",
+      extra: "git diff HEAD",
+      completed: true,
+      body: "输出过长，未完整上传",
+    });
+    expect(blocks.map((block) => block.title)).not.toContain("截断的事件");
+  });
+
+  it("puts assistant text in the body and a streaming thought stays incomplete", () => {
+    const assistant = `${JSON.stringify({
+      type: "assistant",
+      session_id: "s1",
+      message: { content: "I will read the ticket first.\nThen edit." },
+    })}\n`;
+    const thinking = `${JSON.stringify({
+      type: "thinking",
+      subtype: "delta",
+      text: "looking",
+      session_id: "s1",
+      timestamp_ms: 1000,
+    })}\n`;
+    let checkpoint = emptyLogCheckpoint();
+    checkpoint = ingestLog(checkpoint, assistant);
+    checkpoint = ingestLog(checkpoint, thinking);
+    const blocks = groupedLogFrom(checkpoint).sessions[0]?.blocks ?? [];
+    expect(blocks[0]).toMatchObject({
+      kind: "assistant",
+      title: "I will read the ticket first.",
+      body: "I will read the ticket first.\nThen edit.",
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: "thought",
+      body: "looking",
+      completed: false,
+    });
+  });
 });
 
 describe("displayPath and truncateLines", () => {
@@ -563,6 +621,12 @@ describe("displayPath and truncateLines", () => {
     expect(truncateLines("a\nb\nc", 2)).toEqual({
       visible: "a\nb",
       hidden: 1,
+      rest: "c",
+    });
+    expect(truncateLines("a\nb\nc", 2, "end")).toEqual({
+      visible: "b\nc",
+      hidden: 1,
+      rest: "a",
     });
   });
 });
