@@ -45,7 +45,7 @@ import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
 import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
 import type { EnvironmentLimiter } from "./environments.ts";
-import type { PushFn } from "./push.ts";
+import { isNetworkPushError, type PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
 import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
@@ -71,6 +71,8 @@ export interface ExecutorDeps {
   model?: string; // the worker's own model: what a project that sets none gets
   skillsSha?: string; // the skills version the worker checked at start-up; recorded on every agent Run
   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
+  // A push that hit the network waits this long before retrying; tests replace it so they do not wait out 10–180 s.
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface StageContext {
@@ -259,6 +261,19 @@ async function runStage(
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
 
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
 function renderFor(
   deps: ExecutorDeps,
   context: StageContext,
@@ -428,19 +443,30 @@ async function agentChange(
     });
     if (stamped.error)
       throw new InfrastructureError(`stamping failed: ${stamped.error}`);
-    // Still the holder? (This also renews the lease.) A worker that lost its lease must not publish anything.
-    if (
-      context.signal.aborted ||
-      (await deps.api.prePush(context.job)) === "lost"
-    ) {
-      throw new JobLostError("the lease was lost before the push");
-    }
-    const pushed = deps.push({
+    const request = {
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
       target: `refs/heads/${agent}`,
       ...(replaced ? { expectedOld: replaced } : {}),
-    });
+    };
+    // Network blips: wait 10, 30, 90, 180 s and push again from this run, so a flake does not re-run the agent.
+    // Each attempt re-checks the lease first: a worker that lost it must not publish anything.
+    const waitSeconds = [10, 30, 90, 180];
+    const wait = deps.sleep ?? sleep;
+    let pushed: ReturnType<PushFn> = { ok: false, error: "" };
+    for (let i = 0; i < waitSeconds.length; i++) {
+      if (
+        context.signal.aborted ||
+        (await deps.api.prePush(context.job)) === "lost"
+      ) {
+        throw new JobLostError("the lease was lost before the push");
+      }
+      pushed = deps.push(request);
+      if (pushed.ok) break;
+      if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
+        break;
+      await wait(waitSeconds[i] * 1000, context.signal);
+    }
     if (!pushed.ok)
       throw new InfrastructureError(`push failed: ${pushed.error}`);
     facts.headSha = tip(mainDir, agent);

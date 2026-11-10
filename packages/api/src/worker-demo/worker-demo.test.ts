@@ -1484,6 +1484,133 @@ describe("a flood of raw event lines", () => {
   });
 });
 
+describe("a push after the agent is done", { timeout: 60_000 }, () => {
+  const CONNECTION =
+    "fatal: unable to access 'https://github.com/shop/backend.git/': Could not resolve host: github.com";
+
+  function withAgentRemote(
+    executor: ReturnType<typeof deps>,
+    respond: (attempt: number) => { ok: false; error: string } | "push",
+  ) {
+    const real = executor.push;
+    let attempts = 0;
+    executor.push = (request, token) => {
+      if (!request.target.startsWith("refs/heads/agent/"))
+        return real(request, token);
+      attempts += 1;
+      const next = respond(attempts);
+      return next === "push" ? real(request, token) : next;
+    };
+    executor.sleep = async () => {};
+    return () => attempts;
+  }
+
+  it("finishes the job after the remote fails to connect three times, without running the agent again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    const agentPushes = withAgentRemote(executor, (attempt) =>
+      attempt <= 3 ? { ok: false, error: CONNECTION } : "push",
+    );
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(implementRuns).toBe(1);
+    expect(agentPushes()).toBe(4);
+  });
+
+  it.each([
+    [
+      "non-fast-forward",
+      "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
+    ],
+    [
+      "a protected branch",
+      "remote: error: GH006: Protected branch update failed for refs/heads/agent/abc123/T-1",
+    ],
+    [
+      "no permission",
+      "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+    ],
+  ])("does not retry a push that was rejected (%s)", async (_kind, error) => {
+    await confirmedSpec([ticket("a")]);
+    const api2 = workerFor();
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    const executor = deps();
+    const agentPushes = withAgentRemote(executor, () => ({
+      ok: false,
+      error,
+    }));
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("failed");
+    expect(agentPushes()).toBe(1);
+  });
+
+  it("does not push again when the lease is gone before a retry", async () => {
+    await confirmedSpec([ticket("a")]);
+    const real = workerFor();
+    let checks = 0;
+    const api2 = {
+      ...real,
+      prePush: async (job: Parameters<typeof real.prePush>[0]) => {
+        checks += 1;
+        if (checks > 1) return "lost" as const;
+        return real.prePush(job);
+      },
+    };
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    const executor = deps();
+    const agentPushes = withAgentRemote(executor, () => ({
+      ok: false,
+      error: CONNECTION,
+    }));
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("abandoned");
+    expect(agentPushes()).toBe(1);
+    expect(
+      git(origin, ["rev-parse", "--verify", "--quiet", `agent/${ID}/T-1`]).code,
+    ).not.toBe(0);
+  });
+
+  it("fails the job as infrastructure when every retry still cannot connect", async () => {
+    await confirmedSpec([ticket("a")]);
+    const api2 = workerFor();
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    const executor = deps();
+    const agentPushes = withAgentRemote(executor, (attempt) =>
+      attempt <= 4 ? { ok: false, error: CONNECTION } : "push",
+    );
+    expect(
+      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
+    ).toBe("failed");
+    expect(agentPushes()).toBe(4);
+    const stored = await db.pool.query(
+      "SELECT state, error FROM jobs WHERE id = $1",
+      [job.id],
+    );
+    expect(stored.rows[0].state).toBe("failed");
+    expect(stored.rows[0].error).toContain("push failed");
+    expect(await stateOf()).toEqual(["1:running"]);
+  });
+});
+
 describe("the merge stage", () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);
