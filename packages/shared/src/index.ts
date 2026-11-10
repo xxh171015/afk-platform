@@ -229,3 +229,10 @@ export {
   TICKET_STATES,
   ticketTransition,
 } from "./ticket-state.ts";
+export {
+  CURSOR_AUTH_BRIEF,
+  IMAGE_BUILD_BRIEF,
+  INVALID_MODEL_BRIEF,
+  QUOTA_EXHAUSTED_BRIEF,
+  unrecoverableJobError,
+} from "./unrecoverable-job-error.ts";

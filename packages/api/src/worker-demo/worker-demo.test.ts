@@ -742,6 +742,40 @@ describe("the planning commit, end to end", { timeout: 60_000 }, () => {
 });
 
 describe("failures of the worker's own", { timeout: 60_000 }, () => {
+  it("fails a Cursor auth error once: the ticket waits with the human brief, and the agent is not run again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return {
+          error: {
+            kind: "other" as const,
+            message: "ActionRequiredError: Unauthorized request",
+          },
+        };
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const jobs = await db.pool.query(
+      "SELECT state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
+    );
+    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
+    const queue = (await (await fetch(`${api.url}/blocked`)).json()) as {
+      tickets: Array<{ brief: { output: { error: string } } }>;
+    };
+    expect(queue.tickets[0].brief.output.error).toBe(
+      "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+    );
+  });
+
   it("fails the job, keeps the slot's clone, and tells the API", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps({

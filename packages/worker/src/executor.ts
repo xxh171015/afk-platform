@@ -40,7 +40,12 @@ import {
   type TestCounts,
   writePrompt,
 } from "@afk/pipeline";
-import { type Bundle, REVIEW_AXES, type ReviewAxis } from "@afk/shared";
+import {
+  type Bundle,
+  REVIEW_AXES,
+  type ReviewAxis,
+  unrecoverableJobError,
+} from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
@@ -110,8 +115,14 @@ function agentFacts(
   };
 }
 
-// A problem with the worker's own environment, not with the ticket: the job fails and is dispatched again.
-export class InfrastructureError extends Error {}
+// A problem with the worker's own environment, not with the ticket: the job fails and is dispatched again,
+// unless the error is one that will not recover by running it again (Cursor auth, a bad model, a spent quota,
+// a failed integration image build). Those are rewritten here to the human sentence the brief shows.
+export class InfrastructureError extends Error {
+  constructor(message: string) {
+    super(unrecoverableJobError(message) ?? message);
+  }
+}
 // Nothing to run on right now: every slot is taken. The job is left alone and comes back when its lease runs out.
 export class NoFreeSlotError extends Error {}
 // The lease is gone; whatever was done must not be reported.

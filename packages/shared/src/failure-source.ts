@@ -1,4 +1,5 @@
 import { BLOCKED_REASONS } from "./ticket-state.ts";
+import { unrecoverableJobError } from "./unrecoverable-job-error.ts";
 
 // Whose fault a failure or a block is (GLOSSARY Failure source), decided by its reason code when it happens and
 // never changed afterwards (docs/specs/m3-platform.md「失败来源」). Events store it; the waiting queue groups by it.
@@ -98,6 +99,9 @@ export const EXTERNAL_ERROR_PATTERNS = [
   "rate.?limit|too many requests|usage limit|http 429",
   "enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake timeout",
   "err_pnpm_meta_fetch_fail|registry\\.npmjs\\.org|registry\\.npmmirror\\.com",
+  "invalid model|unknown model|model not found|model does not exist|no such model",
+  "quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted",
+  "docker build of .+ failed",
 ] as const;
 
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
@@ -112,7 +116,11 @@ export function failureSourceOf(
     FAILURE_SOURCE_OF_REASON as Record<string, FailureSource | null>
   )[reason];
   if (source === undefined) return "platform";
-  if (reason === "job-failed" && error && EXTERNAL.some((re) => re.test(error)))
+  if (
+    reason === "job-failed" &&
+    error &&
+    (EXTERNAL.some((re) => re.test(error)) || unrecoverableJobError(error))
+  )
     return "external";
   return source;
 }
