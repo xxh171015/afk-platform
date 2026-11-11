@@ -1,3 +1,4 @@
+import { HOST_KIND_LABELS } from "@afk/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { ChevronDown, ExternalLink, MoreHorizontal } from "lucide-react";
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { hostKindOf, hostKindOfRepos } from "./host-copy.ts";
 import { ownerFromRepos, ownerFromUrl, repoHtmlUrl } from "./host-links.ts";
 import { LIST_POLL_MS } from "./live.ts";
 import { paths } from "./paths.ts";
@@ -263,13 +265,17 @@ export function EntityCrumbs() {
     label: "复制链接",
     value: `${window.location.origin}${path}`,
   });
-  if (github)
+  if (github) {
+    const hostKind = specView?.spec.repos?.length
+      ? hostKindOfRepos(specView.spec.repos)
+      : hostKindOf({ hostKind: ticketView?.ticket.hostKind });
     overflow.push({
       kind: "link",
-      label: "在 GitHub 打开",
+      label: `在 ${HOST_KIND_LABELS[hostKind]} 打开`,
       href: github,
       external: true,
     });
+  }
   if (specId !== undefined) {
     overflow.push(
       { kind: "link", label: "概览", href: paths.spec(specId) },

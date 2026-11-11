@@ -114,31 +114,72 @@ function CheckRow({
   );
 }
 
+const doctorStatus = (status: string | undefined): string => {
+  if (status === "ok") return "通过";
+  if (status === "fail") return "缺";
+  if (status === "warn") return "提示";
+  return "尚未检查";
+};
+
+function useDoctorReport(projectId: number | undefined) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["onboarding", "doctor-report", projectId],
+    enabled: projectId !== undefined,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET(
+        "/projects/{projectId}/doctor-report",
+        { params: { path: { projectId: projectId as number } } },
+      );
+      if (response.status === 404) return null;
+      if (!data) throw new Error(describeError(error));
+      return data.report;
+    },
+  });
+}
+
 function LocalChecklist({
   address,
   commit,
+  projectId,
 }: {
   address: string;
   commit: string | null;
+  projectId: number | undefined;
 }) {
+  const report = useDoctorReport(projectId);
+  const item = (id: string) =>
+    report.data?.items.find((entry) => entry.id === id);
+  const skills = item("skills");
+  const plat = item("plat");
+  const tracker = item("tracker-doc");
   return (
     <section aria-label="本机" className="space-y-2">
       <h3 className="text-sm font-medium">本机</h3>
+      {report.data ? (
+        <p className="text-xs text-muted-foreground">
+          {report.data.machine} 已检查 ·{" "}
+          {formatAbsoluteTime(report.data.checkedAt)}
+        </p>
+      ) : null}
       <div className="space-y-3 text-sm">
         <CheckRow
           title="skills"
-          status="尚未检查"
-          command={commit ? installCommand(commit) : null}
+          status={doctorStatus(skills?.status)}
+          note={skills?.detail}
+          command={skills?.command ?? (commit ? installCommand(commit) : null)}
         />
         <CheckRow
           title="plat"
-          status="尚未检查"
-          command={`plat connect ${address}`}
+          status={doctorStatus(plat?.status)}
+          note={plat?.detail}
+          command={plat?.command ?? `plat connect ${address}`}
         />
         <CheckRow
           title="Tracker doc"
-          status="尚未检查"
-          command={TRACKER_DOC_COMMAND}
+          status={doctorStatus(tracker?.status)}
+          note={tracker?.detail}
+          command={tracker?.command ?? TRACKER_DOC_COMMAND}
         />
       </div>
     </section>
@@ -329,6 +370,25 @@ function ProjectRepos({
   );
 }
 
+function AgentsMdRow({
+  projectId,
+  fallbackCommand,
+}: {
+  projectId: number | undefined;
+  fallbackCommand: string;
+}) {
+  const report = useDoctorReport(projectId);
+  const item = report.data?.items.find((entry) => entry.id === "agents-md");
+  return (
+    <CheckRow
+      title="AGENTS.md"
+      status={doctorStatus(item?.status)}
+      note={item?.detail}
+      command={item?.command ?? fallbackCommand}
+    />
+  );
+}
+
 function AccessChecklist({
   projects,
   readAccess,
@@ -374,10 +434,9 @@ function AccessChecklist({
             <ProjectRepos project={project} enabled={readAccess} />
           </div>
         ))}
-        <CheckRow
-          title="AGENTS.md"
-          status="尚未检查"
-          command={AGENTS_MD_COMMAND}
+        <AgentsMdRow
+          projectId={projects[0]?.id}
+          fallbackCommand={AGENTS_MD_COMMAND}
         />
       </div>
     </section>
@@ -399,6 +458,7 @@ function Checklist({
       <LocalChecklist
         address={address}
         commit={version.data?.platformCommit ?? null}
+        projectId={projects[0]?.id}
       />
       <AccessChecklist projects={projects} readAccess={readAccess} />
     </div>

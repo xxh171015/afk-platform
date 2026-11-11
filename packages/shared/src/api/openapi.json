@@ -458,6 +458,228 @@
         }
       }
     },
+    "/projects/{projectId}/doctor-report": {
+      "put": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "machine": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["ok", "fail", "warn"]
+                        },
+                        "detail": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "command": {
+                          "type": "string",
+                          "maxLength": 500
+                        }
+                      },
+                      "required": ["id", "title", "status"]
+                    },
+                    "maxItems": 50
+                  }
+                },
+                "required": ["machine", "items"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "machine": {
+                      "type": "string"
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["ok", "fail", "warn"]
+                          },
+                          "detail": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "command": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        },
+                        "required": ["id", "title", "status"]
+                      }
+                    }
+                  },
+                  "required": ["machine", "checkedAt", "items"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The newest report for this project, or null when none has been stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "report": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "machine": {
+                          "type": "string"
+                        },
+                        "checkedAt": {
+                          "type": "string"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["ok", "fail", "warn"]
+                              },
+                              "detail": {
+                                "type": "string",
+                                "maxLength": 2000
+                              },
+                              "command": {
+                                "type": "string",
+                                "maxLength": 500
+                              }
+                            },
+                            "required": ["id", "title", "status"]
+                          }
+                        }
+                      },
+                      "required": ["machine", "checkedAt", "items"]
+                    }
+                  },
+                  "required": ["report"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/hosts": {
       "get": {
         "responses": {
@@ -1528,6 +1750,50 @@
                       "required": ["name", "text"]
                     },
                     "maxItems": 500
+                  },
+                  "planningDocsAtImport": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": ["changed"]
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "minItems": 1,
+                            "maxItems": 200
+                          }
+                        },
+                        "required": ["status", "files"]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": ["clean"]
+                          }
+                        },
+                        "required": ["status"]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": ["unknown"]
+                          }
+                        },
+                        "required": ["status"]
+                      }
+                    ]
                   }
                 },
                 "required": ["files"]

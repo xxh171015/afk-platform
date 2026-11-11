@@ -14,6 +14,7 @@ import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 const ENTITY_TABLES = [
   "acceptance_packs",
   "code_hosts",
+  "doctor_reports",
   "edges",
   "events",
   "final_e2e",

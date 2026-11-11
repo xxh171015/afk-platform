@@ -1,6 +1,7 @@
 import {
   formatDisplayId,
   type HostKind,
+  type PlanningDocsAtImport,
   type PlanningState,
   type ReviewAxis,
   repoDisplayName,
@@ -500,13 +501,34 @@ function uncoveredStoriesPrecheck(
   ];
 }
 
+function planningDocsPrecheck(
+  hasPlanningRepo: boolean,
+  atImport: PlanningDocsAtImport | null | undefined,
+  specId: number,
+): SpecPrecheck[] {
+  if (!hasPlanningRepo) return [];
+  if (atImport?.status === "clean") return [];
+  if (atImport?.status === "changed") {
+    return [
+      {
+        code: PAGE_CONFIRM_WITHOUT_PLANNING_DOCS.code,
+        level: "yellow",
+        message: `页面确认时不会带上这些规划文档改动：${atImport.files.join("、")}。要带上，在规划仓库里运行 plat spec confirm ${formatDisplayId("spec", specId)}`,
+      },
+    ];
+  }
+  return [PAGE_CONFIRM_WITHOUT_PLANNING_DOCS];
+}
+
 function prechecksOf(
   hasPlanningRepo: boolean,
   warnings: { type?: string; message?: string }[],
   extras: SpecPrecheck[] = [],
+  atImport?: PlanningDocsAtImport | null,
+  specId?: number,
 ): SpecPrecheck[] {
   return [
-    ...(hasPlanningRepo ? [PAGE_CONFIRM_WITHOUT_PLANNING_DOCS] : []),
+    ...planningDocsPrecheck(hasPlanningRepo, atImport, specId ?? 0),
     ...warnings.flatMap((warning) =>
       typeof warning.message === "string"
         ? [
@@ -683,7 +705,7 @@ export async function specView(
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
             s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo,
-            s.planning_state, s.planning_conflict, s.token_merged
+            s.planning_state, s.planning_conflict, s.token_merged, s.planning_docs_at_import
      FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
   );
@@ -752,7 +774,13 @@ export async function specView(
       },
       prechecks:
         row.state === "draft"
-          ? prechecksOf(row.planning_repo !== null, warnings, uncovered)
+          ? prechecksOf(
+              row.planning_repo !== null,
+              warnings,
+              uncovered,
+              row.planning_docs_at_import as PlanningDocsAtImport,
+              row.id as number,
+            )
           : prechecksOf(false, warnings),
       tokenMerged: row.token_merged as boolean,
     },

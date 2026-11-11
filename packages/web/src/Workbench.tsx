@@ -24,11 +24,24 @@ import { formatElapsed } from "./time.ts";
 import { waitingCount } from "./waiting.ts";
 
 export const EMPTY_WAITING = "没有在等你的事。平台在自己跑。";
+export const EMPTY_WAITING_SETUP = "没有在等你的事。先接入一个项目。";
 export const EMPTY_RUNNING = "没有正在运行的票。";
 export const EMPTY_REVIEW = "没有等你验收的需求。";
 export const EMPTY_COMPLETED = "还没有已合并的需求。";
 
 export const WORKBENCH_KEY = ["workbench"] as const;
+
+function useProjectList() {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["onboarding", "projects"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/projects");
+      if (!data) throw new Error(describeError(error));
+      return data.projects;
+    },
+  });
+}
 
 export function useWorkbench() {
   const api = useApi();
@@ -131,6 +144,7 @@ function ItemLink({
 
 export function Workbench() {
   const board = useWorkbench();
+  const projects = useProjectList();
   const data = board.data;
 
   if (board.isError && !board.data) {
@@ -187,7 +201,13 @@ export function Workbench() {
             count={waitingCount(data.waiting)}
           >
             {waitingCount(data.waiting) === 0 ? (
-              <Empty text={EMPTY_WAITING} />
+              <Empty
+                text={
+                  projects.data?.length === 0
+                    ? EMPTY_WAITING_SETUP
+                    : EMPTY_WAITING
+                }
+              />
             ) : (
               <>
                 {data.waiting.tickets.map((ticket) => (
@@ -316,7 +336,7 @@ export function Workbench() {
               data.awaitingAcceptance.map((row) => (
                 <ItemLink
                   key={row.spec.id}
-                  href={paths.spec(row.spec.id)}
+                  href={paths.specDelivery(row.spec.id)}
                   displayId={row.spec.displayId}
                   title={row.spec.title}
                 >

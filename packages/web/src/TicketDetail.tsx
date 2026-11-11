@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { diffLines } from "diff";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, ShieldCheck } from "lucide-react";
 import { type MouseEvent, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import {
@@ -845,6 +845,12 @@ function TicketRetry({
   const queryClient = useQueryClient();
   const [note, setNote] = useState("");
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["ticket", ticketId] }),
+      queryClient.invalidateQueries({ queryKey: ["blocked"] }),
+      queryClient.invalidateQueries({ queryKey: ["workbench"] }),
+    ]);
   const retry = useMutation({
     mutationFn: async (mode: "continue" | "restart") => {
       const { data, error } = await api.POST("/tickets/{id}/retry", {
@@ -854,15 +860,22 @@ function TicketRetry({
       if (!data) throw new Error(describeError(error));
       return data;
     },
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["ticket", ticketId] }),
-        queryClient.invalidateQueries({ queryKey: ["blocked"] }),
-        queryClient.invalidateQueries({ queryKey: ["workbench"] }),
-      ]),
+    onSuccess: invalidate,
+  });
+  const approve = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST(
+        "/tickets/{id}/approve-protected",
+        { params: { path: { id: ticketId } } },
+      );
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: invalidate,
   });
   if (blockedReason === "upstream-cancelled") return null;
-  const busy = retry.isPending;
+  const busy = retry.isPending || approve.isPending;
+  const actionError = retry.error ?? approve.error;
   return (
     <div className="ticket-retry space-y-3">
       <RetryNoteField
@@ -890,10 +903,21 @@ function TicketRetry({
           <RotateCcw />
           从头重试
         </Button>
+        {blockedReason === "protected-path-changed" ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() => approve.mutate()}
+          >
+            <ShieldCheck />
+            批准这些保护路径
+          </Button>
+        ) : null}
       </div>
-      {retry.error ? (
+      {actionError ? (
         <p className="text-sm text-state-blocked" role="alert">
-          {retry.error.message}
+          {actionError.message}
         </p>
       ) : null}
       <AlertDialog

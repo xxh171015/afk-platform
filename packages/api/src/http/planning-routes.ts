@@ -1,9 +1,12 @@
 import {
+  DoctorItemSchema,
+  DoctorReportPutSchema,
   HOST_KINDS,
   type HostKind,
   LimitOverridesSchema,
   MAX_PLANNING_PATCH_BYTES,
   PLANNING_STATES,
+  PlanningDocsAtImportSchema,
   SPEC_STATES,
   SPEC_TYPES,
   tryParseRepoUrl,
@@ -17,6 +20,7 @@ import {
   repoIdByName,
   requestRepoAccess,
 } from "../host/repo-access.ts";
+import { getDoctorReport, putDoctorReport } from "../planning/doctor.ts";
 import {
   addRepo,
   createProject,
@@ -398,6 +402,44 @@ const ImportWarning = z.object({
   message: z.string(),
 });
 
+const DoctorReportView = z.object({
+  machine: z.string(),
+  checkedAt: z.string(),
+  items: z.array(DoctorItemSchema),
+});
+
+const doctorReportPutRoute = createRoute({
+  method: "put",
+  path: "/projects/{projectId}/doctor-report",
+  request: {
+    params: z.object({
+      projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+    body: { content: json(DoctorReportPutSchema) },
+  },
+  responses: {
+    200: reply("Stored", DoctorReportView),
+    404: reply("No such project", ErrorReply),
+  },
+});
+
+const doctorReportGetRoute = createRoute({
+  method: "get",
+  path: "/projects/{projectId}/doctor-report",
+  request: {
+    params: z.object({
+      projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: reply(
+      "The newest report for this project, or null when none has been stored",
+      z.object({ report: DoctorReportView.nullable() }),
+    ),
+    404: reply("No such project", ErrorReply),
+  },
+});
+
 const importRoute = createRoute({
   method: "post",
   path: "/specs/{specId}/tickets/import",
@@ -417,6 +459,8 @@ const importRoute = createRoute({
               }),
             )
             .max(500),
+          // Filenames of planning-doc changes in the planning checkout; the page confirm precheck names them.
+          planningDocsAtImport: PlanningDocsAtImportSchema.optional(),
         }),
       ),
     },
@@ -572,6 +616,28 @@ export function registerPlanningRoutes(
     );
   });
 
+  app.openapi(doctorReportPutRoute, async (c) => {
+    const { projectId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const result = await putDoctorReport(
+      pool,
+      projectId,
+      body.machine,
+      body.items,
+    );
+    if (!result.ok) return c.json({ error: "no such project" }, 404);
+    return c.json(result.report, 200);
+  });
+
+  app.openapi(doctorReportGetRoute, async (c) => {
+    const { projectId } = c.req.valid("param");
+    const result = await getDoctorReport(pool, projectId);
+    if (result.status === "no-project") {
+      return c.json({ error: "no such project" }, 404);
+    }
+    return c.json({ report: result.report }, 200);
+  });
+
   app.openapi(projectListRoute, async (c) => {
     const { repoUrl } = c.req.valid("query");
     const projects = await pool.query(
@@ -725,9 +791,11 @@ export function registerPlanningRoutes(
 
   app.openapi(importRoute, async (c) => {
     const { specId } = c.req.valid("param");
+    const body = c.req.valid("json");
     const result = await aroundSpec(context, specId, () =>
-      importTickets(pool, specId, c.req.valid("json").files, {
+      importTickets(pool, specId, body.files, {
         append: c.req.valid("query").append === "true",
+        planningDocsAtImport: body.planningDocsAtImport,
       }),
     );
     switch (result.status) {

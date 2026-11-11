@@ -414,6 +414,20 @@
       "when": 1794430000000,
       "tag": "0058_agents_paused",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794440000000,
+      "tag": "0059_doctor_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794450000000,
+      "tag": "0060_planning_docs_at_import",
+      "breakpoints": true
     }
   ]
 }

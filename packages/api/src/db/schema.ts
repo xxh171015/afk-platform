@@ -27,6 +27,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -175,6 +176,10 @@ export const specs = pgTable(
     // The platform token's user merged a pull request. Kept for good. A personal token that can push the
     // default branch is not flagged: that would mark every merge a person makes.
     tokenMerged: boolean("token_merged").notNull().default(false),
+    // Filenames of planning-doc changes at the last tickets import (not the bodies). Page confirm names what it would drop.
+    planningDocsAtImport: jsonb("planning_docs_at_import")
+      .notNull()
+      .default({ status: "unknown" }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -712,3 +717,17 @@ export const workers = pgTable("workers", {
   // Free bytes on the worker's home volume, last time it posted /worker/status.
   freeBytes: bigint("free_bytes", { mode: "number" }),
 });
+
+// Last `plat doctor` result for one planning machine of a project. GET returns the newest across machines.
+export const doctorReports = pgTable(
+  "doctor_reports",
+  {
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    machine: text("machine").notNull(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+    items: jsonb("items").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.machine] })],
+);

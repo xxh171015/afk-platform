@@ -2,6 +2,8 @@
 
 The platform accepts a ticket's change only when its gate passes. The gate runs in a fresh sandbox (Debian, Node 22, npm, pnpm, a PostgreSQL server that is not started) on a clone of the repo, with network access.
 
+Use the commands the repo already runs (`package.json` scripts, its CI workflow, its README). The YAML below is a Node example; a repo that is not Node must change every `run:` (and `setup:`) to those commands. When a command is missing from the sandbox itself (`command not found` for a toolchain the repo needs), stop and tell the person who runs the platform: they have to add it to the sandbox image.
+
 ```yaml
 version: 1
 # runs first, in every fresh sandbox
@@ -20,7 +22,7 @@ commands:
     timeoutSeconds: 300
 ```
 
-- Take each command from what the repo already runs: `package.json` scripts, its CI workflow, its README. Name commands after what they check; keep the order cheap to expensive, since the first failure stops the gate.
+- Name commands after what they check; keep the order cheap to expensive, since the first failure stops the gate.
 - One command must write JUnit XML and name the file in `junit`. When the test runner writes none yet, configure its JUnit reporter in the repo (vitest: `reporters: ["default", "junit"]` with `outputFile: { junit: "reports/junit.xml" }`; jest: `jest-junit`) as part of the same pull request.
 - A repo that owns an API contract adds a command that validates it; a repo with a copy of another repo's contract adds one that checks the generated client still matches the copy.
 - Tests that need a database start a throwaway one from `setup` or the test command, inside the sandbox; nothing else runs beside the sandbox during a gate.

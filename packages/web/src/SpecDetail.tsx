@@ -41,6 +41,15 @@ import {
   RowsSkeleton,
   StaleNotice,
 } from "./components/afk/states.tsx";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./components/ui/alert-dialog.tsx";
 import { Button } from "./components/ui/button.tsx";
 import {
   Select,
@@ -924,6 +933,10 @@ function Overview({
     byRepo.set(ticket.repo, row);
   }
   const draft = spec.state === "draft";
+  const docsWarn = prechecks.find(
+    (item) => item.code === "page-confirm-without-planning-docs",
+  );
+  const [confirmDocs, setConfirmDocs] = useState(false);
   return (
     <>
       {draft ? (
@@ -933,11 +946,44 @@ function Overview({
         >
           <Button
             type="button"
-            onClick={onConfirm}
+            onClick={() => {
+              if (docsWarn) setConfirmDocs(true);
+              else onConfirm();
+            }}
             disabled={!canConfirm || confirming}
           >
             {confirming ? "确认中…" : "确认拆分"}
           </Button>
+          <AlertDialog
+            open={confirmDocs}
+            onOpenChange={(open) => {
+              if (!confirming) setConfirmDocs(open);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认拆分会丢掉规划文档</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {docsWarn?.message ??
+                    "页面确认时不会带上本地的规划文档改动。"}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={confirming}>
+                  返回
+                </AlertDialogCancel>
+                <Button
+                  disabled={confirming}
+                  onClick={() => {
+                    onConfirm();
+                    setConfirmDocs(false);
+                  }}
+                >
+                  仍然确认
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           {tickets.length === 0 ? (
             <span className="text-sm text-muted-foreground">
               先导入票（plat tickets import）。

@@ -469,9 +469,6 @@ describe("what plat spec confirm sends", () => {
     ]);
 
     expect(confirmed.code).toBe(0);
-    expect(confirmed.stderr).toContain(
-      "yellow: 页面确认时不会带上本地的规划文档改动",
-    );
     const worker = new FakeWorker(ws.api.url, "w1");
     const [job] = await claimAll(worker);
     const task = await get(

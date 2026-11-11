@@ -1038,6 +1038,43 @@ describe("confirming the split", () => {
     expect(screen.getByRole("button", { name: "确认拆分" })).toBeTruthy();
   });
 
+  it("asks before page confirm when it would drop planning docs", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            prechecks: [
+              {
+                code: "page-confirm-without-planning-docs",
+                level: "yellow",
+                message:
+                  "页面确认时不会带上这些规划文档改动：GLOSSARY.md。要带上，在规划仓库里运行 plat spec confirm S-1",
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/confirm": () => ({
+        json: {
+          state: "running",
+          integrationBranches: [],
+          enqueued: [],
+        },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    fireEvent.click(await screen.findByRole("button", { name: "确认拆分" }));
+    expect(server.calls).not.toContain("POST /specs/1/confirm");
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain(
+      "不会带上这些规划文档改动：GLOSSARY.md",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "仍然确认" }));
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /specs/1/confirm"),
+    );
+  });
+
   it("lists yellow prechecks and still lets the draft be confirmed", async () => {
     const server = fakeServer({
       "GET /specs/1": () => ({
