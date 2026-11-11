@@ -419,6 +419,10 @@ describe("a GitLab PAT's expiry", () => {
         daysLeft: 30,
       },
     ]);
+    const deadline = Date.now() + 2_000;
+    while (notices.length < 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
     expect(notices).toEqual([
       {
         title: "GitLab 令牌即将到期",
@@ -426,6 +430,12 @@ describe("a GitLab PAT's expiry", () => {
           "gitlab.com 的个人令牌将在 2026-12-09 到期（还剩 30 天）",
         ),
       },
+    ]);
+    const system = await db.pool.query(
+      "SELECT type, spec_id, data->>'kind' AS kind FROM events WHERE type = 'system'",
+    );
+    expect(system.rows).toEqual([
+      { type: "system", spec_id: null, kind: "token-expiry" },
     ]);
 
     await fetch(`${api.url}/projects/1/repos/web/access-check`, {

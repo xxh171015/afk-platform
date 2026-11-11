@@ -76,6 +76,7 @@ export {
   failureSourceOf,
   HUMAN_ACTIONS,
   isPlatformProblem,
+  isSandboxOomError,
   PAUSE_REASON_LABELS,
   PAUSE_REASONS,
   pauseReasonLabel,

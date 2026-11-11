@@ -2,13 +2,14 @@ import {
   type FailureSource,
   formatDisplayId,
   type HostKind,
+  type HumanAction,
   pauseReasonLabel,
   pullAbbrev,
 } from "@afk/shared";
 import type pg from "pg";
 
-// A spec's timeline reconstructed from what the platform recorded: runs, pull requests, the pack, and the spec
-// itself. Only the kinds the experience spec listed are emitted
+// A spec's timeline: with events, state changes and a person's actions come from the event table; PR/MR and
+// the pack still come from domain tables. With none, the old assembly from runs, PRs, the pack and the spec
 // (docs/specs/experience-platform.md「信息架构」).
 
 export const TIMELINE_KINDS = [
@@ -26,6 +27,7 @@ export const TIMELINE_KINDS = [
   "pause",
   "resume",
   "merged",
+  "action",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
@@ -46,10 +48,43 @@ const FINAL_STAGES = new Set([
   "final-e2e",
 ]);
 
+function actionText(action: string, ticketId: number | null): string | null {
+  if (action === "confirm") return null;
+  const ticket = ticketId ? formatDisplayId("ticket", ticketId) : null;
+  switch (action as HumanAction) {
+    case "retry":
+      return ticket ? `重试 ${ticket}` : "重试";
+    case "allow":
+      return "放行";
+    case "cancel-ticket":
+      return ticket ? `取消 ${ticket}` : "取消票";
+    case "cancel-spec":
+      return "取消需求";
+    case "approve-protected":
+      return ticket ? `批准保护路径 ${ticket}` : "批准保护路径";
+    case "allow-paths":
+      return ticket ? `批准路径 ${ticket}` : "批准路径";
+    case "edit-ticket":
+      return ticket ? `改票 ${ticket}` : "改票";
+    case "retry-final":
+      return "重试收尾";
+    case "waive-final":
+      return "放行收尾";
+    case "retry-cleanup":
+      return "重试清理";
+    case "retry-planning":
+      return "重试规划";
+    case "waive-planning":
+      return "放行规划";
+    default:
+      return action;
+  }
+}
+
 export async function specTimeline(
   pool: pg.Pool,
   specId: number,
-): Promise<TimelineItem[]> {
+): Promise<{ items: TimelineItem[]; legacy: boolean }> {
   const items: TimelineItem[] = [];
   const spec = (
     await pool.query<{
@@ -60,7 +95,13 @@ export async function specTimeline(
       specId,
     ])
   ).rows[0];
-  if (!spec) return [];
+  if (!spec) return { items: [], legacy: true };
+  const hasEvents =
+    (
+      await pool.query("SELECT 1 FROM events WHERE spec_id = $1 LIMIT 1", [
+        specId,
+      ])
+    ).rows.length > 0;
 
   const firstRun = (
     await pool.query<{ started_at: Date | null }>(
@@ -151,42 +192,68 @@ export async function specTimeline(
     }
   }
 
-  const blockedSources = new Map<number, FailureSource>();
-  const blockedEvents = await pool.query<{
-    ticket_id: number;
-    failure_source: FailureSource | null;
-  }>(
-    `SELECT DISTINCT ON (ticket_id) ticket_id, failure_source
-     FROM events
-     WHERE spec_id = $1 AND type = 'ticket' AND to_state = 'blocked'
-     ORDER BY ticket_id, id DESC`,
-    [specId],
-  );
-  for (const row of blockedEvents.rows) {
-    if (row.failure_source)
-      blockedSources.set(row.ticket_id, row.failure_source);
-  }
-  const blocked = await pool.query<{
-    id: number;
-    blocked_reason: string | null;
-    finished_at: Date | null;
-  }>(
-    `SELECT t.id, t.blocked_reason,
-            (SELECT r.finished_at FROM runs r WHERE r.ticket_id = t.id
-             ORDER BY r.id DESC LIMIT 1) AS finished_at
-     FROM tickets t WHERE t.spec_id = $1 AND t.state = 'blocked'`,
-    [specId],
-  );
-  for (const row of blocked.rows) {
-    items.push({
-      kind: "ticket-blocked",
-      at: (row.finished_at ?? spec.created_at).toISOString(),
-      text: `${formatDisplayId("ticket", row.id)} 卡住${row.blocked_reason ? `：${row.blocked_reason}` : ""}`,
-      ticketId: row.id,
-      ...(blockedSources.get(row.id)
-        ? { failureSource: blockedSources.get(row.id) }
-        : {}),
-    });
+  if (hasEvents) {
+    const blockedHistory = await pool.query<{
+      ticket_id: number;
+      at: Date;
+      reason: string | null;
+      failure_source: FailureSource | null;
+      run_id: number | null;
+    }>(
+      `SELECT ticket_id, at, reason, failure_source, run_id
+       FROM events
+       WHERE spec_id = $1 AND type = 'ticket' AND to_state = 'blocked'
+       ORDER BY id`,
+      [specId],
+    );
+    for (const row of blockedHistory.rows) {
+      items.push({
+        kind: "ticket-blocked",
+        at: row.at.toISOString(),
+        text: `${formatDisplayId("ticket", row.ticket_id)} 卡住${row.reason ? `：${row.reason}` : ""}`,
+        ticketId: row.ticket_id,
+        ...(row.run_id ? { runId: row.run_id } : {}),
+        ...(row.failure_source ? { failureSource: row.failure_source } : {}),
+      });
+    }
+  } else {
+    const blockedSources = new Map<number, FailureSource>();
+    const blockedEvents = await pool.query<{
+      ticket_id: number;
+      failure_source: FailureSource | null;
+    }>(
+      `SELECT DISTINCT ON (ticket_id) ticket_id, failure_source
+       FROM events
+       WHERE spec_id = $1 AND type = 'ticket' AND to_state = 'blocked'
+       ORDER BY ticket_id, id DESC`,
+      [specId],
+    );
+    for (const row of blockedEvents.rows) {
+      if (row.failure_source)
+        blockedSources.set(row.ticket_id, row.failure_source);
+    }
+    const blocked = await pool.query<{
+      id: number;
+      blocked_reason: string | null;
+      finished_at: Date | null;
+    }>(
+      `SELECT t.id, t.blocked_reason,
+              (SELECT r.finished_at FROM runs r WHERE r.ticket_id = t.id
+               ORDER BY r.id DESC LIMIT 1) AS finished_at
+       FROM tickets t WHERE t.spec_id = $1 AND t.state = 'blocked'`,
+      [specId],
+    );
+    for (const row of blocked.rows) {
+      items.push({
+        kind: "ticket-blocked",
+        at: (row.finished_at ?? spec.created_at).toISOString(),
+        text: `${formatDisplayId("ticket", row.id)} 卡住${row.blocked_reason ? `：${row.blocked_reason}` : ""}`,
+        ticketId: row.id,
+        ...(blockedSources.get(row.id)
+          ? { failureSource: blockedSources.get(row.id) }
+          : {}),
+      });
+    }
   }
 
   const appended = await pool.query<{ id: number; created_at: Date }>(
@@ -247,7 +314,64 @@ export async function specTimeline(
       text: "验收包生成",
     });
 
-  if (spec.state === "paused") {
+  if (hasEvents) {
+    const pauses = await pool.query<{
+      at: Date;
+      reason: string | null;
+      failure_source: FailureSource | null;
+    }>(
+      `SELECT at, reason, failure_source FROM events
+       WHERE spec_id = $1 AND type = 'spec' AND to_state = 'paused'
+       ORDER BY id`,
+      [specId],
+    );
+    for (const pause of pauses.rows) {
+      items.push({
+        kind: "pause",
+        at: pause.at.toISOString(),
+        text: pause.reason ? `暂停：${pauseReasonLabel(pause.reason)}` : "暂停",
+        ...(pause.failure_source
+          ? { failureSource: pause.failure_source }
+          : {}),
+      });
+    }
+    const resumes = await pool.query<{ at: Date }>(
+      `SELECT at FROM events
+       WHERE spec_id = $1 AND type = 'spec' AND from_state = 'paused'
+         AND to_state IS DISTINCT FROM 'cancelled'
+       ORDER BY id`,
+      [specId],
+    );
+    for (const resume of resumes.rows) {
+      items.push({
+        kind: "resume",
+        at: resume.at.toISOString(),
+        text: "恢复",
+      });
+    }
+    const actions = await pool.query<{
+      at: Date;
+      ticket_id: number | null;
+      data: { action?: string };
+    }>(
+      `SELECT at, ticket_id, data FROM events
+       WHERE spec_id = $1 AND type = 'action'
+       ORDER BY id`,
+      [specId],
+    );
+    for (const row of actions.rows) {
+      const action = row.data?.action;
+      if (!action) continue;
+      const text = actionText(action, row.ticket_id);
+      if (!text) continue;
+      items.push({
+        kind: "action",
+        at: row.at.toISOString(),
+        text,
+        ...(row.ticket_id ? { ticketId: row.ticket_id } : {}),
+      });
+    }
+  } else if (spec.state === "paused") {
     const pause = (
       await pool.query<{ at: Date; failure_source: FailureSource | null }>(
         `SELECT at, failure_source FROM events
@@ -269,5 +393,5 @@ export async function specTimeline(
   items.sort(
     (a, b) => a.at.localeCompare(b.at) || a.kind.localeCompare(b.kind),
   );
-  return items;
+  return { items, legacy: !hasEvents };
 }

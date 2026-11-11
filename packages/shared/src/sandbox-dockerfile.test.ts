@@ -22,4 +22,8 @@ describe("the platform sandbox Dockerfile", () => {
     );
     expect(dockerfile).toMatch(/^ARG CURSOR_CLI_VERSION=/m);
   });
+
+  it("does not put capability, memory or process limits in the image", () => {
+    expect(dockerfile).not.toMatch(/cap-drop|no-new-privileges|pids-limit/);
+  });
 });

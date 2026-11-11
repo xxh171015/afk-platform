@@ -478,6 +478,30 @@ describe("a failed e2e before the pull requests", () => {
     expect(await queuedOf("open-pr")).toHaveLength(0);
   });
 
+  it("blocks at once with sandbox-oom when the container was OOMKilled, as a platform problem", async () => {
+    await runningSpec();
+    const job = await completeUntilFinalE2e();
+    const failedReply = await worker.fail(
+      job.id,
+      job.attempt,
+      "sandbox-oom: container OOMKilled",
+    );
+    expect(failedReply.status).toBe(200);
+    expect(await finalE2e()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "sandbox-oom",
+    });
+    expect(await claimSkippingHostSync()).toBeNull();
+    const blocked = (await call("GET", "/blocked")).body;
+    const entry = blocked.finalizations.find(
+      (f: Json) => f.step === "final-e2e",
+    );
+    expect(entry).toMatchObject({
+      blockedReason: "sandbox-oom",
+      failureSource: "platform",
+    });
+  });
+
   it("blocks once on an image that would not build, as an outside service, and does not requeue", async () => {
     await runningSpec();
     const job = await completeUntilFinalE2e();

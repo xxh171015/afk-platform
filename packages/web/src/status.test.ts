@@ -13,6 +13,7 @@ describe("status labels", () => {
     expect(specStateLabel("awaiting-review")).toBe("待验收");
     expect(ticketStateLabel("blocked")).toBe("已卡住");
     expect(blockedReasonLabel("agent-gave-up")).toBe("模型放弃");
+    expect(blockedReasonLabel("sandbox-oom")).toBe("沙箱内存不足");
     expect(prStateLabel("closed")).toBe("关闭未合并");
   });
 

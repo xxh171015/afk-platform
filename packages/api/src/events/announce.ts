@@ -2,15 +2,10 @@ import type { InvalidatePayload } from "@afk/shared";
 import type pg from "pg";
 import type { AppContext } from "../app.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
-import {
-  noticesFromTransition,
-  type Shot,
-  type ShotFinal,
-  type ShotPull,
-} from "../notify/notices.ts";
+import type { Shot, ShotFinal, ShotPull } from "../notify/notices.ts";
 
-// Snapshot a spec before a mutation and emit notices plus an invalidate after it, so each of the seven
-// kinds fires once per transition and the page refetches what changed.
+// Snapshot a spec so around* still has a before-image for callers that need it. Notices are dispatched
+// from the events table (notify/dispatch.ts); page refresh is pushed from events/hub.ts.
 
 const SKIP = new Set([
   "no-ticket",
@@ -236,41 +231,13 @@ export async function snapshotSpecs(
   return shots;
 }
 
-function shotsEqual(left: Shot, right: Shot): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 export async function emitTransition(
-  context: AppContext,
-  before: Map<number, Shot>,
-  extra: InvalidatePayload,
+  _context: AppContext,
+  _before: Map<number, Shot>,
+  _extra: InvalidatePayload,
 ): Promise<void> {
-  const specIds = new Set<number>([...before.keys()]);
-  if (extra.specId !== undefined) specIds.add(extra.specId);
-  if (specIds.size === 0) {
-    context.events.publish(extra);
-    return;
-  }
-  // Ticket jobs still refresh a new Run; host-sync must not push the same snapshot.
-  const ticketScoped =
-    extra.ticketId !== undefined || extra.runId !== undefined;
-  for (const specId of specIds) {
-    const after = await loadShot(context.pool, specId);
-    const previous = before.get(specId);
-    if (after && previous) {
-      for (const notice of noticesFromTransition(previous, after)) {
-        await context.notifications.notify(notice);
-      }
-    }
-    if (!ticketScoped && after && previous && shotsEqual(previous, after)) {
-      continue;
-    }
-    context.events.publish({
-      specId,
-      ...(extra.ticketId !== undefined ? { ticketId: extra.ticketId } : {}),
-      ...(extra.runId !== undefined ? { runId: extra.runId } : {}),
-    });
-  }
+  // Notices are dispatched from the events table (notify/dispatch.ts). Invalidate is pushed
+  // from events/hub.ts after commit.
 }
 
 export async function aroundSpec<T extends { status: string }>(

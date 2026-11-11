@@ -6792,7 +6792,8 @@
                               "ticket-appended",
                               "pause",
                               "resume",
-                              "merged"
+                              "merged",
+                              "action"
                             ]
                           },
                           "at": {
@@ -6814,6 +6815,9 @@
                         },
                         "required": ["kind", "at", "text"]
                       }
+                    },
+                    "timelineLegacy": {
+                      "type": "boolean"
                     },
                     "finalRuns": {
                       "type": "array",
@@ -6936,6 +6940,7 @@
                     "acceptancePack",
                     "edges",
                     "timeline",
+                    "timelineLegacy",
                     "finalRuns",
                     "potentialConflicts",
                     "leadTime"
