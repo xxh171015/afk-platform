@@ -9933,6 +9933,177 @@
         }
       }
     },
+    "/links": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "required": true,
+            "name": "sha",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ticket (and later pr) Links for this commit SHA",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["ticket", "pr"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "ticketId": {
+                            "type": ["integer", "null"]
+                          },
+                          "ticketDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "runId": {
+                            "type": ["integer", "null"]
+                          },
+                          "runDisplayId": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "repo",
+                          "sha",
+                          "specId",
+                          "specDisplayId",
+                          "ticketId",
+                          "ticketDisplayId",
+                          "runId",
+                          "runDisplayId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["links"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/links": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Links recorded for this spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["ticket", "pr"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "ticketId": {
+                            "type": ["integer", "null"]
+                          },
+                          "ticketDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "runId": {
+                            "type": ["integer", "null"]
+                          },
+                          "runDisplayId": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "repo",
+                          "sha",
+                          "specId",
+                          "specDisplayId",
+                          "ticketId",
+                          "ticketDisplayId",
+                          "runId",
+                          "runDisplayId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["links"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "parameters": [

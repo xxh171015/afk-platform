@@ -4944,6 +4944,117 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          sha: string;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description ticket (and later pr) Links for this commit SHA */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              links: {
+                /** @enum {string} */
+                kind: "ticket" | "pr";
+                repo: string;
+                sha: string;
+                specId: number;
+                specDisplayId: string;
+                ticketId: number | null;
+                ticketDisplayId: string | null;
+                runId: number | null;
+                runDisplayId: string | null;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Links recorded for this spec */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              links: {
+                /** @enum {string} */
+                kind: "ticket" | "pr";
+                repo: string;
+                sha: string;
+                specId: number;
+                specDisplayId: string;
+                ticketId: number | null;
+                ticketDisplayId: string | null;
+                runId: number | null;
+                runDisplayId: string | null;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/metrics": {
     parameters: {
       query?: never;
