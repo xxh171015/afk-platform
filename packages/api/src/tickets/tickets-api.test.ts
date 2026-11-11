@@ -1619,6 +1619,7 @@ describe("what a person sees", () => {
       cleanups: [],
       readyFailures: [],
       planning: [],
+      locates: [],
       specs: [],
       items: [],
     });

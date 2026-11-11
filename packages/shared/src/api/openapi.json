@@ -1452,6 +1452,102 @@
         }
       }
     },
+    "/bugs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000000
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "slug": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                  },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": ["projectId", "body"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A bug draft was created and a locate-bug job was queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "displayId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "displayId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The project has no repo, or the planning repo name is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/specs": {
       "post": {
         "requestBody": {
@@ -2112,6 +2208,73 @@
           },
           "422": {
             "description": "The patch is too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{specId}/locate/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locate is queued again; the draft stays a draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Locate is not waiting for a retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -8369,6 +8532,75 @@
                         "required": ["id", "displayId", "title", "reason"]
                       }
                     },
+                    "locates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "reason"
+                        ]
+                      }
+                    },
                     "items": {
                       "type": "array",
                       "items": {
@@ -8478,6 +8710,19 @@
                               }
                             },
                             "required": ["kind", "id"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["locate"]
+                              },
+                              "specId": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "specId"]
                           }
                         ]
                       }
@@ -8491,6 +8736,7 @@
                     "readyFailures",
                     "planning",
                     "specs",
+                    "locates",
                     "items"
                   ]
                 }
@@ -8675,6 +8921,32 @@
                             },
                             "required": ["id", "displayId", "title"]
                           }
+                        },
+                        "locates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "specId",
+                              "specDisplayId",
+                              "title",
+                              "reason"
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -8684,7 +8956,8 @@
                         "cleanups",
                         "readyFailures",
                         "planning",
-                        "specs"
+                        "specs",
+                        "locates"
                       ]
                     },
                     "running": {

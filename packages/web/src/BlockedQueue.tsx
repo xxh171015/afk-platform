@@ -1,4 +1,8 @@
-import { isPlatformProblem, pauseReasonLabel } from "@afk/shared";
+import {
+  isPlatformProblem,
+  LOCATE_REASON_LABELS,
+  pauseReasonLabel,
+} from "@afk/shared";
 import {
   keepPreviousData,
   type QueryClient,
@@ -876,6 +880,54 @@ function BlockedPlanning({ item }: { item: Queue["planning"][number] }) {
   );
 }
 
+function FailedLocate({
+  item,
+}: {
+  item: {
+    specId: number;
+    specDisplayId: string;
+    title: string;
+    reason: string;
+    blocking?: Blocking;
+    waitingSince?: string;
+  };
+}) {
+  const label =
+    (LOCATE_REASON_LABELS as Record<string, string>)[item.reason] ??
+    item.reason;
+  return (
+    <Card
+      category="paused"
+      testId={`locate-${item.specDisplayId}`}
+      title={
+        <>
+          <IdChip displayId={item.specDisplayId} id={item.specId} />
+          <a
+            href={paths.spec(item.specId)}
+            className="truncate hover:underline"
+          >
+            {item.title}
+          </a>
+          <ReasonBadge reason={item.reason} />
+        </>
+      }
+      sub={<span>定位失败：{label}</span>}
+    >
+      <WaitingMeta blocking={item.blocking} waitingSince={item.waitingSince} />
+      {waitingReasonHint(item.reason) ? (
+        <p className="text-muted-foreground">
+          {waitingReasonHint(item.reason)}
+        </p>
+      ) : (
+        <p className="text-muted-foreground">
+          补报告或手填原需求之后再试。平台不会自动拆票或开工。
+        </p>
+      )}
+      <CopyCommand command={`plat spec retry-locate ${item.specDisplayId}`} />
+    </Card>
+  );
+}
+
 function CalmIllustration() {
   return (
     <svg viewBox="0 0 160 110" className="h-28 w-40" aria-hidden>
@@ -951,6 +1003,10 @@ function inferredItems(data: Queue): WaitingRef[] {
       kind: "pausedSpec" as const,
       id: spec.id,
     })),
+    ...(data.locates ?? []).map((item) => ({
+      kind: "locate" as const,
+      specId: item.specId,
+    })),
   ];
 }
 
@@ -993,6 +1049,8 @@ function waitingItemOf(data: Queue, ref: WaitingRef) {
       );
     if (ref.kind === "planning")
       return (data.planning ?? []).find((item) => item.specId === ref.specId);
+    if (ref.kind === "locate")
+      return (data.locates ?? []).find((item) => item.specId === ref.specId);
     return data.specs.find((item) => item.id === ref.id);
   };
   return lookup();
@@ -1073,6 +1131,12 @@ function CardFor({ data, item }: { data: Queue; item: WaitingRef }) {
       (entry) => entry.specId === item.specId,
     );
     return row ? <BlockedPlanning item={row} /> : null;
+  }
+  if (item.kind === "locate") {
+    const row = (data.locates ?? []).find(
+      (entry) => entry.specId === item.specId,
+    );
+    return row ? <FailedLocate item={row} /> : null;
   }
   const spec = data.specs.find((row) => row.id === item.id);
   return spec ? <PausedSpec spec={spec} /> : null;

@@ -17,6 +17,7 @@ describe("failure source of a reason code", () => {
     expect(failureSourceOf("integration-environment-failed")).toBe("spec");
     expect(failureSourceOf("update-branch-gate-failed")).toBe("spec");
     expect(failureSourceOf("planning-conflict")).toBe("spec");
+    expect(failureSourceOf("bug-unlocated")).toBe("spec");
     expect(failureSourceOf("lease-expired")).toBe("platform");
     expect(failureSourceOf("sandbox-oom")).toBe("platform");
     expect(failureSourceOf("sync-error")).toBe("external");

@@ -70,7 +70,7 @@ function adrPathsFrom(
 }
 
 async function findRepo(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   repo?: string,
   repoUrl?: string,
 ): Promise<
@@ -108,7 +108,7 @@ async function findRepo(
 }
 
 async function specIdsFromTrailers(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   projectId: number,
   commits: ContextCommit[],
 ): Promise<Set<number>> {
@@ -127,7 +127,7 @@ async function specIdsFromTrailers(
 }
 
 async function ticketIdsFromTrailers(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   projectId: number,
   commits: ContextCommit[],
 ): Promise<Set<number>> {
@@ -147,7 +147,7 @@ async function ticketIdsFromTrailers(
 }
 
 export async function contextFor(
-  pool: pg.Pool,
+  pool: Pick<pg.Pool, "query">,
   input: {
     repo?: string;
     repoUrl?: string;

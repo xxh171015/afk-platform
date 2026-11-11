@@ -156,6 +156,7 @@ const WaitingRef = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("planning"), specId: Id }),
   z.object({ kind: z.literal("pausedSpec"), id: Id }),
+  z.object({ kind: z.literal("locate"), specId: Id }),
 ]);
 
 const TicketSummary = z
@@ -584,6 +585,16 @@ const BlockedQueue = z.object({
       })
       .merge(WaitingFields),
   ),
+  locates: z.array(
+    z
+      .object({
+        specId: Id,
+        specDisplayId: z.string(),
+        title: z.string(),
+        reason: z.string(),
+      })
+      .merge(WaitingFields),
+  ),
   items: z.array(WaitingRef),
 });
 
@@ -640,6 +651,14 @@ const WorkbenchWaiting = z.object({
       id: Id,
       displayId: z.string(),
       title: z.string(),
+    }),
+  ),
+  locates: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      title: z.string(),
+      reason: z.string(),
     }),
   ),
 });

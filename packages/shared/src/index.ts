@@ -62,6 +62,8 @@ export type {
   EventType,
   FailureSource,
   HumanAction,
+  LocateReason,
+  LocateState,
   PauseReason,
   ReasonCode,
 } from "./failure-source.ts";
@@ -78,6 +80,9 @@ export {
   HUMAN_ACTIONS,
   isPlatformProblem,
   isSandboxOomError,
+  LOCATE_REASON_LABELS,
+  LOCATE_REASONS,
+  LOCATE_STATES,
   PAUSE_REASON_LABELS,
   PAUSE_REASONS,
   pauseReasonLabel,

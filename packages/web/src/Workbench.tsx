@@ -278,6 +278,19 @@ export function Workbench() {
                     <StatusBadge kind="spec" code="paused" />
                   </ItemLink>
                 ))}
+                {(data.waiting.locates ?? []).map((item) => (
+                  <ItemLink
+                    key={`locate-${item.specId}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title={item.title}
+                  >
+                    <StatusBadge
+                      kind="blocked"
+                      code={item.reason ?? "bug-unlocated"}
+                    />
+                  </ItemLink>
+                ))}
               </>
             )}
           </Quadrant>

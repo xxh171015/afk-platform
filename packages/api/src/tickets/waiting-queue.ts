@@ -34,7 +34,8 @@ export type WaitingRef =
   | { kind: "cleanup"; specId: number }
   | { kind: "readyFailure"; specId: number; repo: string; number: number }
   | { kind: "planning"; specId: number }
-  | { kind: "pausedSpec"; id: number };
+  | { kind: "pausedSpec"; id: number }
+  | { kind: "locate"; specId: number };
 
 export interface WaitingFields {
   waitingSince: string;
@@ -181,6 +182,14 @@ export interface RankableQueue {
     waitingSince?: string;
     blocking?: Blocking;
   }[];
+  locates: {
+    specId: number;
+    specDisplayId: string;
+    title: string;
+    reason: string;
+    waitingSince?: string;
+    blocking?: Blocking;
+  }[];
 }
 
 export async function rankWaitingQueue<Q extends RankableQueue>(
@@ -197,6 +206,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
       ...queue.readyFailures.map((item) => item.specId),
       ...queue.planning.map((item) => item.specId),
       ...queue.specs.map((item) => item.id),
+      ...queue.locates.map((item) => item.specId),
     ]),
   ];
   const finalizationIds = queue.finalizations.map((item) => item.id);
@@ -524,6 +534,23 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
     return { ...item, waitingSince, blocking, failureSource };
   });
 
+  const locates = queue.locates.map((item) => {
+    const failureSource = sourceOf(item.reason);
+    const blocking = { ...NO_BLOCKING };
+    const waitingSince = iso(
+      specFinished.get(item.specId) ?? specCreated.get(item.specId),
+      now,
+    );
+    ranked.push({
+      ref: { kind: "locate", specId: item.specId },
+      blocking,
+      waitingSince,
+      serialId: item.specId,
+      failureSource,
+    });
+    return { ...item, waitingSince, blocking, failureSource };
+  });
+
   ranked.sort(compareWaiting);
   return {
     ...queue,
@@ -534,6 +561,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
     readyFailures,
     planning,
     specs,
+    locates,
     items: ranked.map((item) => item.ref),
   };
 }

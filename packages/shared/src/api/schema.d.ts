@@ -873,6 +873,76 @@ export interface paths {
     };
     trace?: never;
   };
+  "/bugs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            projectId: number;
+            body: string;
+            title?: string;
+            slug?: string;
+            planningRepo?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description A bug draft was created and a locate-bug job was queued */
+        201: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              displayId: string;
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The project has no repo, or the planning repo name is unknown */
+        422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs": {
     parameters: {
       query?: never;
@@ -1220,6 +1290,68 @@ export interface paths {
         };
         /** @description The patch is too large */
         422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{specId}/locate/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          specId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Locate is queued again; the draft stays a draft */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Locate is not waiting for a retry */
+        409: {
           headers: {
             [name: string]: unknown;
           };
@@ -3961,6 +4093,27 @@ export interface paths {
                   | "spec"
                   | null;
               }[];
+              locates: {
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                reason: string;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
+              }[];
               items: (
                 | {
                     /** @enum {string} */
@@ -4001,6 +4154,11 @@ export interface paths {
                     /** @enum {string} */
                     kind: "pausedSpec";
                     id: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "locate";
+                    specId: number;
                   }
               )[];
             };
@@ -4079,6 +4237,12 @@ export interface paths {
                   id: number;
                   displayId: string;
                   title: string;
+                }[];
+                locates: {
+                  specId: number;
+                  specDisplayId: string;
+                  title: string;
+                  reason: string;
                 }[];
               };
               running: {
