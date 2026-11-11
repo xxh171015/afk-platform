@@ -45,7 +45,8 @@ function agentSkillsSection(multiContext: boolean): string {
   ].join("\n");
 }
 
-// Research and prototypes leave nothing in the person's checkout (GLOSSARY「Scratch files」).
+// Research and prototypes leave nothing in the person's checkout (GLOSSARY「Scratch files」), and the planning docs
+// grilling writes wait for `plat spec confirm` (ADR 0005).
 function planningSection(afkHome: string): string {
   const worktrees = join(afkHome, "planning");
   return [
@@ -54,6 +55,7 @@ function planningSection(afkHome: string): string {
     `- Do research and prototypes in a temporary git worktree under \`${worktrees}\` (for example \`${join(worktrees, "research-<name>")}\`), never in this checkout: do not write files here for them or switch this checkout's branch.`,
     "- Push what they found to a `research/<name>` or `prototype/<name>` branch and keep that branch: the decision it informs links to it. Then remove the temporary worktree (`git worktree remove`).",
     "- Keep no notes of them on this machine.",
+    "- When grilling changes `GLOSSARY.md` or `docs/adr/`, leave those changes uncommitted and unpushed: `plat spec confirm` sends them with the next spec. The step after grilling is `/to-spec`, not a commit, unless the person asks for one.",
     "",
   ].join("\n");
 }

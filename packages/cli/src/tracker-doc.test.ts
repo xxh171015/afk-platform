@@ -62,6 +62,8 @@ describe("renderTrackerDoc", () => {
     expect(doc).toContain("plat spec create --project 3");
     expect(doc).toContain("`backend` repo");
     expect(doc).not.toContain("{{");
+    // a placeholder a formatter split apart is not filled either
+    expect(doc).not.toMatch(/\{ \{/);
   });
 
   it("puts the GitHub seed template in, byte for byte, for a GitHub repo", () => {
