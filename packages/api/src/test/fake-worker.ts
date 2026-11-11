@@ -41,10 +41,10 @@ export async function listen(app: {
             new Promise((done) => {
               // A leftover keep-alive or half-open socket otherwise holds close() past hookTimeout,
               // and the next test's afterEach then deletes that test's temp dirs.
-              (
-                server as { closeAllConnections?: () => void }
-              ).closeAllConnections?.();
-              server.close(() => done());
+              const http = server as import("node:http").Server;
+              http.closeIdleConnections?.();
+              http.closeAllConnections();
+              http.close(() => done());
             }),
         });
       },
