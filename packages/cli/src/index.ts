@@ -1,15 +1,8 @@
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import {
   type ApiClient,
@@ -19,6 +12,8 @@ import {
   HOST_HEADER,
   HOST_KINDS,
   MAX_PLANNING_PATCH_BYTES,
+  PLAT_HEADER,
+  PLAT_OUTDATED,
   parseDisplayId,
   purgedLogMessage,
   SETUP_BRANCH,
@@ -38,7 +33,7 @@ import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
 import { collectDoctorReport, formatDoctorText } from "./doctor.ts";
 import { blockedText, projectText, specText, ticketText } from "./format.ts";
-import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
+import { isTracked, missingExcludes } from "./git-exclude.ts";
 import {
   codeHostProblems,
   hasRegistrations,
@@ -61,6 +56,7 @@ import {
 import {
   integrationWarnings,
   skillsWarnings,
+  staleSkills,
   trackerDocWarnings,
   unreadyRepos,
   versionWarnings,
@@ -73,15 +69,30 @@ import {
   uncommittedPlanningDocs,
   unresolvedPlanningDocs,
 } from "./planning-docs.ts";
+import { writePlanningFiles } from "./planning-files.ts";
 import { rememberApiUrl, rememberedApiUrl } from "./plat-config.ts";
+import {
+  fingerprintOf,
+  PlatOutdated,
+  platFile,
+  type Rerun,
+  replacePlat,
+  rerunPlat,
+  UPDATED_FROM,
+} from "./self-update.ts";
 import { type RunCommand, runCommand, updateSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
 
-// Every call says it is plat, and from which machine: the API records a person's actions with both.
-const cliHeaders = () => ({ ...CLI_HEADERS, [HOST_HEADER]: hostname() });
+// Every call says it is plat, from which machine, and which plat (self-update.ts): the API records a person's
+// actions with the first two and refuses to publish from an older plat.
+const cliHeaders = (plat = fingerprintOf("")) => ({
+  ...CLI_HEADERS,
+  [HOST_HEADER]: hostname(),
+  [PLAT_HEADER]: plat,
+});
 
 export interface Io {
   stdout: (text: string) => void;
@@ -95,8 +106,11 @@ export interface Io {
   confirm?: (question: string) => Promise<boolean>;
   // Runs a command such as the skills CLI (`plat update`); runCommand (skills-install.ts) when omitted.
   run?: RunCommand;
-  // The file plat runs from, which `plat update` replaces; process.argv[1] when omitted, "" for none.
+  // The file plat runs from, which `plat update` and the self-update replace; when omitted, process.argv[1] if it is
+  // the platform's bundle, else none (""). See self-update.ts.
   platPath?: string;
+  // Runs plat again after it replaced itself (self-update.ts); rerunPlat when omitted.
+  rerun?: Rerun;
 }
 
 // How long plat init waits for a worker to say whether the GitHub App or GitLab PAT can work on the repos.
@@ -251,8 +265,143 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         rememberedApiUrl(afkHome(io.env)) ||
         DEFAULT_API_URL,
     );
-  const api = (): ApiClient =>
-    createApiClient(apiUrl(), undefined, cliHeaders());
+  // Which plat this is (self-update.ts); a new plat that just replaced an older one is run with UPDATED_FROM.
+  const self = platFile(io.platPath);
+  const plat = fingerprintOf(self);
+  const updatedFrom = io.env[UPDATED_FROM];
+  const api = (): ApiClient => {
+    const client = createApiClient(apiUrl(), undefined, cliHeaders(plat));
+    // the API refuses to publish from an older plat: run() replaces this one and runs the command again
+    client.use({
+      async onResponse({ response }) {
+        if (response.status !== 409) return undefined;
+        const body = await response
+          .clone()
+          .json()
+          .catch(() => null);
+        if ((body as { code?: unknown } | null)?.code === PLAT_OUTDATED)
+          throw new PlatOutdated();
+        return undefined;
+      },
+    });
+    return client;
+  };
+
+  // Before a command: an older plat than the platform hands out replaces itself and runs the command again (run()
+  // catches PlatOutdated); the new plat brings this machine up first and says what changed.
+  const topCommand = (command: Command): string => {
+    let at = command;
+    while (at.parent && at.parent !== program) at = at.parent;
+    return at.name();
+  };
+  program.hook("preAction", async (_program, action) => {
+    const top = topCommand(action);
+    if (NO_SELF_UPDATE.has(top)) return;
+    if (self && !updatedFrom) {
+      const latest = await createApiClient(
+        apiUrl(),
+        undefined,
+        cliHeaders(plat),
+      )
+        .GET("/version")
+        .then((r) => r.data?.platFingerprint)
+        .catch(() => undefined);
+      if (latest && latest !== plat) throw new PlatOutdated();
+    }
+    if (updatedFrom && top !== "sync") {
+      const lines = await syncMachine(true);
+      io.stderr(
+        `${[`plat: updated itself to the platform's (${updatedFrom} -> ${PLATFORM_VERSION})`, ...lines].join("\n")}\n`,
+      );
+    }
+  });
+
+  // Brings this planning machine up to the platform's (`plat sync`, and after a self-update): the planning skills
+  // when they are not the platform's (always after a self-update: plat carries only some of their text), and the
+  // planning files plat writes in this repo. The lines say what changed; nothing here fails the command.
+  const syncMachine = async (afterUpdate: boolean): Promise<string[]> => {
+    const lines: string[] = [];
+    const cwd = io.cwd ?? process.cwd();
+    const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+    });
+    const repo = top.status === 0 ? top.stdout.trim() : undefined;
+    const home = io.env.HOME ?? homedir();
+    const client = api();
+    const version = await client
+      .GET("/version")
+      .then((r) => r.data)
+      .catch(() => undefined);
+
+    // absolute paths: the home directory and the repo's top, wherever plat runs
+    const readAbsolute = async (path: string) => readFileSync(path, "utf8");
+    const stale =
+      afterUpdate ||
+      (await staleSkills(readAbsolute, home, repo ?? cwd)).length > 0;
+    if (stale) {
+      try {
+        lines.push(
+          ...updateSkills({
+            home,
+            repo,
+            commit: version?.platformCommit ?? null,
+            run: io.run ?? runCommand,
+          }),
+        );
+      } catch (error) {
+        lines.push(
+          `skills: could not update them: ${(error as Error).message}; run plat update`,
+        );
+      }
+    } else {
+      lines.push("skills: nothing to update");
+    }
+
+    const doc = repo
+      ? await readAbsolute(join(repo, TRACKER_DOC_PATH)).catch(() => null)
+      : null;
+    const target = doc ? trackerDocTarget(doc) : null;
+    if (!repo || !target) {
+      lines.push(
+        "planning files: none here (this is not a planning repo set up with afk-setup)",
+      );
+      return lines;
+    }
+    const project = await client.GET("/projects/{projectId}", {
+      params: { path: { projectId: target.project } },
+    });
+    if (!project.data) {
+      lines.push(
+        `planning files: could not load project ${target.project}, so they were left as they are`,
+      );
+      return lines;
+    }
+    const written = writePlanningFiles(
+      repo,
+      afkHome(io.env),
+      project.data,
+      target.repo,
+    );
+    const changed = [
+      ...(written.trackerDoc === "unchanged"
+        ? []
+        : [`${TRACKER_DOC_PATH} ${written.trackerDoc}`]),
+      ...Object.entries(written.docs)
+        .filter(([, state]) => state !== "unchanged")
+        .map(([path, state]) => `${path} ${state}`),
+    ];
+    lines.push(
+      changed.length === 0
+        ? "planning files: up to date"
+        : `planning files: ${changed.join(", ")}`,
+    );
+    if (written.tracked.length > 0)
+      lines.push(
+        `planning files: git tracks ${written.tracked.join(", ")} here, so the change shows in git status: commit it`,
+      );
+    return lines;
+  };
 
   // The planning docs kept for specs that are merged or cancelled by now go, whatever the command.
   program.hook("preAction", async () => {
@@ -706,25 +855,17 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const lines: string[] = [];
 
       // plat: the platform's copy, written next to this one and moved over it.
-      const path = io.platPath ?? process.argv[1];
-      const self = path ? realpathSync(path) : "";
-      if (!self || self.endsWith(".ts")) {
+      if (!self) {
         lines.push(
           "plat: runs from a checkout of the platform, so it is as new as that checkout (git pull there)",
         );
       } else {
-        const response = await fetch(`${base}/cli/plat.mjs`).catch(() => null);
-        if (!response?.ok)
-          throw new Failure(
-            `could not download plat from ${base}/cli/plat.mjs (${response ? `HTTP ${response.status}` : "the platform does not answer"})`,
-          );
-        const text = await response.text();
-        if (text === readFileSync(self, "utf8")) {
+        const replaced = await replacePlat(self, base).catch((error) => {
+          throw new Failure((error as Error).message);
+        });
+        if (!replaced) {
           lines.push(`plat: up to date (${PLATFORM_VERSION})`);
         } else {
-          const next = `${self}.next`;
-          writeFileSync(next, text, { mode: 0o755 });
-          renameSync(next, self);
           const version = await platformVersionAt(base);
           lines.push(
             `plat: replaced with the platform's${version ? ` (${version})` : ""}`,
@@ -737,7 +878,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         cwd: io.cwd ?? process.cwd(),
         encoding: "utf8",
       });
-      const platform = await createApiClient(base, undefined, cliHeaders())
+      const platform = await createApiClient(base, undefined, cliHeaders(plat))
         .GET("/version")
         .then((r) => r.data)
         .catch(() => undefined);
@@ -753,6 +894,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       } catch (error) {
         throw new Failure(`${lines.join("\n")}\n${(error as Error).message}`);
       }
+      print({ lines }, lines.join("\n"));
+    });
+
+  program
+    .command("sync")
+    .description(
+      "bring this planning machine up to the platform's: plat itself, the planning skills and the planning files plat writes in this repo. plat does it by itself when the platform hands out a newer plat; the planning conventions say to run it before planning",
+    )
+    .action(async () => {
+      const lines = await syncMachine(Boolean(updatedFrom));
+      if (updatedFrom)
+        lines.unshift(
+          `plat: updated itself to the platform's (${updatedFrom} -> ${PLATFORM_VERSION})`,
+        );
       print({ lines }, lines.join("\n"));
     });
 
@@ -954,31 +1109,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
 
         const after = await loadProject(projectId);
         if (!after.data) throw failureFrom(after.response, after.error);
-        const doc = renderTrackerDoc(after.data, plan.repos[0]?.name as string);
-        const state =
-          before === null ? "new" : before === doc ? "unchanged" : "updated";
-        if (state !== "unchanged") {
-          mkdirSync(dirname(docPath), { recursive: true });
-          writeFileSync(docPath, doc);
-        }
-        const written =
-          state === "unchanged" || !trackerDocTracked ? [] : [TRACKER_DOC_PATH];
-        const docStates: Record<string, string> = {};
-        for (const agentDoc of agentDocs) {
-          const docState =
-            agentDoc.before === null
-              ? "new"
-              : agentDoc.before === agentDoc.after
-                ? "unchanged"
-                : "updated";
-          docStates[agentDoc.path] = docState;
-          if (docState === "unchanged") continue;
-          const target = join(planning.dir, agentDoc.path);
-          mkdirSync(dirname(target), { recursive: true });
-          writeFileSync(target, agentDoc.after);
-          if (agentDoc.tracked) written.push(agentDoc.path);
-        }
-        excludeLocally(planning.dir, localPaths);
+        const {
+          trackerDoc: state,
+          docs: docStates,
+          tracked: written,
+        } = writePlanningFiles(
+          planning.dir,
+          afkHome(io.env),
+          after.data,
+          plan.repos[0]?.name as string,
+        );
         const lines = [
           `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
           ...(registered.length > 0
@@ -1780,6 +1920,38 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     return 0;
   } catch (error) {
     if (error instanceof CommanderError) return error.exitCode;
+    if (error instanceof PlatOutdated) {
+      // a plat run from a checkout, or one that just replaced itself, does not try again
+      if (!self || updatedFrom) {
+        report(
+          new Failure(`${error.message}: run plat update`, {
+            error: `${error.message}: run plat update`,
+            code: PLAT_OUTDATED,
+          }),
+          json(),
+          io,
+        );
+        return 1;
+      }
+      try {
+        await replacePlat(self, apiUrl());
+      } catch (failure) {
+        report(
+          new Failure(
+            `${error.message}, and it could not replace itself: ${(failure as Error).message}`,
+          ),
+          json(),
+          io,
+        );
+        return 1;
+      }
+      io.stderr(
+        `plat: replaced itself with the platform's plat (was ${PLATFORM_VERSION}); running the command again\n`,
+      );
+      return (io.rerun ?? rerunPlat)(self, argv, {
+        [UPDATED_FROM]: PLATFORM_VERSION,
+      });
+    }
     if (error instanceof Failure) {
       report(error, json(), io);
       return 1;
@@ -1804,6 +1976,9 @@ function ticketIdOf(text: string): number {
 }
 
 const withoutTrailingSlash = (url: string) => url.replace(/\/+$/, "");
+
+// Commands that do not replace plat first: they look at or set plat itself.
+const NO_SELF_UPDATE = new Set(["update", "version", "connect", "help"]);
 
 // The platform version answering at `address`, or undefined when nothing does.
 const platformVersionAt = (address: string): Promise<string | undefined> =>

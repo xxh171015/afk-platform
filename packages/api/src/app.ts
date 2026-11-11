@@ -13,6 +13,7 @@ import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerMetricsRoutes } from "./http/metrics-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
+import { refuseOutdatedPlat } from "./http/plat-freshness.ts";
 import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
 import { LogStore } from "./logs/log-store.ts";
@@ -105,6 +106,8 @@ export function createApp(options: AppOptions): OpenAPIHono {
     "*",
     cors({ origin: (origin) => (LOCAL_ORIGIN.test(origin) ? origin : null) }),
   );
+  // An older plat does not publish (http/plat-freshness.ts).
+  app.use("*", refuseOutdatedPlat);
   registerPlanningRoutes(app, context);
   registerCliRoutes(app);
   registerWorkerRoutes(app, context);

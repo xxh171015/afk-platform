@@ -86,17 +86,16 @@ export async function trackerDocWarnings(
       ];
 }
 
-/**
- * Warnings about the planning machine's skills: to-spec and to-tickets must be the snapshot's text byte for byte (the
- * pinned SHA), and afk-setup the one this platform carries. A skill installed in the planning repo
- * (`repo`, project level) is the one the agent uses, so it is judged alone; otherwise the user's.
- */
-export async function skillsWarnings(
+// Per skill this platform has the text of: whether it is installed, and at which level, and whether it is the
+// platform's. A skill installed in the planning repo (`repo`, project level) is the one the agent uses, so it is
+// judged alone; otherwise the user's.
+async function skillVerdicts(
   readFile: ReadFile,
   home: string,
-  repo = ".",
-): Promise<string[]> {
-  const warnings: string[] = [];
+  repo: string,
+): Promise<
+  { skill: string; verdict: { level: SkillsLevel; ok: boolean } | undefined }[]
+> {
   const wanted = [
     ...CHECKED_SKILLS.map((skill) => ({
       skill,
@@ -108,6 +107,7 @@ export async function skillsWarnings(
     ["project", repo],
     ["user", home],
   ];
+  const verdicts = [];
   for (const { skill, expected } of wanted) {
     let verdict: { level: SkillsLevel; ok: boolean } | undefined;
     for (const [level, root] of levels) {
@@ -123,16 +123,40 @@ export async function skillsWarnings(
         break;
       }
     }
-    if (verdict?.ok) continue;
-    const where = (level: SkillsLevel) =>
-      level === "project" ? "in this repo" : "on this machine";
-    warnings.push(
+    verdicts.push({ skill, verdict });
+  }
+  return verdicts;
+}
+
+/**
+ * Warnings about the planning machine's skills: to-spec and to-tickets must be the snapshot's text byte for byte (the
+ * pinned SHA), and afk-setup the one this platform carries.
+ */
+export async function skillsWarnings(
+  readFile: ReadFile,
+  home: string,
+  repo = ".",
+): Promise<string[]> {
+  const where = (level: SkillsLevel) =>
+    level === "project" ? "in this repo" : "on this machine";
+  return (await skillVerdicts(readFile, home, repo))
+    .filter(({ verdict }) => !verdict?.ok)
+    .map(({ skill, verdict }) =>
       verdict
         ? `warning: the ${skill} skill ${where(verdict.level)} is not the version this platform uses: ${skillsFix(verdict.level)}`
         : `warning: the ${skill} skill was not found in this repo or under ${SKILLS_DIRS.map((d) => `~/${d}`).join(", ")}: ${skillsFix(undefined)}`,
     );
-  }
-  return warnings;
+}
+
+/** The skills installed on this machine that are not the platform's version (`plat sync` installs them again). */
+export async function staleSkills(
+  readFile: ReadFile,
+  home: string,
+  repo = ".",
+): Promise<string[]> {
+  return (await skillVerdicts(readFile, home, repo))
+    .filter(({ verdict }) => verdict && !verdict.ok)
+    .map(({ skill }) => skill);
 }
 
 /** A warning when this plat is older or newer than the platform it talks to. */

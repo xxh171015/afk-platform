@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -70,5 +70,29 @@ describe("plat as the platform hands it out", () => {
     expect(doc.stderr).toBe("");
     const project = await (await fetch(`${ws.api.url}/projects/1`)).json();
     expect(doc.stdout).toBe(renderTrackerDoc(project, "backend"));
+  }, 60_000);
+});
+
+describe("plat as the platform hands it out, once the platform hands out a newer one", () => {
+  it("replaces itself and runs the command again, with nobody asked", async () => {
+    const latest = await (await fetch(`${ws.api.url}/cli/plat.mjs`)).text();
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    await ws.plat(backend.dir, ["init", "--yes"]);
+    // the same plat with one more line: what an older plat looks like to the platform
+    const plat = join(dir, "plat");
+    writeFileSync(plat, `${latest}// older\n`, { mode: 0o755 });
+
+    const shown = await run(plat, ["project", "show", "1"], {
+      cwd: backend.dir,
+      env: { ...process.env, AFK_API_URL: ws.api.url, HOME: dir },
+    });
+
+    expect(readFileSync(plat, "utf8")).toBe(latest);
+    expect(shown.stderr).toContain("replaced itself with the platform's plat");
+    expect(shown.stderr).toContain("plat: updated itself to the platform's");
+    expect(shown.stdout).toContain("backend");
   }, 60_000);
 });

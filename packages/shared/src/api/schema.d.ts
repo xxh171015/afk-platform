@@ -1339,7 +1339,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The platform's version, the mattpocock/skills commit it pins, and the commit of the platform's repo it runs (null when unknown) */
+        /** @description The platform's version, the mattpocock/skills commit it pins, the commit of the platform's repo it runs (null when unknown), and the sha256 of the plat it hands out (null when it cannot build one) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1349,6 +1349,7 @@ export interface paths {
               platformVersion: string;
               skillsSha: string;
               platformCommit: string | null;
+              platFingerprint: string | null;
             };
           };
         };
