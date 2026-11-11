@@ -1,15 +1,21 @@
 import { cn } from "./lib/utils.ts";
 
+// What a ticket retry that keeps the work does with the note, or without one.
+export const TICKET_RETRY_HINT =
+  "保留已有工作时：不写说明，从门禁接着跑；写了说明，agent 按说明接着改。";
+
 export function RetryNoteField({
   id,
   value,
   onChange,
+  hint,
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  hint?: string;
 }) {
-  return (
+  const field = (
     <label className="grid gap-1.5 text-[13px]" htmlFor={id}>
       这一次 Run 的说明
       <textarea
@@ -22,6 +28,13 @@ export function RetryNoteField({
         )}
       />
     </label>
+  );
+  if (!hint) return field;
+  return (
+    <div className="grid gap-1">
+      {field}
+      <p className="text-xs text-muted-foreground">{hint}</p>
+    </div>
   );
 }
 

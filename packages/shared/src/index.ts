@@ -56,6 +56,7 @@ export {
   FINAL_E2E_FAILED,
   failureSourceOf,
   HUMAN_ACTIONS,
+  isAgentProviderUnavailable,
   isPlatformProblem,
   PAUSE_REASON_LABELS,
   PAUSE_REASONS,

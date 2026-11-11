@@ -23,6 +23,7 @@ export interface SandcastleConfig {
   skillsMount: string; // host directory with the pinned skills
   cursorApiKey: string;
   logDir: string; // where the raw logs of this task go
+  sandboxEnv?: Record<string, string>; // set in every sandbox, agent or gate (AFK_NPM_REGISTRIES)
   onNote?: (line: string) => void; // things worth a line in the run log
 }
 
@@ -78,13 +79,16 @@ const provider = (
   ctxDir?: string,
   refs?: readonly { name: string; dir: string }[],
   placement?: SandboxPlacement,
-) =>
-  docker({
+) => {
+  const env = { ...config.sandboxEnv, ...placement?.env };
+  return docker({
     imageName: config.image,
     mounts: sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
     // on an integration environment's network, which reaches its services by name and the model API as well
-    ...(placement ? { network: placement.network, env: placement.env } : {}),
+    ...(placement ? { network: placement.network } : {}),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
   });
+};
 
 export function classifyAgentError(error: unknown): {
   message: string;

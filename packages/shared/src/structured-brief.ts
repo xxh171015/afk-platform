@@ -82,7 +82,7 @@ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
   "integration-unknown-side": "看证据后指定责任仓库或取消",
   "integration-environment-failed": "先修好环境再重试",
   "upstream-cancelled": "取消这张票，或导入替代票",
-  "job-failed": "看作业失败原因，环境好了再重试",
+  "job-failed": "看作业失败原因，环境或额度恢复后直接重试",
 };
 
 export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
@@ -108,7 +108,6 @@ const CONTINUE_WITH_NOTE = new Set<string>([
   "post-merge-gate-failed",
   "merge-conflict",
   "contract-copy-mismatch",
-  "job-failed",
 ]);
 
 function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
@@ -177,6 +176,15 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
       {
         label: "取消这张票",
         command: `plat ticket cancel ${ticket}`,
+      },
+    ];
+  }
+  if (input.reason === "job-failed") {
+    // the worker could not run the stage: nothing for the agent to change, so no note
+    return [
+      {
+        label: "恢复后重试",
+        command: `plat ticket retry ${ticket} --mode continue`,
       },
     ];
   }

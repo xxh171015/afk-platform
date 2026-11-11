@@ -311,7 +311,7 @@ interface TicketRow {
   state: TicketState;
   content_version: number;
   contract_sha: string | null;
-  resume_stage: "e2e" | null;
+  resume_stage: "e2e" | "gate" | null;
 }
 
 // Whatever transaction it runs in, what a pass changes is the scheduler's doing.
@@ -433,9 +433,16 @@ async function schedulingPass(
         repoId: ticket.repo_id,
         contentVersion: ticket.content_version,
       },
-      // a ticket that is merged already (its e2e failed, and the fix is done) starts again from its e2e
+      // a ticket that is merged already (its e2e failed, and the fix is done) starts again from its e2e; one retried
+      // without a note, whose agent had finished its branch, starts again from the gate
       ticket.resume_stage ?? "implement",
     );
+    // the e2e stays the ticket's starting point; the gate is a retry's, used once
+    if (ticket.resume_stage === "gate")
+      await client.query(
+        "UPDATE tickets SET resume_stage = NULL WHERE id = $1",
+        [ticket.id],
+      );
     usage.project += 1;
     usage.repos.set(ticket.repo_id, repoUsed + 1);
     usage.specs.set(specId, held + 1);

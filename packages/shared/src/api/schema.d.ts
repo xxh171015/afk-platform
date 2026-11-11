@@ -2098,6 +2098,94 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/worker/jobs/{id}/gate-result": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            workerId: string;
+            attempt: number;
+            commit?: string;
+            tree?: string;
+            configBlob?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Accepted */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              gate: {
+                commitSha: string;
+                steps: {
+                  name: string;
+                  exitCode: number;
+                  ms: number;
+                }[];
+                counts: {
+                  tests: number;
+                  skipped: number;
+                };
+                testCases?: {
+                  name: string;
+                  classname: string;
+                  /** @enum {string} */
+                  status: "passed" | "failed" | "skipped";
+                }[];
+              } | null;
+            };
+          };
+        };
+        /** @description No such job */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Not the lease holder at the current attempt (fencing) */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/worker/jobs/{id}/fail": {
     parameters: {
       query?: never;
@@ -3833,6 +3921,10 @@ export interface paths {
                 completedAt: string;
               }[];
               status: {
+                agentsPaused: {
+                  since: string;
+                  reason: string;
+                } | null;
                 logDirBytes: number;
                 apiFreeBytes: number;
                 /** @enum {string} */
@@ -3862,6 +3954,43 @@ export interface paths {
     };
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/agents/resume": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Agent jobs are claimed again; resumed is false when they were not paused */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              resumed: boolean;
+            };
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;

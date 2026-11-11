@@ -1,6 +1,7 @@
 import { HOST_KINDS } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
+import { pauseForProvider } from "../agents-pause.ts";
 import type { AppContext } from "../app.ts";
 import { claimsStopped, refreshDiskStatus } from "../disk.ts";
 import {
@@ -56,6 +57,7 @@ import {
   heartbeat,
   isLeaseLive,
 } from "../jobs/queue.ts";
+import type { Notice } from "../notify/notices.ts";
 import {
   buildPlanningTask,
   readPlanningPayload,
@@ -68,6 +70,7 @@ import {
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
 import { recordJobFailure } from "../stages/failures.ts";
+import { findPassingGate } from "../stages/gate-records.ts";
 import { markClaimed, recordStageResult } from "../stages/results.ts";
 import { recordWorkerCleanup } from "../workers.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
@@ -587,6 +590,43 @@ const failRoute = holderRoute(
   z.object({ ok: z.literal(true) }),
 );
 
+// An earlier passing gate of the job's repo: by commit (a baseline), or by tree and gates.yaml blob (to reuse).
+const gateResultRoute = holderRoute(
+  "gate-result",
+  {
+    commit: z.string().min(1).max(100).optional(),
+    tree: z.string().min(1).max(100).optional(),
+    configBlob: z.string().min(1).max(100).optional(),
+  },
+  z.object({
+    gate: z
+      .object({
+        commitSha: z.string(),
+        steps: z.array(
+          z.object({
+            name: z.string(),
+            exitCode: z.number().int(),
+            ms: z.number(),
+          }),
+        ),
+        counts: z.object({
+          tests: z.number().int(),
+          skipped: z.number().int(),
+        }),
+        testCases: z
+          .array(
+            z.object({
+              name: z.string(),
+              classname: z.string(),
+              status: z.enum(["passed", "failed", "skipped"]),
+            }),
+          )
+          .optional(),
+      })
+      .nullable(),
+  }),
+);
+
 function refusal(outcome: Exclude<HolderOutcome, { status: "ok" }>) {
   return outcome.status === "not-found"
     ? ({ body: { error: "no such job" }, status: 404 } as const)
@@ -963,10 +1003,34 @@ export function registerWorkerRoutes(
     return c.json({ held }, 200);
   });
 
+  app.openapi(gateResultRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { workerId, attempt, commit, tree, configBlob } = c.req.valid("json");
+    const held = await checkHolder(context.pool, {
+      jobId: id,
+      workerId,
+      attempt,
+      now: context.clock(),
+    });
+    if (held.status !== "ok") {
+      const { body, status } = refusal(held);
+      return c.json(body, status);
+    }
+    const lookup = commit
+      ? { commit }
+      : tree && configBlob
+        ? { tree, configBlob }
+        : undefined;
+    if (!lookup) return c.json({ gate: null }, 200);
+    const gate = await findPassingGate(context.pool, id, lookup);
+    return c.json({ gate }, 200);
+  });
+
   app.openapi(failRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { workerId, attempt, error } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
+    let notice: Notice | undefined;
     const outcome = await aroundJob(context, id, () =>
       inWorkerReport(context, id, async (client) => {
         const failed = await failJob(
@@ -979,6 +1043,17 @@ export function registerWorkerRoutes(
             "SELECT id, type, payload FROM jobs WHERE id = $1",
             [id],
           );
+          // the agents' provider refuses work: not this stage's failure, the job waits until a person resumes
+          const paused = await pauseForProvider(
+            client,
+            job.rows[0],
+            error,
+            context.clock(),
+          );
+          if (paused !== false) {
+            notice = paused;
+            return failed;
+          }
           const failure = await recordJobFailure(
             client,
             job.rows[0],
@@ -1004,6 +1079,7 @@ export function registerWorkerRoutes(
       const { body, status } = refusal(outcome);
       return c.json(body, status);
     }
+    if (notice) await context.notifications.notify(notice);
     return c.json({ ok: true as const }, 200);
   });
 }

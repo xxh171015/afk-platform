@@ -95,8 +95,8 @@ export const FAILURE_SOURCE_OF_REASON: Record<
 export const EXTERNAL_ERROR_PATTERNS = [
   "(github|gitlab).*(answered |http |[(])(401|403|5[0-9][0-9])([^0-9]|$)",
   "authentication required|not authenticated|cursor-agent login|unauthorized|invalid username or token",
-  "rate.?limit|too many requests|usage limit|http 429",
-  "enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake timeout",
+  "rate.?limit|too many requests|usage limit|out of usage|increase limits|http 429",
+  "enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake",
   "err_pnpm_meta_fetch_fail|registry\\.npmjs\\.org|registry\\.npmmirror\\.com",
 ] as const;
 
@@ -115,6 +115,20 @@ export function failureSourceOf(
   if (reason === "job-failed" && error && EXTERNAL.some((re) => re.test(error)))
     return "external";
   return source;
+}
+
+// Signs that the agent's provider will not take work from anyone for a while: its usage ran out or it refuses the key.
+// Such a failure is not the stage's: every agent job waits until a person resumes them (agents-pause.ts in the api).
+const AGENT_PROVIDER_UNAVAILABLE = [
+  /out of usage|increase limits|usage limit/i,
+  /unauthorized request|invalid api key|cursor-agent login|not authenticated/i,
+];
+
+export function isAgentProviderUnavailable(error: string): boolean {
+  return (
+    /AgentError|cursor/i.test(error) &&
+    AGENT_PROVIDER_UNAVAILABLE.some((re) => re.test(error))
+  );
 }
 
 // The platform's own problems and outside services' are listed after the specs' own in the waiting queue, as a

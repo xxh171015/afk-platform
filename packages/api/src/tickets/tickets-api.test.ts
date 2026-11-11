@@ -165,6 +165,72 @@ describe("retry", () => {
     ]);
   });
 
+  describe("of a branch an agent finished", () => {
+    // implement pushed its branch, the gate passed, and the review could not run three times (the agent's provider
+    // was out of usage): the work is there, only the review is missing
+    async function blockedInReview() {
+      await runningSpec([ticket("a")]);
+      await stage("implement", { outcome: "done", run: { headSha: "h1" } });
+      await stage("gate", { outcome: "passed" });
+      for (let i = 0; i < 3; i++) {
+        const job = (await worker.claim()).body.job as Claimed;
+        expect(job.payload.stage).toBe("review");
+        await worker.fail(job.id, job.attempt, "out of usage");
+      }
+      expect(await states()).toEqual(["1:blocked/job-failed"]);
+    }
+    const stagesQueued = async () =>
+      (
+        await db.pool.query(
+          "SELECT payload->>'stage' AS stage FROM jobs WHERE state = 'queued' AND payload ? 'ticketId' ORDER BY id",
+        )
+      ).rows.map((r) => r.stage);
+
+    it("continue without a note goes on from the gate, once", async () => {
+      await blockedInReview();
+      const result = await call("POST", "/tickets/1/retry", {
+        mode: "continue",
+      });
+      expect(result).toMatchObject({ status: 200, body: { state: "queued" } });
+      expect(await stagesQueued()).toEqual(["gate"]);
+      const resume = await db.pool.query(
+        "SELECT resume_stage FROM tickets WHERE id = 1",
+      );
+      expect(resume.rows[0].resume_stage).toBeNull(); // used up by the gate job
+      await stage("gate", { outcome: "passed" });
+      expect(await row(1)).toMatchObject({ state: "running" });
+      await stage("review", { outcome: "pass" });
+      await stage("merge", { outcome: "merged", headSha: "m1" });
+      expect(await states()).toEqual(["1:done"]);
+    });
+
+    it("continue with a note starts at implement, so the agent reads it", async () => {
+      await blockedInReview();
+      await call("POST", "/tickets/1/retry", {
+        mode: "continue",
+        note: "use the other table",
+      });
+      expect(await stagesQueued()).toEqual(["implement"]);
+    });
+
+    it("restart starts at implement", async () => {
+      await blockedInReview();
+      await call("POST", "/tickets/1/retry", { mode: "restart" });
+      expect(await stagesQueued()).toEqual(["implement"]);
+    });
+
+    it("a gate job that cannot run is tried again, and blocks the ticket like any other", async () => {
+      await blockedInReview();
+      await call("POST", "/tickets/1/retry", { mode: "continue" });
+      for (let i = 0; i < 3; i++) {
+        const job = (await worker.claim()).body.job as Claimed;
+        expect(job.payload.stage).toBe("gate");
+        await worker.fail(job.id, job.attempt, "gate setup failed (exit 1)");
+      }
+      expect(await states()).toEqual(["1:blocked/job-failed"]);
+    });
+  });
+
   it("restart asks the next implement run to start from the integration branch, once", async () => {
     await blockedAfterFixes();
     await call("POST", "/tickets/1/retry", { mode: "restart" });
@@ -2121,7 +2187,7 @@ describe("structured brief on blocked tickets", () => {
       step: "",
       summary: "作业失败",
       evidence: {},
-      recommendedAction: "看作业失败原因，环境好了再重试",
+      recommendedAction: "看作业失败原因，环境或额度恢复后直接重试",
       commands: [{ label: "再跑收尾", command: "plat spec retry-final S-1" }],
     });
     expect(queue.body.finalizations[0].brief).toBeNull();

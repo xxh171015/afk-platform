@@ -16,9 +16,10 @@ import {
   type Environment,
   EnvironmentError,
   type EnvironmentRepo,
-  type GateCache,
   type GateOutcome,
+  type GateRecords,
   type GateSandbox,
+  GateSetupError,
   git,
   gitOrThrow,
   hasRef,
@@ -28,6 +29,7 @@ import {
   projectOf,
   promptFor,
   ReviewOutputSchema,
+  type RunGateInput,
   reclaimEnvironments,
   renderContext,
   reviewFindings,
@@ -60,8 +62,7 @@ export interface ExecutorDeps {
   snapshots: SnapshotStore;
   push: PushFn;
   credentials?: Credentials; // tokens for the code host; without them git uses whatever it is already set up with
-  api: Pick<WorkerApi, "prePush">; // supplied by the worker loop
-  gateCache: GateCache;
+  api: Pick<WorkerApi, "prePush" | "gateResult">; // supplied by the worker loop
   // What an integration environment needs: docker, and the limit on how many a worker runs at once.
   docker?: DockerCli;
   environments?: EnvironmentLimiter;
@@ -568,6 +569,8 @@ function gateFacts(outcome: GateOutcome) {
   return {
     commitSha: outcome.commitSha,
     configSha: outcome.configSha,
+    treeSha: outcome.treeSha,
+    configBlob: outcome.configBlob,
     commandResults: outcome.steps,
     ...(outcome.counts
       ? {
@@ -580,10 +583,36 @@ function gateFacts(outcome: GateOutcome) {
 }
 
 function logGate(log: (line: string) => void, outcome: GateOutcome) {
+  if (outcome.reusedFrom)
+    log(
+      `gate: reused the result of ${outcome.reusedFrom}: the same tree under the same gates.yaml`,
+    );
   for (const step of outcome.steps)
     log(`gate: ${step.name} exit ${step.exitCode} (${step.ms} ms)`);
   for (const [name, text] of Object.entries(outcome.stepLogs))
     log(`--- ${name} ---\n${text}`);
+}
+
+// Earlier gates of the job's repo, as the platform stored them.
+function gateRecords(deps: ExecutorDeps, context: StageContext): GateRecords {
+  return {
+    findPassed: (tree, configBlob) =>
+      deps.api.gateResult(context.job, { tree, configBlob }),
+    countsAt: async (commit) =>
+      (await deps.api.gateResult(context.job, { commit }))?.counts,
+  };
+}
+
+// A gate whose setup failed (dependencies would not install, a database would not start) says nothing about the
+// change: the job fails and is dispatched again, instead of an agent being sent to fix the code.
+async function runGateStep(input: RunGateInput): Promise<GateOutcome> {
+  try {
+    return await runGate(input);
+  } catch (error) {
+    if (error instanceof GateSetupError)
+      throw new InfrastructureError(error.message);
+    throw error;
+  }
 }
 
 async function gate(
@@ -641,16 +670,25 @@ async function gate(
     };
   }
 
+  // The branch is held to the tests of the commit it starts from: tests that other tickets merged since are not
+  // on it yet, and its merge candidate is held to them instead.
+  const records = gateRecords(deps, context);
+  const baseline = await records.countsAt(baseSha);
+  log(
+    baseline
+      ? `gate: baseline ${baseline.tests} tests, ${baseline.skipped} skipped (the branch's base ${baseSha.slice(0, 8)})`
+      : `gate: no baseline (the branch's base ${baseSha.slice(0, 8)} was never gated)`,
+  );
   // The gate configuration comes from the integration branch, not from the ticket's branch.
-  const outcome = await runGate({
+  const outcome = await runGateStep({
     repoDir: mainDir,
     sandbox: deps.makeGateSandbox(slot.dir),
     signal: context.signal,
     ref: agent,
     commitSha: tip(mainDir, agent),
     configSha: tip(mainDir, integration),
-    ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
-    cache: deps.gateCache,
+    ...(baseline ? { baseline } : {}),
+    records,
   });
   if (context.signal.aborted)
     throw new JobLostError("the lease was lost during the gate");
@@ -712,7 +750,7 @@ async function gateCommit(
   gitOrThrow(mainDir, ["update-ref", `refs/heads/${gateBranch}`, commit.sha]);
   try {
     bringBranches(slot, mainDir, [gateBranch]);
-    const outcome = await runGate({
+    const outcome = await runGateStep({
       repoDir: mainDir,
       sandbox: deps.makeGateSandbox(slot.dir),
       signal: context.signal,
@@ -720,7 +758,7 @@ async function gateCommit(
       commitSha: commit.sha,
       configSha: commit.configSha,
       ...(commit.baseline ? { baseline: commit.baseline } : {}),
-      cache: deps.gateCache,
+      records: gateRecords(deps, context),
     });
     if (context.signal.aborted) throw new JobLostError(lostMessage);
     logGate(context.log, outcome);

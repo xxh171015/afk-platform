@@ -56,6 +56,7 @@ export async function withCredentials(
     ),
     push: (request) => deps.push(request, forGit(repoUrl, current)),
     api: {
+      ...deps.api,
       async prePush(job) {
         const holding = await deps.api.prePush(job);
         if (holding === "held") {

@@ -18,7 +18,6 @@ import {
   tokensByHost,
 } from "@afk/host";
 import {
-  GateCache,
   realDocker,
   SANDBOX_SKILLS_DIR,
   SandcastleAgentRunner,
@@ -154,6 +153,9 @@ const sandcastle = (cwd: string): SandcastleConfig => ({
   model: config.model,
   skillsMount: SANDBOX_SKILLS_DIR,
   cursorApiKey: config.cursorApiKey,
+  ...(config.npmRegistries.length > 0
+    ? { sandboxEnv: { AFK_NPM_REGISTRIES: config.npmRegistries.join(" ") } }
+    : {}),
   logDir: join(
     config.home,
     "sandbox-logs",
@@ -255,7 +257,6 @@ await runWorker({
       gitUser: (url) =>
         gitlabHosts.has(repoHost(url) ?? "") ? "oauth2" : undefined,
     },
-    gateCache: new GateCache(),
     docker: realDocker,
     environments: new EnvironmentLimiter(),
     makeAgentRunner: (slotDir) =>

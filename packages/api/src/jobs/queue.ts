@@ -95,6 +95,8 @@ export async function claimJob(
          WHERE j.state = 'queued'
            AND (j.not_before IS NULL OR j.not_before <= $4)
            AND j.required_capabilities <@ $3::text[]
+           -- while the agents' provider refuses work, no agent job is handed out (agents-pause.ts)
+           AND NOT (j.type = 'agent-run' AND EXISTS (SELECT 1 FROM instance WHERE agents_paused_at IS NOT NULL))
            AND (j.lock_key IS NULL OR (
              -- the key is free: nobody holds a live lease on it ...
              NOT EXISTS (SELECT 1 FROM jobs h WHERE h.lock_key = j.lock_key AND h.state = 'running' AND h.lease_expires_at > $4)

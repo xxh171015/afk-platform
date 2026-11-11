@@ -289,6 +289,8 @@ P0/P1 是建议优先级，不表示已排期。每项先有可观察的基线�
 
 ### 2.8 门禁提速：结果按代码树复用，依赖只装一次（P2，和 #159 一起）
 
+> 进展（2026-11-10）：结果按「代码树 SHA + `gates.yaml` blob SHA」存进 `gate_results` 并复用，基线每次重新比较（`fix/gate-and-retry`）。依赖缓存还没做。
+
 **现状。**
 
 - 合并阶段总会在候选提交上整跑一遍门禁（[executor.ts](../packages/worker/src/executor.ts) 合并阶段的候选门禁）。票从开工到合并，集成分支如果没动过，候选的代码树和票分支上刚过门禁的那棵完全一样，配置和基线也一样，这一遍是重复的。门禁缓存按提交 SHA 记，而且只在 worker 进程的内存里（[gate.ts](../packages/pipeline/src/gate.ts) 的 `GateCache`）；候选是新的合并提交，永远命不中。

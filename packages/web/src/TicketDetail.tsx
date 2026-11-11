@@ -60,7 +60,11 @@ import { DETAIL_POLL_MS } from "./live.ts";
 import { TicketBody } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
-import { RetryNoteField, retryTicketBody } from "./RetryNote.tsx";
+import {
+  RetryNoteField,
+  retryTicketBody,
+  TICKET_RETRY_HINT,
+} from "./RetryNote.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { TicketEdit } from "./TicketEdit.tsx";
@@ -865,6 +869,7 @@ function TicketRetry({
         id={`retry-note-ticket-${displayId}`}
         value={note}
         onChange={setNote}
+        hint={TICKET_RETRY_HINT}
       />
       <div className="flex flex-wrap gap-2">
         <Button

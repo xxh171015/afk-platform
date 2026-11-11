@@ -51,6 +51,7 @@ export const emptyWorkbench = {
   awaitingAcceptance: [] as unknown[],
   recentlyCompleted: [] as unknown[],
   status: {
+    agentsPaused: null as { since: string; reason: string } | null,
     logDirBytes: 0,
     apiFreeBytes: 20 * 1024 ** 3,
     diskLevel: "ok" as const,

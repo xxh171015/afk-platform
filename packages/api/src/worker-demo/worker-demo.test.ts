@@ -4,13 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAppTokenSource, createGitHubAdapter } from "@afk/host";
 import { FakeGitHub } from "@afk/host/testing";
-import {
-  composePrompt,
-  GateCache,
-  git,
-  gitOut,
-  promptFor,
-} from "@afk/pipeline";
+import { composePrompt, git, gitOut, promptFor } from "@afk/pipeline";
 import {
   type FakeAgentContext,
   FakeAgentRunner,
@@ -174,7 +168,6 @@ function deps(
     repos: undefined as never,
     snapshots: undefined as never,
     push: (request) => pushRef(request),
-    gateCache: new GateCache(),
     makeAgentRunner: (slotDir) =>
       new FakeAgentRunner(slotDir, async (ctx) => {
         const custom = await over.script?.(ctx);
@@ -765,6 +758,48 @@ describe("failures of the worker's own", () => {
   });
 });
 
+describe("a gate whose setup fails", { timeout: 60_000 }, () => {
+  it("is tried again as a job and never sent to gate-fix: the ticket waits for a person after three", async () => {
+    // the setup fails while the registry cannot be reached, which the agent's work stands in for here
+    seed.commit(
+      {
+        ".sandcastle/gates.yaml": `setup: "sh -c 'test ! -f NO_REGISTRY || { echo tls handshake eof; exit 1; }'"\n${GATES}`,
+      },
+      "a setup step",
+    );
+    git(seed.dir, ["push", "--quiet", origin, "main"]);
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) =>
+          ctx.stage === "implement"
+            ? { files: { NO_REGISTRY: "x\n" }, output: DONE }
+            : undefined,
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const runs = await db.pool.query(
+      "SELECT stage, result, output->>'error' AS error FROM runs WHERE ticket_id = 1 ORDER BY id",
+    );
+    expect(runs.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
+      "implement:done",
+      "gate:job-failed",
+      "gate:job-failed",
+      "gate:job-failed",
+    ]);
+    expect(runs.rows[1].error).toContain(
+      "gate setup failed (exit 1)\ntls handshake eof",
+    );
+    const stored = await db.pool.query(
+      "SELECT count(*)::int AS n FROM gate_results",
+    );
+    expect(stored.rows[0].n).toBe(0);
+  });
+});
+
 describe("a person's decisions about a blocked ticket", () => {
   const work = (over?: Parameters<typeof deps>[0]) =>
     runWorker({
@@ -1247,7 +1282,7 @@ describe("the test count guard", () => {
       heartbeatMs: 20,
     });
 
-  it("measures each gate against what the last merge measured: fewer tests than before is a failed gate", async () => {
+  it("measures a ticket's gate against the commit its branch starts from: fewer tests than there is a failed gate", async () => {
     await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
     await work({
       script: (ctx) => {
@@ -1280,6 +1315,73 @@ describe("the test count guard", () => {
     );
   });
 
+  it("does not hold a ticket's branch to tests another ticket merged after it started", {
+    timeout: 60_000,
+  }, async () => {
+    // b and c start together from a's merge (3 tests); b adds two and is merged before c is gated
+    await confirmedSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c", { blocked_by: ["a"] }),
+    ]);
+    const bDone = async () =>
+      (await db.pool.query("SELECT state FROM tickets WHERE id = 2")).rows[0]
+        ?.state === "done";
+    const executor = deps({
+      script: (ctx) =>
+        ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-2`
+          ? { files: { "tests.count": "5\n" }, output: DONE }
+          : undefined,
+    });
+    // c's gate waits until b is merged (a gate holds no agent slot, so b's review and merge go on meanwhile)
+    const make = executor.makeGateSandbox;
+    executor.makeGateSandbox = (slotDir) => {
+      const sandbox = make(slotDir);
+      const open = sandbox.open.bind(sandbox);
+      sandbox.open = async (ref, placement) => {
+        if (ref === `agent/${ID}/T-3`)
+          for (let i = 0; i < 400 && !(await bDone()); i++)
+            await new Promise((r) => setTimeout(r, 50));
+        return open(ref, placement);
+      };
+      return sandbox;
+    };
+    // two jobs at once, and no loop stops while the other is still waiting at c's gate
+    const stop = new AbortController();
+    const working = runWorker({
+      api: workerFor(),
+      executor,
+      heartbeatMs: 20,
+      concurrency: 2,
+      signal: stop.signal,
+    });
+    for (let i = 0; i < 600; i++) {
+      const left = await db.pool.query(
+        "SELECT 1 FROM jobs WHERE state IN ('queued', 'running') AND payload ? 'ticketId'",
+      );
+      if ((await stateOf()).every((t) => t.endsWith(":done")) && !left.rowCount)
+        break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    stop.abort();
+    await working;
+    expect(await stateOf()).toEqual(["1:done", "2:done", "3:done"]);
+    const c = await db.pool.query(
+      "SELECT stage, result FROM runs WHERE ticket_id = 3 AND stage IN ('gate', 'gate-fix', 'merge') ORDER BY id",
+    );
+    // b was merged, with its 5 tests, before c's gate ran
+    const order = await db.pool.query(
+      `SELECT (SELECT max(finished_at) FROM runs WHERE ticket_id = 2 AND stage = 'merge' AND result = 'merged')
+            < (SELECT min(finished_at) FROM runs WHERE ticket_id = 3 AND stage = 'gate') AS first`,
+    );
+    expect(order.rows[0].first).toBe(true);
+    // held to a's 3 tests, not to the 5 b merged; its merge candidate has b's tests and is held to those
+    expect(c.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
+      "gate:passed",
+      "merge:merged",
+    ]);
+  });
+
   it("does not hold the first ticket of a spec to anything: there is nothing to compare with yet", async () => {
     await confirmedSpec([ticket("a")]);
     await work({
@@ -1289,6 +1391,42 @@ describe("the test count guard", () => {
           : undefined,
     });
     expect(await stateOf()).toEqual(["1:done"]);
+  });
+});
+
+describe("reusing a gate result", { timeout: 60_000 }, () => {
+  it("does not gate the merge candidate again when the integration branch did not move", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps();
+    const opened: string[] = [];
+    const make = executor.makeGateSandbox;
+    executor.makeGateSandbox = (slotDir) => {
+      const sandbox = make(slotDir);
+      const open = sandbox.open.bind(sandbox);
+      sandbox.open = (ref, placement) => {
+        opened.push(ref);
+        return open(ref, placement);
+      };
+      return sandbox;
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    // the ticket's gate ran; the candidate had the same tree and gates.yaml, so its gate was the stored one
+    expect(opened).toEqual([`agent/${ID}/T-1`]);
+    const head = gitOut(origin, ["rev-parse", `spec/${ID}/order-export`]);
+    const stored = await db.pool.query(
+      "SELECT tests_total, tree_sha FROM gate_results WHERE commit_sha = $1",
+      [head],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      tests_total: 3,
+      tree_sha: gitOut(origin, ["rev-parse", `${head}^{tree}`]),
+    });
   });
 });
 
@@ -1711,40 +1849,32 @@ describe("the merge stage", () => {
   });
 
   // somebody else pushes to the integration branch while a candidate is under test, `times` times
-  function withIntruder(executor: ReturnType<typeof deps>, times: number) {
+  // Someone else moves the integration branch between the candidate's gate and its push: the race the push's lease
+  // is there for. The intruder's commit is empty, so the candidate on the new tip has the same tree.
+  function withIntruder(api: ReturnType<typeof workerFor>, times: number) {
     const intruder = join(home, "intruder");
     let pushed = 0;
-    const gateSandbox = executor.makeGateSandbox;
-    executor.makeGateSandbox = (slotDir) => {
-      const inner = gateSandbox(slotDir);
-      return {
-        open: async (ref) => {
-          if (ref.startsWith("gate/") && pushed < times) {
-            pushed += 1;
-            rmSync(intruder, { recursive: true, force: true });
-            git(home, ["clone", "--quiet", origin, intruder]);
-            git(intruder, ["checkout", "--quiet", `spec/${ID}/order-export`]);
-            git(intruder, [
-              "-c",
-              "user.name=X",
-              "-c",
-              "user.email=x@y",
-              "commit",
-              "--quiet",
-              "--allow-empty",
-              "-m",
-              `intruder ${pushed}`,
-            ]);
-            git(intruder, [
-              "push",
-              "--quiet",
-              "origin",
-              `spec/${ID}/order-export`,
-            ]);
-          }
-          return inner.open(ref);
-        },
-      };
+    const prePush = api.prePush.bind(api);
+    api.prePush = async (job) => {
+      if (job.type === "merge" && pushed < times) {
+        pushed += 1;
+        rmSync(intruder, { recursive: true, force: true });
+        git(home, ["clone", "--quiet", origin, intruder]);
+        git(intruder, ["checkout", "--quiet", `spec/${ID}/order-export`]);
+        git(intruder, [
+          "-c",
+          "user.name=X",
+          "-c",
+          "user.email=x@y",
+          "commit",
+          "--quiet",
+          "--allow-empty",
+          "-m",
+          `intruder ${pushed}`,
+        ]);
+        git(intruder, ["push", "--quiet", "origin", `spec/${ID}/order-export`]);
+      }
+      return prePush(job);
     };
     return () => pushed;
   }
@@ -1752,9 +1882,10 @@ describe("the merge stage", () => {
   it("fetches and merges again when the integration branch moved while the candidate was being gated", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps();
-    const intrusions = withIntruder(executor, 1);
+    const api = workerFor();
+    const intrusions = withIntruder(api, 1);
     await runWorker({
-      api: workerFor(),
+      api,
       executor,
       stopWhenIdle: true,
       heartbeatMs: 20,
@@ -1789,9 +1920,10 @@ describe("the merge stage", () => {
   it("gives up, without overwriting anything, if the branch keeps moving", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps();
-    withIntruder(executor, 99);
+    const api = workerFor();
+    withIntruder(api, 99);
     await runWorker({
-      api: workerFor(),
+      api,
       executor,
       stopWhenIdle: true,
       heartbeatMs: 20,

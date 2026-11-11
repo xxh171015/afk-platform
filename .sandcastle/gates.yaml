@@ -1,7 +1,9 @@
 version: 1
 # The worker runs each command as `timeout <seconds> <run>`, so anything that is not a
 # single executable (`&&`, `eval`) must be wrapped in `bash -c`.
-setup: bash -c 'pnpm install --frozen-lockfile && scripts/pg-temp.sh start'
+# install-deps.sh tries the registries in AFK_NPM_REGISTRIES in order. A failed setup is retried as a job, not
+# handed to gate-fix.
+setup: bash -c 'scripts/install-deps.sh && scripts/pg-temp.sh start'
 commands:
   - name: typecheck
     run: pnpm typecheck

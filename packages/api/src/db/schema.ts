@@ -106,6 +106,10 @@ export const instance = pgTable(
       .notNull()
       .default(0),
     diskNoticed: text("disk_noticed").notNull().default("none"),
+    // Set while the agents' provider refuses work (out of usage, key refused): no agent job is claimed until a
+    // person resumes them. The reason is the error that paused them.
+    agentsPausedAt: timestamp("agents_paused_at", { withTimezone: true }),
+    agentsPauseReason: text("agents_pause_reason"),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
@@ -256,7 +260,7 @@ export const tickets = pgTable(
       .where(sql`${t.fixForTicketId} is not null`),
     check(
       "tickets_resume_stage_check",
-      sql`${t.resumeStage} is null or ${t.resumeStage} = 'e2e'`,
+      sql`${t.resumeStage} is null or ${t.resumeStage} in ('e2e', 'gate')`,
     ),
     check("tickets_type_check", oneOf(t.type, TICKET_TYPES)),
     check("tickets_state_check", oneOf(t.state, TICKET_STATES)),
@@ -607,6 +611,9 @@ export const gateResults = pgTable(
     // commit has one of each.
     kind: text("kind").notNull().default("gate"),
     configSha: text("config_sha").notNull(),
+    // What the result depends on: the tree gated and the gates.yaml blob it ran by. A pass is reused for the same pair.
+    treeSha: text("tree_sha"),
+    configBlob: text("config_blob"),
     commandResults: jsonb("command_results").notNull().default([]),
     testsTotal: integer("tests_total"),
     testsSkipped: integer("tests_skipped"),
@@ -620,6 +627,7 @@ export const gateResults = pgTable(
       t.commitSha,
       t.kind,
     ),
+    index("gate_results_tree_idx").on(t.repoId, t.treeSha, t.configBlob),
     check("gate_results_kind_check", oneOf(t.kind, ["gate", "e2e"])),
   ],
 );
