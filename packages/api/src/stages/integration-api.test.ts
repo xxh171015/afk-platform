@@ -269,6 +269,35 @@ async function bundleOfNextJob(): Promise<Bundle | null> {
 }
 
 describe("the e2e job", () => {
+  it("blocks once on an image that would not build, as an outside service, and does not requeue", async () => {
+    await runningSpec();
+    await mergeIntegrationTicket();
+    const job = await claim();
+    expect(job?.payload.stage).toBe("e2e");
+    await worker.fail(
+      (job as Claimed).id,
+      (job as Claimed).attempt,
+      "docker build of backend (backend) failed (exit 1):\nERROR: failed to solve",
+    );
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claim()).toBeNull();
+    const blocked = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as Json;
+    expect(blocked.tickets[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "external",
+      brief: {
+        output: {
+          error: "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
+        },
+      },
+    });
+  });
+
   it("is not agent time, and a failing environment ends in integration-environment-failed", async () => {
     await runningSpec();
     await mergeIntegrationTicket();

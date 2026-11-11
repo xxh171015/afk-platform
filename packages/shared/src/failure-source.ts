@@ -22,10 +22,12 @@ export const FAILURE_SOURCE_LABELS: Record<FailureSource, string> = {
 // The final e2e before the pull requests failed (finalize/final-e2e.ts).
 export const FINAL_E2E_FAILED = "final-e2e-failed";
 
-// Why the final e2e step is blocked: its e2e failed, or its environment would not come up three times over.
+// Why the final e2e step is blocked: its e2e failed, its environment would not come up three times over, or
+// an unrecoverable job error (a failed image build, a dead Cursor key) blocked it at once, as on a ticket.
 export const FINAL_E2E_BLOCKED_REASONS = [
   FINAL_E2E_FAILED,
   "integration-environment-failed",
+  "job-failed",
 ] as const;
 
 // Why the platform paused a spec.
