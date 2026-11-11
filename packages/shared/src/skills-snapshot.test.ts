@@ -28,9 +28,10 @@ describe("what is copied from mattpocock/skills", () => {
   it.each(VENDORED_DIRS)("%s holds the files as copied", (dir) => {
     const note = readFileSync(`${repoRoot}${dir}/VENDORED.md`, "utf8");
     const listed = new Map(
-      [...note.matchAll(/^([0-9a-f]{64}) {2}(.+)$/gm)].map(
-        ([, hash, path]) => [path as string, hash as string],
-      ),
+      [...note.matchAll(/^([0-9a-f]{64}) {2}(.+)$/gm)].map(([, hash, path]) => [
+        path as string,
+        hash as string,
+      ]),
     );
     expect(listed.size).toBeGreaterThan(0);
     // every file under the copied skills (skills/ also holds afk-setup, which is the platform's own)
