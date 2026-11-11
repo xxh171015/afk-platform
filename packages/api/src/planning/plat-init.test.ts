@@ -438,6 +438,7 @@ describe("plat init", () => {
       expect(rules).toMatch(
         /GLOSSARY\.md[^\n]*uncommitted[^\n]*plat spec confirm/,
       );
+      expect(rules).toContain("run `plat sync`");
     }
   });
 

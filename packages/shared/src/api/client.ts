@@ -23,6 +23,12 @@ export const CLIENT_HEADER = "x-afk-client";
 // The machine plat runs on: with no login in M3 it stands in for who did it.
 export const HOST_HEADER = "x-afk-host";
 export const CLI_HEADERS: Record<string, string> = { [CLIENT_HEADER]: "cli" };
+// Which plat it is: the sha256 of the plat file the platform hands out (GET /version's platFingerprint), or "dev" for
+// a plat run from a checkout of the platform. The API refuses to publish from an older plat (PLAT_OUTDATED), and plat
+// then replaces itself with the platform's and runs the command again.
+export const PLAT_HEADER = "x-afk-plat";
+export const PLAT_DEV = "dev";
+export const PLAT_OUTDATED = "plat-outdated";
 export type ApiClient = ReturnType<typeof createApiClient>;
 
 // What GET /worker/jobs/{id}/bundle returns: everything a worker renders into /context.

@@ -49,7 +49,11 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 2. 在 Cursor 里打开项目的仓库，输入 `/afk-setup`。
 
-这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。afk-setup 会用 `plat update` 把缺的、不是平台版本的规划 skill 补成平台的版本：只有你自己选了全局才动全局，从不覆盖你在全局已有的同名 skill（那时规划 skill 装进规划仓库）。装在仓库里的 skill 和 `skills-lock.json` 由 plat 写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。以后平台升级了，在规划仓库运行 `plat update`：它从平台下载 plat 替换自己，再按 skill 原来的级别装平台对应提交上的版本，两处都有就两处都升级；全局有平台装的规划 skill 时，它只提示这会影响你的其他项目，并给出恢复 Matt 版本的命令，不改全局。`plat` 发现自己或这些 skill 过期时也会提示 `plat update`。
+这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。afk-setup 会用 `plat update` 把缺的、不是平台版本的规划 skill 补成平台的版本：只有你自己选了全局才动全局，从不覆盖你在全局已有的同名 skill（那时规划 skill 装进规划仓库）。装在仓库里的 skill 和 `skills-lock.json` 由 plat 写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。以后平台升级了，**规划机器自己跟上，不用人操作**：
+
+- plat 每条命令开始前问平台 `GET /version` 的 `platFingerprint`（平台发出的 plat 文件的 sha256）。和自己不同时，下载平台的 plat 替换自己，用新 plat 重跑同一条命令。新 plat 先把本机带上来，再执行命令：重装规划 skill（规则同 `plat update`：按原来的级别装平台对应提交上的版本；全局有平台装的规划 skill 时不改全局，改装进规划仓库），重新生成规划仓库里 plat 写的文件（tracker 文档、`CLAUDE.local.md`、Cursor 规则；仓库跟踪的文件也改，并说明要提交）。然后在 stderr 用几行说明改了什么，规划 agent 用一句话转告人。
+- 平台不收旧 plat 发布的东西：`plat spec create`、`plat tickets import`、`plat spec confirm` 带着的指纹和平台的不一致时，API 在存任何东西之前回 409 `plat-outdated`，plat 收到后同样替换自己、重跑命令。0.3.0 之前的 plat 不带指纹，会被拒绝并提示运行 `plat update`。从平台仓库 checkout 跑的 plat（`pnpm plat`）带 `dev`，不检查。
+- 规划约定（`CLAUDE.local.md` 的「Planning on this machine」）让规划 agent 在 grill、to-spec、to-tickets 开始前跑一次 `plat sync`，skill 在被读进会话之前就是新的。`plat sync` 也可以手动跑；`plat update` 仍然可用。
 
 这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
@@ -285,7 +289,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 4. 改覆盖层声明的 SHA，让它和新常量一致。
 5. `pnpm check`：`VENDORED.md` 的 SHA 和常量不一致、提示词引用的 skill 没在挂载目录里时，守卫测试会失败。
 
-合并后，worker 重启就用上新 skill（`scripts/up.sh` 重启即可）。规划机器上运行 `plat update` 更新（`plat` 也会提示）。
+合并后，worker 重启就用上新 skill（`scripts/up.sh` 重启即可）。规划机器不用操作：平台发出的 plat 变了，规划机器上的 plat 下一条命令就替换自己、重装 skill、重写规划文件（见 1.2 节「以后平台升级了」）。
 
 ## 附录 A：场景 A 的票目录
 

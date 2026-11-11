@@ -15,6 +15,9 @@ export {
   CLIENT_HEADER,
   createApiClient,
   HOST_HEADER,
+  PLAT_DEV,
+  PLAT_HEADER,
+  PLAT_OUTDATED,
 } from "./api/client.ts";
 export {
   branchNames,

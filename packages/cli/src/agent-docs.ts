@@ -45,13 +45,15 @@ function agentSkillsSection(multiContext: boolean): string {
   ].join("\n");
 }
 
-// Research and prototypes leave nothing in the person's checkout (GLOSSARY「Scratch files」), and the planning docs
-// grilling writes wait for `plat spec confirm` (ADR 0005).
+// Planning starts from the platform's plat, skills and files (`plat sync`, self-update.ts); research and prototypes
+// leave nothing in the person's checkout (GLOSSARY「Scratch files」); the planning docs grilling writes wait for
+// `plat spec confirm` (ADR 0005).
 function planningSection(afkHome: string): string {
   const worktrees = join(afkHome, "planning");
   return [
     "## Planning on this machine",
     "",
+    "- Before you start grill-with-docs, to-spec or to-tickets, run `plat sync`: it brings plat, the planning skills and these files up to the platform's. When its output says something was updated, tell the person in one line what changed, then go on; nothing needs them to act.",
     `- Do research and prototypes in a temporary git worktree under \`${worktrees}\` (for example \`${join(worktrees, "research-<name>")}\`), never in this checkout: do not write files here for them or switch this checkout's branch.`,
     "- Push what they found to a `research/<name>` or `prototype/<name>` branch and keep that branch: the decision it informs links to it. Then remove the temporary worktree (`git worktree remove`).",
     "- Keep no notes of them on this machine.",

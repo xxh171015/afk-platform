@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { cliBundle } from "../cli/cli-bundle.ts";
+import { cliBundle, platFingerprint } from "../cli/cli-bundle.ts";
 
 // What a planning machine fetches from the platform: plat itself, and which version the platform is.
 
@@ -43,13 +43,14 @@ const versionRoute = createRoute({
   responses: {
     200: {
       description:
-        "The platform's version, the mattpocock/skills commit it pins, and the commit of the platform's repo it runs (null when unknown)",
+        "The platform's version, the mattpocock/skills commit it pins, the commit of the platform's repo it runs (null when unknown), and the sha256 of the plat it hands out (null when it cannot build one)",
       content: {
         "application/json": {
           schema: z.object({
             platformVersion: z.string(),
             skillsSha: z.string(),
             platformCommit: z.string().nullable(),
+            platFingerprint: z.string().nullable(),
           }),
         },
       },
@@ -58,12 +59,13 @@ const versionRoute = createRoute({
 });
 
 export function registerCliRoutes(app: OpenAPIHono) {
-  app.openapi(versionRoute, (c) =>
+  app.openapi(versionRoute, async (c) =>
     c.json(
       {
         platformVersion: PLATFORM_VERSION,
         skillsSha: SKILLS_SHA,
         platformCommit: platformCommit(),
+        platFingerprint: await platFingerprint().catch(() => null),
       },
       200,
     ),

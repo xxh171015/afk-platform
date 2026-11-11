@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +82,8 @@ export function cliBundle(): Promise<string> {
     write: false,
     legalComments: "none",
     plugins: [inlineFiles],
+    // so plat knows it is the file the platform handed out, which it may replace (packages/cli/src/self-update.ts)
+    define: { __AFK_PLAT_BUNDLED__: "true" },
     // packages written as CommonJS call require(), which an ES module does not have
     banner: {
       js: 'import { createRequire as __afkCreateRequire } from "node:module"; const require = __afkCreateRequire(import.meta.url);',
@@ -96,4 +99,17 @@ export function cliBundle(): Promise<string> {
       throw error;
     });
   return cached;
+}
+
+// The sha256 of plat as the platform hands it out: GET /version names it, and plat sends its own with every call
+// (PLAT_HEADER), so either side can tell an older plat.
+let fingerprint: Promise<string> | undefined;
+export function platFingerprint(): Promise<string> {
+  fingerprint ??= cliBundle()
+    .then((text) => createHash("sha256").update(text).digest("hex"))
+    .catch((error) => {
+      fingerprint = undefined;
+      throw error;
+    });
+  return fingerprint;
 }

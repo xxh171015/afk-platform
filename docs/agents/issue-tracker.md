@@ -1,4 +1,4 @@
-<!-- plat tracker-doc 0.2.0 skills mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d project 4 repo afk-platform -->
+<!-- plat tracker-doc 0.3.0 skills mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d project 4 repo afk-platform -->
 
 # Issue tracker: the afk-platform and GitHub
 
