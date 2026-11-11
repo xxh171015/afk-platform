@@ -65,6 +65,7 @@ import {
   rankOf,
   type WaitingRef,
   waitingCount,
+  waitingReasonHint,
 } from "./waiting.ts";
 
 export const BLOCKED_KEY = ["blocked"] as const;
@@ -259,7 +260,10 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
             {ticket.title}
           </a>
           {ticket.blockedReason ? (
-            <ReasonBadge reason={ticket.blockedReason} />
+            <ReasonBadge
+              reason={ticket.blockedReason}
+              detail={waitingReasonHint(ticket.blockedReason) ?? undefined}
+            />
           ) : null}
         </>
       }
@@ -603,7 +607,10 @@ function BlockedFinalization({
               : `${item.repo} 的总览审查`}
           </span>
           {item.blockedReason ? (
-            <ReasonBadge reason={item.blockedReason} />
+            <ReasonBadge
+              reason={item.blockedReason}
+              detail={waitingReasonHint(item.blockedReason) ?? undefined}
+            />
           ) : null}
         </>
       }

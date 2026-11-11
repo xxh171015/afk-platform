@@ -28,6 +28,7 @@ export const FINAL_E2E_BLOCKED_REASONS = [
   FINAL_E2E_FAILED,
   "integration-environment-failed",
   "job-failed",
+  "sandbox-oom",
 ] as const;
 
 // Why the platform paused a spec.
@@ -87,6 +88,7 @@ export const FAILURE_SOURCE_OF_REASON: Record<
   "update-branch-gate-failed": "spec",
   "planning-conflict": "spec",
   "job-failed": "platform",
+  "sandbox-oom": "platform",
   "lease-expired": "platform",
   "sync-error": "external",
   "upstream-cancelled": null,
@@ -109,6 +111,10 @@ export const EXTERNAL_ERROR_PATTERNS = [
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
   (pattern) => new RegExp(pattern, "i"),
 );
+
+export function isSandboxOomError(error: string): boolean {
+  return /\bOOMKilled\b|\bsandbox-oom\b/.test(error);
+}
 
 export function failureSourceOf(
   reason: string,
@@ -158,6 +164,8 @@ export const EVENT_TYPES = [
   "pull-request-sync",
   // a person's action (HUMAN_ACTIONS), written by the action's code
   "action",
+  // disk, agent pause, token expiry: inserted on the edge, not by a state trigger (ADR 0009)
+  "system",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

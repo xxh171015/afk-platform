@@ -32,6 +32,17 @@ export const NOTICE_TITLES: Record<NoticeKind, string> = {
   "waiting-other": "待处理",
 };
 
+// Ticket stuck first so a coalesced window never hides a block behind a later merge (ADR 0009).
+export const NOTICE_PRIORITY: readonly NoticeKind[] = [
+  "ticket-blocked",
+  "final-blocked",
+  "spec-paused",
+  "waiting-other",
+  "pr-ready",
+  "awaiting-review",
+  "spec-merged",
+];
+
 export function noticeTitle(
   kind: NoticeKind,
   hostKind: HostKind = "github",
@@ -60,6 +71,21 @@ export function composeNotice(
   return {
     title: noticeTitle(draft.kind, hostKind),
     body: `${draft.displayId} ${draft.title}：${draft.reason}\n${pageUrl(draft.path)}`,
+  };
+}
+
+export function composeWindow(
+  drafts: readonly NoticeDraft[],
+  hostKind: HostKind = "github",
+): Notice {
+  const winner = drafts.reduce((best, draft) =>
+    NOTICE_PRIORITY.indexOf(draft.kind) < NOTICE_PRIORITY.indexOf(best.kind)
+      ? draft
+      : best,
+  );
+  return {
+    title: noticeTitle(winner.kind, hostKind),
+    body: drafts.map((draft) => composeNotice(draft, hostKind).body).join("\n"),
   };
 }
 

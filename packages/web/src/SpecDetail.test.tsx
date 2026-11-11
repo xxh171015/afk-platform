@@ -42,6 +42,7 @@ const view = (
     pullRequests?: unknown[];
     acceptancePack?: unknown;
     timeline?: unknown[];
+    timelineLegacy?: boolean;
     finalRuns?: unknown[];
     potentialConflicts?: unknown[];
     leadTime?: {
@@ -87,6 +88,7 @@ const view = (
   pullRequests: over.pullRequests ?? [],
   acceptancePack: over.acceptancePack ?? null,
   timeline: over.timeline ?? [],
+  timelineLegacy: over.timelineLegacy ?? false,
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
   leadTime: over.leadTime ?? null,
@@ -1265,6 +1267,73 @@ describe("the six-step bar and nested pages", () => {
     expect(screen.getByText("2026-11-01 18:00").getAttribute("dateTime")).toBe(
       "2026-11-01T10:00:00.000Z",
     );
+  });
+
+  it("shows a person's retry on the timeline", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timeline: [
+              {
+                kind: "action",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "重试 T-1",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("重试 T-1")).toBeTruthy();
+    expect(screen.getByText("人的操作")).toBeTruthy();
+  });
+
+  it("notes when the timeline is the old assembly", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timelineLegacy: true,
+            timeline: [
+              {
+                kind: "ticket-blocked",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "T-1 卡住：agent-gave-up",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByTestId("timeline-legacy")).toBeTruthy();
+    expect(screen.getByTestId("timeline-legacy").textContent).toContain(
+      "旧拼法",
+    );
+  });
+
+  it("does not note the old assembly when the timeline is from events", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timelineLegacy: false,
+            timeline: [
+              {
+                kind: "confirm-plan",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "确认拆分",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("确认拆分")).toBeTruthy();
+    expect(screen.queryByTestId("timeline-legacy")).toBeNull();
   });
 
   it("marks blocked and pause timeline events with their failure source", async () => {

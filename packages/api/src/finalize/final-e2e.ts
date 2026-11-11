@@ -1,6 +1,7 @@
 import {
   FINAL_E2E_FAILED,
   formatDisplayId,
+  isSandboxOomError,
   type SpecState,
   unrecoverableJobError,
 } from "@afk/shared";
@@ -294,14 +295,18 @@ export async function finalE2eJobFailed(
       )
     ).rows[0]?.n,
   );
+  const oom = isSandboxOomError(error);
   const unrecoverable = Boolean(unrecoverableJobError(error));
-  if (!unrecoverable && failures < MAX_JOB_FAILURES) {
+  if (!oom && !unrecoverable && failures < MAX_JOB_FAILURES) {
     await enqueueFor(client, read.specId, ticket, read.stage, read.round);
     return { status: "requeued", failures };
   }
   await client.query(
     "UPDATE final_e2e SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
-    [round.id, unrecoverable ? JOB_FAILED : ENVIRONMENT_FAILED],
+    [
+      round.id,
+      oom ? "sandbox-oom" : unrecoverable ? JOB_FAILED : ENVIRONMENT_FAILED,
+    ],
   );
   return { status: "blocked", failures };
 }

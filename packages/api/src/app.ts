@@ -6,7 +6,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
 import { type DiskSample, sampleDisk, volumeFreeBytes } from "./disk.ts";
-import { EventsHub } from "./events/hub.ts";
+import { bindEventsHub, EventsHub } from "./events/hub.ts";
 import { withOrigin } from "./events/origin.ts";
 import { registerCliRoutes } from "./http/cli-routes.ts";
 import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
@@ -22,6 +22,7 @@ import {
   type NotificationChannel,
   silentNotifications,
 } from "./notify/channel.ts";
+import { bindDispatcher, NotificationDispatcher } from "./notify/dispatch.ts";
 
 export interface AppOptions {
   pool: pg.Pool;
@@ -34,6 +35,8 @@ export interface AppOptions {
   events?: EventsHub;
   notifications?: NotificationChannel;
   sseKeepaliveMs?: number;
+  // Tests inject this so the 30s notice window can fire when FakeClock advances.
+  schedule?: (ms: number, fn: () => unknown) => () => void;
 }
 
 export interface AppContext {
@@ -48,6 +51,7 @@ export interface AppContext {
   events: EventsHub;
   notifications: NotificationChannel;
   sseKeepaliveMs: number;
+  schedule: (ms: number, fn: () => unknown) => () => void;
 }
 
 export const LEASE_SECONDS = 120;
@@ -71,8 +75,31 @@ export function createApp(options: AppOptions): OpenAPIHono {
     events: options.events ?? new EventsHub(),
     notifications: options.notifications ?? silentNotifications,
     sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,
+    schedule:
+      options.schedule ??
+      ((ms, fn) => {
+        const timer = setTimeout(fn, ms);
+        timer.unref?.();
+        return () => clearTimeout(timer);
+      }),
   };
   const app = new OpenAPIHono();
+  bindEventsHub(app, context.events);
+  bindDispatcher(
+    app,
+    new NotificationDispatcher({
+      pool: context.pool,
+      hub: context.events,
+      notifications: context.notifications,
+      schedule: context.schedule,
+    }),
+  );
+  if (
+    options.events === undefined &&
+    typeof options.pool?.connect === "function"
+  ) {
+    void context.events.listen(options.pool);
+  }
   // The API starts agents and has no login, so it only talks to this machine. CORS alone would only stop a foreign
   // page from reading answers: a plain cross-site POST would still be carried out. So a request that names a
   // foreign Origin (a browser on another site) or a foreign Host (DNS rebinding) is refused outright.

@@ -785,7 +785,6 @@ export function registerPlanningRoutes(
         409,
       );
     }
-    context.events.publish({ specId: result.spec.id });
     return c.json(result.spec, 201);
   });
 
