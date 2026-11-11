@@ -23,6 +23,10 @@ export {
   promptFor,
   ReviewOutputSchema,
   reviewFindings,
+  reviewOutputSchemaFor,
+  reviewSources,
+  StandardsReviewOutputSchema,
+  sourcesCiteAgentsMd,
   writePrompt,
 } from "./agent.ts";
 export type { ContextInput, RunFacts, RunGate } from "./context.ts";

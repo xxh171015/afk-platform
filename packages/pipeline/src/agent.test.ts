@@ -28,6 +28,9 @@ import {
   type ReviewOutput,
   ReviewOutputSchema,
   reviewFindings,
+  reviewOutputSchemaFor,
+  reviewSources,
+  StandardsReviewOutputSchema,
   writePrompt,
 } from "./agent.ts";
 import { renderContext } from "./context.ts";
@@ -97,6 +100,56 @@ describe("the structured outputs", () => {
     expect(
       ReviewOutputSchema.safeParse({ ...review, mustFix: [] }).success,
     ).toBe(true);
+  });
+
+  it("reads the standards-source files from a review result", () => {
+    expect(
+      reviewSources({
+        verdict: "fix",
+        mustFix: [{ file: "src/a.ts", problem: "default export" }],
+        suggestions: [],
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+        uncertainties: [],
+      }),
+    ).toEqual(["AGENTS.md", "CONTRIBUTING.md"]);
+    expect(
+      reviewSources({
+        verdict: "pass",
+        mustFix: [],
+        suggestions: [],
+        uncertainties: [],
+      }),
+    ).toBeUndefined();
+    expect(reviewSources(undefined)).toBeUndefined();
+    expect(reviewSources({ sources: [] })).toBeUndefined();
+    expect(reviewSources({ sources: [1] })).toBeUndefined();
+  });
+
+  it("a Standards review without sources, or without AGENTS.md, is not a usable result", () => {
+    const review = {
+      verdict: "pass",
+      mustFix: [],
+      suggestions: [],
+      uncertainties: [],
+    };
+    expect(ReviewOutputSchema.safeParse(review).success).toBe(true);
+    expect(StandardsReviewOutputSchema.safeParse(review).success).toBe(false);
+    expect(
+      StandardsReviewOutputSchema.safeParse({
+        ...review,
+        sources: ["CONTRIBUTING.md"],
+      }).success,
+    ).toBe(false);
+    expect(
+      StandardsReviewOutputSchema.safeParse({
+        ...review,
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+      }).success,
+    ).toBe(true);
+    expect(reviewOutputSchemaFor("standards")).toBe(
+      StandardsReviewOutputSchema,
+    );
+    expect(reviewOutputSchemaFor("spec")).toBe(ReviewOutputSchema);
   });
 });
 
@@ -309,6 +362,15 @@ describe("the two axes of a review", () => {
       standards,
       spec,
     });
+    const withSources = out("fix", {
+      sources: ["AGENTS.md", "CONTRIBUTING.md"],
+    });
+    expect(
+      combineReviewRuns({
+        standards: ran(withSources),
+        spec: ran(out("pass")),
+      }).combined?.standards.sources,
+    ).toEqual(["AGENTS.md", "CONTRIBUTING.md"]);
   });
 
   it("takes the failure of either axis as the outcome of the whole review, Standards first", () => {
@@ -358,9 +420,28 @@ describe("the two axes of a review", () => {
       expect(prompt).toContain("不要再开子 agent");
       expect(prompt).toContain("git diff <baseSha>...HEAD");
     }
-    // the documented norms the Standards axis reviews against are the overlay's
+    // overlay norms stay in the list; the agent finds the rest (skill step 3)
     expect(readFileSync(PROMPTS.reviewStandards, "utf8")).toContain(
       "不许删除或跳过测试",
+    );
+  });
+
+  it("has the Standards axis find standards sources itself and name them in sources", () => {
+    for (const file of [
+      PROMPTS.reviewStandards,
+      PROMPTS.finalReviewStandards,
+    ]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("按 skill 第 3 步");
+      expect(prompt).toContain("AGENTS.md");
+      expect(prompt).toContain("一定在列");
+      expect(prompt).toContain("sources");
+      expect(prompt).toContain("你找到的规范文件");
+      expect(prompt).not.toMatch(/第 1–3 步已经替你做完了/);
+      expect(prompt).not.toContain("（`AGENTS.md` 或覆盖层里写明的规范）");
+    }
+    expect(readFileSync(PROMPTS.reviewSpec, "utf8")).toContain(
+      "第 1–3 步已经替你做完了",
     );
   });
 });
@@ -464,6 +545,7 @@ describe("the prompts", () => {
     for (const stage of ["review", "final-review"] as const) {
       expect(whole(stage)).toContain("verdict");
       expect(whole(stage)).toContain("mustFix");
+      expect(whole(stage)).toContain("sources");
     }
   });
 
@@ -520,6 +602,16 @@ describe("the prompts", () => {
       "utf8",
     );
     expect(skill).toMatch(/AGENTS\.md[\s\S]*how to run a single test file/);
+  });
+
+  it("has afk-setup list the repo's existing standards documents in AGENTS.md", () => {
+    const skill = readFileSync(
+      join(PROMPT_DIR, "../../../skills/afk-setup/SKILL.md"),
+      "utf8",
+    );
+    expect(skill).toMatch(
+      /\*\*AGENTS\.md\*\*:[\s\S]*CONTRIBUTING\.md[\s\S]*docs\//,
+    );
   });
 
   it("is written for the skills SHA the platform pins, which the mounted skills were copied at", () => {
@@ -796,5 +888,24 @@ describe("a fake agent run, end to end", () => {
     });
     expect(run.commits).toEqual([]);
     expect(classifyReviewRun(run)).toMatchObject({ outcome: "pass" });
+  });
+
+  it("a Standards review with no sources is invalid-output", async () => {
+    repo = makeRepo();
+    git(repo.dir, ["branch", "agent/T-123"]);
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      output: {
+        verdict: "pass",
+        mustFix: [],
+        suggestions: [],
+        uncertainties: [],
+      },
+    }));
+    const run = await runner.run({
+      ...options(context("review"), StandardsReviewOutputSchema),
+      stage: "review" as const,
+    });
+    expect(run.errorKind).toBe("invalid-output");
+    expect(classifyReviewRun(run)).toMatchObject({ outcome: "invalid-output" });
   });
 });

@@ -27,11 +27,12 @@ import {
   mergeCandidate,
   projectOf,
   promptFor,
-  ReviewOutputSchema,
   readGateConfig,
   reclaimEnvironments,
   renderContext,
   reviewFindings,
+  reviewOutputSchemaFor,
+  reviewSources,
   runE2e,
   runGate,
   type SandboxPlacement,
@@ -552,7 +553,7 @@ async function review(
           promptFile: given.promptFile,
           ctxDir,
           refs,
-          schema: ReviewOutputSchema,
+          schema: reviewOutputSchemaFor(axis),
           ...options,
           signal: context.signal,
         });
@@ -573,21 +574,25 @@ async function review(
         log(
           `review: WARNING the ${axis} review made ${run.commits.length} commit(s); it should only read`,
         );
-    const factsOf = ({ axis, given, run }: (typeof runs)[number]) => ({
-      axis,
-      run: {
-        // what this axis came to on its own; the stage's outcome is the two put together
-        result: axisResult(run),
-        branch: agent,
-        baseSha,
-        commits: run.commits,
-        durationMs: run.durationMs,
-        ...agentFacts(deps, options, given.prompt),
-        ...(refs.length ? { refShas } : {}),
-        output: run.output ?? { error: run.error },
-      },
-      findings: run.output ? reviewFindings(run.output) : [],
-    });
+    const factsOf = ({ axis, given, run }: (typeof runs)[number]) => {
+      const sources = reviewSources(run.output);
+      return {
+        axis,
+        run: {
+          // what this axis came to on its own; the stage's outcome is the two put together
+          result: axisResult(run),
+          branch: agent,
+          baseSha,
+          commits: run.commits,
+          durationMs: run.durationMs,
+          ...agentFacts(deps, options, given.prompt),
+          ...(refs.length ? { refShas } : {}),
+          output: run.output ?? { error: run.error },
+          ...(sources ? { sources } : {}),
+        },
+        findings: run.output ? reviewFindings(run.output) : [],
+      };
+    };
     const [first, ...others] = runs.map(factsOf);
     return {
       stage,

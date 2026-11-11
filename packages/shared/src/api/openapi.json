@@ -4762,6 +4762,12 @@
                         "type": "string"
                       }
                     },
+                    "sources": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "repoUrl": {
                       "type": "string"
                     },
@@ -4792,6 +4798,7 @@
                     "ticketDisplayId",
                     "prompt",
                     "commits",
+                    "sources",
                     "repoUrl",
                     "hostKind"
                   ]
@@ -6057,6 +6064,36 @@
                                   },
                                   "required": ["ticket", "paths"]
                                 }
+                              },
+                              "standardsSources": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "sources": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "sources"
+                                  ]
+                                },
+                                "default": []
                               }
                             },
                             "required": [

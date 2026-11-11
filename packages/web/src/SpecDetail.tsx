@@ -318,6 +318,19 @@ function PackRepoSection({
           ))}
         </ul>
       ) : null}
+      {list(repo.standardsSources).length > 0 ? (
+        <>
+          <p className="note">Standards 依据：</p>
+          <ul className="standards-sources">
+            {list(repo.standardsSources).map((item) => (
+              <li key={`${item.run}-${item.stage}`}>
+                {item.ticket ?? "spec"} {item.run} {item.stage}:{" "}
+                {item.sources.join(", ")}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {list(repo.scopeCreep).length > 0 ? (
         <>
           <p className="note">范围蔓延：票没要求的改动</p>

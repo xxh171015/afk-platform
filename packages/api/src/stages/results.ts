@@ -34,6 +34,8 @@ const RunFacts = z.object({
   skillsSha: z.string().optional(),
   // which axis of a review this Run is (standards | spec)
   axis: z.enum(REVIEW_AXES).optional(),
+  // the standards-source files a Standards review used
+  sources: z.array(z.string()).optional(),
   // the whole prompt the agent was given
   prompt: z.string().optional(),
   // what this Run itself came to, when that is not the stage's outcome (one axis of a review)
@@ -300,6 +302,20 @@ export type ResultFacts = Pick<
   "outcome" | "run" | "gate" | "findings" | "extraRuns"
 >;
 
+function sourcesOf(run?: {
+  sources?: string[];
+  output?: unknown;
+}): string[] | null {
+  if (run?.sources && run.sources.length > 0) return run.sources;
+  if (!run?.output || typeof run.output !== "object") return null;
+  const listed = (run.output as { sources?: unknown }).sources;
+  if (!Array.isArray(listed) || listed.length === 0) return null;
+  const files = listed.filter(
+    (item): item is string => typeof item === "string",
+  );
+  return files.length > 0 ? files : null;
+}
+
 export async function writeFacts(
   client: pg.PoolClient,
   owner: RunOwner,
@@ -378,6 +394,13 @@ export async function writeFacts(
     await client.query("UPDATE runs SET ref_shas = $2 WHERE id = $1", [
       runId,
       JSON.stringify(run.refShas),
+    ]);
+  }
+  const sources = sourcesOf(run);
+  if (sources) {
+    await client.query("UPDATE runs SET sources = $2 WHERE id = $1", [
+      runId,
+      sources,
     ]);
   }
 
@@ -468,6 +491,13 @@ export async function writeFacts(
       await client.query("UPDATE runs SET ref_shas = $2 WHERE id = $1", [
         inserted.rows[0]?.id,
         JSON.stringify(extra.run.refShas),
+      ]);
+    }
+    const extraSources = sourcesOf(extra.run);
+    if (extraSources) {
+      await client.query("UPDATE runs SET sources = $2 WHERE id = $1", [
+        inserted.rows[0]?.id,
+        extraSources,
       ]);
     }
     await insertFindings(

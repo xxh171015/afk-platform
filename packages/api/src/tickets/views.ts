@@ -543,6 +543,7 @@ interface RunDetailRecord extends RunRecord {
   prompt: string | null;
   output: unknown;
   commits: string[];
+  sources: string[] | null;
 }
 
 function runRow(r: RunRecord) {
@@ -576,7 +577,7 @@ export async function runView(pool: pg.Pool, runId: number) {
   >(
     `SELECT r.id, r.spec_id, r.ticket_id, r.stage, r.attempt, r.result, r.duration_ms, r.started_at, r.finished_at,
             r.agent, r.model, r.skills_sha, r.axis, r.cursor_cli_version, r.contract_shas, r.ref_shas,
-            r.prompt, r.output, r.commits, repo.url AS repo_url, repo.host_kind
+            r.prompt, r.output, r.commits, r.sources, repo.url AS repo_url, repo.host_kind
      FROM runs r JOIN repos repo ON repo.id = r.repo_id WHERE r.id = $1`,
     [runId],
   );
@@ -593,6 +594,7 @@ export async function runView(pool: pg.Pool, runId: number) {
     prompt: r.prompt,
     output: r.output ?? null,
     commits: r.commits ?? [],
+    sources: r.sources ?? null,
     repoUrl: r.repo_url,
     hostKind: r.host_kind,
   };
