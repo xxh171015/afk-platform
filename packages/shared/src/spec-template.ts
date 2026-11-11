@@ -22,6 +22,11 @@ export function normalizeSpecBody(text: string): string {
 
 const TESTING_DECISIONS = "Testing Decisions";
 
+/** Whether Testing Decisions names test seams (English or Chinese 缝). */
+export function testingDecisionsNamesSeams(sectionBody: string): boolean {
+  return /seam/i.test(sectionBody) || /缝/.test(sectionBody);
+}
+
 /**
  * Notes on a spec body that do not follow the to-spec template: a section missing or renamed, and no seams in
  * Testing Decisions. They are only advice; the spec is stored as written.
@@ -39,7 +44,7 @@ export function specTemplateWarnings(body: string): string[] {
       `^## ${TESTING_DECISIONS}\\s*$([\\s\\S]*?)(?=^## |(?![\\s\\S]))`,
       "m",
     ).exec(body);
-    if (!/seam/i.test(section?.[1] ?? "")) {
+    if (!testingDecisionsNamesSeams(section?.[1] ?? "")) {
       warnings.push(
         "## Testing Decisions does not name the seams: unattended tdd writes tests only at seams that were confirmed",
       );

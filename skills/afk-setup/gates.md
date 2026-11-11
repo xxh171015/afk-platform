@@ -36,3 +36,7 @@ commands:
   exit 1
   ```
   Registry addresses stay in the worker's configuration (`~/.afk/env`), not in the repo.
+
+## Same package set in every command
+
+When one gate command narrows which packages or paths it checks (a shell script with `grep -v`, a package list, a test filter), **every other command that type-checks, vets, or builds those packages must use the same set**. A common failure: `go test` or a custom test script skips unstable packages, but `go vet ./...` still scans them and the gate fails on code you never meant to gate. Fix by sharing one package list (script, Make target, or env var) across vet, build, and test, or by calling the test script's list from the vet command line.

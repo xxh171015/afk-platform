@@ -324,6 +324,14 @@ describe("plat", () => {
     expect(created.stderr.match(/warning/g)).toHaveLength(1);
   });
 
+  it("does not warn when Testing Decisions names seams with 缝", async () => {
+    const created = await createSpecFrom(
+      SPEC_BODY.replace("Seam: the HTTP API.", "测试缝：HTTP API。"),
+    );
+    expect(created.code).toBe(0);
+    expect(created.stderr).not.toContain("does not name the seams");
+  });
+
   it("stores the body as written apart from line endings and the final newline", async () => {
     const created = await createSpecFrom(
       `${SPEC_BODY.trimEnd().replace(/\n/g, "\r\n")}\r\n\r\n`,

@@ -393,14 +393,15 @@ describe("plat init", () => {
     const cursor = read(".cursor/rules/afk-platform.mdc");
     expect(cursor.startsWith("---\n")).toBe(true);
     expect(cursor).toContain("\nalwaysApply: true\n");
-    for (const rules of [claude, cursor]) {
-      expect(rules).toContain("## Agent skills\n");
-      expect(rules).toContain("See `docs/agents/issue-tracker.md`.");
-      expect(rules).toContain("See `docs/agents/triage-labels.md`.");
-      expect(rules).toContain(
-        "Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.",
-      );
-    }
+    expect(claude).toContain("## Agent skills\n");
+    expect(claude).toContain("See `docs/agents/issue-tracker.md`.");
+    expect(claude).toContain("See `docs/agents/triage-labels.md`.");
+    expect(claude).toContain(
+      "Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.",
+    );
+    expect(cursor).toContain("**`AGENTS.md`**");
+    expect(cursor).toContain("`docs/agents/`");
+    expect(cursor).not.toContain("## Agent skills\n");
     expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
     const exclude = read(".git/info/exclude");
     for (const path of [
@@ -481,8 +482,10 @@ describe("plat init", () => {
     expect(edited.endsWith("## Style\n\nTabs.\n")).toBe(true);
     expect(edited.match(/## Agent skills/g)).toHaveLength(1);
     expect(read("CLAUDE.local.md")).not.toContain("## Agent skills");
-    // Cursor reads AGENTS.md, not CLAUDE.md
-    expect(read(".cursor/rules/afk-platform.mdc")).toContain("## Agent skills");
+    expect(read(".cursor/rules/afk-platform.mdc")).toContain("**`AGENTS.md`**");
+    expect(read(".cursor/rules/afk-platform.mdc")).not.toContain(
+      "## Agent skills",
+    );
     expect(read("CLAUDE.local.md")).toContain("## Planning on this machine");
     const exclude = read(".git/info/exclude").split("\n");
     expect(exclude).not.toContain("/docs/agents/issue-tracker.md");

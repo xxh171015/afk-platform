@@ -125,7 +125,19 @@ export function planAgentDocs(dir: string, afkHome: string): AgentDoc[] {
   // CLAUDE.md, Cursor reads AGENTS.md
   const planning = planningSection(afkHome);
   const forClaude = owner === "CLAUDE.md" ? [planning] : [skills, planning];
-  const forCursor = owner === "AGENTS.md" ? [planning] : [skills, planning];
+  const agentsMdTracked =
+    existsSync(join(dir, "AGENTS.md")) && isTracked(dir, "AGENTS.md");
+  const cursorLead = agentsMdTracked
+    ? [
+        "Repo implementation, gates, and package rules: root **`AGENTS.md`**. Planning skills and tracker: `docs/agents/` (`issue-tracker.md`, `triage-labels.md`, `domain.md`).",
+        "",
+      ].join("\n")
+    : "";
+  const forCursor = agentsMdTracked
+    ? [cursorLead.trimEnd(), planning]
+    : owner === "AGENTS.md"
+      ? [planning]
+      : [skills, planning];
   // CLAUDE.local.md may be the person's own too: only the platform's sections are replaced, and an Agent skills
   // section CLAUDE.md now has is taken out
   const claude = read(CLAUDE_RULES_PATH);
