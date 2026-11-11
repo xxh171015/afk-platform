@@ -106,6 +106,17 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxLimits = {
 export const SANDBOX_RUN_LABEL = "afk.run";
 export const SANDBOX_KIND_LABEL = "afk.kind";
 
+// The kernel killed the container for using too much memory (docker inspect State.OOMKilled).
+export const SANDBOX_OOM_ERROR = "sandbox-oom: container OOMKilled";
+
+export class SandboxOomError extends Error {
+  readonly reason = "sandbox-oom";
+  constructor() {
+    super(SANDBOX_OOM_ERROR);
+    this.name = "SandboxOomError";
+  }
+}
+
 // Same shape leftover sandbox cleanup uses: argv in, code and stdout out.
 export type SandboxDocker = (
   args: string[],
@@ -219,6 +230,19 @@ function dockerExec(
   });
 }
 
+function inspectOomKilled(
+  docker: SandboxDocker,
+  containerName: string,
+): boolean {
+  const inspected = docker([
+    "inspect",
+    "--format",
+    "{{.State.OOMKilled}}",
+    containerName,
+  ]);
+  return inspected.code === 0 && /^\s*true\s*$/i.test(inspected.stdout);
+}
+
 // Bind-mount docker provider used by every Sandcastle sandbox. Hardening flags live here, not in the image.
 export function sandboxProvider(options: SandboxProviderOptions) {
   const limits = options.limits ?? DEFAULT_SANDBOX_LIMITS;
@@ -291,18 +315,25 @@ export function sandboxProvider(options: SandboxProviderOptions) {
       }
       return {
         worktreePath,
-        exec: (command, execOptions) => {
+        exec: async (command, execOptions) => {
           const effective = execOptions?.sudo ? `sudo ${command}` : command;
           const execArgs = ["exec"];
           if (execOptions?.stdin !== undefined) execArgs.push("-i");
           if (execOptions?.cwd) execArgs.push("-w", execOptions.cwd);
           execArgs.push(containerName, "sh", "-c", effective);
-          return dockerExec(docker, execArgs, {
+          const result = await dockerExec(docker, execArgs, {
             ...(execOptions?.onLine ? { onLine: execOptions.onLine } : {}),
             ...(execOptions?.stdin !== undefined
               ? { stdin: execOptions.stdin }
               : {}),
           });
+          if (
+            result.exitCode !== 0 &&
+            inspectOomKilled(docker, containerName)
+          ) {
+            throw new SandboxOomError();
+          }
+          return result;
         },
         copyFileIn: async (hostPath, sandboxPath) => {
           const copied = docker([
@@ -325,8 +356,10 @@ export function sandboxProvider(options: SandboxProviderOptions) {
           }
         },
         close: async () => {
+          const oom = inspectOomKilled(docker, containerName);
           docker(["stop", containerName]);
           docker(["rm", containerName]);
+          if (oom) throw new SandboxOomError();
         },
       };
     },

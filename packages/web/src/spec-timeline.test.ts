@@ -44,6 +44,7 @@ describe("the spec timeline", () => {
       "pause",
       "resume",
       "merged",
+      "action",
     ]);
   });
 });

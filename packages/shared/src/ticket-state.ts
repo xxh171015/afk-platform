@@ -29,6 +29,8 @@ export const BLOCKED_REASONS = [
   "upstream-cancelled",
   // the worker could not carry out a stage, three times over: its environment is at fault, not the ticket
   "job-failed",
+  // the kernel killed the sandbox for using too much memory; stop at once, do not retry the same limit
+  "sandbox-oom",
 ] as const;
 export type BlockedReason = (typeof BLOCKED_REASONS)[number];
 
@@ -106,6 +108,7 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "integration-environment-failed": [...FROM_RUNNING, ...FROM_MERGING],
   "upstream-cancelled": ["pending"],
   "job-failed": [...FROM_RUNNING, ...FROM_MERGING],
+  "sandbox-oom": [...FROM_RUNNING, ...FROM_MERGING],
 };
 
 export function ticketTransition(

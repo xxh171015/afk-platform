@@ -269,6 +269,7 @@ describe("the failure source the database works out", () => {
     "getaddrinfo ENOTFOUND registry.npmmirror.com",
     "net/http: TLS handshake timeout",
     "sandbox exited with code 137",
+    "sandbox-oom: container OOMKilled",
     "ActionRequiredError: Unauthorized request",
     "Error: unknown model 'claude-code'",
     "docker build of backend (backend) failed (exit 1)",

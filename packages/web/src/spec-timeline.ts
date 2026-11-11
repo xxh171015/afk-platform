@@ -1,7 +1,7 @@
 import { type HostKind, pullAbbrev } from "@afk/shared";
 
-// Timeline events a spec page may show. Anything else stays off the screen
-// (docs/specs/experience-platform.md「信息架构」).
+// Timeline events a spec page may show. Must match packages/api/src/tickets/timeline.ts
+// (docs/specs/experience-platform.md「信息架构」, S-28 时间线读事件表).
 
 export const TIMELINE_KINDS = [
   "confirm-plan",
@@ -18,6 +18,7 @@ export const TIMELINE_KINDS = [
   "pause",
   "resume",
   "merged",
+  "action",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
@@ -37,6 +38,7 @@ export const TIMELINE_LABELS: Record<TimelineKind, string> = {
   pause: "暂停",
   resume: "恢复",
   merged: "合并进 main",
+  action: "人的操作",
 };
 
 export function timelineLabel(kind: TimelineKind, hostKind: HostKind): string {
