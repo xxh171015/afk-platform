@@ -39,6 +39,8 @@ interface RawMr {
   merged_at?: string | null;
   merged_by?: RawUser | null;
   merge_user?: RawUser | null;
+  merge_commit_sha?: string | null;
+  squash_commit_sha?: string | null;
   head_pipeline?: { status?: string } | null;
   has_conflicts?: boolean;
 }
@@ -106,7 +108,13 @@ function info(
       (typeof raw.merged_at === "string" ? raw.merged_at : null),
     mergedByPlatform: extra.mergedByPlatform ?? false,
     conflictsWithDefault: raw.has_conflicts === true,
+    mergeSha: namedSha(raw.merge_commit_sha),
+    squashSha: namedSha(raw.squash_commit_sha),
   };
+}
+
+function namedSha(value: string | null | undefined): string | null {
+  return typeof value === "string" && value !== "" ? value.toLowerCase() : null;
 }
 
 export function createGitLabAdapter(options: GitLabOptions): HostAdapter {

@@ -726,7 +726,9 @@ export const workers = pgTable("workers", {
 });
 
 // Commit ↔ Ticket / Spec / PR (GLOSSARY Link). ticket kind is written when a ticket or wrap-up fix
-// merges into the integration branch, from the rewritten SHAs the run recorded; pr kind is later.
+// merges into the integration branch, from the rewritten SHAs the run recorded. pr kind is written
+// when host-sync first sees a pull request merged, from trailers on the default branch (squash: Spec
+// from the pull request body, no Ticket).
 export const links = pgTable(
   "links",
   {
@@ -745,7 +747,7 @@ export const links = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    unique("links_repo_sha_unique").on(t.repoId, t.commitSha),
+    unique("links_repo_sha_kind_unique").on(t.repoId, t.commitSha, t.kind),
     index("links_spec_idx").on(t.specId),
     index("links_sha_idx").on(t.commitSha),
     check("links_kind_check", oneOf(t.kind, LINK_KINDS)),

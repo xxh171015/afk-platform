@@ -27,6 +27,7 @@ const LinkRow = z.object({
   ticketDisplayId: z.string().nullable(),
   runId: z.number().int().nullable(),
   runDisplayId: z.string().nullable(),
+  pullNumber: z.number().int().nullable(),
 });
 
 const LinksReply = z.object({ links: z.array(LinkRow) });

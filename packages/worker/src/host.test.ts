@@ -1,7 +1,10 @@
 import type { HostAdapter, PullRequestInfo } from "@afk/host";
 import { createGitLabAdapter, HostError, hostRepoRef } from "@afk/host";
 import { FakeGitLab } from "@afk/host/testing";
-import { describe, expect, it } from "vitest";
+import { git, gitOrThrow } from "@afk/pipeline";
+import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
+import type { HostTask } from "@afk/shared";
+import { afterEach, describe, expect, it } from "vitest";
 import { InfrastructureError } from "./executor.ts";
 import { runHostTask } from "./host.ts";
 
@@ -20,6 +23,8 @@ const info = (
   mergedAt: null,
   mergedByPlatform: false,
   conflictsWithDefault: false,
+  mergeSha: null,
+  squashSha: null,
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
@@ -229,6 +234,25 @@ describe("a host-sync task", () => {
     ],
   };
 
+  it("passes merge and squash SHAs through in the sync result", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async ({ number }) =>
+        number === 1
+          ? info(1, { state: "merged", mergeSha: "d".repeat(40) })
+          : info(2, { state: "merged", squashSha: "e".repeat(40) }),
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, sync, log);
+    expect(result).toMatchObject({
+      stage: "host-sync",
+      pulls: [
+        { id: 1, state: "merged", mergeSha: "d".repeat(40), squashSha: null },
+        { id: 2, state: "merged", mergeSha: null, squashSha: "e".repeat(40) },
+      ],
+    });
+  });
+
   it("reports each open pull request", async () => {
     const adapter: HostAdapter = {
       ...noCleanup,
@@ -251,6 +275,8 @@ describe("a host-sync task", () => {
           mergedAt: null,
           mergedByPlatform: false,
           conflictsWithDefault: false,
+          mergeSha: null,
+          squashSha: null,
         },
         {
           id: 2,
@@ -263,6 +289,8 @@ describe("a host-sync task", () => {
           mergedAt: null,
           mergedByPlatform: false,
           conflictsWithDefault: false,
+          mergeSha: null,
+          squashSha: null,
         },
       ],
       defaults: [],
@@ -592,5 +620,98 @@ describe("a repo-access task", () => {
     );
     await expect(failing).rejects.toBeInstanceOf(InfrastructureError);
     await expect(failing).rejects.toThrow("HTTP 502");
+  });
+});
+
+describe("an index-pr-links task", () => {
+  let repo: TestRepo | undefined;
+  afterEach(() => repo?.cleanup());
+
+  const task = (extra: {
+    mergeSha?: string | null;
+    squashSha?: string | null;
+  }): HostTask => ({
+    kind: "index-pr-links",
+    repoUrl: "https://github.com/me/pilot.git",
+    repoName: "pilot",
+    defaultBranch: "main",
+    number: 7,
+    mergeSha: extra.mergeSha ?? null,
+    squashSha: extra.squashSha ?? null,
+  });
+
+  function adapterWithBody(body: string): HostAdapter {
+    return {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7, { state: "merged" }),
+      getPullRequestBody: async () => body,
+    };
+  }
+
+  it("does not clone inside host-sync: it needs a default-branch clone of its own", async () => {
+    await expect(
+      runHostTask(
+        { adapter: adapterWithBody(""), repoRef: ref },
+        task({ mergeSha: "d".repeat(40) }),
+        log,
+      ),
+    ).rejects.toThrow("index-pr-links needs a clone of the default branch");
+  });
+
+  it("walks commits a merge brought onto the default branch and reads their trailers", async () => {
+    repo = makeRepo();
+    git(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    const first = repo.commit(
+      { "a.ts": "a\n" },
+      "first\n\nSpec: S-1\nTicket: T-1\nRun: R-10",
+    );
+    const second = repo.commit(
+      { "b.ts": "b\n" },
+      "second\n\nSpec: S-1\nTicket: T-2\nRun: R-11",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    gitOrThrow(repo.dir, ["merge", "--no-ff", "-m", "Merge PR", "pr"]);
+    const mergeSha = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      { adapter: adapterWithBody(""), repoRef: ref, repoDir: repo.dir },
+      task({ mergeSha }),
+      log,
+    );
+    expect(result).toEqual({
+      stage: "index-pr-links",
+      links: [
+        { sha: first, spec: "S-1", ticket: "T-1", run: "R-10" },
+        { sha: second, spec: "S-1", ticket: "T-2", run: "R-11" },
+      ],
+    });
+  });
+
+  it("for a squash, takes Spec from the pull request body and records no Ticket", async () => {
+    repo = makeRepo();
+    git(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    repo.commit({ "a.ts": "a\n" }, "work\n\nSpec: S-1\nTicket: T-1\nRun: R-10");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    gitOrThrow(repo.dir, ["merge", "--squash", "pr"]);
+    gitOrThrow(repo.dir, [
+      "commit",
+      "--quiet",
+      "-m",
+      "squash\n\nSpec: S-1\nTicket: T-1",
+    ]);
+    const squashSha = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      {
+        adapter: adapterWithBody("Spec: S-1\n\n## Tickets\n- T-1 work"),
+        repoRef: ref,
+        repoDir: repo.dir,
+      },
+      task({ squashSha }),
+      log,
+    );
+    expect(result).toEqual({
+      stage: "index-pr-links",
+      links: [{ sha: squashSha, spec: "S-1", ticket: null, run: null }],
+    });
   });
 });

@@ -43,6 +43,10 @@ export interface PullRequestInfo {
   // The host says this pull request cannot merge because it conflicts with the default branch (GitHub
   // `mergeable === false`, GitLab `has_conflicts`). Null/unknown is not a conflict.
   conflictsWithDefault: boolean;
+  // SHA on the default branch after a person merged: a two-parent merge commit, or a squash commit
+  // (one parent). Null until merged, or when the host did not name one.
+  mergeSha: string | null;
+  squashSha: string | null;
 }
 
 export interface OpenPullRequestInput {

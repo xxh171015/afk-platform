@@ -5,7 +5,8 @@ import { enqueueJob, requeueJob } from "../jobs/queue.ts";
 // The jobs that talk to the code host. A worker runs them because the host's credentials live there only
 // (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` follows every
 // pull request of a project that is still worth a look (one row per project, put back in the queue after each
-// look), `patch-pr-body` writes the acceptance pack into a description. None of them holds a lock key.
+// look), `patch-pr-body` writes the acceptance pack into a description, `index-pr-links` walks trailers on
+// the default branch after a pull request is first merged. None of them holds a lock key.
 
 export const SYNC_INTERVAL_SECONDS = 60;
 
@@ -33,6 +34,12 @@ export interface PrReadyPayload {
 export interface PatchPrBodyPayload {
   specId: number;
   pullId: number;
+}
+
+export interface IndexPrLinksPayload {
+  pullId: number;
+  mergeSha?: string;
+  squashSha?: string;
 }
 
 export function readPrReadyPayload(job: {
@@ -86,6 +93,20 @@ export function readPatchPrBodyPayload(job: {
     typeof specId === "number" &&
     typeof pullId === "number"
     ? { specId, pullId }
+    : undefined;
+}
+
+export function readIndexPrLinksPayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): IndexPrLinksPayload | undefined {
+  const { pullId, mergeSha, squashSha } = job.payload;
+  return job.type === "index-pr-links" && typeof pullId === "number"
+    ? {
+        pullId,
+        ...(typeof mergeSha === "string" ? { mergeSha } : {}),
+        ...(typeof squashSha === "string" ? { squashSha } : {}),
+      }
     : undefined;
 }
 
@@ -227,6 +248,23 @@ export async function enqueuePatchPrBody(
     payload: { ...payload },
     requiredCapabilities: [HOST_CAPABILITY],
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+  });
+}
+
+const indexPrLinksKey = ({ pullId }: IndexPrLinksPayload) =>
+  `pull-${pullId}:index-pr-links`;
+
+// First time host-sync sees a pull request merged, with a merge or squash SHA: walk trailers on
+// the default branch. The same key means a later look does not queue another.
+export async function enqueueIndexPrLinks(
+  client: pg.PoolClient,
+  payload: IndexPrLinksPayload,
+) {
+  return enqueueJob(client, {
+    type: "index-pr-links",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: indexPrLinksKey(payload),
   });
 }
 

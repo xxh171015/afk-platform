@@ -11,6 +11,7 @@ export interface LinkRow {
   ticketDisplayId: string | null;
   runId: number | null;
   runDisplayId: string | null;
+  pullNumber: number | null;
 }
 
 interface LinkRecord {
@@ -20,6 +21,7 @@ interface LinkRecord {
   spec_id: number;
   ticket_id: number | null;
   run_id: number | null;
+  pull_number: number | null;
 }
 
 function asLink(row: LinkRecord): LinkRow {
@@ -35,11 +37,14 @@ function asLink(row: LinkRecord): LinkRow {
       : null,
     runId: row.run_id,
     runDisplayId: row.run_id ? formatDisplayId("run", row.run_id) : null,
+    pullNumber: row.pull_number,
   };
 }
 
-const SELECT = `SELECT l.kind, l.commit_sha, l.spec_id, l.ticket_id, l.run_id, r.name AS repo
-     FROM links l JOIN repos r ON r.id = l.repo_id`;
+const SELECT = `SELECT l.kind, l.commit_sha, l.spec_id, l.ticket_id, l.run_id, r.name AS repo,
+            p.number AS pull_number
+     FROM links l JOIN repos r ON r.id = l.repo_id
+     LEFT JOIN pull_requests p ON p.id = l.pull_request_id`;
 
 export async function linksBySha(
   pool: pg.Pool,
