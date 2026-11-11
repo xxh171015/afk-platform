@@ -7,10 +7,11 @@ export interface TestDatabase {
 }
 
 const ADMIN_SHUTDOWN = "57P01"; // what DROP DATABASE ... WITH (FORCE) sends to a connection still open
+const DB_GONE = "3D000"; // queries still in flight after the database was dropped
 
-// An idle connection killed by the forced drop is expected; anything else must surface.
+// A forced drop or a client still talking to a dropped database is expected; anything else must surface.
 function ignoreForcedDrop(error: Error & { code?: string }): void {
-  if (error.code !== ADMIN_SHUTDOWN) throw error;
+  if (error.code !== ADMIN_SHUTDOWN && error.code !== DB_GONE) throw error;
 }
 
 // A throwaway database on the server named by DATABASE_URL, so tests never see each other's tables.
