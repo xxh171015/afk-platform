@@ -1,8 +1,8 @@
 // Rewrites everything the platform takes from mattpocock/skills, from a checkout of it, at SKILLS_SHA:
 //   node scripts/refresh-skills-snapshot.ts <path to a skills checkout>
-// Each file is taken from the commit (not the working tree) and copied unchanged: the planning skills under skills/,
-// the sandbox skills under packages/pipeline/skills/ (each with the upstream LICENSE, so they install and mount as
-// they are), the seed templates under packages/shared/skills-snapshot/. Each folder's VENDORED.md names the SHA. Run
+// Each file is taken from the commit (not the working tree) and copied unchanged, except SETUP_SKILL_RENAMED below:
+// the planning skills under skills/, the sandbox skills under packages/pipeline/skills/ (each with the upstream
+// LICENSE, so they install and mount as they are), the seed templates under packages/shared/skills-snapshot/. Each folder's VENDORED.md names the SHA. Run
 // it after changing SKILLS_SHA, then read the diff (see "升级 skills SHA" in docs/operations-manual.md).
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -45,23 +45,45 @@ const note = (dir: string, what: string) =>
     ].join("\n"),
   );
 
+// The one change made to a copy: on a planning machine the tracker doc comes from /afk-setup, so to-spec and
+// to-tickets name it instead of /setup-matt-pocock-skills (held by packages/cli/src/afk-setup-text.test.ts).
+const SETUP_SKILL_RENAMED = ["to-spec/SKILL.md", "to-tickets/SKILL.md"];
+const renameSetupSkill = (text: string) =>
+  text.replaceAll("/setup-matt-pocock-skills", "/afk-setup");
+
 const license = show("LICENSE");
-const copySkills = (dir: string, skills: Record<string, string>) => {
+const copySkills = (
+  dir: string,
+  skills: Record<string, string>,
+  what: string,
+  rewrite: (copied: string, text: string) => string = (_, text) => text,
+) => {
   for (const [name, path] of Object.entries(skills)) {
     rmSync(`${root}${dir}/${name}`, { recursive: true, force: true });
     const files = git("ls-tree", "-r", "--name-only", SKILLS_SHA, `${path}/`)
       .trim()
       .split("\n");
     for (const file of files) {
-      write(`${dir}/${name}/${file.slice(path.length + 1)}`, show(file));
+      const copied = `${name}/${file.slice(path.length + 1)}`;
+      write(`${dir}/${copied}`, rewrite(copied, show(file)));
     }
     write(`${dir}/${name}/LICENSE`, license);
   }
-  note(dir, Object.keys(skills).join(", "));
+  note(dir, what);
 };
 
-copySkills("skills", PLANNING_SKILLS);
-copySkills("packages/pipeline/skills", SANDBOX_SKILLS);
+copySkills(
+  "skills",
+  PLANNING_SKILLS,
+  `${Object.keys(PLANNING_SKILLS).join(", ")} (except that ${SETUP_SKILL_RENAMED.join(" and ")} say /afk-setup where upstream says /setup-matt-pocock-skills)`,
+  (copied, text) =>
+    SETUP_SKILL_RENAMED.includes(copied) ? renameSetupSkill(text) : text,
+);
+copySkills(
+  "packages/pipeline/skills",
+  SANDBOX_SKILLS,
+  Object.keys(SANDBOX_SKILLS).join(", "),
+);
 
 const templates = "packages/shared/skills-snapshot";
 rmSync(`${root}${templates}`, { recursive: true, force: true });

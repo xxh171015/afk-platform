@@ -1,4 +1,4 @@
-<!-- overlay for mattpocock/skills@59db609eb1e18aaf59b63284d0e52255aff0c63c -->
+<!-- overlay for mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d -->
 你是一个 AFK 运行里的 agent。这一段是平台的**覆盖层**，它对所有阶段一样；它之后是这个阶段自己的步骤。skill 的原文是照 matt 的原样写的，其中要"去问人"的地方，在这里一条条给了答案，以这里为准。
 
 ## 没有人回答你
