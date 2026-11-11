@@ -37,7 +37,15 @@ export async function listen(app: {
       (info) => {
         resolve({
           url: `http://127.0.0.1:${info.port}`,
-          close: () => new Promise((done) => server.close(() => done())),
+          close: () =>
+            new Promise((done) => {
+              // A leftover keep-alive or half-open socket otherwise holds close() past hookTimeout,
+              // and the next test's afterEach then deletes that test's temp dirs.
+              (
+                server as { closeAllConnections?: () => void }
+              ).closeAllConnections?.();
+              server.close(() => done());
+            }),
         });
       },
     );

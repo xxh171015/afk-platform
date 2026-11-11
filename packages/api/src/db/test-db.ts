@@ -34,10 +34,11 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     pool,
     async drop() {
       try {
-        await pool.end();
+        // FORCE first: pool.end() waits for checked-out clients, and a stuck query
+        // held afterEach past hookTimeout.
         await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
       } finally {
-        await admin.end();
+        await Promise.allSettled([pool.end(), admin.end()]);
       }
     },
   };
