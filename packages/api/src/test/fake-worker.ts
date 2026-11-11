@@ -44,9 +44,9 @@ export async function listen(app: {
             await hub?.stop();
             // A leftover keep-alive or half-open socket otherwise holds close() past hookTimeout,
             // and the next test's afterEach then deletes that test's temp dirs.
-            (
-              server as { closeAllConnections?: () => void }
-            ).closeAllConnections?.();
+            if ("closeAllConnections" in server) {
+              server.closeAllConnections();
+            }
             await new Promise<void>((done) => server.close(() => done()));
           },
         });
