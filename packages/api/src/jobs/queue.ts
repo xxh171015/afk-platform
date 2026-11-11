@@ -71,6 +71,20 @@ export interface ClaimRequest {
   leaseSeconds: number;
 }
 
+// A job belongs to a project through whatever id its payload carries (host-sync has projectId, most
+// others specId / ticketId / repoId / pullId). Jobs with none of those stay unattributed and keep FIFO.
+const JOB_PROJECT_ID = `(
+  SELECT COALESCE(
+    (j.payload->>'projectId')::int,
+    (SELECT s.project_id FROM specs s WHERE s.id = (j.payload->>'specId')::int),
+    (SELECT s.project_id FROM tickets t JOIN specs s ON s.id = t.spec_id
+      WHERE t.id = (j.payload->>'ticketId')::int),
+    (SELECT r.project_id FROM repos r WHERE r.id = (j.payload->>'repoId')::int),
+    (SELECT s.project_id FROM pull_requests pr JOIN specs s ON s.id = pr.spec_id
+      WHERE pr.id = (j.payload->>'pullId')::int)
+  )
+)`;
+
 export async function claimJob(
   pool: pg.Pool,
   request: ClaimRequest,
@@ -83,6 +97,11 @@ export async function claimJob(
   try {
     await client.query("BEGIN");
     await applyOrigin(client);
+    // Claims of one worker's slots must see each other's last_claimed_at, or both slots take the same
+    // project's pile. Transaction-scoped, so PgBouncer in transaction mode is fine.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext('afk-job-claim'))",
+    );
     // A lease that ran out puts the job back in the queue; the bumped attempt shuts the old holder out.
     await client.query(
       `UPDATE jobs SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL, attempt = attempt + 1
@@ -92,6 +111,7 @@ export async function claimJob(
     const { rows } = await client.query<Job>(
       `UPDATE jobs SET state = 'running', lease_owner = $1, lease_expires_at = $2
        WHERE id = (SELECT j.id FROM jobs j
+         LEFT JOIN projects p ON p.id = ${JOB_PROJECT_ID}
          WHERE j.state = 'queued'
            AND (j.not_before IS NULL OR j.not_before <= $4)
            AND j.required_capabilities <@ $3::text[]
@@ -100,12 +120,21 @@ export async function claimJob(
              NOT EXISTS (SELECT 1 FROM jobs h WHERE h.lock_key = j.lock_key AND h.state = 'running' AND h.lease_expires_at > $4)
              -- ... and nothing older is still waiting for it (first in, first out)
              AND NOT EXISTS (SELECT 1 FROM jobs e WHERE e.lock_key = j.lock_key AND e.state = 'queued' AND e.id < j.id)))
-         ORDER BY j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1)
+         ORDER BY COALESCE(p.last_claimed_at, '-infinity'::timestamptz), j.id
+         FOR UPDATE OF j SKIP LOCKED LIMIT 1)
        RETURNING ${COLUMNS}`,
       [request.workerId, leaseExpiresAt, request.capabilities, request.now],
     );
+    const job = (rows[0] as LeasedJob | undefined) ?? null;
+    if (job) {
+      await client.query(
+        `UPDATE projects SET last_claimed_at = $2
+         WHERE id = (SELECT ${JOB_PROJECT_ID} FROM jobs j WHERE j.id = $1)`,
+        [job.id, request.now],
+      );
+    }
     await client.query("COMMIT");
-    return (rows[0] as LeasedJob | undefined) ?? null;
+    return job;
   } catch (error) {
     try {
       await client.query("ROLLBACK");

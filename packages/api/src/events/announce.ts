@@ -57,8 +57,18 @@ export async function specIdsOfJob(
     return pull.rows[0] ? [pull.rows[0].spec_id] : [];
   }
   if (typeof payload.projectId === "number") {
+    // host-sync: only specs that are not over, or that still have an open pull request
     const specs = await pool.query<{ id: number }>(
-      "SELECT id FROM specs WHERE project_id = $1 ORDER BY id",
+      `SELECT s.id FROM specs s
+       WHERE s.project_id = $1
+         AND (
+           s.state NOT IN ('merged', 'cancelled')
+           OR EXISTS (
+             SELECT 1 FROM pull_requests p
+             WHERE p.spec_id = s.id AND p.state = 'open'
+           )
+         )
+       ORDER BY s.id`,
       [payload.projectId],
     );
     return specs.rows.map((row) => row.id);
@@ -139,9 +149,12 @@ export async function loadShot(
     repo: string;
     state: string;
     draft: boolean;
+    ci: string;
+    review: string;
+    head_sha: string;
     sync_error: string | null;
   }>(
-    `SELECT p.id, r.name AS repo, p.state, p.draft, p.sync_error
+    `SELECT p.id, r.name AS repo, p.state, p.draft, p.ci, p.review, p.head_sha, p.sync_error
      FROM pull_requests p JOIN repos r ON r.id = p.repo_id
      WHERE p.spec_id = $1 ORDER BY p.id`,
     [specId],
@@ -185,6 +198,9 @@ export async function loadShot(
     repo: item.repo,
     state: item.state,
     draft: item.draft,
+    ci: item.ci,
+    review: item.review,
+    headSha: item.head_sha,
     syncError: item.sync_error,
     mergeOrderDraft: (order.after[item.repo] ?? []).length > 0,
   }));
@@ -220,6 +236,10 @@ export async function snapshotSpecs(
   return shots;
 }
 
+function shotsEqual(left: Shot, right: Shot): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export async function emitTransition(
   context: AppContext,
   before: Map<number, Shot>,
@@ -227,6 +247,13 @@ export async function emitTransition(
 ): Promise<void> {
   const specIds = new Set<number>([...before.keys()]);
   if (extra.specId !== undefined) specIds.add(extra.specId);
+  if (specIds.size === 0) {
+    context.events.publish(extra);
+    return;
+  }
+  // Ticket jobs still refresh a new Run; host-sync must not push the same snapshot.
+  const ticketScoped =
+    extra.ticketId !== undefined || extra.runId !== undefined;
   for (const specId of specIds) {
     const after = await loadShot(context.pool, specId);
     const previous = before.get(specId);
@@ -235,12 +262,9 @@ export async function emitTransition(
         await context.notifications.notify(notice);
       }
     }
-  }
-  if (specIds.size === 0) {
-    context.events.publish(extra);
-    return;
-  }
-  for (const specId of specIds) {
+    if (!ticketScoped && after && previous && shotsEqual(previous, after)) {
+      continue;
+    }
     context.events.publish({
       specId,
       ...(extra.ticketId !== undefined ? { ticketId: extra.ticketId } : {}),

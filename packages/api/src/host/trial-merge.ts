@@ -1,4 +1,9 @@
-import { formatDisplayId, type SpecState, TRIAL_MERGE_JOB } from "@afk/shared";
+import {
+  DEFAULT_BRANCH_PEER_SPEC_ID,
+  formatDisplayId,
+  type SpecState,
+  TRIAL_MERGE_JOB,
+} from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
 import { enqueueJob, type Queryable } from "../jobs/queue.ts";
@@ -30,6 +35,8 @@ export const TrialMergeResultSchema = z.object({
 export type TrialMergePayload = {
   specId: number;
   repoId: number;
+  checkDefault: boolean;
+  mainSha: string | undefined;
 };
 
 export function readTrialMergePayload(job: {
@@ -37,10 +44,15 @@ export function readTrialMergePayload(job: {
   payload: Record<string, unknown>;
 }): TrialMergePayload | undefined {
   if (job.type !== TRIAL_MERGE_JOB) return undefined;
-  const { specId, repoId } = job.payload;
+  const { specId, repoId, mainSha } = job.payload;
   if (typeof specId !== "number" || typeof repoId !== "number")
     return undefined;
-  return { specId, repoId };
+  return {
+    specId,
+    repoId,
+    checkDefault: job.payload.checkDefault === true,
+    mainSha: typeof mainSha === "string" ? mainSha : undefined,
+  };
 }
 
 function branchOf(
@@ -89,10 +101,16 @@ async function nextTrialMergeKey(
 
 export async function enqueueTrialMerge(
   client: pg.PoolClient,
-  target: { specId: number; repoId: number; headSha?: string },
+  target: {
+    specId: number;
+    repoId: number;
+    headSha?: string;
+    checkDefault?: boolean;
+    mainSha?: string;
+  },
 ): Promise<void> {
   const peers = await livePeers(client, target.specId, target.repoId);
-  if (peers.length === 0) return;
+  if (peers.length === 0 && !target.checkDefault) return;
   const queued = await client.query<{ id: number }>(
     `SELECT id FROM jobs
      WHERE type = $1 AND state = 'queued'
@@ -101,12 +119,19 @@ export async function enqueueTrialMerge(
     [TRIAL_MERGE_JOB, target.specId, target.repoId],
   );
   if (queued.rows[0]) {
-    if (target.headSha) {
-      await client.query(
-        `UPDATE jobs SET payload = payload || jsonb_build_object('headSha', $2::text) WHERE id = $1`,
-        [queued.rows[0].id, target.headSha],
-      );
-    }
+    await client.query(
+      `UPDATE jobs SET payload = payload
+         || CASE WHEN $2::text IS NOT NULL THEN jsonb_build_object('headSha', $2::text) ELSE '{}'::jsonb END
+         || CASE WHEN $3::boolean THEN jsonb_build_object('checkDefault', true) ELSE '{}'::jsonb END
+         || CASE WHEN $4::text IS NOT NULL THEN jsonb_build_object('mainSha', $4::text) ELSE '{}'::jsonb END
+       WHERE id = $1`,
+      [
+        queued.rows[0].id,
+        target.headSha ?? null,
+        target.checkDefault === true,
+        target.mainSha ?? null,
+      ],
+    );
     return;
   }
   await enqueueJob(client, {
@@ -116,6 +141,8 @@ export async function enqueueTrialMerge(
       specId: target.specId,
       repoId: target.repoId,
       ...(target.headSha ? { headSha: target.headSha } : {}),
+      ...(target.checkDefault ? { checkDefault: true } : {}),
+      ...(target.mainSha ? { mainSha: target.mainSha } : {}),
     },
     idempotencyKey: await nextTrialMergeKey(
       client,
@@ -166,6 +193,13 @@ export async function buildTrialMergeTask(
   if (!specRow || !repoRow) return undefined;
   const branch = branchOf(specRow.integration_branches, payload.repoId);
   if (!branch) return undefined;
+  const peers = await livePeers(pool, payload.specId, payload.repoId);
+  if (payload.checkDefault) {
+    peers.push({
+      specId: DEFAULT_BRANCH_PEER_SPEC_ID,
+      branch: repoRow.default_branch,
+    });
+  }
   return {
     spec: {
       id: specRow.id,
@@ -178,7 +212,7 @@ export async function buildTrialMergeTask(
       defaultBranch: repoRow.default_branch,
     },
     ours: { specId: payload.specId, branch },
-    peers: await livePeers(pool, payload.specId, payload.repoId),
+    peers,
   };
 }
 
@@ -262,6 +296,29 @@ export async function recordTrialMergeResult(
                      discovered_at = now()`,
       [pair.a, pair.b, read.repoId, peer.files, pair.shaA, pair.shaB],
     );
+  }
+  if (read.checkDefault && specRow.rows[0].state === "running") {
+    const vsDefault = parsed.data.peers.find(
+      (peer) => peer.specId === DEFAULT_BRANCH_PEER_SPEC_ID,
+    );
+    if (vsDefault && vsDefault.files.length > 0) {
+      const { enqueueUpdateBranch } = await import("./update-branch.ts");
+      let sha = read.mainSha;
+      if (!sha) {
+        const repo = await client.query<{ default_sha: string | null }>(
+          "SELECT default_sha FROM repos WHERE id = $1",
+          [read.repoId],
+        );
+        sha = repo.rows[0]?.default_sha ?? undefined;
+      }
+      if (sha) {
+        await enqueueUpdateBranch(client, {
+          specId: read.specId,
+          repoId: read.repoId,
+          mainSha: sha,
+        });
+      }
+    }
   }
   return { status: "applied" };
 }
