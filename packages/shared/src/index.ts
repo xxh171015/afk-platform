@@ -251,6 +251,8 @@ export {
   TICKET_STATES,
   ticketTransition,
 } from "./ticket-state.ts";
+export type { ParsedTrailers } from "./trailers.ts";
+export { parseTrailers } from "./trailers.ts";
 export {
   CURSOR_AUTH_BRIEF,
   IMAGE_BUILD_BRIEF,

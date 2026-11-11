@@ -1975,7 +1975,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2039,6 +2039,16 @@ export interface paths {
                   /** @enum {string} */
                   kind: "repo-access";
                   repoUrl: string;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "index-pr-links";
+                  repoUrl: string;
+                  repoName: string;
+                  defaultBranch: string;
+                  number: number;
+                  mergeSha: string | null;
+                  squashSha: string | null;
                 };
           };
         };
@@ -3523,6 +3533,7 @@ export interface paths {
                 pullRequestId: number | null;
                 pullRequestNumber: number | null;
                 pullRequestUrl: string | null;
+                pullNumber: number | null;
               }[];
             };
           };
@@ -5106,6 +5117,7 @@ export interface paths {
                 pullRequestId: number | null;
                 pullRequestNumber: number | null;
                 pullRequestUrl: string | null;
+                pullNumber: number | null;
               }[];
             };
           };
@@ -5159,6 +5171,7 @@ export interface paths {
                 pullRequestId: number | null;
                 pullRequestNumber: number | null;
                 pullRequestUrl: string | null;
+                pullNumber: number | null;
               }[];
             };
           };

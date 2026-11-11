@@ -247,6 +247,23 @@ export async function processJob(
         throw new InfrastructureError("this worker has no code host");
       const task = await api.hostTask(job);
       if (task === "lost") return "abandoned";
+      if (task.kind === "index-pr-links") {
+        const deps = await withCredentials(
+          { ...options.executor, api },
+          task.repoUrl,
+        );
+        const repoDir = deps.repos.ensure(
+          task.repoName,
+          task.repoUrl,
+          task.defaultBranch,
+        );
+        const body = await runHostTask({ ...options.host, repoDir }, task, log);
+        if (lost.signal.aborted) return "abandoned";
+        if ((await handOver(options, job, body, log)) !== "held")
+          return "abandoned";
+        log(`${job.type} ok`);
+        return "completed";
+      }
       const body = await runHostTask(options.host, task, log);
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")

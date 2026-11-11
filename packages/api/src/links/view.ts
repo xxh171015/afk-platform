@@ -14,6 +14,7 @@ export interface LinkRow {
   pullRequestId: number | null;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
+  pullNumber: number | null;
 }
 
 interface LinkRecord {
@@ -44,6 +45,7 @@ function asLink(row: LinkRecord): LinkRow {
     pullRequestId: row.pull_request_id,
     pullRequestNumber: row.pull_request_number,
     pullRequestUrl: row.pull_request_url,
+    pullNumber: row.pull_request_number,
   };
 }
 

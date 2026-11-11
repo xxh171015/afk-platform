@@ -29,7 +29,7 @@ export async function recordTicketLinks(
       await client.query(
         `INSERT INTO links (repo_id, commit_sha, spec_id, ticket_id, run_id, kind)
          VALUES ($1, $2, $3, $4, $5, 'ticket')
-         ON CONFLICT (repo_id, commit_sha) DO NOTHING`,
+         ON CONFLICT (repo_id, commit_sha, kind) DO NOTHING`,
         [owner.repo_id, sha, owner.spec_id, owner.ticket_id, run.id],
       );
     }

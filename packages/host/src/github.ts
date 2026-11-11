@@ -50,6 +50,7 @@ interface RawPull {
   merged?: boolean;
   merged_at?: string | null;
   merged_by?: { login?: string } | null;
+  merge_commit_sha?: string | null;
   body?: string | null;
   head: { sha: string };
   mergeable?: boolean | null;
@@ -185,7 +186,24 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     return states.includes("pending") ? "pending" : "success";
   }
 
+  async function mergeShas(
+    repo: RepoRef,
+    raw: RawPull,
+  ): Promise<{ mergeSha: string | null; squashSha: string | null }> {
+    const sha =
+      raw.merged && typeof raw.merge_commit_sha === "string"
+        ? raw.merge_commit_sha.toLowerCase()
+        : "";
+    if (!sha) return { mergeSha: null, squashSha: null };
+    const read = await call(repo, BRANCH, "GET", `/commits/${sha}`);
+    const parents = (read.body as { parents?: unknown[] } | null)?.parents;
+    if (read.status === 200 && Array.isArray(parents) && parents.length <= 1)
+      return { mergeSha: null, squashSha: sha };
+    return { mergeSha: sha, squashSha: null };
+  }
+
   async function info(repo: RepoRef, raw: RawPull): Promise<PullRequestInfo> {
+    const shas = await mergeShas(repo, raw);
     return {
       number: raw.number,
       url: raw.html_url,
@@ -198,6 +216,8 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       mergedAt: raw.merged_at ?? null,
       mergedByPlatform: false,
       conflictsWithDefault: raw.mergeable === false,
+      mergeSha: shas.mergeSha,
+      squashSha: shas.squashSha,
     };
   }
 

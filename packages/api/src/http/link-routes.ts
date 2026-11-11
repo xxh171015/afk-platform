@@ -30,6 +30,7 @@ export const LinkRow = z.object({
   pullRequestId: z.number().int().nullable(),
   pullRequestNumber: z.number().int().nullable(),
   pullRequestUrl: z.string().nullable(),
+  pullNumber: z.number().int().nullable(),
 });
 
 const LinksReply = z.object({ links: z.array(LinkRow) });
