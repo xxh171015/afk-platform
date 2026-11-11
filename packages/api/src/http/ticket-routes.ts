@@ -375,6 +375,8 @@ const specRoute = createRoute({
             failureSource: z.enum(FAILURE_SOURCES).optional(),
           }),
         ),
+        // true when this spec has no events and the timeline is the old domain-table assembly
+        timelineLegacy: z.boolean(),
         finalRuns: z.array(
           z.object({
             id: Id,

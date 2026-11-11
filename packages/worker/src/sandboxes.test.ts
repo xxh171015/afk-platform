@@ -9,17 +9,31 @@ import { type Docker, removeSandboxesUnder } from "./sandboxes.ts";
 function fakeDocker(
   containers: Record<string, string[]>,
   created: readonly string[] = [],
+  labels: Record<string, Record<string, string>> = {},
 ) {
   const calls: string[][] = [];
   const docker: Docker = (args) => {
     calls.push(args);
-    if (args[0] === "ps")
+    if (args[0] === "ps") {
+      const filter = args.includes("--filter")
+        ? args[args.indexOf("--filter") + 1]
+        : undefined;
+      const wanted = filter?.startsWith("label=")
+        ? filter.slice("label=".length)
+        : undefined;
+      const [key, value] = wanted?.split("=") ?? [];
       return {
         code: 0,
         stdout: `${Object.keys(containers)
           .filter((id) => args.includes("-a") || !created.includes(id))
+          .filter((id) => {
+            if (!key) return true;
+            const found = labels[id]?.[key];
+            return value ? found === value : found !== undefined;
+          })
           .join("\n")}\n`,
       };
+    }
     if (args[0] === "inspect") {
       const ids = args.filter((a) => a in containers);
       return {
@@ -59,7 +73,10 @@ describe("removeSandboxesUnder", () => {
   it("does nothing, and asks nothing more, when no container is running", () => {
     const fake = fakeDocker({});
     expect(removeSandboxesUnder("/home/w/slots/0", fake.docker)).toEqual([]);
-    expect(fake.calls).toEqual([["ps", "-a", "-q"]]);
+    expect(fake.calls).toEqual([
+      ["ps", "-a", "-q", "--filter", "label=afk.kind"],
+      ["ps", "-a", "-q"],
+    ]);
   });
 
   it("carries on when docker cannot be asked: nothing is removed, nothing throws, and it says so", () => {
@@ -109,5 +126,29 @@ describe("removeSandboxesUnder", () => {
       a1: [`${realpathSync(dir)}/backend/.git`],
     });
     expect(removeSandboxesUnder(dir, fake.docker)).toEqual(["a1"]);
+  });
+
+  it("finds leftover sandboxes by the afk.kind label, and still removes an unlabelled one by its mount", () => {
+    const labelled = fakeDocker({ a1: ["/home/w/slots/0/backend/.git"] }, [], {
+      a1: { "afk.kind": "gate" },
+    });
+    expect(removeSandboxesUnder("/home/w/slots/0", labelled.docker)).toEqual([
+      "a1",
+    ]);
+    expect(
+      labelled.calls.some(
+        (call) =>
+          call[0] === "ps" &&
+          call.includes("--filter") &&
+          call.some((arg) => arg.includes("afk.kind")),
+      ),
+    ).toBe(true);
+
+    const unlabelled = fakeDocker({
+      b2: ["/home/w/slots/0/backend/.git"],
+    });
+    expect(removeSandboxesUnder("/home/w/slots/0", unlabelled.docker)).toEqual([
+      "b2",
+    ]);
   });
 });

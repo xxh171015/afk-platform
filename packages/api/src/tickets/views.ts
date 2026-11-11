@@ -727,6 +727,7 @@ export async function specView(
     ticketStories.rows.map((ticket) => ticket.stories),
   );
   const planningSha = (row.planning_sha as string | null) ?? null;
+  const timeline = await specTimeline(pool, specId);
   const projectRepos = await pool.query<{
     id: number;
     name: string;
@@ -793,7 +794,8 @@ export async function specView(
     orderBroken: row.order_broken as { repo: string; skipped: string[] }[],
     pullRequests: await pullRequestRows(pool, specId),
     acceptancePack: await readAcceptancePack(pool, specId),
-    timeline: await specTimeline(pool, specId),
+    timeline: timeline.items,
+    timelineLegacy: timeline.legacy,
     finalRuns: await finalRunsOf(pool, specId),
     potentialConflicts: await potentialConflictsOf(pool, specId),
     leadTime: await specLeadTime(pool, specId, now),

@@ -542,6 +542,7 @@ export function SpecDetail({
     orderBroken,
     acceptancePack,
     timeline: timelineEvents,
+    timelineLegacy,
     finalRuns,
     potentialConflicts,
     leadTime,
@@ -823,6 +824,7 @@ export function SpecDetail({
           events={timeline}
           pullRequests={pullRequests}
           hostKind={hostKind}
+          legacy={Boolean(timelineLegacy)}
         />
       ) : null}
       <TicketSheet
@@ -1374,6 +1376,7 @@ function TimelinePage({
   events,
   pullRequests,
   hostKind,
+  legacy,
 }: {
   events: {
     kind: string;
@@ -1384,8 +1387,20 @@ function TimelinePage({
   }[];
   pullRequests: SpecView["pullRequests"];
   hostKind: HostKind;
+  legacy: boolean;
 }) {
-  if (events.length === 0) return <p className="note">还没有时间线事件</p>;
+  const note = legacy ? (
+    <p className="note" data-testid="timeline-legacy">
+      时间线沿用旧拼法：此需求还没有事件
+    </p>
+  ) : null;
+  if (events.length === 0)
+    return (
+      <>
+        {note}
+        <p className="note">还没有时间线事件</p>
+      </>
+    );
   const days = new Map<string, typeof events>();
   for (const event of events) {
     const day = event.at ? formatShanghaiDay(event.at) : "未知日期";
@@ -1402,76 +1417,79 @@ function TimelinePage({
     return match?.url ?? prs[0]?.url ?? null;
   };
   return (
-    <div className="timeline">
-      {[...days.entries()].map(([day, items]) => (
-        <section key={day} className="timeline-day">
-          <h3 className="timeline-day-label">{day}</h3>
-          <ol className="timeline-rail">
-            {items.map((event) => {
-              const label =
-                event.kind in TIMELINE_LABELS
-                  ? timelineLabel(
-                      event.kind as keyof typeof TIMELINE_LABELS,
-                      hostKind,
-                    )
-                  : event.kind;
-              const host =
-                event.kind === "pr-opened" ||
-                event.kind === "pr-ready" ||
-                event.kind === "merged"
-                  ? prHref(event.text)
-                  : null;
-              return (
-                <li
-                  key={`${event.kind}-${event.at}-${event.text}-${event.runId ?? ""}`}
-                  className="timeline-item"
-                >
-                  <span className="timeline-dot" aria-hidden="true" />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="timeline-kind">{label}</span>
-                    {event.at ? <RelativeTime iso={event.at} /> : null}
-                    {event.failureSource ? (
-                      <span
-                        className="text-xs text-muted-foreground"
-                        data-testid="failure-source"
-                      >
-                        {FAILURE_SOURCE_LABELS[event.failureSource]}
-                      </span>
-                    ) : null}
-                  </div>
-                  {event.text && event.text !== label ? (
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {event.text}
+    <>
+      {note}
+      <div className="timeline">
+        {[...days.entries()].map(([day, items]) => (
+          <section key={day} className="timeline-day">
+            <h3 className="timeline-day-label">{day}</h3>
+            <ol className="timeline-rail">
+              {items.map((event) => {
+                const label =
+                  event.kind in TIMELINE_LABELS
+                    ? timelineLabel(
+                        event.kind as keyof typeof TIMELINE_LABELS,
+                        hostKind,
+                      )
+                    : event.kind;
+                const host =
+                  event.kind === "pr-opened" ||
+                  event.kind === "pr-ready" ||
+                  event.kind === "merged"
+                    ? prHref(event.text)
+                    : null;
+                return (
+                  <li
+                    key={`${event.kind}-${event.at}-${event.text}-${event.runId ?? ""}`}
+                    className="timeline-item"
+                  >
+                    <span className="timeline-dot" aria-hidden="true" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="timeline-kind">{label}</span>
+                      {event.at ? <RelativeTime iso={event.at} /> : null}
+                      {event.failureSource ? (
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid="failure-source"
+                        >
+                          {FAILURE_SOURCE_LABELS[event.failureSource]}
+                        </span>
+                      ) : null}
                     </div>
-                  ) : null}
-                  <div className="mt-1 flex flex-wrap gap-3 text-xs">
-                    {event.runId ? (
-                      <a
-                        href={paths.run(event.runId)}
-                        className="text-primary hover:underline"
-                      >
-                        R-{event.runId}
-                      </a>
+                    {event.text && event.text !== label ? (
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {event.text}
+                      </div>
                     ) : null}
-                    {host ? (
-                      <a
-                        href={host}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-primary hover:underline"
-                      >
-                        {HOST_KIND_LABELS[hostKind]}
-                        <ExternalLink className="size-3" />
-                      </a>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      ))}
-    </div>
+                    <div className="mt-1 flex flex-wrap gap-3 text-xs">
+                      {event.runId ? (
+                        <a
+                          href={paths.run(event.runId)}
+                          className="text-primary hover:underline"
+                        >
+                          R-{event.runId}
+                        </a>
+                      ) : null}
+                      {host ? (
+                        <a
+                          href={host}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-primary hover:underline"
+                        >
+                          {HOST_KIND_LABELS[hostKind]}
+                          <ExternalLink className="size-3" />
+                        </a>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        ))}
+      </div>
+    </>
   );
 }
 

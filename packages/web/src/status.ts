@@ -41,6 +41,7 @@ export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
   "integration-environment-failed": "联调环境起不来",
   "upstream-cancelled": "上游已取消",
   "job-failed": "作业失败",
+  "sandbox-oom": "沙箱内存不足",
 };
 
 export const PR_STATE_LABELS: Record<string, string> = {

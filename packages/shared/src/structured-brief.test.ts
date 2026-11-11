@@ -282,6 +282,27 @@ needs a new field on Order
     });
   });
 
+  it("tells a person to raise the sandbox memory for sandbox-oom", () => {
+    expect(
+      structuredBrief({
+        reason: "sandbox-oom",
+        ...ids,
+        brief: source("implement", {
+          error: "sandbox-oom: container OOMKilled",
+        }),
+      }),
+    ).toMatchObject({
+      summary: "沙箱内存不足",
+      recommendedAction: "把沙箱内存调大后再试",
+      commands: [
+        {
+          label: "调大内存后重试",
+          command: "plat ticket retry T-12 --mode continue",
+        },
+      ],
+    });
+  });
+
   it("gives a wrap-up step retry-final named with the spec", () => {
     expect(
       structuredBrief({
