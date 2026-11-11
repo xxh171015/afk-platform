@@ -1,5 +1,5 @@
 # The one sandbox image both projects use (docs/specs/m3-platform.md「沙箱镜像」): the pilot frontend
-# image (Node 22, Playwright Chromium) plus this repo's extras (pnpm, a PostgreSQL server). Cursor CLI
+# image (Node 22, Playwright Chromium) plus this repo's extras (pnpm, a PostgreSQL server, Go). Cursor CLI
 # is pinned. Per-repo images stay #159. The sandbox has no Docker; gates that need Postgres start a
 # throwaway instance with scripts/pg-temp.sh.
 FROM node:22-bookworm
@@ -19,6 +19,14 @@ RUN echo 'create_main_cluster = false' >> /etc/postgresql-common/createcluster.c
 
 ARG PNPM_VERSION=12.15.0
 RUN npm install -g "pnpm@${PNPM_VERSION}"
+
+# Go projects (e.g. change) gate on the toolchain in go.mod; bump this ARG to match.
+ARG GO_VERSION=1.24.4
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${arch}.tar.gz" \
+    | tar -C /usr/local -xzf -
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Must match afk-pilot-frontend's @playwright/test. OS packages need root; the browser cache is the agent's.
 ARG PLAYWRIGHT_VERSION=1.64.1
