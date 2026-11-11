@@ -88,7 +88,7 @@ function withoutSection(text: string, heading: string): string {
 }
 
 const hasAgentSkills = (text: string | null) =>
-  text !== null && text.split("\n").some(isHeading("## Agent skills"));
+  text?.split("\n").some(isHeading("## Agent skills")) ?? false;
 
 export function planAgentDocs(dir: string, afkHome: string): AgentDoc[] {
   const read = (path: string) =>
