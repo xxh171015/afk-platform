@@ -52,6 +52,15 @@ export function tryParseRepoUrl(url: string): RepoRef | null {
   }
 }
 
+// https, ssh, and with/without .git are the same repo when owner and name match.
+export function sameRepoUrl(a: string, b: string): boolean {
+  const left = tryParseRepoUrl(a);
+  const right = tryParseRepoUrl(b);
+  return left && right
+    ? left.owner === right.owner && left.name === right.name
+    : a.trim() === b.trim();
+}
+
 // Where the repo's pages are: the https address keeps its port, an ssh one is browsed at its host.
 function originOf(cloneUrl: string): string | null {
   const https = /^https?:\/\/(?:[^@/]+@)?([^/]+)\//i.exec(cloneUrl.trim());

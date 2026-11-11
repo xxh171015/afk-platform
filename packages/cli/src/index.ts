@@ -31,8 +31,15 @@ import {
 } from "commander";
 import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
+import { inspectContextCheckout } from "./context.ts";
 import { collectDoctorReport, formatDoctorText } from "./doctor.ts";
-import { blockedText, projectText, specText, ticketText } from "./format.ts";
+import {
+  blockedText,
+  contextText,
+  projectText,
+  specText,
+  ticketText,
+} from "./format.ts";
 import { isTracked, missingExcludes } from "./git-exclude.ts";
 import {
   codeHostProblems,
@@ -1845,6 +1852,48 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const { data, response, error } = await api().GET("/blocked");
       if (!data) throw failureFrom(response, error);
       print(data, blockedText(data));
+    });
+
+  program
+    .command("context")
+    .description(
+      "pointers from blamed files in this checkout back to specs, tickets, pull requests and planning docs",
+    )
+    .requiredOption("--files <paths...>", "files to blame in this checkout")
+    .option(
+      "--repo <name>",
+      "platform repo name when this checkout's origin does not match a registered repo",
+    )
+    .action(async (options: { files: string[]; repo?: string }) => {
+      const cwd = io.cwd ?? process.cwd();
+      const checkout = inspectContextCheckout(cwd, options.files);
+      if ("error" in checkout) throw new Failure(checkout.error);
+      let originMatches = false;
+      if (checkout.origin) {
+        const listed = await api().GET("/projects", {
+          params: { query: { repoUrl: checkout.origin } },
+        });
+        if (!listed.data) throw failureFrom(listed.response, listed.error);
+        originMatches = listed.data.projects.length > 0;
+      }
+      if (!originMatches && options.repo === undefined) {
+        throw new Failure(
+          checkout.origin
+            ? "this checkout's origin does not match a registered repo; pass --repo <name>"
+            : "this checkout has no origin remote; pass --repo <name>",
+        );
+      }
+      const { data, response, error } = await api().POST("/context", {
+        body: {
+          ...(options.repo !== undefined ? { repo: options.repo } : {}),
+          ...(originMatches && checkout.origin
+            ? { repoUrl: checkout.origin }
+            : {}),
+          files: checkout.files,
+        },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, contextText(data));
     });
 
   program

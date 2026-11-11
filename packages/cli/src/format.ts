@@ -766,3 +766,41 @@ export function specText(view: {
       : []),
   ].join("\n");
 }
+
+export function contextText(data: {
+  files: {
+    path: string;
+    specs: { displayId: string }[];
+    tickets: { displayId: string }[];
+    pullRequests: { number: number; url: string }[];
+    decisions: { specDisplayId: string; heading: string }[];
+    outOfScope: { specDisplayId: string; heading: string }[];
+    adrs: { path: string }[];
+  }[];
+}): string {
+  if (data.files.length === 0) return "no committed lines";
+  return data.files
+    .map((file) => {
+      const lines = [file.path];
+      const specs = file.specs.map((spec) => spec.displayId);
+      if (specs.length) lines.push(`  specs: ${specs.join(", ")}`);
+      const tickets = file.tickets.map((ticket) => ticket.displayId);
+      if (tickets.length) lines.push(`  tickets: ${tickets.join(", ")}`);
+      for (const pull of file.pullRequests) {
+        lines.push(`  pull request: ${pull.url}`);
+      }
+      for (const decision of file.decisions) {
+        lines.push(
+          `  decisions: ${decision.specDisplayId} ${decision.heading}`,
+        );
+      }
+      for (const scope of file.outOfScope) {
+        lines.push(`  out of scope: ${scope.specDisplayId} ${scope.heading}`);
+      }
+      for (const adr of file.adrs) {
+        lines.push(`  adr: ${adr.path}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n");
+}

@@ -19,6 +19,7 @@ export {
   PLAT_HEADER,
   PLAT_OUTDATED,
 } from "./api/client.ts";
+export { committedShasFromBlame, UNCOMMITTED_SHA } from "./blame.ts";
 export {
   branchNames,
   isPlatformBranch,
@@ -159,6 +160,7 @@ export {
   repoDisplayName,
   repoHost,
   repoHtmlUrl,
+  sameRepoUrl,
   treeHtmlUrl,
   tryParseRepoUrl,
 } from "./repo-url.ts";

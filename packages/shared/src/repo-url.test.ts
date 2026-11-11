@@ -6,6 +6,7 @@ import {
   repoDisplayName,
   repoHost,
   repoHtmlUrl,
+  sameRepoUrl,
   treeHtmlUrl,
   tryParseRepoUrl,
 } from "./repo-url.ts";
@@ -51,6 +52,23 @@ describe("parseRepoUrl", () => {
   it("refuses what is not a repository address", () => {
     expect(() => parseRepoUrl("/srv/git/repo.git")).toThrow(RangeError);
     expect(tryParseRepoUrl("/srv/git/repo.git")).toBeNull();
+  });
+});
+
+describe("sameRepoUrl", () => {
+  it("treats https and ssh spellings of the same repo as equal", () => {
+    expect(
+      sameRepoUrl(
+        "https://github.com/acme/backend.git",
+        "git@github.com:acme/backend.git",
+      ),
+    ).toBe(true);
+    expect(
+      sameRepoUrl(
+        "https://github.com/acme/backend.git",
+        "https://github.com/other/other.git",
+      ),
+    ).toBe(false);
   });
 });
 
