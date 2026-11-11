@@ -2,6 +2,7 @@ import { GIB } from "@afk/shared";
 import { serve } from "@hono/node-server";
 import { type AppOptions, createApp } from "../app.ts";
 import type { DiskSample } from "../disk.ts";
+import { eventsHubOf } from "../events/hub.ts";
 
 // Tests inject remaining space so claiming and the workbench do not read the host disk.
 export const TEST_DISK: DiskSample = { freeBytes: 20 * GIB, dirBytes: 0 };
@@ -31,13 +32,18 @@ export interface RunningApi {
 export async function listen(app: {
   fetch: (request: Request) => Response | Promise<Response>;
 }): Promise<RunningApi> {
+  const hub = eventsHubOf(app);
+  await hub?.whenReady();
   return new Promise((resolve) => {
     const server = serve(
       { fetch: app.fetch, port: 0, hostname: "127.0.0.1" },
       (info) => {
         resolve({
           url: `http://127.0.0.1:${info.port}`,
-          close: () => new Promise((done) => server.close(() => done())),
+          close: async () => {
+            await hub?.stop();
+            await new Promise<void>((done) => server.close(() => done()));
+          },
         });
       },
     );

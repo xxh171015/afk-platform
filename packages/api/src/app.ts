@@ -6,7 +6,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
 import { type DiskSample, sampleDisk, volumeFreeBytes } from "./disk.ts";
-import { EventsHub } from "./events/hub.ts";
+import { bindEventsHub, EventsHub } from "./events/hub.ts";
 import { withOrigin } from "./events/origin.ts";
 import { registerCliRoutes } from "./http/cli-routes.ts";
 import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
@@ -72,6 +72,13 @@ export function createApp(options: AppOptions): OpenAPIHono {
     sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,
   };
   const app = new OpenAPIHono();
+  bindEventsHub(app, context.events);
+  if (
+    options.events === undefined &&
+    typeof options.pool?.connect === "function"
+  ) {
+    void context.events.listen(options.pool);
+  }
   // The API starts agents and has no login, so it only talks to this machine. CORS alone would only stop a foreign
   // page from reading answers: a plain cross-site POST would still be carried out. So a request that names a
   // foreign Origin (a browser on another site) or a foreign Host (DNS rebinding) is refused outright.
