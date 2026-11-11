@@ -20,7 +20,8 @@ The platform has no labels and no comments. A draft spec is what a skill means b
   Write the spec markdown **outside this repo** (do not commit it), then:
   `plat spec create --project {{PROJECT}} --type feature --title "<title>" --slug <english-slug> --file ~/.afk/planning/draft/spec.md`
   It prints the spec number, e.g. `S-7`. Pass `--slug` (lowercase letters, digits, hyphens) whenever the title has no
-  Latin words: a Chinese-only title cannot be turned into a slug. The spec is stored as written. `plat` warns, on
+  Latin words: a Chinese-only title cannot be turned into a slug. In Testing Decisions, name the **seams** (the test
+  boundaries) the tickets will test at: unattended tdd writes tests only there. The spec is stored as written. `plat` warns, on
   stderr, about a section of the to-spec template that is missing or renamed, and about a Testing Decisions section
   that names no seams; it still creates the spec. The seams check looks for `seam`/`seams` (case-insensitive) or the
   character 缝 in that section's body. After it prints `S-7`, keep process files under `~/.afk/planning/S-7/`.
@@ -79,7 +80,7 @@ writes it. The file name without `.md` is the ticket's key.
 ```markdown
 ---
 title: 订单增加备注字段
-repo: { { REPO } }
+repo: {{REPO}}
 type: implementation # contract | implementation | integration
 modules: ["src/orders/**", "test/**"]
 stories: [1, 4] # optional: User Story numbers in the spec this ticket is for; omit on infrastructure tickets
@@ -116,7 +117,6 @@ S-7
 - `type: contract` is for a ticket that only edits the contract file. A ticket using `contract: <key>` must point at
   a contract ticket.
 - List in `modules` only globs for paths **this ticket edits**, not an entire package (for example `packages/api/src/planning/**` instead of `packages/api/src/**`) unless the ticket truly touches the whole tree—wide globs overlap and make parallel merges noisier.
-- When the same behaviour is enforced both on the **ticket pipeline** and in **spec finalization** (for example integration or e2e), name **both** paths in acceptance criteria so review can catch a fix that only lands on one path.
 - Two tickets that touch overlapping `modules` but do not depend on each other get an overlap warning. That is not an
   error: say so in the ticket if it is intended, otherwise add a `blocked_by`.
 - Dependencies must not form a cycle, and a ticket cannot depend on itself.

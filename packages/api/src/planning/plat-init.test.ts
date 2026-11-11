@@ -435,6 +435,9 @@ describe("plat init", () => {
       expect(rules).toContain(join(ws.afkHome, "planning"));
       expect(rules).toContain("`research/<name>`");
       expect(rules).toContain("`prototype/<name>`");
+      expect(rules).toMatch(
+        /GLOSSARY\.md[^\n]*uncommitted[^\n]*plat spec confirm/,
+      );
     }
   });
 
