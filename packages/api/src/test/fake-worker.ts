@@ -83,12 +83,14 @@ export async function listen(app: {
           close: async () => {
             await dispatcher?.stop();
             await hub?.stop();
-            // A leftover keep-alive or half-open socket otherwise holds close() past hookTimeout,
-            // and the next test's afterEach then deletes that test's temp dirs.
-            if ("closeAllConnections" in server) {
-              server.closeAllConnections();
-            }
-            await new Promise<void>((done) => server.close(() => done()));
+            await new Promise<void>((done) => {
+              // A leftover keep-alive or half-open socket otherwise holds close() past hookTimeout,
+              // and the next test's afterEach then deletes that test's temp dirs.
+              const http = server as import("node:http").Server;
+              http.closeIdleConnections?.();
+              http.closeAllConnections();
+              http.close(() => done());
+            });
           },
         });
       },
