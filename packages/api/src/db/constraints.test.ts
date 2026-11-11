@@ -197,6 +197,9 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(
       await ticketWith("state, blocked_reason", "'blocked', 'gate-failed'"),
     ).toBe("ok");
+    expect(
+      await ticketWith("state, blocked_reason", "'blocked', 'sandbox-oom'"),
+    ).toBe("ok");
     expect(await ticketWith("state", "'blocked'")).toBe(CHECK_VIOLATION);
     expect(await ticketWith("state, blocked_reason", "'blocked', 'oops'")).toBe(
       CHECK_VIOLATION,
@@ -219,6 +222,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
       );
     expect(await block("the review went wrong")).toBe(CHECK_VIOLATION);
     expect(await block("merge-conflict")).toBe("ok");
+    expect(await block("sandbox-oom")).toBe("ok");
 
     const e2e = await insert("INSERT INTO final_e2e (spec_id) VALUES ($1)", [
       specId,
@@ -231,6 +235,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(await blockE2e("gate-failed")).toBe(CHECK_VIOLATION);
     expect(await blockE2e("final-e2e-failed")).toBe("ok");
     expect(await blockE2e("job-failed")).toBe("ok");
+    expect(await blockE2e("sandbox-oom")).toBe("ok");
   });
 
   it("a paused spec must carry a known pause reason, and only a paused spec may", async () => {

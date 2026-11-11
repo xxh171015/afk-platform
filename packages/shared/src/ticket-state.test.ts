@@ -46,6 +46,8 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     ["merging", "timeout"],
     ["running", "job-failed"],
     ["merging", "job-failed"],
+    ["running", "sandbox-oom"],
+    ["merging", "sandbox-oom"],
     ["merging", "merge-conflict"],
     ["merging", "post-merge-gate-failed"],
     ["pending", "upstream-cancelled"],

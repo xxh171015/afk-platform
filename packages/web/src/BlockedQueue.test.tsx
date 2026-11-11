@@ -285,6 +285,16 @@ describe("the queue of what waits for a person", () => {
     expect(fake.calls.filter((call) => call.startsWith("POST"))).toEqual([]);
   });
 
+  it("tells a person to raise the sandbox memory when the ticket is sandbox-oom", async () => {
+    const { fake } = server(queue({ tickets: [ticket(1, "sandbox-oom")] }));
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    expect(card("T-1").getByTitle("sandbox-oom").textContent).toBe(
+      "沙箱内存不足",
+    );
+    expect(card("T-1").getByText("把沙箱内存调大后再试")).toBeTruthy();
+  });
+
   it("lists the platform's and outside services' problems after the specs', under a heading of their own", async () => {
     const { fake } = server(
       queue({

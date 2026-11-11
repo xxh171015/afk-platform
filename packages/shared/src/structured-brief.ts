@@ -65,6 +65,7 @@ const SUMMARY: Record<BlockedReason, string> = {
   "integration-environment-failed": "联调环境起不来",
   "upstream-cancelled": "上游已取消",
   "job-failed": "作业失败",
+  "sandbox-oom": "沙箱内存不足",
 };
 
 const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
@@ -83,6 +84,7 @@ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
   "integration-environment-failed": "先修好环境再重试",
   "upstream-cancelled": "取消这张票，或导入替代票",
   "job-failed": "看作业失败原因，环境或额度恢复后直接重试",
+  "sandbox-oom": "把沙箱内存调大后再试",
 };
 
 export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
@@ -184,6 +186,14 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
     return [
       {
         label: "恢复后重试",
+        command: `plat ticket retry ${ticket} --mode continue`,
+      },
+    ];
+  }
+  if (input.reason === "sandbox-oom") {
+    return [
+      {
+        label: "调大内存后重试",
         command: `plat ticket retry ${ticket} --mode continue`,
       },
     ];
