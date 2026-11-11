@@ -10,6 +10,7 @@
       "!**/dist",
       "!packages/shared/skills-snapshot",
       "!packages/pipeline/skills",
+      "!packages/cli/templates",
       "!packages/web/src/routeTree.gen.ts"
     ]
   },
