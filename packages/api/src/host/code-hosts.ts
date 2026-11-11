@@ -5,8 +5,7 @@ import {
   repoHost,
 } from "@afk/shared";
 import type pg from "pg";
-import type { Notice } from "../notify/notices.ts";
-import { pageUrl } from "../page-url.ts";
+import { recordSystemEvent } from "../events/system.ts";
 
 // The code hosts the platform can work on are the ones a worker has credentials for: each worker says which at start
 // (GitHub App: github.com; each GitLab PAT: its host). A repo's host kind follows from its address's host.
@@ -84,7 +83,7 @@ export async function recordTokenExpiry(
   host: string,
   expiresAt: string | null,
   now: Date,
-): Promise<Notice | undefined> {
+): Promise<void> {
   const date =
     expiresAt !== null && daysUntil(expiresAt, now) !== undefined
       ? expiresAt
@@ -100,25 +99,22 @@ export async function recordTokenExpiry(
      WHERE host = $1`,
     [host, date],
   );
-  if (date === null) return undefined;
+  if (date === null) return;
   const daysLeft = daysUntil(date, now);
-  if (daysLeft === undefined || daysLeft > TOKEN_EXPIRY_NOTICE_DAYS)
-    return undefined;
+  if (daysLeft === undefined || daysLeft > TOKEN_EXPIRY_NOTICE_DAYS) return;
   const marked = await db.query<{ host: string }>(
     `UPDATE code_hosts SET token_expiry_noticed_at = $2
      WHERE host = $1 AND token_expires_at = $3 AND token_expiry_noticed_at IS NULL
      RETURNING host`,
     [host, now, date],
   );
-  if (!marked.rowCount) return undefined;
-  const remain =
-    daysLeft < 0
-      ? `${host} 的个人令牌已于 ${date} 过期`
-      : `${host} 的个人令牌将在 ${date} 到期（还剩 ${daysLeft} 天）`;
-  return {
-    title: "GitLab 令牌即将到期",
-    body: `${remain}：换令牌后放到 ~/.afk/secrets/gitlab/${host}，不用重启 worker\n${pageUrl("/")}`,
-  };
+  if (!marked.rowCount) return;
+  await recordSystemEvent(db, {
+    kind: "token-expiry",
+    host,
+    date,
+    daysLeft,
+  });
 }
 
 // The kind of host a repo is on: what a worker reported for its host; for a host none reported (tests, or a repo

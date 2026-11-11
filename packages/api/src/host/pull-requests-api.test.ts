@@ -30,6 +30,7 @@ beforeEach(async () => {
     testApp({
       pool: db.pool,
       clock: clock.now,
+      schedule: clock.schedule,
       notifications: {
         async notify(notice) {
           notices.push(notice);
@@ -2288,6 +2289,16 @@ class EventStream {
     return JSON.parse(match[1] as string) as Record<string, number>;
   }
 
+  async drainInvalidates(quietMs = 150): Promise<void> {
+    for (;;) {
+      try {
+        await this.nextInvalidate(quietMs);
+      } catch {
+        return;
+      }
+    }
+  }
+
   async close(): Promise<void> {
     await this.reader.cancel();
   }
@@ -2340,6 +2351,7 @@ describe("host-sync snapshots and invalidate", () => {
     await specWithOpenPr();
     const stream = await openEvents();
     try {
+      await stream.drainInvalidates();
       await look([asOpened(1)]);
       await expect(stream.nextInvalidate(200)).rejects.toThrow(/no invalidate/);
     } finally {
@@ -2351,6 +2363,7 @@ describe("host-sync snapshots and invalidate", () => {
     const { specId } = await specWithOpenPr();
     const stream = await openEvents();
     try {
+      await stream.drainInvalidates();
       await look([asOpened(1, { ci: "failure" })]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
 
@@ -2373,6 +2386,9 @@ describe("host-sync snapshots and invalidate", () => {
         }),
       ]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
+      expect(notices).toEqual([]);
+      clock.advanceSeconds(30);
+      await clock.flush();
       expect(notices).toEqual([
         {
           title: "待处理",

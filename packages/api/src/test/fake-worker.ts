@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { type AppOptions, createApp } from "../app.ts";
 import type { DiskSample } from "../disk.ts";
 import { eventsHubOf } from "../events/hub.ts";
+import { dispatcherOf } from "../notify/dispatch.ts";
 
 // Tests inject remaining space so claiming and the workbench do not read the host disk.
 export const TEST_DISK: DiskSample = { freeBytes: 20 * GIB, dirBytes: 0 };
@@ -17,9 +18,41 @@ export function testApp(options: AppOptions) {
 // A manually advanced clock, so lease expiry never needs real waiting.
 export class FakeClock {
   private current = new Date("2026-01-01T00:00:00Z");
+  private timers: { id: number; at: number; fn: () => unknown }[] = [];
+  private nextId = 1;
+  private pending: Promise<unknown>[] = [];
   now = (): Date => new Date(this.current);
+  schedule = (ms: number, fn: () => unknown): (() => void) => {
+    const id = this.nextId++;
+    this.timers.push({ id, at: this.current.getTime() + ms, fn });
+    return () => {
+      this.timers = this.timers.filter((timer) => timer.id !== id);
+    };
+  };
   advanceSeconds(seconds: number): void {
     this.current = new Date(this.current.getTime() + seconds * 1000);
+    const due = this.timers.filter(
+      (timer) => timer.at <= this.current.getTime(),
+    );
+    this.timers = this.timers.filter(
+      (timer) => timer.at > this.current.getTime(),
+    );
+    for (const timer of due) {
+      const result = timer.fn();
+      if (
+        result !== undefined &&
+        result !== null &&
+        typeof (result as Promise<unknown>).then === "function"
+      ) {
+        this.pending.push(result as Promise<unknown>);
+      }
+    }
+  }
+  async flush(): Promise<void> {
+    while (this.pending.length > 0) {
+      const batch = this.pending.splice(0);
+      await Promise.all(batch);
+    }
   }
 }
 
@@ -34,6 +67,8 @@ export async function listen(app: {
 }): Promise<RunningApi> {
   const hub = eventsHubOf(app);
   await hub?.whenReady();
+  const dispatcher = dispatcherOf(app);
+  await dispatcher?.start();
   return new Promise((resolve) => {
     const server = serve(
       { fetch: app.fetch, port: 0, hostname: "127.0.0.1" },
@@ -41,6 +76,7 @@ export async function listen(app: {
         resolve({
           url: `http://127.0.0.1:${info.port}`,
           close: async () => {
+            await dispatcher?.stop();
             await hub?.stop();
             // A leftover keep-alive or half-open socket otherwise holds close() past hookTimeout,
             // and the next test's afterEach then deletes that test's temp dirs.
