@@ -196,8 +196,8 @@ describe("the workbench", () => {
     );
 
     await screen.findByText("Stuck");
-    expect(screen.queryByText("shop")).toBeNull();
     const waiting = within(screen.getByTestId("quadrant-等你处理"));
+    expect(waiting.queryByText("shop")).toBeNull();
     expect(waiting.getByText("T-9").closest("a")?.getAttribute("href")).toBe(
       "/tickets/9",
     );
@@ -217,7 +217,7 @@ describe("the workbench", () => {
 
     const review = within(screen.getByTestId("quadrant-等你验收"));
     expect(review.getByText("S-5").closest("a")?.getAttribute("href")).toBe(
-      "/specs/5",
+      "/specs/5/delivery",
     );
     expect(review.getByText(/2 个 PR/)).toBeTruthy();
     expect(review.getByText(/验收标准/).textContent).toMatch(/1\/3/);
@@ -403,5 +403,7 @@ describe("the workbench", () => {
         )
       ).length,
     ).toBeGreaterThan(0);
+    expect(screen.queryByText("平台在自己跑")).toBeNull();
+    expect(screen.getByText("没有在等你的事。先接入一个项目。")).toBeTruthy();
   });
 });

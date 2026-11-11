@@ -459,6 +459,46 @@ describe("the ticket page", () => {
         name: "复制命令 plat ticket retry T-4 --mode continue",
       }),
     ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "批准这些保护路径" }),
+    ).toBeTruthy();
+  });
+
+  it("approves protected paths from the ticket page", async () => {
+    const brief = {
+      run: { id: 11, displayId: "R-11" },
+      stage: "gate",
+      result: "protected-path-changed",
+      output: { unapproved: [".github/ci.yml"] },
+      logPath: "/runs/11/logs",
+    };
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: {
+            ...view().ticket,
+            state: "blocked",
+            blockedReason: "protected-path-changed",
+            brief,
+            structuredBrief: structuredBrief({
+              reason: "protected-path-changed",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-4",
+              brief,
+            }),
+          },
+        }),
+      }),
+      "POST /tickets/4/approve-protected": () => ({ json: { ok: true } }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "批准这些保护路径" }),
+    );
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /tickets/4/approve-protected"),
+    );
   });
 
   it("still shows a structured brief when a blocked ticket has no run", async () => {

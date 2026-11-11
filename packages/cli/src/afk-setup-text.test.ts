@@ -36,6 +36,36 @@ describe("the afk-setup skill", () => {
     expect(skill).toContain("`gh auth login`");
   });
 
+  it("runs plat doctor before the report", () => {
+    const skill = readAfkSetupSkill();
+    const report = skill.slice(skill.indexOf("## 6. Report"));
+    expect(report).toMatch(/plat doctor/);
+    const table = report.search(/short table/);
+    expect(table).toBeGreaterThan(0);
+    expect(report.indexOf("plat doctor")).toBeLessThan(table);
+  });
+
+  it("tells planning skills to run /afk-setup when there is no tracker, not /setup-matt-pocock-skills", () => {
+    const root = fileURLToPath(new URL("../../../skills", import.meta.url));
+    for (const name of ["to-spec", "to-tickets"]) {
+      const text = readFileSync(`${root}/${name}/SKILL.md`, "utf8");
+      expect(text).toContain("/afk-setup");
+      expect(text).not.toMatch(/\/setup-matt-pocock-skills/);
+    }
+  });
+
+  it("tells a non-Node repo to change every run: in the gates example", () => {
+    const gates = readFileSync(
+      fileURLToPath(
+        new URL("../../../skills/afk-setup/gates.md", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(gates).toMatch(/commands the repo already runs/);
+    expect(gates).toMatch(/not Node must change every `run:`/);
+    expect(gates).toMatch(/command not found/);
+  });
+
   it("no longer creates triage labels, and no skill still depends on those GitHub labels", () => {
     expect(readAfkSetupSkill()).not.toMatch(/gh label/);
     const roots = [

@@ -36,6 +36,7 @@ import {
 } from "commander";
 import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
+import { collectDoctorReport, formatDoctorText } from "./doctor.ts";
 import { blockedText, projectText, specText, ticketText } from "./format.ts";
 import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
 import {
@@ -645,6 +646,57 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   program
+    .command("doctor")
+    .description(
+      "check this planning machine (Node, git, the platform, plat, skills, tracker doc, local rules, AGENTS.md, gates) and store the result for the control tower",
+    )
+    .option("--project <id>", "project to store the report on", toInt)
+    .action(async (options: { project?: number }) => {
+      const cwd = io.cwd ?? process.cwd();
+      const client = api();
+      const report = await collectDoctorReport({
+        cwd,
+        home: io.env.HOME,
+        readFile: io.readFile,
+        loadVersion: async () => {
+          const { data } = await client.GET("/version");
+          return data ?? undefined;
+        },
+        loadProject: async (id) => {
+          const { data } = await client.GET("/projects/{projectId}", {
+            params: { path: { projectId: id } },
+          });
+          if (!data) throw new Error("no such project");
+          return data;
+        },
+        projectId: options.project,
+      });
+      let stored = {
+        machine: report.machine,
+        checkedAt: report.checkedAt,
+        items: report.items,
+        projectId: report.projectId,
+      };
+      if (report.projectId !== undefined) {
+        const { data, response, error } = await client.PUT(
+          "/projects/{projectId}/doctor-report",
+          {
+            params: { path: { projectId: report.projectId } },
+            body: { machine: report.machine, items: report.items },
+          },
+        );
+        if (data) {
+          stored = { ...data, projectId: report.projectId };
+        } else {
+          io.stderr(
+            `warning: could not store the report: ${failureFrom(response, error).message}\n`,
+          );
+        }
+      }
+      print(stored, formatDoctorText(stored));
+    });
+
+  program
     .command("update")
     .description(
       "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
@@ -1068,15 +1120,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only the glossaries, ADRs and AGENTS.md belong in it`,
         );
       }
+      // Stray checkout: no docs sent, even when import was clean (no page-confirm precheck).
+      if (docs.status === "elsewhere" && docs.checkout) {
+        io.stderr(
+          `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill\n`,
+        );
+      }
       for (const check of view.data.spec.prechecks) {
         if (check.code === "page-confirm-without-planning-docs") {
           if (docs.status === "ok") continue;
-          if (docs.status === "elsewhere" && docs.checkout) {
-            io.stderr(
-              `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill\n`,
-            );
-            continue;
-          }
+          if (docs.status === "elsewhere" && docs.checkout) continue;
         }
         io.stderr(`yellow: ${check.message}\n`);
       }
@@ -1168,6 +1221,34 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     }
   };
 
+  // Filenames only: the page confirm precheck names what it would drop. Import still never uploads the bodies.
+  const planningDocsAtImportOf = async (specId: number) => {
+    try {
+      const view = await api().GET("/specs/{id}", {
+        params: { path: { id: specId } },
+      });
+      if (!view.data?.spec.planning.repo) {
+        return { status: "unknown" as const };
+      }
+      const planningRepo = view.data.spec.planning.repo;
+      const project = await api().GET("/projects/{projectId}", {
+        params: { path: { projectId: view.data.spec.projectId } },
+      });
+      if (!project.data) return { status: "unknown" as const };
+      const docs = readPlanningDocs(
+        io.cwd ?? process.cwd(),
+        project.data.repos,
+        planningRepo,
+      );
+      if (docs.status !== "ok") return { status: "unknown" as const };
+      return docs.files.length === 0
+        ? { status: "clean" as const }
+        : { status: "changed" as const, files: docs.files };
+    } catch {
+      return { status: "unknown" as const };
+    }
+  };
+
   program
     .command("tickets")
     .description("tickets")
@@ -1193,6 +1274,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             : `cannot read the directory ${directory}: ${(error as Error).message}`,
         );
       }
+      const planningDocsAtImport = await planningDocsAtImportOf(specId);
       const { data, response, error } = await api().POST(
         "/specs/{specId}/tickets/import",
         {
@@ -1200,7 +1282,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             path: { specId },
             query: options.append ? { append: "true" } : {},
           },
-          body: { files },
+          body: { files, planningDocsAtImport },
         },
       );
       if (!data) throw failureFrom(response, error);

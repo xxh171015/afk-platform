@@ -5,6 +5,7 @@ import {
   hostKindOfUrl,
   type ImportWarning,
   type LimitOverrides,
+  type PlanningDocsAtImport,
   parseDisplayId,
   planImport,
   type SPEC_TYPES,
@@ -273,7 +274,10 @@ export async function importTickets(
   pool: pg.Pool,
   specId: number,
   files: readonly TicketFile[],
-  options: { append?: boolean } = {},
+  options: {
+    append?: boolean;
+    planningDocsAtImport?: PlanningDocsAtImport;
+  } = {},
 ): Promise<ImportResult> {
   const append = options.append === true;
   const client = await pool.connect();
@@ -426,6 +430,12 @@ export async function importTickets(
           : warnings,
       ),
     ]);
+    if (options.planningDocsAtImport) {
+      await client.query(
+        "UPDATE specs SET planning_docs_at_import = $2::jsonb WHERE id = $1",
+        [specId, JSON.stringify(options.planningDocsAtImport)],
+      );
+    }
 
     if (append) {
       await ensureIntegrationBranches(

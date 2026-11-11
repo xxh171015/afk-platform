@@ -38,6 +38,22 @@ export {
 export type { DisplayId, DisplayIdKind } from "./display-id.ts";
 export { formatDisplayId, parseDisplayId } from "./display-id.ts";
 export type {
+  DoctorItem,
+  DoctorItemStatus,
+  DoctorReport,
+  DoctorReportPut,
+  PlanningDocsAtImport,
+  PlanningDocsAtImportStatus,
+} from "./doctor.ts";
+export {
+  DOCTOR_ITEM_STATUSES,
+  DoctorItemSchema,
+  DoctorReportPutSchema,
+  DoctorReportSchema,
+  PLANNING_DOCS_AT_IMPORT_STATUSES,
+  PlanningDocsAtImportSchema,
+} from "./doctor.ts";
+export type {
   EventSource,
   EventType,
   FailureSource,

@@ -54,7 +54,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。它不开 PR，接入改动推到每个仓库的 `afk/setup` 分支，随第一个需求的 PR 进默认分支，你在那时一起审（ADR 0006）：
 
-1. **工具**：缺 Node 20+、git，或者 `gh` 没登录时，每样用一行告诉你要运行的命令，不替你装、不替你登录。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。在规划仓库里运行 `plat update`，把 skill 补齐、升级成平台的版本（规则见上）。
+1. **工具**：缺 Node 20+、git 时，每样用一行告诉你要运行的命令，不替你装。`gh` 只在 origin 是 GitHub 时才要登录（GitLab 项目用 `glab`，见 skill）。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。在规划仓库里运行 `plat update`，把 skill 补齐、升级成平台的版本（规则见上）。收尾前跑 `plat doctor`：本机缺什么、怎么修，它会写进控制塔接入入口的「本机」列。
 2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：skill 以项目级装在哪个仓库就是哪个；已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
 3. **登记**：在你自己的规划仓库 checkout 里（哪个分支都行）跑 `plat init --yes --with …`。`plat init` 会登记项目和仓库，并写好规划要读的文件：tracker 文档 `docs/agents/issue-tracker.md`、原本由 `setup-matt-pocock-skills` 写的 `docs/agents/domain.md` 和 `docs/agents/triage-labels.md`，以及两个本机规则文件 `CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。规则文件里是 `## Agent skills` 一节和规划约定。这些文件都登记在这个仓库的 `.git/info/exclude` 里，只在这台机器上，`git status` 里看不到，也不会被提交；`AGENTS.md` 不改（ADR 0007）。**不用再跑 setup-matt-pocock-skills**。仓库里早先已经提交了 tracker 文档或 `## Agent skills` 的，保持原样，`plat init` 照旧更新那个被跟踪的文件，这处改动随 `afk/setup` 提交。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库在你的 checkout 之外建一个临时 worktree（`~/.afk/setup/<规划仓库名>/<仓库名>`，基于远端的 `afk/setup`，没有就基于默认分支；detached HEAD，不建本地分支），不动你自己的分支和文件。在那里按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行），用 `git push origin HEAD:afk/setup` 推上去，再用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。通过后删掉这个 worktree，所有仓库都通过后删掉 `~/.afk/setup/<规划仓库名>`，你的机器上不留东西。某个仓库没做完时只留下它的 worktree，报告会写明位置和卡在哪；重跑 `/afk-setup` 会接着用它（里面没有未提交的改动、也没有未推送的提交时，才按远端重建）。旧版 afk-setup 留下的 `<仓库>-afk-setup` worktree 和本地 `afk/setup` 分支：没有未提交的改动、提交也都推了的会被删掉，否则保留，报告里各用一行说明。
@@ -68,11 +68,11 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 | 条件 | 怎么满足、怎么检查 |
 | --- | --- |
 | 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。 |
-| 默认分支是 `main`，代码推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。 |
+| 默认分支是远端 HEAD 所指的分支（常见是 `main`），代码推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。 |
 | `.sandcastle/gates.yaml` | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。 |
 | `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。 |
 | （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
-| （有联调票时）联调环境 | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加 `npm run e2e`，把 JUnit 写到 `reports/e2e-junit.xml`）。`plat tickets import` 发现缺了又没有票补时会警告。 |
+| （有联调票时）联调环境 | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加**它已经在跑的**联调命令，把 JUnit 写到 `reports/e2e-junit.xml`）。不是每个仓库都要 `npm run e2e`。`plat tickets import` 发现缺了又没有票补时会警告。 |
 
 沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`：Node 22、npm、pnpm、PostgreSQL、Playwright Chromium，Cursor CLI 版本锁在 `ARG CURSOR_CLI_VERSION`）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
 

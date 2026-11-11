@@ -105,6 +105,70 @@ describe("getting a project onto the platform from the control tower", () => {
     expect(screen.queryByText("接入新项目")).toBeNull();
   });
 
+  it("shows the machine, results and time after plat doctor has stored a report", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      fakeServer({
+        "GET /projects": () => ({
+          json: { projects: [{ id: 1, name: "shop" }] },
+        }),
+        "GET /version": () => ({
+          json: {
+            platformVersion: "0.2.0",
+            skillsSha: "x",
+            platformCommit: COMMIT,
+          },
+        }),
+        "GET /projects/1/doctor-report": () => ({
+          json: {
+            report: {
+              machine: "dev-mac",
+              checkedAt: "2026-11-11T05:00:00.000Z",
+              items: [
+                { id: "skills", title: "skills", status: "ok" },
+                {
+                  id: "plat",
+                  title: "plat",
+                  status: "fail",
+                  detail: "this plat is from platform 0.1.0",
+                  command: "plat update",
+                },
+                {
+                  id: "tracker-doc",
+                  title: "Tracker doc",
+                  status: "fail",
+                  detail: "docs/agents/issue-tracker.md is out of date",
+                  command: "run the afk-setup skill",
+                },
+                {
+                  id: "agents-md",
+                  title: "AGENTS.md",
+                  status: "fail",
+                  detail:
+                    "AGENTS.md is not on the default branch or origin/afk/setup",
+                  command: "run the afk-setup skill",
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+    const entry = await screen.findByText("接入新项目");
+    const details = entry.closest("details") as HTMLDetailsElement;
+    expect(await within(details).findByText(/dev-mac 已检查/)).toBeTruthy();
+    expect(details.textContent).toContain("2026-11-11 13:00:00");
+    expect(details.textContent).toContain("通过");
+    expect(details.textContent).toContain("this plat is from platform 0.1.0");
+    expect(details.textContent).toContain("plat update");
+    expect(details.textContent).toContain(
+      "docs/agents/issue-tracker.md is out of date",
+    );
+    expect(details.textContent).toContain(
+      "AGENTS.md is not on the default branch or origin/afk/setup",
+    );
+  });
+
   it("splits the checklist into 本机 and 接入条件, all local items 尚未检查", async () => {
     renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, server([]));
 

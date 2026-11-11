@@ -2082,6 +2082,78 @@ describe("prechecks before confirm", () => {
       ),
     ).toEqual([]);
   });
+
+  async function draftWithPlanningRepo(planningDocsAtImport?: {
+    status: "clean" | "changed" | "unknown";
+    files?: string[];
+  }) {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "s",
+      title: "Spec",
+      planningRepo: "backend",
+    });
+    const imported = await call(
+      "POST",
+      `/specs/${spec.body.id}/tickets/import`,
+      {
+        ...importBody(spec.body.id, { tickets: [ticket("a")] }),
+        ...(planningDocsAtImport ? { planningDocsAtImport } : {}),
+      },
+    );
+    expect(imported.status).toBe(200);
+    return spec.body.id as number;
+  }
+
+  it("omits the page-confirm precheck when import said the planning docs were clean", async () => {
+    const specId = await draftWithPlanningRepo({ status: "clean" });
+    const view = await call("GET", `/specs/${specId}`);
+    expect(
+      view.body.spec.prechecks.filter(
+        (p: { code: string }) =>
+          p.code === "page-confirm-without-planning-docs",
+      ),
+    ).toEqual([]);
+  });
+
+  it("names the planning-doc files page confirm would drop", async () => {
+    const specId = await draftWithPlanningRepo({
+      status: "changed",
+      files: ["GLOSSARY.md", "docs/adr/0001-terms.md"],
+    });
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.body.spec.prechecks).toEqual(
+      expect.arrayContaining([
+        {
+          code: "page-confirm-without-planning-docs",
+          level: "yellow",
+          message:
+            "页面确认时不会带上这些规划文档改动：GLOSSARY.md、docs/adr/0001-terms.md。要带上，在规划仓库里运行 plat spec confirm S-1",
+        },
+      ]),
+    );
+  });
+
+  it("keeps the generic page-confirm precheck when import did not say", async () => {
+    const specId = await draftWithPlanningRepo();
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.body.spec.prechecks).toEqual(
+      expect.arrayContaining([
+        {
+          code: "page-confirm-without-planning-docs",
+          level: "yellow",
+          message:
+            "页面确认时不会带上本地的规划文档改动；要带上，在规划仓库里运行 plat spec confirm",
+        },
+      ]),
+    );
+  });
 });
 
 describe("search", () => {

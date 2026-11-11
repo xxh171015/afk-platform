@@ -671,6 +671,57 @@ describe("the app", () => {
     ).toBeTruthy();
   });
 
+  it("says 在 GitLab 打开 when the spec's repos are on GitLab", async () => {
+    const fake = fakeServer({
+      "GET /workbench": () => ({ json: emptyWorkbench }),
+      "GET /blocked": () => ({ json: emptyWaiting }),
+      "GET /search": () => ({ json: { specs: [], tickets: [] } }),
+      "GET /specs/3": () => ({
+        json: {
+          spec: {
+            id: 3,
+            displayId: "S-3",
+            slug: "s",
+            title: "Third",
+            type: "feature",
+            body: "",
+            state: "running",
+            pauseReason: null,
+            integrationBranches: [],
+            warnings: [],
+            repos: [
+              {
+                name: "backend",
+                url: "https://gitlab.com/acme/shop-backend.git",
+                hostKind: "gitlab",
+              },
+            ],
+          },
+          tickets: [],
+          edges: [],
+          finalizations: [],
+          pullRequests: [],
+          mergeOrder: { ordered: [], after: {}, unordered: [] },
+          orderBroken: [],
+          acceptancePack: null,
+          timeline: [],
+          finalRuns: [],
+        },
+      }),
+    });
+    renderApp(fake, "/specs/3");
+    const crumbs = await screen.findByTestId("entity-crumbs");
+    fireEvent.pointerDown(
+      within(crumbs).getByRole("button", { name: "更多操作" }),
+      { button: 0 },
+    );
+    expect(
+      (
+        await screen.findByRole("menuitem", { name: "在 GitLab 打开" })
+      ).getAttribute("href"),
+    ).toBe("https://gitlab.com/acme/shop-backend");
+  });
+
   it("opens help with ?", async () => {
     renderApp(server());
     await screen.findByRole("heading", { name: "工作台" });

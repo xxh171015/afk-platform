@@ -230,6 +230,124 @@ export interface paths {
     };
     trace?: never;
   };
+  "/projects/{projectId}/doctor-report": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The newest report for this project, or null when none has been stored */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              report: {
+                machine: string;
+                checkedAt: string;
+                items: {
+                  id: string;
+                  title: string;
+                  /** @enum {string} */
+                  status: "ok" | "fail" | "warn";
+                  detail?: string;
+                  command?: string;
+                }[];
+              } | null;
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            machine: string;
+            items: {
+              id: string;
+              title: string;
+              /** @enum {string} */
+              status: "ok" | "fail" | "warn";
+              detail?: string;
+              command?: string;
+            }[];
+          };
+        };
+      };
+      responses: {
+        /** @description Stored */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              machine: string;
+              checkedAt: string;
+              items: {
+                id: string;
+                title: string;
+                /** @enum {string} */
+                status: "ok" | "fail" | "warn";
+                detail?: string;
+                command?: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/hosts": {
     parameters: {
       query?: never;
@@ -879,6 +997,20 @@ export interface paths {
               name: string;
               text: string;
             }[];
+            planningDocsAtImport?:
+              | {
+                  /** @enum {string} */
+                  status: "changed";
+                  files: string[];
+                }
+              | {
+                  /** @enum {string} */
+                  status: "clean";
+                }
+              | {
+                  /** @enum {string} */
+                  status: "unknown";
+                };
           };
         };
       };
