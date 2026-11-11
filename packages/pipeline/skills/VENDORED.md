@@ -1,3 +1,24 @@
 # Copied from mattpocock/skills
 
-implement, tdd, code-review, codebase-design: copied unchanged from https://github.com/mattpocock/skills at 4ae2317ddb22b046e26455e4f9c9b3aaaf62212d, under its MIT license. Written by scripts/refresh-skills-snapshot.ts; change them upstream, not here.
+implement, tdd, code-review, codebase-design: copied unchanged from https://github.com/mattpocock/skills at 4ae2317ddb22b046e26455e4f9c9b3aaaf62212d, under its MIT license. Written by scripts/refresh-skills-snapshot.ts; change them upstream, not here: platform rules go in files the platform owns (the tracker-doc templates, the planning conventions plat init writes, AGENTS.md).
+
+## Files (sha256)
+
+```
+8229ca854e11dc8e6aef2131ee03f31fb1561cf905fab9ccc325180cf3331352  code-review/agents/openai.yaml
+0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5  code-review/LICENSE
+9c921a8d88138a41401d8897ca1bb852088ab1b7b605cdd04edc13e3e8aab6dd  code-review/SKILL.md
+edebc9e4fcfe102114012575eaa9600b9b5fd08c311664f389c36e7bc717740f  codebase-design/agents/openai.yaml
+f3dd099ce99289bd213914d8ee3e2429b78309c3957ca4583f7659551b1d53c1  codebase-design/DEEPENING.md
+c222ab5a82e0405672eb9062d62496139a08828e45d07fc5f18e4952c10fac1a  codebase-design/DESIGN-IT-TWICE.md
+0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5  codebase-design/LICENSE
+2c20617f87ec8af6a434859f381b2f061a69b530444e74eb39e78bb016a6d1e2  codebase-design/SKILL.md
+8970a8596ade0c28ab427f41a4ea242d6bdf6186c59ebf55e1238dbecaab79dc  implement/agents/openai.yaml
+0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5  implement/LICENSE
+483bdc4ccf4ac31d86ac7beeaa0d0db80313e71e120bb8c59b3196ae5decd53d  implement/SKILL.md
+ea6f01cf1b8c06a4b0f5b649d74b1b8ce8685e72af1b38d70d877693e092af0b  tdd/agents/openai.yaml
+0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5  tdd/LICENSE
+3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef  tdd/mocking.md
+5505d25bbaa8fc14a79e4d20163936958992a2995b7f1dd1d6197edc9ed722e0  tdd/SKILL.md
+859f9e592c188fda4fc7277dd180e4ce9c7a2e13f6efe1f6f29eccc9d28c106a  tdd/tests.md
+```

@@ -103,5 +103,3 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 </issue-template>
 
 In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
-
-When the same behaviour must hold on the **ticket pipeline** and in **spec finalization** (integration jobs, final e2e, similar), name **both** paths in acceptance criteria so review can catch a fix that only lands on one path. Use the issue-tracker ticket conventions when publishing on the platform.

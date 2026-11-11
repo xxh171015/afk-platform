@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SKILLS_SHA } from "./skills-sha.ts";
@@ -20,6 +21,33 @@ describe("what is copied from mattpocock/skills", () => {
     expect(readFileSync(`${repoRoot}${dir}/VENDORED.md`, "utf8")).toContain(
       SKILLS_SHA,
     );
+  });
+
+  // Guard: a copy edited by hand, or reformatted by an editor, fails here. Platform rules go in files the platform
+  // owns; a change to a copy comes from upstream through scripts/refresh-skills-snapshot.ts.
+  it.each(VENDORED_DIRS)("%s holds the files as copied", (dir) => {
+    const note = readFileSync(`${repoRoot}${dir}/VENDORED.md`, "utf8");
+    const listed = new Map(
+      [...note.matchAll(/^([0-9a-f]{64}) {2}(.+)$/gm)].map(
+        ([, hash, path]) => [path as string, hash as string],
+      ),
+    );
+    expect(listed.size).toBeGreaterThan(0);
+    // every file under the copied skills (skills/ also holds afk-setup, which is the platform's own)
+    const tops = new Set([...listed.keys()].map((path) => path.split("/")[0]));
+    const onDisk = (
+      readdirSync(`${repoRoot}${dir}`, { recursive: true }) as string[]
+    )
+      .filter((path) => tops.has(path.split("/")[0] as string))
+      .filter((path) => statSync(`${repoRoot}${dir}/${path}`).isFile());
+    expect(onDisk.sort()).toEqual([...listed.keys()].sort());
+    const edited = onDisk.filter(
+      (path) =>
+        createHash("sha256")
+          .update(readFileSync(`${repoRoot}${dir}/${path}`))
+          .digest("hex") !== listed.get(path),
+    );
+    expect(edited, "changed since it was copied").toEqual([]);
   });
 
   it.each([
