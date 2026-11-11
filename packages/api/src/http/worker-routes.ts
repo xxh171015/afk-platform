@@ -60,6 +60,11 @@ import {
   isLeaseLive,
 } from "../jobs/queue.ts";
 import {
+  markLocateClaimed,
+  readLocatePayload,
+  recordLocateResult,
+} from "../planning/locate-bug.ts";
+import {
   buildPlanningTask,
   readPlanningPayload,
   recordPlanningResult,
@@ -720,6 +725,7 @@ export function registerWorkerRoutes(
         await markClaimed(client, job);
         await markFinalClaimed(client, job);
         await markUpdateBranchClaimed(client, job);
+        await markLocateClaimed(client, job);
       }),
     );
     const run = await context.pool.query<{ id: number }>(
@@ -812,6 +818,10 @@ export function registerWorkerRoutes(
           const trial = readTrialMergePayload(job.rows[0]);
           if (trial) {
             await recordTrialMergeResult(client, job.rows[0], result);
+            return finished;
+          }
+          if (readLocatePayload(job.rows[0].payload)) {
+            await recordLocateResult(client, job.rows[0], result);
             return finished;
           }
           const planning = readPlanningPayload(job.rows[0]);

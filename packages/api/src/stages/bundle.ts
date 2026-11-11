@@ -7,6 +7,10 @@ import {
 import type pg from "pg";
 import { readUpdateBranchPayload } from "../host/update-branch.ts";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
+import {
+  type LocatePayload,
+  readLocatePayload,
+} from "../planning/locate-bug.ts";
 import { ticketFileOf } from "../tickets/ticket-file.ts";
 import { contractsOf } from "./contracts.ts";
 import { environmentOf, refsOf } from "./refs.ts";
@@ -185,6 +189,8 @@ export async function buildBundle(
   pool: pg.Pool,
   job: { id: number; attempt: number; payload: Record<string, unknown> },
 ): Promise<Bundle | undefined> {
+  const locate = readLocatePayload(job.payload);
+  if (locate) return buildLocateBundle(pool, job, locate);
   const update = readUpdateBranchPayload(job.payload);
   if (update) return buildUpdateBranchBundle(pool, job, update);
   const final = readFinalPayload(job.payload);
@@ -465,6 +471,88 @@ async function buildUpdateBranchBundle(
     review: null,
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
+    ...runSettings(row.limits, row.default_model),
+  };
+}
+
+// Locate: the bug draft, the workspace repo (planning or first), and every other
+// project repo as a default-branch ref. No ticket, no compose, no integration branch.
+async function buildLocateBundle(
+  pool: pg.Pool,
+  job: { id: number; attempt: number },
+  locate: LocatePayload,
+): Promise<Bundle | undefined> {
+  const found = await pool.query(
+    `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
+            s.branch_namespace, s.planning_sha, s.planning_repo_id,
+            r.id AS repo_id, r.name, r.url, r.default_branch,
+            pr.name AS planning_repo_name, pr.url AS planning_repo_url,
+            pr.default_branch AS planning_default_branch,
+            p.protected_paths, p.limits, p.default_model
+     FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
+     LEFT JOIN repos pr ON pr.id = s.planning_repo_id
+     WHERE s.id = $1`,
+    [locate.specId, locate.repoId],
+  );
+  const row = found.rows[0];
+  if (!row) return undefined;
+  const others = await pool.query<{
+    name: string;
+    url: string;
+    default_branch: string;
+  }>(
+    `SELECT name, url, default_branch FROM repos
+     WHERE project_id = $1 AND id <> $2 ORDER BY id`,
+    [locate.projectId, locate.repoId],
+  );
+  const run = await pool.query<{ id: number; retry_note: string | null }>(
+    "SELECT id, retry_note FROM runs WHERE job_id = $1",
+    [job.id],
+  );
+  return {
+    job: { id: job.id, stage: "locate-bug", attempt: job.attempt },
+    run: run.rows[0]
+      ? {
+          id: run.rows[0].id,
+          displayId: formatDisplayId("run", run.rows[0].id),
+        }
+      : null,
+    ticket: null,
+    specTickets: [],
+    spec: {
+      id: row.spec_id,
+      displayId: formatDisplayId("spec", row.spec_id),
+      slug: row.slug,
+      title: row.spec_title,
+      body: row.spec_body,
+      type: row.spec_type,
+    },
+    repo: {
+      id: row.repo_id,
+      name: row.name,
+      url: row.url,
+      defaultBranch: row.default_branch,
+    },
+    domain: domainOf(row),
+    integrationBranch: null,
+    agentBranch: branchNames(row.branch_namespace).locate(
+      formatDisplayId("spec", row.spec_id),
+    ),
+    protectedPaths: row.protected_paths,
+    allowedProtectedPaths: [],
+    contracts: [],
+    refs: others.rows.map((repo) => ({
+      name: repo.name,
+      url: repo.url,
+      defaultBranch: repo.default_branch,
+      sha: null,
+    })),
+    environment: [],
+    note: run.rows[0]?.retry_note ?? null,
+    failureLog: null,
+    review: null,
+    gateBaseline: null,
+    gateBaselines: [],
     ...runSettings(row.limits, row.default_model),
   };
 }

@@ -8,6 +8,7 @@ import {
   checkProtectedPaths,
   classifyAgentRun,
   classifyDiagnoseRun,
+  classifyLocateRun,
   classifyReviewRun,
   combineReviewRuns,
   type DiagnoseOutput,
@@ -25,6 +26,8 @@ import {
   hasRef,
   ImplementOutputSchema,
   isAncestor,
+  type LocateOutput,
+  LocateOutputSchema,
   mergeCandidate,
   projectOf,
   promptFor,
@@ -54,6 +57,7 @@ import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
 import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
 import type { EnvironmentLimiter } from "./environments.ts";
+import { blameLocateFiles } from "./locate.ts";
 import { isNetworkPushError, type PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
@@ -157,6 +161,7 @@ export async function executeStage(
   context: StageContext,
 ): Promise<StageOutcomeBody> {
   const { bundle } = context;
+  if (bundle.job.stage === "locate-bug") return locateBug(rawDeps, context);
   // the repos a stage reads besides its own are fetched with tokens of their own
   const deps = await withCredentials(rawDeps, bundle.repo.url, [
     ...bundle.contracts.map((c) => c.url),
@@ -1217,4 +1222,114 @@ async function diagnose(
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+// Locate: every project default branch in one sandbox (workspace + /refs), no
+// compose. The agent names one repo; blame of those files yields the original spec.
+async function locateBug(
+  rawDeps: ExecutorDeps,
+  context: StageContext,
+): Promise<StageOutcomeBody> {
+  const { bundle } = context;
+  const deps = await withCredentials(rawDeps, bundle.repo.url, [
+    ...bundle.refs.map((r) => r.url),
+    ...(bundle.domain ? [bundle.domain.url] : []),
+  ]);
+  const defaultBranch = bundle.repo.defaultBranch;
+  const mainDir = deps.repos.ensure(
+    bundle.repo.name,
+    bundle.repo.url,
+    defaultBranch,
+  );
+  const head = tip(mainDir, defaultBranch);
+  const slot = await deps.slots.acquire({
+    jobId: context.job.id,
+    attempt: context.job.attempt,
+    repo: bundle.repo.name,
+    repoUrl: bundle.repo.url,
+    ref: bundle.agentBranch,
+    defaultBranch,
+  });
+  if (!slot) throw new NoFreeSlotError("no free slot");
+  let body: StageOutcomeBody | undefined;
+  const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
+  try {
+    const ctxDir = renderFor(deps, context, head, tmp, mainDir);
+    const given = writePrompt(tmp, promptFor("locate-bug"));
+    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const options = runOptions(deps, context);
+    const branch = bundle.agentBranch;
+    gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, head]);
+    try {
+      bringBranches(slot, mainDir, [branch]);
+      context.log(`locate-bug: running the agent on ${defaultBranch}`);
+      const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
+        stage: "locate-bug",
+        branch,
+        baseBranch: defaultBranch,
+        promptFile: given.promptFile,
+        ctxDir,
+        refs,
+        schema: LocateOutputSchema,
+        ...options,
+        signal: context.signal,
+      });
+      if (context.signal.aborted)
+        throw new JobLostError("the lease was lost during locate");
+      const verdict = classifyLocateRun(run);
+      if (verdict.kind === "infrastructure-failure")
+        throw new InfrastructureError(verdict.error);
+      context.log(
+        `locate-bug: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
+      );
+      if (run.commits.length > 0)
+        context.log(
+          `locate-bug: WARNING the agent made ${run.commits.length} commit(s); it should only look, and they are dropped`,
+        );
+      const output: LocateOutput | undefined = run.output;
+      const locate = output
+        ? {
+            repo: output.repo,
+            files: output.files,
+            evidence: output.evidence,
+            reproduction: output.reproduction,
+            commits: blamedLocateCommits(deps, bundle, output),
+          }
+        : undefined;
+      body = {
+        stage: "locate-bug",
+        outcome: verdict.outcome,
+        ...(locate ? { locate } : {}),
+        run: {
+          branch: defaultBranch,
+          headSha: head,
+          refShas,
+          durationMs: run.durationMs,
+          ...agentFacts(deps, options, given.prompt),
+          output: output ?? { error: run.error },
+        },
+      };
+      return body;
+    } finally {
+      git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    await slot.release(body ? "success" : "failure");
+  }
+}
+
+function blamedLocateCommits(
+  deps: ExecutorDeps,
+  bundle: Bundle,
+  output: LocateOutput,
+) {
+  if (output.files.length === 0) return [];
+  const named =
+    output.repo === bundle.repo.name
+      ? bundle.repo
+      : bundle.refs.find((ref) => ref.name === output.repo);
+  if (!named) return [];
+  const clone = deps.repos.ensure(named.name, named.url, named.defaultBranch);
+  return blameLocateFiles(clone, output.files, named.defaultBranch);
 }

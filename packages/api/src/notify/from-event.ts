@@ -1,6 +1,7 @@
 import {
   formatDisplayId,
   type HostKind,
+  LOCATE_REASON_LABELS,
   pauseReasonLabel,
   pullAbbrev,
   structuredBrief,
@@ -89,6 +90,46 @@ export async function noticeFromEvent(
   event: EventRow,
 ): Promise<MappedNotice | undefined> {
   if (event.type === "system") return systemNotice(asRecord(event.data));
+
+  if (event.type === "locate") {
+    if (event.specId == null) return undefined;
+    const spec = await specContext(pool, event.specId);
+    if (!spec) return undefined;
+    const specDisplay = formatDisplayId("spec", event.specId);
+    if (event.toState === "found") {
+      return mapped(
+        {
+          kind: "locate-succeeded",
+          displayId: specDisplay,
+          title: spec.title,
+          reason: "已填上原需求",
+          path: `/specs/${event.specId}`,
+        },
+        spec.hostKind,
+        spec.projectId,
+        event.specId,
+      );
+    }
+    if (event.toState === "failed") {
+      const reason =
+        (event.reason &&
+          (LOCATE_REASON_LABELS as Record<string, string>)[event.reason]) ||
+        "未能定位原需求";
+      return mapped(
+        {
+          kind: "locate-failed",
+          displayId: specDisplay,
+          title: spec.title,
+          reason,
+          path: `/specs/${event.specId}`,
+        },
+        spec.hostKind,
+        spec.projectId,
+        event.specId,
+      );
+    }
+    return undefined;
+  }
 
   if (event.type === "ticket") {
     if (event.toState !== "blocked" || event.fromState === "blocked")

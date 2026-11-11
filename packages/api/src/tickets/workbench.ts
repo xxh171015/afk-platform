@@ -83,6 +83,12 @@ function slimWaiting(queue: RankedQueue) {
       displayId: spec.displayId,
       title: spec.title,
     })),
+    locates: queue.locates.map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      title: item.title,
+      reason: item.reason,
+    })),
   };
 }
 

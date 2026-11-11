@@ -1456,6 +1456,104 @@ describe("plat spec create --source", () => {
   });
 });
 
+describe("plat bug", () => {
+  const REPORT =
+    "TypeError: Cannot read properties of undefined (reading 'id')\nat exportOrders (src/orders.ts:12)";
+
+  it("creates a bug draft from the report and enqueues one locate-bug job", async () => {
+    await plat("project", "create", "shop");
+    await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "backend",
+      "--url",
+      "git@github.com:acme/backend.git",
+    );
+    files["report.txt"] = REPORT;
+    const created = await plat("bug", "--project", "1", "--file", "report.txt");
+    expect(created.code).toBe(0);
+    expect(created.stdout).toBe("S-1\n");
+    const view = (await (await fetch(`${api.url}/specs/1`)).json()) as {
+      spec: { type: string; state: string; body: string };
+      tickets: unknown[];
+    };
+    expect(view.spec).toMatchObject({
+      type: "bug",
+      state: "draft",
+      body: REPORT,
+    });
+    expect(view.tickets).toEqual([]);
+    const jobs = await db.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE (payload->>'specId')::int = 1");
+    expect(jobs.rows).toHaveLength(1);
+    expect(jobs.rows[0]).toMatchObject({
+      type: "agent-run",
+      payload: { stage: "locate-bug", specId: 1 },
+    });
+    expect(jobs.rows[0]?.payload).not.toHaveProperty("ticketId");
+  });
+});
+
+describe("plat spec retry-locate", () => {
+  it("enqueues locate again and does not import tickets or confirm", async () => {
+    await plat("project", "create", "shop");
+    await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "backend",
+      "--url",
+      "git@github.com:acme/backend.git",
+    );
+    files["report.txt"] = "no such file in this project";
+    expect(
+      (await plat("bug", "--project", "1", "--file", "report.txt")).code,
+    ).toBe(0);
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    await worker.complete(job?.id as number, job?.attempt as number, {
+      stage: "locate-bug",
+      outcome: "unlocated",
+      locate: {
+        repo: "",
+        files: [],
+        evidence: "none",
+        reproduction: "",
+        commits: [],
+      },
+      run: {
+        output: {
+          result: "unlocated",
+          repo: "",
+          files: [],
+          evidence: "none",
+          reproduction: "",
+        },
+      },
+    });
+    const retried = await plat("spec", "retry-locate", "S-1");
+    expect(retried.code).toBe(0);
+    const view = (await (await fetch(`${api.url}/specs/1`)).json()) as {
+      spec: { state: string };
+      tickets: unknown[];
+    };
+    expect(view.spec.state).toBe("draft");
+    expect(view.tickets).toEqual([]);
+    const jobs = await db.pool.query(
+      `SELECT payload FROM jobs WHERE (payload->>'specId')::int = 1 AND payload->>'stage' = 'locate-bug'`,
+    );
+    expect(jobs.rows).toHaveLength(2);
+    expect((await plat("spec", "retry-locate", "S-1")).code).toBe(1);
+  });
+});
+
 describe("the plat executable", () => {
   it("runs as a process against $AFK_API_URL", async () => {
     const bin = fileURLToPath(

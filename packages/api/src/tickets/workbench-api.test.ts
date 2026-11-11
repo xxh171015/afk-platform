@@ -108,6 +108,7 @@ describe("GET /workbench", () => {
         readyFailures: [],
         planning: [],
         specs: [],
+        locates: [],
       },
       running: [],
       awaitingAcceptance: [],

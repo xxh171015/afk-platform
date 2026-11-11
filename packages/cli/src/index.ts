@@ -1192,6 +1192,40 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       io.stdout(doc);
     });
 
+  program
+    .command("bug")
+    .description(
+      "create a bug draft from a report and locate the original spec",
+    )
+    .requiredOption("--project <id>", "project id", toInt)
+    .requiredOption("--file <path>", "the report (stack, error, what you saw)")
+    .option("--title <title>", "default: the first line of the report")
+    .option("--slug <slug>", "default: derived from the title")
+    .action(async (options) => {
+      const body = await io.readFile(options.file);
+      if (body.trim().length === 0) {
+        throw new Failure("the report file is empty");
+      }
+      const target = await io
+        .readFile(TRACKER_DOC_PATH)
+        .then(trackerDocTarget)
+        .catch(() => null);
+      const planningRepo =
+        target && target.project === options.project ? target.repo : undefined;
+      const { data, response, error } = await api().POST("/bugs", {
+        body: {
+          projectId: options.project,
+          body,
+          ...(options.title ? { title: options.title } : {}),
+          ...(options.slug ? { slug: options.slug } : {}),
+          ...(planningRepo ? { planningRepo } : {}),
+        },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, data.displayId);
+      await warnAboutPlanningMachine(options.project);
+    });
+
   const spec = program.command("spec").description("specs");
   spec
     .command("create")
@@ -1581,6 +1615,18 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           ...(docs.files.length > 0 ? putAside(spec, docs, planningRepo) : []),
         ].join("\n"),
       );
+    });
+
+  spec
+    .command("retry-locate <spec>")
+    .description("run locate again on a bug draft that could not be located")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{specId}/locate/retry",
+        { params: { path: { specId: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: locate queued again`);
     });
 
   spec

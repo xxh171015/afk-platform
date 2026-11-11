@@ -32,6 +32,7 @@ import {
   readFinalPayload,
   readStagePayload,
 } from "../jobs/stage-jobs.ts";
+import { recordLocateJobFailure } from "../planning/locate-bug.ts";
 import {
   planningCommitFailed,
   readPlanningPayload,
@@ -121,6 +122,12 @@ export async function recordJobFailure(
   if (cleanup) return specCleanupFailed(client, cleanup, now);
   const ready = readPrReadyPayload(job);
   if (ready) return prReadyFailed(client, ready, now);
+  const locate = await recordLocateJobFailure(client, job, error);
+  if (locate.status !== "not-locate") {
+    return locate.status === "ignored"
+      ? { status: "ignored" }
+      : { status: "blocked", failures: 1 };
+  }
   return { status: "not-a-stage" };
 }
 

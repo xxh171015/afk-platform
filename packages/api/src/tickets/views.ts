@@ -1272,6 +1272,23 @@ async function blockedPlanning(pool: pg.Pool) {
   }));
 }
 
+async function failedLocates(pool: pg.Pool) {
+  const { rows } = await pool.query<{
+    id: number;
+    title: string;
+    locate_reason: string;
+  }>(
+    `SELECT id, title, locate_reason FROM specs
+     WHERE locate_state = 'failed' AND state <> 'cancelled' ORDER BY id`,
+  );
+  return rows.map((row) => ({
+    specId: row.id,
+    specDisplayId: formatDisplayId("spec", row.id),
+    title: row.title,
+    reason: row.locate_reason,
+  }));
+}
+
 export async function blockedQueue(
   pool: pg.Pool,
   options: { brief?: boolean; rank?: boolean } = {},
@@ -1311,6 +1328,12 @@ export async function blockedQueue(
       displayId: formatDisplayId("spec", s.id),
       title: s.title as string,
       reason: s.pause_reason as string,
+    })),
+    locates: (await failedLocates(pool)).map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      title: item.title,
+      reason: item.reason,
     })),
   };
   if (options.rank === false) return queue;

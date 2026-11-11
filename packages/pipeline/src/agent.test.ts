@@ -14,12 +14,14 @@ import {
   type AgentRunResult,
   classifyAgentRun,
   classifyDiagnoseRun,
+  classifyLocateRun,
   classifyReviewRun,
   combineReviewRuns,
   composePrompt,
   DiagnoseOutputSchema,
   type ImplementOutput,
   ImplementOutputSchema,
+  LocateOutputSchema,
   OVERLAY_FILE,
   overlaySkillsSha,
   PROMPT_DIR,
@@ -507,6 +509,59 @@ describe("classifyDiagnoseRun", () => {
   });
 });
 
+describe("a locate run", () => {
+  it("accepts one repo name and rejects a list of repos", () => {
+    const found = {
+      result: "found" as const,
+      repo: "backend",
+      files: ["src/orders.ts"],
+      evidence: "exportOrders throws",
+      reproduction: "POST /orders/export",
+    };
+    expect(LocateOutputSchema.safeParse(found).success).toBe(true);
+    expect(
+      LocateOutputSchema.safeParse({ ...found, repo: ["backend", "frontend"] })
+        .success,
+    ).toBe(false);
+    expect(
+      classifyLocateRun({
+        output: found,
+        commits: [],
+        durationMs: 1,
+      }),
+    ).toEqual({ kind: "outcome", outcome: "found" });
+    expect(
+      classifyLocateRun({
+        output: {
+          result: "unlocated",
+          repo: "",
+          files: [],
+          evidence: "no match",
+          reproduction: "",
+        },
+        commits: [],
+        durationMs: 1,
+      }),
+    ).toEqual({ kind: "outcome", outcome: "unlocated" });
+  });
+
+  it("asks for the structured output from a prompt that changes nothing", () => {
+    expect(promptFor("locate-bug")).toBe(PROMPTS.locateBug);
+    const prompt = readFileSync(PROMPTS.locateBug, "utf8");
+    for (const word of [
+      "repo",
+      "files",
+      "evidence",
+      "reproduction",
+      "unlocated",
+      "<result>",
+      "不要提交",
+      "一个仓库名",
+    ])
+      expect(prompt).toContain(word);
+  });
+});
+
 const STAGES_WITH_PROMPTS = [
   "implement",
   "review",
@@ -517,6 +572,7 @@ const STAGES_WITH_PROMPTS = [
   "final-review",
   "final-fix",
   "diagnose",
+  "locate-bug",
 ] as const;
 
 describe("the prompts", () => {
@@ -664,6 +720,7 @@ describe("the prompts", () => {
       PROMPTS.updateBranch,
       PROMPTS.integrationImplement,
       PROMPTS.diagnose,
+      PROMPTS.locateBug,
     ])
       expect(readFileSync(file, "utf8")).not.toContain(
         "/home/agent/.cursor/skills/",

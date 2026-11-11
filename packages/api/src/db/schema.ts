@@ -11,6 +11,8 @@ import {
   HOST_KINDS,
   JOB_STATES,
   LINK_KINDS,
+  LOCATE_REASONS,
+  LOCATE_STATES,
   PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
@@ -188,6 +190,10 @@ export const specs = pgTable(
     planningDocsAtImport: jsonb("planning_docs_at_import")
       .notNull()
       .default({ status: "unknown" }),
+    // Locate of a bug draft: pending while the job is out, found after it filled the original spec,
+    // failed when a person has to retry or fill the source by hand. Null on specs that never located.
+    locateState: text("locate_state"),
+    locateReason: text("locate_reason"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -224,6 +230,14 @@ export const specs = pgTable(
     check(
       "specs_pause_reason_check",
       sql`(${t.state} = 'paused') = (${t.pauseReason} is not null) and (${t.pauseReason} is null or ${oneOf(t.pauseReason, PAUSE_REASONS)})`,
+    ),
+    check(
+      "specs_locate_state_check",
+      sql`${t.locateState} is null or ${oneOf(t.locateState, LOCATE_STATES)}`,
+    ),
+    check(
+      "specs_locate_reason_check",
+      sql`(${t.locateState} = 'failed') = (${t.locateReason} is not null) and (${t.locateReason} is null or ${oneOf(t.locateReason, LOCATE_REASONS)})`,
     ),
   ],
 );

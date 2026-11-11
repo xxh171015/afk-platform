@@ -21,6 +21,7 @@ import {
   requestRepoAccess,
 } from "../host/repo-access.ts";
 import { getDoctorReport, putDoctorReport } from "../planning/doctor.ts";
+import { retryLocate, submitBug } from "../planning/locate-bug.ts";
 import {
   addRepo,
   createProject,
@@ -386,6 +387,39 @@ const repoEditRoute = createRoute({
   },
 });
 
+const bugRoute = createRoute({
+  method: "post",
+  path: "/bugs",
+  request: {
+    body: {
+      content: json(
+        z.object({
+          projectId: Id,
+          body: z.string().min(1).max(1_000_000),
+          title: Text.optional(),
+          slug: z
+            .string()
+            .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+            .max(100)
+            .optional(),
+          planningRepo: Text.optional(),
+        }),
+      ),
+    },
+  },
+  responses: {
+    201: reply(
+      "A bug draft was created and a locate-bug job was queued",
+      z.object({ id: Id, displayId: z.string() }),
+    ),
+    404: reply("No such project", ErrorReply),
+    422: reply(
+      "The project has no repo, or the planning repo name is unknown",
+      ErrorReply,
+    ),
+  },
+});
+
 const specRoute = createRoute({
   method: "post",
   path: "/specs",
@@ -549,6 +583,22 @@ const planningRetryRoute = createRoute({
     404: reply("No such spec", ErrorReply),
     409: reply("The planning docs are not blocked", ErrorReply),
     422: reply("The patch is too large", ErrorReply),
+  },
+});
+
+const locateRetryRoute = createRoute({
+  method: "post",
+  path: "/specs/{specId}/locate/retry",
+  request: {
+    params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+  },
+  responses: {
+    200: reply(
+      "Locate is queued again; the draft stays a draft",
+      z.object({ ok: z.literal(true) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("Locate is not waiting for a retry", ErrorReply),
   },
 });
 
@@ -820,6 +870,17 @@ export function registerPlanningRoutes(
     return c.json(result.repo, 200);
   });
 
+  app.openapi(bugRoute, async (c) => {
+    const result = await submitBug(pool, c.req.valid("json"));
+    if (result.status === "no-project") {
+      return c.json({ error: "no such project" }, 404);
+    }
+    if (result.status === "no-repo" || result.status === "invalid") {
+      return c.json({ error: result.message }, 422);
+    }
+    return c.json(result.spec, 201);
+  });
+
   app.openapi(specRoute, async (c) => {
     const result = await createSpec(pool, c.req.valid("json"));
     if (result.status === "no-project") {
@@ -881,6 +942,18 @@ export function registerPlanningRoutes(
       return c.json({ error: result.message }, 409);
     if (result.status === "invalid")
       return c.json({ error: result.message }, 422);
+    return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(locateRetryRoute, async (c) => {
+    const { specId } = c.req.valid("param");
+    const result = await aroundSpec(context, specId, () =>
+      retryLocate(pool, specId),
+    );
+    if (result.status === "no-spec")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "not-failed")
+      return c.json({ error: result.message }, 409);
     return c.json({ ok: true as const }, 200);
   });
 

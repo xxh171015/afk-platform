@@ -112,8 +112,18 @@ export const DiagnoseOutputSchema = z.object({
 });
 export type DiagnoseOutput = z.infer<typeof DiagnoseOutputSchema>;
 
+// What Locate ends with (GLOSSARY Locate): one repo name, not a list, then the worker blames those files.
+export const LocateOutputSchema = z.object({
+  result: z.enum(["found", "unlocated"]),
+  repo: z.string(),
+  files: z.array(z.string()).default([]),
+  evidence: z.string(),
+  reproduction: z.string().default(""),
+});
+export type LocateOutput = z.infer<typeof LocateOutputSchema>;
+
 export interface AgentRunOptions<Schema extends z.ZodType> {
-  stage: Stage | FinalStep | "update-branch";
+  stage: Stage | FinalStep | "update-branch" | "locate-bug";
   branch: string; // the agent's branch, created from baseBranch when it does not exist
   baseBranch: string;
   promptFile: string;
@@ -220,6 +230,34 @@ export function classifyDiagnoseRun(
   };
 }
 
+export type LocateOutcome =
+  | "found"
+  | "unlocated"
+  | "invalid-output"
+  | "timeout";
+
+export function classifyLocateRun(
+  result: AgentRunResult<LocateOutput>,
+): Classification<LocateOutcome> {
+  const failure = failureOf(result);
+  if (failure) return failure;
+  const output = result.output;
+  if (!output) {
+    return { kind: "outcome", outcome: "invalid-output", detail: "no result" };
+  }
+  if (output.result === "found" && output.repo.trim()) {
+    return { kind: "outcome", outcome: "found" };
+  }
+  if (output.result === "unlocated") {
+    return { kind: "outcome", outcome: "unlocated" };
+  }
+  return {
+    kind: "outcome",
+    outcome: "invalid-output",
+    detail: "found without a repo name",
+  };
+}
+
 export function classifyReviewRun(
   result: AgentRunResult<ReviewOutput>,
 ): Classification<ReviewOutcome> {
@@ -301,6 +339,7 @@ export const PROMPTS = {
   implement: join(PROMPT_DIR, "implement.md"),
   integrationImplement: join(PROMPT_DIR, "integration-implement.md"),
   diagnose: join(PROMPT_DIR, "afk-integration.md"),
+  locateBug: join(PROMPT_DIR, "locate-bug.md"),
   gateFix: join(PROMPT_DIR, "gate-fix.md"),
   reviewFix: join(PROMPT_DIR, "review-fix.md"),
   mergeFix: join(PROMPT_DIR, "merge-fix.md"),
@@ -348,7 +387,8 @@ export function promptFor(
     | "update-branch"
     | "final-review"
     | "final-fix"
-    | "diagnose",
+    | "diagnose"
+    | "locate-bug",
   options: { integration?: boolean; axis?: ReviewAxis } = {},
 ): string {
   switch (stage) {
@@ -360,6 +400,8 @@ export function promptFor(
       return PROMPTS.finalFix;
     case "diagnose":
       return PROMPTS.diagnose;
+    case "locate-bug":
+      return PROMPTS.locateBug;
     case "implement":
       return options.integration
         ? PROMPTS.integrationImplement
