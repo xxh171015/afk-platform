@@ -57,7 +57,6 @@ import {
   heartbeat,
   isLeaseLive,
 } from "../jobs/queue.ts";
-import type { Notice } from "../notify/notices.ts";
 import {
   buildPlanningTask,
   readPlanningPayload,
@@ -680,9 +679,7 @@ export function registerWorkerRoutes(
       freeBytes,
     );
     const sample = await context.statDisk(context.logDir);
-    await refreshDiskStatus(context.pool, sample, (notice) =>
-      context.notifications.notify(notice),
-    );
+    await refreshDiskStatus(context.pool, sample);
     return c.json({ ok: true as const }, 200);
   });
 
@@ -843,7 +840,6 @@ export function registerWorkerRoutes(
                     access,
                     (result ?? {}) as Record<string, unknown>,
                     context.clock(),
-                    (notice) => context.notifications.notify(notice),
                   );
                 else if (openPr)
                   await recordOpenPr(client, openPr, result, context.clock());
@@ -1031,7 +1027,6 @@ export function registerWorkerRoutes(
     const { id } = c.req.valid("param");
     const { workerId, attempt, error } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
-    let notice: Notice | undefined;
     const outcome = await aroundJob(context, id, () =>
       inWorkerReport(context, id, async (client) => {
         const failed = await failJob(
@@ -1052,7 +1047,6 @@ export function registerWorkerRoutes(
             context.clock(),
           );
           if (paused !== false) {
-            notice = paused;
             return failed;
           }
           const failure = await recordJobFailure(
@@ -1080,7 +1074,6 @@ export function registerWorkerRoutes(
       const { body, status } = refusal(outcome);
       return c.json(body, status);
     }
-    if (notice) await context.notifications.notify(notice);
     return c.json({ ok: true as const }, 200);
   });
 }

@@ -6,8 +6,31 @@ import type { Notice } from "./notices.ts";
 // banner is clicked; a failure (Focus, notifications off) is swallowed
 // (docs/specs/experience-platform.md「通知」).
 
+export interface NotificationMeta {
+  eventId: number;
+  projectId?: number;
+}
+
 export interface NotificationChannel {
-  notify(notice: Notice): Promise<void>;
+  notify(notice: Notice, meta?: NotificationMeta): Promise<void>;
+}
+
+export function fanOutNotifications(
+  channels: readonly NotificationChannel[],
+): NotificationChannel {
+  return {
+    async notify(notice, meta) {
+      await Promise.all(
+        channels.map(async (channel) => {
+          try {
+            await channel.notify(notice, meta);
+          } catch {
+            // One channel's failure must not block the others (ADR 0009).
+          }
+        }),
+      );
+    },
+  };
 }
 
 export const silentNotifications: NotificationChannel = {

@@ -997,9 +997,7 @@ export function registerTicketRoutes(
   app.openapi(workbenchRoute, async (c) => {
     const board = await workbench(pool, context.clock());
     const sample = await context.statDisk(context.logDir);
-    const status = await refreshDiskStatus(pool, sample, (notice) =>
-      context.notifications.notify(notice),
-    );
+    const status = await refreshDiskStatus(pool, sample);
     const agentsPaused = await agentsPause(pool);
     return c.json({ ...board, status: { ...status, agentsPaused } }, 200);
   });

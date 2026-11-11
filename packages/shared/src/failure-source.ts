@@ -158,6 +158,8 @@ export const EVENT_TYPES = [
   "pull-request-sync",
   // a person's action (HUMAN_ACTIONS), written by the action's code
   "action",
+  // disk, agent pause, token expiry: inserted on the edge, not by a state trigger (ADR 0009)
+  "system",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

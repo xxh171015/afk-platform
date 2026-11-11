@@ -21,6 +21,22 @@ export function bindEventsHub(app: object, hub: EventsHub): void {
   hubs.set(app, hub);
 }
 
+export interface EventRow {
+  id: number;
+  specId: number | null;
+  ticketId: number | null;
+  runId: number | null;
+  jobId: number | null;
+  repoId: number | null;
+  type: string;
+  fromState: string | null;
+  toState: string | null;
+  reason: string | null;
+  data: unknown;
+}
+
+export type EventListener = (row: EventRow) => void | Promise<void>;
+
 function payloadOf(row: {
   spec_id: number | null;
   ticket_id: number | null;
@@ -33,8 +49,37 @@ function payloadOf(row: {
   };
 }
 
+function eventRowOf(row: {
+  id: string;
+  spec_id: number | null;
+  ticket_id: number | null;
+  run_id: number | null;
+  job_id: number | null;
+  repo_id: number | null;
+  type: string;
+  from_state: string | null;
+  to_state: string | null;
+  reason: string | null;
+  data: unknown;
+}): EventRow {
+  return {
+    id: Number(row.id),
+    specId: row.spec_id,
+    ticketId: row.ticket_id,
+    runId: row.run_id,
+    jobId: row.job_id,
+    repoId: row.repo_id,
+    type: row.type,
+    fromState: row.from_state,
+    toState: row.to_state,
+    reason: row.reason,
+    data: row.data,
+  };
+}
+
 export class EventsHub {
   private readonly listeners = new Set<InvalidateListener>();
+  private readonly eventListeners = new Set<EventListener>();
   private pool: pg.Pool | undefined;
   private client: pg.Client | undefined;
   private cursor = "0";
@@ -47,6 +92,13 @@ export class EventsHub {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  subscribeEvents(listener: EventListener): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
     };
   }
 
@@ -143,14 +195,34 @@ export class EventsHub {
       spec_id: number | null;
       ticket_id: number | null;
       run_id: number | null;
+      job_id: number | null;
+      repo_id: number | null;
+      type: string;
+      from_state: string | null;
+      to_state: string | null;
+      reason: string | null;
+      data: unknown;
     }>(
-      `SELECT id::text AS id, spec_id, ticket_id, run_id
+      `SELECT id::text AS id, spec_id, ticket_id, run_id, job_id, repo_id, type,
+              from_state, to_state, reason, data
        FROM events WHERE id > $1::bigint ORDER BY id`,
       [this.cursor],
     );
     for (const row of rows) {
       this.cursor = row.id;
+      // Dispatcher ingest finishes before SSE, so a client that saw invalidate has a scheduled window.
+      await this.emitEvent(eventRowOf(row));
       this.publish(payloadOf(row));
+    }
+  }
+
+  private async emitEvent(row: EventRow): Promise<void> {
+    for (const listener of this.eventListeners) {
+      try {
+        await listener(row);
+      } catch (error) {
+        console.error("event listener failed:", error);
+      }
     }
   }
 

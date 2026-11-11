@@ -40,6 +40,14 @@ async function workbench() {
   return { status: reply.status, body: await reply.json() };
 }
 
+async function waitForNotices(count: number, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (notices.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  expect(notices).toHaveLength(count);
+}
+
 async function reportWorker() {
   return fetch(`${api.url}/worker/status`, {
     method: "POST",
@@ -67,14 +75,17 @@ describe("disk remaining-space alerts", () => {
 
     freeBytes = 9 * GIB;
     expect((await workbench()).body.status.diskLevel).toBe("warn");
+    await waitForNotices(1);
     expect(notices.map((n) => n.title)).toEqual(["磁盘空间不足"]);
     expect(notices[0].body).toContain("剩余不足 10 GiB");
 
     expect((await workbench()).body.status.diskLevel).toBe("warn");
+    await new Promise((resolve) => setTimeout(resolve, 80));
     expect(notices).toHaveLength(1);
 
     freeBytes = 4 * GIB;
     expect((await workbench()).body.status.diskLevel).toBe("stop");
+    await waitForNotices(2);
     expect(notices.map((n) => n.title)).toEqual([
       "磁盘空间不足",
       "磁盘空间严重不足",
@@ -87,6 +98,7 @@ describe("disk remaining-space alerts", () => {
 
     freeBytes = 4 * GIB;
     expect((await workbench()).body.status.diskLevel).toBe("stop");
+    await waitForNotices(4);
     expect(notices.map((n) => n.title)).toEqual([
       "磁盘空间不足",
       "磁盘空间严重不足",
@@ -98,6 +110,7 @@ describe("disk remaining-space alerts", () => {
   it("uses the tighter of the API disk and the workers' last report", async () => {
     workerFree = 4 * GIB;
     expect((await reportWorker()).status).toBe(200);
+    await waitForNotices(2);
     expect(notices.map((n) => n.title)).toEqual([
       "磁盘空间不足",
       "磁盘空间严重不足",
