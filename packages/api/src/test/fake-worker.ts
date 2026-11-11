@@ -12,6 +12,11 @@ export function testApp(options: AppOptions) {
   return createApp({
     statDisk: async () => TEST_DISK,
     ...options,
+    feishu: {
+      secretsPath:
+        options.feishu?.secretsPath ?? "/nonexistent-afk-feishu-app.json",
+      ...options.feishu,
+    },
   });
 }
 

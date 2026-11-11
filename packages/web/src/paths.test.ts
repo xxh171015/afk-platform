@@ -15,6 +15,7 @@ describe("shareable addresses", () => {
       "/specs/$specId/timeline",
       "/tickets/$ticketId",
       "/runs/$runId",
+      "/projects/$projectId",
     ]);
     expect(paths.spec(3)).toBe("/specs/3");
     expect(paths.specDescription(3)).toBe("/specs/3/description");
@@ -23,6 +24,7 @@ describe("shareable addresses", () => {
     expect(paths.specTimeline(3)).toBe("/specs/3/timeline");
     expect(paths.ticket(9)).toBe("/tickets/9");
     expect(paths.run(4)).toBe("/runs/4");
+    expect(paths.project(1)).toBe("/projects/1");
     expect(PAGE_PATHS.every((path) => !path.startsWith("#"))).toBe(true);
   });
 });

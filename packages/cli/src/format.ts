@@ -13,11 +13,15 @@ export function projectText(project: {
   id: number;
   name: string;
   defaultAgent: string | null;
+  feishuChatId?: string | null;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
     const inactive = project.defaultAgent === "cursor" ? "" : "（当前不生效）";
     lines.push(`default-agent: ${project.defaultAgent}${inactive}`);
+  }
+  if (project.feishuChatId) {
+    lines.push(`feishu-chat: ${project.feishuChatId}`);
   }
   return lines.join("\n");
 }

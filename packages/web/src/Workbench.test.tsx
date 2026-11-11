@@ -380,6 +380,26 @@ describe("the workbench", () => {
     );
   });
 
+  it("prompts in the status area when the Feishu channel is closed", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            ...emptyWorkbench,
+            status: {
+              ...emptyWorkbench.status,
+              feishu: { open: false, closedReason: "missing" },
+            },
+          },
+        }),
+      }),
+    );
+    const status = await screen.findByTestId("workbench-status");
+    expect(status.textContent).toMatch(/飞书渠道已关闭：密钥文件不存在/);
+  });
+
   it("puts getting the first project on the platform at the top while there is none", async () => {
     renderWithApp(
       <Workbench />,

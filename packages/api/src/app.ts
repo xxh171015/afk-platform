@@ -18,10 +18,19 @@ import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
 import { LogStore } from "./logs/log-store.ts";
 import {
+  fanOutNotifications,
+  macosNotifications,
   type NotificationChannel,
+  type RunCommand,
   silentNotifications,
 } from "./notify/channel.ts";
 import { bindDispatcher, NotificationDispatcher } from "./notify/dispatch.ts";
+import {
+  createFeishuChannel,
+  type FeishuHandle,
+  type FeishuHttp,
+  feishuSecretsPath,
+} from "./notify/feishu.ts";
 
 export interface AppOptions {
   pool: pg.Pool;
@@ -33,6 +42,17 @@ export interface AppOptions {
   statDisk?: (path: string) => Promise<DiskSample>;
   events?: EventsHub;
   notifications?: NotificationChannel;
+  // When true and notifications is omitted, assemble macOS plus an open Feishu channel.
+  liveNotifications?: boolean;
+  macosRun?: RunCommand;
+  feishu?: {
+    secretsPath?: string;
+    http?: FeishuHttp;
+    defaultChatId?: string;
+    clock?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    log?: (message: string) => void;
+  };
   sseKeepaliveMs?: number;
   // Tests inject this so the 30s notice window can fire when FakeClock advances.
   schedule?: (ms: number, fn: () => unknown) => () => void;
@@ -49,6 +69,7 @@ export interface AppContext {
   freeBytes: (path: string) => Promise<number>;
   events: EventsHub;
   notifications: NotificationChannel;
+  feishu: FeishuHandle;
   sseKeepaliveMs: number;
   schedule: (ms: number, fn: () => unknown) => () => void;
 }
@@ -61,6 +82,32 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 export function createApp(options: AppOptions): OpenAPIHono {
   const logDir = options.logDir ?? mkdtempSync(join(tmpdir(), "afk-logs-"));
   const injectedStat = options.statDisk;
+  const feishu = createFeishuChannel({
+    secretsPath: options.feishu?.secretsPath ?? feishuSecretsPath(),
+    http: options.feishu?.http,
+    clock: options.feishu?.clock,
+    sleep: options.feishu?.sleep,
+    log: options.feishu?.log,
+    defaultChatId:
+      options.feishu?.defaultChatId ?? process.env.AFK_FEISHU_DEFAULT_CHAT,
+    resolveChatId: async (projectId) => {
+      if (typeof options.pool?.query !== "function" || projectId == null) {
+        return undefined;
+      }
+      try {
+        const { rows } = await options.pool.query<{
+          feishu_chat_id: string | null;
+        }>("SELECT feishu_chat_id FROM projects WHERE id = $1", [projectId]);
+        return rows[0]?.feishu_chat_id ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  });
+  const live = fanOutNotifications([
+    macosNotifications(options.macosRun),
+    ...(feishu.state.open ? [feishu.channel] : []),
+  ]);
   const context: AppContext = {
     pool: options.pool,
     clock: options.clock ?? (() => new Date()),
@@ -72,7 +119,10 @@ export function createApp(options: AppOptions): OpenAPIHono {
       ? async (path) => (await injectedStat(path)).freeBytes
       : volumeFreeBytes,
     events: options.events ?? new EventsHub(),
-    notifications: options.notifications ?? silentNotifications,
+    notifications:
+      options.notifications ??
+      (options.liveNotifications ? live : silentNotifications),
+    feishu,
     sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,
     schedule:
       options.schedule ??

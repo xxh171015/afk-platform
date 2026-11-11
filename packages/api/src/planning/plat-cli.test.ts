@@ -526,6 +526,29 @@ describe("plat", () => {
     expect(none.stderr).toMatch(/nothing to change/);
   });
 
+  it("writes and reads a project's Feishu chat id with --feishu-chat", async () => {
+    await plat("project", "create", "shop");
+    const edited = await plat(
+      "project",
+      "edit",
+      "1",
+      "--feishu-chat",
+      "oc_shop",
+    );
+    expect(edited).toEqual({
+      code: 0,
+      stdout: "project 1 updated\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT feishu_chat_id FROM projects WHERE id = 1"))
+        .rows[0].feishu_chat_id,
+    ).toBe("oc_shop");
+    const shown = await plat("project", "show", "1");
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain("oc_shop");
+  });
+
   it("refuses project create with --default-agent claude-code and says only Cursor is supported", async () => {
     const refused = await plat(
       "project",

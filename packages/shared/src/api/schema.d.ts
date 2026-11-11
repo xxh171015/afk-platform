@@ -131,6 +131,7 @@ export interface paths {
               id: number;
               name: string;
               defaultAgent: string | null;
+              feishuChatId: string | null;
               repos: {
                 name: string;
                 url: string;
@@ -174,6 +175,7 @@ export interface paths {
           "application/json": {
             defaultAgent?: string;
             defaultModel?: string;
+            feishuChatId?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -342,6 +344,80 @@ export interface paths {
       };
     };
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/feishu-test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description A test card was sent to the project's group or the default group */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              sent: true;
+              chatId: string;
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Feishu is closed or no chat is configured */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Feishu send failed */
+        502: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;
@@ -4121,6 +4197,11 @@ export interface paths {
                     snapshots: number;
                   };
                 }[];
+                feishu: {
+                  open: boolean;
+                  /** @enum {string|null} */
+                  closedReason: "missing" | "permissions" | "invalid" | null;
+                };
               };
             };
           };
