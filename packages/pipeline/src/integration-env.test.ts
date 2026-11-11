@@ -244,6 +244,23 @@ describe("starting an environment", () => {
     );
     expect(fake.only("rmi").length).toBe(1);
   });
+
+  it("does not apply sandbox hardening to compose services", async () => {
+    const fake = fakeDocker();
+    await startEnvironment({
+      docker: fake.docker,
+      runId: "R-9",
+      repos: repos(),
+    });
+    for (const call of fake.calls) {
+      expect(call).not.toContain("--cap-drop");
+      expect(call).not.toContain("no-new-privileges=true");
+      expect(call).not.toContain("--pids-limit");
+      expect(call).not.toContain("--memory-swap");
+      expect(call).not.toContain("--shm-size");
+      expect(call.join("\0")).not.toMatch(/afk\.(kind|run)=/);
+    }
+  });
 });
 
 describe("stopping an environment", () => {

@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_SANDBOX_LIMITS, type SandboxLimits } from "@afk/pipeline";
 
 // What `pnpm worker` needs to know, from the environment. Everything that is wrong is reported at once, in one
 // sentence each, before anything starts.
@@ -17,6 +18,7 @@ export interface WorkerConfig {
   // npm registries to install from, tried in order (AFK_NPM_REGISTRIES): passed into every sandbox, where a repo's
   // setup script reads them. Empty when not set.
   npmRegistries: string[];
+  sandboxLimits: SandboxLimits; // AFK_SANDBOX_MEMORY / PIDS / CPUS / SHM, else the Mac VM defaults
 }
 
 export class ConfigError extends Error {
@@ -59,6 +61,18 @@ const positiveInt = (
   if (text === undefined || text === "") return fallback;
   const n = Number(text);
   return Number.isInteger(n) && n >= 1 && n <= max ? n : undefined;
+};
+
+// Docker size, e.g. 3g / 512m, and a positive CPU count that may be fractional.
+const dockerSize = (text: string | undefined, fallback: string) => {
+  if (text === undefined || text === "") return fallback;
+  return /^\d+(\.\d+)?[kKmMgGtT]?[bB]?$/.test(text) ? text : undefined;
+};
+
+const positiveNumber = (text: string | undefined, fallback: number) => {
+  if (text === undefined || text === "") return fallback;
+  const n = Number(text);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
 export function loadConfig(sources: ConfigSources): WorkerConfig {
@@ -109,6 +123,40 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
     }
   }
 
+  const memory = dockerSize(
+    env.AFK_SANDBOX_MEMORY,
+    DEFAULT_SANDBOX_LIMITS.memory,
+  );
+  if (memory === undefined)
+    problems.push(
+      `AFK_SANDBOX_MEMORY must be a Docker size such as 3g, got ${JSON.stringify(env.AFK_SANDBOX_MEMORY)}`,
+    );
+  const pids = positiveInt(
+    env.AFK_SANDBOX_PIDS,
+    DEFAULT_SANDBOX_LIMITS.pids,
+    1_000_000,
+  );
+  if (pids === undefined)
+    problems.push(
+      `AFK_SANDBOX_PIDS must be a whole number from 1, got ${JSON.stringify(env.AFK_SANDBOX_PIDS)}`,
+    );
+  const cpus = positiveNumber(
+    env.AFK_SANDBOX_CPUS,
+    DEFAULT_SANDBOX_LIMITS.cpus,
+  );
+  if (cpus === undefined)
+    problems.push(
+      `AFK_SANDBOX_CPUS must be a positive number, got ${JSON.stringify(env.AFK_SANDBOX_CPUS)}`,
+    );
+  const shmSize = dockerSize(
+    env.AFK_SANDBOX_SHM,
+    DEFAULT_SANDBOX_LIMITS.shmSize,
+  );
+  if (shmSize === undefined)
+    problems.push(
+      `AFK_SANDBOX_SHM must be a Docker size such as 1g, got ${JSON.stringify(env.AFK_SANDBOX_SHM)}`,
+    );
+
   if (problems.length > 0) throw new ConfigError(problems);
   return {
     apiUrl,
@@ -125,5 +173,11 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
     gitlabDir:
       env.AFK_GITLAB_DIR || join(sources.homedir, ".afk", "secrets", "gitlab"),
     npmRegistries,
+    sandboxLimits: {
+      memory: memory as string,
+      pids: pids as number,
+      cpus: cpus as number,
+      shmSize: shmSize as string,
+    },
   };
 }

@@ -103,16 +103,25 @@ export {
   checkProtectedPaths,
   globMatches,
 } from "./protected-paths.ts";
-export type { SandcastleConfig } from "./sandcastle.ts";
+export type {
+  SandboxDocker,
+  SandboxKind,
+  SandboxLimits,
+  SandcastleConfig,
+} from "./sandcastle.ts";
 export {
   agentEnv,
   CONTEXT_SANDBOX_PATH,
   classifyAgentError,
+  DEFAULT_SANDBOX_LIMITS,
+  SANDBOX_KIND_LABEL,
+  SANDBOX_RUN_LABEL,
   SANDBOX_SKILLS_DIR,
   SandcastleAgentRunner,
   SandcastleGateSandbox,
   SKILLS_SANDBOX_PATH,
   sandboxMounts,
+  sandboxProvider,
 } from "./sandcastle.ts";
 export type { StampRequest, StampResult, TrailerIds } from "./trailers.ts";
 export { stampTrailers } from "./trailers.ts";
