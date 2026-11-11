@@ -557,6 +557,7 @@ describe("project view", () => {
       id: projectId,
       name: "shop",
       defaultAgent: null,
+      feishuChatId: null,
       repos: [
         {
           name: "backend",
@@ -660,6 +661,18 @@ describe("project edit", () => {
       max_concurrency: 2,
       limits: { repoConcurrency: 3 },
     });
+  });
+
+  it("writes and returns the Feishu chat id", async () => {
+    await post("/projects", { name: "shop" });
+    expect(
+      (await patch("/projects/1", { feishuChatId: "oc_shop" })).status,
+    ).toBe(200);
+    expect((await projectRow()).feishu_chat_id).toBe("oc_shop");
+    const view = await fetch(`${api.url}/projects/1`).then((r) => r.json());
+    expect(view).toMatchObject({ feishuChatId: "oc_shop" });
+    expect((await patch("/projects/1", { feishuChatId: "" })).status).toBe(200);
+    expect((await projectRow()).feishu_chat_id).toBeNull();
   });
 
   it("changes the default model", async () => {

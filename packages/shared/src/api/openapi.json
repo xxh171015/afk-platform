@@ -239,6 +239,9 @@
                     "defaultAgent": {
                       "type": ["string", "null"]
                     },
+                    "feishuChatId": {
+                      "type": ["string", "null"]
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -271,7 +274,13 @@
                       }
                     }
                   },
-                  "required": ["id", "name", "defaultAgent", "repos"]
+                  "required": [
+                    "id",
+                    "name",
+                    "defaultAgent",
+                    "feishuChatId",
+                    "repos"
+                  ]
                 }
               }
             }
@@ -322,6 +331,10 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500
+                  },
+                  "feishuChatId": {
+                    "type": "string",
+                    "maxLength": 200
                   },
                   "protectedPaths": {
                     "type": "array",
@@ -663,6 +676,92 @@
           },
           "404": {
             "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/feishu-test": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A test card was sent to the project's group or the default group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sent": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "chatId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sent", "chatId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Feishu is closed or no chat is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Feishu send failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -8944,6 +9043,24 @@
                               "cleaned"
                             ]
                           }
+                        },
+                        "feishu": {
+                          "type": "object",
+                          "properties": {
+                            "open": {
+                              "type": "boolean"
+                            },
+                            "closedReason": {
+                              "type": ["string", "null"],
+                              "enum": [
+                                "missing",
+                                "permissions",
+                                "invalid",
+                                null
+                              ]
+                            }
+                          },
+                          "required": ["open", "closedReason"]
                         }
                       },
                       "required": [
@@ -8954,7 +9071,8 @@
                         "warnGib",
                         "stopGib",
                         "lastCleanup",
-                        "workers"
+                        "workers",
+                        "feishu"
                       ]
                     }
                   },

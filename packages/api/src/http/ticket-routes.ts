@@ -674,6 +674,10 @@ const WorkbenchStatus = z.object({
       }),
     }),
   ),
+  feishu: z.object({
+    open: z.boolean(),
+    closedReason: z.enum(["missing", "permissions", "invalid"]).nullable(),
+  }),
 });
 
 const workbenchRoute = createRoute({
@@ -1001,7 +1005,20 @@ export function registerTicketRoutes(
     const sample = await context.statDisk(context.logDir);
     const status = await refreshDiskStatus(pool, sample);
     const agentsPaused = await agentsPause(pool);
-    return c.json({ ...board, status: { ...status, agentsPaused } }, 200);
+    const feishu = context.feishu.state;
+    return c.json(
+      {
+        ...board,
+        status: {
+          ...status,
+          agentsPaused,
+          feishu: feishu.open
+            ? { open: true, closedReason: null }
+            : { open: false, closedReason: feishu.closedReason },
+        },
+      },
+      200,
+    );
   });
 
   app.openapi(resumeAgentsRoute, async (c) =>
