@@ -3,6 +3,13 @@ import { formatShanghaiTime } from "./time.ts";
 
 export { FAILURE_SOURCE_LABELS };
 
+export function waitingReasonHint(
+  reason: string | null | undefined,
+): string | null {
+  if (reason === "sandbox-oom") return "把沙箱内存调大后再试";
+  return null;
+}
+
 // How many items sit in the waiting queue: the nav badge and the workbench 等你处理 quadrant share this.
 
 export function waitingCount(queue: {

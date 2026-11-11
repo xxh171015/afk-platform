@@ -112,15 +112,40 @@ const defaultCreate = {
   env: {},
 };
 
+type CreatedSandbox = {
+  exec(
+    command: string,
+    options?: {
+      cwd?: string;
+      stdin?: string;
+      onLine?: (line: string) => void;
+      sudo?: boolean;
+    },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  close(): Promise<void>;
+};
+
 // Sandcastle keeps provider.create off the public type; the runtime object still has it.
 function startProvider(
   options: Parameters<typeof sandboxProvider>[0],
   create = defaultCreate,
 ) {
   const provider = sandboxProvider(options) as unknown as {
-    create: (opts: typeof defaultCreate) => Promise<{ close(): Promise<void> }>;
+    create: (opts: typeof defaultCreate) => Promise<CreatedSandbox>;
   };
   return provider.create(create);
+}
+
+function oomDocker(opts: { execCode: number; oomKilled: boolean }) {
+  const calls: string[][] = [];
+  const docker: SandboxDocker = (args) => {
+    calls.push(args);
+    if (args[0] === "exec") return { code: opts.execCode, stdout: "killed\n" };
+    if (args[0] === "inspect")
+      return { code: 0, stdout: opts.oomKilled ? "true\n" : "false\n" };
+    return { code: 0, stdout: "ok\n" };
+  };
+  return { docker, calls };
 }
 
 function expectHardened(args: string[], kind: "agent" | "gate", runId = "R-9") {
@@ -323,6 +348,52 @@ describe("the hardened sandbox", () => {
     expect(
       volumes.some((v) => v.includes(`${SANDBOX_SKILLS_DIR}:/context:ro`)),
     ).toBe(true);
+  });
+});
+
+describe("a sandbox that ran out of memory", () => {
+  it("maps inspect OOMKilled after a failed exec to sandbox-oom", async () => {
+    const fake = oomDocker({ execCode: 137, oomKilled: true });
+    const sandbox = await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
+      kind: "gate",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    await expect(sandbox.exec("hog")).rejects.toThrow(/sandbox-oom/);
+    expect(fake.calls.some((call) => call[0] === "inspect")).toBe(true);
+    expect(
+      fake.calls.some((call) => call.includes("{{.State.OOMKilled}}")),
+    ).toBe(true);
+  });
+
+  it("maps inspect OOMKilled before close to sandbox-oom", async () => {
+    const fake = oomDocker({ execCode: 0, oomKilled: true });
+    const sandbox = await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
+      kind: "gate",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    await expect(sandbox.close()).rejects.toThrow(/sandbox-oom/);
+    const inspectAt = fake.calls.findIndex((call) => call[0] === "inspect");
+    const stopAt = fake.calls.findIndex((call) => call[0] === "stop");
+    expect(inspectAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(inspectAt);
+  });
+
+  it("a failed exec that was not OOMKilled is still a failed command", async () => {
+    const fake = oomDocker({ execCode: 1, oomKilled: false });
+    const sandbox = await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
+      kind: "gate",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    expect(await sandbox.exec("false")).toMatchObject({ exitCode: 1 });
   });
 });
 

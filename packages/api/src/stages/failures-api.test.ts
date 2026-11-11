@@ -223,6 +223,22 @@ describe("a job the worker could not carry out", () => {
     },
   );
 
+  it("blocks the ticket at once with sandbox-oom when the container was OOMKilled, as a platform problem", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext("sandbox-oom: container OOMKilled");
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "sandbox-oom",
+    });
+    expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      blockedReason: "sandbox-oom",
+      failureSource: "platform",
+    });
+  });
+
   it("blocks the ticket with job-failed after the third failure, with the error in its brief", async () => {
     await runningSpec([ticket("a")]);
     await failNext("one");
@@ -431,6 +447,24 @@ describe("a step of the overall review that could not be carried out", () => {
     await call("POST", "/agents/resume");
     const again = (await claim()) as Claimed;
     expect(again.payload.stage).toBe("final-review");
+  });
+
+  it("blocks the wrap-up at once with sandbox-oom when the container was OOMKilled, without three failures", async () => {
+    await toFinalReview();
+    await failNext("sandbox-oom: container OOMKilled");
+    expect(
+      (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
+        .rows[0],
+    ).toEqual({
+      state: "blocked",
+      blocked_reason: "sandbox-oom",
+    });
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.finalizations[0]).toMatchObject({
+      blockedReason: "sandbox-oom",
+      failureSource: "platform",
+    });
   });
 
   it("is queued again, and blocks the finalization after three failures", async () => {
