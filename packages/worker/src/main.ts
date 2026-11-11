@@ -147,12 +147,14 @@ const repos = new RepoStore(join(config.home, "repos"));
 const snapshots = new SnapshotStore(join(config.home, "snapshots"));
 const slotsRoot = join(config.home, "slots");
 // Each run writes its raw logs to a folder of its own: two slots at once, or one run after another, never share one.
-const sandcastle = (cwd: string): SandcastleConfig => ({
+const sandcastle = (cwd: string, runId?: string): SandcastleConfig => ({
   cwd,
   image: config.image,
   model: config.model,
   skillsMount: SANDBOX_SKILLS_DIR,
   cursorApiKey: config.cursorApiKey,
+  limits: config.sandboxLimits,
+  ...(runId ? { runId } : {}),
   ...(config.npmRegistries.length > 0
     ? { sandboxEnv: { AFK_NPM_REGISTRIES: config.npmRegistries.join(" ") } }
     : {}),
@@ -259,10 +261,10 @@ await runWorker({
     },
     docker: realDocker,
     environments: new EnvironmentLimiter(),
-    makeAgentRunner: (slotDir) =>
-      new SandcastleAgentRunner(sandcastle(slotDir)),
-    makeGateSandbox: (slotDir) =>
-      new SandcastleGateSandbox(sandcastle(slotDir)),
+    makeAgentRunner: (slotDir, runId) =>
+      new SandcastleAgentRunner(sandcastle(slotDir, runId)),
+    makeGateSandbox: (slotDir, runId) =>
+      new SandcastleGateSandbox(sandcastle(slotDir, runId)),
     model: config.model,
     skillsSha: SKILLS_SHA, // what SANDBOX_SKILLS_DIR was copied at
     secrets: [config.cursorApiKey],

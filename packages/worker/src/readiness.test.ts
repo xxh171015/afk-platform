@@ -1,7 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitOrThrow } from "@afk/pipeline";
+import {
+  gitOrThrow,
+  SANDBOX_SKILLS_DIR,
+  SandcastleGateSandbox,
+} from "@afk/pipeline";
 import {
   FakeGateSandbox,
   makeRepo,
@@ -127,5 +131,54 @@ describe("checking a repo's gate on a branch", () => {
       pass: false,
       reasons: ["afk/other is not on the repo's origin: push it first"],
     });
+  });
+
+  it("opens the same hardened Sandcastle gate sandbox the ticket gate uses", async () => {
+    const repo = origin({
+      ".sandcastle/gates.yaml": gates(
+        `  - { name: test, run: "true", timeoutSeconds: 30 }\n`,
+      ),
+    });
+    const root = mkdtempSync(join(tmpdir(), "afk-readiness-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const calls: string[][] = [];
+    const logDir = mkdtempSync(join(tmpdir(), "afk-sandbox-log-"));
+    cleanups.push(() => rmSync(logDir, { recursive: true, force: true }));
+    await runReadinessGate(
+      {
+        repos: new RepoStore(root),
+        makeGateSandbox: (dir) =>
+          new SandcastleGateSandbox({
+            cwd: dir,
+            image: "sandcastle:afk-platform",
+            model: "m",
+            skillsMount: SANDBOX_SKILLS_DIR,
+            cursorApiKey: "k",
+            logDir,
+            docker: (args) => {
+              calls.push(args);
+              return { code: 0, stdout: "ok\n" };
+            },
+          }),
+      },
+      {
+        repo: { name: "backend", url: repo.dir, defaultBranch: "main" },
+        branch: "afk/setup",
+      },
+      () => {},
+    );
+    const run = calls.find((call) => call[0] === "run");
+    expect(run, "docker run was not recorded").toBeDefined();
+    expect(run).toEqual(expect.arrayContaining(["--cap-drop", "ALL"]));
+    expect(run).toEqual(
+      expect.arrayContaining(["--security-opt", "no-new-privileges=true"]),
+    );
+    expect(run).toContain("--init");
+    expect(run).toEqual(expect.arrayContaining(["--pids-limit", "4096"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory", "3g"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory-swap", "3g"]));
+    expect(run).toEqual(expect.arrayContaining(["--cpus", "2"]));
+    expect(run).toEqual(expect.arrayContaining(["--shm-size", "1g"]));
+    expect(run).toEqual(expect.arrayContaining(["--label", "afk.kind=gate"]));
   });
 });

@@ -53,6 +53,30 @@ describe("the worker's configuration", () => {
       npmRegistries: [],
     });
     expect(config.workerId).not.toBe("");
+    expect(config.sandboxLimits).toEqual({
+      memory: "3g",
+      pids: 4096,
+      cpus: 2,
+      shmSize: "1g",
+    });
+  });
+
+  it("reads sandbox memory, pids, cpus and shm from the environment", () => {
+    const config = loadConfig(
+      sources({
+        ...complete,
+        AFK_SANDBOX_MEMORY: "1g",
+        AFK_SANDBOX_PIDS: "256",
+        AFK_SANDBOX_CPUS: "0.5",
+        AFK_SANDBOX_SHM: "64m",
+      }),
+    );
+    expect(config.sandboxLimits).toEqual({
+      memory: "1g",
+      pids: 256,
+      cpus: 0.5,
+      shmSize: "64m",
+    });
   });
 
   it("reads the npm registries, in order, from the environment or ~/.afk/env", () => {

@@ -1,9 +1,23 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StructuredOutputError } from "@ai-hero/sandcastle";
-import { describe, expect, it } from "vitest";
-import { agentEnv, classifyAgentError, sandboxMounts } from "./sandcastle.ts";
+import { afterEach, describe, expect, it } from "vitest";
+import { runE2e } from "./e2e.ts";
+import { gitOut } from "./exec.ts";
+import { runGate } from "./gate.ts";
+import {
+  agentEnv,
+  classifyAgentError,
+  SANDBOX_SKILLS_DIR,
+  type SandboxDocker,
+  type SandcastleConfig,
+  SandcastleGateSandbox,
+  sandboxMounts,
+  sandboxProvider,
+} from "./sandcastle.ts";
+import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
 // What can be checked without Docker: the configuration handed to Sandcastle, how its errors are read, and
 // that Sandcastle stays behind this one module. The real thing is exercised by the interruption drill (#42).
@@ -72,6 +86,243 @@ describe("the mounts", () => {
 describe("the environment", () => {
   it("is the Cursor API key and nothing else", () => {
     expect(agentEnv("key-123")).toEqual({ CURSOR_API_KEY: "key-123" });
+  });
+});
+
+// A docker that only writes down what it is asked, the same shape leftover cleanup uses.
+function recordingDocker() {
+  const calls: string[][] = [];
+  const docker: SandboxDocker = (args) => {
+    calls.push(args);
+    return { code: 0, stdout: "ok\n" };
+  };
+  return { docker, calls };
+}
+
+const dockerRunOf = (calls: string[][]) => {
+  const run = calls.find((call) => call[0] === "run");
+  expect(run, "docker run was not recorded").toBeDefined();
+  return run as string[];
+};
+
+const defaultCreate = {
+  worktreePath: "/host/wt",
+  hostRepoPath: "/host/repo",
+  mounts: [{ hostPath: "/host/wt", sandboxPath: "/home/agent/workspace" }],
+  env: {},
+};
+
+// Sandcastle keeps provider.create off the public type; the runtime object still has it.
+function startProvider(
+  options: Parameters<typeof sandboxProvider>[0],
+  create = defaultCreate,
+) {
+  const provider = sandboxProvider(options) as unknown as {
+    create: (opts: typeof defaultCreate) => Promise<{ close(): Promise<void> }>;
+  };
+  return provider.create(create);
+}
+
+function expectHardened(args: string[], kind: "agent" | "gate", runId = "R-9") {
+  expect(args).toEqual(expect.arrayContaining(["--cap-drop", "ALL"]));
+  expect(args).toEqual(
+    expect.arrayContaining(["--security-opt", "no-new-privileges=true"]),
+  );
+  expect(args).toContain("--init");
+  expect(args).toEqual(expect.arrayContaining(["--pids-limit", "4096"]));
+  expect(args).toEqual(expect.arrayContaining(["--memory", "3g"]));
+  expect(args).toEqual(expect.arrayContaining(["--memory-swap", "3g"]));
+  expect(args).toEqual(expect.arrayContaining(["--cpus", "2"]));
+  expect(args).toEqual(expect.arrayContaining(["--shm-size", "1g"]));
+  expect(args).toEqual(expect.arrayContaining(["--label", `afk.run=${runId}`]));
+  expect(args).toEqual(expect.arrayContaining(["--label", `afk.kind=${kind}`]));
+}
+
+let repo: TestRepo | undefined;
+afterEach(() => {
+  repo?.cleanup();
+  repo = undefined;
+});
+
+function gateConfig(
+  fake: ReturnType<typeof recordingDocker>,
+  over: Partial<SandcastleConfig> = {},
+): SandcastleConfig {
+  const logDir = mkdtempSync(join(tmpdir(), "afk-sandbox-log-"));
+  return {
+    cwd: repo?.dir as string,
+    image: "sandcastle:afk-platform",
+    model: "m",
+    skillsMount: SANDBOX_SKILLS_DIR,
+    cursorApiKey: "k",
+    logDir,
+    runId: "R-9",
+    docker: fake.docker,
+    ...over,
+  };
+}
+
+describe("the hardened sandbox", () => {
+  it("records a docker run that drops all capabilities, cannot gain new ones, has init, limits pids, memory, swap, cpus and shm, and is labelled with the run and kind", async () => {
+    const fake = recordingDocker();
+    await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
+      kind: "gate",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    const run = dockerRunOf(fake.calls);
+    expect(run).toEqual(expect.arrayContaining(["--cap-drop", "ALL"]));
+    expect(run).toEqual(
+      expect.arrayContaining(["--security-opt", "no-new-privileges=true"]),
+    );
+    expect(run).toContain("--init");
+    expect(run).toEqual(expect.arrayContaining(["--pids-limit", "4096"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory", "3g"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory-swap", "3g"]));
+    expect(run).toEqual(expect.arrayContaining(["--cpus", "2"]));
+    expect(run).toEqual(expect.arrayContaining(["--shm-size", "1g"]));
+    expect(run).toEqual(expect.arrayContaining(["--label", "afk.run=R-9"]));
+    expect(run).toEqual(expect.arrayContaining(["--label", "afk.kind=gate"]));
+  });
+
+  it("uses the same hardened docker run for an agent sandbox, labelled agent rather than gate", async () => {
+    const fake = recordingDocker();
+    await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({
+        ctxDir: SANDBOX_SKILLS_DIR,
+        skillsMount: SANDBOX_SKILLS_DIR,
+      }),
+      kind: "agent",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    const run = dockerRunOf(fake.calls);
+    expect(run).toEqual(expect.arrayContaining(["--cap-drop", "ALL"]));
+    expect(run).toEqual(
+      expect.arrayContaining(["--security-opt", "no-new-privileges=true"]),
+    );
+    expect(run).toContain("--init");
+    expect(run).toEqual(expect.arrayContaining(["--pids-limit", "4096"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory", "3g"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory-swap", "3g"]));
+    expect(run).toEqual(expect.arrayContaining(["--cpus", "2"]));
+    expect(run).toEqual(expect.arrayContaining(["--shm-size", "1g"]));
+    expect(run).toEqual(expect.arrayContaining(["--label", "afk.run=R-9"]));
+    expect(run).toEqual(expect.arrayContaining(["--label", "afk.kind=agent"]));
+    expect(run).not.toEqual(
+      expect.arrayContaining(["--label", "afk.kind=gate"]),
+    );
+  });
+
+  it("the ticket gate opens a Sandcastle sandbox with those docker run parameters", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml":
+        'setup: "true"\ncommands:\n  - { name: test, run: "true", timeoutSeconds: 30 }\n',
+    });
+    const sha = gitOut(repo.dir, ["rev-parse", "main"]);
+    gitOut(repo.dir, ["branch", "agent/T-1", sha]);
+    const fake = recordingDocker();
+    await runGate({
+      repoDir: repo.dir,
+      sandbox: new SandcastleGateSandbox(gateConfig(fake)),
+      ref: "agent/T-1",
+      commitSha: sha,
+      configSha: sha,
+    });
+    expectHardened(dockerRunOf(fake.calls), "gate");
+  });
+
+  it("the e2e path opens a Sandcastle sandbox with those same docker run parameters", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml":
+        'setup: "true"\ncommands:\n  - { name: test, run: "true", timeoutSeconds: 30 }\n',
+    });
+    const sha = gitOut(repo.dir, ["rev-parse", "main"]);
+    gitOut(repo.dir, ["branch", "e2e/T-1", sha]);
+    const fake = recordingDocker();
+    await runE2e({
+      repoDir: repo.dir,
+      sandbox: new SandcastleGateSandbox(gateConfig(fake)),
+      ref: "e2e/T-1",
+      commitSha: sha,
+      configSha: sha,
+      network: "afk-r-9_default",
+      env: { BACKEND_URL: "http://backend:8080" },
+    });
+    const run = dockerRunOf(fake.calls);
+    expectHardened(run, "gate");
+    expect(run).toEqual(
+      expect.arrayContaining(["--network", "afk-r-9_default"]),
+    );
+  });
+
+  it("takes memory, pids, cpus and shm from the limits it is given, not only the defaults", async () => {
+    const fake = recordingDocker();
+    await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
+      kind: "gate",
+      runId: "R-9",
+      limits: { memory: "1g", pids: 256, cpus: 0.5, shmSize: "64m" },
+      docker: fake.docker,
+    });
+    const run = dockerRunOf(fake.calls);
+    expect(run).toEqual(expect.arrayContaining(["--pids-limit", "256"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory", "1g"]));
+    expect(run).toEqual(expect.arrayContaining(["--memory-swap", "1g"]));
+    expect(run).toEqual(expect.arrayContaining(["--cpus", "0.5"]));
+    expect(run).toEqual(expect.arrayContaining(["--shm-size", "64m"]));
+  });
+
+  it("keeps the worktree and skills mounts, the container user, HOME, and the compose network", async () => {
+    const fake = recordingDocker();
+    const uid = process.getuid?.() ?? 1000;
+    const gid = process.getgid?.() ?? 1000;
+    await startProvider(
+      {
+        image: "sandcastle:afk-platform",
+        mounts: sandboxMounts({
+          ctxDir: SANDBOX_SKILLS_DIR,
+          skillsMount: SANDBOX_SKILLS_DIR,
+        }),
+        env: { AFK_NPM_REGISTRIES: "https://example.invalid" },
+        network: "afk-r-9_default",
+        kind: "agent",
+        runId: "R-9",
+        docker: fake.docker,
+      },
+      { ...defaultCreate, env: { BACKEND_URL: "http://backend:8080" } },
+    );
+    const run = dockerRunOf(fake.calls);
+    expect(run).toEqual(expect.arrayContaining(["--user", `${uid}:${gid}`]));
+    expect(run).toEqual(expect.arrayContaining(["-e", "HOME=/home/agent"]));
+    expect(run).toEqual(
+      expect.arrayContaining(["-e", "BACKEND_URL=http://backend:8080"]),
+    );
+    expect(run).toEqual(
+      expect.arrayContaining([
+        "-e",
+        "AFK_NPM_REGISTRIES=https://example.invalid",
+      ]),
+    );
+    expect(run).toEqual(
+      expect.arrayContaining(["--network", "afk-r-9_default"]),
+    );
+    const volumes = run.flatMap((arg, i) => (run[i - 1] === "-v" ? [arg] : []));
+    expect(
+      volumes.some((v) => v.startsWith("/host/wt:/home/agent/workspace")),
+    ).toBe(true);
+    expect(
+      volumes.some((v) =>
+        v.includes(`${SANDBOX_SKILLS_DIR}:/home/agent/.cursor/skills:ro`),
+      ),
+    ).toBe(true);
+    expect(
+      volumes.some((v) => v.includes(`${SANDBOX_SKILLS_DIR}:/context:ro`)),
+    ).toBe(true);
   });
 });
 
