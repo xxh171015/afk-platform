@@ -814,38 +814,44 @@ describe("the planning commit, end to end", { timeout: 60_000 }, () => {
 });
 
 describe("failures of the worker's own", { timeout: 60_000 }, () => {
-  it("fails a Cursor auth error once: the ticket waits with the human brief, and the agent is not run again", async () => {
+  it("pauses agent jobs on a Cursor auth error: the agent is not run again until a person resumes, then the ticket goes on", async () => {
     await confirmedSpec([ticket("a")]);
     let implementRuns = 0;
     const executor = deps({
       script: (ctx) => {
-        if (ctx.stage === "implement") implementRuns += 1;
-        return {
-          error: {
-            kind: "other" as const,
-            message: "ActionRequiredError: Unauthorized request",
-          },
-        };
+        if (ctx.stage !== "implement") return undefined;
+        implementRuns += 1;
+        return implementRuns === 1
+          ? {
+              error: {
+                kind: "other" as const,
+                message: "ActionRequiredError: Unauthorized request",
+              },
+            }
+          : undefined;
       },
     });
-    await runWorker({
-      api: workerFor(),
-      executor,
-      stopWhenIdle: true,
-      heartbeatMs: 20,
-    });
+    const work = () =>
+      runWorker({
+        api: workerFor(),
+        executor,
+        stopWhenIdle: true,
+        heartbeatMs: 20,
+      });
+    await work();
     expect(implementRuns).toBe(1);
-    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
-    const jobs = await db.pool.query(
-      "SELECT state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
-    );
-    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
-    const queue = (await (await fetch(`${api.url}/blocked`)).json()) as {
-      tickets: Array<{ brief: { output: { error: string } } }>;
+    expect(await stateOf()).toEqual(["1:running"]); // not blocked: the job waits in the queue
+    const paused = (await (await fetch(`${api.url}/workbench`)).json()) as {
+      status: { agentsPaused: { reason: string } | null };
     };
-    expect(queue.tickets[0].brief.output.error).toBe(
+    expect(paused.status.agentsPaused?.reason).toBe(
       "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
     );
+
+    await fetch(`${api.url}/agents/resume`, { method: "POST" });
+    await work();
+    expect(implementRuns).toBe(2);
+    expect(await stateOf()).toEqual(["1:done"]);
   });
 
   it("fails the job, keeps the slot's clone, and tells the API", async () => {
