@@ -2247,10 +2247,28 @@ class EventStream {
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
   private readonly decoder = new TextDecoder();
   private buffer = "";
+  private pending:
+    | ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>
+    | undefined;
   constructor(response: Response) {
     const body = response.body;
     if (!body) throw new Error("no body");
     this.reader = body.getReader();
+  }
+
+  private async pull(timeoutMs: number): Promise<void> {
+    this.pending ??= this.reader.read();
+    const result = await Promise.race([
+      this.pending.then((chunk) => ({ kind: "chunk" as const, chunk })),
+      new Promise<{ kind: "timeout" }>((resolve) =>
+        setTimeout(() => resolve({ kind: "timeout" }), timeoutMs),
+      ),
+    ]);
+    if (result.kind === "timeout") return;
+    this.pending = undefined;
+    if (result.chunk.value) {
+      this.buffer += this.decoder.decode(result.chunk.value, { stream: true });
+    }
   }
 
   async nextInvalidate(timeoutMs = 2_000): Promise<Record<string, number>> {
@@ -2258,18 +2276,7 @@ class EventStream {
     while (Date.now() < deadline) {
       const parsed = this.takeInvalidate();
       if (parsed) return parsed;
-      const remaining = deadline - Date.now();
-      const chunk = await Promise.race([
-        this.reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(
-            () => resolve({ done: true, value: undefined }),
-            remaining,
-          ),
-        ),
-      ]);
-      if (chunk.value)
-        this.buffer += this.decoder.decode(chunk.value, { stream: true });
+      await this.pull(deadline - Date.now());
     }
     throw new Error(`no invalidate in ${this.buffer}`);
   }
@@ -2340,7 +2347,7 @@ describe("host-sync snapshots and invalidate", () => {
     }
   });
 
-  it("streams invalidate and notifies when a pull request's state, CI, review or head changes", async () => {
+  it("streams invalidate and notifies when a pull request's state, CI or review changes", async () => {
     const { specId } = await specWithOpenPr();
     const stream = await openEvents();
     try {
@@ -2350,10 +2357,11 @@ describe("host-sync snapshots and invalidate", () => {
       await look([asOpened(1, { ci: "failure", review: "approved" })]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
 
+      // head_sha is not an event (drizzle/0035_events.sql), so a look that only moves head does not invalidate.
       await look([
         asOpened(1, { ci: "failure", review: "approved", headSha: "head-2" }),
       ]);
-      expect(await stream.nextInvalidate()).toMatchObject({ specId });
+      await expect(stream.nextInvalidate(200)).rejects.toThrow(/no invalidate/);
 
       notices.length = 0;
       await look([
