@@ -12,6 +12,7 @@ export const PAGE_PATHS = [
   "/specs/$specId/timeline",
   "/tickets/$ticketId",
   "/runs/$runId",
+  "/projects/$projectId",
 ] as const;
 
 export const paths = {
@@ -26,4 +27,5 @@ export const paths = {
   specTimeline: (id: number | string) => `/specs/${id}/timeline`,
   ticket: (id: number | string) => `/tickets/${id}`,
   run: (id: number | string) => `/runs/${id}`,
+  project: (id: number | string) => `/projects/${id}`,
 } as const;

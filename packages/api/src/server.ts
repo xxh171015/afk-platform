@@ -5,8 +5,8 @@ import { assertMigrated } from "./db/migrate.ts";
 import { eventsHubOf } from "./events/hub.ts";
 import { defaultLogDir, LogStore } from "./logs/log-store.ts";
 import { retainLogs } from "./logs/retention.ts";
-import { fanOutNotifications, macosNotifications } from "./notify/channel.ts";
 import { dispatcherOf } from "./notify/dispatch.ts";
+import { feishuSecretsPath } from "./notify/feishu.ts";
 import { scheduleRunningSpecs } from "./scheduling/scheduler.ts";
 
 // The API process. It only listens on this machine (no login: the platform is for one person, docs/specs/
@@ -37,7 +37,11 @@ export async function startServer(options: {
   const app = createApp({
     pool: options.pool,
     logDir,
-    notifications: fanOutNotifications([macosNotifications()]),
+    liveNotifications: true,
+    feishu: {
+      secretsPath: feishuSecretsPath(),
+      defaultChatId: process.env.AFK_FEISHU_DEFAULT_CHAT,
+    },
   });
   await eventsHubOf(app)?.whenReady();
   await dispatcherOf(app)?.start();

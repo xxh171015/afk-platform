@@ -485,6 +485,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "override a concurrency or budget default, merged with the ones already set (repeatable)",
       collect,
     )
+    .option(
+      "--feishu-chat <chat_id>",
+      "Feishu group chat_id for this project's notifications (empty clears it)",
+    )
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
@@ -494,10 +498,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         maxConcurrency: options.maxConcurrency,
         budgetLimit: options.budgetLimit,
         limits: parseLimits(options.limit),
+        feishuChatId: options.feishuChat as string | undefined,
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit or --limit",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit or --feishu-chat",
         );
       }
       const projectId = toInt(id);
@@ -1853,6 +1858,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           ? "agent jobs are handed out again"
           : "agent jobs were not paused",
       );
+    });
+
+  const feishuCommands = program
+    .command("feishu")
+    .description("Feishu notifications");
+  feishuCommands
+    .command("test")
+    .description(
+      "send a test card to the project's Feishu group, or the platform default group",
+    )
+    .requiredOption("--project <id>", "project id", toInt)
+    .action(async (options: { project: number }) => {
+      const { data, response, error } = await api().POST(
+        "/projects/{projectId}/feishu-test",
+        { params: { path: { projectId: options.project } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `sent a test card to ${data.chatId}`);
     });
 
   program

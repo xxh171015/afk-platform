@@ -66,7 +66,9 @@ export type ProjectEdit = Partial<
     | "budgetLimit"
     | "limits"
   >
->;
+> & {
+  feishuChatId?: string | null;
+};
 
 // Only the fields that are given change. Limits are merged key by key over the stored overrides; protected paths
 // are replaced as a whole. Tickets already made keep what they have; bundles are built from the project when read.
@@ -92,6 +94,8 @@ export async function editProject(
   if (edit.budgetLimit !== undefined) set("budget_limit", edit.budgetLimit);
   if (edit.limits !== undefined)
     set("limits", JSON.stringify(edit.limits), "limits || $::jsonb");
+  if (edit.feishuChatId !== undefined)
+    set("feishu_chat_id", edit.feishuChatId === "" ? null : edit.feishuChatId);
   // An empty edit still has to tell a missing project from an existing one.
   const { rowCount } = await pool.query(
     `UPDATE projects SET ${assignments.join(", ") || "id = id"} WHERE id = $1`,

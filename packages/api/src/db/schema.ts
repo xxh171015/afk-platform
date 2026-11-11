@@ -60,6 +60,8 @@ export const projects = pgTable("projects", {
   // When a worker last claimed a job of this project. Claim picks the project served longest ago so
   // projects take turns (packages/api/src/jobs/queue.ts). Null until the first claim.
   lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
+  // Feishu group chat_id for this project's notifications. Null until plat project edit --feishu-chat.
+  feishuChatId: text("feishu_chat_id"),
   createdAt: createdAt(),
 });
 

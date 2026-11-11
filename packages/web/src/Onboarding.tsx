@@ -7,6 +7,7 @@ import { CopyCommand } from "./components/afk/code.tsx";
 import { ErrorState } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { DETAIL_POLL_MS } from "./live.ts";
+import { paths } from "./paths.ts";
 import { formatAbsoluteTime } from "./time.ts";
 
 // Getting a project onto the platform from the control tower (#181 / #186): the skills install
@@ -430,7 +431,9 @@ function AccessChecklist({
         />
         {projects.map((project) => (
           <div key={project.id} className="space-y-2">
-            <p>{project.name}</p>
+            <p>
+              {project.name} <a href={paths.project(project.id)}>飞书</a>
+            </p>
             <ProjectRepos project={project} enabled={readAccess} />
           </div>
         ))}
