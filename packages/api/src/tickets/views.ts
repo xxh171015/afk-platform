@@ -9,7 +9,7 @@ import {
   structuredBrief,
   type TicketState,
 } from "@afk/shared";
-import { uncoveredUserStories } from "@afk/shared/spec-template";
+import { uncoveredUserStories } from "@afk/shared/user-stories";
 import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { formatDisplayId } from "./display-id.ts";
 import type { EdgeKind } from "./schemas.ts";
-import { userStoriesOf } from "./spec-template.ts";
+import { userStoriesOf } from "./user-stories.ts";
 
 // What planImport checks: the tickets of a directory of ticket files, as readTicketFiles (ticket-files.ts) turns
 // them (docs/design.md「导入格式」). Keys are snake_case as in the front matter.
