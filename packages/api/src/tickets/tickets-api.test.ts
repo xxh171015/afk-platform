@@ -1992,6 +1992,171 @@ describe("what a person sees", () => {
   });
 });
 
+describe("the spec timeline", () => {
+  const blockedAt = "2026-01-02T03:04:05.000Z";
+  const pauseAt = "2026-01-03T04:05:06.000Z";
+  const resumeAt = "2026-01-04T05:06:07.000Z";
+
+  it("keeps historical blocked and pause/resume at event time after the spec has moved on", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    await db.pool.query(
+      `UPDATE events SET at = $2
+       WHERE spec_id = $1 AND type = 'ticket' AND to_state = 'blocked'`,
+      [specId, blockedAt],
+    );
+    expect(
+      (await call("POST", "/tickets/1/retry", { mode: "continue" })).status,
+    ).toBe(200);
+    expect((await states())[0]).not.toMatch(/blocked/);
+    await db.pool.query(
+      `UPDATE specs SET state = 'paused', pause_reason = 'update-branch-conflict' WHERE id = $1`,
+      [specId],
+    );
+    await db.pool.query(
+      `UPDATE events SET at = $2
+       WHERE spec_id = $1 AND type = 'spec' AND to_state = 'paused'`,
+      [specId, pauseAt],
+    );
+    expect((await call("POST", `/specs/${specId}/resume`, {})).status).toBe(
+      200,
+    );
+    await db.pool.query(
+      `UPDATE events SET at = $2
+       WHERE spec_id = $1 AND type = 'spec' AND from_state = 'paused'`,
+      [specId, resumeAt],
+    );
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.timelineLegacy).toBe(false);
+    const timeline = view.body.timeline as { kind: string; at: string }[];
+    expect(
+      timeline.find((event) => event.kind === "ticket-blocked"),
+    ).toMatchObject({
+      kind: "ticket-blocked",
+      at: blockedAt,
+      text: "T-1 卡住：agent-gave-up",
+    });
+    expect(timeline.find((event) => event.kind === "pause")).toMatchObject({
+      kind: "pause",
+      at: pauseAt,
+      text: "暂停：合 main 有冲突",
+    });
+    expect(timeline.find((event) => event.kind === "resume")).toMatchObject({
+      kind: "resume",
+      at: resumeAt,
+    });
+  });
+
+  it("puts a person's retry, allow and cancel on the timeline", async () => {
+    const specId = await runningSpec([ticket("a"), ticket("b")]);
+    await stage("implement", GAVE_UP);
+    await stage("implement", GAVE_UP);
+    expect(
+      (await call("POST", "/tickets/1/retry", { mode: "continue" })).status,
+    ).toBe(200);
+    await db.pool.query(
+      `UPDATE specs SET state = 'paused', pause_reason = 'update-branch-conflict' WHERE id = $1`,
+      [specId],
+    );
+    expect((await call("POST", `/specs/${specId}/allow`)).status).toBe(200);
+    expect(
+      (await call("POST", "/tickets/2/cancel", { cascade: false })).status,
+    ).toBe(200);
+    const timeline = (await call("GET", `/specs/${specId}`)).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(
+      timeline
+        .filter((event) => event.kind === "action")
+        .map((event) => event.text),
+    ).toEqual(["重试 T-1", "放行", "取消 T-2"]);
+  });
+
+  it("does not put job queued, claimed or finished events on the timeline", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    const jobs = await db.pool.query<{ to_state: string }>(
+      `SELECT to_state FROM events WHERE spec_id = $1 AND type = 'job' ORDER BY id`,
+      [specId],
+    );
+    expect(jobs.rows.map((row) => row.to_state)).toEqual(
+      expect.arrayContaining(["queued", "running", "done"]),
+    );
+    expect(jobs.rows.length).toBeGreaterThanOrEqual(3);
+    const timeline = (await call("GET", `/specs/${specId}`)).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(timeline.map((event) => event.kind)).toEqual([
+      "confirm-plan",
+      "ticket-start",
+    ]);
+    expect(
+      timeline.some(
+        (event) =>
+          event.kind === "job" ||
+          /作业|排队|领取/.test(event.text) ||
+          event.text === "queued" ||
+          event.text === "running" ||
+          event.text === "done",
+      ),
+    ).toBe(false);
+  });
+
+  it("still shows PR open, ready, merge and the acceptance pack from domain tables", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    const at = "2026-02-03T04:05:06.000Z";
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, synced_at)
+       VALUES ($1, 1, 9, 'https://git.example/pr/9', 'merged', false, 'abc', $2)`,
+      [specId, at],
+    );
+    await db.pool.query(
+      `INSERT INTO acceptance_packs (spec_id, content, generated_at)
+       VALUES ($1, '{}'::jsonb, $2)`,
+      [specId, at],
+    );
+    const timeline = (await call("GET", `/specs/${specId}`)).body.timeline as {
+      kind: string;
+      text: string;
+      at: string;
+    }[];
+    expect(timeline).toEqual(
+      expect.arrayContaining([
+        { kind: "pr-opened", at, text: "开 PR #9" },
+        { kind: "pr-ready", at, text: "PR #9 转 ready" },
+        { kind: "merged", at, text: "PR #9 合并进 main" },
+        { kind: "pack", at, text: "验收包生成" },
+      ]),
+    );
+  });
+
+  it("assembles a spec with no events the old way and marks the response as legacy", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    await db.pool.query("DELETE FROM events WHERE spec_id = $1", [specId]);
+    const blocked = await call("GET", `/specs/${specId}`);
+    expect(blocked.body.timelineLegacy).toBe(true);
+    expect(
+      blocked.body.timeline.map((event: { kind: string }) => event.kind),
+    ).toContain("ticket-blocked");
+    expect(
+      (await call("POST", "/tickets/1/retry", { mode: "continue" })).status,
+    ).toBe(200);
+    await db.pool.query("DELETE FROM events WHERE spec_id = $1", [specId]);
+    const after = await call("GET", `/specs/${specId}`);
+    expect(after.body.timelineLegacy).toBe(true);
+    expect(
+      after.body.timeline.map((event: { kind: string }) => event.kind),
+    ).not.toContain("ticket-blocked");
+    expect(
+      after.body.timeline.map((event: { kind: string }) => event.kind),
+    ).not.toContain("action");
+  });
+});
+
 describe("prechecks before confirm", () => {
   const fiveStories = [
     "## User Stories",
