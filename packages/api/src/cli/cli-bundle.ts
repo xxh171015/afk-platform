@@ -52,7 +52,7 @@ const inlineFiles: Plugin = {
         reader(
           "readTemplateText",
           filesUnder(at("packages/cli/templates")),
-          "`${file}.md`",
+          'file + ".md"',
         ),
       [at("packages/cli/src/afk-setup-text.ts")]: () =>
         reader(
