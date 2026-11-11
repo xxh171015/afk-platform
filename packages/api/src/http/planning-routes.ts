@@ -403,6 +403,8 @@ const specRoute = createRoute({
           body: z.string().max(1_000_000).optional(),
           // the repo the spec is made in, which holds its planning docs (ADR 0005)
           planningRepo: Text.optional(),
+          // a bug may point at the spec it came from; omitted means none
+          sourceSpecId: Id.optional(),
         }),
       ),
     },
@@ -411,7 +413,10 @@ const specRoute = createRoute({
     201: reply("Created", z.object({ id: Id, displayId: z.string() })),
     404: reply("No such project", ErrorReply),
     409: reply("The project already has a spec with this slug", ErrorReply),
-    422: reply("The project has no repo of that name", ErrorReply),
+    422: reply(
+      "The project has no repo of that name, or the source spec is not allowed",
+      ErrorReply,
+    ),
   },
 });
 
@@ -820,7 +825,7 @@ export function registerPlanningRoutes(
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);
     }
-    if (result.status === "no-repo") {
+    if (result.status === "no-repo" || result.status === "invalid-source") {
       return c.json({ error: result.message }, 422);
     }
     if (result.status === "slug-taken") {

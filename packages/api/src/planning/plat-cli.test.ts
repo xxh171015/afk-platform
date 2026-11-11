@@ -1409,6 +1409,53 @@ describe("plat", () => {
   });
 });
 
+describe("plat spec create --source", () => {
+  it("writes the original spec on a bug and GET returns its display id", async () => {
+    await register();
+    const created = await plat(
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "bug",
+      "--title",
+      "Export crash",
+      "--slug",
+      "export-crash",
+      "--source",
+      "S-1",
+    );
+    expect(created.code).toBe(0);
+    expect(created.stdout).toBe("S-2\n");
+    const view = (await (await fetch(`${api.url}/specs/2`)).json()) as {
+      spec: { sourceSpec: { displayId: string } | null };
+    };
+    expect(view.spec.sourceSpec?.displayId).toBe("S-1");
+  });
+
+  it("creates a bug without --source and leaves the original spec empty", async () => {
+    await plat("project", "create", "shop");
+    const created = await plat(
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "bug",
+      "--title",
+      "Unknown crash",
+      "--slug",
+      "unknown-crash",
+    );
+    expect(created.code).toBe(0);
+    const view = (await (await fetch(`${api.url}/specs/1`)).json()) as {
+      spec: { sourceSpec: { displayId: string } | null };
+    };
+    expect(view.spec.sourceSpec).toBeNull();
+  });
+});
+
 describe("the plat executable", () => {
   it("runs as a process against $AFK_API_URL", async () => {
     const bin = fileURLToPath(

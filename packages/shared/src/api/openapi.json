@@ -1487,6 +1487,11 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500
+                  },
+                  "sourceSpecId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
                   }
                 },
                 "required": ["projectId", "type", "slug", "title"]
@@ -1549,7 +1554,7 @@
             }
           },
           "422": {
-            "description": "The project has no repo of that name",
+            "description": "The project has no repo of that name, or the source spec is not allowed",
             "content": {
               "application/json": {
                 "schema": {
@@ -5544,6 +5549,66 @@
                         },
                         "tokenMerged": {
                           "type": "boolean"
+                        },
+                        "sourceSpec": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "displayId": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "displayId", "title", "type"]
+                        },
+                        "bugs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "type",
+                              "state"
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -5563,7 +5628,9 @@
                         "planningRepo",
                         "planning",
                         "prechecks",
-                        "tokenMerged"
+                        "tokenMerged",
+                        "sourceSpec",
+                        "bugs"
                       ]
                     },
                     "tickets": {
@@ -7027,6 +7094,65 @@
                         "waitingMs",
                         "totalMs"
                       ]
+                    },
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["ticket", "pr"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "ticketId": {
+                            "type": ["integer", "null"]
+                          },
+                          "ticketDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "runId": {
+                            "type": ["integer", "null"]
+                          },
+                          "runDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestNumber": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestUrl": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "repo",
+                          "sha",
+                          "specId",
+                          "specDisplayId",
+                          "ticketId",
+                          "ticketDisplayId",
+                          "runId",
+                          "runDisplayId",
+                          "pullRequestId",
+                          "pullRequestNumber",
+                          "pullRequestUrl"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -7042,7 +7168,8 @@
                     "timelineLegacy",
                     "finalRuns",
                     "potentialConflicts",
-                    "leadTime"
+                    "leadTime",
+                    "links"
                   ]
                 }
               }
@@ -10109,6 +10236,15 @@
                           },
                           "runDisplayId": {
                             "type": ["string", "null"]
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestNumber": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestUrl": {
+                            "type": ["string", "null"]
                           }
                         },
                         "required": [
@@ -10120,7 +10256,10 @@
                           "ticketId",
                           "ticketDisplayId",
                           "runId",
-                          "runDisplayId"
+                          "runDisplayId",
+                          "pullRequestId",
+                          "pullRequestNumber",
+                          "pullRequestUrl"
                         ]
                       }
                     }
@@ -10187,6 +10326,15 @@
                           },
                           "runDisplayId": {
                             "type": ["string", "null"]
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestNumber": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestUrl": {
+                            "type": ["string", "null"]
                           }
                         },
                         "required": [
@@ -10198,7 +10346,10 @@
                           "ticketId",
                           "ticketDisplayId",
                           "runId",
-                          "runDisplayId"
+                          "runDisplayId",
+                          "pullRequestId",
+                          "pullRequestNumber",
+                          "pullRequestUrl"
                         ]
                       }
                     }

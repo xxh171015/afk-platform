@@ -45,6 +45,7 @@ const view = (
     timelineLegacy?: boolean;
     finalRuns?: unknown[];
     potentialConflicts?: unknown[];
+    links?: unknown[];
     leadTime?: {
       agentMs: number;
       gateMs: number;
@@ -71,6 +72,8 @@ const view = (
     pauseReason: null,
     integrationBranches: [],
     warnings: [],
+    sourceSpec: null,
+    bugs: [],
     ...over.spec,
   },
   tickets: over.tickets ?? [
@@ -92,6 +95,7 @@ const view = (
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
   leadTime: over.leadTime ?? null,
+  links: over.links ?? [],
 });
 
 const ticketView = (n: number, over: Record<string, unknown> = {}) => ({
@@ -788,6 +792,94 @@ describe("the spec page", () => {
     );
     const back = await screen.findByRole("link", { name: /全部需求/ });
     expect(back.getAttribute("href")).toBe("/specs");
+  });
+
+  it("shows the original spec and the bugs that point at it", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: {
+              sourceSpec: {
+                id: 4,
+                displayId: "S-4",
+                title: "Order export",
+                type: "feature",
+              },
+              bugs: [
+                {
+                  id: 7,
+                  displayId: "S-7",
+                  title: "Export crash",
+                  type: "bug",
+                  state: "draft",
+                },
+              ],
+            },
+          }),
+        }),
+      }),
+    );
+    const source = await screen.findByTestId("source-spec");
+    expect(source.textContent).toContain("S-4");
+    expect(source.textContent).toContain("Order export");
+    expect(within(source).getByRole("link").getAttribute("href")).toBe(
+      "/specs/4",
+    );
+    const bugs = screen.getByTestId("spec-bugs");
+    expect(bugs.textContent).toContain("S-7");
+    expect(bugs.textContent).toContain("Export crash");
+    expect(within(bugs).getByRole("link").getAttribute("href")).toBe(
+      "/specs/7",
+    );
+  });
+
+  it("shows this spec's commits, tickets and PRs from Links, and does not blame", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          links: [
+            {
+              kind: "ticket",
+              repo: "backend",
+              sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              specId: 1,
+              specDisplayId: "S-1",
+              ticketId: 3,
+              ticketDisplayId: "T-3",
+              runId: 9,
+              runDisplayId: "R-9",
+              pullRequestId: null,
+              pullRequestNumber: null,
+              pullRequestUrl: null,
+            },
+            {
+              kind: "pr",
+              repo: "backend",
+              sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              specId: 1,
+              specDisplayId: "S-1",
+              ticketId: null,
+              ticketDisplayId: null,
+              runId: null,
+              runDisplayId: null,
+              pullRequestId: 2,
+              pullRequestNumber: 12,
+              pullRequestUrl: "https://github.com/acme/backend/pull/12",
+            },
+          ],
+        }),
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    const trace = await screen.findByTestId("spec-trace");
+    expect(trace.textContent).toContain("aaaaaaa");
+    expect(trace.textContent).toContain("T-3");
+    expect(trace.textContent).toContain("#12");
+    expect(server.calls.some((call) => /blame|\/context/i.test(call))).toBe(
+      false,
+    );
   });
 });
 

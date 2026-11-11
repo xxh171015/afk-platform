@@ -24,6 +24,7 @@ import {
   bigserial,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -192,6 +193,20 @@ export const specs = pgTable(
   (t) => [
     index("specs_project_idx").on(t.projectId),
     unique("specs_project_slug_unique").on(t.projectId, t.slug),
+    unique("specs_id_project_unique").on(t.id, t.projectId),
+    foreignKey({
+      name: "specs_source_same_project_fk",
+      columns: [t.sourceSpecId, t.projectId],
+      foreignColumns: [t.id, t.projectId],
+    }),
+    check(
+      "specs_source_bug_check",
+      sql`${t.sourceSpecId} is null or ${t.type} = 'bug'`,
+    ),
+    check(
+      "specs_source_not_self_check",
+      sql`${t.sourceSpecId} is null or ${t.sourceSpecId} <> ${t.id}`,
+    ),
     check("specs_type_check", oneOf(t.type, SPEC_TYPES)),
     check("specs_state_check", oneOf(t.state, SPEC_STATES)),
     check(

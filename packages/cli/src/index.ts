@@ -1194,6 +1194,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .requiredOption("--title <title>")
     .option("--slug <slug>", "default: derived from the title")
     .option("--file <path>", "markdown body")
+    .option("--source <spec>", "original spec (S-n) this bug points at")
     .action(async (options) => {
       const slug = options.slug ?? slugify(options.title);
       const body = options.file
@@ -1206,6 +1207,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         .catch(() => null);
       const planningRepo =
         target && target.project === options.project ? target.repo : undefined;
+      const sourceSpecId = options.source
+        ? specIdOf(options.source)
+        : undefined;
       const { data, response, error } = await api().POST("/specs", {
         body: {
           projectId: options.project,
@@ -1214,6 +1218,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           title: options.title,
           body,
           planningRepo,
+          ...(sourceSpecId !== undefined ? { sourceSpecId } : {}),
         },
       });
       if (!data) throw failureFrom(response, error);

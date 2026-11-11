@@ -546,6 +546,7 @@ export function SpecDetail({
     finalRuns,
     potentialConflicts,
     leadTime,
+    links,
   } = data;
   const timeline = visibleTimeline(timelineEvents);
 
@@ -788,6 +789,7 @@ export function SpecDetail({
           hostKind={hostKind}
           potentialConflicts={potentialConflicts ?? []}
           leadTime={leadTime ?? null}
+          links={links ?? []}
         />
       ) : null}
       {section === "description" ? (
@@ -904,6 +906,7 @@ function Overview({
   hostKind,
   potentialConflicts,
   leadTime,
+  links,
 }: {
   spec: SpecView["spec"];
   tickets: SpecView["tickets"];
@@ -921,6 +924,7 @@ function Overview({
   hostKind: HostKind;
   potentialConflicts: NonNullable<SpecView["potentialConflicts"]>;
   leadTime: SpecView["leadTime"];
+  links: NonNullable<SpecView["links"]>;
 }) {
   const progress = ticketProgress(tickets);
   const repos = spec.repos ?? [];
@@ -1052,6 +1056,20 @@ function Overview({
             </dd>
           </div>
         ) : null}
+        {spec.sourceSpec ? (
+          <div data-testid="source-spec">
+            <dt className="text-xs text-muted-foreground">原需求</dt>
+            <dd className="mt-1">
+              <a
+                href={paths.spec(spec.sourceSpec.id)}
+                className="text-primary hover:underline"
+              >
+                {spec.sourceSpec.displayId}
+              </a>{" "}
+              {spec.sourceSpec.title}
+            </dd>
+          </div>
+        ) : null}
         {potentialConflicts.length > 0 ? (
           <div>
             <dt className="text-xs text-muted-foreground">潜在冲突</dt>
@@ -1154,6 +1172,70 @@ function Overview({
           </div>
         ) : null}
       </dl>
+
+      {(spec.bugs ?? []).length > 0 ? (
+        <section className="mb-6">
+          <h3 className="mb-2 text-sm font-semibold">指向它的缺陷</h3>
+          <ul data-testid="spec-bugs" className="space-y-1 text-sm">
+            {(spec.bugs ?? []).map((bug) => (
+              <li key={bug.id}>
+                <a
+                  href={paths.spec(bug.id)}
+                  className="text-primary hover:underline"
+                >
+                  {bug.displayId}
+                </a>{" "}
+                {bug.title}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {links.length > 0 ? (
+        <section className="mb-6" data-testid="spec-trace">
+          <h3 className="mb-2 text-sm font-semibold">追溯</h3>
+          <ul className="space-y-1 text-sm">
+            {links.map((link) => {
+              const repoUrl = repos.find(
+                (repo) => repo.name === link.repo,
+              )?.url;
+              return (
+                <li key={`${link.kind}-${link.sha}`}>
+                  <ShaChip
+                    sha={link.sha}
+                    href={repoUrl ? commitHtmlUrl(repoUrl, link.sha) : null}
+                  />
+                  {link.ticketId && link.ticketDisplayId ? (
+                    <>
+                      {" "}
+                      <a
+                        href={paths.ticket(link.ticketId)}
+                        className="text-primary hover:underline"
+                      >
+                        {link.ticketDisplayId}
+                      </a>
+                    </>
+                  ) : null}
+                  {link.pullRequestNumber != null ? (
+                    <>
+                      {" "}
+                      <a
+                        href={link.pullRequestUrl ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        #{link.pullRequestNumber}
+                      </a>
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       {excerpt ? (
         <p className="mb-6 text-sm text-muted-foreground">

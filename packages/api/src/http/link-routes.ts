@@ -17,7 +17,7 @@ const Sha = z
   .regex(/^[0-9a-f]{40}$/, "a commit SHA is 40 lowercase hex characters");
 const PathId = z.coerce.number().int().min(1).max(INT4_MAX);
 
-const LinkRow = z.object({
+export const LinkRow = z.object({
   kind: z.enum(LINK_KINDS),
   repo: z.string(),
   sha: z.string(),
@@ -27,6 +27,9 @@ const LinkRow = z.object({
   ticketDisplayId: z.string().nullable(),
   runId: z.number().int().nullable(),
   runDisplayId: z.string().nullable(),
+  pullRequestId: z.number().int().nullable(),
+  pullRequestNumber: z.number().int().nullable(),
+  pullRequestUrl: z.string().nullable(),
 });
 
 const LinksReply = z.object({ links: z.array(LinkRow) });
