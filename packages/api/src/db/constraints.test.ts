@@ -277,6 +277,38 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     ).toBe("ok");
   });
 
+  it("only a bug may point at a source spec, which must be another spec in the same project", async () => {
+    const { projectId, specId } = await seed();
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES ($1, 'feature', 'from-feature', 't', $2)",
+        [projectId, specId],
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES ($1, 'bug', 'from-feature', 't', $2)",
+        [projectId, specId],
+      ),
+    ).toBe("ok");
+    const bugId = await insert(
+      "INSERT INTO specs (project_id, type, slug, title) VALUES ($1, 'bug', 'self', 't')",
+      [projectId],
+    );
+    expect(
+      await outcome("UPDATE specs SET source_spec_id = $1 WHERE id = $1", [
+        bugId,
+      ]),
+    ).toBe(CHECK_VIOLATION);
+    const other = await insert("INSERT INTO projects (name) VALUES ('other')");
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES ($1, 'bug', 'cross', 't', $2)",
+        [other, specId],
+      ),
+    ).toBe(FOREIGN_KEY_VIOLATION);
+  });
+
   it("a spec's type and state must be known values", async () => {
     const { projectId } = await seed();
     const sql =

@@ -41,6 +41,7 @@ import {
   ticketView,
 } from "../tickets/views.ts";
 import { workbench } from "../tickets/workbench.ts";
+import { LinkRow } from "./link-routes.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int();
@@ -355,6 +356,23 @@ const specRoute = createRoute({
             }),
           ),
           tokenMerged: z.boolean(),
+          sourceSpec: z
+            .object({
+              id: Id,
+              displayId: z.string(),
+              title: z.string(),
+              type: z.string(),
+            })
+            .nullable(),
+          bugs: z.array(
+            z.object({
+              id: Id,
+              displayId: z.string(),
+              title: z.string(),
+              type: z.string(),
+              state: z.enum(SPEC_STATES),
+            }),
+          ),
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
@@ -411,6 +429,7 @@ const specRoute = createRoute({
             totalMs: z.number().int(),
           })
           .nullable(),
+        links: z.array(LinkRow),
       }),
     ),
     404: reply("No such spec", ErrorReply),

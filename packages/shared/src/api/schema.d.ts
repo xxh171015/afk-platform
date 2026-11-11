@@ -989,6 +989,7 @@ export interface paths {
             title: string;
             body?: string;
             planningRepo?: string;
+            sourceSpecId?: number;
           };
         };
       };
@@ -1027,7 +1028,7 @@ export interface paths {
             };
           };
         };
-        /** @description The project has no repo of that name */
+        /** @description The project has no repo of that name, or the source spec is not allowed */
         422: {
           headers: {
             [name: string]: unknown;
@@ -3077,6 +3078,30 @@ export interface paths {
                   message: string;
                 }[];
                 tokenMerged: boolean;
+                sourceSpec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                } | null;
+                bugs: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                }[];
               };
               tickets: {
                 id: number;
@@ -3494,6 +3519,22 @@ export interface paths {
                 waitingMs: number;
                 totalMs: number;
               } | null;
+              links: {
+                /** @enum {string} */
+                kind: "ticket" | "pr";
+                repo: string;
+                sha: string;
+                specId: number;
+                specDisplayId: string;
+                ticketId: number | null;
+                ticketDisplayId: string | null;
+                runId: number | null;
+                runDisplayId: string | null;
+                pullRequestId: number | null;
+                pullRequestNumber: number | null;
+                pullRequestUrl: string | null;
+                pullNumber: number | null;
+              }[];
             };
           };
         };
@@ -5073,6 +5114,9 @@ export interface paths {
                 ticketDisplayId: string | null;
                 runId: number | null;
                 runDisplayId: string | null;
+                pullRequestId: number | null;
+                pullRequestNumber: number | null;
+                pullRequestUrl: string | null;
                 pullNumber: number | null;
               }[];
             };
@@ -5124,6 +5168,9 @@ export interface paths {
                 ticketDisplayId: string | null;
                 runId: number | null;
                 runDisplayId: string | null;
+                pullRequestId: number | null;
+                pullRequestNumber: number | null;
+                pullRequestUrl: string | null;
                 pullNumber: number | null;
               }[];
             };
