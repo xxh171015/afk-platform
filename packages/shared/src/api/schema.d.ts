@@ -3372,7 +3372,8 @@ export interface paths {
                   | "ticket-appended"
                   | "pause"
                   | "resume"
-                  | "merged";
+                  | "merged"
+                  | "action";
                 at: string;
                 text: string;
                 runId?: number;
@@ -3380,6 +3381,7 @@ export interface paths {
                 /** @enum {string} */
                 failureSource?: "platform" | "external" | "agent" | "spec";
               }[];
+              timelineLegacy: boolean;
               finalRuns: {
                 id: number;
                 displayId: string;
