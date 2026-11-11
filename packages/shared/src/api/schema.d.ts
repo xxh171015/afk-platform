@@ -5150,6 +5150,106 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/context": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            repo?: string;
+            repoUrl?: string;
+            files: {
+              path: string;
+              commits: {
+                sha: string;
+                spec?: string;
+                ticket?: string;
+                run?: string;
+              }[];
+            }[];
+          };
+        };
+      };
+      responses: {
+        /** @description Pointers from blamed commits to specs, tickets, pull requests, and planning headings; never the file or spec bodies */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              files: {
+                path: string;
+                specs: {
+                  id: number;
+                  displayId: string;
+                }[];
+                tickets: {
+                  id: number;
+                  displayId: string;
+                }[];
+                pullRequests: {
+                  number: number;
+                  url: string;
+                }[];
+                decisions: {
+                  specDisplayId: string;
+                  heading: string;
+                }[];
+                outOfScope: {
+                  specDisplayId: string;
+                  heading: string;
+                }[];
+                adrs: {
+                  path: string;
+                }[];
+              }[];
+            };
+          };
+        };
+        /** @description Repo is missing or matches more than one registered repo */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description No registered repo matches */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/metrics": {
     parameters: {
       query?: never;

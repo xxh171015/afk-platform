@@ -10271,6 +10271,224 @@
         }
       }
     },
+    "/context": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "repoUrl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "commits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sha": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{40}$"
+                              },
+                              "spec": {
+                                "type": "string"
+                              },
+                              "ticket": {
+                                "type": "string"
+                              },
+                              "run": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sha"]
+                          }
+                        }
+                      },
+                      "required": ["path", "commits"]
+                    }
+                  }
+                },
+                "required": ["files"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pointers from blamed commits to specs, tickets, pull requests, and planning headings; never the file or spec bodies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "specs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "displayId"]
+                            }
+                          },
+                          "tickets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "displayId"]
+                            }
+                          },
+                          "pullRequests": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "number": {
+                                  "type": "integer"
+                                },
+                                "url": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["number", "url"]
+                            }
+                          },
+                          "decisions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "specDisplayId": {
+                                  "type": "string"
+                                },
+                                "heading": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["specDisplayId", "heading"]
+                            }
+                          },
+                          "outOfScope": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "specDisplayId": {
+                                  "type": "string"
+                                },
+                                "heading": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["specDisplayId", "heading"]
+                            }
+                          },
+                          "adrs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["path"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "specs",
+                          "tickets",
+                          "pullRequests",
+                          "decisions",
+                          "outOfScope",
+                          "adrs"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["files"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Repo is missing or matches more than one registered repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No registered repo matches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "parameters": [
