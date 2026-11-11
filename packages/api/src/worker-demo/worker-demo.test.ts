@@ -73,11 +73,16 @@ beforeEach(async () => {
   git(home, ["clone", "--quiet", "--bare", seed.dir, origin]);
 });
 afterEach(async () => {
-  await api.close();
-  await db.drop();
-  seed.cleanup();
-  rmSync(logDir, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
+  const closing = api;
+  const dropping = db;
+  const seedDir = seed;
+  const logs = logDir;
+  const homeDir = home;
+  await closing.close();
+  await dropping.drop();
+  seedDir.cleanup();
+  rmSync(logs, { recursive: true, force: true });
+  rmSync(homeDir, { recursive: true, force: true });
 });
 
 async function post(path: string, body?: unknown) {

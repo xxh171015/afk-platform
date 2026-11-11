@@ -177,10 +177,11 @@ export type {
   RunnableInput,
 } from "./runnable.ts";
 export { isRunnable } from "./runnable.ts";
-export type { Edge, EdgeKind, Spec, Ticket } from "./schemas.ts";
+export type { Edge, EdgeKind, LinkKind, Spec, Ticket } from "./schemas.ts";
 export {
   EDGE_KINDS,
   EdgeSchema,
+  LINK_KINDS,
   SPEC_TYPES,
   SpecSchema,
   TICKET_TYPES,

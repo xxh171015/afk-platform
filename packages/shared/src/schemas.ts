@@ -56,6 +56,9 @@ export type Ticket = z.infer<typeof TicketSchema>;
 export const EDGE_KINDS = ["blocks", "contract"] as const;
 export type EdgeKind = (typeof EDGE_KINDS)[number];
 
+export const LINK_KINDS = ["ticket", "pr"] as const;
+export type LinkKind = (typeof LINK_KINDS)[number];
+
 export const EdgeSchema = z
   .object({
     from: IdSchema,

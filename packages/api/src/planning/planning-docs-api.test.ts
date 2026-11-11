@@ -26,7 +26,8 @@ beforeEach(async () => {
   ws = await platWorkspace();
 });
 afterEach(async () => {
-  await ws.close();
+  const closing = ws;
+  await closing.close();
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: test-only view of a JSON reply

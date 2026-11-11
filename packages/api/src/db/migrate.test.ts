@@ -23,6 +23,7 @@ const ENTITY_TABLES = [
   "gate_results",
   "instance",
   "jobs",
+  "links",
   "potential_conflicts",
   "projects",
   "pull_requests",

@@ -10,6 +10,7 @@ import {
   FINDING_RESOLUTIONS,
   HOST_KINDS,
   JOB_STATES,
+  LINK_KINDS,
   PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
@@ -723,6 +724,38 @@ export const workers = pgTable("workers", {
   // Free bytes on the worker's home volume, last time it posted /worker/status.
   freeBytes: bigint("free_bytes", { mode: "number" }),
 });
+
+// Commit ↔ Ticket / Spec / PR (GLOSSARY Link). ticket kind is written when a ticket or wrap-up fix
+// merges into the integration branch, from the rewritten SHAs the run recorded; pr kind is later.
+export const links = pgTable(
+  "links",
+  {
+    id: serial("id").primaryKey(),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id),
+    commitSha: text("commit_sha").notNull(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    ticketId: integer("ticket_id").references(() => tickets.id),
+    runId: integer("run_id").references(() => runs.id),
+    pullRequestId: integer("pull_request_id").references(() => pullRequests.id),
+    kind: text("kind").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("links_repo_sha_unique").on(t.repoId, t.commitSha),
+    index("links_spec_idx").on(t.specId),
+    index("links_sha_idx").on(t.commitSha),
+    check("links_kind_check", oneOf(t.kind, LINK_KINDS)),
+    check("links_sha_check", sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
+    check(
+      "links_ticket_kind_run_check",
+      sql`${t.kind} <> 'ticket' or ${t.runId} is not null`,
+    ),
+  ],
+);
 
 // Last `plat doctor` result for one planning machine of a project. GET returns the newest across machines.
 export const doctorReports = pgTable(
