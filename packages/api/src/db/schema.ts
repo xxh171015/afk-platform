@@ -114,6 +114,10 @@ export const instance = pgTable(
     // person resumes them. The reason is the error that paused them.
     agentsPausedAt: timestamp("agents_paused_at", { withTimezone: true }),
     agentsPauseReason: text("agents_pause_reason"),
+    // Events through this id have been handed to the notice dispatcher; restart continues after it (ADR 0009).
+    lastNotifiedEventId: bigint("last_notified_event_id", { mode: "number" })
+      .notNull()
+      .default(0),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),

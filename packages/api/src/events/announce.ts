@@ -2,15 +2,10 @@ import type { InvalidatePayload } from "@afk/shared";
 import type pg from "pg";
 import type { AppContext } from "../app.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
-import {
-  noticesFromTransition,
-  type Shot,
-  type ShotFinal,
-  type ShotPull,
-} from "../notify/notices.ts";
+import type { Shot, ShotFinal, ShotPull } from "../notify/notices.ts";
 
-// Snapshot a spec before a mutation and emit notices after it, so each of the seven kinds fires once
-// per transition. Page refresh is pushed from the events table (events/hub.ts).
+// Snapshot a spec so around* still has a before-image for callers that need it. Notices are dispatched
+// from the events table (notify/dispatch.ts); page refresh is pushed from events/hub.ts.
 
 const SKIP = new Set([
   "no-ticket",
@@ -237,23 +232,12 @@ export async function snapshotSpecs(
 }
 
 export async function emitTransition(
-  context: AppContext,
-  before: Map<number, Shot>,
-  extra: InvalidatePayload,
+  _context: AppContext,
+  _before: Map<number, Shot>,
+  _extra: InvalidatePayload,
 ): Promise<void> {
-  const specIds = new Set<number>([...before.keys()]);
-  if (extra.specId !== undefined) specIds.add(extra.specId);
-  // Invalidate is pushed from the events table after commit (events/hub.ts). This path only
-  // still compares snapshots for the seven notice kinds.
-  for (const specId of specIds) {
-    const after = await loadShot(context.pool, specId);
-    const previous = before.get(specId);
-    if (after && previous) {
-      for (const notice of noticesFromTransition(previous, after)) {
-        await context.notifications.notify(notice);
-      }
-    }
-  }
+  // Notices are dispatched from the events table (notify/dispatch.ts). Invalidate is pushed
+  // from events/hub.ts after commit.
 }
 
 export async function aroundSpec<T extends { status: string }>(

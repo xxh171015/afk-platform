@@ -21,6 +21,7 @@ import {
   type NotificationChannel,
   silentNotifications,
 } from "./notify/channel.ts";
+import { bindDispatcher, NotificationDispatcher } from "./notify/dispatch.ts";
 
 export interface AppOptions {
   pool: pg.Pool;
@@ -33,6 +34,8 @@ export interface AppOptions {
   events?: EventsHub;
   notifications?: NotificationChannel;
   sseKeepaliveMs?: number;
+  // Tests inject this so the 30s notice window can fire when FakeClock advances.
+  schedule?: (ms: number, fn: () => unknown) => () => void;
 }
 
 export interface AppContext {
@@ -47,6 +50,7 @@ export interface AppContext {
   events: EventsHub;
   notifications: NotificationChannel;
   sseKeepaliveMs: number;
+  schedule: (ms: number, fn: () => unknown) => () => void;
 }
 
 export const LEASE_SECONDS = 120;
@@ -70,9 +74,25 @@ export function createApp(options: AppOptions): OpenAPIHono {
     events: options.events ?? new EventsHub(),
     notifications: options.notifications ?? silentNotifications,
     sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,
+    schedule:
+      options.schedule ??
+      ((ms, fn) => {
+        const timer = setTimeout(fn, ms);
+        timer.unref?.();
+        return () => clearTimeout(timer);
+      }),
   };
   const app = new OpenAPIHono();
   bindEventsHub(app, context.events);
+  bindDispatcher(
+    app,
+    new NotificationDispatcher({
+      pool: context.pool,
+      hub: context.events,
+      notifications: context.notifications,
+      schedule: context.schedule,
+    }),
+  );
   if (
     options.events === undefined &&
     typeof options.pool?.connect === "function"

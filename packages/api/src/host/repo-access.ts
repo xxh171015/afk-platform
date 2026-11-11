@@ -1,7 +1,6 @@
 import { HOST_CAPABILITY, type HostKind, repoHost } from "@afk/shared";
 import type pg from "pg";
 import { enqueueJob, type Queryable } from "../jobs/queue.ts";
-import type { Notice } from "../notify/notices.ts";
 import { recordTokenExpiry } from "./code-hosts.ts";
 
 // Whether the bot (GitHub App or GitLab PAT) can work on a repo (docs/operations-manual.md 1.3). Credentials live
@@ -163,7 +162,6 @@ export async function recordRepoAccess(
   { repoId }: RepoAccessPayload,
   result: Record<string, unknown>,
   now: Date,
-  notify?: (notice: Notice) => Promise<void>,
 ): Promise<void> {
   const state = result.state;
   if (
@@ -218,8 +216,7 @@ export async function recordRepoAccess(
   if (host && Object.hasOwn(result, "tokenExpiresAt")) {
     const expires =
       typeof result.tokenExpiresAt === "string" ? result.tokenExpiresAt : null;
-    const notice = await recordTokenExpiry(db, host, expires, now);
-    if (notice) await notify?.(notice);
+    await recordTokenExpiry(db, host, expires, now);
   }
   await scheduleNextRepoAccess(db, repoId, now);
 }

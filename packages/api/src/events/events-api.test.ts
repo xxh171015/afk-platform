@@ -3,6 +3,7 @@ import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import type { Notice } from "../notify/notices.ts";
 import {
+  FakeClock,
   FakeWorker,
   listen,
   type RunningApi,
@@ -14,15 +15,19 @@ import { EVENTS_APPLICATION_NAME } from "./hub.ts";
 let db: TestDatabase;
 let api: RunningApi;
 let worker: FakeWorker;
+let clock: FakeClock;
 let notices: Notice[];
 
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   notices = [];
+  clock = new FakeClock();
   api = await listen(
     testApp({
       pool: db.pool,
+      clock: clock.now,
+      schedule: clock.schedule,
       sseKeepaliveMs: 40,
       notifications: {
         async notify(notice) {
@@ -360,6 +365,9 @@ describe("notifications on a visible transition", () => {
       };
       const summary = detail.ticket.structuredBrief.summary;
       expect(summary).toBe("模型放弃");
+      expect(notices).toEqual([]);
+      clock.advanceSeconds(30);
+      await clock.flush();
       expect(notices).toEqual([
         {
           title: "票卡住",

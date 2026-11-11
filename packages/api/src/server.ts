@@ -5,7 +5,8 @@ import { assertMigrated } from "./db/migrate.ts";
 import { eventsHubOf } from "./events/hub.ts";
 import { defaultLogDir, LogStore } from "./logs/log-store.ts";
 import { retainLogs } from "./logs/retention.ts";
-import { macosNotifications } from "./notify/channel.ts";
+import { fanOutNotifications, macosNotifications } from "./notify/channel.ts";
+import { dispatcherOf } from "./notify/dispatch.ts";
 import { scheduleRunningSpecs } from "./scheduling/scheduler.ts";
 
 // The API process. It only listens on this machine (no login: the platform is for one person, docs/specs/
@@ -36,9 +37,10 @@ export async function startServer(options: {
   const app = createApp({
     pool: options.pool,
     logDir,
-    notifications: macosNotifications(),
+    notifications: fanOutNotifications([macosNotifications()]),
   });
   await eventsHubOf(app)?.whenReady();
+  await dispatcherOf(app)?.start();
   const sweep = periodicScheduling(
     options.pool,
     options.scheduleEveryMs ?? 60_000,
@@ -57,6 +59,7 @@ export async function startServer(options: {
         resolve({
           url: `http://${HOST}:${info.port}`,
           close: async () => {
+            await dispatcherOf(app)?.stop();
             await eventsHubOf(app)?.stop();
             await sweep.stop();
             await retention.stop();

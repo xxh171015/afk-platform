@@ -148,6 +148,10 @@ describe("the agents' provider refusing work", () => {
       [null, "provider-unavailable"],
     ]);
     expect(runs.rows[0].error).toBe("Cursor 额度用完，充值或换模型后再试");
+    const deadline = Date.now() + 2_000;
+    while (notices.length < 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
     expect(notices).toHaveLength(1);
     expect(notices[0]?.title).toBe("Agent 已暂停");
     expect(notices[0]?.body).toContain("Cursor 额度用完");

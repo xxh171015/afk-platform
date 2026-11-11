@@ -11,8 +11,7 @@ import {
   GIB,
 } from "@afk/shared";
 import type pg from "pg";
-import type { Notice } from "./notify/notices.ts";
-import { pageUrl } from "./page-url.ts";
+import { recordSystemEvent } from "./events/system.ts";
 
 export interface DiskSample {
   freeBytes: number;
@@ -73,24 +72,6 @@ function thresholds() {
   };
 }
 
-function diskNoticesFor(
-  kinds: Array<"warn" | "stop">,
-  warnGib: number,
-  stopGib: number,
-): Notice[] {
-  return kinds.map((kind) =>
-    kind === "warn"
-      ? {
-          title: "磁盘空间不足",
-          body: `剩余不足 ${warnGib} GiB\n${pageUrl("/")}`,
-        }
-      : {
-          title: "磁盘空间严重不足",
-          body: `剩余不足 ${stopGib} GiB，worker 已停止领取新作业\n${pageUrl("/")}`,
-        },
-  );
-}
-
 interface WorkbenchStatus {
   logDirBytes: number;
   apiFreeBytes: number;
@@ -128,7 +109,6 @@ export async function claimsStopped(
 export async function refreshDiskStatus(
   pool: Pick<pg.Pool, "query">,
   sample: DiskSample,
-  notify: (notice: Notice) => Promise<void>,
 ): Promise<WorkbenchStatus> {
   const { warnGib, stopGib, warnBytes, stopBytes } = thresholds();
   const workers = await pool.query<{
@@ -162,8 +142,13 @@ export async function refreshDiskStatus(
     `UPDATE instance SET log_dir_bytes = $1, log_dir_free_bytes = $2, disk_noticed = $3`,
     [sample.dirBytes, sample.freeBytes, next.noticed],
   );
-  for (const notice of diskNoticesFor(next.notices, warnGib, stopGib)) {
-    await notify(notice);
+  for (const kind of next.notices) {
+    await recordSystemEvent(
+      pool,
+      kind === "warn"
+        ? { kind: "disk-warn", warnGib }
+        : { kind: "disk-stop", stopGib },
+    );
   }
   const instance = await pool.query<{
     logs_purged_at: Date | null;
