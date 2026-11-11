@@ -19,6 +19,7 @@ import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import { reportHosts } from "../host/code-hosts.ts";
 import {
   readHostSyncPayload,
+  readIndexPrLinksPayload,
   readOpenPrPayload,
   readPatchPrBodyPayload,
   readPrReadyPayload,
@@ -28,6 +29,7 @@ import {
   buildHostTask,
   hostSyncFailed,
   recordHostSync,
+  recordIndexPrLinks,
   recordOpenPr,
   recordPrReady,
   recordSpecCleanup,
@@ -408,6 +410,15 @@ const HostTask = z.discriminatedUnion("kind", [
     kind: z.literal("repo-access"),
     repoUrl: z.string(),
   }),
+  z.object({
+    kind: z.literal("index-pr-links"),
+    repoUrl: z.string(),
+    repoName: z.string(),
+    defaultBranch: z.string(),
+    number: z.number().int(),
+    mergeSha: z.string().nullable(),
+    squashSha: z.string().nullable(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -423,7 +434,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -834,6 +845,7 @@ export function registerWorkerRoutes(
                 const cleanup = readSpecCleanupPayload(job.rows[0]);
                 const ready = readPrReadyPayload(job.rows[0]);
                 const access = readRepoAccessPayload(job.rows[0]);
+                const indexLinks = readIndexPrLinksPayload(job.rows[0]);
                 if (access)
                   await recordRepoAccess(
                     client,
@@ -848,6 +860,8 @@ export function registerWorkerRoutes(
                 else if (cleanup)
                   await recordSpecCleanup(client, cleanup, result);
                 else if (ready) await recordPrReady(client, ready, result);
+                else if (indexLinks)
+                  await recordIndexPrLinks(client, indexLinks, result);
               }
             }
           }
@@ -915,7 +929,8 @@ export function registerWorkerRoutes(
         readHostSyncPayload(row) ??
         readPrReadyPayload(row) ??
         readSpecCleanupPayload(row) ??
-        readPatchPrBodyPayload(row));
+        readPatchPrBodyPayload(row) ??
+        readIndexPrLinksPayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)

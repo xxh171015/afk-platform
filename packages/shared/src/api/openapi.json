@@ -3326,7 +3326,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -3518,6 +3518,42 @@
                         }
                       },
                       "required": ["kind", "repoUrl"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["index-pr-links"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "repoName": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "mergeSha": {
+                          "type": ["string", "null"]
+                        },
+                        "squashSha": {
+                          "type": ["string", "null"]
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "repoName",
+                        "defaultBranch",
+                        "number",
+                        "mergeSha",
+                        "squashSha"
+                      ]
                     }
                   ]
                 }
@@ -10109,6 +10145,9 @@
                           },
                           "runDisplayId": {
                             "type": ["string", "null"]
+                          },
+                          "pullNumber": {
+                            "type": ["integer", "null"]
                           }
                         },
                         "required": [
@@ -10120,7 +10159,8 @@
                           "ticketId",
                           "ticketDisplayId",
                           "runId",
-                          "runDisplayId"
+                          "runDisplayId",
+                          "pullNumber"
                         ]
                       }
                     }
@@ -10187,6 +10227,9 @@
                           },
                           "runDisplayId": {
                             "type": ["string", "null"]
+                          },
+                          "pullNumber": {
+                            "type": ["integer", "null"]
                           }
                         },
                         "required": [
@@ -10198,7 +10241,8 @@
                           "ticketId",
                           "ticketDisplayId",
                           "runId",
-                          "runDisplayId"
+                          "runDisplayId",
+                          "pullNumber"
                         ]
                       }
                     }

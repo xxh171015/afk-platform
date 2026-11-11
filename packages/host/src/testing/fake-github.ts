@@ -17,6 +17,12 @@ interface FakePull {
   merged: boolean;
   sha: string;
   mergeable: boolean | null;
+  mergeCommitSha: string | null;
+}
+
+interface FakeCommit {
+  sha: string;
+  parents: { sha: string }[];
 }
 
 export interface FakeReview {
@@ -67,6 +73,7 @@ export class FakeGitHub {
   private readonly reviews = new Map<number, FakeReview[]>();
   private readonly checks = new Map<string, FakeCheck[]>();
   private readonly statuses = new Map<string, string>();
+  private readonly commits = new Map<string, FakeCommit>();
   private readonly live = new Map<string, number>(); // token -> expiry
   private server: Server | undefined;
   url = "";
@@ -105,10 +112,23 @@ export class FakeGitHub {
   }
 
   // --- what a test does to "GitHub"
-  mergePull(number: number): void {
+  mergePull(
+    number: number,
+    extra: { sha?: string; squash?: boolean } = {},
+  ): void {
     const pull = this.pull(number);
     pull.merged = true;
     pull.state = "closed";
+    if (extra.sha) {
+      pull.mergeCommitSha = extra.sha;
+      const firstParent = "a".repeat(40);
+      this.commits.set(extra.sha, {
+        sha: extra.sha,
+        parents: extra.squash
+          ? [{ sha: firstParent }]
+          : [{ sha: firstParent }, { sha: pull.sha }],
+      });
+    }
   }
   closePull(number: number): void {
     this.pull(number).state = "closed";
@@ -311,6 +331,7 @@ export class FakeGitHub {
         merged: false,
         sha: createHash("sha1").update(String(body.head)).digest("hex"),
         mergeable: true,
+        mergeCommitSha: null,
       };
       this.pulls.push(pull);
       return this.json(res, 201, this.render(pull));
@@ -377,6 +398,15 @@ export class FakeGitHub {
           })),
         ),
       );
+    const oneCommit = /^\/commits\/([0-9a-f]+)$/.exec(rest);
+    if (req.method === "GET" && oneCommit) {
+      const commit = this.commits.get(oneCommit[1] as string);
+      if (!commit) return this.json(res, 404, { message: "Not Found" });
+      return this.conditional(req, res, {
+        sha: commit.sha,
+        parents: commit.parents,
+      });
+    }
     const checkRuns = /^\/commits\/([0-9a-f]+)\/check-runs$/.exec(rest);
     if (req.method === "GET" && checkRuns) {
       const all = (this.checks.get(checkRuns[1] as string) ?? []).map((c) => ({
@@ -431,6 +461,7 @@ export class FakeGitHub {
       state: pull.state,
       draft: pull.draft,
       merged: pull.merged,
+      merge_commit_sha: pull.mergeCommitSha,
       head: { sha: pull.sha, ref: pull.head },
       base: { ref: pull.base },
       title: pull.title,

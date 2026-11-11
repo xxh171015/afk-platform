@@ -10,8 +10,8 @@ export type {
   StageOutcomeBody,
 } from "./executor.ts";
 export { executeStage, InfrastructureError, JobLostError } from "./executor.ts";
-export type { HostDeps } from "./host.ts";
-export { runHostTask } from "./host.ts";
+export type { HostDeps, PrLinkRow } from "./host.ts";
+export { indexPrLinksFromRepo, runHostTask } from "./host.ts";
 export type { PushFn, PushRequest, PushResult } from "./push.ts";
 export { pushRef, pushWithToken } from "./push.ts";
 export { RepoStore } from "./repos.ts";
