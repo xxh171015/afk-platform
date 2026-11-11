@@ -100,6 +100,17 @@ const RepoSection = z.object({
   protectedPathApprovals: z.array(
     z.object({ ticket: z.string(), paths: z.array(z.string()) }),
   ),
+  // files the Standards axis used as standards sources, newest review of each ticket (and the wrap-up)
+  standardsSources: z
+    .array(
+      z.object({
+        ticket: z.string().nullable(),
+        run: z.string(),
+        stage: z.string(),
+        sources: z.array(z.string()),
+      }),
+    )
+    .default([]),
 });
 
 // The integration tickets get a section of their own: the result of each one's last e2e (a rerun before the pull
@@ -335,6 +346,7 @@ export async function buildAcceptancePack(
         scopeCreep: [],
         uncertainties: [],
         protectedPathApprovals: [],
+        standardsSources: [],
       };
       sections.set(repoId, section);
     }
@@ -456,6 +468,42 @@ export async function buildAcceptancePack(
       body: f.body,
       resolution: f.resolution,
       axis: f.axis,
+    });
+  }
+
+  const sourceRows = await client.query<{
+    ticket_id: number | null;
+    repo_id: number;
+    repo: string;
+    id: number;
+    stage: string;
+    sources: string[] | null;
+    output: unknown;
+  }>(
+    `SELECT DISTINCT ON (r.ticket_id, r.repo_id, r.stage)
+            r.ticket_id, r.repo_id, rp.name AS repo, r.id, r.stage, r.sources, r.output
+     FROM runs r JOIN repos rp ON rp.id = r.repo_id
+     WHERE r.spec_id = $1
+       AND r.stage IN ('review', 'final-review')
+       AND r.axis = 'standards'
+       AND r.output IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id = r.ticket_id AND t.state = 'cancelled')
+     ORDER BY r.ticket_id, r.repo_id, r.stage, r.id DESC`,
+    [specId],
+  );
+  for (const row of sourceRows.rows) {
+    const files = row.sources?.length
+      ? row.sources
+      : strings(record(row.output).sources);
+    if (files.length === 0) continue;
+    sectionOf(row.repo_id, row.repo).standardsSources.push({
+      ticket:
+        row.ticket_id === null
+          ? null
+          : formatDisplayId("ticket", row.ticket_id),
+      run: formatDisplayId("run", row.id),
+      stage: row.stage,
+      sources: files,
     });
   }
 
@@ -721,6 +769,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         scopeCreep: asArray(repo.scopeCreep as never[]),
         uncertainties: asArray(repo.uncertainties as never[]),
         protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
+        standardsSources: asArray(repo.standardsSources as never[]),
       };
     }),
   };

@@ -2666,6 +2666,7 @@ export interface paths {
               prompt: string | null;
               output?: unknown;
               commits: string[];
+              sources: string[] | null;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";
@@ -3070,6 +3071,13 @@ export interface paths {
                   protectedPathApprovals: {
                     ticket: string;
                     paths: string[];
+                  }[];
+                  /** @default [] */
+                  standardsSources: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    sources: string[];
                   }[];
                 }[];
                 integration?: {

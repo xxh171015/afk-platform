@@ -61,6 +61,14 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       scopeCreep: [],
       uncertainties: [{ source: "T-1 implement", text: "date format" }],
       protectedPathApprovals: [],
+      standardsSources: [
+        {
+          ticket: "T-1",
+          run: "R-2",
+          stage: "review",
+          sources: ["AGENTS.md", "CONTRIBUTING.md"],
+        },
+      ],
     },
     {
       repo: "frontend",
@@ -78,6 +86,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       scopeCreep: [],
       uncertainties: [],
       protectedPathApprovals: [],
+      standardsSources: [],
     },
   ],
   integration: {
@@ -171,6 +180,15 @@ describe("renderPackSection", () => {
     );
     expect(renderPackSection(gitlab, "backend", 1).summary).toContain(
       "too long for a GitLab description",
+    );
+  });
+
+  it("lists the standards-source files the Standards review used", () => {
+    const { section } = renderPackSection(pack(), "backend", 1);
+    expect(section).toContain("### Standards sources");
+    expect(section).toContain("T-1 R-2 review: AGENTS.md, CONTRIBUTING.md");
+    expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
+      "Standards sources",
     );
   });
 

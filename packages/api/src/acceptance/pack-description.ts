@@ -78,6 +78,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     `## ${repo}`,
     criteriaLines(section),
     findingsLines(section),
+    standardsSourceLines(section),
     gateLines(section),
     uncertaintyLines(section),
   ].filter(Boolean);
@@ -125,6 +126,19 @@ function findingsLines(section: AcceptancePack["repos"][number]): string {
     );
   }
   return lines.join("\n");
+}
+
+function standardsSourceLines(
+  section: AcceptancePack["repos"][number],
+): string {
+  if (section.standardsSources.length === 0) return "";
+  return [
+    "### Standards sources",
+    ...section.standardsSources.map((item) => {
+      const who = item.ticket ?? "spec";
+      return `- ${who} ${item.run} ${item.stage}: ${item.sources.join(", ")}`;
+    }),
+  ].join("\n");
 }
 
 function gateLines(section: AcceptancePack["repos"][number]): string {

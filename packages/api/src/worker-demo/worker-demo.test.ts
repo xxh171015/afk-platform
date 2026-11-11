@@ -158,6 +158,7 @@ const PASS = {
   mustFix: [],
   suggestions: ["rename x"],
   uncertainties: [],
+  sources: ["AGENTS.md"],
 };
 
 // The fake agent: every ticket adds a file named after its branch; the script can be overridden per stage.
@@ -397,6 +398,84 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     expect(creep.rows).toEqual([
       { resolution: "acceptance-pack", axis: "spec" },
     ]);
+  });
+
+  it("a Standards review that names no sources is invalid-output", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) =>
+          ctx.stage === "review" && !isSpecAxis(ctx.prompt)
+            ? {
+                output: {
+                  verdict: "pass",
+                  mustFix: [],
+                  suggestions: [],
+                  uncertainties: [],
+                },
+              }
+            : undefined,
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/invalid-output"]);
+    const reviews = await db.pool.query(
+      "SELECT axis, result FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(reviews.rows).toEqual([
+      { axis: "standards", result: "invalid-output" },
+      { axis: "spec", result: "pass" },
+    ]);
+  });
+
+  it("records a CONTRIBUTING.md hard rule as a must-fix with that file in the Run's sources", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) => {
+          if (ctx.stage === "review" && !isSpecAxis(ctx.prompt)) {
+            return {
+              output: {
+                verdict: "fix",
+                mustFix: [
+                  {
+                    file: "src/a.ts",
+                    problem: "CONTRIBUTING.md: no default exports",
+                  },
+                ],
+                suggestions: [],
+                scopeCreep: [],
+                sources: ["AGENTS.md", "CONTRIBUTING.md"],
+                uncertainties: [],
+              },
+            };
+          }
+          if (ctx.stage === "review-fix") {
+            return {
+              files: { "src/named.ts": "export const named = 1;\n" },
+              message: "named export",
+              output: DONE,
+            };
+          }
+          return undefined;
+        },
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const reviews = await db.pool.query(
+      "SELECT axis, result, sources FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(reviews.rows[0]).toEqual({
+      axis: "standards",
+      result: "fix",
+      sources: ["AGENTS.md", "CONTRIBUTING.md"],
+    });
+    expect(reviews.rows[0].sources).toContain("AGENTS.md");
   });
 
   it("takes the failure of one axis as the failure of the whole review, and leaves no branch of the axes behind", async () => {
@@ -1050,6 +1129,7 @@ describe("the overall review of the integration branch", {
     ],
     suggestions: [],
     uncertainties: [],
+    sources: ["AGENTS.md"],
   };
 
   it("reviews the whole spec's diff with every ticket's aim in front of it, and passes", async () => {

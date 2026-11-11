@@ -284,7 +284,7 @@ describe("the app", () => {
 
   it("opens a ticket sheet from a graph node without leaving the spec", async () => {
     const { router } = renderApp(server(), "/specs/3");
-    fireEvent.click(await screen.findByRole("link", { name: "T-9" }));
+    fireEvent.click(await screen.findByTestId("node-T-9"));
     expect(await screen.findByText("Ship the only ticket.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "R-4" }).getAttribute("href")).toBe(
       "/runs/4",

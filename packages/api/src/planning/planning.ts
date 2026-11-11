@@ -281,7 +281,7 @@ export async function importTickets(
     await client.query("BEGIN");
     await applyOrigin(client);
     const spec = await client.query(
-      "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings FROM specs WHERE id = $1 FOR UPDATE",
+      "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings, body FROM specs WHERE id = $1 FOR UPDATE",
       [specId],
     );
     if (spec.rowCount === 0)
@@ -341,6 +341,7 @@ export async function importTickets(
             ),
             specId,
             append ? await existingGraph(client, specId) : undefined,
+            specRow.body as string,
           );
     if (!read.ok) {
       // The files that could be read are checked as a graph too, so every problem comes back at once. What only
@@ -365,8 +366,8 @@ export async function importTickets(
     const tickets: ImportedTicket[] = [];
     for (const ticket of plan.tickets) {
       const { rows } = await client.query(
-        `INSERT INTO tickets (spec_id, repo_id, type, title, body, acceptance_criteria, modules, allowed_protected_paths, refs, environment, appended)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+        `INSERT INTO tickets (spec_id, repo_id, type, title, body, acceptance_criteria, modules, allowed_protected_paths, refs, environment, stories, appended)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
         [
           specId,
           ticket.repoId,
@@ -378,6 +379,7 @@ export async function importTickets(
           ticket.allowedProtectedPaths,
           ticket.refs,
           ticket.environment,
+          ticket.stories,
           append,
         ],
       );

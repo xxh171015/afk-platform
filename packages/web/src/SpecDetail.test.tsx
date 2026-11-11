@@ -381,6 +381,14 @@ describe("the spec page", () => {
           protectedPathApprovals: [
             { ticket: "T-1", paths: [".github/ci.yml"] },
           ],
+          standardsSources: [
+            {
+              ticket: "T-1",
+              run: "R-3",
+              stage: "review",
+              sources: ["AGENTS.md", "CONTRIBUTING.md"],
+            },
+          ],
         },
         {
           repo: "frontend",
@@ -465,6 +473,7 @@ describe("the spec page", () => {
         ?.className,
     ).toBe("scope-creep");
     expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
+    expect(screen.getByText(/AGENTS.md, CONTRIBUTING.md/)).toBeTruthy();
     expect(screen.getByText(/门禁：/));
     expect(screen.getByRole("button", { name: /0123456/ })).toBeTruthy();
     expect(

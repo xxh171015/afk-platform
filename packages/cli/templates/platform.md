@@ -77,6 +77,7 @@ title: 订单增加备注字段
 repo: {{REPO}}
 type: implementation # contract | implementation | integration
 modules: ["src/orders/**", "test/**"]
+stories: [1, 4] # optional: User Story numbers in the spec this ticket is for; omit on infrastructure tickets
 blocked_by: [01-contract] # keys of other files; these are the native blocking edges
 ---
 
@@ -99,7 +100,10 @@ S-7
 - Each acceptance line is a single `- [ ] ` line; the section holds nothing else. The acceptance criteria are read
   from this section, never written twice.
 - Every ticket needs `repo`, `type`, a `title` and at least one glob in `modules`. Other optional fields:
-  `protected_paths_ok`, `contract`, `refs`, `environment`. Unknown keys are rejected.
+  `protected_paths_ok`, `contract`, `refs`, `environment`, `stories`. Unknown keys are rejected.
+- `stories: [1, 4]` names the User Story numbers in the spec this ticket is responsible for. The import checks
+  those numbers exist in the spec's User Stories and refuses the whole directory if any do not, listing the
+  missing numbers. Omit the field on infrastructure tickets; that is normal and is not a warning.
 - **Quote** a `title` that contains `: ` or starts with a special character, or the YAML will not parse.
 - A ticket that changes a **protected path** (project setting, `{{PROTECTED_PATH}}` by default, plus the contract file) must
   list the exact files in `protected_paths_ok`. Without it the ticket is blocked; fix it with `plat ticket allow-path`

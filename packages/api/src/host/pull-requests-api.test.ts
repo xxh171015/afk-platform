@@ -1452,6 +1452,7 @@ describe("the acceptance pack", () => {
           mustFix: [],
           suggestions: ["rename x"],
           scopeCreep: [],
+          sources: ["AGENTS.md", "CONTRIBUTING.md"],
           uncertainties: ["the review could not run the export"],
         },
       },
@@ -1569,6 +1570,18 @@ describe("the acceptance pack", () => {
       status: "unverified",
       reason: "the agent named no test",
     });
+  });
+
+  it("shows the Standards sources the review used, including CONTRIBUTING.md", async () => {
+    const { acceptancePack } = await packOf();
+    expect(acceptancePack.repos[0].standardsSources).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "review",
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+      },
+    ]);
   });
 
   it("carries the review's findings with what became of them, and every uncertainty", async () => {
