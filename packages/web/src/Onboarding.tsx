@@ -6,6 +6,8 @@ import { apiBase, describeError, useApi } from "./api.tsx";
 import { CopyCommand } from "./components/afk/code.tsx";
 import { ErrorState } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
+import { DETAIL_POLL_MS } from "./live.ts";
+import { formatAbsoluteTime } from "./time.ts";
 
 // Getting a project onto the platform from the control tower (#181 / #186): the skills install
 // command pinned to the platform's commit, then /afk-setup, plus a two-part checklist of 本机
@@ -143,10 +145,18 @@ function LocalChecklist({
   );
 }
 
+function accessChecking(access: {
+  state?: string;
+  checking?: boolean;
+}): boolean {
+  return access.checking === true || access.state === "pending";
+}
+
 function accessStatus(
   access:
     | {
         state: string;
+        checking?: boolean;
         files?: { gates?: boolean; integrationCompose?: boolean };
         hints?: string[];
       }
@@ -157,8 +167,8 @@ function accessStatus(
   if (pending) return "读取中";
   if (error) return "失败";
   if (!access) return "尚未检查";
+  if (accessChecking(access)) return "检查中";
   if (access.state === "unchecked") return "尚未检查";
-  if (access.state === "pending") return "检查中";
   if (access.state === "ok")
     return access.hints && access.hints.length > 0 ? "提示" : "通过";
   if (access.state === "not-installed") return "未安装 App";
@@ -188,6 +198,10 @@ function RepoAccessRow({
       if (!data) throw new Error(describeError(error));
       return data;
     },
+    refetchInterval: (query) =>
+      query.state.data && accessChecking(query.state.data)
+        ? DETAIL_POLL_MS
+        : false,
   });
   const check = useMutation({
     mutationFn: async () => {
@@ -210,6 +224,11 @@ function RepoAccessRow({
   const hints =
     access.data && "hints" in access.data ? access.data.hints : undefined;
   const fix = access.data && "fix" in access.data ? access.data.fix : undefined;
+  const checking = access.data ? accessChecking(access.data) : false;
+  const checkedAt =
+    access.data && "checkedAt" in access.data
+      ? access.data.checkedAt
+      : undefined;
   return (
     <li className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -224,11 +243,16 @@ function RepoAccessRow({
           type="button"
           size="sm"
           variant="outline"
-          disabled={check.isPending}
+          disabled={check.isPending || checking}
           onClick={() => check.mutate()}
         >
           现在检查
         </Button>
+        {checkedAt ? (
+          <span className="text-[11px] text-muted-foreground">
+            上次检查 {formatAbsoluteTime(checkedAt)}
+          </span>
+        ) : null}
       </div>
       {fix ? <p className="text-muted-foreground">{fix}</p> : null}
       {hints?.includes("personal-token") ? (

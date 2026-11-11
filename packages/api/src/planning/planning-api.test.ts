@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { listen, type RunningApi } from "../test/fake-worker.ts";
+import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
@@ -11,7 +10,7 @@ let api: RunningApi;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
 });
 afterEach(async () => {
   await api.close();
@@ -202,6 +201,58 @@ describe("tickets import", () => {
     expect(result.body.errors.join("\n")).toMatch(
       /plat repo edit backend --project <id> --contract-path/,
     );
+  });
+
+  const userStoriesBody = [
+    "## User Stories",
+    "",
+    "1. As a splitter, I want to name the User Stories a ticket is for.",
+    "2. As an importer, I want unknown numbers rejected.",
+    "3. As a reviewer, I want the assigned stories as counterparts.",
+    "4. As an author of an infrastructure ticket, I want to omit stories.",
+    "",
+  ].join("\n");
+
+  it("records stories that exist in the spec on the ticket and leaves them off a ticket that omitted them", async () => {
+    const { specId } = await setup();
+    await db.pool.query("UPDATE specs SET body = $2 WHERE id = $1", [
+      specId,
+      userStoriesBody,
+    ]);
+    const ok = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("named", { stories: [1, 4] }), ticket("plain")],
+      }),
+    );
+    expect(ok.status).toBe(200);
+    const named = await fetch(`${api.url}/tickets/1`);
+    const namedBody = (await named.json()) as { ticket: { file: string } };
+    expect(namedBody.ticket.file).toMatch(/stories:/);
+    expect(namedBody.ticket.file).toMatch(/- 1/);
+    expect(namedBody.ticket.file).toMatch(/- 4/);
+    const plain = await fetch(`${api.url}/tickets/2`);
+    const plainBody = (await plain.json()) as { ticket: { file: string } };
+    expect(plainBody.ticket.file).not.toMatch(/^stories:/m);
+  });
+
+  it("rejects the whole import when stories lists numbers the spec does not have, naming those numbers", async () => {
+    const { specId } = await setup();
+    await db.pool.query("UPDATE specs SET body = $2 WHERE id = $1", [
+      specId,
+      userStoriesBody,
+    ]);
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("a", { stories: [1, 9] }), ticket("b")],
+      }),
+    );
+    expect(result.status).toBe(422);
+    expect(result.body.errors.join("\n")).toMatch(/ticket a:.*stories.*\b9\b/);
+    expect(
+      (await db.pool.query("SELECT count(*)::int AS n FROM tickets")).rows[0].n,
+    ).toBe(0);
   });
 
   it("writes every ticket and edge, returns display ids, and stores no warnings when there are none", async () => {
@@ -505,6 +556,7 @@ describe("project view", () => {
     expect(await response.json()).toEqual({
       id: projectId,
       name: "shop",
+      defaultAgent: null,
       repos: [
         {
           name: "backend",
@@ -691,6 +743,99 @@ describe("project edit", () => {
       (await post(`/specs/${specId}/tickets/import`, importBody(specId, file)))
         .status,
     ).toBe(200);
+  });
+});
+
+describe("default agent", () => {
+  it("refuses a default agent other than cursor on create and says only Cursor is supported", async () => {
+    const refused = await post("/projects", {
+      name: "shop",
+      defaultAgent: "claude-code",
+    });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).toContain("目前只支持 Cursor");
+    expect(await count("projects")).toBe(0);
+  });
+
+  it("refuses a default agent other than cursor on edit and leaves the stored value", async () => {
+    await post("/projects", { name: "shop" });
+    await db.pool.query(
+      "UPDATE projects SET default_agent = 'claude-code' WHERE id = 1",
+    );
+    const refused = await patch("/projects/1", { defaultAgent: "codex" });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).toContain("目前只支持 Cursor");
+    expect(
+      (await db.pool.query("SELECT default_agent FROM projects WHERE id = 1"))
+        .rows[0].default_agent,
+    ).toBe("claude-code");
+  });
+
+  it("accepts cursor as the default agent and leaving it unset", async () => {
+    const omitted = await post("/projects", { name: "plain" });
+    expect(omitted.status).toBe(201);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT default_agent FROM projects WHERE id = $1",
+          [omitted.body.id],
+        )
+      ).rows[0].default_agent,
+    ).toBeNull();
+
+    const created = await post("/projects", {
+      name: "shop",
+      defaultAgent: "cursor",
+    });
+    expect(created.status).toBe(201);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT default_agent FROM projects WHERE id = $1",
+          [created.body.id],
+        )
+      ).rows[0].default_agent,
+    ).toBe("cursor");
+
+    expect(
+      (await patch(`/projects/${created.body.id}`, { defaultAgent: "cursor" }))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT default_agent FROM projects WHERE id = $1",
+          [created.body.id],
+        )
+      ).rows[0].default_agent,
+    ).toBe("cursor");
+  });
+
+  it("returns the stored default agent on the project view, including a value that is not in effect", async () => {
+    const created = await post("/projects", { name: "shop" });
+    const id = created.body.id as number;
+    const view = async () =>
+      (await (await fetch(`${api.url}/projects/${id}`)).json()) as {
+        defaultAgent: string | null;
+      };
+    expect((await view()).defaultAgent).toBeNull();
+
+    await patch(`/projects/${id}`, { defaultAgent: "cursor" });
+    expect((await view()).defaultAgent).toBe("cursor");
+
+    await db.pool.query(
+      "UPDATE projects SET default_agent = 'claude-code' WHERE id = $1",
+      [id],
+    );
+    expect((await view()).defaultAgent).toBe("claude-code");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT default_agent FROM projects WHERE id = $1",
+          [id],
+        )
+      ).rows[0].default_agent,
+    ).toBe("claude-code");
   });
 });
 

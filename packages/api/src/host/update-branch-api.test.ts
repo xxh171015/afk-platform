@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import {
@@ -7,10 +8,12 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
-// main 前进后, running specs get one update-branch; later advances coalesce; conflict/gate-fail give a
+// main 前进后, running specs follow only on a merge-tree conflict, lag past the project thresholds
+// (default 15 commits or 6 hours), or at 收尾; later advances coalesce; conflict/gate-fail give a
 // merge agent one try, then pause (docs/specs/m3-platform.md「多需求并行」). Host-sync reads default SHAs;
 // paused/cancelled specs are left alone.
 
@@ -25,7 +28,7 @@ beforeEach(async () => {
   await migrate(db.pool);
   clock = new FakeClock();
   api = await listen(
-    createApp({ pool: db.pool, clock: clock.now, leaseSeconds: 3600 }),
+    testApp({ pool: db.pool, clock: clock.now, leaseSeconds: 3600 }),
   );
   host = new FakeWorker(api.url, "h1", ["host"]);
   agent = new FakeWorker(api.url, "a1", []);
@@ -61,13 +64,24 @@ const ticket = (key: string, repo: string) => ({
 });
 
 async function runningSpecs(
-  options: { repos?: { name: string; url: string }[]; slugs?: string[] } = {},
+  options: {
+    repos?: { name: string; url: string }[];
+    slugs?: string[];
+    limits?: Record<string, number>;
+    followMain?: boolean;
+  } = {},
 ) {
   const repos = options.repos ?? [
     { name: "backend", url: "https://github.com/me/shop-backend.git" },
   ];
   const slugs = options.slugs ?? ["export"];
-  const project = await call("POST", "/projects", { name: "shop" });
+  const limits = options.followMain
+    ? { updateBranchBehindCommits: 1, ...options.limits }
+    : options.limits;
+  const project = await call("POST", "/projects", {
+    name: "shop",
+    ...(limits ? { limits } : {}),
+  });
   for (const repo of repos)
     await call("POST", `/projects/${project.body.id}/repos`, repo);
   const specIds: number[] = [];
@@ -164,6 +178,57 @@ const updateJobs = async () =>
     )
   ).rows as Json[];
 
+// Finish cheap default-conflict checks and any update-branch so a later advance can queue another
+// (the old "every SHA change" behaviour). Without this, coalescing would hide extra updates.
+async function drainFollowUps(conflictFiles: string[] = []) {
+  for (;;) {
+    const due = await db.pool.query(
+      `SELECT 1 FROM jobs
+       WHERE state = 'queued' AND type <> 'host-sync'
+         AND (type = 'trial-merge' OR payload->>'stage' = 'update-branch')
+       LIMIT 1`,
+    );
+    if (!due.rowCount) return;
+    const job = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+      type: string;
+      payload: Json;
+    } | null;
+    if (job?.type === "trial-merge") {
+      expect(
+        (
+          await agent.complete(job.id, job.attempt, {
+            stage: "trial-merge",
+            peers: [
+              {
+                specId: 0,
+                files: conflictFiles,
+                ourSha: "ours",
+                theirSha: "theirs",
+              },
+            ],
+          })
+        ).status,
+      ).toBe(200);
+      continue;
+    }
+    if (job?.payload?.stage === "update-branch") {
+      expect(
+        (
+          await agent.complete(job.id, job.attempt, {
+            stage: "update-branch",
+            outcome: "merged",
+            headSha: "caught-up",
+          })
+        ).status,
+      ).toBe(200);
+      continue;
+    }
+    return;
+  }
+}
+
 const specRow = async (id = 1) =>
   (
     await db.pool.query("SELECT state, pause_reason FROM specs WHERE id = $1", [
@@ -255,6 +320,7 @@ describe("enqueueing update-branch when main advances", () => {
   it("queues one update-branch per running spec of that repo, with the integration lock", async () => {
     const { specIds, repoUrl } = await runningSpecs({
       slugs: ["export", "other"],
+      followMain: true,
     });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
@@ -284,7 +350,7 @@ describe("enqueueing update-branch when main advances", () => {
   });
 
   it("coalesces later advances onto the one queued job", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
     await look([{ repoUrl, sha: "ccc333" }]);
@@ -294,7 +360,7 @@ describe("enqueueing update-branch when main advances", () => {
   });
 
   it("queues one more while an update-branch is running, still coalescing onto that one", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
     const running = (await agent.claim()).body.job;
@@ -327,6 +393,7 @@ describe("enqueueing update-branch when main advances", () => {
     const repoUrl = "https://gitlab.example/me/shop-backend.git";
     await runningSpecs({
       repos: [{ name: "backend", url: repoUrl }],
+      followMain: true,
     });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
@@ -368,8 +435,131 @@ describe("enqueueing update-branch when main advances", () => {
   });
 });
 
+describe("running specs do not follow every default-branch advance", () => {
+  it("queues at most one update-branch across 10 conflict-free advances", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "base000" }]);
+    for (let n = 1; n <= 10; n++) {
+      await look([{ repoUrl, sha: `adv${String(n).padStart(3, "0")}` }]);
+      await drainFollowUps();
+    }
+    expect(await updateJobs()).toHaveLength(0);
+  });
+
+  it("updates when lag reaches the default 15 commits", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "base000" }]);
+    for (let n = 1; n <= 15; n++) {
+      await look([{ repoUrl, sha: `adv${String(n).padStart(3, "0")}` }]);
+      await drainFollowUps();
+    }
+    expect(await updateJobs()).toMatchObject([{ state: "done" }]);
+  });
+
+  it("uses the project's commit threshold when it is set", async () => {
+    const { repoUrl } = await runningSpecs({
+      limits: { updateBranchBehindCommits: 3 },
+    });
+    await look([{ repoUrl, sha: "base000" }]);
+    await look([{ repoUrl, sha: "adv001" }]);
+    await drainFollowUps();
+    await look([{ repoUrl, sha: "adv002" }]);
+    await drainFollowUps();
+    expect(await updateJobs()).toHaveLength(0);
+    await look([{ repoUrl, sha: "adv003" }]);
+    await drainFollowUps();
+    expect(await updateJobs()).toMatchObject([{ state: "done" }]);
+  });
+
+  it("updates when lag reaches the default 6 hours, even if main has not moved again", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "base000" }]);
+    await look([{ repoUrl, sha: "adv001" }]);
+    await drainFollowUps();
+    expect(await updateJobs()).toHaveLength(0);
+    clock.advanceSeconds(6 * 3600);
+    await look([{ repoUrl, sha: "adv001" }]);
+    expect(await updateJobs()).toMatchObject([
+      { state: "queued", payload: { mainSha: "adv001" } },
+    ]);
+  });
+
+  it("uses the project's hour threshold when it is set", async () => {
+    const { repoUrl } = await runningSpecs({
+      limits: { updateBranchBehindHours: 2 },
+    });
+    await look([{ repoUrl, sha: "base000" }]);
+    await look([{ repoUrl, sha: "adv001" }]);
+    await drainFollowUps();
+    clock.advanceSeconds(2 * 3600);
+    await look([{ repoUrl, sha: "adv001" }]);
+    expect(await updateJobs()).toMatchObject([
+      { state: "queued", payload: { mainSha: "adv001" } },
+    ]);
+  });
+
+  it("updates immediately when a merge-tree check finds a conflict with the default branch", async () => {
+    const { specIds, repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "base000" }]);
+    await look([{ repoUrl, sha: "adv001" }]);
+    expect(await updateJobs()).toHaveLength(0);
+    const check = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+      type: string;
+      lockKey: string | null;
+    };
+    expect(check).toMatchObject({ type: "trial-merge", lockKey: null });
+    const task = await fetch(
+      `${api.url}/worker/jobs/${check.id}/trial-merge-task?workerId=a1&attempt=${check.attempt}`,
+    ).then((r) => r.json());
+    expect(task.peers).toContainEqual({ specId: 0, branch: "main" });
+    expect(
+      (
+        await agent.complete(check.id, check.attempt, {
+          stage: "trial-merge",
+          peers: [
+            {
+              specId: 0,
+              files: ["src/shared.ts"],
+              ourSha: "ours",
+              theirSha: "theirs",
+            },
+          ],
+        })
+      ).status,
+    ).toBe(200);
+    expect(await updateJobs()).toMatchObject([
+      {
+        state: "queued",
+        lock_key: "integration:1:spec/export",
+        payload: {
+          stage: "update-branch",
+          specId: specIds[0],
+          repoId: 1,
+          mainSha: "adv001",
+        },
+      },
+    ]);
+  });
+
+  it("does not update when the merge-tree check finds no conflict", async () => {
+    const { repoUrl } = await runningSpecs();
+    await look([{ repoUrl, sha: "base000" }]);
+    await look([{ repoUrl, sha: "adv001" }]);
+    await drainFollowUps();
+    expect(await updateJobs()).toHaveLength(0);
+  });
+
+  it("writes in the design that semantic conflicts surface by wrap-up", () => {
+    const design = readFileSync(join(process.cwd(), "docs/design.md"), "utf8");
+    expect(design).toContain("merge-tree 只能发现文本冲突");
+    expect(design).toContain("语义冲突最迟在收尾前暴露");
+  });
+});
+
 async function queuedUpdate() {
-  const { repoUrl } = await runningSpecs();
+  const { repoUrl } = await runningSpecs({ followMain: true });
   await look([{ repoUrl, sha: "aaa111" }]);
   await look([{ repoUrl, sha: "bbb222" }]);
   return (await agent.claim()).body.job as {
@@ -513,7 +703,7 @@ describe("the update-branch job", () => {
   });
 
   it("drops a queued update-branch when the spec is paused, and a merged outcome does not pause", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
     const running = (await agent.claim()).body.job as {
@@ -536,7 +726,7 @@ describe("the update-branch job", () => {
   });
 
   it("coalesces a later SHA onto the merge agent instead of starting another locked merge", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
     const first = (await agent.claim()).body.job as {
@@ -562,7 +752,7 @@ describe("the update-branch job", () => {
   });
 
   it("keeps the spec running when the second merge succeeds, and drops a queued job when the second merge fails", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
     const first = (await agent.claim()).body.job as {
@@ -747,7 +937,7 @@ describe("update-branch during 收尾 and 验收", () => {
   });
 
   it("coalesces a later SHA onto a finalizing spec's in-flight update-branch", async () => {
-    const { repoUrl } = await runningSpecs();
+    const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
     await look([{ repoUrl, sha: "bbb222" }]);
     const running = (await agent.claim()).body.job;

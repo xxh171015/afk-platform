@@ -257,7 +257,7 @@ export type EditResult =
   | { status: "refused"; message: string }
   | { status: "invalid"; message: string };
 
-const sameSet = (a: readonly string[], b: readonly string[]) =>
+const sameSet = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length && a.every((x) => b.includes(x));
 
 // A pending or blocked ticket gets new content from a ticket file (what `plat ticket view --md` prints): only the
@@ -278,7 +278,7 @@ export async function editTicket(
     }
     const current = await client.query(
       `SELECT t.spec_id, t.title, t.body, t.acceptance_criteria, t.modules, t.allowed_protected_paths, t.type,
-              t.refs, t.environment, t.content_version, r.name AS repo
+              t.refs, t.environment, t.stories, t.content_version, r.name AS repo
        FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
       [ticketId],
     );
@@ -302,15 +302,19 @@ export async function editTicket(
         .filter((e) => e.kind === kind)
         .map((e) => formatDisplayId("ticket", e.from_ticket_id));
     // fields that cannot change may be left out; written, they must say what the ticket has
-    const fixed: [string, string | string[] | undefined, string | string[]][] =
-      [
-        ["repo", edit.repo, now.repo],
-        ["type", edit.type, now.type],
-        ["contract", edit.contract, upstream("contract")],
-        ["refs", edit.refs, now.refs],
-        ["environment", edit.environment, now.environment],
-        ["blocked_by", edit.blocked_by, upstream("blocks")],
-      ];
+    const fixed: [
+      string,
+      string | string[] | number[] | undefined,
+      string | string[] | number[],
+    ][] = [
+      ["repo", edit.repo, now.repo],
+      ["type", edit.type, now.type],
+      ["contract", edit.contract, upstream("contract")],
+      ["refs", edit.refs, now.refs],
+      ["environment", edit.environment, now.environment],
+      ["blocked_by", edit.blocked_by, upstream("blocks")],
+      ["stories", edit.stories, now.stories],
+    ];
     for (const [field, written, has] of fixed) {
       const differs = Array.isArray(written)
         ? !sameSet(written, has as string[])

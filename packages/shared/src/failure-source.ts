@@ -1,4 +1,5 @@
 import { BLOCKED_REASONS } from "./ticket-state.ts";
+import { unrecoverableJobError } from "./unrecoverable-job-error.ts";
 
 // Whose fault a failure or a block is (GLOSSARY Failure source), decided by its reason code when it happens and
 // never changed afterwards (docs/specs/m3-platform.md「失败来源」). Events store it; the waiting queue groups by it.
@@ -21,10 +22,12 @@ export const FAILURE_SOURCE_LABELS: Record<FailureSource, string> = {
 // The final e2e before the pull requests failed (finalize/final-e2e.ts).
 export const FINAL_E2E_FAILED = "final-e2e-failed";
 
-// Why the final e2e step is blocked: its e2e failed, or its environment would not come up three times over.
+// Why the final e2e step is blocked: its e2e failed, its environment would not come up three times over, or
+// an unrecoverable job error (a failed image build, a dead Cursor key) blocked it at once, as on a ticket.
 export const FINAL_E2E_BLOCKED_REASONS = [
   FINAL_E2E_FAILED,
   "integration-environment-failed",
+  "job-failed",
 ] as const;
 
 // Why the platform paused a spec.
@@ -98,6 +101,9 @@ export const EXTERNAL_ERROR_PATTERNS = [
   "rate.?limit|too many requests|usage limit|out of usage|increase limits|http 429",
   "enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake",
   "err_pnpm_meta_fetch_fail|registry\\.npmjs\\.org|registry\\.npmmirror\\.com",
+  "invalid model|unknown model|model not found|model does not exist|no such model",
+  "quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted",
+  "docker build of .+ failed",
 ] as const;
 
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
@@ -112,23 +118,13 @@ export function failureSourceOf(
     FAILURE_SOURCE_OF_REASON as Record<string, FailureSource | null>
   )[reason];
   if (source === undefined) return "platform";
-  if (reason === "job-failed" && error && EXTERNAL.some((re) => re.test(error)))
+  if (
+    reason === "job-failed" &&
+    error &&
+    (EXTERNAL.some((re) => re.test(error)) || unrecoverableJobError(error))
+  )
     return "external";
   return source;
-}
-
-// Signs that the agent's provider will not take work from anyone for a while: its usage ran out or it refuses the key.
-// Such a failure is not the stage's: every agent job waits until a person resumes them (agents-pause.ts in the api).
-const AGENT_PROVIDER_UNAVAILABLE = [
-  /out of usage|increase limits|usage limit/i,
-  /unauthorized request|invalid api key|cursor-agent login|not authenticated/i,
-];
-
-export function isAgentProviderUnavailable(error: string): boolean {
-  return (
-    /AgentError|cursor/i.test(error) &&
-    AGENT_PROVIDER_UNAVAILABLE.some((re) => re.test(error))
-  );
 }
 
 // The platform's own problems and outside services' are listed after the specs' own in the waiting queue, as a

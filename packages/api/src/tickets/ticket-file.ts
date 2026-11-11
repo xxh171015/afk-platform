@@ -12,7 +12,7 @@ export async function ticketFileOf(
 ): Promise<string | undefined> {
   const found = await pool.query(
     `SELECT t.title, t.body, t.modules, t.allowed_protected_paths, t.content_version, t.type, t.refs, t.environment,
-            r.name AS repo
+            t.stories, r.name AS repo
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
     [ticketId],
   );
@@ -42,6 +42,7 @@ export async function ticketFileOf(
     title: content.title,
     repo: content.repo,
     type: content.type,
+    stories: content.stories,
     modules: content.modules,
     protectedPathsOk: content.allowed_protected_paths,
     contract: named("contract"),

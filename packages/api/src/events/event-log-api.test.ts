@@ -5,7 +5,6 @@ import {
   REASON_CODES,
 } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
@@ -14,6 +13,7 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -28,7 +28,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(createApp({ pool: db.pool, clock: clock.now }));
+  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -269,6 +269,11 @@ describe("the failure source the database works out", () => {
     "getaddrinfo ENOTFOUND registry.npmmirror.com",
     "net/http: TLS handshake timeout",
     "sandbox exited with code 137",
+    "ActionRequiredError: Unauthorized request",
+    "Error: unknown model 'claude-code'",
+    "docker build of backend (backend) failed (exit 1)",
+    "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+    "模型名无效，检查项目的默认模型或 AFK_MODEL",
   ];
 
   it("agrees with @afk/shared on every reason code and error", async () => {

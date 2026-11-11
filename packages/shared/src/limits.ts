@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-// Concurrency and budget defaults (docs/specs/m1-platform.md「并发与预算默认值」). A project may override any of them.
+// Concurrency, budget, and update-branch lag defaults (docs/specs/m1-platform.md「并发与预算默认值」).
+// A project may override any of them.
 export const DEFAULT_LIMITS = {
   workerSlots: 2, // read by the worker, not the scheduler
   projectConcurrency: 2, // agent runs at once in one project
@@ -10,6 +11,9 @@ export const DEFAULT_LIMITS = {
   runWallclockSeconds: 60 * 60,
   ticketWallclockSeconds: 3 * 60 * 60,
   specAgentSeconds: 12 * 60 * 60, // all agent time of one spec
+  // Running specs follow main when either threshold is hit (whichever first).
+  updateBranchBehindCommits: 15,
+  updateBranchBehindHours: 6,
 } as const;
 
 export type Limits = { -readonly [K in keyof typeof DEFAULT_LIMITS]: number };

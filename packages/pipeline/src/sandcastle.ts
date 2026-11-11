@@ -14,7 +14,12 @@ import {
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "./agent.ts";
-import type { GateSandbox, SandboxPlacement, SandboxSession } from "./gate.ts";
+import {
+  type GateSandbox,
+  type SandboxPlacement,
+  type SandboxSession,
+  shellQuote,
+} from "./gate.ts";
 
 export interface SandcastleConfig {
   cwd: string; // the slot's clone of the repo: the agent and the gate only ever see this copy
@@ -208,8 +213,11 @@ export class SandcastleGateSandbox implements GateSandbox {
       cwd: this.config.cwd,
     });
     return {
-      exec: async (command) => {
-        const result = await sandbox.exec(command);
+      // sandbox.exec has no timeout of its own: wrap with GNU timeout inside the image.
+      exec: async (command, options) => {
+        const result = await sandbox.exec(
+          `timeout ${options.timeoutSeconds} sh -c ${shellQuote(command)}`,
+        );
         return {
           exitCode: result.exitCode,
           output: result.stdout + result.stderr,

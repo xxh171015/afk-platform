@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
 import {
@@ -7,6 +6,7 @@ import {
   FakeWorker,
   listen,
   type RunningApi,
+  testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 import type { Bundle } from "./bundle.ts";
@@ -23,7 +23,7 @@ beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
   clock = new FakeClock();
-  api = await listen(createApp({ pool: db.pool, clock: clock.now }));
+  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -269,6 +269,35 @@ async function bundleOfNextJob(): Promise<Bundle | null> {
 }
 
 describe("the e2e job", () => {
+  it("blocks once on an image that would not build, as an outside service, and does not requeue", async () => {
+    await runningSpec();
+    await mergeIntegrationTicket();
+    const job = await claim();
+    expect(job?.payload.stage).toBe("e2e");
+    await worker.fail(
+      (job as Claimed).id,
+      (job as Claimed).attempt,
+      "docker build of backend (backend) failed (exit 1):\nERROR: failed to solve",
+    );
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claim()).toBeNull();
+    const blocked = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as Json;
+    expect(blocked.tickets[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "external",
+      brief: {
+        output: {
+          error: "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
+        },
+      },
+    });
+  });
+
   it("is not agent time, and a failing environment ends in integration-environment-failed", async () => {
     await runningSpec();
     await mergeIntegrationTicket();

@@ -68,6 +68,28 @@ describe("a valid import", () => {
     };
     expect(plan(input).ok).toBe(true);
   });
+
+  it("records stories that exist in the spec", () => {
+    const specBody = [
+      "## User Stories",
+      "",
+      "1. As a splitter, I want to name the User Stories a ticket is for.",
+      "2. As an importer, I want unknown numbers rejected.",
+      "3. As a reviewer, I want the assigned stories as counterparts.",
+      "4. As an author of an infrastructure ticket, I want to omit stories.",
+      "",
+    ].join("\n");
+    const result = planImport(
+      file(ticket("a", { stories: [1, 4] })),
+      repos,
+      12,
+      undefined,
+      specBody,
+    );
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.tickets[0]?.stories).toEqual([1, 4]);
+  });
 });
 
 describe("rejections", () => {
@@ -173,6 +195,33 @@ describe("rejections", () => {
 
   it("only allows contract, implementation and integration tickets", () => {
     expect(errorsOf(file(ticket("a", { type: "fix" })))[0]).toMatch(/type/);
+  });
+
+  it("rejects the whole import when stories lists numbers the spec does not have, naming those numbers", () => {
+    const specBody = [
+      "## User Stories",
+      "",
+      "1. As a splitter, I want to name the User Stories a ticket is for.",
+      "2. As an importer, I want unknown numbers rejected.",
+      "",
+    ].join("\n");
+    const result = planImport(
+      file(
+        ticket("ok", { stories: [1, 2] }),
+        ticket("a", { stories: [1, 4] }),
+        ticket("b", { stories: [2, 9, 4] }),
+      ),
+      repos,
+      12,
+      undefined,
+      specBody,
+    );
+    if (result.ok) throw new Error("expected the import to be rejected");
+    const listed = result.errors.join("\n");
+    expect(listed).toMatch(/ticket a:.*stories.*\b4\b/);
+    expect(listed).toMatch(/ticket b:.*stories.*\b9\b/);
+    expect(listed).toMatch(/ticket b:.*stories.*\b4\b/);
+    expect(result.errors.some((e) => /ticket ok/.test(e))).toBe(false);
   });
 });
 

@@ -56,7 +56,6 @@ export {
   FINAL_E2E_FAILED,
   failureSourceOf,
   HUMAN_ACTIONS,
-  isAgentProviderUnavailable,
   isPlatformProblem,
   PAUSE_REASON_LABELS,
   PAUSE_REASONS,
@@ -66,8 +65,9 @@ export {
 export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
 export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
-export { FINDING_RESOLUTIONS } from "./findings.ts";
+export { FINDING_RESOLUTIONS, findingResolutionPhrase } from "./findings.ts";
 export {
+  DEFAULT_BRANCH_PEER_SPEC_ID,
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   TRIAL_MERGE_JOB,
@@ -230,3 +230,11 @@ export {
   TICKET_STATES,
   ticketTransition,
 } from "./ticket-state.ts";
+export {
+  CURSOR_AUTH_BRIEF,
+  IMAGE_BUILD_BRIEF,
+  INVALID_MODEL_BRIEF,
+  isAgentProviderUnavailable,
+  QUOTA_EXHAUSTED_BRIEF,
+  unrecoverableJobError,
+} from "./unrecoverable-job-error.ts";

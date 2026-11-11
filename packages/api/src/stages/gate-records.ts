@@ -1,13 +1,13 @@
 import type { Queryable } from "../jobs/queue.ts";
 
 // What a worker may ask about earlier gates of the repo its job is on (docs/design.md「门禁」): a passing result of the
-// same tree under the same gates.yaml, to reuse instead of running the commands again; or the counts of a commit, as
-// the baseline of a ticket branch that starts there. Only results whose commands all exited 0 and that read a JUnit
-// report count: a stored pass is judged against the baseline again where it is reused.
+// same tree under the same gates.yaml, to reuse instead of running the commands again. Only results whose commands all
+// exited 0 and that read a JUnit report count: a stored pass is judged against the baseline again where it is reused.
 
-export type GateLookup =
-  | { commit: string }
-  | { tree: string; configBlob: string };
+export interface GateLookup {
+  tree: string;
+  configBlob: string;
+}
 
 export interface StoredGateRow {
   commitSha: string;
@@ -25,13 +25,6 @@ export async function findPassingGate(
   jobId: number,
   lookup: GateLookup,
 ): Promise<StoredGateRow | null> {
-  const [where, args] =
-    "commit" in lookup
-      ? ["g.commit_sha = $2", [lookup.commit]]
-      : [
-          "g.tree_sha = $2 AND g.config_blob = $3",
-          [lookup.tree, lookup.configBlob],
-        ];
   const { rows } = await pool.query<{
     commit_sha: string;
     command_results: { name: string; exitCode: number; ms: number }[];
@@ -41,12 +34,12 @@ export async function findPassingGate(
   }>(
     `SELECT g.commit_sha, g.command_results, g.tests_total, g.tests_skipped, g.test_cases
      FROM jobs j JOIN gate_results g ON g.repo_id = (j.payload->>'repoId')::int
-     WHERE j.id = $1 AND ${where} AND g.kind = 'gate' AND g.tests_total IS NOT NULL
+     WHERE j.id = $1 AND g.tree_sha = $2 AND g.config_blob = $3 AND g.kind = 'gate' AND g.tests_total IS NOT NULL
        AND NOT EXISTS (
          SELECT 1 FROM jsonb_array_elements(g.command_results) s WHERE (s->>'exitCode')::int <> 0
        )
      ORDER BY g.id DESC LIMIT 1`,
-    [jobId, ...args],
+    [jobId, lookup.tree, lookup.configBlob],
   );
   const row = rows[0];
   if (!row) return null;

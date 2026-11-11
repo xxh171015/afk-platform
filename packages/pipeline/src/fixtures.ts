@@ -78,6 +78,7 @@ export function bundleFor(
     failureLog: null,
     review: null,
     gateBaseline: null,
+    gateBaselines: [],
     limits: {
       runIdleSeconds: DEFAULT_LIMITS.runIdleSeconds,
       runWallclockSeconds: DEFAULT_LIMITS.runWallclockSeconds,

@@ -1,4 +1,4 @@
-import { isAgentProviderUnavailable } from "@afk/shared";
+import { isAgentProviderUnavailable, unrecoverableJobError } from "@afk/shared";
 import type pg from "pg";
 import type { Queryable } from "./jobs/queue.ts";
 import type { Notice } from "./notify/notices.ts";
@@ -43,13 +43,14 @@ export async function pauseForProvider(
 ): Promise<Notice | undefined | false> {
   if (job.type !== AGENT_JOB_TYPE || !isAgentProviderUnavailable(error))
     return false;
-  // The Run keeps the failure in the ticket's history; the job's next claim starts a Run of its own.
+  // The Run keeps the failure, in the person's words, in the history; the job's next claim starts a Run of its own.
+  const brief = unrecoverableJobError(error) ?? error;
   await client.query(
     `UPDATE runs SET job_id = NULL, finished_at = COALESCE(finished_at, now()), result = 'provider-unavailable',
        duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
        output = jsonb_build_object('error', $2::text)
      WHERE job_id = $1`,
-    [job.id, error],
+    [job.id, brief],
   );
   await client.query(
     `UPDATE jobs SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL, error = NULL,
@@ -60,22 +61,14 @@ export async function pauseForProvider(
   const paused = await client.query(
     `UPDATE instance SET agents_paused_at = $1::timestamptz, agents_pause_reason = $2
      WHERE agents_paused_at IS NULL RETURNING 1`,
-    [now, error.slice(0, 1000)],
+    [now, brief.slice(0, 1000)],
   );
   if (paused.rowCount === 0) return undefined;
   return {
     title: "Agent 已暂停",
-    body: `${firstLine(error)}\n额度或密钥恢复后在页面上点「恢复」\n${pageUrl("/")}`,
+    body: `${brief}\n恢复后在页面上点「恢复」，或运行 plat agents resume\n${pageUrl("/")}`,
   };
 }
-
-const firstLine = (error: string) =>
-  error
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !/^\(FiberFailure\)|exited with code/.test(line))
-    .at(0)
-    ?.slice(0, 200) ?? error.slice(0, 200);
 
 // A person says the provider takes work again: agent jobs are claimed again, starting with the ones put back.
 export async function resumeAgents(pool: Queryable): Promise<boolean> {

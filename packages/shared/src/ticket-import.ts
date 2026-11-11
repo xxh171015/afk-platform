@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { formatDisplayId } from "./display-id.ts";
 import type { EdgeKind } from "./schemas.ts";
+import { userStoriesOf } from "./user-stories.ts";
 
 // What planImport checks: the tickets of a directory of ticket files, as readTicketFiles (ticket-files.ts) turns
 // them (docs/design.md「导入格式」). Keys are snake_case as in the front matter.
@@ -14,6 +15,7 @@ const ImportTicketSchema = z.strictObject({
   modules: z.array(z.string().min(1)).min(1),
   protected_paths_ok: z.array(z.string().min(1)).default([]),
   acceptance: z.array(z.string().min(1)).min(1),
+  stories: z.array(z.number().int().positive()).default([]),
   blocked_by: z.array(z.string().min(1)).default([]),
   // One upstream contract ticket, or several (at most one chain of them per repo).
   contract: z
@@ -49,6 +51,7 @@ export interface PlannedTicket {
   title: string;
   body: string;
   acceptanceCriteria: string[];
+  stories: number[];
   modules: string[];
   allowedProtectedPaths: string[];
   refs: string[];
@@ -128,6 +131,7 @@ export function planImport(
   repos: ReadonlyMap<string, ImportRepo>,
   specId: number,
   existing?: ExistingGraph,
+  specBody = "",
 ): ImportPlan {
   const parsed = ImportFileSchema.safeParse(input);
   if (!parsed.success) {
@@ -138,6 +142,9 @@ export function planImport(
   }
   const file = parsed.data;
   const errors: string[] = [];
+  const knownStories = new Set(
+    userStoriesOf(specBody).map((story) => story.number),
+  );
 
   if (
     file.spec !== undefined &&
@@ -246,6 +253,14 @@ export function planImport(
         errors.push(`${where}: refs ${name} does not belong to the project`);
       }
     }
+    const unknownStories = [...new Set(ticket.stories)].filter(
+      (n) => !knownStories.has(n),
+    );
+    if (unknownStories.length > 0) {
+      errors.push(
+        `${where}: stories ${unknownStories.join(", ")} are not User Story numbers in the spec`,
+      );
+    }
     if (ticket.environment.length > 0 && ticket.type !== "integration") {
       errors.push(
         `${where}: environment can only be written on an integration ticket`,
@@ -291,6 +306,7 @@ export function planImport(
       title: ticket.title,
       body: ticket.body,
       acceptanceCriteria: ticket.acceptance,
+      stories: ticket.stories,
       modules: ticket.modules,
       allowedProtectedPaths: ticket.protected_paths_ok,
       refs: ticket.refs,

@@ -98,6 +98,16 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 2147483647
+                      },
+                      "updateBranchBehindCommits": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "updateBranchBehindHours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
                       }
                     },
                     "additionalProperties": false
@@ -127,6 +137,22 @@
                     }
                   },
                   "required": ["id", "name"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The default agent is not supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
                 }
               }
             }
@@ -210,6 +236,9 @@
                     "name": {
                       "type": "string"
                     },
+                    "defaultAgent": {
+                      "type": ["string", "null"]
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -242,7 +271,7 @@
                       }
                     }
                   },
-                  "required": ["id", "name", "repos"]
+                  "required": ["id", "name", "defaultAgent", "repos"]
                 }
               }
             }
@@ -284,6 +313,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "defaultAgent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
                   "defaultModel": {
                     "type": "string",
                     "minLength": 1,
@@ -350,6 +384,16 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 2147483647
+                      },
+                      "updateBranchBehindCommits": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      },
+                      "updateBranchBehindHours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
                       }
                     },
                     "additionalProperties": false
@@ -375,6 +419,22 @@
                     }
                   },
                   "required": ["id"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The default agent is not supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
                 }
               }
             }
@@ -2755,6 +2815,24 @@
                       },
                       "required": ["tests", "skipped"]
                     },
+                    "gateBaselines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sha": {
+                            "type": "string"
+                          },
+                          "tests": {
+                            "type": "integer"
+                          },
+                          "skipped": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["sha", "tests", "skipped"]
+                      }
+                    },
                     "limits": {
                       "type": "object",
                       "properties": {
@@ -2796,6 +2874,7 @@
                     "note",
                     "failureLog",
                     "gateBaseline",
+                    "gateBaselines",
                     "limits",
                     "model"
                   ]
@@ -3550,11 +3629,6 @@
                     "minimum": 1,
                     "maximum": 2147483647
                   },
-                  "commit": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
-                  },
                   "tree": {
                     "type": "string",
                     "minLength": 1,
@@ -3566,7 +3640,7 @@
                     "maxLength": 100
                   }
                 },
-                "required": ["workerId", "attempt"]
+                "required": ["workerId", "attempt", "tree", "configBlob"]
               }
             }
           }
@@ -4861,6 +4935,12 @@
                         "type": "string"
                       }
                     },
+                    "sources": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "repoUrl": {
                       "type": "string"
                     },
@@ -4891,6 +4971,7 @@
                     "ticketDisplayId",
                     "prompt",
                     "commits",
+                    "sources",
                     "repoUrl",
                     "hostKind"
                   ]
@@ -6156,6 +6237,36 @@
                                   },
                                   "required": ["ticket", "paths"]
                                 }
+                              },
+                              "standardsSources": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "sources": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "sources"
+                                  ]
+                                },
+                                "default": []
                               }
                             },
                             "required": [

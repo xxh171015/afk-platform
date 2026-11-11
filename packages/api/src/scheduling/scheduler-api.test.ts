@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 import {
   completeTicket,
@@ -16,7 +20,7 @@ let api: RunningApi;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
 });
 afterEach(async () => {
   await api.close();
@@ -446,6 +450,21 @@ describe("concurrency limits", () => {
     const confirmed = await post(`/specs/${specId}/confirm`);
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.enqueued).toEqual([]);
+  });
+
+  it("does not count a merging ticket against the project's concurrency", async () => {
+    const { specId } = await draftSpec(independent(2), {
+      projectConcurrency: 1,
+    });
+    expect((await post(`/specs/${specId}/confirm`)).body.enqueued).toHaveLength(
+      1,
+    );
+    expect(await ticketStates()).toEqual(["1:queued", "2:pending"]);
+    await db.pool.query("UPDATE tickets SET state = 'merging' WHERE id = 1");
+    expect(await scheduleSpec(db.pool, specId)).toMatchObject({
+      enqueued: [{ ticketId: 2 }],
+    });
+    expect(await ticketStates()).toEqual(["1:merging", "2:queued"]);
   });
 
   it("honours the project's own limits", async () => {

@@ -32,6 +32,8 @@ const FrontMatter = z.strictObject({
   repo: z.string().min(1),
   type: z.enum(["contract", "implementation", "integration"]),
   modules: z.array(z.string().min(1)).min(1),
+  // User Story numbers in the spec this ticket is for. Omitted on infrastructure tickets.
+  stories: z.array(z.number().int().positive()).default([]),
   protected_paths_ok: z.array(z.string().min(1)).default([]),
   // One upstream contract ticket, or several (at most one chain of them per repo).
   contract: z
@@ -287,6 +289,7 @@ const EditFront = z.strictObject({
   protected_paths_ok: z.array(z.string().min(1)).optional(),
   repo: z.string().optional(),
   type: z.string().optional(),
+  stories: z.array(z.number().int().positive()).optional(),
   contract: z
     .union([z.string(), z.array(z.string())])
     .transform((value) => (typeof value === "string" ? [value] : value))
@@ -332,6 +335,7 @@ export interface TicketFileView {
   title: string;
   repo: string;
   type: string;
+  stories?: number[];
   modules: string[];
   protectedPathsOk: string[];
   contract: string[];
@@ -341,6 +345,24 @@ export interface TicketFileView {
   body: string;
 }
 
+const StoriesField = z.array(z.number().int().positive());
+
+// Numbers named in a ticket file's front matter, including the printed view with id and version.
+export function storiesOfTicketFile(text: string): number[] {
+  const split = splitFile("the ticket file", text);
+  if (Array.isArray(split)) return [];
+  let raw: unknown;
+  try {
+    raw = parseYaml(split.front);
+  } catch {
+    return [];
+  }
+  const stories = (raw as { stories?: unknown } | null)?.stories;
+  if (stories === undefined) return [];
+  const parsed = StoriesField.safeParse(stories);
+  return parsed.success ? parsed.data : [];
+}
+
 export function renderTicketFile(ticket: TicketFileView): string {
   const front = stringifyYaml({
     id: ticket.id,
@@ -348,6 +370,7 @@ export function renderTicketFile(ticket: TicketFileView): string {
     title: ticket.title,
     repo: ticket.repo,
     type: ticket.type,
+    ...(ticket.stories?.length ? { stories: ticket.stories } : {}),
     modules: ticket.modules,
     protected_paths_ok: ticket.protectedPathsOk,
     contract: ticket.contract,

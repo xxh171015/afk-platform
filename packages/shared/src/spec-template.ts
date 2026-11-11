@@ -1,5 +1,7 @@
 import { readSkillSnapshot } from "./skills-snapshot.ts";
 
+export { uncoveredUserStories, userStoriesOf } from "./user-stories.ts";
+
 const h2Names = (text: string): string[] =>
   [...text.matchAll(/^## (.+?)\s*$/gm)].map((m) => m[1] as string);
 

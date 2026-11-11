@@ -36,7 +36,7 @@ import {
 } from "commander";
 import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
-import { blockedText, specText, ticketText } from "./format.ts";
+import { blockedText, projectText, specText, ticketText } from "./format.ts";
 import { excludeLocally, isTracked, missingExcludes } from "./git-exclude.ts";
 import {
   codeHostProblems,
@@ -314,6 +314,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description(
       "change settings of an existing project; only the given ones change (tickets already made keep theirs)",
     )
+    .option("--default-agent <agent>")
     .option(
       "--default-model <model>",
       "the Cursor model for its agent runs (the worker's AFK_MODEL when unset)",
@@ -337,6 +338,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
+        defaultAgent: options.defaultAgent,
         defaultModel: options.defaultModel,
         protectedPaths: options.protectedPath,
         maxConcurrency: options.maxConcurrency,
@@ -345,7 +347,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-model, --protected-path, --max-concurrency, --budget-limit or --limit",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit or --limit",
         );
       }
       const projectId = toInt(id);
@@ -355,6 +357,19 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       );
       if (!data) throw failureFrom(response, error);
       print(data, `project ${data.id} updated`);
+    });
+
+  projectCommands
+    .command("show <project>")
+    .description("a project and its default agent")
+    .action(async (id: string) => {
+      const projectId = toInt(id);
+      const { data, response, error } = await api().GET(
+        "/projects/{projectId}",
+        { params: { path: { projectId } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, projectText(data));
     });
 
   const repoCommands = program.command("repo").description("repos");

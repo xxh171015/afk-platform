@@ -509,3 +509,66 @@ describe("pause reasons as codes", () => {
     }
   });
 });
+
+describe("final-fix findings already on disk", () => {
+  it("marks wrap-up must-fix as fixed when that repo's final-fix is done, and leaves the rest", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = omitFrom(journal.entries, "0050_final_fix_findings");
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+
+      await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+      await db.pool.query(
+        `INSERT INTO repos (project_id, url, name) VALUES
+           (1, 'git@x:backend', 'backend'),
+           (1, 'git@x:frontend', 'frontend')`,
+      );
+      await db.pool.query(
+        `INSERT INTO specs (project_id, type, slug, title) VALUES
+           (1, 'feature', 'done-fix', 'Done'),
+           (1, 'feature', 'failed-fix', 'Failed')`,
+      );
+      await db.pool.query(
+        "INSERT INTO tickets (spec_id, repo_id, type, title) VALUES (1, 1, 'implementation', 'A')",
+      );
+      await db.pool.query(
+        `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, result) VALUES
+           (1, 1, 1, 'review', 'pass'),
+           (1, 1, NULL, 'final-review', 'fix'),
+           (1, 1, NULL, 'final-fix', 'done'),
+           (1, 2, NULL, 'final-review', 'fix'),
+           (2, 1, NULL, 'final-review', 'fix'),
+           (2, 1, NULL, 'final-fix', 'agent-gave-up')`,
+      );
+      await db.pool.query(
+        `INSERT INTO findings (run_id, kind, body, resolution) VALUES
+           (1, 'must-fix', 'ticket leftover', 'unhandled'),
+           (2, 'must-fix', 'backend must-fix', 'unhandled'),
+           (2, 'suggestion', 'backend suggestion', 'acceptance-pack'),
+           (4, 'must-fix', 'frontend must-fix', 'unhandled'),
+           (5, 'must-fix', 'failed-spec must-fix', 'unhandled')`,
+      );
+
+      await migrate(db.pool);
+      expect(
+        (
+          await db.pool.query(
+            "SELECT body, resolution FROM findings ORDER BY id",
+          )
+        ).rows,
+      ).toEqual([
+        { body: "ticket leftover", resolution: "unhandled" },
+        { body: "backend must-fix", resolution: "fixed" },
+        { body: "backend suggestion", resolution: "acceptance-pack" },
+        { body: "frontend must-fix", resolution: "unhandled" },
+        { body: "failed-spec must-fix", resolution: "unhandled" },
+      ]);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});

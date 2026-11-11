@@ -1,4 +1,17 @@
+import { GIB } from "@afk/shared";
 import { serve } from "@hono/node-server";
+import { type AppOptions, createApp } from "../app.ts";
+import type { DiskSample } from "../disk.ts";
+
+// Tests inject remaining space so claiming and the workbench do not read the host disk.
+export const TEST_DISK: DiskSample = { freeBytes: 20 * GIB, dirBytes: 0 };
+
+export function testApp(options: AppOptions) {
+  return createApp({
+    statDisk: async () => TEST_DISK,
+    ...options,
+  });
+}
 
 // A manually advanced clock, so lease expiry never needs real waiting.
 export class FakeClock {

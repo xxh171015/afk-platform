@@ -22,14 +22,14 @@ The platform has no labels and no comments. A draft spec is what a skill means b
   that names no seams; it still creates the spec. After it prints `S-7`, keep process files under `~/.afk/planning/S-7/`.
 - **Planning docs** (`GLOSSARY.md`, `docs/adr/`, `AGENTS.md` in this repo, as grill-with-docs and domain-modeling
   write them): leave the changes **uncommitted and unpushed**. `plat spec confirm` sends them and the platform
-  commits them onto the spec's integration branch, so they reach the default branch with the spec's pull request.
+  commits them onto the spec's integration branch, so they reach the default branch with the spec's {{HOST_PR}}.
   The same goes for the repo's setup on `afk/setup` (gates.yaml, this doc, the agent docs): the platform starts
   each spec's integration branch with it, so it is not merged on its own.
 - **A repo the project does not have yet** (a ticket would name a repo in `repo`, `refs` or `environment` that
   `plat tickets import` says does not belong to the project): set it up yourself with the afk-setup skill, from its
   checkout among this workspace's folders, without asking the person; then import again. Tell the person in one
   line, with its `afk/setup` gate check. Nothing is merged first: the setup on `afk/setup` reaches the default
-  branch with the spec's pull request.
+  branch with the spec's {{HOST_PR}}.
 - **Read a spec** (what a skill means by "fetch the issue and read its body and comments"): `plat spec show S-7`.
   It prints the spec's body, its tickets, edges and warnings (after the run, the acceptance pack). A spec has no comments.
 - **Publish tickets** (to-tickets step 5). On this tracker publishing is four steps, in this order:
@@ -43,7 +43,7 @@ The platform has no labels and no comments. A draft spec is what a skill means b
      "开工吗？" (start the work now?).
   4. If they say yes, run `plat spec confirm S-7` here, in this repo. It sends the planning docs (below) as they are in
      this checkout, and the platform commits them before any ticket starts. Then tell them that from here they only
-     wait for the acceptance pack, merge the pull requests, and look at `plat blocked`. If they say no, stop; they can
+     wait for the acceptance pack, merge the {{HOST_PRS}}, and look at `plat blocked`. If they say no, stop; they can
      confirm later here (the platform's page cannot send the planning docs).
 
   Confirming is the last step of publishing tickets on this tracker. It does not change the spec's body and does not
@@ -54,11 +54,11 @@ The platform has no labels and no comments. A draft spec is what a skill means b
   Only the title, the body, `modules` and `protected_paths_ok` can change; the other front matter fields may be left out,
   and written they must equal the ticket's. To change those, cancel the ticket and append a new one with
   `plat tickets import S-7 <dir> --append`.
-- **See what waits for a person**: `plat blocked` (blocked tickets, paused specs, and pull requests that were closed
-  without merge or could not be read; the platform never touches a pull request, so reopen it on the host, rework the
+- **See what waits for a person**: `plat blocked` (blocked tickets, paused specs, and {{HOST_PRS}} that were closed
+  without merge or could not be read; the platform never touches a {{HOST_PR}}, so reopen it on the host, rework the
   spec, or `plat spec cancel S-7`). Read a run's log: `plat run logs R-25`.
 - **Unblock**: `plat ticket retry T-8`, `plat ticket approve-protected T-8` (only after the gate found a
-  protected-path change), `plat ticket allow-path T-8 .github/CODEOWNERS` (a blocked ticket that needs a protected path
+  protected-path change), `plat ticket allow-path T-8 {{PROTECTED_EXAMPLE}}` (a blocked ticket that needs a protected path
   the file did not approve; then retry it), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the
   top level. To give up a whole spec, `plat spec cancel S-7`.
 
@@ -77,6 +77,7 @@ title: 订单增加备注字段
 repo: {{REPO}}
 type: implementation # contract | implementation | integration
 modules: ["src/orders/**", "test/**"]
+stories: [1, 4] # optional: User Story numbers in the spec this ticket is for; omit on infrastructure tickets
 blocked_by: [01-contract] # keys of other files; these are the native blocking edges
 ---
 
@@ -99,9 +100,12 @@ S-7
 - Each acceptance line is a single `- [ ] ` line; the section holds nothing else. The acceptance criteria are read
   from this section, never written twice.
 - Every ticket needs `repo`, `type`, a `title` and at least one glob in `modules`. Other optional fields:
-  `protected_paths_ok`, `contract`, `refs`, `environment`. Unknown keys are rejected.
+  `protected_paths_ok`, `contract`, `refs`, `environment`, `stories`. Unknown keys are rejected.
+- `stories: [1, 4]` names the User Story numbers in the spec this ticket is responsible for. The import checks
+  those numbers exist in the spec's User Stories and refuses the whole directory if any do not, listing the
+  missing numbers. Omit the field on infrastructure tickets; that is normal and is not a warning.
 - **Quote** a `title` that contains `: ` or starts with a special character, or the YAML will not parse.
-- A ticket that changes a **protected path** (project setting, `.github/**` by default, plus the contract file) must
+- A ticket that changes a **protected path** (project setting, `{{PROTECTED_PATH}}` by default, plus the contract file) must
   list the exact files in `protected_paths_ok`. Without it the ticket is blocked; fix it with `plat ticket allow-path`
   and `plat ticket retry`.
 - `type: contract` is for a ticket that only edits the contract file. A ticket using `contract: <key>` must point at

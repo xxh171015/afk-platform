@@ -112,6 +112,31 @@ describe("renderTrackerDoc", () => {
     expect(doc).not.toContain("issue-tracker-github");
   });
 
+  it("does not put GitHub-only steps in a GitLab project's tracker doc", () => {
+    const doc = renderTrackerDoc(
+      {
+        id: 5,
+        name: "shop",
+        repos: [
+          repo(
+            "backend",
+            "https://git.example.org/acme/backend.git",
+            null,
+            "gitlab",
+          ),
+        ],
+      },
+      "backend",
+    );
+    const platform = doc.slice(0, doc.indexOf("## On GitLab"));
+    expect(platform).not.toContain(".github/");
+    expect(platform).not.toMatch(/`gh`/);
+    expect(platform).not.toMatch(/pull request/i);
+    expect(platform).toMatch(
+      /merge requests treated as requests\s*\|\s*GitLab\s*\|\s*`glab`/,
+    );
+  });
+
   it("states the four publishing steps and that confirm is not modify parent", () => {
     const doc = renderTrackerDoc(single, "backend");
     expect(doc).toContain("开工吗");
@@ -176,6 +201,13 @@ describe("the template sources", () => {
 });
 
 describe("the ticket file in the platform part", () => {
+  it("documents the optional stories field as User Story numbers in the spec", () => {
+    const doc = renderTrackerDoc(single, "backend");
+    expect(doc).toMatch(/stories:\s*\[1,\s*4\]/);
+    expect(doc).toMatch(/stories[\s\S]{0,200}User Story/);
+    expect(doc).toMatch(/omit|不写|optional/i);
+  });
+
   // Guard: the example a skill copies must be a file the importer accepts.
   it("is imported by the real ticket file reader", () => {
     const doc = renderTrackerDoc(single, "backend");

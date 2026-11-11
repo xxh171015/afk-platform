@@ -315,6 +315,13 @@ const Bundle = z.object({
   gateBaseline: z
     .object({ tests: z.number().int(), skipped: z.number().int() })
     .nullable(),
+  gateBaselines: z.array(
+    z.object({
+      sha: z.string(),
+      tests: z.number().int(),
+      skipped: z.number().int(),
+    }),
+  ),
   limits: z.object({
     runIdleSeconds: z.number().int(),
     runWallclockSeconds: z.number().int(),
@@ -590,13 +597,12 @@ const failRoute = holderRoute(
   z.object({ ok: z.literal(true) }),
 );
 
-// An earlier passing gate of the job's repo: by commit (a baseline), or by tree and gates.yaml blob (to reuse).
+// An earlier passing gate of the job's repo on the same tree under the same gates.yaml blob, to reuse.
 const gateResultRoute = holderRoute(
   "gate-result",
   {
-    commit: z.string().min(1).max(100).optional(),
-    tree: z.string().min(1).max(100).optional(),
-    configBlob: z.string().min(1).max(100).optional(),
+    tree: z.string().min(1).max(100),
+    configBlob: z.string().min(1).max(100),
   },
   z.object({
     gate: z
@@ -817,6 +823,7 @@ export function registerWorkerRoutes(
               client,
               job.rows[0],
               result,
+              context.clock(),
             );
             if (updated.status === "not-update-branch") {
               const final = await recordFinalResult(
@@ -1005,7 +1012,7 @@ export function registerWorkerRoutes(
 
   app.openapi(gateResultRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const { workerId, attempt, commit, tree, configBlob } = c.req.valid("json");
+    const { workerId, attempt, tree, configBlob } = c.req.valid("json");
     const held = await checkHolder(context.pool, {
       jobId: id,
       workerId,
@@ -1016,13 +1023,7 @@ export function registerWorkerRoutes(
       const { body, status } = refusal(held);
       return c.json(body, status);
     }
-    const lookup = commit
-      ? { commit }
-      : tree && configBlob
-        ? { tree, configBlob }
-        : undefined;
-    if (!lookup) return c.json({ gate: null }, 200);
-    const gate = await findPassingGate(context.pool, id, lookup);
+    const gate = await findPassingGate(context.pool, id, { tree, configBlob });
     return c.json({ gate }, 200);
   });
 

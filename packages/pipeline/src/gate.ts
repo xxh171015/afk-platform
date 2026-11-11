@@ -28,7 +28,10 @@ export type GateConfig = z.infer<typeof GateConfigSchema>;
 
 // A sandbox that is thrown away afterwards. The only module that talks to Sandcastle implements this (#29).
 export interface SandboxSession {
-  exec(command: string): Promise<{ exitCode: number; output: string }>;
+  exec(
+    command: string,
+    options: { timeoutSeconds: number },
+  ): Promise<{ exitCode: number; output: string }>;
   readFile(path: string): Promise<string | undefined>;
   close(): Promise<void>;
 }
@@ -147,8 +150,6 @@ export interface GateRecords {
     treeSha: string,
     configBlob: string,
   ): Promise<StoredGate | undefined>;
-  // The counts of a commit whose gate ran every command to success; undefined when it has none.
-  countsAt(commitSha: string): Promise<TestCounts | undefined>;
 }
 
 const SETUP_LOG_LINES = 40;
@@ -239,10 +240,9 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
     for (const step of steps) {
       if (input.signal?.aborted) break;
       const started = Date.now();
-      // sandbox.exec has no timeout of its own: the command is wrapped
-      const result = await session.exec(
-        `timeout ${step.timeoutSeconds} sh -c ${shellQuote(step.run)}`,
-      );
+      const result = await session.exec(step.run, {
+        timeoutSeconds: step.timeoutSeconds,
+      });
       if (step.name === "setup" && config.setup && result.exitCode !== 0)
         throw new GateSetupError(result.exitCode, result.output);
       outcomes.push({

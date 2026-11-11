@@ -40,7 +40,7 @@ export interface WorkerApi {
   // An earlier passing gate of the job's repo; undefined when there is none or the lease is gone.
   gateResult(
     job: ClaimedJob,
-    lookup: { commit: string } | { tree: string; configBlob: string },
+    lookup: { tree: string; configBlob: string },
   ): Promise<StoredGate | undefined>;
   appendLog(runId: number, job: ClaimedJob, chunk: string): Promise<Holding>;
 }

@@ -9,6 +9,7 @@
     "./skills-sha": "./src/skills-sha.ts",
     "./skills-snapshot": "./src/skills-snapshot.ts",
     "./spec-template": "./src/spec-template.ts",
+    "./user-stories": "./src/user-stories.ts",
     "./ticket-files": "./src/ticket-files.ts"
   },
   "scripts": {

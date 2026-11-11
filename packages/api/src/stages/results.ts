@@ -34,6 +34,8 @@ const RunFacts = z.object({
   skillsSha: z.string().optional(),
   // which axis of a review this Run is (standards | spec)
   axis: z.enum(REVIEW_AXES).optional(),
+  // the standards-source files a Standards review used
+  sources: z.array(z.string()).optional(),
   // the whole prompt the agent was given
   prompt: z.string().optional(),
   // what this Run itself came to, when that is not the stage's outcome (one axis of a review)
@@ -307,6 +309,20 @@ export type ResultFacts = Pick<
   "outcome" | "run" | "gate" | "findings" | "extraRuns"
 >;
 
+function sourcesOf(run?: {
+  sources?: string[];
+  output?: unknown;
+}): string[] | null {
+  if (run?.sources && run.sources.length > 0) return run.sources;
+  if (!run?.output || typeof run.output !== "object") return null;
+  const listed = (run.output as { sources?: unknown }).sources;
+  if (!Array.isArray(listed) || listed.length === 0) return null;
+  const files = listed.filter(
+    (item): item is string => typeof item === "string",
+  );
+  return files.length > 0 ? files : null;
+}
+
 export async function writeFacts(
   client: pg.PoolClient,
   owner: RunOwner,
@@ -387,6 +403,13 @@ export async function writeFacts(
       JSON.stringify(run.refShas),
     ]);
   }
+  const sources = sourcesOf(run);
+  if (sources) {
+    await client.query("UPDATE runs SET sources = $2 WHERE id = $1", [
+      runId,
+      sources,
+    ]);
+  }
 
   if (result?.gate) {
     const gate = result.gate;
@@ -423,6 +446,18 @@ export async function writeFacts(
       `UPDATE findings SET resolution = 'fixed' WHERE resolution = 'unhandled'
        AND run_id IN (SELECT id FROM runs WHERE ticket_id = $1 AND stage = 'review')`,
       [owner.ticket_id],
+    );
+  }
+  if (stage === "final-fix" && result?.outcome === "done") {
+    // Same meaning of `fixed` as ticket-level review-fix: the wrap-up's must-fix were handed to
+    // this fix, which reported done. Suggestions stay on the acceptance pack.
+    await client.query(
+      `UPDATE findings SET resolution = 'fixed' WHERE resolution = 'unhandled' AND kind = 'must-fix'
+       AND run_id IN (
+         SELECT id FROM runs
+         WHERE spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-review'
+       )`,
+      [owner.spec_id, owner.repo_id],
     );
   }
   await insertFindings(client, runId, result?.findings ?? []);
@@ -467,6 +502,13 @@ export async function writeFacts(
       await client.query("UPDATE runs SET ref_shas = $2 WHERE id = $1", [
         inserted.rows[0]?.id,
         JSON.stringify(extra.run.refShas),
+      ]);
+    }
+    const extraSources = sourcesOf(extra.run);
+    if (extraSources) {
+      await client.query("UPDATE runs SET sources = $2 WHERE id = $1", [
+        inserted.rows[0]?.id,
+        extraSources,
       ]);
     }
     await insertFindings(

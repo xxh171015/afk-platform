@@ -65,6 +65,8 @@ export interface paths {
               runWallclockSeconds?: number;
               ticketWallclockSeconds?: number;
               specAgentSeconds?: number;
+              updateBranchBehindCommits?: number;
+              updateBranchBehindHours?: number;
             };
           };
         };
@@ -79,6 +81,17 @@ export interface paths {
             "application/json": {
               id: number;
               name: string;
+            };
+          };
+        };
+        /** @description The default agent is not supported */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
             };
           };
         };
@@ -117,6 +130,7 @@ export interface paths {
             "application/json": {
               id: number;
               name: string;
+              defaultAgent: string | null;
               repos: {
                 name: string;
                 url: string;
@@ -158,6 +172,7 @@ export interface paths {
       requestBody?: {
         content: {
           "application/json": {
+            defaultAgent?: string;
             defaultModel?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
@@ -171,6 +186,8 @@ export interface paths {
               runWallclockSeconds?: number;
               ticketWallclockSeconds?: number;
               specAgentSeconds?: number;
+              updateBranchBehindCommits?: number;
+              updateBranchBehindHours?: number;
             };
           };
         };
@@ -184,6 +201,17 @@ export interface paths {
           content: {
             "application/json": {
               id: number;
+            };
+          };
+        };
+        /** @description The default agent is not supported */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
             };
           };
         };
@@ -1670,6 +1698,11 @@ export interface paths {
                 tests: number;
                 skipped: number;
               } | null;
+              gateBaselines: {
+                sha: string;
+                tests: number;
+                skipped: number;
+              }[];
               limits: {
                 runIdleSeconds: number;
                 runWallclockSeconds: number;
@@ -2121,9 +2154,8 @@ export interface paths {
           "application/json": {
             workerId: string;
             attempt: number;
-            commit?: string;
-            tree?: string;
-            configBlob?: string;
+            tree: string;
+            configBlob: string;
           };
         };
       };
@@ -2721,6 +2753,7 @@ export interface paths {
               prompt: string | null;
               output?: unknown;
               commits: string[];
+              sources: string[] | null;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";
@@ -3125,6 +3158,13 @@ export interface paths {
                   protectedPathApprovals: {
                     ticket: string;
                     paths: string[];
+                  }[];
+                  /** @default [] */
+                  standardsSources: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    sources: string[];
                   }[];
                 }[];
                 integration?: {

@@ -147,15 +147,15 @@ describe("the agents' provider refusing work", () => {
       [null, "provider-unavailable"],
       [null, "provider-unavailable"],
     ]);
-    expect(runs.rows[0].error).toContain("out of usage");
+    expect(runs.rows[0].error).toBe("Cursor 额度用完，充值或换模型后再试");
     expect(notices).toHaveLength(1);
     expect(notices[0]?.title).toBe("Agent 已暂停");
-    expect(notices[0]?.body).toContain("You're out of usage");
+    expect(notices[0]?.body).toContain("Cursor 额度用完");
 
     expect(await claim()).toBeNull();
     const board = (await call("GET", "/workbench")).body;
     expect(board.status.agentsPaused).toMatchObject({
-      reason: expect.stringContaining("out of usage"),
+      reason: "Cursor 额度用完，充值或换模型后再试",
     });
 
     expect((await call("POST", "/agents/resume")).body).toEqual({

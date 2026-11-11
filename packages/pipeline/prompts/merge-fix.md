@@ -4,7 +4,7 @@
 
 1. 读 `/context/run.json`：`integrationBranch` 是集成分支。再读 `/context/ticket.md` 弄清这张票的意图，以及仓库根目录的 `AGENTS.md`。
 2. 执行 `git merge <integrationBranch>`，解决冲突，保留两边的意图。
-3. `npm run typecheck` 和 `npm test` 都要通过，再提交。
+3. 提交前按 `/context/run.json` 的 `gate` 逐条跑通，再提交。`setup` 只列出来，不要求你自己再跑。
 
 ## 结果
 

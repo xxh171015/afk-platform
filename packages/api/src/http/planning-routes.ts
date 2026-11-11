@@ -35,6 +35,10 @@ import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int().min(1).max(INT4_MAX);
 const Text = z.string().min(1).max(500);
+const SUPPORTED_DEFAULT_AGENT = "cursor";
+const UNSUPPORTED_DEFAULT_AGENT = "目前只支持 Cursor";
+const unsupportedDefaultAgent = (value: string | undefined) =>
+  value !== undefined && value !== SUPPORTED_DEFAULT_AGENT;
 const json = <T extends z.ZodType>(schema: T) => ({
   "application/json": { schema },
 });
@@ -78,7 +82,10 @@ const projectRoute = createRoute({
       ),
     },
   },
-  responses: { 201: reply("Created", z.object({ id: Id, name: z.string() })) },
+  responses: {
+    201: reply("Created", z.object({ id: Id, name: z.string() })),
+    400: reply("The default agent is not supported", ErrorReply),
+  },
 });
 
 const projectViewRoute = createRoute({
@@ -95,6 +102,7 @@ const projectViewRoute = createRoute({
       z.object({
         id: Id,
         name: z.string(),
+        defaultAgent: z.string().nullable(),
         repos: z.array(
           z.object({
             name: z.string(),
@@ -138,13 +146,18 @@ const projectEditRoute = createRoute({
     body: {
       content: json(
         z
-          .object({ defaultModel: Text.optional(), ...projectSettings })
+          .object({
+            defaultAgent: Text.optional(),
+            defaultModel: Text.optional(),
+            ...projectSettings,
+          })
           .strict(),
       ),
     },
   },
   responses: {
     200: reply("Updated", z.object({ id: Id })),
+    400: reply("The default agent is not supported", ErrorReply),
     404: reply("No such project", ErrorReply),
   },
 });
@@ -523,14 +536,18 @@ export function registerPlanningRoutes(
   const { pool } = context;
 
   app.openapi(projectRoute, async (c) => {
-    const project = await createProject(pool, c.req.valid("json"));
+    const body = c.req.valid("json");
+    if (unsupportedDefaultAgent(body.defaultAgent)) {
+      return c.json({ error: UNSUPPORTED_DEFAULT_AGENT }, 400);
+    }
+    const project = await createProject(pool, body);
     return c.json(project, 201);
   });
 
   app.openapi(projectViewRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const project = await pool.query(
-      "SELECT id, name FROM projects WHERE id = $1",
+      "SELECT id, name, default_agent FROM projects WHERE id = $1",
       [projectId],
     );
     if (!project.rows[0]) return c.json({ error: "no such project" }, 404);
@@ -542,6 +559,7 @@ export function registerPlanningRoutes(
       {
         id: project.rows[0].id as number,
         name: project.rows[0].name as string,
+        defaultAgent: (project.rows[0].default_agent as string | null) ?? null,
         repos: repos.rows.map((r) => ({
           name: r.name as string,
           url: r.url as string,
@@ -586,7 +604,11 @@ export function registerPlanningRoutes(
 
   app.openapi(projectEditRoute, async (c) => {
     const { projectId } = c.req.valid("param");
-    const result = await editProject(pool, projectId, c.req.valid("json"));
+    const body = c.req.valid("json");
+    if (unsupportedDefaultAgent(body.defaultAgent)) {
+      return c.json({ error: UNSUPPORTED_DEFAULT_AGENT }, 400);
+    }
+    const result = await editProject(pool, projectId, body);
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);
     }

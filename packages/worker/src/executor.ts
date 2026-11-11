@@ -28,11 +28,13 @@ import {
   mergeCandidate,
   projectOf,
   promptFor,
-  ReviewOutputSchema,
   type RunGateInput,
+  readGateConfig,
   reclaimEnvironments,
   renderContext,
   reviewFindings,
+  reviewOutputSchemaFor,
+  reviewSources,
   runE2e,
   runGate,
   type SandboxPlacement,
@@ -41,13 +43,18 @@ import {
   type TestCounts,
   writePrompt,
 } from "@afk/pipeline";
-import { type Bundle, REVIEW_AXES, type ReviewAxis } from "@afk/shared";
+import {
+  type Bundle,
+  REVIEW_AXES,
+  type ReviewAxis,
+  unrecoverableJobError,
+} from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
 import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
 import type { EnvironmentLimiter } from "./environments.ts";
-import type { PushFn } from "./push.ts";
+import { isNetworkPushError, type PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
 import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
@@ -72,6 +79,8 @@ export interface ExecutorDeps {
   model?: string; // the worker's own model: what a project that sets none gets
   skillsSha?: string; // the skills version the worker checked at start-up; recorded on every agent Run
   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
+  // A push that hit the network waits this long before retrying; tests replace it so they do not wait out 10–180 s.
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface StageContext {
@@ -108,8 +117,14 @@ function agentFacts(
   };
 }
 
-// A problem with the worker's own environment, not with the ticket: the job fails and is dispatched again.
-export class InfrastructureError extends Error {}
+// A problem with the worker's own environment, not with the ticket: the job fails and is dispatched again,
+// unless the error is one that will not recover by running it again (Cursor auth, a bad model, a spent quota,
+// a failed integration image build). Those are rewritten here to the human sentence the brief shows.
+export class InfrastructureError extends Error {
+  constructor(message: string) {
+    super(unrecoverableJobError(message) ?? message);
+  }
+}
 // Nothing to run on right now: every slot is taken. The job is left alone and comes back when its lease runs out.
 export class NoFreeSlotError extends Error {}
 // The lease is gone; whatever was done must not be reported.
@@ -260,15 +275,30 @@ async function runStage(
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
 
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
 function renderFor(
   deps: ExecutorDeps,
   context: StageContext,
   baseSha: string,
   ctxRoot: string,
+  mainDir: string,
 ) {
   const { bundle } = context;
   const dir = join(ctxRoot, "context");
   const domainFiles = fetchDomain(deps.repos, bundle.domain, bundle.repo.name);
+  const integration = bundle.integrationBranch;
   renderContext({
     dir,
     bundle,
@@ -283,6 +313,9 @@ function renderFor(
       ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
       : {}),
     ...(domainFiles ? { domain: domainFiles } : {}),
+    ...(integration
+      ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
+      : {}),
   });
   return dir;
 }
@@ -346,7 +379,7 @@ async function agentChange(
       : before;
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
     const inEnvironment =
       bundle.ticket?.type === "integration" && bundle.environment.length > 0;
     const given = writePrompt(
@@ -429,19 +462,30 @@ async function agentChange(
     });
     if (stamped.error)
       throw new InfrastructureError(`stamping failed: ${stamped.error}`);
-    // Still the holder? (This also renews the lease.) A worker that lost its lease must not publish anything.
-    if (
-      context.signal.aborted ||
-      (await deps.api.prePush(context.job)) === "lost"
-    ) {
-      throw new JobLostError("the lease was lost before the push");
-    }
-    const pushed = deps.push({
+    const request = {
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
       target: `refs/heads/${agent}`,
       ...(replaced ? { expectedOld: replaced } : {}),
-    });
+    };
+    // Network blips: wait 10, 30, 90, 180 s and push again from this run, so a flake does not re-run the agent.
+    // Each attempt re-checks the lease first: a worker that lost it must not publish anything.
+    const waitSeconds = [10, 30, 90, 180];
+    const wait = deps.sleep ?? sleep;
+    let pushed: ReturnType<PushFn> = { ok: false, error: "" };
+    for (let i = 0; i < waitSeconds.length; i++) {
+      if (
+        context.signal.aborted ||
+        (await deps.api.prePush(context.job)) === "lost"
+      ) {
+        throw new JobLostError("the lease was lost before the push");
+      }
+      pushed = deps.push(request);
+      if (pushed.ok) break;
+      if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
+        break;
+      await wait(waitSeconds[i] * 1000, context.signal);
+    }
     if (!pushed.ok)
       throw new InfrastructureError(`push failed: ${pushed.error}`);
     facts.headSha = tip(mainDir, agent);
@@ -497,7 +541,7 @@ async function review(
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
   try {
     bringBranches(slot, mainDir, [...branches.values()]);
-    const ctxDir = renderFor(deps, context, baseSha, tmp);
+    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
     const { refs, refShas } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     const runs = await Promise.all(
@@ -510,7 +554,7 @@ async function review(
           promptFile: given.promptFile,
           ctxDir,
           refs,
-          schema: ReviewOutputSchema,
+          schema: reviewOutputSchemaFor(axis),
           ...options,
           signal: context.signal,
         });
@@ -531,21 +575,25 @@ async function review(
         log(
           `review: WARNING the ${axis} review made ${run.commits.length} commit(s); it should only read`,
         );
-    const factsOf = ({ axis, given, run }: (typeof runs)[number]) => ({
-      axis,
-      run: {
-        // what this axis came to on its own; the stage's outcome is the two put together
-        result: axisResult(run),
-        branch: agent,
-        baseSha,
-        commits: run.commits,
-        durationMs: run.durationMs,
-        ...agentFacts(deps, options, given.prompt),
-        ...(refs.length ? { refShas } : {}),
-        output: run.output ?? { error: run.error },
-      },
-      findings: run.output ? reviewFindings(run.output) : [],
-    });
+    const factsOf = ({ axis, given, run }: (typeof runs)[number]) => {
+      const sources = reviewSources(run.output);
+      return {
+        axis,
+        run: {
+          // what this axis came to on its own; the stage's outcome is the two put together
+          result: axisResult(run),
+          branch: agent,
+          baseSha,
+          commits: run.commits,
+          durationMs: run.durationMs,
+          ...agentFacts(deps, options, given.prompt),
+          ...(refs.length ? { refShas } : {}),
+          output: run.output ?? { error: run.error },
+          ...(sources ? { sources } : {}),
+        },
+        findings: run.output ? reviewFindings(run.output) : [],
+      };
+    };
     const [first, ...others] = runs.map(factsOf);
     return {
       stage,
@@ -598,8 +646,6 @@ function gateRecords(deps: ExecutorDeps, context: StageContext): GateRecords {
   return {
     findPassed: (tree, configBlob) =>
       deps.api.gateResult(context.job, { tree, configBlob }),
-    countsAt: async (commit) =>
-      (await deps.api.gateResult(context.job, { commit }))?.counts,
   };
 }
 
@@ -670,15 +716,16 @@ async function gate(
     };
   }
 
-  // The branch is held to the tests of the commit it starts from: tests that other tickets merged since are not
-  // on it yet, and its merge candidate is held to them instead.
-  const records = gateRecords(deps, context);
-  const baseline = await records.countsAt(baseSha);
-  log(
-    baseline
-      ? `gate: baseline ${baseline.tests} tests, ${baseline.skipped} skipped (the branch's base ${baseSha.slice(0, 8)})`
-      : `gate: no baseline (the branch's base ${baseSha.slice(0, 8)} was never gated)`,
+  // The ticket's branch is held to the newest baseline it already contains. Merges that landed on the integration
+  // branch after it branched are not its to answer for; the merge stage gates the combination against the newest.
+  const baseline = bundle.gateBaselines.find(
+    (b) => hasRef(mainDir, b.sha) && isAncestor(mainDir, b.sha, agent),
   );
+  if (!baseline && bundle.gateBaseline)
+    log(
+      "gate: no earlier merge is part of this branch yet, so the test count is not compared here",
+    );
+
   // The gate configuration comes from the integration branch, not from the ticket's branch.
   const outcome = await runGateStep({
     repoDir: mainDir,
@@ -688,7 +735,7 @@ async function gate(
     commitSha: tip(mainDir, agent),
     configSha: tip(mainDir, integration),
     ...(baseline ? { baseline } : {}),
-    records,
+    records: gateRecords(deps, context),
   });
   if (context.signal.aborted)
     throw new JobLostError("the lease was lost during the gate");
@@ -1098,7 +1145,7 @@ async function diagnose(
   const head = tip(mainDir, integration);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, head, tmp);
+    const ctxDir = renderFor(deps, context, head, tmp, mainDir);
     const given = writePrompt(tmp, promptFor("diagnose"));
     const { refs } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);

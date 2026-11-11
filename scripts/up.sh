@@ -3,7 +3,9 @@
 # Postgres (compose), migrations, the API, the page and one worker, with their output on one terminal.
 # The first time, it checks what the README's "Once" list asks for and, in a terminal, offers to do each
 # missing step for you (install dependencies, build the sandbox image, save your
-# model and Cursor key to ~/.afk/env). Without a terminal it only lists what is missing and how to fix it.
+# model and Cursor key to ~/.afk/env, write a GitLab PAT). Without a terminal it only lists what is missing
+# and how to fix it. Code-host credentials are at least one of the GitHub App or a GitLab PAT
+# (~/.afk/secrets/gitlab/<host>, mode 600, verified against that host). --check never asks.
 #
 # Usage: scripts/up.sh            (Ctrl-C stops everything; Ctrl-C twice: stop them at once)
 #        scripts/up.sh --check    only check, start nothing
@@ -68,6 +70,11 @@ problems=()
 warnings=()
 problem() { problems+=("$1"); }
 good() { printf '  [ok] %s\n' "$1"; }
+# both ways to put code-host credentials on this machine (GitHub App or a GitLab PAT)
+no_host_credentials() {
+  problem "No GitHub App credentials. Put private-key.pem and app.json in $1, then: chmod 600 $1/private-key.pem"
+  problem "No GitLab token. Put a PAT in $2/<host> and run: chmod 600 $2/<host>"
+}
 
 # offer <question> <command...>: in a terminal, ask and run it; succeeds only if it was asked, said yes and worked
 offer() {
@@ -162,10 +169,62 @@ if [ "${WORKER:-1}" != 0 ]; then
   key=
 
   app_dir="${AFK_GITHUB_APP_DIR:-$afk_home/secrets/github-app}"
+  gitlab_dir="${AFK_GITLAB_DIR:-$afk_home/secrets/gitlab}"
+  github_ok=0
+  gitlab_files=0
   if [ -f "$app_dir/private-key.pem" ] && [ -f "$app_dir/app.json" ]; then
+    github_ok=1
     good "GitHub App credentials in $app_dir"
-  else
-    warnings+=("No GitHub App credentials in $app_dir (private-key.pem and app.json). The worker starts without them but cannot open pull requests; see the README, then check them with: node scripts/check-github-app.ts <owner>/<repo>")
+  fi
+  if [ -d "$gitlab_dir" ]; then
+    for f in "$gitlab_dir"/*; do
+      [ -f "$f" ] || continue
+      gitlab_files=1
+      if out=$(node scripts/check-gitlab-token.ts "$f" 2>&1); then
+        good "$out"
+      else
+        problem "$out"
+      fi
+    done
+  fi
+  if [ "$github_ok" = 0 ] && [ "$gitlab_files" = 0 ]; then
+    if [ "$check_only" = 1 ] || [ "$interactive" = 0 ]; then
+      no_host_credentials "$app_dir" "$gitlab_dir"
+    else
+      kind=
+      read -r -p "  Use a GitHub App or a GitLab token? [github/gitlab] " kind || kind=
+      case "$kind" in
+        github | GitHub | GITHUB)
+          problem "No GitHub App credentials in $app_dir (private-key.pem and app.json). See the README, then check them with: node scripts/check-github-app.ts <owner>/<repo>"
+          ;;
+        gitlab | GitLab | GITLAB)
+          gl_host=
+          gl_token=
+          read -r -p "  GitLab host (for example git.example.com; saved as $gitlab_dir/<host>): " gl_host || gl_host=
+          read -r -s -p "  GitLab personal access token (input is hidden; saved mode 600): " gl_token || gl_token=
+          echo
+          gl_host=$(printf '%s' "$gl_host" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          case "$gl_host" in
+            "" | . | .. | */*)
+              problem "GitLab host must be a hostname (the file name under $gitlab_dir)"
+              ;;
+            *)
+              mkdir -p "$gitlab_dir"
+              printf '%s\n' "$gl_token" >"$gitlab_dir/$gl_host"
+              chmod 600 "$gitlab_dir/$gl_host"
+              if out=$(node scripts/check-gitlab-token.ts "$gitlab_dir/$gl_host" 2>&1); then
+                good "$out"
+              else
+                problem "$out"
+              fi
+              ;;
+          esac
+          ;;
+        *)
+          no_host_credentials "$app_dir" "$gitlab_dir"
+          ;;
+      esac
+    fi
   fi
 fi
 

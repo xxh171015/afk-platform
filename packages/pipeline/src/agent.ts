@@ -39,25 +39,68 @@ export const ImplementOutputSchema = z.discriminatedUnion("status", [
 ]);
 export type ImplementOutput = z.infer<typeof ImplementOutputSchema>;
 
-export const ReviewOutputSchema = z
-  .object({
-    verdict: z.enum(["pass", "fix"]),
-    mustFix: z.array(
-      z.object({
-        file: z.string(),
-        line: z.number().int().optional(),
-        problem: z.string().min(1),
-      }),
-    ),
-    suggestions: z.array(z.string()),
-    // the Spec axis's (b): behaviour nobody asked for. It goes to the acceptance pack, never to a fix.
-    scopeCreep: z.array(z.string()).default([]),
-    uncertainties: z.array(z.string()),
-  })
-  .refine((review) => review.mustFix.length === 0 || review.verdict === "fix", {
-    message: "mustFix is not empty, so the verdict must be fix",
-  });
+const ReviewObject = z.object({
+  verdict: z.enum(["pass", "fix"]),
+  mustFix: z.array(
+    z.object({
+      file: z.string(),
+      line: z.number().int().optional(),
+      problem: z.string().min(1),
+    }),
+  ),
+  suggestions: z.array(z.string()),
+  // the Spec axis's (b): behaviour nobody asked for. It goes to the acceptance pack, never to a fix.
+  scopeCreep: z.array(z.string()).default([]),
+  uncertainties: z.array(z.string()),
+  // files this review used as standards sources. Required on the Standards axis.
+  sources: z.array(z.string()).optional(),
+});
+
+const verdictMatchesMustFix = (review: {
+  mustFix: unknown[];
+  verdict: string;
+}) => review.mustFix.length === 0 || review.verdict === "fix";
+
+export const ReviewOutputSchema = ReviewObject.refine(verdictMatchesMustFix, {
+  message: "mustFix is not empty, so the verdict must be fix",
+});
 export type ReviewOutput = z.infer<typeof ReviewOutputSchema>;
+
+/** The standards-source files a review named, or undefined when the result has none. */
+export function reviewSources(output: unknown): string[] | undefined {
+  if (!output || typeof output !== "object") return undefined;
+  const sources = (output as { sources?: unknown }).sources;
+  if (
+    !Array.isArray(sources) ||
+    sources.length === 0 ||
+    sources.some((item) => typeof item !== "string")
+  )
+    return undefined;
+  return sources;
+}
+
+export function sourcesCiteAgentsMd(sources: readonly string[]): boolean {
+  return sources.some(
+    (path) => path.replace(/\\/g, "/").split("/").pop() === "AGENTS.md",
+  );
+}
+
+export const StandardsReviewOutputSchema = ReviewObject.extend({
+  sources: z.array(z.string()).min(1),
+})
+  .refine(verdictMatchesMustFix, {
+    message: "mustFix is not empty, so the verdict must be fix",
+  })
+  .refine((review) => sourcesCiteAgentsMd(review.sources), {
+    message: "AGENTS.md must be among the sources",
+    path: ["sources"],
+  });
+
+export function reviewOutputSchemaFor(axis: ReviewAxis) {
+  return axis === "standards"
+    ? StandardsReviewOutputSchema
+    : ReviewOutputSchema;
+}
 
 // What a diagnosis ends with (docs/specs/m2-platform.md「联调」): which repo is at fault for a failed e2e.
 export const DiagnoseOutputSchema = z.object({

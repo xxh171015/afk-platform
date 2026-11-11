@@ -230,6 +230,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
       );
     expect(await blockE2e("gate-failed")).toBe(CHECK_VIOLATION);
     expect(await blockE2e("final-e2e-failed")).toBe("ok");
+    expect(await blockE2e("job-failed")).toBe("ok");
   });
 
   it("a paused spec must carry a known pause reason, and only a paused spec may", async () => {

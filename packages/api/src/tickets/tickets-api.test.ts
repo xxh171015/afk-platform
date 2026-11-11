@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { FakeWorker, listen, type RunningApi } from "../test/fake-worker.ts";
+import {
+  FakeWorker,
+  listen,
+  type RunningApi,
+  testApp,
+} from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
 let db: TestDatabase;
@@ -12,7 +16,7 @@ let worker: FakeWorker;
 beforeEach(async () => {
   db = await createTestDatabase();
   await migrate(db.pool);
-  api = await listen(createApp({ pool: db.pool }));
+  api = await listen(testApp({ pool: db.pool }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -166,8 +170,8 @@ describe("retry", () => {
   });
 
   describe("of a branch an agent finished", () => {
-    // implement pushed its branch, the gate passed, and the review could not run three times (the agent's provider
-    // was out of usage): the work is there, only the review is missing
+    // implement pushed its branch, the gate passed, and the review could not run three times (its sandbox would not
+    // start): the work is there, only the review is missing
     async function blockedInReview() {
       await runningSpec([ticket("a")]);
       await stage("implement", { outcome: "done", run: { headSha: "h1" } });
@@ -175,7 +179,7 @@ describe("retry", () => {
       for (let i = 0; i < 3; i++) {
         const job = (await worker.claim()).body.job as Claimed;
         expect(job.payload.stage).toBe("review");
-        await worker.fail(job.id, job.attempt, "out of usage");
+        await worker.fail(job.id, job.attempt, "sandbox exited with code 137");
       }
       expect(await states()).toEqual(["1:blocked/job-failed"]);
     }
@@ -658,6 +662,44 @@ describe("a review of two axes", () => {
     // the review passed: the next step is the merge, not a fix
     expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
       "merge",
+    );
+  });
+
+  it("records the Standards sources on the Run, including CONTRIBUTING.md when that was the hard rule", async () => {
+    await reviewed(
+      axisOutput("fix", {
+        mustFix: [
+          { file: "src/x.ts", problem: "CONTRIBUTING.md: no default exports" },
+        ],
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+      }),
+      axisOutput("pass"),
+      "fix",
+    );
+    const runs = await db.pool.query(
+      "SELECT id, axis, sources FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(runs.rows).toEqual([
+      {
+        id: expect.any(Number),
+        axis: "standards",
+        sources: ["AGENTS.md", "CONTRIBUTING.md"],
+      },
+      { id: expect.any(Number), axis: "spec", sources: null },
+    ]);
+    const detail = await call("GET", `/runs/${runs.rows[0].id}`);
+    expect(detail.body.sources).toEqual(["AGENTS.md", "CONTRIBUTING.md"]);
+    expect(detail.body.output.sources).toEqual([
+      "AGENTS.md",
+      "CONTRIBUTING.md",
+    ]);
+    const findings = (await call("GET", "/tickets/1")).body.findings;
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        axis: "standards",
+        kind: "must-fix",
+        body: "src/x.ts CONTRIBUTING.md: no default exports",
+      }),
     );
   });
 });
@@ -1947,6 +1989,98 @@ describe("what a person sees", () => {
       commits: [],
     });
     expect((await call("GET", "/runs/99")).status).toBe(404);
+  });
+});
+
+describe("prechecks before confirm", () => {
+  const fiveStories = [
+    "## User Stories",
+    "",
+    "1. As a splitter, I want to name the User Stories a ticket is for.",
+    "2. As an importer, I want unknown numbers rejected.",
+    "3. As a reviewer, I want the assigned stories as counterparts.",
+    "4. As an author of an infrastructure ticket, I want to omit stories.",
+    "5. As a planner, I want uncovered User Stories listed before confirm.",
+    "",
+  ].join("\n");
+
+  async function draftWith(
+    tickets: Record<string, unknown>[],
+    body = fiveStories,
+  ) {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "s",
+      title: "Spec",
+      body,
+    });
+    expect(
+      (
+        await call(
+          "POST",
+          `/specs/${spec.body.id}/tickets/import`,
+          importBody(spec.body.id, { tickets }),
+        )
+      ).status,
+    ).toBe(200);
+    return spec.body.id as number;
+  }
+
+  it("when tickets' stories cover only 3 of 5 User Stories, prechecks name the other 2 as having no ticket responsible", async () => {
+    const specId = await draftWith([
+      ticket("a", { stories: [1, 3] }),
+      ticket("b", { stories: [4] }),
+    ]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.status).toBe(200);
+    expect(view.body.spec.prechecks).toEqual(
+      expect.arrayContaining([
+        {
+          code: "uncovered-user-stories",
+          level: "yellow",
+          message: "这几条 User Story 没有任何票负责：2, 5",
+        },
+      ]),
+    );
+  });
+
+  it("still confirms a draft that has the uncovered-User-Story precheck", async () => {
+    const specId = await draftWith([
+      ticket("a", { stories: [1, 3] }),
+      ticket("b", { stories: [4] }),
+    ]);
+    const confirmed = await call("POST", `/specs/${specId}/confirm`);
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.state).toBe("running");
+  });
+
+  it("omits the uncovered-User-Story precheck when no ticket wrote stories", async () => {
+    const specId = await draftWith([ticket("a"), ticket("b")]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(
+      view.body.spec.prechecks.filter(
+        (p: { code: string }) => p.code === "uncovered-user-stories",
+      ),
+    ).toEqual([]);
+  });
+
+  it("omits the uncovered-User-Story precheck when every User Story has a ticket", async () => {
+    const specId = await draftWith([
+      ticket("a", { stories: [1, 2, 3] }),
+      ticket("b", { stories: [4, 5] }),
+    ]);
+    const view = await call("GET", `/specs/${specId}`);
+    expect(
+      view.body.spec.prechecks.filter(
+        (p: { code: string }) => p.code === "uncovered-user-stories",
+      ),
+    ).toEqual([]);
   });
 });
 

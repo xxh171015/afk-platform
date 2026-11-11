@@ -71,6 +71,14 @@ describe("failure source of a failed job", () => {
     "ERR_PNPM_META_FETCH_FAIL GET https://registry.npmmirror.com/zod: getaddrinfo ENOTFOUND registry.npmmirror.com",
     "docker: Error response from daemon: Get https://registry-1.docker.io/v2/: net/http: TLS handshake timeout",
     "could not push agent/T-4: fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com",
+    "ActionRequiredError: Unauthorized request",
+    "Error: unknown model 'claude-code'",
+    "Error: quota exceeded: usage limit reached",
+    "docker build of backend (backend) failed (exit 1):\nERROR: failed to solve",
+    "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+    "模型名无效，检查项目的默认模型或 AFK_MODEL",
+    "Cursor 额度用完，充值或换模型后再试",
+    "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
   ];
   const platform = [
     "could not push agent/T-4: ! [rejected] agent/T-4 -> agent/T-4 (non-fast-forward)",
