@@ -46,6 +46,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
    ```
 
    skill 全选；agent 选你用的。装在项目里（默认推荐，只在这台机器上生效，不进仓库）还是全局，由你选。安装时显示的风险表是 skills CLI 对所有包都会做的通用扫描。
+
 2. 在 Cursor 里打开项目的仓库，输入 `/afk-setup`。
 
 这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。afk-setup 会用 `plat update` 把缺的、不是平台版本的规划 skill 补成平台的版本：只有你自己选了全局才动全局，从不覆盖你在全局已有的同名 skill（那时规划 skill 装进规划仓库）。装在仓库里的 skill 和 `skills-lock.json` 由 plat 写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。以后平台升级了，在规划仓库运行 `plat update`：它从平台下载 plat 替换自己，再按 skill 原来的级别装平台对应提交上的版本，两处都有就两处都升级；全局有平台装的规划 skill 时，它只提示这会影响你的其他项目，并给出恢复 Matt 版本的命令，不改全局。`plat` 发现自己或这些 skill 过期时也会提示 `plat update`。
@@ -56,7 +57,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 1. **工具**：缺 Node 20+、git 时，每样用一行告诉你要运行的命令，不替你装。`gh` 只在 origin 是 GitHub 时才要登录（GitLab 项目用 `glab`，见 skill）。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。在规划仓库里运行 `plat update`，把 skill 补齐、升级成平台的版本（规则见上）。收尾前跑 `plat doctor`：本机缺什么、怎么修，它会写进控制塔接入入口的「本机」列。
 2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：skill 以项目级装在哪个仓库就是哪个；已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
-3. **登记**：在你自己的规划仓库 checkout 里（哪个分支都行）跑 `plat init --yes --with …`。`plat init` 会登记项目和仓库，并写好规划要读的文件：tracker 文档 `docs/agents/issue-tracker.md`、原本由 `setup-matt-pocock-skills` 写的 `docs/agents/domain.md` 和 `docs/agents/triage-labels.md`，以及两个本机规则文件 `CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。规则文件里是 `## Agent skills` 一节和规划约定。这些文件都登记在这个仓库的 `.git/info/exclude` 里，只在这台机器上，`git status` 里看不到，也不会被提交；`AGENTS.md` 不改（ADR 0007）。**不用再跑 setup-matt-pocock-skills**。仓库里早先已经提交了 tracker 文档或 `## Agent skills` 的，保持原样，`plat init` 照旧更新那个被跟踪的文件，这处改动随 `afk/setup` 提交。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
+3. **登记**：在你自己的规划仓库 checkout 里（哪个分支都行）跑 `plat init --yes --with …`。`plat init` 会登记项目和仓库，并写好规划要读的文件：tracker 文档 `docs/agents/issue-tracker.md`、原本由 `setup-matt-pocock-skills` 写的 `docs/agents/domain.md` 和 `docs/agents/triage-labels.md`，以及两个本机规则文件 `CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。`CLAUDE.local.md` 含 `## Agent skills` 与规划约定；仓库已跟踪 `AGENTS.md` 时，Cursor 规则只指向 `AGENTS.md` 与 `docs/agents/`，不重复技能路由。这些文件都登记在这个仓库的 `.git/info/exclude` 里，只在这台机器上，`git status` 里看不到，也不会被提交；`AGENTS.md` 不改（ADR 0007）。**不用再跑 setup-matt-pocock-skills**。仓库里早先已经提交了 tracker 文档或 `## Agent skills` 的，保持原样，`plat init` 照旧更新那个被跟踪的文件，这处改动随 `afk/setup` 提交。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
 4. **补齐接入条件**：每个仓库在你的 checkout 之外建一个临时 worktree（`~/.afk/setup/<规划仓库名>/<仓库名>`，基于远端的 `afk/setup`，没有就基于默认分支；detached HEAD，不建本地分支），不动你自己的分支和文件。在那里按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行），用 `git push origin HEAD:afk/setup` 推上去，再用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。通过后删掉这个 worktree，所有仓库都通过后删掉 `~/.afk/setup/<规划仓库名>`，你的机器上不留东西。某个仓库没做完时只留下它的 worktree，报告会写明位置和卡在哪；重跑 `/afk-setup` 会接着用它（里面没有未提交的改动、也没有未推送的提交时，才按远端重建）。旧版 afk-setup 留下的 `<仓库>-afk-setup` worktree 和本地 `afk/setup` 分支：没有未提交的改动、提交也都推了的会被删掉，否则保留，报告里各用一行说明。
 5. **不开 PR，不用先合**：提交说明里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。平台切每个需求的集成分支时，先把 `afk/setup` 合到默认分支最新提交上（**设置提交**），票按它的 `gates.yaml` 过门禁，接入改动跟代码在同一个 PR 里进默认分支；默认分支已经包含 `afk/setup` 后就不再叠。`plat spec confirm` 只在某个仓库的默认分支和 `afk/setup` 上都没有 `gates.yaml` 时拒绝开工。
 6. **在自己的 checkout 里规划**：第 2 节的 grill / to-spec / to-tickets / confirm 都在你自己的规划仓库 checkout 里做，哪个分支都行，不用等设置合入，也没有要换过去的工作树。规划要读的文件只在这台机器上：换一台机器规划，在那台机器上也跑一次 `/afk-setup`。项目已经接入时，它只做本机这部分（工具、skill、本机的规划文件），不推送、不重跑门禁检查，报告只有一行「本机已就绪」。
@@ -65,14 +66,14 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
 ### 1.3 每个仓库要满足的条件
 
-| 条件 | 怎么满足、怎么检查 |
-| --- | --- |
-| 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。 |
-| 默认分支是远端 HEAD 所指的分支（常见是 `main`），代码推到了远端 | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。 |
-| `.sandcastle/gates.yaml` | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。 |
-| `AGENTS.md` / 编码规范 | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。 |
-| （场景 B 的前端）契约副本 | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。 |
-| （有联调票时）联调环境 | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加**它已经在跑的**联调命令，把 JUnit 写到 `reports/e2e-junit.xml`）。不是每个仓库都要 `npm run e2e`。`plat tickets import` 发现缺了又没有票补时会警告。 |
+| 条件                                                                                                                          | 怎么满足、怎么检查                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。                                                                                                                                  |
+| 默认分支是远端 HEAD 所指的分支（常见是 `main`），代码推到了远端                                                               | 平台只 clone 远端。grill 产出的 `GLOSSARY.md`、ADR 是例外：**不用提交也不用推**，`plat spec confirm` 会带上（见第 1 步、第 4 步）。                                                                                                                                                                                                                                        |
+| `.sandcastle/gates.yaml`                                                                                                      | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。                                                                                                                               |
+| `AGENTS.md` / 编码规范                                                                                                        | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。                                                                                                                                                                                                                                        |
+| （场景 B 的前端）契约副本                                                                                                     | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。                                                                                                                                                                                                           |
+| （有联调票时）联调环境                                                                                                        | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加**它已经在跑的**联调命令，把 JUnit 写到 `reports/e2e-junit.xml`）。不是每个仓库都要 `npm run e2e`。`plat tickets import` 发现缺了又没有票补时会警告。 |
 
 沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`：Node 22、npm、pnpm、PostgreSQL、Playwright Chromium，Cursor CLI 版本锁在 `ARG CURSOR_CLI_VERSION`）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
 
@@ -112,7 +113,7 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `d
 ```
 
 - 不会再采访你，只汇总刚才的对话；**它会让你确认「测试 seams」**，认真看：无人值守的 agent 不能再问你，seams 在这里定死。
-- 发布时它调用 `plat spec create`，打印 `S-n`。spec 缺了 to-spec 模板的某一节、或节名被改，以及 `## Testing Decisions` 里没写 seams 时，会在 stderr 告警（不拒绝，正文照存，只统一换行符和末尾换行）。标题没有英文单词时必须带 `--slug <english-slug>`（中文标题生成不了 slug）。
+- 发布时它调用 `plat spec create`，打印 `S-n`。spec 缺了 to-spec 模板的某一节、或节名被改，以及 `## Testing Decisions` 里既无 `seam`/`seams` 也无「缝」时，会在 stderr 告警（不拒绝，正文照存，只统一换行符和末尾换行）。标题没有英文单词时必须带 `--slug <english-slug>`（中文标题生成不了 slug）。
 - spec 此时是 draft，什么都还没开始跑。
 
 ### 第 3 步 to-tickets（拆票并导入）
@@ -171,6 +172,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
    - 前端票用 `contract: <契约票 key>` 引用契约（**跨仓库的契约边**）：平台把契约合并时的版本（契约 SHA）送给前端 agent。
    - 前端若还想只读参考后端代码，加 `refs: [backend]`。
    - 联调票 `type: integration`，写在使用方（前端）仓库，`environment: [backend]`，`blocked_by` 两边的实现票。
+
 3. **联调**：联调票合并后，平台会在全新的联调环境里跑 `npm run e2e`；失败时 agent 诊断出错的仓库，平台**自动**建修复票，修好后重跑，最多 2 轮，之后 blocked（`integration-loop-exceeded`，或 `integration-unknown-side`）。
 4. **合并顺序**：PR 会同时开，但**用别人契约的仓库（前端）的 PR 先开成 draft**。你先合并后端 PR，平台看到后自动把前端 PR 转 ready，你再合并前端。`plat spec show` 按合并顺序列出各 PR、draft/ready 和在等什么。状态从 `partially-merged` 到 `merged`。
 
@@ -180,13 +182,13 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 按下面的顺序做。**每一步都要看到预期结果才往下走。**
 
-| # | 做什么 | 预期 |
-| --- | --- | --- |
-| 1 | `scripts/up.sh --check`，然后 `scripts/up.sh` | 全部 `[ok]`；API 和页面起来；页面能打开 |
-| 2 | 1.2 在 Cursor 里 `/afk-setup`（场景 B 工作区里放前后端两个仓库） | 清单里各仓库的名字、地址、契约路径都对；每个仓库「the GitHub App can work here」；`plat repo check` 都通过 |
-| 3 | 确认 `/afk-setup` 推了各仓库的 `afk/setup`、没有开 PR | 各仓库 GitHub 上有 `afk/setup` 分支，里面有 `.sandcastle/gates.yaml`、`AGENTS.md`，规划仓库的 tracker 文档不在里面（它只在本机，`git status` 是干净的）；默认分支没变 |
-| 4 | **场景 A**，选一个小需求（一个字段、一个接口） | 见下 |
-| 5 | **场景 B**，选一个前后端各改一点的小需求 | 见下 |
+| #   | 做什么                                                           | 预期                                                                                                                                                                  |
+| --- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `scripts/up.sh --check`，然后 `scripts/up.sh`                    | 全部 `[ok]`；API 和页面起来；页面能打开                                                                                                                               |
+| 2   | 1.2 在 Cursor 里 `/afk-setup`（场景 B 工作区里放前后端两个仓库） | 清单里各仓库的名字、地址、契约路径都对；每个仓库「the GitHub App can work here」；`plat repo check` 都通过                                                            |
+| 3   | 确认 `/afk-setup` 推了各仓库的 `afk/setup`、没有开 PR            | 各仓库 GitHub 上有 `afk/setup` 分支，里面有 `.sandcastle/gates.yaml`、`AGENTS.md`，规划仓库的 tracker 文档不在里面（它只在本机，`git status` 是干净的）；默认分支没变 |
+| 4   | **场景 A**，选一个小需求（一个字段、一个接口）                   | 见下                                                                                                                                                                  |
+| 5   | **场景 B**，选一个前后端各改一点的小需求                         | 见下                                                                                                                                                                  |
 
 **场景 A 的通过标准**
 
@@ -210,13 +212,13 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 ## 5. 看进度
 
-| 想知道 | 命令 |
-| --- | --- |
-| 一个 spec 的全貌（票、状态、PR、验收包） | `plat spec show S-n` |
-| 一张票的内容 | `plat ticket view T-n`（旧版本：`--version 1`） |
-| **有什么在等我** | `plat blocked`（blocked 的票和原因简报、paused 的 spec、被关掉或读不出的 PR、清理没做完的） |
-| 某次 run 的日志 | `plat run logs R-n` |
-| 图形化 | 页面 `http://127.0.0.1:5173`：工作台、需求（流程条和五个嵌套页）、待处理、独立 Run |
+| 想知道                                   | 命令                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 一个 spec 的全貌（票、状态、PR、验收包） | `plat spec show S-n`                                                                        |
+| 一张票的内容                             | `plat ticket view T-n`（旧版本：`--version 1`）                                             |
+| **有什么在等我**                         | `plat blocked`（blocked 的票和原因简报、paused 的 spec、被关掉或读不出的 PR、清理没做完的） |
+| 某次 run 的日志                          | `plat run logs R-n`                                                                         |
+| 图形化                                   | 页面 `http://127.0.0.1:5173`：工作台、需求（流程条和五个嵌套页）、待处理、独立 Run          |
 
 日志目录：API 的 run 日志在 `~/.afk/logs/<实例 id>/`；worker 的沙箱原始日志在 `~/.afk/sandbox-logs/`（含未脱敏的流，别拿去分享）。
 
@@ -224,20 +226,20 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 先 `plat blocked`，看原因，再选动作：
 
-| 情况 | 做法 |
-| --- | --- |
-| 票 blocked，想让它再试一次 | `plat ticket retry T-n`（`--mode continue` 接着做 / `--mode restart` 重来；可选 `--note "…"` 只对下一次 Run 有效）。页面待处理和票页也能写这句说明再重试。 |
-| 门禁发现改了保护路径，且你同意 | `plat ticket approve-protected T-n`，再 retry |
-| 票需要改某个保护路径但文件里没批准 | `plat ticket allow-path T-n <路径>`，再 retry |
-| 票的描述有问题 | `plat ticket view T-n --md > t.md`，改完 `plat ticket edit T-n --file t.md`（只对 pending / blocked 的票，可改标题、正文、模块、已批准的保护路径，验收标准从正文重新解析；改仓库、类型、依赖要取消后追加） |
-| 漏了票或要拆票 | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票 |
-| 不要这张票了 | `plat ticket cancel T-n`（`--cascade` 一并取消下游） |
-| spec 暂停（超出 agent 时长） | `plat spec resume S-n`（可给更多时间） |
+| 情况                                                                 | 做法                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 票 blocked，想让它再试一次                                           | `plat ticket retry T-n`（`--mode continue` 接着做 / `--mode restart` 重来；可选 `--note "…"` 只对下一次 Run 有效）。页面待处理和票页也能写这句说明再重试。                                                                                                                                   |
+| 门禁发现改了保护路径，且你同意                                       | `plat ticket approve-protected T-n`，再 retry                                                                                                                                                                                                                                                |
+| 票需要改某个保护路径但文件里没批准                                   | `plat ticket allow-path T-n <路径>`，再 retry                                                                                                                                                                                                                                                |
+| 票的描述有问题                                                       | `plat ticket view T-n --md > t.md`，改完 `plat ticket edit T-n --file t.md`（只对 pending / blocked 的票，可改标题、正文、模块、已批准的保护路径，验收标准从正文重新解析；改仓库、类型、依赖要取消后追加）                                                                                   |
+| 漏了票或要拆票                                                       | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票                                                                                                                                                                         |
+| 不要这张票了                                                         | `plat ticket cancel T-n`（`--cascade` 一并取消下游）                                                                                                                                                                                                                                         |
+| spec 暂停（超出 agent 时长）                                         | `plat spec resume S-n`（可给更多时间）                                                                                                                                                                                                                                                       |
 | 规划文档合不进默认分支（别人刚改了同一段），或规划提交连续三次没做成 | 在规划仓库里拉最新的默认分支，运行 `plat spec retry-planning S-n`：它用备份把规划文档三方合并放回 checkout，冲突标在文件里；解决后再运行一次同一条命令，重新发送并再次收走；不要这些文档了：`plat spec waive-planning S-n`（照常开工，验收包和 PR 描述注明「规划文档未提交」；备份一并删掉） |
-| 整体 review 步骤 blocked | `plat spec retry-final S-n`（也可带 `--note`，出现在这批收尾 Run 上）；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明） |
-| PR 被关掉没合并 | 在 GitHub 上重开；或重做 spec；或 `plat spec cancel S-n` |
-| 取消了但分支/PR 没清干净 | `plat spec cleanup S-n` |
-| 整个 spec 不要了 | `plat spec cancel S-n`（没做完的票和作业停掉，随后关 PR、删分支） |
+| 整体 review 步骤 blocked                                             | `plat spec retry-final S-n`（也可带 `--note`，出现在这批收尾 Run 上）；联调失败又确认可以放行：`plat spec waive-final S-n`（验收包会注明）                                                                                                                                                   |
+| PR 被关掉没合并                                                      | 在 GitHub 上重开；或重做 spec；或 `plat spec cancel S-n`                                                                                                                                                                                                                                     |
+| 取消了但分支/PR 没清干净                                             | `plat spec cleanup S-n`                                                                                                                                                                                                                                                                      |
+| 整个 spec 不要了                                                     | `plat spec cancel S-n`（没做完的票和作业停掉，随后关 PR、删分支）                                                                                                                                                                                                                            |
 
 ## 7. 正式使用前的清单
 
@@ -251,28 +253,29 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 ## 8. 常见问题
 
-| 现象 | 原因和处理 |
-| --- | --- |
-| `up.sh` 说端口已被占用 | 旧的栈还在跑；先停掉旧的，不要同时跑两套（会出现两个 worker 抢同一批槽位） |
-| `up.sh` 说缺 `AFK_MODEL` / key | 在终端里运行它会引导补齐；设置保存在 `~/.afk/env` |
-| `plat spec create` 报 slug 错 | 中文标题要加 `--slug english-slug` |
-| 导入报 YAML 解析错 | 含 `: ` 或以特殊字符开头的 `title`、`acceptance` 整行加引号；全部加引号最稳 |
-| 导入被拒：没有契约路径 | `plat repo edit <名字> --project <P> --contract-path openapi/openapi.yaml` |
-| 导入报 spec 不是 draft | 一个 spec 只能导入一次；追加用 `--append` |
-| agent 卡在提问 | 说明 spec 里的 seams 没写清；在 spec 里补，或改票的 `body` |
+| 现象                                                           | 原因和处理                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `up.sh` 说端口已被占用                                         | 旧的栈还在跑；先停掉旧的，不要同时跑两套（会出现两个 worker 抢同一批槽位）                                                                                                                                                                                                                                    |
+| `up.sh` 说缺 `AFK_MODEL` / key                                 | 在终端里运行它会引导补齐；设置保存在 `~/.afk/env`                                                                                                                                                                                                                                                             |
+| `plat spec create` 报 slug 错                                  | 中文标题要加 `--slug english-slug`                                                                                                                                                                                                                                                                            |
+| 导入报 YAML 解析错                                             | 含 `: ` 或以特殊字符开头的 `title`、`acceptance` 整行加引号；全部加引号最稳                                                                                                                                                                                                                                   |
+| 导入被拒：没有契约路径                                         | `plat repo edit <名字> --project <P> --contract-path openapi/openapi.yaml`                                                                                                                                                                                                                                    |
+| 导入报 spec 不是 draft                                         | 一个 spec 只能导入一次；追加用 `--append`                                                                                                                                                                                                                                                                     |
+| agent 卡在提问                                                 | 说明 spec 里的 seams 没写清；在 spec 里补，或改票的 `body`                                                                                                                                                                                                                                                    |
 | 升级后 `pnpm db:migrate` 失败，写着某张票 `cannot be migrated` | 迁移把所有票的正文改写成 issue 模板（Parent / What to build / Acceptance criteria），并核对验收标准能原样解析回来；不能的票会让整个迁移回滚，错误里写明是哪张票和哪个版本。按提示改那张票的旧正文或验收标准（不要有 `## Acceptance criteria`、`## Parent`、`## Blocked by` 小节，代码围栏要成对），再迁移一次 |
-| 前后端起了不同的名字 / 并行改了同一文件 | to-spec 里把共享名字写死；to-tickets 给会改同一文件的票加依赖边 |
-| 转 ready 失败 | GitHub App 缺 `contents: write`；手动转 ready |
+| 前后端起了不同的名字 / 并行改了同一文件                        | to-spec 里把共享名字写死；to-tickets 给会改同一文件的票加依赖边                                                                                                                                                                                                                                               |
+| 转 ready 失败                                                  | GitHub App 缺 `contents: write`；手动转 ready                                                                                                                                                                                                                                                                 |
+| `check-sandbox-image.sh` 退出 1 但输出里已有 `go`/`node` 版本  | 工具链检查通过 ≠ 本仓库 platform gate 全绿（`GATE_RESULT=fail` 常见）。只验证镜像工具链用 `SKIP_PLATFORM_GATE=1 scripts/check-sandbox-image.sh`                                                                                                                                                               |
 
 ## 9. 升级 skills SHA
 
 平台从 mattpocock/skills 取的东西都原样复制在本仓库里，是唯一来源，运行时不再需要 Matt 仓库的 checkout：
 
-| 位置 | 内容 | 谁用 |
-| --- | --- | --- |
-| `skills/` | grill-with-docs、grilling、domain-modeling、to-spec、to-tickets | 规划机器，和 afk-setup 一起用 `npx skills@latest add xxh171015/afk-platform` 装 |
-| `packages/pipeline/skills/` | implement、tdd、code-review、codebase-design | worker 只读挂进沙箱 |
-| `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板 | `plat init`、`plat tracker-doc` |
+| 位置                               | 内容                                                            | 谁用                                                                            |
+| ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `skills/`                          | grill-with-docs、grilling、domain-modeling、to-spec、to-tickets | 规划机器，和 afk-setup 一起用 `npx skills@latest add xxh171015/afk-platform` 装 |
+| `packages/pipeline/skills/`        | implement、tdd、code-review、codebase-design                    | worker 只读挂进沙箱                                                             |
+| `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板                             | `plat init`、`plat tracker-doc`                                                 |
 
 固定的 SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`），每个目录的 `VENDORED.md` 记下复制时的 SHA，守卫测试保证两者一致。升级时在**一个提交**里做完下面几步：
 
@@ -293,7 +296,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 ```markdown
 ---
 title: "契约：订单备注字段"
-repo: backend                 # 1.2 登记的仓库名（plat init 的清单里有）
+repo: backend # 1.2 登记的仓库名（plat init 的清单里有）
 type: contract
 modules: ["openapi/**"]
 protected_paths_ok: ["openapi/openapi.yaml"]
@@ -321,7 +324,7 @@ repo: backend
 type: implementation
 modules: ["src/orders/**", "test/**"]
 blocked_by: [contract]
-contract: contract            # 可选：拿到契约票合并时的版本
+contract: contract # 可选：拿到契约票合并时的版本
 ---
 
 ## Parent
@@ -401,8 +404,8 @@ title: "前端：订单详情页的取消原因"
 repo: frontend
 type: implementation
 modules: ["src/**", "contract/**"]
-contract: contract            # 跨仓库的契约边
-refs: [backend]               # 可选：只读参考后端代码，出现在 /refs/backend/
+contract: contract # 跨仓库的契约边
+refs: [backend] # 可选：只读参考后端代码，出现在 /refs/backend/
 ---
 
 ## Parent
@@ -427,7 +430,7 @@ title: "联调：取消原因"
 repo: frontend
 type: integration
 modules: ["e2e/**"]
-environment: [backend]        # 不能包含票自己的仓库
+environment: [backend] # 不能包含票自己的仓库
 blocked_by: [be-cancel-reason, fe-status-actions]
 ---
 
@@ -463,7 +466,7 @@ repo: backend
 type: contract
 modules: ["openapi/**"]
 protected_paths_ok: ["openapi/openapi.yaml"]
-blocks: [T-8]                 # 只能在 --append 的文件里写
+blocks: [T-8] # 只能在 --append 的文件里写
 ---
 ```
 

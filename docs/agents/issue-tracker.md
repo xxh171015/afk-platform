@@ -5,15 +5,15 @@
 This repo's specs and tickets live in the **afk-platform**; everything else stays on **GitHub**. Pick the side
 by what the skill is working on:
 
-| A skill says …                                        | Goes to       | Use            |
-| ----------------------------------------------------- | ------------- | -------------- |
-| to-spec: publish the spec                             | the platform  | `plat`         |
-| to-tickets: publish tickets                           | the platform  | `plat`         |
-| implement: fetch the ticket                           | the platform  | `plat`         |
-| code-review: find the spec                            | the platform  | `plat`         |
-| wayfinder: the map and its tickets                    | GitHub | `gh` |
-| triage: labels, needs-info, ready-for-agent on issues | GitHub | `gh` |
-| pull requests treated as requests                     | GitHub | `gh` |
+| A skill says …                                        | Goes to      | Use    |
+| ----------------------------------------------------- | ------------ | ------ |
+| to-spec: publish the spec                             | the platform | `plat` |
+| to-tickets: publish tickets                           | the platform | `plat` |
+| implement: fetch the ticket                           | the platform | `plat` |
+| code-review: find the spec                            | the platform | `plat` |
+| wayfinder: the map and its tickets                    | GitHub       | `gh`   |
+| triage: labels, needs-info, ready-for-agent on issues | GitHub       | `gh`   |
+| pull requests treated as requests                     | GitHub       | `gh`   |
 
 The platform has no labels and no comments, which is why triage and wayfinder stay on GitHub. Each part
 below is complete for its side; do not look for either one elsewhere.
@@ -23,8 +23,10 @@ below is complete for its side; do not look for either one elsewhere.
 Specs and tickets live in the afk-platform, not on the code host. Use the `plat` CLI for all of it.
 `plat` is a command on this machine; run it from this repo, so file paths are relative to here. It finds the
 platform at `--api-url`, `$AFK_API_URL`, the address `plat connect` remembered, else `http://127.0.0.1:3000`.
-Add `--json` for machine output. `plat --help` and
-`plat <command> --help` list every command.
+Add `--json` for machine output. Before guessing a subcommand, run `plat --help` and
+`plat <command> --help`. When this checkout is the **afk-platform** source tree, use `pnpm plat` so the CLI matches the code here (not another `plat` on `PATH`).
+
+`plat repo check <repo name> --branch afk/setup` runs from the **planning repo checkout** where `plat init` registered the project (same place you run `plat spec create`).
 
 This repo is the project's `afk-platform` repo (`repo: afk-platform` in a ticket file); the project is `4` on the platform.
 
@@ -38,7 +40,8 @@ The platform has no labels and no comments. A draft spec is what a skill means b
   It prints the spec number, e.g. `S-7`. Pass `--slug` (lowercase letters, digits, hyphens) whenever the title has no
   Latin words: a Chinese-only title cannot be turned into a slug. The spec is stored as written. `plat` warns, on
   stderr, about a section of the to-spec template that is missing or renamed, and about a Testing Decisions section
-  that names no seams; it still creates the spec. After it prints `S-7`, keep process files under `~/.afk/planning/S-7/`.
+  that names no seams; it still creates the spec. The seams check looks for `seam`/`seams` (case-insensitive) or the
+  character 缝 in that section's body. After it prints `S-7`, keep process files under `~/.afk/planning/S-7/`.
 - **Planning docs** (`GLOSSARY.md`, `docs/adr/`, `AGENTS.md` in this repo, as grill-with-docs and domain-modeling
   write them): leave the changes **uncommitted and unpushed**. `plat spec confirm` sends them and the platform
   commits them onto the spec's integration branch, so they reach the default branch with the spec's pull request.
@@ -67,6 +70,7 @@ The platform has no labels and no comments. A draft spec is what a skill means b
 
   Confirming is the last step of publishing tickets on this tracker. It does not change the spec's body and does not
   close the spec, so it is **not** what a skill means by "modify a parent issue".
+
 - **Fetch a ticket** (a skill's "fetch the relevant ticket"): `plat ticket view T-8 --md` prints the ticket file, the
   same text the agent reads; `plat ticket view T-8` shows its runs, findings and neighbours as well.
 - **Change a ticket that has not started**: `plat ticket view T-8 --md > t.md`, edit the file, `plat ticket edit T-8 --file t.md`.
@@ -80,6 +84,7 @@ The platform has no labels and no comments. A draft spec is what a skill means b
   protected-path change), `plat ticket allow-path T-8 .github/CODEOWNERS` (a blocked ticket that needs a protected path
   the file did not approve; then retry it), `plat ticket cancel T-8`. Ticket commands live under `ticket`, not at the
   top level. To give up a whole spec, `plat spec cancel S-7`.
+- **Give up or clean up a spec**: run `plat spec show S-n` first (state, tickets, branches). **`plat spec cancel`** stops work and cancels open tickets; there is no `plat spec delete`—cancelled specs stay visible as history. On a cancelled spec, `plat spec cleanup S-n` can remove leftover host branches or pull requests. Asking to 「删除」a spec usually means cancel (or cleanup), not erasing the row.
 
 Numbers are global and are never reused, and a failed `spec create` may still take one. Always use the number the
 command printed.
@@ -91,7 +96,6 @@ writes it. The file name without `.md` is the ticket's key.
 
 ```markdown
 ---
-
 title: 订单增加备注字段
 repo: afk-platform
 type: implementation # contract | implementation | integration
@@ -125,6 +129,8 @@ S-7
   and `plat ticket retry`.
 - `type: contract` is for a ticket that only edits the contract file. A ticket using `contract: <key>` must point at
   a contract ticket.
+- List in `modules` only globs for paths **this ticket edits**, not an entire package (for example `packages/api/src/planning/**` instead of `packages/api/src/**`) unless the ticket truly touches the whole tree—wide globs overlap and make parallel merges noisier.
+- When the same behaviour is enforced both on the **ticket pipeline** and in **spec finalization** (for example integration or e2e), name **both** paths in acceptance criteria so review can catch a fix that only lands on one path.
 - Two tickets that touch overlapping `modules` but do not depend on each other get an overlap warning. That is not an
   error: say so in the ticket if it is intended, otherwise add a `blocked_by`.
 - Dependencies must not form a cycle, and a ticket cannot depend on itself.

@@ -29,6 +29,7 @@ Done when `plat version` matches the platform and `plat connect` (no address) sa
 The repos are the git checkouts among the workspace folders; read each one's `origin` and default branch. A repo added to the workspace later is set up when planning first needs it (see "Called mid-planning"). When any origin is GitHub, `gh auth status` must say logged in. If it does not (gh missing or not logged in), say in one line the command the person runs ("gh: `gh auth login`") and stop until it is. Do not install gh or log in for the person. Origins that are all GitLab do not need gh: carry on.
 
 The **planning repo** is where the person plans, decided in this order:
+
 1. the repo afk-setup is installed in (project level): that is where the person chose to plan; the report says so;
 2. the repo whose `docs/agents/issue-tracker.md` the platform wrote (its first line is `<!-- plat tracker-doc …`): the project already has it;
 3. the only repo;
@@ -56,7 +57,7 @@ Done when every repo has its `<setup>`, up to date with origin, and every leftov
 
 In the person's own checkout of the planning repo (not a worktree; whatever branch it is on):
 
-1. `plat init --yes --with <checkout of each other repo> ...`. It registers what is not registered yet; a registered repo keeps its name and settings. It writes the tracker doc, `docs/agents/domain.md`, `docs/agents/triage-labels.md` and the local rule files `CLAUDE.local.md` (Claude Code) and `.cursor/rules/afk-platform.mdc` (Cursor), which hold the `## Agent skills` section and the planning conventions. It adds them to the repo's `.git/info/exclude`: they stay on this machine and are never committed. Do not move them into `AGENTS.md` or `CLAUDE.md`. A repo that already tracks one of these files (an older setup committed it) keeps it there: plat updates the tracked file and its `next:` line names it; copy that change into the planning repo's `<setup>` and commit it with the setup (section 5), then `git restore` it in the person's checkout.
+1. `plat init --yes --with <checkout of each other repo> ...`. It registers what is not registered yet; a registered repo keeps its name and settings. It writes the tracker doc, `docs/agents/domain.md`, `docs/agents/triage-labels.md` and the local rule files `CLAUDE.local.md` (Claude Code) and `.cursor/rules/afk-platform.mdc` (Cursor): `CLAUDE.local.md` holds the `## Agent skills` section and planning conventions; when `AGENTS.md` is tracked, the Cursor rule file points at `AGENTS.md` and `docs/agents/` instead of duplicating Agent skills. It adds them to the repo's `.git/info/exclude`: they stay on this machine and are never committed. Do not move them into `AGENTS.md` or `CLAUDE.md`. A repo that already tracks one of these files (an older setup committed it) keeps it there: plat updates the tracked file and its `next:` line names it; copy that change into the planning repo's `<setup>` and commit it with the setup (section 5), then `git restore` it in the person's checkout.
 2. Each repo's 托管 line comes back. When it is not "can work here" / 「托管正常」, give the person the fix from that line (GitHub: the install/permissions link, for whoever runs the platform; GitLab: who to add as Developer, or the personal-token / Developers-can-merge hint) and carry on with the next steps.
 
 Done when `plat init` printed the project and every repo is registered.
@@ -65,7 +66,7 @@ Done when `plat init` printed the project and every repo is registered.
 
 For every repo, in its `<setup>`:
 
-- **Gate**: write `.sandcastle/gates.yaml` following [gates.md](gates.md), unless one is there already.
+- **Gate**: write `.sandcastle/gates.yaml` following [gates.md](gates.md), unless one is there already. When test uses a filtered package list, vet/build must use the same set (see gates.md「Same package set in every command」).
 - **AGENTS.md**: the agent that implements tickets reads it. When the repo has one (or a `CLAUDE.md`), keep it and add only what is missing: how to run the tests, how to run a single test file, the repo's existing standards documents (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, and files under `docs/` that say how to write code) listed as a fallback for Standards review, and the section "Running unattended": nobody answers questions during a run; when a decision only a person can make comes up, the agent reports `cannot-proceed` and ends. Without one, write it from the code: what the repo is, where things live, how to run it, its conventions, how to run a single test file, and those existing standards documents.
 
 End-to-end tests against other repos are not set up here: a spec that needs them adds what they need as tickets (the tracker doc's "Integration tickets").

@@ -27,4 +27,6 @@ Each round the user answers reshapes the tree: settled decisions push the fronti
 
 Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
 
+When a **recommended answer** asserts how **this platform** behaves today (ticket stages, spec finalization, what runs once vs retries), read the authoritative source in the repo before you recommend—start from `AGENTS.md` navigation pointers and the files they name (for example `packages/shared/src/stage-flow.ts` and `finalize-flow.ts`). If you have not read that source, do not state the behaviour as fact; leave the question on the frontier for a lookup round.
+
 The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.

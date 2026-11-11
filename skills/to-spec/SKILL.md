@@ -61,6 +61,7 @@ Exception: if a prototype produced a snippet that encodes a decision more precis
 A list of testing decisions that were made. Include:
 
 - A description of what makes a good test (only test external behavior, not implementation details)
+- Which **seams** (test boundaries) will be used; name them with `seam`/`seams` or 缝 somewhere in this section (`plat spec create` warns when this section names neither)
 - Which modules will be tested
 - Prior art for the tests (i.e. similar types of tests in the codebase)
 

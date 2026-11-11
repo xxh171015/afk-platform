@@ -1,3 +1,5 @@
+在本仓库实现代码、跑门禁、改包：以根目录 **`AGENTS.md`** 为准（本节只有规划技能路由）。
+
 ## Agent skills
 
 ### Issue tracker

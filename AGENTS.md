@@ -6,7 +6,7 @@
 
 AFK 研发平台本身：人只在规划和最终合并时出现，中间由平台按依赖图调度 agent 在沙箱里逐张票实现。pnpm workspace，包依赖方向只能是 `shared ← api / pipeline / cli / web`，`pipeline ← worker`。`worker` 不引用 `api`，也不连数据库。
 
-- `packages/shared`：类型、zod schema、状态机、生成的 API 客户端
+- `packages/shared`：类型、zod schema、状态机、生成的 API 客户端（票阶段 `stage-flow.ts`，收尾 `finalize-flow.ts`）
 - `packages/api`：Hono 服务、调度、作业队列、Drizzle 表结构
 - `packages/pipeline`：阶段函数，唯一调用 Sandcastle 的模块
 - `packages/worker`：租约循环
@@ -27,6 +27,8 @@ pnpm lint                            # biome check .
 ```
 
 提交前这三条都要通过。门禁跑的就是它们，配置在 `.sandcastle/gates.yaml`。改了 `packages/api/src/db/schema.ts` 要 `pnpm --filter @afk/api db:generate` 并把生成的 SQL 一起提交。改了 API 路由要 `pnpm gen:api` 更新 OpenAPI 和生成的类型。
+
+**本机平台栈（checkout / 重启 / 镜像）：** 没有「平台向 worker 推文件」的通道。跑 worker 的机器上 `git pull` 到含改动的 commit，改 `packages/pipeline/skills` 或 pipeline 后 **重启 worker**（`scripts/up.sh`），改 API 后重启 api，改 `.sandcastle/Dockerfile` 后重建 `sandcastle:afk-platform` 再重启 worker。业务仓代码走 Git 远端，不靠本机未提交改动。细节见 `docs/operations-manual.md` §1 与 §9。
 
 ## 编码规范
 
