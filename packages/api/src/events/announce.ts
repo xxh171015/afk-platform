@@ -9,8 +9,8 @@ import {
   type ShotPull,
 } from "../notify/notices.ts";
 
-// Snapshot a spec before a mutation and emit notices plus an invalidate after it, so each of the seven
-// kinds fires once per transition and the page refetches what changed.
+// Snapshot a spec before a mutation and emit notices after it, so each of the seven kinds fires once
+// per transition. Page refresh is pushed from the events table (events/hub.ts).
 
 const SKIP = new Set([
   "no-ticket",
@@ -236,10 +236,6 @@ export async function snapshotSpecs(
   return shots;
 }
 
-function shotsEqual(left: Shot, right: Shot): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 export async function emitTransition(
   context: AppContext,
   before: Map<number, Shot>,
@@ -247,13 +243,8 @@ export async function emitTransition(
 ): Promise<void> {
   const specIds = new Set<number>([...before.keys()]);
   if (extra.specId !== undefined) specIds.add(extra.specId);
-  if (specIds.size === 0) {
-    context.events.publish(extra);
-    return;
-  }
-  // Ticket jobs still refresh a new Run; host-sync must not push the same snapshot.
-  const ticketScoped =
-    extra.ticketId !== undefined || extra.runId !== undefined;
+  // Invalidate is pushed from the events table after commit (events/hub.ts). This path only
+  // still compares snapshots for the seven notice kinds.
   for (const specId of specIds) {
     const after = await loadShot(context.pool, specId);
     const previous = before.get(specId);
@@ -262,14 +253,6 @@ export async function emitTransition(
         await context.notifications.notify(notice);
       }
     }
-    if (!ticketScoped && after && previous && shotsEqual(previous, after)) {
-      continue;
-    }
-    context.events.publish({
-      specId,
-      ...(extra.ticketId !== undefined ? { ticketId: extra.ticketId } : {}),
-      ...(extra.runId !== undefined ? { runId: extra.runId } : {}),
-    });
   }
 }
 
