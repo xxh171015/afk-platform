@@ -25,3 +25,12 @@ commands:
 - A repo that owns an API contract adds a command that validates it; a repo with a copy of another repo's contract adds one that checks the generated client still matches the copy.
 - Tests that need a database start a throwaway one from `setup` or the test command, inside the sandbox; nothing else runs beside the sandbox during a gate.
 - The gate reads this file from the branch a ticket merges into: changing it later takes a pull request too.
+- `setup` is the place for what can fail for reasons outside the change: installing dependencies, starting a database. A failing `setup` is not handed to an agent to fix: the job is tried again (three times, a minute or two apart), then the ticket waits for a person. Put real checks in `commands`, never in `setup`.
+- When the worker has `AFK_NPM_REGISTRIES` set (registries separated by spaces, e.g. a public mirror and the company one), every sandbox gets it as an environment variable. A Node repo can install from them in order, moving on when one fails, like this repo's `scripts/install-deps.sh` does:
+  ```sh
+  for registry in ${AFK_NPM_REGISTRIES:-https://registry.npmjs.org}; do
+    pnpm install --frozen-lockfile --registry "$registry" && exit 0
+  done
+  exit 1
+  ```
+  Registry addresses stay in the worker's configuration (`~/.afk/env`), not in the repo.

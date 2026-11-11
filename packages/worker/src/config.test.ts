@@ -50,8 +50,29 @@ describe("the worker's configuration", () => {
       cursorApiKey: "key",
       credentialsDir: "/home/me/.afk/secrets/github-app",
       gitlabDir: "/home/me/.afk/secrets/gitlab",
+      npmRegistries: [],
     });
     expect(config.workerId).not.toBe("");
+  });
+
+  it("reads the npm registries, in order, from the environment or ~/.afk/env", () => {
+    const fromFile = loadConfig(
+      sources(complete, {
+        "/home/me/.afk/env":
+          'AFK_NPM_REGISTRIES="https://registry.npmmirror.com  https://nexus.example/npm/"\n',
+      }),
+    );
+    expect(fromFile.npmRegistries).toEqual([
+      "https://registry.npmmirror.com",
+      "https://nexus.example/npm/",
+    ]);
+    const fromEnv = loadConfig(
+      sources({ ...complete, AFK_NPM_REGISTRIES: "https://a.example" }),
+    );
+    expect(fromEnv.npmRegistries).toEqual(["https://a.example"]);
+    expect(() =>
+      loadConfig(sources({ ...complete, AFK_NPM_REGISTRIES: "not-a-url" })),
+    ).toThrow(/AFK_NPM_REGISTRIES has something that is not an address/);
   });
 
   it("takes the Cursor key from ~/.afk/env, and only that key", () => {

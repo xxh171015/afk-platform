@@ -14,6 +14,9 @@ export interface WorkerConfig {
   cursorApiKey: string;
   credentialsDir: string; // the GitHub App's key and ids
   gitlabDir: string; // one file per GitLab host, named after it, holding a PAT
+  // npm registries to install from, tried in order (AFK_NPM_REGISTRIES): passed into every sandbox, where a repo's
+  // setup script reads them. Empty when not set.
+  npmRegistries: string[];
 }
 
 export class ConfigError extends Error {
@@ -63,9 +66,10 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
   const problems: string[] = [];
   const home = env.AFK_HOME || join(sources.homedir, ".afk");
   const fileText = sources.readFile(join(home, "env"));
-  // The environment wins over the file. Only the Cursor key is read from it: GitHub access goes through the App.
-  const cursorApiKey =
-    env.CURSOR_API_KEY || parseEnvFile(fileText ?? "").CURSOR_API_KEY || "";
+  const file = parseEnvFile(fileText ?? "");
+  // The environment wins over the file. Only the Cursor key and the registries are read from it: GitHub access
+  // goes through the App.
+  const cursorApiKey = env.CURSOR_API_KEY || file.CURSOR_API_KEY || "";
   if (!cursorApiKey)
     problems.push(
       `CURSOR_API_KEY is not set: export it, or put CURSOR_API_KEY=... in ${join(home, "env")}`,
@@ -88,6 +92,23 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
     problems.push(`AFK_API_URL is not an address: ${JSON.stringify(apiUrl)}`);
   }
 
+  const npmRegistries = (
+    env.AFK_NPM_REGISTRIES ??
+    file.AFK_NPM_REGISTRIES ??
+    ""
+  )
+    .split(/\s+/)
+    .filter(Boolean);
+  for (const registry of npmRegistries) {
+    try {
+      new URL(registry);
+    } catch {
+      problems.push(
+        `AFK_NPM_REGISTRIES has something that is not an address: ${JSON.stringify(registry)}`,
+      );
+    }
+  }
+
   if (problems.length > 0) throw new ConfigError(problems);
   return {
     apiUrl,
@@ -103,5 +124,6 @@ export function loadConfig(sources: ConfigSources): WorkerConfig {
       join(sources.homedir, ".afk", "secrets", "github-app"),
     gitlabDir:
       env.AFK_GITLAB_DIR || join(sources.homedir, ".afk", "secrets", "gitlab"),
+    npmRegistries,
   };
 }

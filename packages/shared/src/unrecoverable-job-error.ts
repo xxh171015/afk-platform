@@ -11,6 +11,12 @@ export const IMAGE_BUILD_BRIEF =
 
 const CASES: { pattern: string; brief: string }[] = [
   {
+    // Cursor says "You're out of usage. … Increase limits" inside an ActionRequiredError: a quota, not a dead key.
+    pattern:
+      "out of usage|increase limits|usage limit|quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted",
+    brief: QUOTA_EXHAUSTED_BRIEF,
+  },
+  {
     // ActionRequiredError: Unauthorized request is what Cursor returns when the key is dead.
     pattern:
       "actionrequirederror|authentication required|not authenticated|cursor-agent login|unauthorized request",
@@ -22,15 +28,18 @@ const CASES: { pattern: string; brief: string }[] = [
     brief: INVALID_MODEL_BRIEF,
   },
   {
-    pattern:
-      "quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted",
-    brief: QUOTA_EXHAUSTED_BRIEF,
-  },
-  {
     pattern: "docker build of .+ failed",
     brief: IMAGE_BUILD_BRIEF,
   },
 ];
+
+// Of those, the ones that stop every agent job alike, whatever the project: the provider's quota is spent or it
+// refuses the key. They pause all agent jobs until a person resumes them (agents-pause.ts in the api) instead of
+// blocking one ticket after another.
+export function isAgentProviderUnavailable(error: string): boolean {
+  const brief = unrecoverableJobError(error);
+  return brief === QUOTA_EXHAUSTED_BRIEF || brief === CURSOR_AUTH_BRIEF;
+}
 
 export function unrecoverableJobError(error: string): string | undefined {
   const trimmed = error.trim();

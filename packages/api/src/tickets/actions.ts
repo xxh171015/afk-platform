@@ -81,9 +81,24 @@ export function parkedRetryNote(
   return trimmed === "" ? null : trimmed;
 }
 
-// continue keeps the branch and its commits; restart starts again from the integration branch. Either way the
-// fix counts and the review start over, and the ticket goes back to pending for the scheduler. A Retry note
-// (if any) is parked until the next Run is claimed.
+// Has an agent run of the ticket's current version finished and pushed its branch, with no restart pending since?
+async function finishedBranch(
+  client: pg.PoolClient,
+  ticketId: number,
+): Promise<boolean> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM tickets t JOIN runs r ON r.ticket_id = t.id AND r.ticket_version = t.content_version
+     WHERE t.id = $1 AND NOT t.restart AND r.result = 'done' AND r.head_sha IS NOT NULL
+       AND r.stage IN ('implement', 'gate-fix', 'review-fix', 'merge-fix')
+     LIMIT 1`,
+    [ticketId],
+  );
+  return rows.length > 0;
+}
+
+// continue keeps the branch and its commits, and goes on from the gate when there is no note and an agent had finished
+// the branch; restart starts again from the integration branch. Either way the fix counts and the review start over,
+// and the ticket goes back to pending for the scheduler. A Retry note (if any) is parked until the next Run is claimed.
 export async function retryTicket(
   pool: pg.Pool,
   ticketId: number,
@@ -109,9 +124,17 @@ export async function retryTicket(
       }
     }
     const plan = retryPlan(mode === "continue" ? "resume" : "restart");
+    const parked = parkedRetryNote(note);
+    // Continuing without a note for the agent, on a branch an agent already finished: nothing needs writing, so the
+    // pipeline goes on from the gate (which reuses a stored pass) instead of an implement run finding nothing to do.
+    const fromGate =
+      mode === "continue" &&
+      parked === null &&
+      (await finishedBranch(client, ticketId));
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false,
          restart = $3 AND resume_stage IS NULL, integration_rounds = 0,
+         resume_stage = CASE WHEN resume_stage IS NULL AND $5 THEN 'gate' ELSE NULLIF(resume_stage, 'gate') END,
          job_floor = (SELECT COALESCE(max(id), 0) FROM jobs),
          retry_note = $4
        WHERE id = $1`,
@@ -119,7 +142,8 @@ export async function retryTicket(
         ticketId,
         JSON.stringify(plan.fixCounts),
         plan.deleteBranch,
-        parkedRetryNote(note),
+        parked,
+        fromGate,
       ],
     );
     await recordAction(

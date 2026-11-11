@@ -163,42 +163,40 @@ describe("a job the worker could not carry out", () => {
     ).toBe(2);
   });
 
-  it("blocks on a Cursor auth error at the first failure, with the human brief, and does not requeue", async () => {
-    await runningSpec([ticket("a")]);
-    await failNext("ActionRequiredError: Unauthorized request");
-    expect(await state()).toEqual({
-      state: "blocked",
-      blocked_reason: "job-failed",
-    });
-    expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
-    expect(await claim()).toBeNull();
-
-    const queue = await call("GET", "/blocked");
-    expect(queue.body.tickets[0]).toMatchObject({
-      displayId: "T-1",
-      blockedReason: "job-failed",
-      failureSource: "external",
-      brief: {
-        stage: "implement",
-        result: "job-failed",
-        output: {
-          error:
-            "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
-        },
-      },
-    });
-  });
+  it.each([
+    [
+      "a Cursor auth error",
+      "ActionRequiredError: Unauthorized request",
+      "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+    ],
+    [
+      "a spent Cursor quota",
+      "Error: quota exceeded: usage limit reached",
+      "Cursor 额度用完，充值或换模型后再试",
+    ],
+  ] as const)(
+    "pauses every agent job on %s instead of blocking: the job waits in the queue with the human brief",
+    async (_kind, error, brief) => {
+      await runningSpec([ticket("a")]);
+      await failNext(error);
+      expect(await state()).toEqual({ state: "running", blocked_reason: null });
+      expect((await keys()).map((k) => k.state)).toEqual(["queued"]);
+      expect(await claim()).toBeNull(); // agents are paused
+      const run = await db.pool.query(
+        "SELECT result, output->>'error' AS error FROM runs WHERE ticket_id = 1",
+      );
+      expect(run.rows).toEqual([
+        { result: "provider-unavailable", error: brief },
+      ]);
+      expect((await call("GET", "/blocked")).body.tickets).toEqual([]);
+    },
+  );
 
   it.each([
     [
       "an invalid model name",
       "Error: unknown model 'claude-code'",
       "模型名无效，检查项目的默认模型或 AFK_MODEL",
-    ],
-    [
-      "a spent Cursor quota",
-      "Error: quota exceeded: usage limit reached",
-      "Cursor 额度用完，充值或换模型后再试",
     ],
     [
       "an integration image that would not build",
@@ -416,33 +414,23 @@ describe("a step of the overall review that could not be carried out", () => {
     }
   }
 
-  it("blocks the finalization at the first Cursor auth error, with the human brief", async () => {
+  it("does not block the finalization on a Cursor auth error: agent jobs pause, and the step waits in the queue", async () => {
     await toFinalReview();
     await failNext("ActionRequiredError: Unauthorized request");
     expect(
       (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
         .rows[0],
-    ).toEqual({
-      state: "blocked",
-      blocked_reason: "job-failed",
-    });
+    ).toEqual({ state: "active", blocked_reason: null });
     expect(await claim()).toBeNull();
-    const queue = await call("GET", "/blocked");
-    expect(queue.body.finalizations[0]).toMatchObject({
-      blockedReason: "job-failed",
-      brief: {
-        result: "job-failed",
-        output: {
-          error:
-            "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
-        },
-      },
-    });
-    const recorded = await db.pool.query(
-      `SELECT failure_source FROM events
-       WHERE type = 'finalization' AND to_state = 'blocked' ORDER BY id DESC LIMIT 1`,
+    const paused = await db.pool.query(
+      "SELECT agents_pause_reason FROM instance",
     );
-    expect(recorded.rows[0].failure_source).toBe("external");
+    expect(paused.rows[0].agents_pause_reason).toBe(
+      "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
+    );
+    await call("POST", "/agents/resume");
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-review");
   });
 
   it("is queued again, and blocks the finalization after three failures", async () => {

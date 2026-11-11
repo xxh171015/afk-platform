@@ -63,6 +63,8 @@ const GateFacts = z.object({
   kind: z.enum(["gate", "e2e"]).default("gate"),
   commitSha: z.string().min(1),
   configSha: z.string().min(1),
+  treeSha: z.string().min(1).optional(),
+  configBlob: z.string().min(1).optional(),
   commandResults: z.array(z.unknown()).default([]),
   testsTotal: z.number().int().min(0).optional(),
   testsSkipped: z.number().int().min(0).optional(),
@@ -192,6 +194,11 @@ export const EXPECTED_STATE: Record<Stage, TicketState> = {
   diagnose: "merging",
 };
 
+// The stages a queued ticket can start at: implement; the gate, after a retry that keeps a branch the agent already
+// finished; and the e2e of a ticket that is merged already.
+export const startsQueued = (stage: Stage) =>
+  stage === "implement" || stage === "gate" || stage === "e2e";
+
 // The event that takes a queued ticket into its stage: an e2e is the run of a ticket that is merged already.
 const claimEventOf = (stage: Stage): TicketEvent =>
   stage === "e2e" ? { type: "resume-e2e" } : { type: "claim" };
@@ -230,11 +237,11 @@ export async function recordStageResult(
       [ticketId],
     )
   ).rows[0] as TicketRow;
-  // A worker that claimed the implement job may reach us before the claim marked the ticket running.
+  // A worker that claimed the first job may reach us before the claim marked the ticket running.
   const expected = EXPECTED_STATE[stage];
   const stateFits =
     ticket.state === expected ||
-    ((stage === "implement" || stage === "e2e") && ticket.state === "queued");
+    (startsQueued(stage) && ticket.state === "queued");
   if (!stateFits || read.contentVersion !== ticket.content_version) {
     return {
       status: "ignored",
@@ -408,9 +415,11 @@ export async function writeFacts(
     const gate = result.gate;
     // The same commit can be gated again (a rerun after a restart): the latest facts win.
     await client.query(
-      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, kind,
+         tree_sha, config_blob)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (repo_id, commit_sha, kind) DO UPDATE SET config_sha = EXCLUDED.config_sha,
+         tree_sha = EXCLUDED.tree_sha, config_blob = EXCLUDED.config_blob,
          command_results = EXCLUDED.command_results, tests_total = EXCLUDED.tests_total,
          tests_skipped = EXCLUDED.tests_skipped, test_cases = EXCLUDED.test_cases`,
       [
@@ -422,6 +431,8 @@ export async function writeFacts(
         gate.testsSkipped ?? null,
         gate.testCases === undefined ? null : JSON.stringify(gate.testCases),
         gate.kind,
+        gate.treeSha ?? null,
+        gate.configBlob ?? null,
       ],
     );
   }
@@ -632,7 +643,7 @@ export async function markClaimed(
   const read = readStagePayload(job.payload);
   if (!read) return;
   const { ticketId, stage } = read;
-  if (stage === "implement" || stage === "e2e") {
+  if (startsQueued(stage)) {
     // an e2e that is queued is the ticket's run again after a fix: it is merged already
     const next = ticketTransition("queued", claimEventOf(stage));
     if (next.ok && next.state !== "blocked") {

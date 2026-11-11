@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { AgentRunOptions, AgentRunResult } from "@afk/pipeline";
 import {
   composePrompt,
-  GateCache,
   git,
   gitOut,
   PROMPTS,
@@ -236,7 +235,6 @@ function executor(): Omit<ExecutorDeps, "api"> {
     repos,
     snapshots: new SnapshotStore(join(home, "snapshots")),
     push: (request) => pushRef(request),
-    gateCache: new GateCache(),
     docker: docker.cli,
     environments,
     makeAgentRunner: (slotDir) =>

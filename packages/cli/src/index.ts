@@ -1520,7 +1520,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .description("try a blocked ticket again")
     .requiredOption(
       "--mode <mode>",
-      "continue (keep the branch) or restart (start from the integration branch)",
+      "continue (keep the branch; without --note it goes on from the gate when the agent had finished the branch) or restart (start from the integration branch)",
     )
     .option(
       "--note <text>",
@@ -1613,6 +1613,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const { data, response, error } = await api().GET("/blocked");
       if (!data) throw failureFrom(response, error);
       print(data, blockedText(data));
+    });
+
+  program
+    .command("agents")
+    .description("agent jobs, paused while the model provider refuses work")
+    .command("resume")
+    .description(
+      "hand out agent jobs again, once the provider's usage or key is back",
+    )
+    .action(async () => {
+      const { data, response, error } = await api().POST("/agents/resume");
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        data.resumed
+          ? "agent jobs are handed out again"
+          : "agent jobs were not paused",
+      );
     });
 
   program

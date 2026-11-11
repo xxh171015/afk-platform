@@ -690,7 +690,7 @@ sequenceDiagram
 
 | 动作             | 效果                                                     |
 | ---------------- | -------------------------------------------------------- |
-| 接着重试         | 保留分支和 commits，回到 pending，fix 次数清零           |
+| 接着重试         | 保留分支和 commits，回到 pending，fix 次数清零。不带说明、且 agent 已经做完并推送过分支时，从门禁接着跑（门禁结果复用，随后照常 review）；带说明则从 implement 开始，让 agent 按说明改 |
 | 从头重试         | 删除 `agent/<ticket-id>` 分支和 worktree，回到 pending   |
 | 改票后重试       | `plat ticket edit`：内容版本号加一，再按上面两种方式之一重试 |
 | 批准保护路径改动 | 只用于 `protected-path-changed`，跳过这一项检查继续门禁  |
@@ -727,6 +727,7 @@ flowchart LR
 - **幂等键**：每个阶段的幂等键是 `(ticket, 内容版本, 阶段, 序号)`。重跑时先查这个阶段有没有已记录的结果，有就跳过。合并阶段额外检查：agent 分支的 head 已经是集成分支的祖先，就当作已合并。
 - **能力标签**：作业声明需要的能力（docker、能访问哪些仓库），worker 只拉自己能做的。
 - **互斥键**：作业可带 `lock_key`，领取时 API 排除“同键已有未过期租约”的作业，持有期等于租约期，过期自动释放。僵尸 worker 的防护：推送集成分支前先调 API 校验 (作业号, attempt) 仍是当前持有者并续期；推送本身用 `--force-with-lease`；若僵尸抢先推送成功，新持有者靠“agent 分支的 head 已是集成分支的祖先”的幂等检查当作已合并。校验和推送之间有一个很窄的时间窗，由后两层兜住。
+- **作业失败**：worker 自己跑不下去（沙箱起不来、推送一再被拒、门禁的 setup 失败）时报作业失败，同一阶段重排，三次都失败票才以 `job-failed` 等人处理。例外是 agent 的提供方拒绝一切工作（额度用完、密钥被拒，见 `isAgentProviderUnavailable`）：这次 Run 以 `provider-unavailable` 结束并和作业脱钩，作业原样回到队列，平台暂停所有 `agent-run` 作业（instance 表的 `agents_paused_at`），发一次通知，页面顶部显示原因和「恢复」按钮（也可以 `plat agents resume`）。暂停期间门禁、合并照常领取；票不进 blocked，也不计失败次数。
 - 队列库用 graphile-worker、pg-boss，或者直接在 Postgres 表上自己实现都行，前提是满足上面的语义；选型时先确认租约续期和 attempt 是否可用。
 
 作业类型：
@@ -827,9 +828,10 @@ gitGraph
 - **保护路径**：项目配置列出保护路径，默认包括 `.sandcastle/**`、`.github/**`、`.gitlab-ci.yml`、测试框架配置（`vitest.config.*`、`jest.config.*`、`playwright.config.*`）、`tsconfig.json`、契约文件。改这些文件的票，在拆票时用 `protected_paths_ok` 标明具体路径，人在确认拆分时提前批准。判定分两层：
   - **第一道防线是 agent 自己**：`/context/run.json` 里的 `allowedProtectedPaths` 列出这张票已批准的保护路径，prompt 要求“保护路径一律不改，`allowedProtectedPaths` 里的除外”。没批准却必须改时，agent 输出 `cannot-proceed`（`blockedReason` 为 `contract-change-needed` 或 `agent-gave-up`）。M0 实测 agent 会照此拒绝。
   - **兜底是 worker 的检查**：`merge-base..HEAD` 的 diff 碰到的保护路径，减去 `allowedProtectedPaths`，非空就判 `protected-path-changed`，由人批准或驳回。M0 里这条兜底只在本机用造出来的 commit 验证过，没有在真实运行里被触发过。
-- **跳过的测试**：从 JUnit XML 里取测试总数和跳过数。和基准提交的 GateResult 比，跳过数增加或总数减少都判失败。这同时覆盖了“缺 fixture 或 .env，测试悄悄跳过”的情况。**只在所有命令都跑完、拿到 JUnit 时才比较**；前面的命令已经失败时，只报告失败的那一条。
+- **跳过的测试**：从 JUnit XML 里取测试总数和跳过数。和基准提交的 GateResult 比，跳过数增加或总数减少都判失败。单票门禁的基准是票分支的起点（`merge-base`）那次门禁的计数，起点从没跑过门禁就不比；候选门禁的基准是集成分支最近一次合并的计数。别的票后来合进去的测试不在票分支上，不能拿来要求它。这同时覆盖了“缺 fixture 或 .env，测试悄悄跳过”的情况。**只在所有命令都跑完、拿到 JUnit 时才比较**；前面的命令已经失败时，只报告失败的那一条。
 - **0 个 commit**：implement 和 fix 运行结束时没有新 commit，判失败。
-- **结果存档和缓存**：每次门禁按 commit SHA 存一条 GateResult，后续的基线比较和验收包都用它。集成分支 head 的基线门禁直接复用已存的 GateResult，没有就跑一次（M0 实测一次约 15 秒），不在每张票上重跑。
+- **结果存档和复用**：每次门禁按 commit SHA 存一条 GateResult，同时记下代码树 SHA 和 `gates.yaml` 的 blob SHA，后续的基线比较和验收包都用它。门禁结果只取决于代码树和门禁配置，所以同一仓库里树和配置都相同、命令全部通过并有 JUnit 的旧结果直接复用，不再开沙箱，只按这一次的基准重新比较测试数，并为新提交照常记一条 GateResult。典型情况是集成分支没动过时的合并候选（和票分支是同一棵树），以及 worker 重启或重试后同一提交再过门禁。
+- **setup 失败不是改动的问题**：`setup`（装依赖、起数据库）失败时整次门禁当作作业失败，按作业失败重试（共三次），之后票以 `job-failed` 等人处理；不派 gate-fix，也不存 GateResult。worker 配置了 `AFK_NPM_REGISTRIES` 时，它作为环境变量进入每个沙箱，仓库的 setup 脚本按顺序换源安装（本仓库是 `scripts/install-deps.sh`）。
 
 ## 跨仓库需求
 

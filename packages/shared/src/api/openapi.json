@@ -3599,6 +3599,159 @@
         }
       }
     },
+    "/worker/jobs/{id}/gate-result": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "tree": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "configBlob": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "required": ["workerId", "attempt", "tree", "configBlob"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "gate": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "commitSha": {
+                          "type": "string"
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "exitCode": {
+                                "type": "integer"
+                              },
+                              "ms": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["name", "exitCode", "ms"]
+                          }
+                        },
+                        "counts": {
+                          "type": "object",
+                          "properties": {
+                            "tests": {
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["tests", "skipped"]
+                        },
+                        "testCases": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "classname": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["passed", "failed", "skipped"]
+                              }
+                            },
+                            "required": ["name", "classname", "status"]
+                          }
+                        }
+                      },
+                      "required": ["commitSha", "steps", "counts"]
+                    }
+                  },
+                  "required": ["gate"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not the lease holder at the current attempt (fencing)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/worker/jobs/{id}/fail": {
       "post": {
         "parameters": [
@@ -8428,6 +8581,18 @@
                     "status": {
                       "type": "object",
                       "properties": {
+                        "agentsPaused": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "since": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["since", "reason"]
+                        },
                         "logDirBytes": {
                           "type": "number"
                         },
@@ -8503,6 +8668,7 @@
                         }
                       },
                       "required": [
+                        "agentsPaused",
                         "logDirBytes",
                         "apiFreeBytes",
                         "diskLevel",
@@ -8520,6 +8686,28 @@
                     "recentlyCompleted",
                     "status"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/resume": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Agent jobs are claimed again; resumed is false when they were not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resumed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["resumed"]
                 }
               }
             }

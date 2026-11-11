@@ -49,6 +49,7 @@ import {
   RetryNoteField,
   retryFinalBody,
   retryTicketBody,
+  TICKET_RETRY_HINT,
 } from "./RetryNote.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { WaitingTicketEdit } from "./TicketEdit.tsx";
@@ -280,6 +281,7 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
               id={`retry-note-${ticket.displayId}`}
               value={note}
               onChange={setNote}
+              hint={TICKET_RETRY_HINT}
             />
           ) : (
             <p className="w-full text-xs text-muted-foreground">

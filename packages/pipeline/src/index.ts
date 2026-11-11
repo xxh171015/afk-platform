@@ -62,17 +62,19 @@ export {
 export type {
   GateConfig,
   GateOutcome,
+  GateRecords,
   GateSandbox,
   RunGateInput,
   SandboxPlacement,
   SandboxSession,
+  StoredGate,
   TestCase,
   TestCaseStatus,
   TestCounts,
 } from "./gate.ts";
 export {
   GATE_CONFIG_PATH,
-  GateCache,
+  GateSetupError,
   junitCases,
   junitCounts,
   readGateConfig,

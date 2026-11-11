@@ -60,6 +60,9 @@ export interface GateOutcome {
   reasons: string[];
   commitSha: string;
   configSha: string;
+  treeSha: string; // what the gate is about: the same tree under the same configuration gives the same result
+  configBlob: string; // the gates.yaml the commands came from, by content
+  reusedFrom?: string; // the commit whose stored result was used instead of running the commands
   counts?: TestCounts; // only when a JUnit report was read
   testCases?: TestCase[]; // the same report, case by case
   steps: StepOutcome[];
@@ -134,27 +137,86 @@ export function junitCases(xml: string): TestCase[] {
   return cases;
 }
 
+// What the platform remembers of earlier gates in the repo (gate_results), asked for by the worker.
+export interface StoredGate {
+  commitSha: string;
+  steps: StepOutcome[];
+  counts: TestCounts;
+  testCases?: TestCase[];
+}
+export interface GateRecords {
+  // A gate of the same tree under the same gates.yaml whose commands all passed and that wrote a JUnit report.
+  findPassed(
+    treeSha: string,
+    configBlob: string,
+  ): Promise<StoredGate | undefined>;
+}
+
+const SETUP_LOG_LINES = 40;
+
+// The setup step (installing dependencies, starting a database) failed: a problem of the sandbox or the network,
+// not of the change, so the job is tried again rather than handed to an agent to fix.
+export class GateSetupError extends Error {
+  readonly exitCode: number;
+
+  constructor(exitCode: number, output: string) {
+    const tail = output
+      .trimEnd()
+      .split("\n")
+      .slice(-SETUP_LOG_LINES)
+      .join("\n");
+    super(`gate setup failed (exit ${exitCode})\n${tail}`);
+    this.name = "GateSetupError";
+    this.exitCode = exitCode;
+  }
+}
 export interface RunGateInput {
   repoDir: string;
   sandbox: GateSandbox;
   ref: string; // what to test: a branch or a candidate commit
-  commitSha: string; // the commit `ref` points at; the GateResult is cached under it
+  commitSha: string; // the commit `ref` points at
   configSha: string; // where the gate configuration is read from
-  baseline?: TestCounts; // counts of the last passing gate on the integration branch
-  cache?: GateCache;
+  baseline?: TestCounts; // the test counts the change is held to
+  records?: GateRecords; // earlier results: a pass on the same tree and configuration is not run again
   // Aborted when the job is lost: no further command is started (one already running cannot be interrupted).
   signal?: AbortSignal;
 }
 
 export async function runGate(input: RunGateInput): Promise<GateOutcome> {
-  const cached = input.cache?.get(
-    input.commitSha,
-    input.configSha,
-    input.baseline,
-  );
-  if (cached) return cached;
-
   const config = readGateConfig(input.repoDir, input.configSha);
+  const treeSha = gitOrThrow(input.repoDir, [
+    "rev-parse",
+    `${input.commitSha}^{tree}`,
+  ]);
+  const configBlob = gitOrThrow(input.repoDir, [
+    "rev-parse",
+    `${input.configSha}:${GATE_CONFIG_PATH}`,
+  ]);
+  const about = {
+    commitSha: input.commitSha,
+    configSha: input.configSha,
+    treeSha,
+    configBlob,
+  };
+
+  // The commands depend only on the tree and the configuration: a stored pass stands, judged against today's baseline.
+  const stored = await input.records?.findPassed(treeSha, configBlob);
+  if (stored) {
+    const reasons = countReasons(stored.counts, input.baseline);
+    return {
+      ...about,
+      pass: reasons.length === 0,
+      reasons,
+      reusedFrom: stored.commitSha,
+      counts: stored.counts,
+      ...(stored.testCases ? { testCases: stored.testCases } : {}),
+      steps: stored.steps,
+      failureLog:
+        reasons.length > 0 ? failureLog(stored.steps, {}, reasons) : "",
+      stepLogs: {},
+    };
+  }
+
   const steps = [
     ...(config.setup
       ? [
@@ -181,6 +243,8 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
       const result = await session.exec(step.run, {
         timeoutSeconds: step.timeoutSeconds,
       });
+      if (step.name === "setup" && config.setup && result.exitCode !== 0)
+        throw new GateSetupError(result.exitCode, result.output);
       outcomes.push({
         name: step.name,
         exitCode: result.exitCode,
@@ -203,27 +267,14 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
   let counts: TestCounts | undefined;
   if (reasons.length === 0) {
     counts = junit === undefined ? undefined : junitCounts(junit);
-    if (!counts) {
-      reasons.push("no JUnit results");
-    } else if (input.baseline) {
-      if (counts.tests < input.baseline.tests) {
-        reasons.push(
-          `fewer tests than the baseline: ${counts.tests} < ${input.baseline.tests}`,
-        );
-      }
-      if (counts.skipped > input.baseline.skipped) {
-        reasons.push(
-          `more skipped tests than the baseline: ${counts.skipped} > ${input.baseline.skipped}`,
-        );
-      }
-    }
+    if (!counts) reasons.push("no JUnit results");
+    else reasons.push(...countReasons(counts, input.baseline));
   }
 
-  const outcome: GateOutcome = {
+  return {
+    ...about,
     pass: reasons.length === 0,
     reasons,
-    commitSha: input.commitSha,
-    configSha: input.configSha,
     ...(counts ? { counts } : {}),
     ...(counts && junit !== undefined ? { testCases: junitCases(junit) } : {}),
     steps: outcomes,
@@ -232,8 +283,21 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
     stepLogs,
     ...(junit === undefined ? {} : { junit }),
   };
-  input.cache?.remember(outcome, input.baseline);
-  return outcome;
+}
+
+// The number of tests may not shrink and the number of skipped tests may not grow.
+function countReasons(counts: TestCounts, baseline?: TestCounts): string[] {
+  if (!baseline) return [];
+  const reasons: string[] = [];
+  if (counts.tests < baseline.tests)
+    reasons.push(
+      `fewer tests than the baseline: ${counts.tests} < ${baseline.tests}`,
+    );
+  if (counts.skipped > baseline.skipped)
+    reasons.push(
+      `more skipped tests than the baseline: ${counts.skipped} > ${baseline.skipped}`,
+    );
+  return reasons;
 }
 
 // The tail of the failing step's output, then the verdict: this is what gate-fix reads.
@@ -247,32 +311,4 @@ export function failureLog(
     ? `# ${failed.name} failed (exit ${failed.exitCode})\n\n${(logs[failed.name] ?? "").trimEnd().split("\n").slice(-FAILURE_LOG_LINES).join("\n")}\n\n`
     : "";
   return `${tail}## Gate verdict\n${reasons.map((reason) => `- ${reason}`).join("\n")}\n`;
-}
-
-// Results by commit: the same commit under the same configuration is not gated twice (a re-run after a worker
-// restart, or a candidate that equals a branch already gated). Only passing results are reused.
-export class GateCache {
-  private readonly results = new Map<string, GateOutcome>();
-
-  // A pass is only reusable against the same baseline: counts that were enough then may not be now.
-  private key(commitSha: string, configSha: string, baseline?: TestCounts) {
-    return JSON.stringify([commitSha, configSha, baseline ?? null]);
-  }
-
-  get(
-    commitSha: string,
-    configSha: string,
-    baseline?: TestCounts,
-  ): GateOutcome | undefined {
-    return this.results.get(this.key(commitSha, configSha, baseline));
-  }
-
-  remember(outcome: GateOutcome, baseline?: TestCounts): void {
-    if (outcome.pass) {
-      this.results.set(
-        this.key(outcome.commitSha, outcome.configSha, baseline),
-        outcome,
-      );
-    }
-  }
 }

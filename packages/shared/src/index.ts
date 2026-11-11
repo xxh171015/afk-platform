@@ -234,6 +234,7 @@ export {
   CURSOR_AUTH_BRIEF,
   IMAGE_BUILD_BRIEF,
   INVALID_MODEL_BRIEF,
+  isAgentProviderUnavailable,
   QUOTA_EXHAUSTED_BRIEF,
   unrecoverableJobError,
 } from "./unrecoverable-job-error.ts";

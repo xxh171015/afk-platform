@@ -113,6 +113,7 @@ describe("GET /workbench", () => {
       awaitingAcceptance: [],
       recentlyCompleted: [],
       status: {
+        agentsPaused: null,
         logDirBytes: 0,
         apiFreeBytes: 20 * GIB,
         diskLevel: "ok",

@@ -100,7 +100,10 @@ describe("a stage's credentials", () => {
   it("are not renewed for a lease that is gone", async () => {
     const { base, pushed } = deps({
       credentials: { tokens, repoRef: ref },
-      api: { prePush: async () => "lost" as const },
+      api: {
+        prePush: async () => "lost" as const,
+        gateResult: async () => undefined,
+      },
     });
     const bound = await withCredentials(base, "x");
     expect(await bound.api.prePush({} as never)).toBe("lost");

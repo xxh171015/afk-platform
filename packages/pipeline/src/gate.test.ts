@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, gitOut } from "./exec.ts";
 import {
-  GateCache,
+  type GateRecords,
+  GateSetupError,
   junitCases,
   junitCounts,
   readGateConfig,
@@ -384,47 +385,123 @@ describe("the configuration comes from the trusted commit", () => {
   });
 });
 
-describe("caching by commit", () => {
-  it("does not gate the same commit under the same configuration twice", async () => {
+// What the platform would answer: the outcomes it was told about, looked up as the API does.
+class MemoryRecords implements GateRecords {
+  readonly stored: {
+    tree: string;
+    blob: string;
+    outcome: Awaited<ReturnType<typeof runGate>>;
+  }[] = [];
+  remember(outcome: Awaited<ReturnType<typeof runGate>>) {
+    this.stored.push({
+      tree: outcome.treeSha,
+      blob: outcome.configBlob,
+      outcome,
+    });
+  }
+  private passing(match: (o: Awaited<ReturnType<typeof runGate>>) => boolean) {
+    return this.stored
+      .map((s) => s.outcome)
+      .filter((o) => o.counts && o.steps.every((s) => s.exitCode === 0))
+      .findLast(match);
+  }
+  async findPassed(tree: string, blob: string) {
+    const o = this.passing((o) => o.treeSha === tree && o.configBlob === blob);
+    return o?.counts
+      ? { commitSha: o.commitSha, steps: o.steps, counts: o.counts }
+      : undefined;
+  }
+}
+
+describe("reusing a stored pass", () => {
+  it("does not run the commands again for the same tree under the same gates.yaml", async () => {
     const configSha = repoWithGate([{ name: "test", run: writeJunit(3) }]);
     const sandbox = new FakeGateSandbox(repo.dir);
-    const cache = new GateCache();
-    const first = await gate({ sandbox, configSha, cache });
-    const second = await gate({ sandbox, configSha, cache });
-    expect(second).toBe(first);
-    expect(sandbox.opened).toHaveLength(1);
-  });
-
-  it("does not reuse a pass against a different baseline", async () => {
-    const configSha = repoWithGate([{ name: "test", run: writeJunit(8) }]);
-    const sandbox = new FakeGateSandbox(repo.dir);
-    const cache = new GateCache();
-    const first = await gate({
-      sandbox,
-      configSha,
-      cache,
-      baseline: { tests: 5, skipped: 0 },
-    });
-    expect(first.pass).toBe(true);
+    const records = new MemoryRecords();
+    const first = await gate({ sandbox, configSha, records });
+    records.remember(first);
+    // a merge commit whose tree is the same: the candidate of a branch the integration branch did not move under
+    const tree = gitOut(repo.dir, ["rev-parse", "main^{tree}"]);
+    const candidate = gitOut(repo.dir, [
+      "commit-tree",
+      tree,
+      "-p",
+      "main",
+      "-m",
+      "candidate",
+    ]);
     const second = await gate({
       sandbox,
       configSha,
-      cache,
+      records,
+      commitSha: candidate,
+    });
+    expect(sandbox.opened).toHaveLength(1);
+    expect(second).toMatchObject({
+      pass: true,
+      commitSha: candidate,
+      reusedFrom: first.commitSha,
+      counts: { tests: 3, skipped: 0 },
+    });
+  });
+
+  it("judges a stored pass against today's baseline", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(8) }]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const records = new MemoryRecords();
+    records.remember(await gate({ sandbox, configSha, records }));
+    const second = await gate({
+      sandbox,
+      configSha,
+      records,
       baseline: { tests: 9, skipped: 0 },
     });
     expect(second.pass).toBe(false); // the integration branch gained tests since
-    expect(sandbox.opened).toHaveLength(2);
+    expect(second.reasons).toEqual(["fewer tests than the baseline: 8 < 9"]);
+    expect(sandbox.opened).toHaveLength(1);
   });
 
-  it("gates again when the configuration differs, and never reuses a failure", async () => {
+  it("runs again when the tree or the gates.yaml differ", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(2) }]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const records = new MemoryRecords();
+    records.remember(await gate({ sandbox, configSha, records }));
+    repo.commit({ "src.txt": "v2\n" }, "change the code");
+    await gate({ sandbox, configSha, records });
+    repo.commit(
+      {
+        ".sandcastle/gates.yaml": gatesYaml([
+          { name: "test", run: writeJunit(4) },
+        ]),
+      },
+      "change the gate",
+    );
+    const newConfig = gitOut(repo.dir, ["rev-parse", "main"]);
+    records.remember(await gate({ sandbox, configSha: newConfig, records }));
+    expect(sandbox.opened).toHaveLength(3);
+  });
+
+  it("finds no pass among failed results", async () => {
     const configSha = repoWithGate([{ name: "test", run: "sh -c 'exit 1'" }]);
     const sandbox = new FakeGateSandbox(repo.dir);
-    const cache = new GateCache();
-    await gate({ sandbox, configSha, cache });
-    await gate({ sandbox, configSha, cache });
-    expect(sandbox.opened).toHaveLength(2); // a failed result is not cached
-    expect(
-      cache.get(gitOut(repo.dir, ["rev-parse", "main"]), configSha),
-    ).toBeUndefined();
+    const records = new MemoryRecords();
+    records.remember(await gate({ sandbox, configSha, records }));
+    await gate({ sandbox, configSha, records });
+    expect(sandbox.opened).toHaveLength(2);
+  });
+});
+
+describe("a failing setup", () => {
+  it("is not a verdict on the change: it throws with the tail of its output", async () => {
+    const configSha = repoWithGate(
+      [{ name: "test", run: writeJunit(1) }],
+      "sh -c 'echo ERR_PNPM_FETCH tls handshake eof; exit 1'",
+    );
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const failing = gate({ sandbox, configSha });
+    await expect(failing).rejects.toBeInstanceOf(GateSetupError);
+    await expect(failing).rejects.toThrow(
+      /gate setup failed \(exit 1\)\nERR_PNPM_FETCH tls handshake eof/,
+    );
   });
 });

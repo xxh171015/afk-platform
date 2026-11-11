@@ -16,6 +16,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AgentsPausedBanner } from "./AgentsPausedBanner.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
@@ -305,6 +306,7 @@ function Chrome() {
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar onSearch={() => setSearchOpen(true)} waiting={waiting} />
           <TokenExpiryBanner />
+          <AgentsPausedBanner />
           <DiskBanner />
           <main className="flex-1">
             <Outlet />

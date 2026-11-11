@@ -36,7 +36,7 @@ import {
   readPlanningPayload,
 } from "../planning/planning-commit.ts";
 import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
-import { EXPECTED_STATE, type StageJob } from "./results.ts";
+import { EXPECTED_STATE, type StageJob, startsQueued } from "./results.ts";
 
 // A worker that cannot carry out a stage reports the job as failed (its sandbox would not start, a push was
 // refused again and again, ...). That is not the ticket's fault, so the stage is queued again; if it keeps
@@ -149,7 +149,7 @@ async function ticketStageFailed(
   ).rows[0];
   const stateFits =
     row?.state === EXPECTED_STATE[read.stage] ||
-    (read.stage === "implement" && row?.state === "queued");
+    (startsQueued(read.stage) && row?.state === "queued");
   if (!row || !stateFits || read.contentVersion !== row.content_version)
     return { status: "ignored" };
 

@@ -1,3 +1,4 @@
+import type { StoredGate } from "@afk/pipeline";
 import {
   type ApiClient,
   type Bundle,
@@ -36,6 +37,11 @@ export interface WorkerApi {
   isHeld(jobId: number, attempt: number): Promise<boolean>;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
   fail(job: ClaimedJob, error: string): Promise<Holding>;
+  // An earlier passing gate of the job's repo; undefined when there is none or the lease is gone.
+  gateResult(
+    job: ClaimedJob,
+    lookup: { tree: string; configBlob: string },
+  ): Promise<StoredGate | undefined>;
   appendLog(runId: number, job: ClaimedJob, chunk: string): Promise<Holding>;
 }
 
@@ -169,6 +175,16 @@ export function createWorkerApi(
           })
         ).response.status,
       );
+    },
+    async gateResult(job, lookup) {
+      const { params, body } = call(job);
+      const { data, response } = await client.POST(
+        "/worker/jobs/{id}/gate-result",
+        { params, body: { ...body, ...lookup } },
+      );
+      if (data) return data.gate ?? undefined;
+      if (holding(response.status) === "lost") return undefined;
+      throw new Error(`gate result failed: HTTP ${response.status}`);
     },
     async appendLog(runId, job, chunk) {
       const status = (

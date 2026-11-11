@@ -13,6 +13,7 @@ import {
   OrderBroken,
   PullRequestRow,
 } from "../acceptance/pack.ts";
+import { agentsPause, resumeAgents } from "../agents-pause.ts";
 import type { AppContext } from "../app.ts";
 import { refreshDiskStatus } from "../disk.ts";
 import { aroundSpec, aroundTicket } from "../events/announce.ts";
@@ -647,6 +648,8 @@ const RunningTicket = z.object({
 });
 
 const WorkbenchStatus = z.object({
+  // set while the agents' provider refuses work and no agent job is claimed
+  agentsPaused: z.object({ since: z.string(), reason: z.string() }).nullable(),
   logDirBytes: z.number(),
   apiFreeBytes: z.number(),
   diskLevel: z.enum(["ok", "warn", "stop"]),
@@ -695,6 +698,17 @@ const workbenchRoute = createRoute({
         ),
         status: WorkbenchStatus,
       }),
+    ),
+  },
+});
+
+const resumeAgentsRoute = createRoute({
+  method: "post",
+  path: "/agents/resume",
+  responses: {
+    200: reply(
+      "Agent jobs are claimed again; resumed is false when they were not paused",
+      z.object({ resumed: z.boolean() }),
     ),
   },
 });
@@ -986,8 +1000,13 @@ export function registerTicketRoutes(
     const status = await refreshDiskStatus(pool, sample, (notice) =>
       context.notifications.notify(notice),
     );
-    return c.json({ ...board, status }, 200);
+    const agentsPaused = await agentsPause(pool);
+    return c.json({ ...board, status: { ...status, agentsPaused } }, 200);
   });
+
+  app.openapi(resumeAgentsRoute, async (c) =>
+    c.json({ resumed: await resumeAgents(pool) }, 200),
+  );
 
   app.openapi(retryRoute, async (c) => {
     const { id } = c.req.valid("param");

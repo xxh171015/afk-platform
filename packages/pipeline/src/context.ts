@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Bundle } from "@afk/shared";
-import { userStoriesOf } from "@afk/shared/user-stories";
 import { storiesOfTicketFile } from "@afk/shared/ticket-files";
+import { userStoriesOf } from "@afk/shared/user-stories";
 import { git } from "./exec.ts";
 import type { GateConfig } from "./gate.ts";
 
