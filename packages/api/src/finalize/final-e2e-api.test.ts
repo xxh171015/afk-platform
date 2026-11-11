@@ -247,6 +247,36 @@ async function drive(plan: Plan = {}) {
 
 const FIX_BACKEND = { 1: { outcome: "fix", run: { output: REVIEW_FIX } } };
 
+// Completes every job until the first job of the final-e2e step, which is left running.
+async function completeUntilFinalE2e(): Promise<Claimed> {
+  for (let i = 0; i < 60; i++) {
+    const job = await claimSkippingHostSync();
+    if (!job) break;
+    if (job.payload.finalE2e) return job;
+    const stage = job.payload.stage;
+    const result =
+      stage === "final-review"
+        ? job.payload.repoId === 1
+          ? { outcome: "fix", run: { output: REVIEW_FIX } }
+          : { outcome: "pass", run: { output: REVIEW_PASS } }
+        : stage === "final-fix"
+          ? { outcome: "done" }
+          : stage === "final-merge"
+            ? { outcome: "merged", headSha: "h" }
+            : stage === "e2e"
+              ? e2eRun("passed", "fe-head")
+              : stage === "gate"
+                ? { outcome: "passed" }
+                : stage === "review"
+                  ? { outcome: "pass" }
+                  : stage === "implement"
+                    ? { outcome: "done" }
+                    : { outcome: "merged", headSha: "head" };
+    await worker.complete(job.id, job.attempt, { stage, ...result });
+  }
+  throw new Error("no final e2e job");
+}
+
 const finalE2e = async () =>
   (
     await db.pool.query(
@@ -361,6 +391,7 @@ describe("a failed e2e before the pull requests", () => {
     );
     expect(entry).toMatchObject({
       blockedReason: "final-e2e-failed",
+      failureSource: "agent",
       state: "blocked",
     });
     expect(JSON.stringify(entry.brief.output)).toContain("answers 404");
@@ -445,6 +476,35 @@ describe("a failed e2e before the pull requests", () => {
     expect((await call("POST", "/specs/1/cancel")).status).toBe(200);
     expect((await call("POST", "/specs/1/final/waive")).status).toBe(409);
     expect(await queuedOf("open-pr")).toHaveLength(0);
+  });
+
+  it("blocks once on an image that would not build, as an outside service, and does not requeue", async () => {
+    await runningSpec();
+    const job = await completeUntilFinalE2e();
+    const failedReply = await worker.fail(
+      job.id,
+      job.attempt,
+      "docker build of backend (backend) failed (exit 1):\nERROR: failed to solve",
+    );
+    expect(failedReply.status).toBe(200);
+    expect(await finalE2e()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claimSkippingHostSync()).toBeNull();
+    const blocked = (await call("GET", "/blocked")).body;
+    const entry = blocked.finalizations.find(
+      (f: Json) => f.step === "final-e2e",
+    );
+    expect(entry).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "external",
+      brief: {
+        output: {
+          error: "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
+        },
+      },
+    });
   });
 
   it("is blocked as integration-environment-failed after three failed jobs", async () => {
