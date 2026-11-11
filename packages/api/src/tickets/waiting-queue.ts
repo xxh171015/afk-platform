@@ -210,6 +210,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
     finalFinished,
     e2eFinished,
     ticketSources,
+    e2eSources,
     openBySpec,
     downstreamById,
     pullTimes,
@@ -277,6 +278,29 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
         [ticketIds],
       );
       for (const row of rows) map.set(row.ticket_id, row.failure_source);
+      return map;
+    })(),
+    // as it was recorded when the final e2e was blocked
+    (async () => {
+      const map = new Map<number, FailureSource | null>();
+      const e2eSpecIds = [
+        ...new Set(
+          queue.finalizations
+            .filter((item) => item.step === "final-e2e")
+            .map((item) => item.specId),
+        ),
+      ];
+      if (e2eSpecIds.length === 0) return map;
+      const { rows } = await pool.query<{
+        spec_id: number;
+        failure_source: FailureSource | null;
+      }>(
+        `SELECT DISTINCT ON (spec_id) spec_id, failure_source FROM events
+         WHERE type = 'final-e2e' AND to_state = 'blocked' AND spec_id = ANY($1)
+         ORDER BY spec_id, id DESC`,
+        [e2eSpecIds],
+      );
+      for (const row of rows) map.set(row.spec_id, row.failure_source);
       return map;
     })(),
     (async () => {
@@ -382,7 +406,10 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
         ? e2eFinished.get(item.specId)
         : finalFinished.get(item.specId);
     const waitingSince = iso(related ?? finalCreated.get(item.id), now);
-    const failureSource = sourceOf(item.blockedReason);
+    const failureSource =
+      item.step === "final-e2e" && e2eSources.has(item.specId)
+        ? (e2eSources.get(item.specId) ?? null)
+        : sourceOf(item.blockedReason);
     ranked.push({
       ref: { kind: "finalization", id: item.id, step: item.step },
       blocking,

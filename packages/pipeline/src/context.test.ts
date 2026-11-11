@@ -2,7 +2,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readContract, readDomainFiles, renderContext } from "./context.ts";
+import {
+  readContract,
+  readDomainFiles,
+  renderContext,
+  specMarkdownForContext,
+} from "./context.ts";
 import { bundleFor } from "./fixtures.ts";
 import { readGateConfig } from "./gate.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
@@ -24,7 +29,90 @@ const read = (dir: string, file: string) =>
   readFileSync(join(dir, file), "utf8");
 const run = { runId: "R-9", baseSha: "abc123", branch: "agent/T-123" };
 
+describe("specMarkdownForContext", () => {
+  const spec = {
+    displayId: "S-12",
+    title: "Order export",
+    body: [
+      "Customers want CSV.",
+      "",
+      "## User Stories",
+      "",
+      "1. As a merchant, I want a CSV of orders so I can reconcile.",
+      "2. As a shopper, I want a receipt.",
+      "4. As an operator, I want a header row so the file opens in Excel.",
+      "",
+    ].join("\n"),
+  };
+
+  it("lists the ticket's User Stories separately and keeps the rest of the spec", () => {
+    const md = specMarkdownForContext(spec, [1, 4]);
+    expect(md).toContain("# S-12 Order export");
+    expect(md).toContain("Customers want CSV.");
+    expect(md).toContain("2. As a shopper, I want a receipt.");
+    const assigned = md.split("## 这张票负责的 User Story")[1];
+    expect(assigned).toContain(
+      "1. As a merchant, I want a CSV of orders so I can reconcile.",
+    );
+    expect(assigned).toContain(
+      "4. As an operator, I want a header row so the file opens in Excel.",
+    );
+    expect(assigned).not.toContain("As a shopper, I want a receipt.");
+  });
+});
+
 describe("renderContext", () => {
+  it("lists the ticket's User Stories in spec.md when the ticket names them", () => {
+    const dir = ctxDir();
+    const base = bundleFor();
+    const ticket = base.ticket;
+    if (!ticket) throw new Error("expected a ticket on the bundle");
+    const file = ticket.file.replace(
+      "type: implementation\n",
+      "type: implementation\nstories:\n  - 1\n  - 4\n",
+    );
+    renderContext({
+      dir,
+      bundle: bundleFor({
+        ticket: { ...ticket, file },
+        spec: {
+          ...base.spec,
+          body: [
+            "Customers want CSV.",
+            "",
+            "## User Stories",
+            "",
+            "1. As a merchant, I want a CSV of orders so I can reconcile.",
+            "2. As a shopper, I want a receipt.",
+            "4. As an operator, I want a header row so the file opens in Excel.",
+            "",
+          ].join("\n"),
+        },
+      }),
+      run,
+    });
+    const assigned = read(dir, "spec.md").split(
+      "## 这张票负责的 User Story",
+    )[1];
+    expect(assigned).toContain(
+      "1. As a merchant, I want a CSV of orders so I can reconcile.",
+    );
+    expect(assigned).toContain(
+      "4. As an operator, I want a header row so the file opens in Excel.",
+    );
+    expect(assigned).not.toContain("As a shopper");
+    expect(read(dir, "spec.md")).toContain("Customers want CSV.");
+  });
+
+  it("writes spec.md without an assigned-stories section when the ticket has no stories", () => {
+    const dir = ctxDir();
+    renderContext({ dir, bundle: bundleFor(), run });
+    expect(read(dir, "spec.md")).toBe(
+      "# S-12 Order export\n\n# Order export\n\nCustomers want CSV.\n",
+    );
+    expect(read(dir, "spec.md")).not.toContain("这张票负责的 User Story");
+  });
+
   it("writes ticket.md, spec.md and run.json", () => {
     const dir = ctxDir();
     renderContext({ dir, bundle: bundleFor(), run });

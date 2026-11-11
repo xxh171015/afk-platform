@@ -219,6 +219,8 @@ export const tickets = pgTable(
     // Names of repos: read-only references for the agent, and the repos an integration ticket's e2e environment starts.
     refs: text("refs").array().notNull().default([]),
     environment: text("environment").array().notNull().default([]),
+    // User Story numbers in the spec this ticket is responsible for. Empty when omitted.
+    stories: integer("stories").array().notNull().default([]),
     // Added to a spec that was already confirmed (plat tickets import --append).
     appended: boolean("appended").notNull().default(false),
     state: text("state").notNull().default("pending"),
