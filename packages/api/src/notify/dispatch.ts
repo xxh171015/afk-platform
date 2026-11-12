@@ -110,9 +110,10 @@ export class NotificationDispatcher {
       from_state: string | null;
       to_state: string | null;
       reason: string | null;
+      source: string | null;
       data: unknown;
     }>(
-      `SELECT id::text AS id, spec_id, ticket_id, run_id, job_id, repo_id, type, from_state, to_state, reason, data
+      `SELECT id::text AS id, spec_id, ticket_id, run_id, job_id, repo_id, type, from_state, to_state, reason, source, data
        FROM events WHERE id > $1::bigint ORDER BY id`,
       [this.cursor],
     );
@@ -199,6 +200,7 @@ function eventRowOf(row: {
   from_state: string | null;
   to_state: string | null;
   reason: string | null;
+  source: string | null;
   data: unknown;
 }): EventRow {
   return {
@@ -212,6 +214,7 @@ function eventRowOf(row: {
     fromState: row.from_state,
     toState: row.to_state,
     reason: row.reason,
+    source: row.source,
     data: row.data,
   };
 }

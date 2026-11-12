@@ -229,35 +229,42 @@ async function stopTicketWork(
   );
 }
 
+// Stop the ticket's jobs and hold it as taken-over. Used by a person and by host-sync / a refused push.
+export async function applyTakeover(
+  client: pg.PoolClient,
+  ticketId: number,
+): Promise<ActionResult<{ state: TicketState }>> {
+  const ticket = await loadLocked(client, ticketId);
+  if (!ticket) return { status: "no-ticket" };
+  const next = ticketTransition(ticket.state, { type: "takeover" });
+  if (!next.ok) {
+    return refused(
+      `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a pending, queued, running, merging or blocked ticket can be taken over`,
+    );
+  }
+  await client.query(
+    "UPDATE tickets SET state = 'taken-over', blocked_reason = NULL WHERE id = $1",
+    [ticketId],
+  );
+  await stopTicketWork(client, ticketId);
+  await recordAction(client, "takeover", {
+    specId: ticket.spec_id,
+    ticketId,
+  });
+  await schedulePass(client, ticket.spec_id);
+  return { status: "ok", state: next.state };
+}
+
 // A person takes the ticket: jobs stop, the in-flight Run is cancelled, the ticket is not job-failed.
 export async function takeoverTicket(
   pool: pg.Pool,
   ticketId: number,
 ): Promise<ActionResult<{ state: TicketState }>> {
-  return inTransaction(pool, async (client) => {
-    const ticket = await loadLocked(client, ticketId);
-    if (!ticket) return { status: "no-ticket" };
-    const next = ticketTransition(ticket.state, { type: "takeover" });
-    if (!next.ok) {
-      return refused(
-        `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a pending, queued, running, merging or blocked ticket can be taken over`,
-      );
-    }
-    await client.query(
-      "UPDATE tickets SET state = 'taken-over', blocked_reason = NULL WHERE id = $1",
-      [ticketId],
-    );
-    await stopTicketWork(client, ticketId);
-    await recordAction(client, "takeover", {
-      specId: ticket.spec_id,
-      ticketId,
-    });
-    await schedulePass(client, ticket.spec_id);
-    return { status: "ok", state: next.state };
-  });
+  return inTransaction(pool, (client) => applyTakeover(client, ticketId));
 }
 
 // They give it back: the platform takes the remote tip and goes on, without rewriting their commits.
+// last_pushed_sha is cleared so host-sync does not treat their tip as someone else pushing.
 export async function handbackTicket(
   pool: pg.Pool,
   ticketId: number,
@@ -276,6 +283,7 @@ export async function handbackTicket(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, restart = false,
          reviewed = CASE WHEN $2 = 'gate' THEN false ELSE reviewed END,
          resume_stage = $2,
+         last_pushed_sha = NULL,
          job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
        WHERE id = $1`,
       [ticketId, resume],

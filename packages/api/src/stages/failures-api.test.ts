@@ -223,27 +223,50 @@ describe("a job the worker could not carry out", () => {
     },
   );
 
-  it("blocks the ticket at once as branch-moved on a non-fast-forward, without a second job", async () => {
+  it("takes the ticket over at once as branch-moved on a non-fast-forward, without a second job", async () => {
     await runningSpec([ticket("a")]);
     await failNext(
       "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
     );
     expect(await state()).toEqual({
-      state: "blocked",
-      blocked_reason: "branch-moved",
+      state: "taken-over",
+      blocked_reason: null,
     });
     expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
     expect(await claim()).toBeNull();
-    const queue = await call("GET", "/blocked");
-    expect(queue.body.tickets[0]).toMatchObject({
-      blockedReason: "branch-moved",
-      failureSource: "spec",
-      structuredBrief: {
-        summary: "运行期间票分支被推过了",
-      },
-    });
-    expect(queue.body.tickets[0].brief.output.error).toContain(
-      "运行期间票分支被推过了",
+    expect((await call("GET", "/blocked")).body.tickets).toEqual([]);
+    const detail = await call("GET", "/tickets/1");
+    const last = detail.body.runs.at(-1);
+    const run = await call("GET", `/runs/${last.id}`);
+    expect(run.body.output.error).toContain("运行期间票分支被推过了");
+    const events = await db.pool.query<{
+      type: string;
+      to_state: string | null;
+      source: string | null;
+      data: { action?: string };
+    }>(
+      `SELECT type, to_state, source, data FROM events
+       WHERE ticket_id = 1 AND type IN ('ticket', 'action', 'job')
+       ORDER BY id`,
+    );
+    expect(events.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "job",
+          to_state: "failed",
+          source: "worker",
+        }),
+        expect.objectContaining({
+          type: "ticket",
+          to_state: "taken-over",
+          source: "worker",
+        }),
+        expect.objectContaining({
+          type: "action",
+          source: "worker",
+          data: expect.objectContaining({ action: "takeover" }),
+        }),
+      ]),
     );
   });
 

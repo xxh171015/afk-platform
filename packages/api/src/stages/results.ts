@@ -442,6 +442,22 @@ export async function writeFacts(
   }
   const runId = inserted.rows[0]?.id as number;
   await recordOrphanEvent(client, owner, job, run);
+  const TICKET_PUSH_STAGES = [
+    "implement",
+    "gate-fix",
+    "review-fix",
+    "merge-fix",
+  ];
+  if (
+    owner.ticket_id !== null &&
+    run?.headSha &&
+    TICKET_PUSH_STAGES.includes(stage)
+  ) {
+    await client.query(
+      "UPDATE tickets SET last_pushed_sha = $2 WHERE id = $1",
+      [owner.ticket_id, run.headSha],
+    );
+  }
   if (run?.testsTotal !== undefined || run?.envUpMs !== undefined) {
     await client.query(
       "UPDATE runs SET tests_total = $2, tests_failed = $3, env_up_ms = $4 WHERE id = $1",

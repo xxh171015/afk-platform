@@ -3577,6 +3577,24 @@
                             },
                             "required": ["repoUrl", "branch"]
                           }
+                        },
+                        "ticketBranches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "ticketId": {
+                                "type": "integer"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["ticketId", "repoUrl", "branch"]
+                          }
                         }
                       },
                       "required": ["kind", "pulls"]

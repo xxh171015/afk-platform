@@ -256,7 +256,29 @@ export async function runHostTask(
       log(`default branch ${branch.branch} of ${branch.repoUrl}: ${message}`);
     }
   }
-  return { stage: "host-sync", pulls, defaults };
+  const ticketBranches = [];
+  for (const branch of task.kind === "host-sync"
+    ? (task.ticketBranches ?? [])
+    : []) {
+    try {
+      const sha = await deps.adapter.getBranchSha({
+        repo: repoRef(branch.repoUrl),
+        branch: branch.branch,
+      });
+      ticketBranches.push({ ticketId: branch.ticketId, sha });
+    } catch (error) {
+      if (error instanceof HostError && error.status === 429)
+        throw new InfrastructureError(error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      log(`ticket branch ${branch.branch} of ${branch.repoUrl}: ${message}`);
+    }
+  }
+  return {
+    stage: "host-sync",
+    pulls,
+    defaults,
+    ...(ticketBranches.length > 0 ? { ticketBranches } : {}),
+  };
 }
 
 // Closes the spec's open pull requests and deletes its branches. Only what a spec makes is ever deleted

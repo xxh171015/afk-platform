@@ -1940,7 +1940,7 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
     expect(agentPushes()).toBe(1);
   });
 
-  it("blocks the ticket as branch-moved on the first non-fast-forward, with the remote tip in the brief", async () => {
+  it("takes the ticket over as branch-moved on the first non-fast-forward, with the remote tip in the run output", async () => {
     await confirmedSpec([ticket("a")]);
     const remoteTip = gitOut(origin, ["rev-parse", "HEAD"]);
     git(origin, ["update-ref", `refs/heads/agent/${ID}/T-1`, remoteTip]);
@@ -1963,28 +1963,25 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
     });
     expect(implementRuns).toBe(1);
     expect(agentPushes()).toBe(1);
-    expect(await stateOf()).toEqual(["1:blocked/branch-moved"]);
+    expect(await stateOf()).toEqual(["1:taken-over"]);
     const jobs = await db.pool.query(
       "SELECT state FROM jobs WHERE payload->>'stage' = 'implement' ORDER BY id",
     );
     expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
-    const queue = (await fetch(`${api.url}/blocked`).then((r) => r.json())) as {
-      tickets: Array<{
-        structuredBrief: {
-          summary: string;
-          evidence: { lastLogLines?: string };
-        };
-      }>;
-    };
-    expect(queue.tickets[0].structuredBrief.summary).toBe(
-      "运行期间票分支被推过了",
-    );
-    expect(queue.tickets[0].structuredBrief.evidence.lastLogLines).toContain(
-      `远端 tip: ${remoteTip}`,
-    );
-    expect(queue.tickets[0].structuredBrief.evidence.lastLogLines).toContain(
-      "本轮起点:",
-    );
+    const waiting = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as { tickets: unknown[] };
+    expect(waiting.tickets).toEqual([]);
+    const detail = (await fetch(`${api.url}/tickets/1`).then((r) =>
+      r.json(),
+    )) as { runs: { id: number }[] };
+    const last = detail.runs.at(-1);
+    const run = (await fetch(`${api.url}/runs/${last?.id}`).then((r) =>
+      r.json(),
+    )) as { output: { error?: string } };
+    expect(run.output.error).toContain("运行期间票分支被推过了");
+    expect(run.output.error).toContain(`远端 tip: ${remoteTip}`);
+    expect(run.output.error).toContain("本轮起点:");
   });
 
   it("blocks as job-failed on the first permission refusal, with a host brief", async () => {
@@ -2569,7 +2566,7 @@ describe("the ticket branch follows origin", { timeout: 60_000 }, () => {
       heartbeatMs: 20,
     });
     expect(implementRuns).toBe(1);
-    expect(await stateOf()).toEqual(["1:blocked/branch-moved"]);
+    expect(await stateOf()).toEqual(["1:taken-over"]);
     expect(gitOut(origin, ["show", `agent/${ID}/T-1:intruder.ts`])).toBe(
       "intruder",
     );

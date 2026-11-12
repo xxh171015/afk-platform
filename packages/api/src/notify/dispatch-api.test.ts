@@ -593,4 +593,50 @@ describe("notifications from events", () => {
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(notices).toHaveLength(1);
   });
+
+  it("does not notify when a person takes a ticket over from the page", async () => {
+    await runningSpec();
+    const stream = await openEvents();
+    try {
+      await stream.drainInvalidates();
+      expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+      expect(await stream.nextInvalidate()).toMatchObject({ ticketId: 1 });
+      await flushWindow();
+      expect(notices).toEqual([]);
+    } finally {
+      await stream.close();
+    }
+  });
+
+  it("sends waiting-other when host-sync takes a ticket over because the remote branch moved", async () => {
+    await runningSpec();
+    const stream = await openEvents();
+    try {
+      await stream.drainInvalidates();
+      const client = await db.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('afk.source', 'host-sync', true)",
+        );
+        await client.query(
+          "UPDATE tickets SET state = 'taken-over', blocked_reason = NULL WHERE id = 1",
+        );
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+      expect(await stream.nextInvalidate()).toMatchObject({ ticketId: 1 });
+      expect(notices).toEqual([]);
+      await flushWindow();
+      expect(notices).toEqual([
+        {
+          title: "待处理",
+          body: "T-1 写 CSV：票分支已被人改过\nhttp://127.0.0.1:5173/tickets/1",
+        },
+      ]);
+    } finally {
+      await stream.close();
+    }
+  });
 });

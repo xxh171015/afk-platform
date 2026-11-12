@@ -41,10 +41,11 @@ import {
   readPlanningPayload,
 } from "../planning/planning-commit.ts";
 import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
+import { applyTakeover } from "../tickets/actions.ts";
 import { EXPECTED_STATE, type StageJob, startsQueued } from "./results.ts";
 
 // A worker that cannot carry out a stage reports the job as failed (its sandbox would not start, a push was
-// refused, ...). A network blip is retried; a non-fast-forward stops at once as branch-moved, and a host
+// refused, ...). A network blip is retried; a non-fast-forward takes the ticket over at once, and a host
 // permission refusal as job-failed. Other infrastructure errors are queued again and block after three.
 // Cursor auth, a bad model, a spent quota, and a failed integration image build still skip the requeue.
 export const MAX_JOB_FAILURES = 3;
@@ -210,6 +211,11 @@ async function ticketStageFailed(
       read.stage,
     );
     return { status: "requeued", failures };
+  }
+  if (immediate === "branch-moved") {
+    const taken = await applyTakeover(client, read.ticketId);
+    if (taken.status === "no-ticket") throw new Error("no-ticket");
+    return { status: "blocked", failures };
   }
   // A ticket that never got to start counts as running now, so that the state machine can block it.
   const from: TicketState = row.state === "queued" ? "running" : row.state;

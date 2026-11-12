@@ -2137,6 +2137,11 @@ export interface paths {
                     repoUrl: string;
                     branch: string;
                   }[];
+                  ticketBranches?: {
+                    ticketId: number;
+                    repoUrl: string;
+                    branch: string;
+                  }[];
                 }
               | {
                   /** @enum {string} */

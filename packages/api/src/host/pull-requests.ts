@@ -11,6 +11,7 @@ import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
 import { renderPackSection } from "../acceptance/pack-description.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
+import { applyTakeover } from "../tickets/actions.ts";
 import {
   enqueueHostSync,
   enqueueIndexPrLinks,
@@ -56,6 +57,11 @@ export type HostTask =
       kind: "host-sync";
       pulls: { id: number; repoUrl: string; number: number }[];
       defaults: { repoUrl: string; branch: string }[];
+      ticketBranches?: {
+        ticketId: number;
+        repoUrl: string;
+        branch: string;
+      }[];
     }
   | {
       kind: "pr-ready";
@@ -139,6 +145,14 @@ export const HostSyncResultSchema = z.object({
     .array(
       z.object({
         repoUrl: z.string().min(1),
+        sha: z.string().min(1),
+      }),
+    )
+    .optional(),
+  ticketBranches: z
+    .array(
+      z.object({
+        ticketId: z.number().int(),
         sha: z.string().min(1),
       }),
     )
@@ -296,6 +310,7 @@ export async function buildHostTask(
      WHERE r.project_id = $1 AND ${FOLLOWED_PULL_REQUESTS} ORDER BY p.id`,
     [projectId],
   );
+  const ticketBranches = await idleTicketBranches(pool, projectId);
   return {
     kind: "host-sync",
     pulls: pulls.rows.map((p) => ({
@@ -304,7 +319,43 @@ export async function buildHostTask(
       number: p.number,
     })),
     defaults: await defaultBranchesToWatch(pool, projectId),
+    ...(ticketBranches.length > 0 ? { ticketBranches } : {}),
   };
+}
+
+// Idle tickets whose last platform push is known: host-sync compares the remote tip. A ticket with a job
+// in flight is skipped so a push that has not been recorded yet is not taken as someone else's.
+async function idleTicketBranches(
+  pool: pg.Pool,
+  projectId: number,
+): Promise<{ ticketId: number; repoUrl: string; branch: string }[]> {
+  const { rows } = await pool.query<{
+    ticket_id: number;
+    repo_url: string;
+    branch_namespace: string | null;
+  }>(
+    `SELECT t.id AS ticket_id, r.url AS repo_url, s.branch_namespace
+     FROM tickets t
+     JOIN specs s ON s.id = t.spec_id
+     JOIN repos r ON r.id = t.repo_id
+     WHERE r.project_id = $1
+       AND t.state NOT IN ('done', 'cancelled', 'taken-over')
+       AND t.last_pushed_sha IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs j
+         WHERE j.state IN ('queued', 'running')
+           AND (j.payload->>'ticketId')::int = t.id
+       )
+     ORDER BY t.id`,
+    [projectId],
+  );
+  return rows.map((row) => ({
+    ticketId: row.ticket_id,
+    repoUrl: row.repo_url,
+    branch: branchNames(row.branch_namespace).ticket(
+      formatDisplayId("ticket", row.ticket_id),
+    ),
+  }));
 }
 
 // A spec's pull requests that were last seen open, and the branches it made in every repo it touched: the
@@ -631,6 +682,12 @@ export async function recordHostSync(
   for (const { spec_id: specId } of owners.rows) await lockSpec(client, specId);
   if (parsed.data.defaults)
     await applyDefaultShas(client, read.projectId, parsed.data.defaults, now);
+  if (parsed.data.ticketBranches)
+    await takeOverDivergedTicketBranches(
+      client,
+      read.projectId,
+      parsed.data.ticketBranches,
+    );
   for (const pull of parsed.data.pulls) {
     if ("error" in pull) {
       // kept on the row, so that a pull request the host keeps refusing is not silent
@@ -692,10 +749,33 @@ export async function recordHostSync(
   return { status: "applied" };
 }
 
-// A draft pull request goes ready once every pull request it is behind (the repos whose contracts its repo uses) is
-// merged. One a person has already turned ready is not a draft any more and is left alone; one that has had a job
-// (waiting, running, failed or done) is not queued again by this: a failed one waits in plat blocked for a person,
-// and one the host still shows as a draft after a job succeeded is not asked again every minute.
+// Idle tickets whose remote tip is not the SHA the platform last pushed: someone else moved the branch.
+async function takeOverDivergedTicketBranches(
+  client: pg.PoolClient,
+  projectId: number,
+  reported: { ticketId: number; sha: string }[],
+): Promise<void> {
+  for (const item of reported) {
+    const found = await client.query(
+      `SELECT t.id
+       FROM tickets t
+       JOIN repos r ON r.id = t.repo_id
+       WHERE t.id = $1 AND r.project_id = $2
+         AND t.state NOT IN ('done', 'cancelled', 'taken-over')
+         AND t.last_pushed_sha IS NOT NULL
+         AND t.last_pushed_sha <> $3
+         AND NOT EXISTS (
+           SELECT 1 FROM jobs j
+           WHERE j.state IN ('queued', 'running')
+             AND (j.payload->>'ticketId')::int = t.id
+         )`,
+      [item.ticketId, projectId, item.sha],
+    );
+    if (!found.rows[0]) continue;
+    await applyTakeover(client, item.ticketId);
+  }
+}
+
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 function commitSha(value: string | null | undefined): string | undefined {
@@ -723,6 +803,10 @@ async function enqueueIndexPrLinksIfMerged(
   });
 }
 
+// A draft pull request goes ready once every pull request it is behind (the repos whose contracts its repo uses) is
+// merged. One a person has already turned ready is not a draft any more and is left alone; one that has had a job
+// (waiting, running, failed or done) is not queued again by this: a failed one waits in plat blocked for a person,
+// and one the host still shows as a draft after a job succeeded is not asked again every minute.
 async function queueReadyPullRequests(client: pg.PoolClient, specId: number) {
   const order = await mergeOrderOf(client, specId);
   const pulls = await client.query<{
