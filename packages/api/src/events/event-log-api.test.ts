@@ -171,7 +171,7 @@ describe("the events of a ticket", () => {
     ]);
   });
 
-  it("records a lease that ran out as a platform failure", async () => {
+  it("records a lease that ran out as a failed job, the platform's, with its own reason", async () => {
     await runningSpec(["a"]);
     const job = (await claim()) as Claimed;
     clock.advanceSeconds(10_000);
@@ -181,7 +181,7 @@ describe("the events of a ticket", () => {
     ).toEqual([
       expect.objectContaining({
         from_state: "running",
-        to_state: "queued",
+        to_state: "failed",
         failure_source: "platform",
         job_id: job.id,
       }),

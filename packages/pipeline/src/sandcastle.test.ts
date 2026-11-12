@@ -10,6 +10,7 @@ import { runGate } from "./gate.ts";
 import {
   agentEnv,
   classifyAgentError,
+  DEPS_CACHE_SANDBOX_PATH,
   SANDBOX_SKILLS_DIR,
   type SandboxDocker,
   type SandcastleConfig,
@@ -348,6 +349,74 @@ describe("the hardened sandbox", () => {
     expect(
       volumes.some((v) => v.includes(`${SANDBOX_SKILLS_DIR}:/context:ro`)),
     ).toBe(true);
+  });
+});
+
+describe("the gate's dependency cache", () => {
+  const gateRepo = () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml":
+        'setup: "true"\ncommands:\n  - { name: test, run: "true", timeoutSeconds: 30 }\n',
+    });
+    const sha = gitOut(repo.dir, ["rev-parse", "main"]);
+    gitOut(repo.dir, ["branch", "agent/T-1", sha]);
+    return sha;
+  };
+  const volumesOf = (run: string[]) =>
+    run.flatMap((arg, i) => (run[i - 1] === "-v" ? [arg] : []));
+
+  it("mounts the repo's cache folder writable and points the package managers at it, so a second gate downloads nothing", async () => {
+    const sha = gateRepo();
+    const cache = join(mkdtempSync(join(tmpdir(), "afk-deps-")), "backend");
+    const fake = recordingDocker();
+    await runGate({
+      repoDir: repo?.dir as string,
+      sandbox: new SandcastleGateSandbox(
+        gateConfig(fake, { depsCacheDir: cache }),
+      ),
+      ref: "agent/T-1",
+      commitSha: sha,
+      configSha: sha,
+    });
+    const run = dockerRunOf(fake.calls);
+    expect(volumesOf(run)).toContain(`${cache}:${DEPS_CACHE_SANDBOX_PATH}:z`);
+    expect(run).toEqual(
+      expect.arrayContaining([
+        "-e",
+        `pnpm_config_store_dir=${DEPS_CACHE_SANDBOX_PATH}/pnpm-store`,
+      ]),
+    );
+    expect(run).toEqual(
+      expect.arrayContaining([
+        "-e",
+        `pnpm_config_cache_dir=${DEPS_CACHE_SANDBOX_PATH}/pnpm-cache`,
+      ]),
+    );
+    expect(run).toEqual(
+      expect.arrayContaining([
+        "-e",
+        `AFK_DEPS_CACHE=${DEPS_CACHE_SANDBOX_PATH}`,
+      ]),
+    );
+    // made before docker run, so the container's user owns it rather than docker making it as root
+    expect(statSync(cache).isDirectory()).toBe(true);
+  });
+
+  it("is not there when the worker gives no cache folder", async () => {
+    const sha = gateRepo();
+    const fake = recordingDocker();
+    await runGate({
+      repoDir: repo?.dir as string,
+      sandbox: new SandcastleGateSandbox(gateConfig(fake)),
+      ref: "agent/T-1",
+      commitSha: sha,
+      configSha: sha,
+    });
+    const run = dockerRunOf(fake.calls);
+    expect(
+      volumesOf(run).some((v) => v.includes(DEPS_CACHE_SANDBOX_PATH)),
+    ).toBe(false);
+    expect(run.some((arg) => arg.startsWith("AFK_DEPS_CACHE="))).toBe(false);
   });
 });
 

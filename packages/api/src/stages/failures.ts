@@ -49,6 +49,12 @@ export const MAX_JOB_FAILURES = 3;
 
 const JOB_FAILED: BlockedReason = "job-failed";
 
+// The error of a job whose lease ran out. It counts against MAX_JOB_FAILURES like any failure the worker reports:
+// a worker that keeps dying or hanging on the same stage would otherwise be handed the job for ever. The events
+// trigger reads the prefix to record the reason as lease-expired (drizzle/0069_lease_expired_failures.sql).
+export const LEASE_EXPIRED_ERROR =
+  "lease-expired: the worker stopped renewing its lease (it stopped, hung, or could not reach the API)";
+
 // The e2e stage only fails as a job when its environment cannot be brought up (an e2e that runs and fails is a
 // result, not a failed job), and the diagnosis runs in a fresh environment too: three failures of either name it.
 // So does the implement of an integration ticket, whose agent works in the environment: the error in its brief
