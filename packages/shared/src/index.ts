@@ -26,6 +26,17 @@ export {
   parseTicketBranch,
   SETUP_BRANCH,
 } from "./branches.ts";
+export type {
+  DecisionLog,
+  DecisionLogGroup,
+  DecisionLogItem,
+  DecisionLogRun,
+} from "./decision-log.ts";
+export {
+  decisionId,
+  decisionLogFromRuns,
+  itemsFromRun,
+} from "./decision-log.ts";
 export type { Decision, DecisionKind } from "./decisions.ts";
 export {
   CODE_CHANGING_STAGES,

@@ -137,6 +137,10 @@ export function renderContext(input: ContextInput): void {
     ),
   );
   writeFileSync(join(dir, "run.json"), JSON.stringify(runJson(input), null, 2));
+  writeFileSync(
+    join(dir, "decisions.json"),
+    `${JSON.stringify(bundle.decisionLog, null, 2)}\n`,
+  );
   if (bundle.note) {
     writeFileSync(join(dir, "note.md"), bundle.note);
   }

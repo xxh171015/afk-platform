@@ -1,6 +1,9 @@
 import {
   branchNames,
+  CODE_CHANGING_STAGES,
   DEFAULT_TICKET_REVIEW,
+  type DecisionLog,
+  decisionLogFromRuns,
   formatDisplayId,
   parseStageModels,
   resolveLimits,
@@ -127,6 +130,8 @@ export interface Bundle {
   }[];
   // Last passing ticket gate's names, for the merge three-way. Null when this job has no ticket or that gate listed none.
   ticketGateNames: { classname: string; name: string }[] | null;
+  // Decision log for /context: earlier Decisions on this ticket, done siblings, wrap-up runs.
+  decisionLog: DecisionLog;
   // Names a person has allowed this ticket (or this wrap-up / update-branch job) to drop.
   approvedRemovedTests: { classname: string; name: string }[] | null;
   // The project's say over how a run is carried out: how long an agent may be silent or run in all, and the model
@@ -306,6 +311,44 @@ async function ticketGateNamesFor(
   return names.length > 0 ? names : null;
 }
 
+async function decisionLogFor(
+  pool: pg.Pool,
+  specId: number,
+  specDisplayId: string,
+  ticketId: number | null,
+  ticketDisplayId: string | null,
+  currentRunId: number | null,
+): Promise<DecisionLog> {
+  const tickets = await pool.query<{ id: number; state: string }>(
+    "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  const runs = await pool.query<{
+    id: number;
+    stage: string;
+    ticket_id: number | null;
+    output: unknown;
+  }>(
+    `SELECT id, stage, ticket_id, output FROM runs
+     WHERE spec_id = $1 AND result = 'done' AND output IS NOT NULL AND stage = ANY($2)
+     ORDER BY id`,
+    [specId, [...CODE_CHANGING_STAGES]],
+  );
+  return decisionLogFromRuns({
+    specDisplayId,
+    ticketId,
+    ticketDisplayId,
+    currentRunId,
+    tickets: tickets.rows,
+    runs: runs.rows.map((row) => ({
+      id: row.id,
+      stage: row.stage,
+      ticketId: row.ticket_id,
+      output: row.output,
+    })),
+  });
+}
+
 export async function buildBundle(
   pool: pg.Pool,
   job: { id: number; attempt: number; payload: Record<string, unknown> },
@@ -420,6 +463,14 @@ export async function buildBundle(
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
     gateBaselines: await gateBaselinesFor(pool, row.spec_id, row.repo_id),
     ticketGateNames: await ticketGateNamesFor(pool, row.id),
+    decisionLog: await decisionLogFor(
+      pool,
+      row.spec_id,
+      formatDisplayId("spec", row.spec_id),
+      row.id,
+      formatDisplayId("ticket", row.id),
+      run.rows[0]?.id ?? null,
+    ),
     approvedRemovedTests: (() => {
       const names = testNamesFrom(row.allowed_removed_tests);
       return names.length > 0 ? names : null;
@@ -528,6 +579,14 @@ async function buildFinalBundle(
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
     gateBaselines: await gateBaselinesFor(pool, final.specId, final.repoId),
     ticketGateNames: null,
+    decisionLog: await decisionLogFor(
+      pool,
+      final.specId,
+      formatDisplayId("spec", final.specId),
+      null,
+      null,
+      run.rows[0]?.id ?? null,
+    ),
     approvedRemovedTests: (() => {
       const names = testNamesFrom(job.payload.approvedRemoved);
       return names.length > 0 ? names : null;
@@ -624,6 +683,14 @@ async function buildUpdateBranchBundle(
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
     ticketGateNames: null,
+    decisionLog: await decisionLogFor(
+      pool,
+      update.specId,
+      formatDisplayId("spec", update.specId),
+      null,
+      null,
+      run.rows[0]?.id ?? null,
+    ),
     approvedRemovedTests: (() => {
       const names = testNamesFrom(job.payload.approvedRemoved);
       return names.length > 0 ? names : null;
@@ -717,6 +784,14 @@ async function buildLocateBundle(
     gateBaseline: null,
     gateBaselines: [],
     ticketGateNames: null,
+    decisionLog: await decisionLogFor(
+      pool,
+      locate.specId,
+      formatDisplayId("spec", locate.specId),
+      null,
+      null,
+      run.rows[0]?.id ?? null,
+    ),
     approvedRemovedTests: null,
     ...runSettings(
       row.limits,

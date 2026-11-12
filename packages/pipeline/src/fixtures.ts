@@ -81,6 +81,11 @@ export function bundleFor(
     gateBaseline: null,
     gateBaselines: [],
     ticketGateNames: null,
+    decisionLog: {
+      ticket: { displayId: "T-123", decisions: [], rulings: [] },
+      doneTickets: [],
+      spec: null,
+    },
     approvedRemovedTests: null,
     limits: {
       runIdleSeconds: DEFAULT_LIMITS.runIdleSeconds,

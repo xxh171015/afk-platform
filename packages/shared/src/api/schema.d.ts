@@ -2089,6 +2089,62 @@ export interface paths {
                     name: string;
                   }[]
                 | null;
+              decisionLog: {
+                ticket: {
+                  displayId: string;
+                  decisions: {
+                    id: string;
+                    run: string;
+                    stage: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  rulings: unknown[];
+                } | null;
+                doneTickets: {
+                  displayId: string;
+                  decisions: {
+                    id: string;
+                    run: string;
+                    stage: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  rulings: unknown[];
+                }[];
+                spec: {
+                  displayId: string;
+                  decisions: {
+                    id: string;
+                    run: string;
+                    stage: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  rulings: unknown[];
+                } | null;
+              };
               approvedRemovedTests:
                 | {
                     classname: string;

@@ -3511,6 +3511,174 @@
                         "required": ["classname", "name"]
                       }
                     },
+                    "decisionLog": {
+                      "type": "object",
+                      "properties": {
+                        "ticket": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "displayId": {
+                              "type": "string"
+                            },
+                            "decisions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "run": {
+                                    "type": "string"
+                                  },
+                                  "stage": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "choice",
+                                      "conflict",
+                                      "known-gap",
+                                      "deferred",
+                                      "workaround"
+                                    ]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "ref": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "run",
+                                  "stage",
+                                  "kind",
+                                  "text"
+                                ]
+                              }
+                            },
+                            "rulings": {
+                              "type": "array",
+                              "items": {}
+                            }
+                          },
+                          "required": ["displayId", "decisions", "rulings"]
+                        },
+                        "doneTickets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "decisions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "choice",
+                                        "conflict",
+                                        "known-gap",
+                                        "deferred",
+                                        "workaround"
+                                      ]
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "ref": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "run",
+                                    "stage",
+                                    "kind",
+                                    "text"
+                                  ]
+                                }
+                              },
+                              "rulings": {
+                                "type": "array",
+                                "items": {}
+                              }
+                            },
+                            "required": ["displayId", "decisions", "rulings"]
+                          }
+                        },
+                        "spec": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "displayId": {
+                              "type": "string"
+                            },
+                            "decisions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "run": {
+                                    "type": "string"
+                                  },
+                                  "stage": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "choice",
+                                      "conflict",
+                                      "known-gap",
+                                      "deferred",
+                                      "workaround"
+                                    ]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "ref": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "run",
+                                  "stage",
+                                  "kind",
+                                  "text"
+                                ]
+                              }
+                            },
+                            "rulings": {
+                              "type": "array",
+                              "items": {}
+                            }
+                          },
+                          "required": ["displayId", "decisions", "rulings"]
+                        }
+                      },
+                      "required": ["ticket", "doneTickets", "spec"]
+                    },
                     "approvedRemovedTests": {
                       "type": ["array", "null"],
                       "items": {
@@ -3592,6 +3760,7 @@
                     "gateBaseline",
                     "gateBaselines",
                     "ticketGateNames",
+                    "decisionLog",
                     "approvedRemovedTests",
                     "limits",
                     "model",

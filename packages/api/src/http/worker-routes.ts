@@ -1,4 +1,5 @@
 import {
+  DECISION_KINDS,
   HOST_KINDS,
   REVIEW_AXES,
   StageModelsSchema,
@@ -238,6 +239,20 @@ const completeRoute = holderRoute(
   { result: z.unknown() },
   z.object({ ok: z.literal(true) }),
 );
+const DecisionLogGroup = z.object({
+  displayId: z.string(),
+  decisions: z.array(
+    z.object({
+      id: z.string(),
+      run: z.string(),
+      stage: z.string(),
+      kind: z.enum(DECISION_KINDS),
+      text: z.string(),
+      ref: z.string().optional(),
+    }),
+  ),
+  rulings: z.array(z.unknown()),
+});
 const Bundle = z.object({
   job: z.object({
     id: z.number().int(),
@@ -357,6 +372,11 @@ const Bundle = z.object({
   ticketGateNames: z
     .array(z.object({ classname: z.string(), name: z.string() }))
     .nullable(),
+  decisionLog: z.object({
+    ticket: DecisionLogGroup.nullable(),
+    doneTickets: z.array(DecisionLogGroup),
+    spec: DecisionLogGroup.nullable(),
+  }),
   approvedRemovedTests: z
     .array(z.object({ classname: z.string(), name: z.string() }))
     .nullable(),

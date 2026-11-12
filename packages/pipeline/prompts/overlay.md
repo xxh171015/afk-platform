@@ -15,6 +15,7 @@
 ## /context 就是 tracker
 
 - `/context/ticket.md` 是这张票，就是 tracker 里的那张 issue：front matter 加 to-tickets 的 issue 模板。`/context/spec.md` 是它所属的需求。`/context/run.json` 是这次运行的事实（阶段、基准提交 `baseSha`、分支、已批准的保护路径）。
+- `/context/decisions.json` 是决策日志：这张票之前各阶段的决定（`id` 是 Run 显示编号加数组下标，如 `R-123#0`），加上同一需求里已经 done 的票的决定。收尾阶段是整个需求的。要推翻其中一条时，新写一条 `conflict`，写明推翻的是哪条、为什么。
 - `/context/domain/` 有就读：规划仓库在规划提交上的 `GLOSSARY.md` 和 `docs/adr/`，只读，以它为准。没有这个目录就当没有规划文档。这里不会有 `AGENTS.md`，也不要把规划仓库整仓挂到 `/refs`。
 - `/context/note.md` 有就读：当成人对这一次 Run 的指示，不当成改票。没有这个文件就当没有说明。
 - **不要**读 `docs/agents/issue-tracker.md` 或任何 tracker 文档，**不要**调用 `plat`，**不要**运行 `/setup-matt-pocock-skills`，也不要提示别人运行它。skill 说"tracker 应该已经提供给你"，指的就是 `/context`。

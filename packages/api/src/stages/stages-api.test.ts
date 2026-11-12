@@ -1057,6 +1057,83 @@ describe("the bundle", () => {
     expect(run.rows[0].contract_shas).toBeNull();
   });
 
+  it("puts this ticket's earlier decisions on gate-fix and review, with stage and Run id", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [{ kind: "conflict", text: "picked the story" }],
+        },
+      },
+    });
+    const expected = [
+      {
+        id: expect.stringMatching(/^R-\d+#0$/),
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "implement",
+        kind: "conflict",
+        text: "picked the story",
+      },
+    ];
+    await stage("gate", { outcome: "failed" });
+    const fix = (await worker.claim()).body.job as Claimed;
+    expect(fix.payload.stage).toBe("gate-fix");
+    expect((await bundle(fix)).body.decisionLog.ticket?.decisions).toEqual(
+      expected,
+    );
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "gate-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    expect(review.payload.stage).toBe("review");
+    const onReview = (await bundle(review)).body.decisionLog;
+    expect(onReview.ticket?.decisions).toEqual(expected);
+    expect(onReview.spec).toBeNull();
+  });
+
+  it("gives a downstream ticket the upstream's decisions once it is done, and not a pending sibling's", async () => {
+    await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c", { blocked_by: ["b"] }),
+    ]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "a",
+          acceptance: {},
+          decisions: [{ kind: "choice", text: "named it export" }],
+        },
+      },
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", MERGED);
+    const b = (await worker.claim()).body.job as Claimed;
+    expect(b.payload.stage).toBe("implement");
+    const log = (await bundle(b)).body.decisionLog;
+    expect(log.ticket?.displayId).toBe("T-2");
+    expect(log.doneTickets.map((t) => t.displayId)).toEqual(["T-1"]);
+    expect(log.doneTickets[0]?.decisions).toEqual([
+      {
+        id: expect.stringMatching(/^R-\d+#0$/),
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "implement",
+        kind: "choice",
+        text: "named it export",
+      },
+    ]);
+    expect(log.doneTickets.map((t) => t.displayId)).not.toContain("T-3");
+  });
+
   it("names the Run the job started, so logs and commit trailers have somewhere to point", async () => {
     await runningSpec([ticket("a")]);
     const job = (await worker.claim()).body.job as Claimed;

@@ -689,6 +689,9 @@ describe("the prompts", () => {
       "保护路径",
       "/context/domain/",
       "/context/note.md",
+      "/context/decisions.json",
+      "推翻",
+      "conflict",
       "不当成改票",
       "单个测试文件怎么跑看仓库的 `AGENTS.md`",
     ])

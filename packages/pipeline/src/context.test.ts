@@ -113,6 +113,47 @@ describe("renderContext", () => {
     expect(read(dir, "spec.md")).not.toContain("这张票负责的 User Story");
   });
 
+  it("writes the decision log next to run.json", () => {
+    const dir = ctxDir();
+    const log = {
+      ticket: {
+        displayId: "T-123",
+        decisions: [
+          {
+            id: "R-8#0",
+            run: "R-8",
+            stage: "implement",
+            kind: "conflict" as const,
+            text: "picked the story",
+          },
+        ],
+        rulings: [],
+      },
+      doneTickets: [
+        {
+          displayId: "T-1",
+          decisions: [
+            {
+              id: "R-2#0",
+              run: "R-2",
+              stage: "implement",
+              kind: "choice" as const,
+              text: "named it export",
+            },
+          ],
+          rulings: [],
+        },
+      ],
+      spec: null,
+    };
+    renderContext({
+      dir,
+      bundle: bundleFor({ decisionLog: log }),
+      run,
+    });
+    expect(JSON.parse(read(dir, "decisions.json"))).toEqual(log);
+  });
+
   it("writes ticket.md, spec.md and run.json", () => {
     const dir = ctxDir();
     renderContext({ dir, bundle: bundleFor(), run });

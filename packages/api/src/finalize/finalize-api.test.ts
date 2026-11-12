@@ -457,6 +457,60 @@ describe("the overall review and the one fix", () => {
     });
     expect((await bundleOf(fix)).review).toMatchObject({ verdict: "fix" }); // the fix is told what to fix
   });
+
+  it("gives wrap-up the whole spec's decisions, including update-branch", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE repos SET default_sha = 'bbb222'");
+    await step("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [{ kind: "choice", text: "named it export" }],
+        },
+      },
+    });
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    await step("review", SUCCESS.review as Record<string, unknown>);
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    const bundleOf = async (job: Claimed) =>
+      (await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      ).then((r) => r.json())) as Json;
+    const named = {
+      id: expect.stringMatching(/^R-\d+#0$/),
+      run: expect.stringMatching(/^R-\d+$/),
+      stage: "implement",
+      kind: "choice",
+      text: "named it export",
+    };
+    const wholeSpec = (log: Json) => {
+      expect(log.ticket).toBeNull();
+      expect(log.doneTickets.map((t: Json) => t.displayId)).toEqual(["T-1"]);
+      expect(log.doneTickets[0]?.decisions).toEqual([named]);
+      expect(log.spec).toMatchObject({ displayId: "S-1", decisions: [] });
+    };
+    const update = (await claim()) as Claimed;
+    expect(update.payload.stage).toBe("update-branch");
+    wholeSpec((await bundleOf(update)).decisionLog);
+    await worker.complete(update.id, update.attempt, {
+      stage: "update-branch",
+      outcome: "merged",
+      headSha: "updated",
+    });
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    wholeSpec((await bundleOf(review)).decisionLog);
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      ...REVIEW_FIX,
+    });
+    const fix = (await claim()) as Claimed;
+    expect(fix.payload.stage).toBe("final-fix");
+    wholeSpec((await bundleOf(fix)).decisionLog);
+  });
 });
 
 describe("when it goes wrong", () => {
