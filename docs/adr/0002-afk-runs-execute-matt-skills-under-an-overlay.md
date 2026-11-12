@@ -16,4 +16,5 @@
 - 覆盖层引用了 skill 里的具体步骤（比如 code-review 第 1–3 步、第 4 步的 brief），所以绑定到 skills SHA：覆盖层写明它对应的 SHA，和平台固定的 SHA 不一致时有测试失败，升级 skills 时必须回头核对覆盖层。
 - review 结果的每一项带审查轴（`axis`），要改平台的 schema。坏味道和 scope creep 只进 suggestions，写进验收包由人看；AFK 运行里不做重构。
 - 现在 code-review 的第 3 步（找标准来源）由覆盖层替 agent 做完，Standards 轴只认 `AGENTS.md`、覆盖层规范和坏味道基线。优化计划 4.2 落地后改为 agent 按 skill 原文自己找，`AGENTS.md` 和覆盖层写明的规范仍一定在列，用到的文件记在 Run 的 `sources` 上；两次运行互相隔离、不开子 agent 的取舍不变。
+- 票级审查默认只跑 Spec 轴：Standards 轴在 S-1…S-28 的票级和需求级共 67 次没有提出一条必须修，只在需求级 final-review 跑，那里看的是整份改动。项目设置 `ticketReview: both` 可以要回票级两轴；两次运行互相隔离的做法不变。票级 Spec 轴保留，它要对实现者的决定下结论（[ADR 0010](0010-afk-means-do-not-wait.md)）。
 - 联调 implement 和诊断阶段不跑 matt 的 skill，只接覆盖层：e2e 是对着已经实现好的服务写的，套不上 tdd 的红 → 绿。

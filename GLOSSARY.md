@@ -48,7 +48,7 @@ _Avoid_: 需求点、story 编号（不要把 User Story 当 Spec 的叫法）
 _Avoid_: 任务、issue、子票
 
 **Content version（内容版本）**：
-Ticket 内容（标题、正文（含验收标准）、模块、已批准的保护路径）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型、依赖边和 Retry note 都不属于内容，不能靠它们加版本。
+Ticket 内容（标题、正文（含验收标准）、模块、已批准的保护路径、已批准删除的测试）的版本号，每次改票加一；每个版本都留存，Run 记下它看到的是哪一版。仓库、类型、依赖边和 Retry note 都不属于内容，不能靠它们加版本。
 _Avoid_: 修订号、票版本
 
 **Retry note（重试说明）**：
@@ -130,12 +130,16 @@ _Avoid_: 提示、system prompt
 _Avoid_: 输出、结果
 
 **Decision（决定）**：
-一次会改代码的 agent Run 里，agent 自己做的取舍，写在结构化输出里。票不因此停下。每条有一个类型：`choice`（可撤回的小事）、`conflict`（票、需求、契约、现有代码对不上，选了一边）、`known-gap`（知道没做、或做了但有问题）、`deferred`（留给别的票）、`workaround`（绕过仓库或环境的问题）。票级标成必须人来定的只记录，不叫人；开 PR 前仍未解决的、以及没做掉的 `deferred`，让收尾 blocked。
+一次会改代码的 agent Run 里，agent 自己做的取舍，写在结构化输出里。票不因此停下：AFK 是不等人，不是不告诉人。每条有一个类型：`choice`（可撤回的小事）、`conflict`（票、需求、契约、现有代码对不上，选了一边）、`known-gap`（知道没做、或做了但有问题）、`deferred`（留给别的票）、`workaround`（绕过仓库或环境的问题）。契约没写到的、票和 User Story 写法不同的，都是 `conflict`，不是停下的理由；只有缺做下去必需的东西、要改没批准的保护路径、契约非改不可时才停下。
 _Avoid_: uncertainty、不确定点（旧字段名）、Implementation Decisions（那是 Spec 正文里规划时写下的节）、待确认的决定（不是待处理队列里的新类别）
 
 **Ruling（结论）**：
-Spec 轴对一条 `conflict` 或 `known-gap` 的判定：允许这样做、必须改、或必须人来定。有这类决定却缺结论，该次审查为 `invalid-output`。
+Spec 轴对一条 `conflict` 或 `known-gap` 的判定：允许这样做、必须改、或必须人来定。票级和需求级各判一次；有这类决定却缺结论，该次审查为 `invalid-output`。必须人来定的不挡流程、不叫人，和没被做掉的 `deferred` 一起，在开 PR 时列在验收包和 PR 描述的最前面，由人在合并时定。
 _Avoid_: 裁决、批注
+
+**Decision log（决策日志）**：
+一张票之前各阶段的 Decision 和 Ruling，加上同一需求里已经 done 的票的 Decision；收尾时是整个需求的。每个 agent 阶段都读得到。要推翻其中一条，就新写一条 `conflict`，写明推翻的是哪条。
+_Avoid_: decisions.json、上下文
 
 **Overlay（覆盖层）**：
 平台叠在 matt skill 之上的规则，让 skill 原样在无人值守的 Run 里跑：替 skill 回答它本来要问人的问题，并加上平台的约束。和它对应的 Skills SHA 绑定。
@@ -172,6 +176,10 @@ agent 不允许改动的路径，改了就需要人批准。
 人在确认拆分时为某张 Ticket 提前批准可以改动的保护路径；Ticket 被阻塞后，也可以在重试前追加；只对这张 Ticket 有效，其余保护路径仍然不许改。
 _Avoid_: 白名单、豁免路径
 
+**Approved test removal（已批准删除的测试）**：
+门禁按测试名比较：分叉点上有、改动后没有的测试（改名也算）让门禁失败。人批准某张 Ticket 可以去掉的那些测试名，只对这张 Ticket 有效。
+_Avoid_: 测试白名单、基准调整
+
 **Blocked reason（blocked 原因码）**：
 票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。
 
@@ -184,8 +192,12 @@ _Avoid_: pending 队列、待处理项、待确认的决定
 _Avoid_: 推送、提醒
 
 **Finding（意见）**：
-review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）和「建议」（只写进验收包，由人看）。审查之后那次只看改动的 Spec 轴给出的必须修不派 fix，等人批准这次改测试或改票。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，不表示已有人或复审验证过问题确实修好。收尾的 final-review 默认只跑一次；审查之后的修复或 Update-branch 若改了已有测试或配置，合并前再跑一次只看这次改动的 Spec 轴。
+review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）和「建议」（只写进验收包，由人看）。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，不表示已有人或复审验证过问题确实修好。审查只跑一次；之后的改动只经过 Recheck。
 _Avoid_: 评论、issue
+
+**Recheck（复查）**：
+审查之后的修复或 Update-branch 删改了已有测试、或改了测试和构建配置时，合并前那次只看这次改动的 Spec 轴，只问有没有改变已有行为或放松检查。由确定性检查触发，没命中就不跑。不是 pass 就叫人批准这次改动，不派 fix。
+_Avoid_: 二次审查、re-review
 
 **Review axis（审查轴）**：
 审查的两个互相独立的角度：Standards（是否符合仓库写明的规范）和 Spec（是否做了票或需求要求的事）。每条 review 意见属于一轴，两轴分开记，不跨轴排名。
