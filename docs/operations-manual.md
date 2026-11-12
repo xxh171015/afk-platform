@@ -226,6 +226,8 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 日志目录：API 的 run 日志在 `~/.afk/logs/<实例 id>/`；worker 的沙箱原始日志在 `~/.afk/sandbox-logs/`（含未脱敏的流，别拿去分享）。
 
+门禁的依赖缓存在 `~/.afk/cache/deps/<仓库>/`（pnpm store、npm、Go、Gradle、pip 的下载），每个仓库一份，只挂进门禁沙箱，agent 沙箱看不到。占地方了可以整个删掉，下一次门禁会重新下载。
+
 ## 6. 处理卡住的情况
 
 先 `plat blocked`，看原因，再选动作：

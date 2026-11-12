@@ -35,6 +35,7 @@ import {
 import { createWorkerApi, reportCleanup, reportCodeHosts } from "./api.ts";
 import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
+import { depsCacheDirOf } from "./deps-cache.ts";
 import { freeBytesOf } from "./disk.ts";
 import { EnvironmentLimiter } from "./environments.ts";
 import { pushWithToken } from "./push.ts";
@@ -146,6 +147,7 @@ const api = createWorkerApi(config.apiUrl, config.workerId);
 const repos = new RepoStore(join(config.home, "repos"));
 const snapshots = new SnapshotStore(join(config.home, "snapshots"));
 const slotsRoot = join(config.home, "slots");
+const depsCacheRoot = join(config.home, "cache", "deps");
 // Each run writes its raw logs to a folder of its own: two slots at once, or one run after another, never share one.
 const sandcastle = (cwd: string, runId?: string): SandcastleConfig => ({
   cwd,
@@ -263,8 +265,12 @@ await runWorker({
     environments: new EnvironmentLimiter(),
     makeAgentRunner: (slotDir, runId) =>
       new SandcastleAgentRunner(sandcastle(slotDir, runId)),
+    // only the gate keeps package downloads between runs; agents never see the cache
     makeGateSandbox: (slotDir, runId) =>
-      new SandcastleGateSandbox(sandcastle(slotDir, runId)),
+      new SandcastleGateSandbox({
+        ...sandcastle(slotDir, runId),
+        depsCacheDir: depsCacheDirOf(depsCacheRoot, slotDir),
+      }),
     model: config.model,
     skillsSha: SKILLS_SHA, // what SANDBOX_SKILLS_DIR was copied at
     secrets: [config.cursorApiKey],

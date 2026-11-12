@@ -33,6 +33,8 @@ export interface SandcastleConfig {
   cursorApiKey: string;
   logDir: string; // where the raw logs of this task go
   sandboxEnv?: Record<string, string>; // set in every sandbox, agent or gate (AFK_NPM_REGISTRIES)
+  // The repo's package downloads, kept between gates on the host. Only the gate sandbox mounts it (writable).
+  depsCacheDir?: string;
   onNote?: (line: string) => void; // things worth a line in the run log
   runId?: string; // R-<n>, on the container as afk.run; omitted when there is no Run
   limits?: SandboxLimits; // worker env overrides; defaults fit the Mac Docker VM
@@ -50,6 +52,20 @@ export const SANDBOX_SKILLS_DIR = fileURLToPath(
   new URL("../skills/", import.meta.url),
 );
 export const CONTEXT_SANDBOX_PATH = "/context";
+export const DEPS_CACHE_SANDBOX_PATH = "/deps-cache";
+
+// Where each package manager keeps its downloads in the gate sandbox. AFK_DEPS_CACHE is for a gates.yaml whose tool
+// is not listed (Maven: -Dmaven.repo.local=$AFK_DEPS_CACHE/m2).
+const depsCacheEnv = (path: string) => ({
+  AFK_DEPS_CACHE: path,
+  pnpm_config_store_dir: `${path}/pnpm-store`,
+  // package metadata: pnpm reads it for every package to check the lockfile against its supply-chain policies
+  pnpm_config_cache_dir: `${path}/pnpm-cache`,
+  npm_config_cache: `${path}/npm`,
+  GOMODCACHE: `${path}/go-mod`,
+  GRADLE_USER_HOME: `${path}/gradle`,
+  PIP_CACHE_DIR: `${path}/pip`,
+});
 export const REFS_SANDBOX_PATH = "/refs";
 
 // Read-only mounts: the context the agent reads, and the skills. Nothing else from the host is visible.
@@ -372,11 +388,27 @@ const provider = (
   ctxDir?: string,
   refs?: readonly { name: string; dir: string }[],
   placement?: SandboxPlacement,
+  depsCacheDir?: string,
 ) => {
-  const env = { ...config.sandboxEnv, ...placement?.env };
+  const env = {
+    ...config.sandboxEnv,
+    ...(depsCacheDir ? depsCacheEnv(DEPS_CACHE_SANDBOX_PATH) : {}),
+    ...placement?.env,
+  };
   return sandboxProvider({
     image: config.image,
-    mounts: sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
+    mounts: [
+      ...sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
+      ...(depsCacheDir
+        ? [
+            {
+              hostPath: depsCacheDir,
+              sandboxPath: DEPS_CACHE_SANDBOX_PATH,
+              readonly: false,
+            },
+          ]
+        : []),
+    ],
     kind,
     ...(placement ? { network: placement.network } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
@@ -499,9 +531,19 @@ export class SandcastleGateSandbox implements GateSandbox {
     ref: string,
     placement?: SandboxPlacement,
   ): Promise<SandboxSession> {
+    const cache = this.config.depsCacheDir;
+    // made here, so the container's user owns it rather than docker making it as root
+    if (cache) mkdirSync(cache, { recursive: true });
     const sandbox = await createSandbox({
       branch: ref,
-      sandbox: provider(this.config, "gate", undefined, undefined, placement),
+      sandbox: provider(
+        this.config,
+        "gate",
+        undefined,
+        undefined,
+        placement,
+        cache,
+      ),
       cwd: this.config.cwd,
     });
     return {
