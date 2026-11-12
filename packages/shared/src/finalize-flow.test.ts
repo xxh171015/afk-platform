@@ -54,6 +54,15 @@ describe("finalization of a spec's integration branch", () => {
     });
   });
 
+  it("blocks tests-removed on final-merge without a second fix", () => {
+    expect(
+      advanceFinalization({
+        step: "final-merge",
+        outcome: "tests-removed",
+      }),
+    ).toEqual({ type: "block", reason: "tests-removed" });
+  });
+
   it("knows its steps in order", () => {
     expect([...FINAL_STEPS]).toEqual([
       "final-review",

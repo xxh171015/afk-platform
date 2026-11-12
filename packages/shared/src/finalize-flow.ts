@@ -19,7 +19,10 @@ export type FinalReport =
       outcome: "pass" | "fix" | "invalid-output" | "timeout";
     }
   | { step: "final-fix"; outcome: "done" | (typeof AGENT_FAILURES)[number] }
-  | { step: "final-merge"; outcome: "merged" | "conflict" | "gate-failed" };
+  | {
+      step: "final-merge";
+      outcome: "merged" | "conflict" | "gate-failed" | "tests-removed";
+    };
 
 export type FinalDecision =
   | { type: "enqueue"; step: FinalStep }
@@ -39,6 +42,8 @@ export function advanceFinalization(report: FinalReport): FinalDecision {
         : { type: "block", reason: report.outcome };
     case "final-merge":
       if (report.outcome === "merged") return { type: "done" };
+      if (report.outcome === "tests-removed")
+        return { type: "block", reason: "tests-removed" };
       return {
         type: "block",
         reason:

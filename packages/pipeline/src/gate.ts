@@ -4,8 +4,9 @@ import { gitOrThrow } from "./exec.ts";
 
 // The gate: a repo's own checks, run in a fresh sandbox on a commit (docs/design.md「门禁」). The configuration
 // is read from a trusted commit, never from the branch under test; commands run in order; a failed test command
-// is rerun once on the same commit, and only then does a failure stop the run; the number of tests may not shrink
-// and the number of skipped tests may not grow.
+// is rerun once on the same commit, and only then does a failure stop the run; when JUnit names are available the
+// set of classname+name may not shrink, otherwise the number of tests may not shrink and the number of skipped
+// tests may not grow.
 
 export const GATE_CONFIG_PATH = ".sandcastle/gates.yaml";
 export const FAILURE_LOG_LINES = 200;
@@ -37,6 +38,8 @@ const GateConfigSchema = z
     setup: z.string().min(1).optional(),
     commands: z.array(GateCommandSchema).min(1),
     generated: z.array(GeneratedGroupSchema).min(1).optional(),
+    // Default: compare JUnit classname+name when both sides have names. `counts` keeps the old totals.
+    testCompare: z.enum(["names", "counts"]).optional(),
   })
   .strict();
 export type GateConfig = z.infer<typeof GateConfigSchema>;
@@ -65,6 +68,18 @@ export interface TestCounts {
   skipped: number;
 }
 
+export type TestName = { classname: string; name: string };
+
+export interface GateBaseline extends TestCounts {
+  names?: TestName[];
+}
+
+export interface MergeTestNames {
+  base: TestName[];
+  ours: TestName[];
+  theirs: TestName[];
+}
+
 export interface StepOutcome {
   name: string;
   exitCode: number;
@@ -81,6 +96,7 @@ export interface GateOutcome {
   reusedFrom?: string; // the commit whose stored result was used instead of running the commands
   counts?: TestCounts; // only when a JUnit report was read
   testCases?: TestCase[]; // the same report, case by case
+  removedTests?: TestName[]; // names the baseline had that this report does not, after approvals
   steps: StepOutcome[];
   failureLog: string; // for gate-fix and merge-fix; empty when the gate passed
   stepLogs: Record<string, string>; // full logs per step, for the run log
@@ -221,7 +237,10 @@ export interface RunGateInput {
   ref: string; // what to test: a branch or a candidate commit
   commitSha: string; // the commit `ref` points at
   configSha: string; // where the gate configuration is read from
-  baseline?: TestCounts; // the test counts the change is held to
+  baseline?: GateBaseline; // the test counts and names the change is held to
+  // Merge candidate: names at the merge-base, the integration tip, and the incoming tip.
+  mergeNames?: MergeTestNames;
+  approvedRemoved?: TestName[]; // names a person has allowed this ticket (or this wrap-up) to drop
   records?: GateRecords; // earlier results: a pass on the same tree and configuration is not run again
   // Aborted when the job is lost: no further command is started (one already running cannot be interrupted).
   signal?: AbortSignal;
@@ -247,17 +266,25 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
   // The commands depend only on the tree and the configuration: a stored pass stands, judged against today's baseline.
   const stored = await input.records?.findPassed(treeSha, configBlob);
   if (stored) {
-    const reasons = countReasons(stored.counts, input.baseline);
+    const judged = judgeBaseline(
+      config,
+      stored.counts,
+      stored.testCases,
+      input,
+    );
     return {
       ...about,
-      pass: reasons.length === 0,
-      reasons,
+      pass: judged.reasons.length === 0,
+      reasons: judged.reasons,
       reusedFrom: stored.commitSha,
       counts: stored.counts,
       ...(stored.testCases ? { testCases: stored.testCases } : {}),
+      ...(judged.removedTests ? { removedTests: judged.removedTests } : {}),
       steps: stored.steps,
       failureLog:
-        reasons.length > 0 ? failureLog(stored.steps, {}, reasons) : "",
+        judged.reasons.length > 0
+          ? failureLog(stored.steps, {}, judged.reasons)
+          : "",
       stepLogs: {},
     };
   }
@@ -324,10 +351,21 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
       reasons.push(`${step.name} failed (exit ${step.exitCode})`);
   }
   let counts: TestCounts | undefined;
+  let judged: { reasons: string[]; removedTests?: TestName[] } = {
+    reasons: [],
+  };
   if (reasons.length === 0) {
     counts = junit === undefined ? undefined : junitCounts(junit);
     if (!counts) reasons.push("no JUnit results");
-    else reasons.push(...countReasons(counts, input.baseline));
+    else {
+      judged = judgeBaseline(
+        config,
+        counts,
+        junit === undefined ? undefined : junitCases(junit),
+        input,
+      );
+      reasons.push(...judged.reasons);
+    }
   }
 
   const testCases =
@@ -339,6 +377,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
     reasons,
     ...(counts ? { counts } : {}),
     ...(testCases ? { testCases } : {}),
+    ...(judged.removedTests ? { removedTests: judged.removedTests } : {}),
     steps: outcomes,
     failureLog:
       reasons.length > 0 ? failureLog(outcomes, stepLogs, reasons) : "",
@@ -503,6 +542,104 @@ async function rerunFailedTests(
     junit: merged.xml,
     flaky: merged.flaky,
   };
+}
+
+export function testKey(n: TestName): string {
+  return `${n.classname}\n${n.name}`;
+}
+
+function namesOf(cases: TestCase[] | undefined): TestName[] {
+  return (cases ?? []).map((c) => ({ classname: c.classname, name: c.name }));
+}
+
+function nameSet(names: TestName[]): Set<string> {
+  return new Set(names.map(testKey));
+}
+
+function parseTestKey(key: string): TestName {
+  const i = key.indexOf("\n");
+  return i < 0
+    ? { classname: "", name: key }
+    : { classname: key.slice(0, i), name: key.slice(i + 1) };
+}
+
+function formatTestName(n: TestName): string {
+  return n.classname ? `${n.classname} ${n.name}` : n.name;
+}
+
+function requiredNames(input: RunGateInput): TestName[] | undefined {
+  if (input.mergeNames) {
+    const base = nameSet(input.mergeNames.base);
+    const ours = nameSet(input.mergeNames.ours);
+    const theirs = nameSet(input.mergeNames.theirs);
+    const required = new Set<string>();
+    for (const k of ours) if (theirs.has(k)) required.add(k);
+    for (const k of ours) if (!base.has(k)) required.add(k);
+    for (const k of theirs) if (!base.has(k)) required.add(k);
+    return [...required].map(parseTestKey);
+  }
+  return input.baseline?.names;
+}
+
+function removedFrom(
+  current: TestName[],
+  required: TestName[],
+  approved: TestName[] | undefined,
+): TestName[] {
+  const have = nameSet(current);
+  const allowed = nameSet(approved ?? []);
+  return required.filter((n) => {
+    const k = testKey(n);
+    return !have.has(k) && !allowed.has(k);
+  });
+}
+
+function nameReasons(removed: TestName[]): string[] {
+  if (removed.length === 0) return [];
+  return [`removed tests: ${removed.map(formatTestName).join(", ")}`];
+}
+
+function compareByNames(
+  config: GateConfig,
+  current: TestName[],
+  input: RunGateInput,
+): boolean {
+  if (config.testCompare === "counts") return false;
+  if (config.testCompare === "names") return true;
+  if (current.length === 0) return false;
+  if (input.mergeNames) return true;
+  return (input.baseline?.names?.length ?? 0) > 0;
+}
+
+// Merge candidate: three-way names when every side is known; otherwise the old totals (names on the
+// latest integration baseline would treat a main-side deletion as a missing test).
+export function mergeGateCompare(
+  baseline: GateBaseline | undefined,
+  mergeNames: MergeTestNames | undefined,
+): { baseline?: GateBaseline; mergeNames?: MergeTestNames } {
+  if (mergeNames) {
+    return { ...(baseline ? { baseline } : {}), mergeNames };
+  }
+  if (!baseline) return {};
+  return { baseline: { tests: baseline.tests, skipped: baseline.skipped } };
+}
+
+function judgeBaseline(
+  config: GateConfig,
+  counts: TestCounts,
+  cases: TestCase[] | undefined,
+  input: RunGateInput,
+): { reasons: string[]; removedTests?: TestName[] } {
+  const current = namesOf(cases);
+  if (compareByNames(config, current, input)) {
+    const required = requiredNames(input) ?? [];
+    const removedTests = removedFrom(current, required, input.approvedRemoved);
+    return {
+      reasons: nameReasons(removedTests),
+      ...(removedTests.length > 0 ? { removedTests } : {}),
+    };
+  }
+  return { reasons: countReasons(counts, input.baseline) };
 }
 
 // The number of tests may not shrink and the number of skipped tests may not grow.

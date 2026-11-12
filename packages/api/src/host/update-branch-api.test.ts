@@ -683,6 +683,72 @@ describe("the update-branch job", () => {
     });
   });
 
+  it("pauses immediately on tests-removed, and approve continues only that update", async () => {
+    const gone = { classname: "suite", name: "gone" };
+    const job = await queuedUpdate();
+    expect(
+      (
+        await agent.complete(job.id, job.attempt, {
+          stage: "update-branch",
+          outcome: "tests-removed",
+          run: { output: { removedTests: [gone] } },
+        })
+      ).status,
+    ).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "tests-removed",
+    });
+    expect((await updateJobs()).some((row) => row.type === "agent-run")).toBe(
+      false,
+    );
+    expect(
+      (await call("GET", "/blocked")).body.specs.some(
+        (s: Json) => s.reason === "tests-removed",
+      ),
+    ).toBe(true);
+    const approved = await call("POST", "/specs/1/approve-removed-tests");
+    expect(approved).toMatchObject({
+      status: 200,
+      body: { approved: [gone] },
+    });
+    expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+    const continued = (await updateJobs()).find(
+      (row) => row.state === "queued",
+    );
+    expect(continued?.payload.approvedRemoved).toEqual([gone]);
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'stage' = 'implement' AND state = 'queued'",
+    );
+    const again = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+      payload: Json;
+    };
+    expect(again.payload.stage).toBe("update-branch");
+    expect(again.payload.approvedRemoved).toEqual([gone]);
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${again.id}/bundle?workerId=a1&attempt=${again.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.approvedRemovedTests).toEqual([gone]);
+    expect(
+      (
+        await agent.complete(again.id, again.attempt, {
+          stage: "update-branch",
+          outcome: "merged",
+          headSha: "after-approve",
+        })
+      ).status,
+    ).toBe(200);
+    const repoUrl = (
+      await db.pool.query<{ url: string }>("SELECT url FROM repos WHERE id = 1")
+    ).rows[0]?.url as string;
+    await look([{ repoUrl, sha: "ccc333" }]);
+    const later = (await updateJobs()).find((row) => row.state === "queued");
+    expect(later?.payload.mainSha).toBe("ccc333");
+    expect(later?.payload.approvedRemoved).toBeUndefined();
+  });
+
   it("pauses when the merge agent gives up, with the reason the merge had", async () => {
     const job = await queuedUpdate();
     await agent.complete(job.id, job.attempt, {

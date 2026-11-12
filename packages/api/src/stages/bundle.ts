@@ -111,11 +111,24 @@ export interface Bundle {
   }> | null;
   review: unknown;
   // What the last merge into the integration branch measured: a gate may not find fewer tests or more skipped ones
-  // than this. Null before the spec has merged anything.
-  gateBaseline: { tests: number; skipped: number } | null;
+  // than this. Names are present when that merge's JUnit listed classname+name. Null before the spec has merged anything.
+  gateBaseline: {
+    tests: number;
+    skipped: number;
+    names?: { classname: string; name: string }[];
+  } | null;
   // Every merge's measurement, newest first, with the commit it was taken at. A ticket's own gate is held only to
   // the newest one its branch already contains: merges that landed after it branched are not its to answer for.
-  gateBaselines: { sha: string; tests: number; skipped: number }[];
+  gateBaselines: {
+    sha: string;
+    tests: number;
+    skipped: number;
+    names?: { classname: string; name: string }[];
+  }[];
+  // Last passing ticket gate's names, for the merge three-way. Null when this job has no ticket or that gate listed none.
+  ticketGateNames: { classname: string; name: string }[] | null;
+  // Names a person has allowed this ticket (or this wrap-up / update-branch job) to drop.
+  approvedRemovedTests: { classname: string; name: string }[] | null;
   // The project's say over how a run is carried out: how long an agent may be silent or run in all, and the model
   // it uses (null: the worker's own AFK_MODEL).
   limits: {
@@ -146,6 +159,27 @@ const runSettings = (
     stageModels: parseStageModels(stageModels),
   };
 };
+
+function testNamesFrom(raw: unknown): { classname: string; name: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const names: { classname: string; name: string }[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.name !== "string" || typeof rec.classname !== "string")
+      continue;
+    names.push({ classname: rec.classname, name: rec.name });
+  }
+  return names;
+}
+
+function withNames<T extends { tests: number; skipped: number }>(
+  row: T,
+  cases: unknown,
+): T & { names?: { classname: string; name: string }[] } {
+  const names = testNamesFrom(cases);
+  return names.length > 0 ? { ...row, names } : row;
+}
 
 function failedCasesFrom(raw: unknown): Bundle["failedCases"] {
   if (!Array.isArray(raw) || raw.length === 0) return null;
@@ -193,8 +227,9 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   const { rows } = await pool.query<{
     tests_total: number;
     tests_skipped: number | null;
+    test_cases: unknown;
   }>(
-    `SELECT g.tests_total, g.tests_skipped FROM runs r
+    `SELECT g.tests_total, g.tests_skipped, g.test_cases FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
@@ -203,7 +238,10 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   );
   const row = rows[0];
   return row
-    ? { tests: row.tests_total, skipped: row.tests_skipped ?? 0 }
+    ? withNames(
+        { tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
+        row.test_cases,
+      )
     : null;
 }
 
@@ -212,19 +250,60 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
     sha: string;
     tests_total: number;
     tests_skipped: number | null;
+    test_cases: unknown;
   }>(
-    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped FROM runs r
+    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped, g.test_cases FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 50`,
     [specId, repoId],
   );
-  return rows.map((r) => ({
-    sha: r.sha,
-    tests: r.tests_total,
-    skipped: r.tests_skipped ?? 0,
-  }));
+  const listed = rows.map((r) =>
+    withNames(
+      { sha: r.sha, tests: r.tests_total, skipped: r.tests_skipped ?? 0 },
+      r.test_cases,
+    ),
+  );
+  const repo = await pool.query<{ default_sha: string | null }>(
+    "SELECT default_sha FROM repos WHERE id = $1",
+    [repoId],
+  );
+  const sha = repo.rows[0]?.default_sha;
+  if (!sha || listed.some((b) => b.sha === sha)) return listed;
+  const extra = await pool.query<{
+    tests_total: number;
+    tests_skipped: number | null;
+    test_cases: unknown;
+  }>(
+    `SELECT tests_total, tests_skipped, test_cases FROM gate_results
+     WHERE repo_id = $1 AND commit_sha = $2 AND kind = 'gate' AND tests_total IS NOT NULL`,
+    [repoId, sha],
+  );
+  const row = extra.rows[0];
+  if (!row) return listed;
+  return [
+    ...listed,
+    withNames(
+      { sha, tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
+      row.test_cases,
+    ),
+  ];
+}
+
+async function ticketGateNamesFor(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<Bundle["ticketGateNames"]> {
+  const { rows } = await pool.query<{ test_cases: unknown }>(
+    `SELECT g.test_cases FROM runs r
+     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
+     WHERE r.ticket_id = $1 AND r.stage = 'gate' AND r.result = 'passed'
+     ORDER BY r.id DESC LIMIT 1`,
+    [ticketId],
+  );
+  const names = testNamesFrom(rows[0]?.test_cases);
+  return names.length > 0 ? names : null;
 }
 
 export async function buildBundle(
@@ -243,7 +322,7 @@ export async function buildBundle(
 
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.title, t.body, t.acceptance_criteria, t.modules, t.state, t.content_version,
-            t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths,
+            t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths, t.allowed_removed_tests,
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
             s.integration_branches, s.branch_namespace, s.planning_sha, s.planning_repo_id,
             r.id AS repo_id, r.name, r.url, r.default_branch,
@@ -340,6 +419,11 @@ export async function buildBundle(
     ]),
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
     gateBaselines: await gateBaselinesFor(pool, row.spec_id, row.repo_id),
+    ticketGateNames: await ticketGateNamesFor(pool, row.id),
+    approvedRemovedTests: (() => {
+      const names = testNamesFrom(row.allowed_removed_tests);
+      return names.length > 0 ? names : null;
+    })(),
     ...runSettings(
       row.limits,
       row.default_model,
@@ -353,7 +437,11 @@ export async function buildBundle(
 // or a merge after a failure) what went wrong before.
 async function buildFinalBundle(
   pool: pg.Pool,
-  job: { id: number; attempt: number },
+  job: {
+    id: number;
+    attempt: number;
+    payload: Record<string, unknown>;
+  },
   final: { specId: number; repoId: number; step: string },
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
@@ -439,6 +527,11 @@ async function buildFinalBundle(
     ),
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
     gateBaselines: await gateBaselinesFor(pool, final.specId, final.repoId),
+    ticketGateNames: null,
+    approvedRemovedTests: (() => {
+      const names = testNamesFrom(job.payload.approvedRemoved);
+      return names.length > 0 ? names : null;
+    })(),
     ...runSettings(
       row.limits,
       row.default_model,
@@ -453,7 +546,11 @@ async function buildFinalBundle(
 // merge-trees the default branch when that temp does not exist yet. The Run belongs to the spec, not a ticket.
 async function buildUpdateBranchBundle(
   pool: pg.Pool,
-  job: { id: number; attempt: number },
+  job: {
+    id: number;
+    attempt: number;
+    payload: Record<string, unknown>;
+  },
   update: { specId: number; repoId: number; fix: boolean; afterFix: boolean },
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
@@ -526,6 +623,11 @@ async function buildUpdateBranchBundle(
     review: null,
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
+    ticketGateNames: null,
+    approvedRemovedTests: (() => {
+      const names = testNamesFrom(job.payload.approvedRemoved);
+      return names.length > 0 ? names : null;
+    })(),
     ...runSettings(
       row.limits,
       row.default_model,
@@ -614,6 +716,8 @@ async function buildLocateBundle(
     review: null,
     gateBaseline: null,
     gateBaselines: [],
+    ticketGateNames: null,
+    approvedRemovedTests: null,
     ...runSettings(
       row.limits,
       row.default_model,

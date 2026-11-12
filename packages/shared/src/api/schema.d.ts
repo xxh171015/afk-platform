@@ -2069,12 +2069,32 @@ export interface paths {
               gateBaseline: {
                 tests: number;
                 skipped: number;
+                names?: {
+                  classname: string;
+                  name: string;
+                }[];
               } | null;
               gateBaselines: {
                 sha: string;
                 tests: number;
                 skipped: number;
+                names?: {
+                  classname: string;
+                  name: string;
+                }[];
               }[];
+              ticketGateNames:
+                | {
+                    classname: string;
+                    name: string;
+                  }[]
+                | null;
+              approvedRemovedTests:
+                | {
+                    classname: string;
+                    name: string;
+                  }[]
+                | null;
               limits: {
                 runIdleSeconds: number;
                 runWallclockSeconds: number;
@@ -4822,6 +4842,134 @@ export interface paths {
           };
         };
         /** @description The ticket is not blocked by protected-path-changed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/approve-removed-tests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the ticket goes on from the gate */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              approved: {
+                classname: string;
+                name: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The ticket is not blocked by tests-removed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/approve-removed-tests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the wrap-up or update-branch goes on */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              approved: {
+                classname: string;
+                name: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not blocked or paused by tests-removed */
         409: {
           headers: {
             [name: string]: unknown;

@@ -77,7 +77,17 @@ const TWO_FAIL_CASES = [
     message: "nope\nstack b",
   },
 ];
+const NAMED_BOTH =
+  '<testsuites tests="2"><testsuite name="a" tests="2" skipped="0"><testcase classname="suite" name="kept"/><testcase classname="suite" name="gone"/></testsuite></testsuites>';
+const NAMED_KEPT =
+  '<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="suite" name="kept"/></testsuite></testsuites>';
 const COUNT_TESTS =
+  "if [ -f NAMED ]; then mkdir -p reports; " +
+  "if [ -f DROP ]; then " +
+  `echo ${Buffer.from(NAMED_KEPT).toString("base64")} | base64 -d > reports/junit.xml; ` +
+  "else " +
+  `echo ${Buffer.from(NAMED_BOTH).toString("base64")} | base64 -d > reports/junit.xml; ` +
+  "fi; exit 0; fi; " +
   "if [ -f TWOFAIL ] || { [ -f from-a ] && [ -f from-b ] && [ ! -f SETTLED ]; }; then mkdir -p reports; " +
   `echo ${Buffer.from(TWO_FAIL).toString("base64")} | base64 -d > reports/junit.xml; exit 1; fi; ` +
   "if [ -f FLAKY ]; then mkdir -p reports; if [ -f .gate-tried ]; then " +
@@ -1831,6 +1841,38 @@ describe("the test count guard", { timeout: 60_000 }, () => {
     expect(gates.rows[0].output.failureLog).toContain(
       "fewer tests than the baseline",
     );
+  });
+
+  it("fails the gate by missing names when a test is deleted and another is added, until a person approves", async () => {
+    await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await work({
+      script: (ctx) => {
+        if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-1`) {
+          const files: Record<string, string> = { NAMED: "\n" };
+          return { files, output: DONE };
+        }
+        if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-2`) {
+          const files: Record<string, string> = { NAMED: "\n", DROP: "\n" };
+          return {
+            files,
+            message: "drop a test",
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:blocked/tests-removed"]);
+    const gates = await db.pool.query(
+      "SELECT result, output FROM runs WHERE ticket_id = 2 AND stage = 'gate' ORDER BY id",
+    );
+    expect(gates.rows[0].result).toBe("tests-removed");
+    expect(gates.rows[0].output.removedTests).toEqual([
+      { classname: "suite", name: "gone" },
+    ]);
+    expect((await post("/tickets/2/approve-removed-tests")).status).toBe(200);
+    await work();
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
   });
 
   it("does not hold a ticket's branch to tests another ticket merged after it started", {

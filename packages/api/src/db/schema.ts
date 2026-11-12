@@ -278,6 +278,10 @@ export const tickets = pgTable(
       .array()
       .notNull()
       .default([]),
+    // JUnit classname+name a person has allowed this ticket to drop. Empty until approve-removed-tests.
+    allowedRemovedTests: jsonb("allowed_removed_tests")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     // Names of repos: read-only references for the agent, and the repos an integration ticket's e2e environment starts.
     refs: text("refs").array().notNull().default([]),
     environment: text("environment").array().notNull().default([]),
@@ -348,6 +352,9 @@ export const ticketVersions = pgTable(
     acceptanceCriteria: text("acceptance_criteria").array().notNull(),
     modules: text("modules").array().notNull(),
     allowedProtectedPaths: text("allowed_protected_paths").array().notNull(),
+    allowedRemovedTests: jsonb("allowed_removed_tests")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     createdAt: createdAt(),
   },
   (t) => [

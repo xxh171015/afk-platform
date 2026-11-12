@@ -19,6 +19,7 @@ import {
   EnvironmentError,
   type EnvironmentRepo,
   failedCasesOf,
+  type GateBaseline,
   type GateConfig,
   type GateOutcome,
   type GateRecords,
@@ -36,6 +37,7 @@ import {
   type LocateOutput,
   LocateOutputSchema,
   mergeCandidate,
+  mergeGateCompare,
   mergeTakingOurs,
   projectOf,
   promptFor,
@@ -52,7 +54,7 @@ import {
   type SandboxSession,
   stampTrailers,
   startEnvironment,
-  type TestCounts,
+  type TestName,
   writePrompt,
 } from "@afk/pipeline";
 import {
@@ -828,7 +830,41 @@ function gateFailureOutput(outcome: GateOutcome) {
     failureLog: outcome.failureLog,
     reasons: outcome.reasons,
     ...(failedCases ? { failedCases } : {}),
+    ...(outcome.removedTests ? { removedTests: outcome.removedTests } : {}),
   };
+}
+
+function namesAt(bundle: Bundle, sha: string): TestName[] | undefined {
+  const hit = bundle.gateBaselines.find((b) => b.sha === sha);
+  return hit?.names;
+}
+
+function mergeNameSets(
+  mainDir: string,
+  integration: string,
+  incoming: string,
+  bundle: Bundle,
+): { base: TestName[]; ours: TestName[]; theirs: TestName[] } | undefined {
+  const found = git(mainDir, ["merge-base", integration, incoming]);
+  if (found.code !== 0) return undefined;
+  const baseSha = found.stdout.trim();
+  const oursSha = tip(mainDir, integration);
+  const theirsSha = tip(mainDir, incoming);
+  const base = namesAt(bundle, baseSha);
+  const ours = namesAt(bundle, oursSha) ?? bundle.gateBaseline?.names;
+  const theirs =
+    namesAt(bundle, theirsSha) ?? bundle.ticketGateNames ?? undefined;
+  if (!base?.length || !ours?.length || !theirs?.length) return undefined;
+  return { base, ours, theirs };
+}
+
+function gateOutcomeOf(
+  outcome: GateOutcome,
+): "passed" | "failed" | "tests-removed" {
+  if (outcome.pass) return "passed";
+  if (outcome.removedTests && outcome.removedTests.length > 0)
+    return "tests-removed";
+  return "failed";
 }
 
 function logGate(log: (line: string) => void, outcome: GateOutcome) {
@@ -944,7 +980,18 @@ async function gate(
     ref: agent,
     commitSha,
     configSha: tip(mainDir, integration),
-    ...(baseline ? { baseline } : {}),
+    ...(baseline
+      ? {
+          baseline: {
+            tests: baseline.tests,
+            skipped: baseline.skipped,
+            ...(baseline.names?.length ? { names: baseline.names } : {}),
+          },
+        }
+      : {}),
+    ...(bundle.approvedRemovedTests?.length
+      ? { approvedRemoved: bundle.approvedRemovedTests }
+      : {}),
     records: gateRecords(deps, context),
   });
   if (context.signal.aborted)
@@ -952,7 +999,7 @@ async function gate(
   logGate(log, outcome);
   return {
     stage: "gate",
-    outcome: outcome.pass ? "passed" : "failed",
+    outcome: gateOutcomeOf(outcome),
     run: {
       branch: agent,
       baseSha,
@@ -1004,7 +1051,13 @@ async function gateCommit(
   context: StageContext,
   mainDir: string,
   slot: Slot,
-  commit: { sha: string; configSha: string; baseline?: TestCounts },
+  commit: {
+    sha: string;
+    configSha: string;
+    baseline?: GateBaseline;
+    mergeNames?: { base: TestName[]; ours: TestName[]; theirs: TestName[] };
+    approvedRemoved?: TestName[];
+  },
   lostMessage: string,
 ): Promise<GateOutcome> {
   const gateBranch = `gate/${subjectLabel(context.bundle)}`;
@@ -1019,6 +1072,10 @@ async function gateCommit(
       commitSha: commit.sha,
       configSha: commit.configSha,
       ...(commit.baseline ? { baseline: commit.baseline } : {}),
+      ...(commit.mergeNames ? { mergeNames: commit.mergeNames } : {}),
+      ...(commit.approvedRemoved?.length
+        ? { approvedRemoved: commit.approvedRemoved }
+        : {}),
       records: gateRecords(deps, context),
     });
     if (context.signal.aborted) throw new JobLostError(lostMessage);
@@ -1325,6 +1382,7 @@ async function mergeOnce(
   }
 
   // The candidate is gated on a branch of its own; only a passing candidate moves the integration branch.
+  const mergeNames = mergeNameSets(mainDir, integration, incoming, bundle);
   const outcome = await gateCommit(
     deps,
     context,
@@ -1333,14 +1391,20 @@ async function mergeOnce(
     {
       sha: candidateSha,
       configSha: oldTip,
-      ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
+      ...mergeGateCompare(bundle.gateBaseline ?? undefined, mergeNames),
+      ...(bundle.approvedRemovedTests?.length
+        ? { approvedRemoved: bundle.approvedRemovedTests }
+        : {}),
     },
     "the lease was lost during the candidate gate",
   );
   if (!outcome.pass) {
     return {
       stage,
-      outcome: "gate-failed",
+      outcome:
+        gateOutcomeOf(outcome) === "tests-removed"
+          ? "tests-removed"
+          : "gate-failed",
       run: {
         output: gateFailureOutput(outcome),
       },

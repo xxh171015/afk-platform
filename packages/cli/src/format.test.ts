@@ -201,6 +201,31 @@ describe("plat blocked of a stuck ticket", () => {
     expect(text).toContain("plat ticket retry T-12 --mode continue");
   });
 
+  it("prints approve-removed-tests for tests-removed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          blockedReason: "tests-removed",
+          structuredBrief: {
+            reason: "tests-removed",
+            step: "gate",
+            summary: "删了测试",
+            evidence: { lastLogLines: "removed tests: suite gone" },
+            recommendedAction: "确认这些测试可以去掉，批准后从门禁接着跑",
+            commands: [
+              {
+                label: "批准删掉的测试",
+                command: "plat ticket approve-removed-tests T-12",
+              },
+            ],
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain("plat ticket approve-removed-tests T-12");
+  });
+
   it("prints the append import command for contract-change-needed", () => {
     const text = blockedText({
       ...emptyQueue,

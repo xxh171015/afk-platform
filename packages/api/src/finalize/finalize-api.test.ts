@@ -81,6 +81,7 @@ interface Claimed {
     ticketId?: number;
     specId?: number;
     final?: boolean;
+    approvedRemoved?: { classname: string; name: string }[];
   };
 }
 const SUCCESS: Record<string, Record<string, unknown>> = {
@@ -544,6 +545,43 @@ describe("when it goes wrong", () => {
       state: "blocked",
     });
     expect(await claim()).toBeNull();
+  });
+
+  it("removed tests on final-merge block without a second fix, and approve continues that merge", async () => {
+    await toFinalFix();
+    await step("final-fix", { outcome: "done" });
+    await step("final-merge", {
+      outcome: "tests-removed",
+      run: {
+        output: { removedTests: [{ classname: "suite", name: "gone" }] },
+      },
+    });
+    expect(await fin()).toEqual([
+      {
+        step: "final-merge",
+        state: "blocked",
+        blocked_reason: "tests-removed",
+      },
+    ]);
+    const approved = await call("POST", "/specs/1/approve-removed-tests");
+    expect(approved).toMatchObject({
+      status: 200,
+      body: { approved: [{ classname: "suite", name: "gone" }] },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-merge", state: "active", blocked_reason: null },
+    ]);
+    const again = await claim();
+    expect(again?.payload.stage).toBe("final-merge");
+    expect(again?.payload.approvedRemoved).toEqual([
+      { classname: "suite", name: "gone" },
+    ]);
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${again?.id}/bundle?workerId=w1&attempt=${again?.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.approvedRemovedTests).toEqual([
+      { classname: "suite", name: "gone" },
+    ]);
   });
 
   it("a conflict or a failed gate when the fix is merged blocks it, and a retry runs the merge again", async () => {

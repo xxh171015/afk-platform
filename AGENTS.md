@@ -34,7 +34,7 @@ pnpm lint                            # biome check .
 - TypeScript strict。相对导入带 `.ts` / `.tsx` 后缀。不用 `enum`、`namespace`。
 - 新行为先写测试（红 → 绿）。测试走公共接口（HTTP、CLI、导出的纯函数），不测私有方法和内部调用次数。
 - API 层测试用真 Postgres；不要为了测试去 mock 自己的模块。系统边界（GitHub/GitLab HTTP、agent 运行器、时间）才允许假对象。
-- 不要删除或跳过已有测试（`it.skip`、`it.only`、`describe.skip` 都不行）。门禁会比较测试总数和跳过数，变少就判失败。
+- 不要删除或跳过已有测试（`it.skip`、`it.only`、`describe.skip` 都不行），也不要改已有测试的名字。门禁按测试名比，少了名字就判失败，除非人批准这些名字可以去掉。没有 JUnit 或门禁声明按数量比时，仍比总数和跳过数。
 - 术语以 `GLOSSARY.md` 为准。不要引入它明确 Avoid 的叫法。
 - commit 信息用英文祈使句，一个 commit 做一件事。
 

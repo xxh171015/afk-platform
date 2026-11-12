@@ -38,6 +38,7 @@ export const PAUSE_REASONS = [
   "update-branch-gate-failed",
   "branch-moved",
   "job-failed",
+  "tests-removed",
 ] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 
@@ -47,6 +48,7 @@ export const PAUSE_REASON_LABELS: Record<PauseReason, string> = {
   "update-branch-gate-failed": "合 main 后门禁失败",
   "branch-moved": "运行期间分支被推过了",
   "job-failed": "作业失败",
+  "tests-removed": "删了测试，等人批准",
 };
 
 export function pauseReasonLabel(reason: string | null | undefined): string {
@@ -109,6 +111,7 @@ export const FAILURE_SOURCE_OF_REASON: Record<
   "budget-exhausted": "agent",
   "merge-conflict": "spec",
   "protected-path-changed": "spec",
+  "tests-removed": "spec",
   "contract-copy-mismatch": "spec",
   "contract-change-needed": "spec",
   "integration-environment-failed": "spec",
@@ -206,6 +209,7 @@ export const HUMAN_ACTIONS = [
   "confirm",
   "retry",
   "approve-protected",
+  "approve-removed-tests",
   "allow-paths",
   "edit-ticket",
   "cancel-ticket",

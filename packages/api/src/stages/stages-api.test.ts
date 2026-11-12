@@ -287,6 +287,23 @@ describe("blocked reason codes", () => {
     expect(retried.status).toBe(200);
   });
 
+  it("removed tests block after the gate without spending a gate-fix", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "tests-removed",
+      run: {
+        output: { removedTests: [{ classname: "suite", name: "gone" }] },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "tests-removed",
+      fix_counts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
+    });
+    await noJobsLeft();
+  });
+
   it("a gate failure runs gate-fix once; failing again is gate-failed", async () => {
     await runningSpec([ticket("a")]);
     await stage("implement", IMPLEMENT_DONE);
@@ -695,6 +712,24 @@ describe("the gate baseline in the bundle", () => {
     expect(body.gateBaselines).toEqual([
       { sha: "new", tests: 4, skipped: 2 },
       { sha: "old", tests: 9, skipped: 0 },
+    ]);
+  });
+
+  it("includes the default branch's last gate so a merge against main can three-way", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query(
+      "UPDATE repos SET default_sha = 'main-tip' WHERE id = 1",
+    );
+    await db.pool.query(
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, tests_total, tests_skipped)
+       VALUES (1, 'main-tip', 'c', 7, 1)`,
+    );
+    const job = (await worker.claim()).body.job as Claimed;
+    const body = (await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json())) as { gateBaselines: unknown };
+    expect(body.gateBaselines).toEqual([
+      { sha: "main-tip", tests: 7, skipped: 1 },
     ]);
   });
 });

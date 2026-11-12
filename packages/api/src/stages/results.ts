@@ -122,6 +122,7 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
       "failed",
       "protected-path-changed",
       "contract-copy-mismatch",
+      "tests-removed",
     ]),
     ...commonFields,
   }),
@@ -132,7 +133,7 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
   }),
   z.object({
     stage: z.literal("merge"),
-    outcome: z.enum(["merged", "conflict", "gate-failed"]),
+    outcome: z.enum(["merged", "conflict", "gate-failed", "tests-removed"]),
     // the integration branch head after the advance; a contract ticket's contract SHA
     headSha: z.string().min(1).optional(),
     ...commonFields,

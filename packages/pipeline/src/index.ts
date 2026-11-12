@@ -67,10 +67,12 @@ export {
 } from "./exec.ts";
 export type {
   FailedCase,
+  GateBaseline,
   GateConfig,
   GateOutcome,
   GateRecords,
   GateSandbox,
+  MergeTestNames,
   RunGateInput,
   SandboxPlacement,
   SandboxSession,
@@ -78,6 +80,7 @@ export type {
   TestCase,
   TestCaseStatus,
   TestCounts,
+  TestName,
 } from "./gate.ts";
 export {
   failedCasesOf,
@@ -85,8 +88,10 @@ export {
   GateSetupError,
   junitCases,
   junitCounts,
+  mergeGateCompare,
   readGateConfig,
   runGate,
+  testKey,
 } from "./gate.ts";
 export type { GeneratedGroup } from "./generated.ts";
 export {

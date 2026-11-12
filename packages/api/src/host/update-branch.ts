@@ -24,7 +24,7 @@ import { enqueueTrialMerge } from "./trial-merge.ts";
 
 export const UpdateBranchResultSchema = z.object({
   stage: z.literal("update-branch"),
-  outcome: z.enum(["merged", "conflict", "gate-failed"]),
+  outcome: z.enum(["merged", "conflict", "gate-failed", "tests-removed"]),
   headSha: z.string().min(1).optional(),
   ...commonFields,
 });
@@ -128,6 +128,7 @@ export async function enqueueUpdateBranch(
     repoId: number;
     mainSha: string;
     afterFix?: boolean;
+    approvedRemoved?: { classname: string; name: string }[];
   },
 ): Promise<void> {
   const queued = await client.query<{
@@ -182,6 +183,9 @@ export async function enqueueUpdateBranch(
       repoId: target.repoId,
       mainSha: target.mainSha,
       ...(target.afterFix ? { afterFix: true } : {}),
+      ...(target.approvedRemoved?.length
+        ? { approvedRemoved: target.approvedRemoved }
+        : {}),
     },
     lockKey: `integration:${target.repoId}:spec/${spec.rows[0]?.slug}`,
     idempotencyKey: await nextUpdateBranchKey(
@@ -732,6 +736,10 @@ export async function recordUpdateBranchResult(
       headSha: valid.headSha,
     });
     await enqueueFinalReviewIfWaiting(client, read.specId, read.repoId);
+    return { status: "applied" };
+  }
+  if (valid.outcome === "tests-removed") {
+    await pauseForUpdateBranch(client, read.specId, "tests-removed");
     return { status: "applied" };
   }
   if (valid.outcome !== "conflict" && valid.outcome !== "gate-failed") {

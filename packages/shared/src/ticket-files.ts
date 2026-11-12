@@ -35,6 +35,9 @@ const FrontMatter = z.strictObject({
   // User Story numbers in the spec this ticket is for. Omitted on infrastructure tickets.
   stories: z.array(z.number().int().positive()).default([]),
   protected_paths_ok: z.array(z.string().min(1)).default([]),
+  removed_tests_ok: z
+    .array(z.object({ classname: z.string(), name: z.string().min(1) }))
+    .default([]),
   // One upstream contract ticket, or several (at most one chain of them per repo).
   contract: z
     .union([z.string().min(1), z.array(z.string().min(1))])
@@ -233,7 +236,7 @@ function readTicket(
     errors,
   );
   if (errors.length > 0 || !("value" in parsed)) return errors;
-  const { blocks, ...fields } = parsed.value;
+  const { blocks, removed_tests_ok: _removed, ...fields } = parsed.value;
   return {
     ticket: { key, ...fields, body, acceptance },
     blocks,
@@ -287,6 +290,9 @@ const EditFront = z.strictObject({
   title: z.string().min(1),
   modules: z.array(z.string().min(1)).min(1),
   protected_paths_ok: z.array(z.string().min(1)).optional(),
+  removed_tests_ok: z
+    .array(z.object({ classname: z.string(), name: z.string().min(1) }))
+    .optional(),
   repo: z.string().optional(),
   type: z.string().optional(),
   stories: z.array(z.number().int().positive()).optional(),
@@ -338,6 +344,7 @@ export interface TicketFileView {
   stories?: number[];
   modules: string[];
   protectedPathsOk: string[];
+  removedTestsOk?: { classname: string; name: string }[];
   contract: string[];
   refs: string[];
   environment: string[];
@@ -373,6 +380,9 @@ export function renderTicketFile(ticket: TicketFileView): string {
     ...(ticket.stories?.length ? { stories: ticket.stories } : {}),
     modules: ticket.modules,
     protected_paths_ok: ticket.protectedPathsOk,
+    ...(ticket.removedTestsOk?.length
+      ? { removed_tests_ok: ticket.removedTestsOk }
+      : {}),
     contract: ticket.contract,
     refs: ticket.refs,
     environment: ticket.environment,

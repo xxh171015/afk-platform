@@ -501,6 +501,48 @@ describe("the ticket page", () => {
     );
   });
 
+  it("approves removed tests from the ticket page", async () => {
+    const brief = {
+      run: { id: 11, displayId: "R-11" },
+      stage: "gate",
+      result: "tests-removed",
+      output: { removedTests: [{ classname: "suite", name: "gone" }] },
+      logPath: "/runs/11/logs",
+    };
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: {
+            ...view().ticket,
+            state: "blocked",
+            blockedReason: "tests-removed",
+            brief,
+            structuredBrief: structuredBrief({
+              reason: "tests-removed",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-4",
+              brief,
+            }),
+          },
+        }),
+      }),
+      "POST /tickets/4/approve-removed-tests": () => ({
+        json: { approved: [{ classname: "suite", name: "gone" }] },
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    expect(
+      await screen.findByRole("button", {
+        name: "复制命令 plat ticket approve-removed-tests T-4",
+      }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "批准删掉的测试" }));
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /tickets/4/approve-removed-tests"),
+    );
+  });
+
   it("still shows a structured brief when a blocked ticket has no run", async () => {
     const server = fakeServer({
       "GET /tickets/4": () => ({

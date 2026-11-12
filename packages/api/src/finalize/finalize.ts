@@ -36,7 +36,7 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
   }),
   z.object({
     stage: z.literal("final-merge"),
-    outcome: z.enum(["merged", "conflict", "gate-failed"]),
+    outcome: z.enum(["merged", "conflict", "gate-failed", "tests-removed"]),
     headSha: z.string().min(1).optional(),
     ...commonFields,
   }),

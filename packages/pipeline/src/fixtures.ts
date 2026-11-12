@@ -80,6 +80,8 @@ export function bundleFor(
     review: null,
     gateBaseline: null,
     gateBaselines: [],
+    ticketGateNames: null,
+    approvedRemovedTests: null,
     limits: {
       runIdleSeconds: DEFAULT_LIMITS.runIdleSeconds,
       runWallclockSeconds: DEFAULT_LIMITS.runWallclockSeconds,

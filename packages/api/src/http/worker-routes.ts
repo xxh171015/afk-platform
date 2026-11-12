@@ -336,15 +336,30 @@ const Bundle = z.object({
     .nullable(),
   review: z.unknown(),
   gateBaseline: z
-    .object({ tests: z.number().int(), skipped: z.number().int() })
+    .object({
+      tests: z.number().int(),
+      skipped: z.number().int(),
+      names: z
+        .array(z.object({ classname: z.string(), name: z.string() }))
+        .optional(),
+    })
     .nullable(),
   gateBaselines: z.array(
     z.object({
       sha: z.string(),
       tests: z.number().int(),
       skipped: z.number().int(),
+      names: z
+        .array(z.object({ classname: z.string(), name: z.string() }))
+        .optional(),
     }),
   ),
+  ticketGateNames: z
+    .array(z.object({ classname: z.string(), name: z.string() }))
+    .nullable(),
+  approvedRemovedTests: z
+    .array(z.object({ classname: z.string(), name: z.string() }))
+    .nullable(),
   limits: z.object({
     runIdleSeconds: z.number().int(),
     runWallclockSeconds: z.number().int(),

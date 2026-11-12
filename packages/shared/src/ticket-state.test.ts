@@ -52,6 +52,8 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     ["merging", "sandbox-oom"],
     ["merging", "merge-conflict"],
     ["merging", "post-merge-gate-failed"],
+    ["running", "tests-removed"],
+    ["merging", "tests-removed"],
     ["pending", "upstream-cancelled"],
   ] as const)("%s blocks with %s and keeps the reason", (from, reason) => {
     expect(ticketTransition(from, { type: "block", reason })).toEqual({
@@ -78,6 +80,18 @@ describe("ticketTransition: blocked, retry, cancel", () => {
         false,
       );
     }
+  });
+
+  it("approving removed tests sends a blocked ticket on to running, and only a blocked one", () => {
+    expect(
+      ticketTransition("blocked", { type: "approve-removed-tests" }),
+    ).toEqual({
+      ok: true,
+      state: "running",
+    });
+    expect(
+      ticketTransition("running", { type: "approve-removed-tests" }).ok,
+    ).toBe(false);
   });
 
   it("a person retrying sends blocked back to pending", () => {

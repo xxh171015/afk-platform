@@ -134,6 +134,39 @@ describe("structuredBrief", () => {
     ]);
   });
 
+  it("gives tests-removed an approve command and no retry", () => {
+    expect(
+      structuredBrief({
+        reason: "tests-removed",
+        ...ids,
+        brief: source("gate", {
+          removedTests: [{ classname: "suite", name: "gone" }],
+        }),
+      }).commands,
+    ).toEqual([
+      {
+        label: "批准删掉的测试",
+        command: "plat ticket approve-removed-tests T-12",
+      },
+    ]);
+  });
+
+  it("gives wrap-up tests-removed a spec approve command", () => {
+    expect(
+      structuredBrief({
+        reason: "tests-removed",
+        specDisplayId: "S-19",
+        wrapUpStep: "final-merge",
+        brief: source("final-merge", null),
+      }).commands,
+    ).toEqual([
+      {
+        label: "批准删掉的测试",
+        command: "plat spec approve-removed-tests S-19",
+      },
+    ]);
+  });
+
   it("gives protected-path-changed an approve command and a retry", () => {
     expect(
       structuredBrief({

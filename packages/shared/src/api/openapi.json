@@ -3444,6 +3444,21 @@
                         },
                         "skipped": {
                           "type": "integer"
+                        },
+                        "names": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "classname": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["classname", "name"]
+                          }
                         }
                       },
                       "required": ["tests", "skipped"]
@@ -3461,9 +3476,54 @@
                           },
                           "skipped": {
                             "type": "integer"
+                          },
+                          "names": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "classname": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["classname", "name"]
+                            }
                           }
                         },
                         "required": ["sha", "tests", "skipped"]
+                      }
+                    },
+                    "ticketGateNames": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "classname": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["classname", "name"]
+                      }
+                    },
+                    "approvedRemovedTests": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "classname": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["classname", "name"]
                       }
                     },
                     "limits": {
@@ -3531,6 +3591,8 @@
                     "failedCases",
                     "gateBaseline",
                     "gateBaselines",
+                    "ticketGateNames",
+                    "approvedRemovedTests",
                     "limits",
                     "model",
                     "ticketReview",
@@ -10129,6 +10191,162 @@
           },
           "409": {
             "description": "The ticket is not blocked by protected-path-changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/approve-removed-tests": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved; the ticket goes on from the gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approved": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "classname": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["classname", "name"]
+                      }
+                    }
+                  },
+                  "required": ["approved"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is not blocked by tests-removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/approve-removed-tests": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved; the wrap-up or update-branch goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approved": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "classname": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["classname", "name"]
+                      }
+                    }
+                  },
+                  "required": ["approved"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not blocked or paused by tests-removed",
             "content": {
               "application/json": {
                 "schema": {

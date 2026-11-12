@@ -8,6 +8,7 @@ import {
   GateSetupError,
   junitCases,
   junitCounts,
+  mergeGateCompare,
   readGateConfig,
   runGate,
 } from "./gate.ts";
@@ -441,6 +442,193 @@ describe("the test count guard", () => {
     expect(
       (await gate({ sandbox: new FakeGateSandbox(repo.dir), configSha })).pass,
     ).toBe(true);
+  });
+});
+
+describe("the test name guard", () => {
+  const writeNamed = (names: { classname?: string; name: string }[]) =>
+    writeXml(
+      junitWithCases(
+        names.map((n) => ({
+          name: n.name,
+          classname: n.classname ?? "suite",
+        })),
+      ),
+    );
+  const names = (
+    ...list: { classname?: string; name: string }[]
+  ): { classname: string; name: string }[] =>
+    list.map((n) => ({ classname: n.classname ?? "suite", name: n.name }));
+
+  it("fails listing the names that were deleted when another test is added", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "keeps" }, { name: "added" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 2,
+        skipped: 0,
+        names: names({ name: "keeps" }, { name: "gone" }),
+      },
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.reasons).toEqual(["removed tests: suite gone"]);
+    expect(outcome.removedTests).toEqual(names({ name: "gone" }));
+  });
+
+  it("fails when an existing test is renamed", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "renamed" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 1, skipped: 0, names: names({ name: "original" }) },
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.reasons).toEqual(["removed tests: suite original"]);
+  });
+
+  it("does not fail when a sibling added tests this ticket never had", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: writeNamed([{ name: "mine" }, { name: "from-sibling" }]),
+      },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 1, skipped: 0, names: names({ name: "mine" }) },
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+
+  it("fails a merge candidate that dropped a name the other side still has and did not delete", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "shared" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 2, skipped: 0 },
+      mergeNames: {
+        base: names({ name: "shared" }),
+        ours: names({ name: "shared" }, { name: "from-integration" }),
+        theirs: names({ name: "shared" }, { name: "from-ticket" }),
+      },
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.removedTests).toEqual(
+      names({ name: "from-integration" }, { name: "from-ticket" }),
+    );
+  });
+
+  it("does not require a name main deleted relative to the merge-base", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "kept" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 1, skipped: 0 },
+      mergeNames: {
+        base: names({ name: "kept" }, { name: "main-deleted" }),
+        ours: names({ name: "kept" }),
+        theirs: names({ name: "kept" }, { name: "main-deleted" }),
+      },
+    });
+    expect(outcome.pass).toBe(true);
+  });
+
+  it("still compares totals when the report has no names", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(9, 0) }]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 10,
+        skipped: 0,
+        names: names({ name: "a" }),
+      },
+    });
+    expect(outcome.reasons).toEqual(["fewer tests than the baseline: 9 < 10"]);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+
+  it("still compares totals when a merge side has no names in the report", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(2, 0) }]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 2, skipped: 0, names: names({ name: "kept" }) },
+      mergeNames: {
+        base: names({ name: "kept" }, { name: "main-deleted" }),
+        ours: names({ name: "kept" }),
+        theirs: names({ name: "kept" }, { name: "main-deleted" }),
+      },
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+
+  it("still compares totals when gates.yaml declares count compare", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": `${gatesYaml([{ name: "test", run: writeNamed([{ name: "new" }]) }])}\ntestCompare: counts\n`,
+      "src.txt": "v1\n",
+    });
+    const configSha = gitOut(repo.dir, ["rev-parse", "main"]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 2,
+        skipped: 0,
+        names: names({ name: "old-a" }, { name: "old-b" }),
+      },
+    });
+    expect(outcome.reasons).toEqual(["fewer tests than the baseline: 1 < 2"]);
+  });
+
+  it("strips baseline names for a merge candidate when a side is missing", () => {
+    const baseline = {
+      tests: 2,
+      skipped: 0,
+      names: names({ name: "kept" }, { name: "from-integration" }),
+    };
+    expect(mergeGateCompare(baseline, undefined)).toEqual({
+      baseline: { tests: 2, skipped: 0 },
+    });
+    const mergeNames = {
+      base: names({ name: "kept" }),
+      ours: names({ name: "kept" }),
+      theirs: names({ name: "kept" }),
+    };
+    expect(mergeGateCompare(baseline, mergeNames)).toEqual({
+      baseline,
+      mergeNames,
+    });
+  });
+
+  it("lets an approved name disappear", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "kept" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 2,
+        skipped: 0,
+        names: names({ name: "kept" }, { name: "gone" }),
+      },
+      approvedRemoved: names({ name: "gone" }),
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.removedTests).toBeUndefined();
   });
 });
 

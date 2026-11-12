@@ -96,6 +96,12 @@ describe("the gate", () => {
     ).toEqual(block("contract-copy-mismatch"));
   });
 
+  it("blocks on removed tests without spending a gate-fix", () => {
+    expect(
+      advanceStage({ stage: "gate", outcome: "tests-removed" }, fresh),
+    ).toEqual(block("tests-removed"));
+  });
+
   it("runs gate-fix once, then blocks gate-failed", () => {
     const first = advanceStage({ stage: "gate", outcome: "failed" }, fresh);
     expect(first).toEqual(enqueue("gate-fix"));
@@ -169,6 +175,15 @@ describe("merge", () => {
         reviewed(used("merge-fix")),
       ),
     ).toEqual(block("post-merge-gate-failed"));
+  });
+
+  it("blocks on removed tests without spending a merge-fix", () => {
+    expect(
+      advanceStage(
+        { stage: "merge", outcome: "tests-removed" },
+        reviewed(fresh),
+      ),
+    ).toEqual(block("tests-removed"));
   });
 
   it("merge-fix shares the budget between conflicts and candidate gate failures", () => {

@@ -1702,6 +1702,23 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("approve-removed-tests <spec>")
+    .description(
+      "accept the missing test names of a wrap-up or update-branch blocked by tests-removed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/approve-removed-tests",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      const names = data.approved
+        .map((n) => (n.classname ? `${n.classname} ${n.name}` : n.name))
+        .join(", ");
+      print(data, `${id}: approved ${names}`);
+    });
+
+  spec
     .command("waive-final <spec>")
     .description(
       "open a spec's pull requests although the e2e before them failed (the acceptance pack says so)",
@@ -1905,6 +1922,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         data,
         `approved: ${data.approved.join(", ")}; ${id} goes on from the gate`,
       );
+    });
+  ticketCommands
+    .command("approve-removed-tests <ticket>")
+    .description(
+      "accept the missing test names of a ticket blocked by tests-removed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/approve-removed-tests",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      const names = data.approved
+        .map((n) => (n.classname ? `${n.classname} ${n.name}` : n.name))
+        .join(", ");
+      print(data, `approved: ${names}; ${id} goes on from the gate`);
     });
   ticketCommands
     .command("allow-path <ticket> <paths...>")

@@ -43,10 +43,14 @@ export type StageReport =
         | "passed"
         | "failed"
         | "protected-path-changed"
-        | "contract-copy-mismatch";
+        | "contract-copy-mismatch"
+        | "tests-removed";
     }
   | { stage: "review"; outcome: "pass" | "fix" | "invalid-output" | "timeout" }
-  | { stage: "merge"; outcome: "merged" | "conflict" | "gate-failed" }
+  | {
+      stage: "merge";
+      outcome: "merged" | "conflict" | "gate-failed" | "tests-removed";
+    }
   | { stage: "e2e"; outcome: "passed" | "failed" }
   // diagnosed: the diagnosis names a repo of the environment (or the ticket's own)
   | {
@@ -125,6 +129,9 @@ export function advanceStage(
       if (report.outcome === "contract-copy-mismatch") {
         return block("contract-copy-mismatch");
       }
+      if (report.outcome === "tests-removed") {
+        return block("tests-removed");
+      }
       if (report.outcome === "passed") {
         return progress.reviewed
           ? toMerge(progress)
@@ -151,6 +158,9 @@ export function advanceStage(
         return ticketType === "integration"
           ? enqueue("e2e", progress)
           : { type: "done" };
+      }
+      if (report.outcome === "tests-removed") {
+        return block("tests-removed");
       }
       const spent = spendFix(progress, "merge-fix");
       if (spent) {

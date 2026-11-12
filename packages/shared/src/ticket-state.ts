@@ -34,6 +34,8 @@ export const BLOCKED_REASONS = [
   "branch-moved",
   // the kernel killed the sandbox for using too much memory; stop at once, do not retry the same limit
   "sandbox-oom",
+  // JUnit names the baseline had are missing; a person must allow those names to go
+  "tests-removed",
 ] as const;
 export type BlockedReason = (typeof BLOCKED_REASONS)[number];
 
@@ -51,6 +53,8 @@ export type TicketEvent =
   | { type: "retry" }
   // A person accepts the protected path changes of a blocked ticket: it goes on from the gate.
   | { type: "approve-protected" }
+  // A person accepts the missing test names of a blocked ticket: it goes on from the gate or the merge.
+  | { type: "approve-removed-tests" }
   | { type: "cancel" }
   // The whole spec is cancelled: every ticket that has not finished goes with it, even one under way.
   | { type: "spec-cancelled" }
@@ -89,6 +93,7 @@ const TRANSITIONS: Partial<
   blocked: {
     retry: "pending",
     "approve-protected": "running",
+    "approve-removed-tests": "running",
     cancel: "cancelled",
     "spec-cancelled": "cancelled",
     takeover: "taken-over",
@@ -114,6 +119,7 @@ const FROM_MERGING: TicketState[] = ["merging"];
 const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "gate-failed": FROM_RUNNING,
   "protected-path-changed": FROM_RUNNING,
+  "tests-removed": [...FROM_RUNNING, ...FROM_MERGING],
   "contract-copy-mismatch": FROM_RUNNING,
   "no-commits": FROM_RUNNING,
   "agent-gave-up": FROM_RUNNING,
