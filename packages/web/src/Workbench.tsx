@@ -16,11 +16,12 @@ import { useResourcePoll } from "./EventsProvider.tsx";
 import { hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
-import { Onboarding } from "./Onboarding.tsx";
+import { Onboarding, useProjectList } from "./Onboarding.tsx";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { formatElapsed } from "./time.ts";
+import { feishuClosedMessage } from "./feishu-status.ts";
 import { waitingCount } from "./waiting.ts";
 
 export const EMPTY_WAITING = "没有在等你的事。平台在自己跑。";
@@ -30,18 +31,6 @@ export const EMPTY_REVIEW = "没有等你验收的需求。";
 export const EMPTY_COMPLETED = "还没有已合并的需求。";
 
 export const WORKBENCH_KEY = ["workbench"] as const;
-
-function useProjectList() {
-  const api = useApi();
-  return useQuery({
-    queryKey: ["onboarding", "projects"],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/projects");
-      if (!data) throw new Error(describeError(error));
-      return data.projects;
-    },
-  });
-}
 
 export function useWorkbench() {
   const api = useApi();
@@ -164,7 +153,9 @@ export function Workbench() {
       title="工作台"
       actions={<StaleNotice error={data ? board.error : null} />}
     >
-      {data ? <Onboarding /> : null}
+      {data ? (
+        <Onboarding feishu={data.status?.feishu} />
+      ) : null}
       {!data ? (
         <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
           <p className="sr-only">加载工作台…</p>
@@ -390,24 +381,19 @@ export function Workbench() {
           </Quadrant>
         </div>
       )}
-      {data?.status ? <StatusArea status={data.status} /> : null}
+      {data?.status ? (
+        <StatusArea
+          status={data.status}
+          settingsProjectId={projects.data?.[0]?.id ?? null}
+        />
+      ) : null}
     </Page>
   );
 }
 
-export function feishuClosedMessage(feishu: {
-  open: boolean;
-  closedReason: "missing" | "permissions" | "invalid" | null;
-}): string | null {
-  if (feishu.open) return null;
-  if (feishu.closedReason === "permissions")
-    return "飞书渠道已关闭：密钥文件权限过宽";
-  if (feishu.closedReason === "invalid") return "飞书渠道已关闭：密钥文件无效";
-  return "飞书渠道已关闭：密钥文件不存在";
-}
-
 function StatusArea({
   status,
+  settingsProjectId,
 }: {
   status: {
     logDirBytes: number;
@@ -424,6 +410,7 @@ function StatusArea({
       cleaned: { sandboxLogs: number; salvage: number; snapshots: number };
     }>;
   };
+  settingsProjectId: number | null;
 }) {
   const feishuClosed = status.feishu
     ? feishuClosedMessage(status.feishu)
@@ -455,7 +442,20 @@ function StatusArea({
           ? `最近清理删了 ${status.lastCleanup.runs} 个 Run 日志、${status.lastCleanup.orphans} 个孤儿目录`
           : "还没有做过日志清理"}
       </p>
-      {feishuClosed ? <p>{feishuClosed}</p> : null}
+      {feishuClosed ? (
+        <p>
+          {settingsProjectId !== null ? (
+            <a
+              href={paths.project(settingsProjectId)}
+              className="text-primary hover:underline"
+            >
+              {feishuClosed}
+            </a>
+          ) : (
+            feishuClosed
+          )}
+        </p>
+      ) : null}
     </footer>
   );
 }

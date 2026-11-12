@@ -28,11 +28,12 @@ const empty = {
   running: [],
   awaitingAcceptance: [],
   recentlyCompleted: [],
+  status: emptyWorkbench.status,
 };
 
 const onboarding = {
   "GET /projects": () => ({
-    json: { projects: [{ id: 1, name: "shop" }] },
+    json: { projects: [{ id: 1, name: "shop", feishuChatId: null }] },
   }),
   "GET /version": () => ({
     json: { platformVersion: "0.2.0", skillsSha: "x", platformCommit: "abc" },
@@ -397,7 +398,9 @@ describe("the workbench", () => {
       }),
     );
     const status = await screen.findByTestId("workbench-status");
-    expect(status.textContent).toMatch(/飞书渠道已关闭：密钥文件不存在/);
+    const link = within(status).getByRole("link");
+    expect(link.textContent).toMatch(/飞书渠道已关闭：密钥文件不存在/);
+    expect(link.getAttribute("href")).toContain("/projects/1");
   });
 
   it("puts getting the first project on the platform at the top while there is none", async () => {

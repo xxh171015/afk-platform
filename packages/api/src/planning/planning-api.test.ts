@@ -550,6 +550,24 @@ modules: ["src/orders/**"]
 });
 
 describe("project view", () => {
+  it("lists every project with its Feishu chat id", async () => {
+    const { projectId } = await setup();
+    expect(
+      (await patch(`/projects/${projectId}`, { feishuChatId: "oc_shop" }))
+        .status,
+    ).toBe(200);
+    const response = await fetch(`${api.url}/projects`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      projects: { id: number; name: string; feishuChatId: string | null }[];
+    };
+    expect(body.projects).toEqual(
+      expect.arrayContaining([
+        { id: projectId, name: "shop", feishuChatId: "oc_shop" },
+      ]),
+    );
+  });
+
   it("lists the project's repos in the order they were added, with the contract path of the one that has it", async () => {
     const { projectId } = await setup();
     const response = await fetch(`${api.url}/projects/${projectId}`);

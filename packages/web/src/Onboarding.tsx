@@ -1,18 +1,17 @@
 import { skillsPackageAt } from "@afk/shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Plug } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { apiBase, describeError, useApi } from "./api.tsx";
+import { ConnectedProjects } from "./ConnectedProjects.tsx";
 import { CopyCommand } from "./components/afk/code.tsx";
+import { Hint } from "./components/afk/hint.tsx";
 import { ErrorState } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
-import { DETAIL_POLL_MS } from "./live.ts";
-import { paths } from "./paths.ts";
 import { formatAbsoluteTime } from "./time.ts";
 
 // Getting a project onto the platform from the control tower (#181 / #186): the skills install
-// command pinned to the platform's commit, then /afk-setup, plus a two-part checklist of 本机
-// and 接入条件. In plain sight while there is no project; folded away once there is one.
+// command pinned to the platform's commit, then /afk-setup. Project settings live elsewhere.
 
 export const installCommand = (commit: string) =>
   `npx skills@latest add ${skillsPackageAt(commit)}`;
@@ -30,14 +29,32 @@ const isLocal = (address: string) => {
   }
 };
 
-function useProjectList() {
+export function useProjectList() {
   const api = useApi();
   return useQuery({
     queryKey: ["onboarding", "projects"],
     queryFn: async () => {
       const { data, error } = await api.GET("/projects");
       if (!data) throw new Error(describeError(error));
-      return data.projects;
+      const listed = data.projects;
+      const missing = listed.filter(
+        (project) => project.feishuChatId === undefined,
+      );
+      if (missing.length === 0) return listed;
+      const chats = await Promise.all(
+        missing.map(async (project) => {
+          const detail = await api.GET("/projects/{projectId}", {
+            params: { path: { projectId: project.id } },
+          });
+          return [project.id, detail.data?.feishuChatId ?? null] as const;
+        }),
+      );
+      const byId = new Map(chats);
+      return listed.map((project) =>
+        project.feishuChatId !== undefined
+          ? project
+          : { ...project, feishuChatId: byId.get(project.id) ?? null },
+      );
     },
   });
 }
@@ -187,216 +204,7 @@ function LocalChecklist({
   );
 }
 
-function accessChecking(access: {
-  state?: string;
-  checking?: boolean;
-}): boolean {
-  return access.checking === true || access.state === "pending";
-}
-
-function accessStatus(
-  access:
-    | {
-        state: string;
-        checking?: boolean;
-        files?: { gates?: boolean; integrationCompose?: boolean };
-        hints?: string[];
-      }
-    | undefined,
-  pending: boolean,
-  error: boolean,
-): string {
-  if (pending) return "读取中";
-  if (error) return "失败";
-  if (!access) return "尚未检查";
-  if (accessChecking(access)) return "检查中";
-  if (access.state === "unchecked") return "尚未检查";
-  if (access.state === "ok")
-    return access.hints && access.hints.length > 0 ? "提示" : "通过";
-  if (access.state === "not-installed") return "未安装 App";
-  if (access.state === "missing-permissions") return "权限不足";
-  if (access.state === "not-member") return "不是项目成员";
-  if (access.state === "error") return "失败";
-  return access.state;
-}
-
-function RepoAccessRow({
-  projectId,
-  repo,
-}: {
-  projectId: number;
-  repo: { name: string; hostKind: string };
-}) {
-  const api = useApi();
-  const queryClient = useQueryClient();
-  const gitlab = repo.hostKind === "gitlab";
-  const access = useQuery({
-    queryKey: ["onboarding", "access", projectId, repo.name],
-    queryFn: async () => {
-      const { data, error } = await api.GET(
-        "/projects/{projectId}/repos/{name}/access",
-        { params: { path: { projectId, name: repo.name } } },
-      );
-      if (!data) throw new Error(describeError(error));
-      return data;
-    },
-    refetchInterval: (query) =>
-      query.state.data && accessChecking(query.state.data)
-        ? DETAIL_POLL_MS
-        : false,
-  });
-  const check = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await api.POST(
-        "/projects/{projectId}/repos/{name}/access-check",
-        { params: { path: { projectId, name: repo.name } } },
-      );
-      if (!data) throw new Error(describeError(error));
-      return data;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(
-        ["onboarding", "access", projectId, repo.name],
-        data,
-      );
-    },
-  });
-  const files =
-    access.data && "files" in access.data ? access.data.files : undefined;
-  const hints =
-    access.data && "hints" in access.data ? access.data.hints : undefined;
-  const fix = access.data && "fix" in access.data ? access.data.fix : undefined;
-  const checking = access.data ? accessChecking(access.data) : false;
-  const checkedAt =
-    access.data && "checkedAt" in access.data
-      ? access.data.checkedAt
-      : undefined;
-  return (
-    <li className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span>
-          {repo.name}
-          {gitlab ? "（GitLab）" : ""}
-        </span>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {accessStatus(access.data, access.isPending, access.isError)}
-        </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={check.isPending || checking}
-          onClick={() => check.mutate()}
-        >
-          现在检查
-        </Button>
-        {checkedAt ? (
-          <span className="text-[11px] text-muted-foreground">
-            上次检查 {formatAbsoluteTime(checkedAt)}
-          </span>
-        ) : null}
-      </div>
-      {fix ? <p className="text-muted-foreground">{fix}</p> : null}
-      {hints?.includes("personal-token") ? (
-        <p className="text-muted-foreground">
-          平台用的是个人令牌：推送和 MR 显示为
-          {access.data && "username" in access.data && access.data.username
-            ? `〈${access.data.username}〉`
-            : "令牌用户"}
-          ，平台不调合并接口，但合并者是不是平台检测不出；换 bot 账号放 M4
-        </p>
-      ) : null}
-      {hints?.includes("developers-can-merge") ? (
-        <p className="text-muted-foreground">Developers 能合并默认分支</p>
-      ) : null}
-      {files ? (
-        <p className="text-muted-foreground">
-          门禁文件{files.gates ? "已有" : "没有"}
-          {files.integrationCompose
-            ? "；联调 compose 已有"
-            : "；联调 compose 没有"}
-        </p>
-      ) : null}
-    </li>
-  );
-}
-
-function ProjectRepos({
-  project,
-  enabled,
-}: {
-  project: { id: number; name: string };
-  enabled: boolean;
-}) {
-  const api = useApi();
-  const view = useQuery({
-    queryKey: ["onboarding", "project", project.id],
-    enabled,
-    queryFn: async () => {
-      const { data, error } = await api.GET("/projects/{projectId}", {
-        params: { path: { projectId: project.id } },
-      });
-      if (!data) throw new Error(describeError(error));
-      return data;
-    },
-  });
-  if (!enabled) return null;
-  if (view.isPending) {
-    return (
-      <p className="text-muted-foreground">正在读取 {project.name} 的仓库…</p>
-    );
-  }
-  if (view.isError) {
-    return (
-      <p className="text-muted-foreground">
-        读不到 {project.name} 的仓库：{view.error.message}
-      </p>
-    );
-  }
-  if (view.data.repos.length === 0) {
-    return (
-      <p className="text-muted-foreground">{project.name} 还没有登记仓库。</p>
-    );
-  }
-  return (
-    <ul className="space-y-3">
-      {view.data.repos.map((repo) => (
-        <RepoAccessRow
-          key={`${project.id}-${repo.name}`}
-          projectId={project.id}
-          repo={repo}
-        />
-      ))}
-    </ul>
-  );
-}
-
-function AgentsMdRow({
-  projectId,
-  fallbackCommand,
-}: {
-  projectId: number | undefined;
-  fallbackCommand: string;
-}) {
-  const report = useDoctorReport(projectId);
-  const item = report.data?.items.find((entry) => entry.id === "agents-md");
-  return (
-    <CheckRow
-      title="AGENTS.md"
-      status={doctorStatus(item?.status)}
-      note={item?.detail}
-      command={item?.command ?? fallbackCommand}
-    />
-  );
-}
-
-function AccessChecklist({
-  projects,
-  readAccess,
-}: {
-  projects: { id: number; name: string }[];
-  readAccess: boolean;
-}) {
+function PlatformChecklist() {
   const version = usePlatformVersion();
   const reachable = version.isSuccess
     ? "通过"
@@ -423,54 +231,49 @@ function AccessChecklist({
             ) : null
           }
         />
+        <CheckRow title="已登记的项目和仓库" status="还没有项目" />
         <CheckRow
-          title="已登记的项目和仓库"
-          status={
-            projects.length === 0 ? "还没有项目" : `${projects.length} 个项目`
-          }
-        />
-        {projects.map((project) => (
-          <div key={project.id} className="space-y-2">
-            <p>
-              {project.name} <a href={paths.project(project.id)}>飞书</a>
-            </p>
-            <ProjectRepos project={project} enabled={readAccess} />
-          </div>
-        ))}
-        <AgentsMdRow
-          projectId={projects[0]?.id}
-          fallbackCommand={AGENTS_MD_COMMAND}
+          title="AGENTS.md"
+          status="尚未检查"
+          command={AGENTS_MD_COMMAND}
         />
       </div>
     </section>
   );
 }
 
-function Checklist({
+function OnboardingFlow({
   address,
-  projects,
-  readAccess,
+  projectId,
 }: {
   address: string;
-  projects: { id: number; name: string }[];
-  readAccess: boolean;
+  projectId: number | undefined;
 }) {
   const version = usePlatformVersion();
   return (
     <div className="space-y-4">
+      <Steps address={address} />
       <LocalChecklist
         address={address}
         commit={version.data?.platformCommit ?? null}
-        projectId={projects[0]?.id}
+        projectId={projectId}
       />
-      <AccessChecklist projects={projects} readAccess={readAccess} />
+      {projectId === undefined ? <PlatformChecklist /> : null}
     </div>
   );
 }
 
-export function Onboarding({ address = apiBase() }: { address?: string }) {
+export function Onboarding({
+  address = apiBase(),
+  feishu,
+}: {
+  address?: string;
+  feishu?: {
+    open: boolean;
+    closedReason: "missing" | "permissions" | "invalid" | null;
+  };
+}) {
   const projects = useProjectList();
-  const [open, setOpen] = useState(false);
   if (projects.isPending) return null;
   if (projects.isError) {
     return (
@@ -483,39 +286,32 @@ export function Onboarding({ address = apiBase() }: { address?: string }) {
       </section>
     );
   }
-  if (projects.data.length === 0)
+  if (projects.data.length === 0) {
     return (
       <section
         aria-label="接入第一个项目"
-        className="mb-8 space-y-4 rounded-lg border p-5"
+        className="mb-8 space-y-4 rounded-lg border border-border-strong p-5"
       >
         <h2 className="flex items-center gap-2 text-base font-medium">
           <Plug className="size-4 text-primary" />
           接入第一个项目
         </h2>
-        <Steps address={address} />
-        <Checklist address={address} projects={[]} readAccess={false} />
+        <OnboardingFlow address={address} projectId={undefined} />
       </section>
     );
+  }
   return (
-    <details
-      aria-label="接入新项目"
-      className="mb-6 text-sm"
-      onToggle={(event) =>
-        setOpen((event.currentTarget as HTMLDetailsElement).open)
-      }
-    >
-      <summary className="cursor-pointer text-muted-foreground">
-        接入新项目
-      </summary>
-      <div className="mt-3 space-y-4">
-        <Steps address={address} />
-        <Checklist
-          address={address}
-          projects={projects.data}
-          readAccess={open}
-        />
-      </div>
-    </details>
+    <>
+      <ConnectedProjects projects={projects.data} feishu={feishu} />
+      <details aria-label="接入新项目" className="afk-disclosure mb-6 text-sm">
+        <summary>接入新项目</summary>
+        <div className="mt-3 space-y-3 rounded-lg border border-border p-4">
+          <Hint>
+            第一次把仓库接到平台时用。已经在跑的项目，去上面「已接入的项目」改飞书。
+          </Hint>
+          <OnboardingFlow address={address} projectId={projects.data[0]?.id} />
+        </div>
+      </details>
+    </>
   );
 }

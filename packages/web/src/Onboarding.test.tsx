@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import {
-  act,
   cleanup,
   fireEvent,
   screen,
@@ -8,7 +7,6 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DETAIL_POLL_MS } from "./live.ts";
 import { Onboarding } from "./Onboarding.tsx";
 import { fakeServer, renderWithApp } from "./test-utils.tsx";
 
@@ -21,7 +19,14 @@ const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
 const server = (projects: unknown[], platformCommit: string | null = COMMIT) =>
   fakeServer({
-    "GET /projects": () => ({ json: { projects } }),
+    "GET /projects": () => ({
+      json: {
+        projects: (projects as { id: number; name: string }[]).map((p) => ({
+          feishuChatId: null,
+          ...p,
+        })),
+      },
+    }),
     "GET /version": () => ({
       json: { platformVersion: "0.2.0", skillsSha: "x", platformCommit },
     }),
@@ -110,7 +115,7 @@ describe("getting a project onto the platform from the control tower", () => {
       <Onboarding address="http://127.0.0.1:3000" />,
       fakeServer({
         "GET /projects": () => ({
-          json: { projects: [{ id: 1, name: "shop" }] },
+          json: { projects: [{ id: 1, name: "shop", feishuChatId: null }] },
         }),
         "GET /version": () => ({
           json: {
@@ -164,9 +169,74 @@ describe("getting a project onto the platform from the control tower", () => {
     expect(details.textContent).toContain(
       "docs/agents/issue-tracker.md is out of date",
     );
-    expect(details.textContent).toContain(
-      "AGENTS.md is not on the default branch or origin/afk/setup",
+  });
+
+  it("lists connected projects without Feishu or repo checks inside onboarding", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      server([{ id: 1, name: "shop" }]),
     );
+    const connected = await screen.findByRole("region", {
+      name: "已接入的项目",
+    });
+    expect(within(connected).getByText("shop")).toBeTruthy();
+    expect(
+      within(connected)
+        .getByRole("link", { name: "设置" })
+        .getAttribute("href"),
+    ).toContain("/projects/1");
+    fireEvent.click(screen.getByText("接入新项目"));
+    const details = screen.getByText("接入新项目").closest("details");
+    expect(details).not.toBeNull();
+    if (!details) return;
+    expect(within(details).queryByText("飞书")).toBeNull();
+    expect(
+      within(details).queryByRole("button", { name: "现在检查" }),
+    ).toBeNull();
+    expect(within(connected).getByText("未配飞书群")).toBeTruthy();
+  });
+
+  it("fills in a chat id from the project page when the list omits it", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      fakeServer({
+        "GET /projects": () => ({
+          json: { projects: [{ id: 1, name: "shop" }] },
+        }),
+        "GET /version": () => ({
+          json: {
+            platformVersion: "0.2.0",
+            skillsSha: "x",
+            platformCommit: COMMIT,
+          },
+        }),
+        "GET /projects/1": () => ({
+          json: {
+            id: 1,
+            name: "shop",
+            defaultAgent: null,
+            feishuChatId: "oc_shop",
+            repos: [],
+          },
+        }),
+      }),
+    );
+    const connected = await screen.findByRole("region", {
+      name: "已接入的项目",
+    });
+    expect(within(connected).getByText("已配飞书群")).toBeTruthy();
+  });
+
+  it("marks a project as 已配飞书群 when the list includes a chat id", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      server([{ id: 1, name: "shop", feishuChatId: "oc_shop" }]),
+    );
+    const connected = await screen.findByRole("region", {
+      name: "已接入的项目",
+    });
+    expect(within(connected).getByText("已配飞书群")).toBeTruthy();
+    expect(within(connected).queryByText("未配飞书群")).toBeNull();
   });
 
   it("splits the checklist into 本机 and 接入条件, all local items 尚未检查", async () => {
@@ -183,294 +253,6 @@ describe("getting a project onto the platform from the control tower", () => {
     expect(block.textContent).toContain("test -f AGENTS.md");
     expect(block.textContent).not.toContain("就绪检查");
     expect(block.textContent).not.toContain("gate-check");
-  });
-
-  it("checks GitHub access only when 现在检查 is clicked", async () => {
-    const fake = fakeServer({
-      "GET /projects": () => ({
-        json: { projects: [{ id: 1, name: "shop" }] },
-      }),
-      "GET /version": () => ({
-        json: {
-          platformVersion: "0.2.0",
-          skillsSha: "x",
-          platformCommit: COMMIT,
-        },
-      }),
-      "GET /projects/1": () => ({
-        json: {
-          id: 1,
-          name: "shop",
-          repos: [
-            {
-              name: "backend",
-              url: "https://github.com/acme/shop-backend.git",
-              defaultBranch: "main",
-              contractPath: null,
-              hostKind: "github",
-            },
-            {
-              name: "other",
-              url: "https://gitlab.com/acme/other.git",
-              defaultBranch: "main",
-              contractPath: null,
-              hostKind: "gitlab",
-            },
-          ],
-        },
-      }),
-      "GET /projects/1/repos/backend/access": () => ({
-        json: { state: "unchecked" },
-      }),
-      "GET /projects/1/repos/other/access": () => ({
-        json: { state: "unchecked" },
-      }),
-      "POST /projects/1/repos/backend/access-check": () => ({
-        json: { state: "ok", checkedAt: "2026-11-01T00:00:00.000Z" },
-      }),
-    });
-    renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, fake);
-    const entry = await screen.findByText("接入新项目");
-    expect(fake.calls).not.toContain(
-      "POST /projects/1/repos/backend/access-check",
-    );
-    expect(fake.calls).not.toContain("GET /projects/1/repos/backend/access");
-    fireEvent.click(entry);
-    const checkButtons = await screen.findAllByRole("button", {
-      name: "现在检查",
-    });
-    expect(checkButtons).toHaveLength(2);
-    expect(fake.calls).toContain("GET /projects/1/repos/backend/access");
-    expect(fake.calls).toContain("GET /projects/1/repos/other/access");
-    expect(fake.calls).not.toContain(
-      "POST /projects/1/repos/backend/access-check",
-    );
-    expect(screen.queryByText("这项检查仅 GitHub 可查。")).toBeNull();
-    fireEvent.click(checkButtons[0] as HTMLElement);
-    await waitFor(() =>
-      expect(fake.calls).toContain(
-        "POST /projects/1/repos/backend/access-check",
-      ),
-    );
-    expect(fake.calls.some((call) => call.includes("gate-check"))).toBe(false);
-    expect(screen.getAllByText("test -f AGENTS.md")).toHaveLength(1);
-  });
-
-  it("shows 检查中 and disables 现在检查 while a check is still running", async () => {
-    const fake = fakeServer({
-      "GET /projects": () => ({
-        json: { projects: [{ id: 1, name: "shop" }] },
-      }),
-      "GET /version": () => ({
-        json: {
-          platformVersion: "0.2.0",
-          skillsSha: "x",
-          platformCommit: COMMIT,
-        },
-      }),
-      "GET /projects/1": () => ({
-        json: {
-          id: 1,
-          name: "shop",
-          repos: [
-            {
-              name: "backend",
-              url: "https://github.com/acme/shop-backend.git",
-              defaultBranch: "main",
-              contractPath: null,
-              hostKind: "github",
-            },
-          ],
-        },
-      }),
-      "GET /projects/1/repos/backend/access": () => ({
-        json: {
-          state: "ok",
-          checkedAt: "2026-11-01T00:00:00.000Z",
-          files: { gates: true, integrationCompose: false },
-        },
-      }),
-      "POST /projects/1/repos/backend/access-check": () => ({
-        json: {
-          state: "ok",
-          checking: true,
-          checkedAt: "2026-11-01T00:00:00.000Z",
-          files: { gates: true, integrationCompose: false },
-        },
-      }),
-    });
-    renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, fake);
-    fireEvent.click(await screen.findByText("接入新项目"));
-    const check = await screen.findByRole("button", { name: "现在检查" });
-    const row = check.closest("li") as HTMLElement;
-    await waitFor(() => expect(within(row).getByText("通过")).toBeTruthy());
-    fireEvent.click(check);
-    await waitFor(() => expect(within(row).getByText("检查中")).toBeTruthy());
-    expect((check as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("shows the new result once the worker answers", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    let access: Record<string, unknown> = {
-      state: "ok",
-      checkedAt: "2026-11-01T00:00:00.000Z",
-      files: { gates: true, integrationCompose: false },
-    };
-    const fake = fakeServer({
-      "GET /projects": () => ({
-        json: { projects: [{ id: 1, name: "shop" }] },
-      }),
-      "GET /version": () => ({
-        json: {
-          platformVersion: "0.2.0",
-          skillsSha: "x",
-          platformCommit: COMMIT,
-        },
-      }),
-      "GET /projects/1": () => ({
-        json: {
-          id: 1,
-          name: "shop",
-          repos: [
-            {
-              name: "backend",
-              url: "https://github.com/acme/shop-backend.git",
-              defaultBranch: "main",
-              contractPath: null,
-              hostKind: "github",
-            },
-          ],
-        },
-      }),
-      "GET /projects/1/repos/backend/access": () => ({ json: access }),
-      "POST /projects/1/repos/backend/access-check": () => ({
-        json: { ...access, checking: true },
-      }),
-    });
-    renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, fake);
-    fireEvent.click(await screen.findByText("接入新项目"));
-    const check = await screen.findByRole("button", { name: "现在检查" });
-    fireEvent.click(check);
-    await waitFor(() => expect(screen.getByText("检查中")).toBeTruthy());
-    access = {
-      state: "ok",
-      checkedAt: "2026-11-01T00:01:00.000Z",
-      files: { gates: true, integrationCompose: true },
-    };
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(DETAIL_POLL_MS);
-    });
-    const row = check.closest("li") as HTMLElement;
-    await waitFor(() =>
-      expect(
-        within(row).getByText("门禁文件已有；联调 compose 已有"),
-      ).toBeTruthy(),
-    );
-    expect(within(row).getByText("通过")).toBeTruthy();
-    expect((check as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("says when the repo was last checked, to the second, and moves it on a new answer", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    let access: Record<string, unknown> = {
-      state: "ok",
-      checkedAt: "2026-11-01T00:00:00.000Z",
-      files: { gates: true, integrationCompose: false },
-    };
-    const fake = fakeServer({
-      "GET /projects": () => ({
-        json: { projects: [{ id: 1, name: "shop" }] },
-      }),
-      "GET /version": () => ({
-        json: {
-          platformVersion: "0.2.0",
-          skillsSha: "x",
-          platformCommit: COMMIT,
-        },
-      }),
-      "GET /projects/1": () => ({
-        json: {
-          id: 1,
-          name: "shop",
-          repos: [
-            {
-              name: "backend",
-              url: "https://github.com/acme/shop-backend.git",
-              defaultBranch: "main",
-              contractPath: null,
-              hostKind: "github",
-            },
-          ],
-        },
-      }),
-      "GET /projects/1/repos/backend/access": () => ({ json: access }),
-      "POST /projects/1/repos/backend/access-check": () => ({
-        json: { ...access, checking: true },
-      }),
-    });
-    renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, fake);
-    fireEvent.click(await screen.findByText("接入新项目"));
-    const check = await screen.findByRole("button", { name: "现在检查" });
-    const row = check.closest("li") as HTMLElement;
-    await waitFor(() =>
-      expect(
-        within(row).getByText("上次检查 2026-11-01 08:00:00"),
-      ).toBeTruthy(),
-    );
-    fireEvent.click(check);
-    await waitFor(() => expect(within(row).getByText("检查中")).toBeTruthy());
-    access = {
-      state: "ok",
-      checkedAt: "2026-11-01T00:01:05.000Z",
-      files: { gates: true, integrationCompose: false },
-    };
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(DETAIL_POLL_MS);
-    });
-    await waitFor(() =>
-      expect(
-        within(row).getByText("上次检查 2026-11-01 08:01:05"),
-      ).toBeTruthy(),
-    );
-  });
-
-  it("does not claim a check time for a repo never checked", async () => {
-    const fake = fakeServer({
-      "GET /projects": () => ({
-        json: { projects: [{ id: 1, name: "shop" }] },
-      }),
-      "GET /version": () => ({
-        json: {
-          platformVersion: "0.2.0",
-          skillsSha: "x",
-          platformCommit: COMMIT,
-        },
-      }),
-      "GET /projects/1": () => ({
-        json: {
-          id: 1,
-          name: "shop",
-          repos: [
-            {
-              name: "backend",
-              url: "https://github.com/acme/shop-backend.git",
-              defaultBranch: "main",
-              contractPath: null,
-              hostKind: "github",
-            },
-          ],
-        },
-      }),
-      "GET /projects/1/repos/backend/access": () => ({
-        json: { state: "unchecked" },
-      }),
-    });
-    renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, fake);
-    fireEvent.click(await screen.findByText("接入新项目"));
-    const check = await screen.findByRole("button", { name: "现在检查" });
-    const row = check.closest("li") as HTMLElement;
-    await waitFor(() => expect(within(row).getByText("尚未检查")).toBeTruthy());
-    expect(row.textContent).not.toContain("上次检查");
   });
 
   it("lets a person retry when the platform cannot be reached", async () => {

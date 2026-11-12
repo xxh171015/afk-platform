@@ -24,16 +24,18 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { AlertTriangle, Check, ExternalLink } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import {
   IdChip,
   Mono,
+  Pill,
   RepoTag,
   ShaChip,
   ticketBorderClass,
 } from "./components/afk/badges.tsx";
+import { Hint } from "./components/afk/hint.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { SegmentedProgress } from "./components/afk/progress-bar.tsx";
 import {
@@ -76,6 +78,10 @@ import { SpecBody } from "./Markdown.tsx";
 import { specExcerpt } from "./markdown-body.ts";
 import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
+import {
+  ReviewEventText,
+  ticketSummaryWithReview,
+} from "./review-findings-menu.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import {
   currentFlowStep,
@@ -91,17 +97,17 @@ import {
   ticketProgress,
 } from "./spec-flow.ts";
 import {
+  groupTimeline,
   TIMELINE_LABELS,
+  type TimelineEvent,
+  type TimelineTicketRail,
   timelineLabel,
   visibleTimeline,
 } from "./spec-timeline.ts";
 import { blockedReasonLabel, ticketStateLabel } from "./status.ts";
 import { peekTicketClick, TicketSheet } from "./TicketDetail.tsx";
-import {
-  formatCompactDuration,
-  formatShanghaiDay,
-  formatShanghaiTime,
-} from "./time.ts";
+import { TraceSection } from "./TraceSection.tsx";
+import { formatCompactDuration, formatShanghaiTime } from "./time.ts";
 
 const list = <T,>(value: T[] | undefined | null): T[] =>
   Array.isArray(value) ? value : [];
@@ -824,6 +830,11 @@ export function SpecDetail({
       {section === "timeline" ? (
         <TimelinePage
           events={timeline}
+          tickets={tickets.map((ticket) => ({
+            id: ticket.id,
+            displayId: ticket.displayId,
+            title: ticket.title,
+          }))}
           pullRequests={pullRequests}
           hostKind={hostKind}
           legacy={Boolean(timelineLegacy)}
@@ -1175,7 +1186,7 @@ function Overview({
 
       {(spec.bugs ?? []).length > 0 ? (
         <section className="mb-6">
-          <h3 className="mb-2 text-sm font-semibold">指向它的缺陷</h3>
+          <h3 className="mb-2 text-sm font-semibold">指向它的 bug 需求</h3>
           <ul data-testid="spec-bugs" className="space-y-1 text-sm">
             {(spec.bugs ?? []).map((bug) => (
               <li key={bug.id}>
@@ -1193,48 +1204,17 @@ function Overview({
       ) : null}
 
       {links.length > 0 ? (
-        <section className="mb-6" data-testid="spec-trace">
-          <h3 className="mb-2 text-sm font-semibold">追溯</h3>
-          <ul className="space-y-1 text-sm">
-            {links.map((link) => {
-              const repoUrl = repos.find(
-                (repo) => repo.name === link.repo,
-              )?.url;
-              return (
-                <li key={`${link.kind}-${link.sha}`}>
-                  <ShaChip
-                    sha={link.sha}
-                    href={repoUrl ? commitHtmlUrl(repoUrl, link.sha) : null}
-                  />
-                  {link.ticketId && link.ticketDisplayId ? (
-                    <>
-                      {" "}
-                      <a
-                        href={paths.ticket(link.ticketId)}
-                        className="text-primary hover:underline"
-                      >
-                        {link.ticketDisplayId}
-                      </a>
-                    </>
-                  ) : null}
-                  {link.pullRequestNumber != null ? (
-                    <>
-                      {" "}
-                      <a
-                        href={link.pullRequestUrl ?? undefined}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary hover:underline"
-                      >
-                        #{link.pullRequestNumber}
-                      </a>
-                    </>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <TraceSection
+          links={links}
+          repos={repos}
+          ticketTitles={
+            new Map(
+              tickets.map(
+                (ticket) => [ticket.displayId, ticket.title] as const,
+              ),
+            )
+          }
+        />
       ) : null}
 
       {excerpt ? (
@@ -1456,21 +1436,18 @@ function TicketsPage({
 
 function TimelinePage({
   events,
+  tickets,
   pullRequests,
   hostKind,
   legacy,
 }: {
-  events: {
-    kind: string;
-    at?: string;
-    text?: string;
-    runId?: number;
-    failureSource?: FailureSource;
-  }[];
+  events: TimelineEvent[];
+  tickets: { id: number; displayId: string; title: string }[];
   pullRequests: SpecView["pullRequests"];
   hostKind: HostKind;
   legacy: boolean;
 }) {
+  const days = useMemo(() => groupTimeline(events, tickets), [events, tickets]);
   const note = legacy ? (
     <p className="note" data-testid="timeline-legacy">
       时间线沿用旧拼法：此需求还没有事件
@@ -1483,13 +1460,6 @@ function TimelinePage({
         <p className="note">还没有时间线事件</p>
       </>
     );
-  const days = new Map<string, typeof events>();
-  for (const event of events) {
-    const day = event.at ? formatShanghaiDay(event.at) : "未知日期";
-    const bucket = days.get(day) ?? [];
-    bucket.push(event);
-    days.set(day, bucket);
-  }
   const prHref = (text?: string) => {
     if (!text) return null;
     const prs = list(pullRequests);
@@ -1498,80 +1468,245 @@ function TimelinePage({
     );
     return match?.url ?? prs[0]?.url ?? null;
   };
+  const renderEvent = (event: TimelineEvent, key: string) => (
+    <TimelineEventRow
+      key={key}
+      event={event}
+      hostKind={hostKind}
+      prHref={prHref}
+      variant="rail"
+    />
+  );
   return (
     <>
       {note}
+      <Hint className="mb-4">
+        每张票默认一行摘要。行末有「曾卡住或重试」表示走过失败或重试，点开展开看门禁与
+        Run。
+      </Hint>
       <div className="timeline">
-        {[...days.entries()].map(([day, items]) => (
+        {days.map(({ day, rails }) => (
           <section key={day} className="timeline-day">
             <h3 className="timeline-day-label">{day}</h3>
             <ol className="timeline-rail">
-              {items.map((event) => {
-                const label =
-                  event.kind in TIMELINE_LABELS
-                    ? timelineLabel(
-                        event.kind as keyof typeof TIMELINE_LABELS,
-                        hostKind,
-                      )
-                    : event.kind;
-                const host =
-                  event.kind === "pr-opened" ||
-                  event.kind === "pr-ready" ||
-                  event.kind === "merged"
-                    ? prHref(event.text)
-                    : null;
-                return (
-                  <li
-                    key={`${event.kind}-${event.at}-${event.text}-${event.runId ?? ""}`}
-                    className="timeline-item"
-                  >
-                    <span className="timeline-dot" aria-hidden="true" />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="timeline-kind">{label}</span>
-                      {event.at ? <RelativeTime iso={event.at} /> : null}
-                      {event.failureSource ? (
-                        <span
-                          className="text-xs text-muted-foreground"
-                          data-testid="failure-source"
-                        >
-                          {FAILURE_SOURCE_LABELS[event.failureSource]}
-                        </span>
-                      ) : null}
-                    </div>
-                    {event.text && event.text !== label ? (
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {event.text}
-                      </div>
-                    ) : null}
-                    <div className="mt-1 flex flex-wrap gap-3 text-xs">
-                      {event.runId ? (
-                        <a
-                          href={paths.run(event.runId)}
-                          className="text-primary hover:underline"
-                        >
-                          R-{event.runId}
-                        </a>
-                      ) : null}
-                      {host ? (
-                        <a
-                          href={host}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-primary hover:underline"
-                        >
-                          {HOST_KIND_LABELS[hostKind]}
-                          <ExternalLink className="size-3" />
-                        </a>
-                      ) : null}
-                    </div>
-                  </li>
-                );
-              })}
+              {rails.map((rail) =>
+                rail.type === "event" ? (
+                  renderEvent(
+                    rail.event,
+                    `e-${rail.event.kind}-${rail.at}-${rail.event.runId ?? ""}`,
+                  )
+                ) : (
+                  <TimelineTicketRailRow
+                    key={`t-${rail.ticketId}`}
+                    rail={rail}
+                    hostKind={hostKind}
+                    prHref={prHref}
+                  />
+                ),
+              )}
             </ol>
           </section>
         ))}
       </div>
     </>
+  );
+}
+
+function TimelineEventRow({
+  event,
+  hostKind,
+  prHref,
+  ticketId,
+  variant = "rail",
+}: {
+  event: TimelineEvent;
+  hostKind: HostKind;
+  prHref: (text?: string) => string | null;
+  ticketId?: number;
+  variant?: "rail" | "nested";
+}) {
+  const label =
+    event.kind in TIMELINE_LABELS
+      ? timelineLabel(event.kind as keyof typeof TIMELINE_LABELS, hostKind)
+      : event.kind;
+  const host =
+    event.kind === "pr-opened" ||
+    event.kind === "pr-ready" ||
+    event.kind === "merged"
+      ? prHref(event.text)
+      : null;
+  const body = (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="timeline-kind">{label}</span>
+        {event.at ? <RelativeTime iso={event.at} /> : null}
+        {event.failureSource ? (
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="failure-source"
+          >
+            {FAILURE_SOURCE_LABELS[event.failureSource as FailureSource]}
+          </span>
+        ) : null}
+      </div>
+      {event.text && event.text !== label ? (
+        <div className="mt-1 text-sm text-muted-foreground">
+          {event.kind === "review" && ticketId != null ? (
+            <ReviewEventText
+              text={event.text}
+              ticketId={ticketId}
+              event={event}
+            />
+          ) : (
+            event.text
+          )}
+        </div>
+      ) : null}
+      <div className="mt-1 flex flex-wrap gap-3 text-xs">
+        {event.runId ? (
+          <a
+            href={paths.run(event.runId)}
+            className="text-primary hover:underline"
+          >
+            R-{event.runId}
+          </a>
+        ) : null}
+        {host ? (
+          <a
+            href={host}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-primary hover:underline"
+          >
+            {HOST_KIND_LABELS[hostKind]}
+            <ExternalLink className="size-3" />
+          </a>
+        ) : null}
+      </div>
+    </>
+  );
+  if (variant === "nested") {
+    return (
+      <div
+        data-testid={
+          event.kind === "ticket-blocked" ? "timeline-blocked-event" : undefined
+        }
+      >
+        {body}
+      </div>
+    );
+  }
+  return (
+    <li
+      className="timeline-item"
+      data-testid={
+        event.kind === "ticket-blocked" ? "timeline-blocked-event" : undefined
+      }
+    >
+      <span className="timeline-dot" aria-hidden="true" />
+      {body}
+    </li>
+  );
+}
+
+function TimelineTicketRailRow({
+  rail,
+  hostKind,
+  prHref,
+}: {
+  rail: TimelineTicketRail;
+  hostKind: HostKind;
+  prHref: (text?: string) => string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li
+      className="timeline-item"
+      data-testid="timeline-ticket-group"
+      data-trouble={rail.hadTrouble ? "true" : undefined}
+    >
+      <span
+        className={cn(
+          "timeline-dot",
+          rail.hadTrouble && "bg-state-blocked border-state-blocked",
+        )}
+        aria-hidden="true"
+      />
+      <div className="-ml-0.5 flex w-full items-start gap-2 rounded-md text-sm">
+        <button
+          type="button"
+          className="mt-0.5 shrink-0 rounded-md p-0.5 text-muted-foreground hover:bg-accent/40"
+          aria-expanded={open}
+          aria-label={open ? "收起票步骤" : "展开票步骤"}
+          data-testid="timeline-ticket-toggle"
+          onClick={() => setOpen((o) => !o)}
+        >
+          <ChevronDown
+            className={cn("size-4 transition-transform", open && "rotate-180")}
+          />
+        </button>
+        <span className="min-w-0 flex-1">
+          <span className="block">
+            <a
+              href={paths.ticket(rail.ticketId)}
+              className="font-mono text-primary hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {rail.displayId}
+            </a>
+            {rail.title ? (
+              <span className="ml-2 font-medium text-foreground">
+                {rail.title}
+              </span>
+            ) : null}
+            <span className="ml-2">
+              {ticketSummaryWithReview(
+                rail.summary,
+                rail.ticketId,
+                rail.lastReview,
+              )}
+            </span>
+            {rail.hadTrouble ? (
+              <span
+                className="ml-1.5 inline-flex align-middle"
+                data-testid="timeline-ticket-trouble"
+              >
+                <Pill tone="blocked" dot={false}>
+                  曾卡住或重试
+                </Pill>
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {open ? "收起步骤" : "展开看门禁与 Run"}
+            {rail.at ? (
+              <>
+                {" · "}
+                <RelativeTime iso={rail.at} />
+              </>
+            ) : null}
+          </span>
+        </span>
+      </div>
+      {open ? (
+        <ol className="ml-5 mt-2 space-y-0 border-l border-border pl-3">
+          {rail.events.map((event) => (
+            <li
+              key={`${event.kind}-${event.at}-${event.runId ?? ""}`}
+              className="border-border border-b border-dashed py-2 last:border-0"
+            >
+              <TimelineEventRow
+                event={event}
+                hostKind={hostKind}
+                prHref={prHref}
+                ticketId={rail.ticketId}
+                variant="nested"
+              />
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </li>
   );
 }
 

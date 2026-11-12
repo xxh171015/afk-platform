@@ -119,27 +119,32 @@ export function Pill({
   children,
   title,
   className,
+  dot = true,
 }: {
   tone: Tone;
   children: ReactNode;
   title?: string;
   className?: string;
+  dot?: boolean;
 }) {
   const flashing = useChangeFlash(`${tone}:${badgeText(children)}`);
   return (
     <span
       title={title}
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-sm border px-1.5 font-mono text-[11px] leading-none whitespace-nowrap",
+        "inline-flex h-5 shrink-0 items-center rounded-sm border px-1.5 font-mono text-[11px] leading-none whitespace-nowrap",
+        dot ? "gap-1.5" : "",
         toneClass[tone],
         flashing && "afk-change-flash",
         className,
       )}
     >
-      <span
-        className={cn("size-1.5 rounded-full", dotClass[tone])}
-        aria-hidden
-      />
+      {dot ? (
+        <span
+          className={cn("size-1.5 rounded-full", dotClass[tone])}
+          aria-hidden
+        />
+      ) : null}
       {children}
     </span>
   );

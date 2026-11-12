@@ -32,6 +32,7 @@ export interface paths {
               projects: {
                 id: number;
                 name: string;
+                feishuChatId: string | null;
               }[];
             };
           };

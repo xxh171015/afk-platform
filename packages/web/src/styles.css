@@ -178,9 +178,9 @@
   --accent-foreground: oklch(0.95 0.004 265);
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.155 0.004 265);
-  --border: oklch(0.26 0.006 265);
-  --border-strong: oklch(0.32 0.008 265);
-  --input: oklch(0.28 0.007 265);
+  --border: oklch(0.4 0.01 265);
+  --border-strong: oklch(0.48 0.012 265);
+  --input: oklch(0.42 0.01 265);
   --ring: oklch(0.6 0.12 255);
 
   --sidebar: oklch(0.135 0.004 265);
@@ -231,6 +231,38 @@
 
 @utility tabular {
   font-variant-numeric: tabular-nums;
+}
+
+.afk-disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.afk-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.afk-disclosure > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.35rem;
+  transition: transform 0.15s;
+}
+
+.afk-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.afk-disclosure > summary:focus {
+  outline: none;
+}
+
+.afk-disclosure > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius);
 }
 
 /* Read-only dependency canvas; semantic tokens shared with the dashboard. */

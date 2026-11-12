@@ -876,7 +876,8 @@ describe("the spec page", () => {
     const trace = await screen.findByTestId("spec-trace");
     expect(trace.textContent).toContain("aaaaaaa");
     expect(trace.textContent).toContain("T-3");
-    expect(trace.textContent).toContain("#12");
+    expect(trace.textContent?.match(/#12/g)?.length).toBe(1);
+    expect(trace.textContent).toContain("1 个 PR");
     expect(server.calls.some((call) => /blame|\/context/i.test(call))).toBe(
       false,
     );
@@ -1319,6 +1320,70 @@ describe("the six-step bar and nested pages", () => {
     ).toBe("/specs/1/timeline");
   });
 
+  it("opens review findings on the timeline without leaving the page", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "done")],
+            timeline: [
+              {
+                kind: "gate",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "T-1 门禁通过",
+                ticketId: 1,
+                runId: 4,
+              },
+              {
+                kind: "review",
+                at: "2026-11-01T10:01:00.000Z",
+                text: "T-1 review 2 条意见",
+                ticketId: 1,
+                runId: 12,
+              },
+              {
+                kind: "ticket-merge",
+                at: "2026-11-01T10:02:00.000Z",
+                text: "T-1 合并进集成分支",
+                ticketId: 1,
+              },
+            ],
+          }),
+        }),
+        "GET /tickets/1": () => ({
+          json: {
+            ...ticketView(1),
+            findings: [
+              {
+                id: 1,
+                runId: 12,
+                kind: "must-fix",
+                body: "src/foo needs fix",
+                resolution: "fixed",
+                axis: "standards",
+              },
+              {
+                id: 2,
+                runId: 99,
+                kind: "suggestion",
+                body: "other run",
+                resolution: "unhandled",
+                axis: null,
+              },
+            ],
+          },
+        }),
+      }),
+    );
+    const trigger = await screen.findByTestId("review-findings-trigger");
+    fireEvent.click(trigger);
+    await waitFor(() =>
+      expect(screen.getByText("src/foo needs fix")).toBeTruthy(),
+    );
+    expect(screen.queryByText("other run")).toBeNull();
+  });
+
   it("shows listed timeline events and drops anything else", async () => {
     renderWithApp(
       <SpecDetail specId={1} section="timeline" />,
@@ -1340,7 +1405,14 @@ describe("the six-step bar and nested pages", () => {
                 kind: "gate",
                 at: "2026-11-01T10:02:00.000Z",
                 text: "T-1 门禁通过",
+                ticketId: 1,
                 runId: 4,
+              },
+              {
+                kind: "ticket-merge",
+                at: "2026-11-01T10:03:00.000Z",
+                text: "T-1 合并进集成分支",
+                ticketId: 1,
               },
             ],
           }),
@@ -1348,7 +1420,12 @@ describe("the six-step bar and nested pages", () => {
       }),
     );
     expect(await screen.findByText("确认拆分")).toBeTruthy();
-    expect(screen.getByText("门禁")).toBeTruthy();
+    expect(screen.getByText(/门禁通过/)).toBeTruthy();
+    expect(screen.getByText(/已合并/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "R-4" })).toBeNull();
+    fireEvent.click(
+      screen.getAllByTestId("timeline-ticket-toggle")[0] as HTMLElement,
+    );
     expect(screen.getByRole("link", { name: "R-4" }).getAttribute("href")).toBe(
       "/runs/4",
     );
@@ -1372,13 +1449,16 @@ describe("the six-step bar and nested pages", () => {
                 kind: "action",
                 at: "2026-11-01T10:00:00.000Z",
                 text: "重试 T-1",
+                ticketId: 1,
               },
             ],
           }),
         }),
       }),
     );
-    expect(await screen.findByText("重试 T-1")).toBeTruthy();
+    expect(await screen.findByTestId("timeline-ticket-trouble")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("timeline-ticket-toggle"));
+    expect(screen.getByText("重试 T-1")).toBeTruthy();
     expect(screen.getByText("人的操作")).toBeTruthy();
   });
 
@@ -1439,6 +1519,7 @@ describe("the six-step bar and nested pages", () => {
                 kind: "ticket-blocked",
                 at: "2026-11-01T10:00:00.000Z",
                 text: "T-1 卡住：gate-failed",
+                ticketId: 1,
                 failureSource: "agent",
               },
               {
@@ -1452,7 +1533,9 @@ describe("the six-step bar and nested pages", () => {
         }),
       }),
     );
-    expect(await screen.findByText("T-1 卡住：gate-failed")).toBeTruthy();
+    expect(await screen.findByTestId("timeline-ticket-trouble")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("timeline-ticket-toggle"));
+    expect(screen.getByText("T-1 卡住：gate-failed")).toBeTruthy();
     const sources = screen.getAllByTestId("failure-source");
     expect(sources.map((el) => el.textContent)).toEqual(["agent", "需求本身"]);
   });
@@ -1491,6 +1574,32 @@ describe("the six-step bar and nested pages", () => {
     const link = await screen.findByRole("link", { name: "GitHub" });
     expect(link.getAttribute("href")).toBe("https://github.com/me/shop/pull/7");
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("marks a troubled ticket while collapsed, and expands only when asked", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            timeline: [
+              {
+                kind: "ticket-blocked",
+                at: "2026-11-01T10:00:00.000Z",
+                text: "T-1 卡住：gate-failed",
+                ticketId: 1,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByTestId("timeline-ticket-trouble")).toBeTruthy();
+    expect(screen.queryByText("T-1 卡住：gate-failed")).toBeNull();
+    const group = screen.getByTestId("timeline-ticket-group");
+    expect(group.textContent).toMatch(/卡住\s+1\s+次/);
+    fireEvent.click(screen.getByTestId("timeline-ticket-toggle"));
+    expect(screen.getByText("T-1 卡住：gate-failed")).toBeTruthy();
   });
 
   it("shows each repo's finishing step by step, with its Runs and the log of the one going now", async () => {

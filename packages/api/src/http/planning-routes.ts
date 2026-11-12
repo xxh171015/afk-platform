@@ -139,7 +139,13 @@ const projectListRoute = createRoute({
     200: reply(
       "The projects, or with repoUrl the ones that have a repo at that address",
       z.object({
-        projects: z.array(z.object({ id: Id, name: z.string() })),
+        projects: z.array(
+          z.object({
+            id: Id,
+            name: z.string(),
+            feishuChatId: z.string().nullable(),
+          }),
+        ),
       }),
     ),
   },
@@ -721,7 +727,7 @@ export function registerPlanningRoutes(
   app.openapi(projectListRoute, async (c) => {
     const { repoUrl } = c.req.valid("query");
     const projects = await pool.query(
-      "SELECT id, name FROM projects ORDER BY id",
+      "SELECT id, name, feishu_chat_id FROM projects ORDER BY id",
     );
     let ids: Set<number> | null = null;
     if (repoUrl !== undefined) {
@@ -742,7 +748,11 @@ export function registerPlanningRoutes(
       {
         projects: projects.rows
           .filter((p) => ids === null || ids.has(p.id as number))
-          .map((p) => ({ id: p.id as number, name: p.name as string })),
+          .map((p) => ({
+            id: p.id as number,
+            name: p.name as string,
+            feishuChatId: (p.feishu_chat_id as string | null) ?? null,
+          })),
       },
       200,
     );
