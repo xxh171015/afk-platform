@@ -19,8 +19,8 @@ import {
   processJob,
   pushRef,
   RepoStore,
-  runWorker,
   SlotManager,
+  runWorker as startWorker,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate.ts";
@@ -29,7 +29,9 @@ import {
   FakeClock,
   listen,
   type RunningApi,
+  teardownTestRuntime,
   testApp,
+  trackedWorkers,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -46,6 +48,10 @@ let logDir: string;
 let home: string;
 let origin: string; // bare repo standing in for GitHub
 let seed: TestRepo;
+const workers = trackedWorkers();
+function runWorker(opts: Parameters<typeof startWorker>[0]) {
+  return workers.run((signal) => startWorker({ ...opts, signal }), opts.signal);
+}
 
 // The test command counts tests from a file in the repo (3 unless the work says otherwise) and fails on BROKEN.
 const COUNT_TESTS =
@@ -78,8 +84,11 @@ afterEach(async () => {
   const seedDir = seed;
   const logs = logDir;
   const homeDir = home;
-  await closing.close();
-  await dropping.drop();
+  await teardownTestRuntime({
+    stopWorker: () => workers.stopAll(),
+    api: closing,
+    db: dropping,
+  });
   seedDir.cleanup();
   rmSync(logs, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });

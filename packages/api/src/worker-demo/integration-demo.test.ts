@@ -22,9 +22,9 @@ import {
   type ExecutorDeps,
   pushRef,
   RepoStore,
-  runWorker,
   SlotManager,
   SnapshotStore,
+  runWorker as startWorker,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
@@ -34,7 +34,9 @@ import {
   FakeClock,
   listen,
   type RunningApi,
+  teardownTestRuntime,
   testApp,
+  trackedWorkers,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -59,6 +61,10 @@ let agentRuns: {
   environmentsUp: number;
 }[];
 const origins: Record<string, string> = {};
+const workers = trackedWorkers();
+function runWorker(opts: Parameters<typeof startWorker>[0]) {
+  return workers.run((signal) => startWorker({ ...opts, signal }), opts.signal);
+}
 
 const COUNT_TESTS =
   'mkdir -p reports && printf \'<testsuites tests="3"><testsuite name="a" tests="3" skipped="0"/></testsuites>\' > reports/junit.xml';
@@ -117,8 +123,11 @@ beforeEach(async () => {
   agentRuns = [];
 });
 afterEach(async () => {
-  await api.close();
-  await db.drop();
+  await teardownTestRuntime({
+    stopWorker: () => workers.stopAll(),
+    api,
+    db,
+  });
   backendSeed.cleanup();
   frontendSeed.cleanup();
   rmSync(home, { recursive: true, force: true });

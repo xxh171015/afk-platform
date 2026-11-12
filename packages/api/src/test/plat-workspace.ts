@@ -7,7 +7,12 @@ import { gitOrThrow } from "@afk/pipeline";
 import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
-import { listen, type RunningApi, testApp } from "./fake-worker.ts";
+import {
+  listen,
+  type RunningApi,
+  teardownTestRuntime,
+  testApp,
+} from "./fake-worker.ts";
 
 // The real HTTP API and a real Postgres, with `plat` run in real git checkouts whose origin is a GitHub address
 // that git rewrites (url.<bare>.insteadOf) to a local bare repo, so pushes and ls-remote work offline.
@@ -138,8 +143,7 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
       return { code, stdout, stderr, questions };
     },
     async close() {
-      await api.close();
-      await db.drop();
+      await teardownTestRuntime({ api, db });
       for (const cleanup of cleanups.splice(0)) cleanup();
       await rm(root, { recursive: true, force: true });
       await rm(logDir, { recursive: true, force: true });

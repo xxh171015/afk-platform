@@ -66,6 +66,42 @@ export interface RunningApi {
   close(): Promise<void>;
 }
 
+// afterEach order for HTTP + Postgres tests (ticket #287): worker loop, drain HTTP, drop DB.
+export async function teardownTestRuntime(options: {
+  stopWorker?: () => Promise<void>;
+  api: RunningApi;
+  db: { drop(): Promise<void> };
+}): Promise<void> {
+  await options.stopWorker?.();
+  await options.api.close();
+  await options.db.drop();
+}
+
+// Links every runWorker in a file to afterEach so a leftover loop is aborted
+// before close() waits for in-flight requests.
+export function trackedWorkers() {
+  let stop = new AbortController();
+  const live: Promise<unknown>[] = [];
+  return {
+    run<T>(
+      start: (signal: AbortSignal) => Promise<T>,
+      signal?: AbortSignal,
+    ): Promise<T> {
+      const combined = signal
+        ? AbortSignal.any([signal, stop.signal])
+        : stop.signal;
+      const running = start(combined);
+      live.push(running);
+      return running;
+    },
+    async stopAll(): Promise<void> {
+      stop.abort();
+      await Promise.allSettled(live.splice(0));
+      stop = new AbortController();
+    },
+  };
+}
+
 // The app on a real HTTP port, so the fake worker talks to it the way a real worker will.
 export async function listen(app: {
   fetch: (request: Request) => Response | Promise<Response>;
@@ -74,13 +110,36 @@ export async function listen(app: {
   await hub?.whenReady();
   const dispatcher = dispatcherOf(app);
   await dispatcher?.start();
+  let inFlight = 0;
+  const idleWaiters: (() => void)[] = [];
+  const fetch = async (request: Request) => {
+    inFlight += 1;
+    try {
+      return await app.fetch(request);
+    } finally {
+      inFlight -= 1;
+      if (inFlight === 0) {
+        for (const notify of idleWaiters.splice(0)) notify();
+      }
+    }
+  };
+  const whenIdle = () =>
+    inFlight === 0
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          idleWaiters.push(resolve);
+        });
   return new Promise((resolve) => {
-    const server = serve(
-      { fetch: app.fetch, port: 0, hostname: "127.0.0.1" },
-      (info) => {
-        resolve({
-          url: `http://127.0.0.1:${info.port}`,
-          close: async () => {
+    const server = serve({ fetch, port: 0, hostname: "127.0.0.1" }, (info) => {
+      let closed: Promise<void> | undefined;
+      resolve({
+        url: `http://127.0.0.1:${info.port}`,
+        close: () => {
+          if (closed) return closed;
+          closed = (async () => {
+            // Finish handlers that are still querying (a worker heartbeat) before
+            // cutting sockets and dropping the database (ticket #287).
+            await whenIdle();
             await dispatcher?.stop();
             await hub?.stop();
             await new Promise<void>((done) => {
@@ -88,13 +147,14 @@ export async function listen(app: {
               // and the next test's afterEach then deletes that test's temp dirs.
               const http = server as import("node:http").Server;
               http.closeIdleConnections?.();
-              http.closeAllConnections();
               http.close(() => done());
+              http.closeAllConnections();
             });
-          },
-        });
-      },
-    );
+          })();
+          return closed;
+        },
+      });
+    });
   });
 }
 
