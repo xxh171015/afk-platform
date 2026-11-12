@@ -44,7 +44,8 @@ export interface PushOptions {
 
 export type PushResult = { ok: true } | { ok: false; error: string };
 
-// A failed push we will wait out and try again: the remote was unreachable, timed out, or answered 5xx.
+// A failed push we will wait out and try again: the remote was unreachable, timed out, answered 5xx,
+// or hit a host-internal error (commit_refs, a remote rejected with no reason).
 // A refusal (non-fast-forward, a protected branch, no permission) is classified in @afk/shared.
 export { isNetworkPushError } from "@afk/shared";
 

@@ -18,8 +18,9 @@ export type PushFailureTips = {
 };
 
 // Copied from the worker's former NETWORK_PUSH: a flake we wait out and push again.
+// GitHub's commit_refs internal error and a remote rejected with no reason also wait out.
 const NETWORK =
-  /could not resolve host|failed to connect|connection refused|connection reset|connection timed out|timed out|etimedout|econnreset|enotfound|eai_again|couldn't connect|tls handshake timeout|the requested url returned error: 5\d\d|\bhttp 5\d\d\b|rpc failed; http 5\d\d/i;
+  /could not resolve host|failed to connect|connection refused|connection reset|connection timed out|timed out|etimedout|econnreset|enotfound|eai_again|couldn't connect|tls handshake timeout|the requested url returned error: 5\d\d|\bhttp 5\d\d\b|rpc failed; http 5\d\d|fatal error in commit_refs|\[remote rejected\][^\n]*\(failure\)/i;
 
 const BRANCH_MOVED =
   /non-fast-forward|fetch first|stale info|updates were rejected because/i;

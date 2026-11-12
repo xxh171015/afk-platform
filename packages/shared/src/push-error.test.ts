@@ -35,6 +35,9 @@ describe("classifyPushError", () => {
     "fatal: unable to access 'https://github.com/x.git/': Could not resolve host: github.com",
     "Failed to connect to github.com port 443: Connection timed out",
     "RPC failed; HTTP 502",
+    "remote: fatal error in commit_refs",
+    "! [remote rejected] agent/T-1 -> agent/T-1 (failure)",
+    "remote: fatal error in commit_refs\n! [remote rejected] agent/T-1 -> agent/T-1 (failure)",
   ])("names a network blip: %s", (error) => {
     expect(classifyPushError(error)).toBe("network");
     expect(isNetworkPushError(error)).toBe(true);
@@ -92,10 +95,15 @@ describe("formatPushFailure", () => {
     expect(HOST_PERMISSION_BRIEF).not.toContain("CURSOR_API_KEY");
   });
 
-  it("leaves a network error unchanged so the worker can retry it", () => {
-    const error =
-      "fatal: unable to access 'https://github.com/x.git/': Could not resolve host: github.com";
-    expect(formatPushFailure(error)).toBe(error);
-    expect(isNetworkPushError(formatPushFailure(error))).toBe(true);
-  });
+  it.each([
+    "fatal: unable to access 'https://github.com/x.git/': Could not resolve host: github.com",
+    "remote: fatal error in commit_refs",
+    "! [remote rejected] agent/T-1 -> agent/T-1 (failure)",
+  ])(
+    "leaves a network error unchanged so the worker can retry it: %s",
+    (error) => {
+      expect(formatPushFailure(error)).toBe(error);
+      expect(isNetworkPushError(formatPushFailure(error))).toBe(true);
+    },
+  );
 });
