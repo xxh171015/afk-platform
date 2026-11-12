@@ -155,6 +155,12 @@ if [ "${WORKER:-1}" != 0 ]; then
     good "model: $model"
   fi
 
+  slots="$(setting AFK_SLOTS)"
+  if [ -n "$slots" ]; then
+    export AFK_SLOTS="$slots"
+    good "worker slots: $slots"
+  fi
+
   key="$(setting CURSOR_API_KEY)"
   if [ -z "$key" ] && [ "$interactive" = 1 ]; then
     read -r -s -p "  Cursor API key (CURSOR_API_KEY; input is hidden; saved to $env_file, mode 600): " key || key=
