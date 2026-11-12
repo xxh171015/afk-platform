@@ -283,7 +283,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | `packages/pipeline/skills/`        | implement、tdd、code-review、codebase-design                    | worker 只读挂进沙箱                                                             |
 | `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板                             | `plat init`、`plat tracker-doc`                                                 |
 
-固定的 SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`），每个目录的 `VENDORED.md` 记下复制时的 SHA 和每个复制文件的 sha256，守卫测试保证 SHA 一致、文件没被改过。**副本不手改**（编辑器的格式化也算）：平台自己的规划规则写进平台的文件——通用的写进 tracker 文档模板（`packages/cli/templates/`）或 `plat init` 写的规划约定（`packages/cli/src/agent-docs.ts`），只对本仓库成立的写进 `AGENTS.md`。唯一的例外是 to-spec、to-tickets 里把 `/setup-matt-pocock-skills` 换成 `/afk-setup`，由刷新脚本做。升级时在**一个提交**里做完下面几步：
+固定的 SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`），每个目录的 `VENDORED.md` 记下复制时的 SHA 和每个复制文件的 sha256，守卫测试保证 SHA 一致、文件没被改过。**副本不手改**（编辑器的格式化也算）：平台自己的规划规则写进平台的文件——通用的写进 tracker 文档模板（`packages/cli/templates/`）或 `plat init` 写的规划约定（`packages/cli/src/agent-docs.ts`），只对本仓库成立的写进 `CLAUDE.md`（`AGENTS.md` 也给 worker 读，不放规划规则）。唯一的例外是 to-spec、to-tickets 里把 `/setup-matt-pocock-skills` 换成 `/afk-setup`，由刷新脚本做。升级时在**一个提交**里做完下面几步：
 
 1. 把 `SKILLS_SHA` 改成新的 commit（在 mattpocock/skills 的 checkout 里 `git fetch` 后确认它存在）。
 2. 跑刷新脚本：`node scripts/refresh-skills-snapshot.ts <skills checkout 路径>`。它从那个 commit 把上表三处整个重写（附上游 LICENSE 和 `VENDORED.md`）。对当前 SHA 重跑，什么都不会变。
