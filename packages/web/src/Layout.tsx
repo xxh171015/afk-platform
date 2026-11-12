@@ -83,9 +83,7 @@ function Sidebar({
       )}
     >
       <div className="flex h-12 items-center gap-2 border-b border-sidebar-border px-3">
-        <div className="grid size-6 shrink-0 place-items-center rounded-sm bg-primary font-mono text-[10px] font-bold text-primary-foreground">
-          AFK
-        </div>
+        <img src="/icon.png" alt="" className="size-6 shrink-0 rounded-sm" />
         {!collapsed && (
           <span className="truncate text-[13px] font-semibold">AFK 平台</span>
         )}
