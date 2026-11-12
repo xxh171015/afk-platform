@@ -1,5 +1,6 @@
 import {
   AGENT_FAILURES,
+  classifyPushError,
   formatDisplayId,
   type PauseReason,
   resolveLimits,
@@ -552,6 +553,33 @@ export type RecordUpdateBranchResult =
   | { status: "not-update-branch" }
   | { status: "ignored"; reason: string }
   | { status: "applied" };
+
+export async function updateBranchJobFailed(
+  client: pg.PoolClient,
+  job: StageJob,
+  error: string,
+): Promise<"not-update-branch" | "paused" | "ignored"> {
+  const read = readUpdateBranchPayload(job.payload);
+  if (!read) return "not-update-branch";
+  await lockSpec(client, read.specId);
+  const spec = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [read.specId],
+  );
+  const specState = spec.rows[0]?.state;
+  if (!specState || !SPECS_THAT_WATCH_MAIN.includes(specState))
+    return "ignored";
+  const kind = classifyPushError(error);
+  const reason: PauseReason | undefined =
+    kind === "branch-moved"
+      ? "branch-moved"
+      : kind === "host-permission"
+        ? "job-failed"
+        : undefined;
+  if (!reason) return "ignored";
+  await pauseForUpdateBranch(client, read.specId, reason);
+  return "paused";
+}
 
 async function failQueuedUpdateBranches(
   client: pg.PoolClient,

@@ -223,6 +223,52 @@ describe("a job the worker could not carry out", () => {
     },
   );
 
+  it("blocks the ticket at once as branch-moved on a non-fast-forward, without a second job", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext(
+      "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
+    );
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "branch-moved",
+    });
+    expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      blockedReason: "branch-moved",
+      failureSource: "spec",
+      structuredBrief: {
+        summary: "运行期间票分支被推过了",
+      },
+    });
+    expect(queue.body.tickets[0].brief.output.error).toContain(
+      "运行期间票分支被推过了",
+    );
+  });
+
+  it("blocks at once as job-failed on a protected branch or missing permission, with a host brief", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext(
+      "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+    );
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "platform",
+    });
+    expect(queue.body.tickets[0].brief.output.error).toContain("代码托管");
+    expect(queue.body.tickets[0].brief.output.error).not.toContain(
+      "CURSOR_API_KEY",
+    );
+  });
+
   it("blocks the ticket at once with sandbox-oom when the container was OOMKilled, as a platform problem", async () => {
     await runningSpec([ticket("a")]);
     await failNext("sandbox-oom: container OOMKilled");
@@ -510,6 +556,40 @@ describe("a step of the overall review that could not be carried out", () => {
     await call("POST", "/agents/resume");
     const again = (await claim()) as Claimed;
     expect(again.payload.stage).toBe("final-review");
+  });
+
+  it("blocks the wrap-up at once as branch-moved when final-fix cannot push", async () => {
+    await toFinalReview();
+    const review = (await claim()) as Claimed;
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    await failNext(
+      "! [rejected] agent/abc123/S-1-final -> agent/abc123/S-1-final (non-fast-forward)",
+    );
+    expect(
+      (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
+        .rows[0],
+    ).toEqual({
+      state: "blocked",
+      blocked_reason: "branch-moved",
+    });
+    expect(await claim()).toBeNull();
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.finalizations[0]).toMatchObject({
+      blockedReason: "branch-moved",
+      failureSource: "spec",
+      structuredBrief: { summary: "运行期间票分支被推过了" },
+    });
   });
 
   it("blocks the wrap-up at once with sandbox-oom when the container was OOMKilled, without three failures", async () => {

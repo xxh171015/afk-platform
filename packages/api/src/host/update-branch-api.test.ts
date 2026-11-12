@@ -818,6 +818,42 @@ describe("the update-branch job", () => {
     ).toBe(true);
   });
 
+  it("pauses on the first non-fast-forward, with branch-moved", async () => {
+    const job = await queuedUpdate();
+    const reply = await agent.fail(
+      job.id,
+      job.attempt,
+      "! [rejected] spec/abc123/export -> spec/abc123/export (non-fast-forward)",
+    );
+    expect(reply.status).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "branch-moved",
+    });
+    expect(await updateJobs()).toMatchObject([{ state: "failed" }]);
+    expect((await agent.claim()).body.job).toBeNull();
+  });
+
+  it("pauses on the first permission refusal as job-failed, not a Cursor key brief", async () => {
+    const job = await queuedUpdate();
+    const reply = await agent.fail(
+      job.id,
+      job.attempt,
+      "remote: error: GH006: Protected branch update failed for refs/heads/spec/abc123/export",
+    );
+    expect(reply.status).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "job-failed",
+    });
+    expect(await updateJobs()).toMatchObject([{ state: "failed" }]);
+    const run = await db.pool.query(
+      "SELECT output->>'error' AS error FROM runs WHERE stage = 'update-branch'",
+    );
+    expect(run.rows[0].error).toContain("代码托管");
+    expect(run.rows[0].error).not.toContain("CURSOR_API_KEY");
+  });
+
   it("leaves the spec running when the merge lands", async () => {
     const job = await queuedUpdate();
     await agent.complete(job.id, job.attempt, {

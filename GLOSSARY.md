@@ -181,7 +181,7 @@ _Avoid_: 白名单、豁免路径
 _Avoid_: 测试白名单、基准调整
 
 **Blocked reason（blocked 原因码）**：
-票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。
+票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。`branch-moved` 表示运行期间票分支被别人推过了，失败来源是需求本身。
 
 **Waiting queue（待处理队列）**：
 需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。

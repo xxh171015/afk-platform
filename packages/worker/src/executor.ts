@@ -48,6 +48,10 @@ import {
 } from "@afk/pipeline";
 import {
   type Bundle,
+  classifyPushError,
+  formatPushFailure,
+  isNetworkPushError,
+  type PushFailureTips,
   REVIEW_AXES,
   type ReviewAxis,
   unrecoverableJobError,
@@ -58,7 +62,7 @@ import { type Credentials, withCredentials } from "./credentials.ts";
 import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
 import type { EnvironmentLimiter } from "./environments.ts";
 import { blameLocateFiles } from "./locate.ts";
-import { isNetworkPushError, type PushFn } from "./push.ts";
+import type { PushFn } from "./push.ts";
 import { sanitizeRawLine } from "./raw-log.ts";
 import type { RepoStore } from "./repos.ts";
 import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
@@ -280,6 +284,26 @@ async function runStage(
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
 
+function originTip(repoDir: string, ref: string): string | undefined {
+  const sha = git(repoDir, ["ls-remote", "origin", ref])
+    .stdout.split("\t")[0]
+    ?.trim();
+  return sha || undefined;
+}
+
+function throwPushFailure(error: string, tips: PushFailureTips): never {
+  const kind = classifyPushError(error);
+  if (kind === "branch-moved" || kind === "host-permission") {
+    throw new InfrastructureError(
+      formatPushFailure(error, {
+        remoteTip: tips.remoteTip ?? "",
+        startedFrom: tips.startedFrom ?? "",
+      }),
+    );
+  }
+  throw new InfrastructureError(`push failed: ${error}`);
+}
+
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -492,7 +516,10 @@ async function agentChange(
       await wait(waitSeconds[i] * 1000, context.signal);
     }
     if (!pushed.ok)
-      throw new InfrastructureError(`push failed: ${pushed.error}`);
+      throwPushFailure(pushed.error, {
+        remoteTip: originTip(mainDir, request.target),
+        startedFrom: request.expectedOld ?? replaced ?? before,
+      });
     facts.headSha = tip(mainDir, agent);
     facts.commits = gitOrThrow(mainDir, [
       "rev-list",
@@ -980,7 +1007,15 @@ async function mergeOnce(
     target: integrationRef,
     expectedOld: oldTip,
   });
-  if (!pushed.ok) return { integrationMoved: pushed.error };
+  if (!pushed.ok) {
+    if (classifyPushError(pushed.error) === "host-permission") {
+      throwPushFailure(pushed.error, {
+        remoteTip: originTip(mainDir, integrationRef),
+        startedFrom: oldTip,
+      });
+    }
+    return { integrationMoved: pushed.error };
+  }
   gitOrThrow(mainDir, ["update-ref", integrationRef, candidate.candidate]);
   log(`merge: ${integration} is now ${candidate.candidate}`);
   return {

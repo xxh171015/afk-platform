@@ -1805,6 +1805,82 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
     return () => attempts;
   }
 
+  it("finishes the job after the remote fails to connect twice, without running the agent again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    const agentPushes = withAgentRemote(executor, (attempt) =>
+      attempt <= 2 ? { ok: false, error: CONNECTION } : "push",
+    );
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(implementRuns).toBe(1);
+    expect(agentPushes()).toBe(3);
+  });
+
+  it("retries a disconnected final-fix push in the same job, without running the agent again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let finalFixRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "final-review")
+          return {
+            output: {
+              verdict: "fix",
+              mustFix: [
+                {
+                  file: "src/a.ts",
+                  line: 1,
+                  problem: "a and b name the same thing differently",
+                },
+              ],
+              suggestions: [],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        if (ctx.stage === "final-fix") {
+          finalFixRuns += 1;
+          return {
+            files: { "src/shared-name.ts": "export const name = 1;\n" },
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    const real = executor.push;
+    let finalPushes = 0;
+    executor.push = (request, token) => {
+      if (!request.target.includes("S-1-final")) return real(request, token);
+      finalPushes += 1;
+      if (finalPushes <= 2) return { ok: false, error: CONNECTION };
+      return real(request, token);
+    };
+    executor.sleep = async () => {};
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(finalFixRuns).toBe(1);
+    expect(finalPushes).toBe(3);
+    expect(
+      (await db.pool.query("SELECT step, state FROM finalizations")).rows[0],
+    ).toEqual({ step: "final-merge", state: "done" });
+  });
+
   it("finishes the job after the remote fails to connect three times, without running the agent again", async () => {
     await confirmedSpec([ticket("a")]);
     let implementRuns = 0;
@@ -1856,6 +1932,86 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
       await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
     ).toBe("failed");
     expect(agentPushes()).toBe(1);
+  });
+
+  it("blocks the ticket as branch-moved on the first non-fast-forward, with the remote tip in the brief", async () => {
+    await confirmedSpec([ticket("a")]);
+    const remoteTip = gitOut(origin, ["rev-parse", "HEAD"]);
+    git(origin, ["update-ref", `refs/heads/agent/${ID}/T-1`, remoteTip]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    const agentPushes = withAgentRemote(executor, () => ({
+      ok: false,
+      error: `! [rejected] agent/${ID}/T-1 -> agent/${ID}/T-1 (non-fast-forward)`,
+    }));
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(agentPushes()).toBe(1);
+    expect(await stateOf()).toEqual(["1:blocked/branch-moved"]);
+    const jobs = await db.pool.query(
+      "SELECT state FROM jobs WHERE payload->>'stage' = 'implement' ORDER BY id",
+    );
+    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
+    const queue = (await fetch(`${api.url}/blocked`).then((r) => r.json())) as {
+      tickets: Array<{
+        structuredBrief: {
+          summary: string;
+          evidence: { lastLogLines?: string };
+        };
+      }>;
+    };
+    expect(queue.tickets[0].structuredBrief.summary).toBe(
+      "运行期间票分支被推过了",
+    );
+    expect(queue.tickets[0].structuredBrief.evidence.lastLogLines).toContain(
+      `远端 tip: ${remoteTip}`,
+    );
+    expect(queue.tickets[0].structuredBrief.evidence.lastLogLines).toContain(
+      "本轮起点:",
+    );
+  });
+
+  it("blocks as job-failed on the first permission refusal, with a host brief", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    withAgentRemote(executor, () => ({
+      ok: false,
+      error:
+        "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+    }));
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const jobs = await db.pool.query(
+      "SELECT state FROM jobs WHERE payload->>'stage' = 'implement' ORDER BY id",
+    );
+    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
+    const queue = (await fetch(`${api.url}/blocked`).then((r) => r.json())) as {
+      tickets: Array<{ brief: { output: { error: string } } }>;
+    };
+    expect(queue.tickets[0].brief.output.error).toContain("代码托管");
+    expect(queue.tickets[0].brief.output.error).not.toContain("CURSOR_API_KEY");
   });
 
   it("does not push again when the lease is gone before a retry", async () => {

@@ -200,6 +200,9 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(
       await ticketWith("state, blocked_reason", "'blocked', 'sandbox-oom'"),
     ).toBe("ok");
+    expect(
+      await ticketWith("state, blocked_reason", "'blocked', 'branch-moved'"),
+    ).toBe("ok");
     expect(await ticketWith("state", "'blocked'")).toBe(CHECK_VIOLATION);
     expect(await ticketWith("state, blocked_reason", "'blocked', 'oops'")).toBe(
       CHECK_VIOLATION,
@@ -223,6 +226,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(await block("the review went wrong")).toBe(CHECK_VIOLATION);
     expect(await block("merge-conflict")).toBe("ok");
     expect(await block("sandbox-oom")).toBe("ok");
+    expect(await block("branch-moved")).toBe("ok");
 
     const e2e = await insert("INSERT INTO final_e2e (spec_id) VALUES ($1)", [
       specId,
@@ -254,6 +258,18 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(
       await outcome(
         "UPDATE specs SET state = 'paused', pause_reason = 'budget-exhausted' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+    expect(
+      await outcome(
+        "UPDATE specs SET pause_reason = 'branch-moved' WHERE id = $1",
+        [specId],
+      ),
+    ).toBe("ok");
+    expect(
+      await outcome(
+        "UPDATE specs SET pause_reason = 'job-failed' WHERE id = $1",
         [specId],
       ),
     ).toBe("ok");

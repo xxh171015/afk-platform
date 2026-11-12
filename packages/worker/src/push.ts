@@ -45,11 +45,8 @@ export interface PushOptions {
 export type PushResult = { ok: true } | { ok: false; error: string };
 
 // A failed push we will wait out and try again: the remote was unreachable, timed out, or answered 5xx.
-// A refusal (non-fast-forward, a protected branch, no permission) is not this; those fail the job as they do today.
-const NETWORK_PUSH =
-  /could not resolve host|failed to connect|connection refused|connection reset|connection timed out|timed out|etimedout|econnreset|enotfound|eai_again|couldn't connect|tls handshake timeout|the requested url returned error: 5\d\d|\bhttp 5\d\d\b|rpc failed; http 5\d\d/i;
-
-export const isNetworkPushError = (error: string) => NETWORK_PUSH.test(error);
+// A refusal (non-fast-forward, a protected branch, no permission) is classified in @afk/shared.
+export { isNetworkPushError } from "@afk/shared";
 
 export function pushRef(
   request: PushRequest,

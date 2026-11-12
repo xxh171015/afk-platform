@@ -65,6 +65,7 @@ const SUMMARY: Record<BlockedReason, string> = {
   "integration-environment-failed": "联调环境起不来",
   "upstream-cancelled": "上游已取消",
   "job-failed": "作业失败",
+  "branch-moved": "运行期间票分支被推过了",
   "sandbox-oom": "沙箱内存不足",
 };
 
@@ -84,6 +85,7 @@ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
   "integration-environment-failed": "先修好环境再重试",
   "upstream-cancelled": "取消这张票，或导入替代票",
   "job-failed": "看作业失败原因，环境或额度恢复后直接重试",
+  "branch-moved": "看谁推了票分支，决定从远端继续后再试",
   "sandbox-oom": "把沙箱内存调大后再试",
 };
 
@@ -190,6 +192,14 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
       },
     ];
   }
+  if (input.reason === "branch-moved") {
+    return [
+      {
+        label: "从远端继续",
+        command: `plat ticket retry ${ticket} --mode continue`,
+      },
+    ];
+  }
   if (input.reason === "sandbox-oom") {
     return [
       {
@@ -283,7 +293,11 @@ function evidenceOf(
               source.attempts
                 ?.map((attempt) => attempt.diagnosis?.evidence)
                 .filter((text): text is string => typeof text === "string"),
-            ) ?? unapprovedLines(out));
+            ) ??
+            unapprovedLines(out) ??
+            (reason === "branch-moved" && typeof out?.error === "string"
+              ? out.error
+              : undefined));
   if (lastLogLines) evidence.lastLogLines = lastLogLines;
   const conflictFiles =
     stringArray(out?.conflictFiles) ??

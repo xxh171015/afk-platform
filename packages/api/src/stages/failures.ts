@@ -1,5 +1,7 @@
 import {
   type BlockedReason,
+  classifyPushError,
+  formatPushFailure,
   isSandboxOomError,
   type TicketState,
   ticketTransition,
@@ -25,6 +27,7 @@ import {
   type SpecCleanupPayload,
   specCleanupKeyPrefix,
 } from "../host/host-jobs.ts";
+import { updateBranchJobFailed } from "../host/update-branch.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
   enqueueFinalJob,
@@ -41,10 +44,9 @@ import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
 import { EXPECTED_STATE, type StageJob, startsQueued } from "./results.ts";
 
 // A worker that cannot carry out a stage reports the job as failed (its sandbox would not start, a push was
-// refused again and again, ...). That is not the ticket's fault, so the stage is queued again; if it keeps
-// failing the ticket is blocked with job-failed and the error in its brief, for a person to look at.
-// Errors that will not recover by running again (Cursor auth, a bad model, a spent quota, a failed
-// integration image build) skip the requeue and block on the first failure.
+// refused, ...). A network blip is retried; a non-fast-forward stops at once as branch-moved, and a host
+// permission refusal as job-failed. Other infrastructure errors are queued again and block after three.
+// Cursor auth, a bad model, a spent quota, and a failed integration image build still skip the requeue.
 export const MAX_JOB_FAILURES = 3;
 
 const JOB_FAILED: BlockedReason = "job-failed";
@@ -65,6 +67,19 @@ const reasonOfFailed = (stage: string, type: string): BlockedReason =>
   (stage === "implement" && type === "integration")
     ? "integration-environment-failed"
     : JOB_FAILED;
+
+function storedJobError(error: string): string {
+  return unrecoverableJobError(error) ?? formatPushFailure(error);
+}
+
+function immediateBlockReason(error: string): BlockedReason | undefined {
+  if (isSandboxOomError(error)) return "sandbox-oom";
+  if (unrecoverableJobError(error)) return JOB_FAILED;
+  const push = classifyPushError(error);
+  if (push === "branch-moved") return "branch-moved";
+  if (push === "host-permission") return JOB_FAILED;
+  return undefined;
+}
 
 export type FailureOutcome =
   | { status: "not-a-stage" } // a job that is neither a ticket stage nor a finalization step
@@ -103,7 +118,7 @@ export async function recordJobFailure(
   error: string,
   now: Date,
 ): Promise<FailureOutcome> {
-  await finishRun(client, job.id, unrecoverableJobError(error) ?? error);
+  await finishRun(client, job.id, storedJobError(error));
 
   const planning = readPlanningPayload(job);
   if (planning) {
@@ -122,6 +137,12 @@ export async function recordJobFailure(
   if (stage) return ticketStageFailed(client, stage, error);
   const final = readFinalPayload(job.payload);
   if (final) return finalStepFailed(client, final, error);
+  const update = await updateBranchJobFailed(client, job, error);
+  if (update !== "not-update-branch") {
+    return update === "paused"
+      ? { status: "blocked", failures: 1 }
+      : { status: "ignored" };
+  }
   const openPr = readOpenPrPayload(job);
   if (openPr) return openPrFailed(client, openPr);
   const cleanup = readSpecCleanupPayload(job);
@@ -176,9 +197,8 @@ async function ticketStageFailed(
     }),
     row.job_floor,
   );
-  const oom = isSandboxOomError(error);
-  const unrecoverable = Boolean(unrecoverableJobError(error));
-  if (!oom && !unrecoverable && failures < MAX_JOB_FAILURES) {
+  const immediate = immediateBlockReason(error);
+  if (!immediate && failures < MAX_JOB_FAILURES) {
     await enqueueStageJob(
       client,
       {
@@ -193,11 +213,8 @@ async function ticketStageFailed(
   }
   // A ticket that never got to start counts as running now, so that the state machine can block it.
   const from: TicketState = row.state === "queued" ? "running" : row.state;
-  const reason: BlockedReason = oom
-    ? "sandbox-oom"
-    : unrecoverable
-      ? JOB_FAILED
-      : reasonOfFailed(read.stage, row.type);
+  const reason: BlockedReason =
+    immediate ?? reasonOfFailed(read.stage, row.type);
   const blocked = ticketTransition(from, { type: "block", reason });
   if (!blocked.ok) throw new Error(blocked.reason);
   await client.query(
@@ -238,14 +255,14 @@ async function finalStepFailed(
     }),
     fin.job_floor,
   );
-  const oom = isSandboxOomError(error);
-  if (!oom && !unrecoverableJobError(error) && failures < MAX_JOB_FAILURES) {
+  const immediate = immediateBlockReason(error);
+  if (!immediate && failures < MAX_JOB_FAILURES) {
     await enqueueFinalJob(client, read, read.step);
     return { status: "requeued", failures };
   }
   await client.query(
     "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
-    [fin.id, oom ? "sandbox-oom" : JOB_FAILED],
+    [fin.id, immediate ?? JOB_FAILED],
   );
   return { status: "blocked", failures };
 }
