@@ -75,6 +75,15 @@ const GATES = [
   `    run: ${JSON.stringify(COUNT_TESTS)}`,
   "    timeoutSeconds: 30",
   "    junit: reports/junit.xml",
+  "generated:",
+  "  - paths: [gen.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo regenerated > gen.txt'")}`,
+  "  - paths: [gen-a.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo A > gen-a.txt'")}`,
+  "  - paths: [gen-b.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo B > gen-b.txt'")}`,
+  "  - paths: [gen-fail.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo boom; exit 1'")}`,
   "",
 ].join("\n");
 
@@ -779,6 +788,210 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     expect(gitOut(origin, ["show", `spec/${ID}/order-export:shared.txt`])).toBe(
       "settled",
     );
+  });
+
+  it("regenerates declared files on a generated-only conflict instead of merge-fix", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const sandboxCommands: string[] = [];
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { "gen.txt": `${ctx.branch}\n` }, output: DONE };
+        if (ctx.stage === "merge-fix")
+          throw new Error(
+            "merge-fix must not run for generated-only conflicts",
+          );
+        return undefined;
+      },
+    });
+    const inner = executor.makeGateSandbox;
+    executor.makeGateSandbox = (dir, runId) => {
+      const sandbox = inner(dir, runId);
+      const opened = sandbox.open.bind(sandbox);
+      sandbox.open = async (ref, placement) => {
+        const session = await opened(ref, placement);
+        const exec = session.exec.bind(session);
+        session.exec = async (command, options) => {
+          sandboxCommands.push(
+            typeof command === "string" ? command : command.join("\0"),
+          );
+          return exec(command, options);
+        };
+        return session;
+      };
+      return sandbox;
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:gen.txt`])).toBe(
+      "regenerated",
+    );
+    expect(
+      sandboxCommands.some((command) => command.includes("echo regenerated")),
+    ).toBe(true);
+    const regen = gitOut(origin, [
+      "log",
+      "-1",
+      "--format=%an%x00%ae%x00%B",
+      `spec/${ID}/order-export`,
+    ]).split("\0");
+    expect(regen[0]).toBe("afk-worker");
+    expect(regen[2]).toContain("Spec: S-1");
+    expect(regen[2]).toContain("Ticket: T-");
+    expect(regen[2]).toContain("Run: R-");
+    const merges = await db.pool.query<{
+      output: { generatedOnlyConflict?: boolean };
+    }>(
+      "SELECT output FROM runs WHERE stage = 'merge' AND output ? 'generatedOnlyConflict'",
+    );
+    expect(
+      merges.rows.some((row) => row.output.generatedOnlyConflict === true),
+    ).toBe(true);
+  });
+
+  it("runs declared generate groups in declaration order", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const sandboxCommands: string[] = [];
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return {
+            files: {
+              "gen-a.txt": `${ctx.branch}-a\n`,
+              "gen-b.txt": `${ctx.branch}-b\n`,
+            },
+            output: DONE,
+          };
+        if (ctx.stage === "merge-fix")
+          throw new Error(
+            "merge-fix must not run for generated-only conflicts",
+          );
+        return undefined;
+      },
+    });
+    const inner = executor.makeGateSandbox;
+    executor.makeGateSandbox = (dir, runId) => {
+      const sandbox = inner(dir, runId);
+      const opened = sandbox.open.bind(sandbox);
+      sandbox.open = async (ref, placement) => {
+        const session = await opened(ref, placement);
+        const exec = session.exec.bind(session);
+        session.exec = async (command, options) => {
+          sandboxCommands.push(
+            typeof command === "string" ? command : command.join("\0"),
+          );
+          return exec(command, options);
+        };
+        return session;
+      };
+      return sandbox;
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:gen-a.txt`])).toBe(
+      "A",
+    );
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:gen-b.txt`])).toBe(
+      "B",
+    );
+    const generate = sandboxCommands.filter(
+      (command) => command.includes("echo A") || command.includes("echo B"),
+    );
+    expect(generate[0]).toContain("echo A");
+    expect(generate[1]).toContain("echo B");
+  });
+
+  it("sends a failed generate to merge-fix once, with the command output in the log", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { "gen-fail.txt": `${ctx.branch}\n` }, output: DONE };
+        if (ctx.stage === "merge-fix") {
+          expect(ctx.context("failure/gate.log")).toContain("boom");
+          git(ctx.dir, [
+            "fetch",
+            "--quiet",
+            ".",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
+          ]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
+          return { files: { "gen-fail.txt": "settled\n" }, output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    const stages = await db.pool.query(
+      "SELECT stage, result FROM runs WHERE ticket_id = 2 AND stage IN ('merge', 'merge-fix') ORDER BY id",
+    );
+    expect(stages.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
+      "merge:conflict",
+      "merge-fix:done",
+      "merge:merged",
+    ]);
+  });
+
+  it("sends mixed source and generated conflicts to merge-fix with the generate commands in the log", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return {
+            files: {
+              "shared.txt": `${ctx.branch}\n`,
+              "gen.txt": `${ctx.branch}\n`,
+            },
+            output: DONE,
+          };
+        if (ctx.stage === "merge-fix") {
+          expect(ctx.context("failure/gate.log")).toContain("echo regenerated");
+          git(ctx.dir, [
+            "fetch",
+            "--quiet",
+            ".",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
+          ]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
+          return {
+            files: { "shared.txt": "settled\n", "gen.txt": "settled\n" },
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
   });
 });
 

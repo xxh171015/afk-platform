@@ -483,6 +483,22 @@ describe("the configuration comes from the trusted commit", () => {
       commands: [{ name: "test", rerunFiles: ["pnpm", "test"] }],
     });
   });
+
+  it("keeps declared generated groups", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "generated:",
+        "  - paths: [openapi.json, schema.d.ts]",
+        "    run: pnpm gen:api",
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main").generated).toEqual([
+      { paths: ["openapi.json", "schema.d.ts"], run: "pnpm gen:api" },
+    ]);
+  });
 });
 
 // What the platform would answer: the outcomes it was told about, looked up as the API does.

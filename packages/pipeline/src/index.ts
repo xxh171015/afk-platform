@@ -84,6 +84,13 @@ export {
   readGateConfig,
   runGate,
 } from "./gate.ts";
+export type { GeneratedGroup } from "./generated.ts";
+export {
+  generatedCommandsNote,
+  generatedConflictShare,
+  generatedGroupsFor,
+  generatedOnlyConflicts,
+} from "./generated.ts";
 export type {
   DockerCli,
   DockerResult,
@@ -100,7 +107,13 @@ export {
   startEnvironment,
 } from "./integration-env.ts";
 export type { MergeCandidate } from "./merge.ts";
-export { hasRef, isAncestor, mergeCandidate, trialMerge } from "./merge.ts";
+export {
+  hasRef,
+  isAncestor,
+  mergeCandidate,
+  mergeTakingOurs,
+  trialMerge,
+} from "./merge.ts";
 export type { ProtectedPathCheck } from "./protected-paths.ts";
 export {
   changedFiles,

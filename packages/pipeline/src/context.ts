@@ -31,12 +31,21 @@ export interface ContextInput {
 export type RunGate = {
   setup: string | null;
   commands: { name: string; run: string }[];
+  generated?: { paths: string[]; run: string }[];
 };
 
 export function gateForRun(config: GateConfig): RunGate {
   return {
     setup: config.setup ?? null,
     commands: config.commands.map(({ name, run }) => ({ name, run })),
+    ...(config.generated?.length
+      ? {
+          generated: config.generated.map(({ paths, run }) => ({
+            paths,
+            run,
+          })),
+        }
+      : {}),
   };
 }
 

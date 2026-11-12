@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type AgentRunner,
+  AUTHOR,
   changedFiles,
   checkContractCopies,
   checkProtectedPaths,
@@ -17,10 +18,15 @@ import {
   type Environment,
   EnvironmentError,
   type EnvironmentRepo,
+  type GateConfig,
   type GateOutcome,
   type GateRecords,
   type GateSandbox,
   GateSetupError,
+  type GeneratedGroup,
+  generatedCommandsNote,
+  generatedGroupsFor,
+  generatedOnlyConflicts,
   git,
   gitOrThrow,
   hasRef,
@@ -29,6 +35,7 @@ import {
   type LocateOutput,
   LocateOutputSchema,
   mergeCandidate,
+  mergeTakingOurs,
   projectOf,
   promptFor,
   type RunGateInput,
@@ -41,6 +48,7 @@ import {
   runE2e,
   runGate,
   type SandboxPlacement,
+  type SandboxSession,
   stampTrailers,
   startEnvironment,
   type TestCounts,
@@ -987,6 +995,121 @@ async function measureMergedHead(
   return undefined;
 }
 
+const GENERATE_TIMEOUT_SECONDS = 600;
+
+function treeShaFrom(output: string): string | undefined {
+  return output
+    .trim()
+    .split("\n")
+    .findLast((line) => /^[0-9a-f]{40,64}$/.test(line));
+}
+
+function regenerateMessage(bundle: Bundle): string {
+  const lines = [
+    "Regenerate declared files",
+    "",
+    `Spec: ${bundle.spec.displayId}`,
+  ];
+  if (bundle.ticket) lines.push(`Ticket: ${bundle.ticket.displayId}`);
+  if (bundle.run) lines.push(`Run: ${bundle.run.displayId}`);
+  return lines.join("\n");
+}
+
+async function regenerateGeneratedConflicts(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+  input: {
+    integration: string;
+    incoming: string;
+    files: string[];
+    groups: GeneratedGroup[];
+    config: GateConfig;
+    message: string;
+  },
+): Promise<
+  { ok: true; candidate: string } | { ok: false; failureLog: string }
+> {
+  const { bundle, log } = context;
+  const ours = mergeTakingOurs(
+    mainDir,
+    input.integration,
+    input.incoming,
+    input.files,
+    input.message,
+  );
+  const regenRef = `gate/regen/${subjectLabel(bundle)}`;
+  gitOrThrow(mainDir, ["update-ref", `refs/heads/${regenRef}`, ours.candidate]);
+  bringBranches(slot, mainDir, [regenRef]);
+  const sandbox = deps.makeGateSandbox(slot.dir, runIdOf(bundle));
+  let session: SandboxSession | undefined;
+  const logs: string[] = [];
+  try {
+    session = await sandbox.open(regenRef);
+    if (input.config.setup) {
+      const setup = await session.exec(input.config.setup, {
+        timeoutSeconds: GENERATE_TIMEOUT_SECONDS,
+      });
+      logs.push(`# setup\n${setup.output}`);
+      if (setup.exitCode !== 0)
+        throw new GateSetupError(setup.exitCode, setup.output);
+    }
+    for (const group of input.groups) {
+      log(`merge: regenerating ${group.paths.join(", ")}`);
+      const result = await session.exec(group.run, {
+        timeoutSeconds: GENERATE_TIMEOUT_SECONDS,
+      });
+      logs.push(`# ${group.run}\n${result.output}`);
+      if (result.exitCode !== 0) {
+        return {
+          ok: false,
+          failureLog: `# regenerating declared files failed\n\n${logs.join("\n\n")}\n`,
+        };
+      }
+    }
+    const written = await session.exec("git add -A && git write-tree", {
+      timeoutSeconds: 60,
+    });
+    const tree = treeShaFrom(written.output);
+    if (written.exitCode !== 0 || !tree) {
+      return {
+        ok: false,
+        failureLog: `# regenerating declared files failed\n\ncould not write a tree\n\n${logs.join("\n\n")}\n${written.output}\n`,
+      };
+    }
+    // Same tree still gets a platform commit: the merge commit only carries Ticket, and
+    // the spec wants Spec/Ticket/Run trailers on the regenerate commit.
+    const candidate = gitOrThrow(
+      slot.dir,
+      [
+        "commit-tree",
+        tree,
+        "-p",
+        ours.candidate,
+        "-m",
+        regenerateMessage(bundle),
+      ],
+      AUTHOR,
+    );
+    gitOrThrow(slot.dir, ["update-ref", `refs/heads/${regenRef}`, candidate]);
+    gitOrThrow(mainDir, [
+      "-c",
+      "transfer.fsckObjects=true",
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      slot.dir,
+      `+refs/heads/${regenRef}:refs/heads/${regenRef}`,
+    ]);
+    return { ok: true, candidate };
+  } finally {
+    await session?.close();
+    git(mainDir, ["update-ref", "-d", `refs/heads/${regenRef}`]);
+    git(slot.dir, ["update-ref", "-d", `refs/heads/${regenRef}`]);
+  }
+}
+
 async function mergeOnce(
   deps: ExecutorDeps,
   context: StageContext,
@@ -1056,25 +1179,71 @@ async function mergeOnce(
       };
     }
   }
+  const mergeMessage =
+    stage === "update-branch"
+      ? `Merge ${incoming} into ${integration}\n\nSpec: ${bundle.spec.displayId}${bundle.run ? `\nRun: ${bundle.run.displayId}` : ""}`
+      : `Merge ${incoming} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`;
   const candidate = mergeCandidate(
     mainDir,
     integration,
     incoming,
-    stage === "update-branch"
-      ? `Merge ${incoming} into ${integration}\n\nSpec: ${bundle.spec.displayId}${bundle.run ? `\nRun: ${bundle.run.displayId}` : ""}`
-      : `Merge ${incoming} into ${integration}${bundle.ticket ? `\n\nTicket: ${bundle.ticket.displayId}` : ""}`,
+    mergeMessage,
   );
+  let candidateSha: string;
+  let generatedOnlyConflict: boolean | undefined;
+  let conflictFiles: string[] | undefined;
   if (candidate.conflict) {
     log(`merge: conflict in ${candidate.files.join(", ")}`);
-    return {
-      stage,
-      outcome: "conflict",
-      run: {
-        output: {
-          failureLog: `# merge conflict\n\n${incoming} cannot be merged into ${integration}:\n${candidate.files.map((f) => `- ${f}`).join("\n")}\n`,
+    const config = readGateConfig(mainDir, oldTip);
+    const generated = config.generated ?? [];
+    const groups = generatedGroupsFor(candidate.files, generated);
+    const note = generatedCommandsNote(groups);
+    if (generatedOnlyConflicts(candidate.files, generated)) {
+      const resolved = await regenerateGeneratedConflicts(
+        deps,
+        context,
+        mainDir,
+        slot,
+        {
+          integration,
+          incoming,
+          files: candidate.files,
+          groups,
+          config,
+          message: mergeMessage,
         },
-      },
-    };
+      );
+      if (!resolved.ok) {
+        return {
+          stage,
+          outcome: "conflict",
+          run: {
+            output: {
+              failureLog: resolved.failureLog,
+              generatedOnlyConflict: true,
+              conflictFiles: candidate.files,
+            },
+          },
+        };
+      }
+      candidateSha = resolved.candidate;
+      generatedOnlyConflict = true;
+      conflictFiles = candidate.files;
+    } else {
+      return {
+        stage,
+        outcome: "conflict",
+        run: {
+          output: {
+            failureLog: `# merge conflict\n\n${incoming} cannot be merged into ${integration}:\n${candidate.files.map((f) => `- ${f}`).join("\n")}\n${note}`,
+            generatedOnlyConflict: false,
+            conflictFiles: candidate.files,
+          },
+        },
+      };
+    }
+  } else {
+    candidateSha = candidate.candidate;
   }
 
   // The candidate is gated on a branch of its own; only a passing candidate moves the integration branch.
@@ -1084,7 +1253,7 @@ async function mergeOnce(
     mainDir,
     slot,
     {
-      sha: candidate.candidate,
+      sha: candidateSha,
       configSha: oldTip,
       ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
     },
@@ -1105,7 +1274,7 @@ async function mergeOnce(
     throw new JobLostError("the lease was lost before the push");
   const pushed = deps.push({
     repoDir: mainDir,
-    source: candidate.candidate,
+    source: candidateSha,
     target: integrationRef,
     expectedOld: oldTip,
   });
@@ -1118,14 +1287,25 @@ async function mergeOnce(
     }
     return { integrationMoved: pushed.error };
   }
-  gitOrThrow(mainDir, ["update-ref", integrationRef, candidate.candidate]);
-  log(`merge: ${integration} is now ${candidate.candidate}`);
+  gitOrThrow(mainDir, ["update-ref", integrationRef, candidateSha]);
+  log(`merge: ${integration} is now ${candidateSha}`);
   return {
     stage,
     outcome: "merged",
-    headSha: candidate.candidate,
+    headSha: candidateSha,
     // recorded on the Run, so the next gate can be measured against what this merge measured
-    run: { headSha: candidate.candidate, ...orphanRunFields(align) },
+    run: {
+      headSha: candidateSha,
+      ...orphanRunFields(align),
+      ...(generatedOnlyConflict
+        ? {
+            output: {
+              generatedOnlyConflict: true,
+              conflictFiles,
+            },
+          }
+        : {}),
+    },
     gate: gateFacts(outcome),
   };
 }

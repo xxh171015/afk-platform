@@ -23,11 +23,19 @@ const GateCommandSchema = z
   })
   .strict();
 
+const GeneratedGroupSchema = z
+  .object({
+    paths: z.array(z.string().min(1)).min(1),
+    run: z.string().min(1),
+  })
+  .strict();
+
 const GateConfigSchema = z
   .object({
     version: z.number().int().optional(),
     setup: z.string().min(1).optional(),
     commands: z.array(GateCommandSchema).min(1),
+    generated: z.array(GeneratedGroupSchema).min(1).optional(),
   })
   .strict();
 export type GateConfig = z.infer<typeof GateConfigSchema>;
