@@ -36,7 +36,7 @@ _Avoid_: setup PR、接入 PR
 平台在规划仓库的集成分支上提交本 Spec 规划文档改动得到的那个提交，叠在 Setup commit 之上；没有规划文档改动时，是 Setup commit，两者都没有时，是规划仓库默认分支当时的最新提交。所有票开工前它就要存在，其他仓库的票按它读规划文档。身份是 SHA，不是分支名。
 _Avoid_: 规划 SHA、文档提交、规划分支
 
-**Spec（需求）*一个要交付的需求（feature / bug / improvement），是拆票的来源。bug 类型可以指向它所修的原 Spec，也可以没有原 Spec。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
+\**Spec（需求）*一个要交付的需求（feature / bug / improvement），是拆票的来源。bug 类型可以指向它所修的原 Spec，也可以没有原 Spec。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
 **User Story（用户故事）**：
@@ -129,6 +129,14 @@ _Avoid_: 提示、system prompt
 一次 agent Run 结束时记下的 JSON 结果。不合法时记下当时的原始内容，该次结果为 `invalid-output`。
 _Avoid_: 输出、结果
 
+**Decision（决定）**：
+一次会改代码的 agent Run 里，agent 自己做的取舍，写在结构化输出里。票不因此停下。每条有一个类型：`choice`（可撤回的小事）、`conflict`（票、需求、契约、现有代码对不上，选了一边）、`known-gap`（知道没做、或做了但有问题）、`deferred`（留给别的票）、`workaround`（绕过仓库或环境的问题）。票级标成必须人来定的只记录，不叫人；开 PR 前仍未解决的、以及没做掉的 `deferred`，让收尾 blocked。
+_Avoid_: uncertainty、不确定点（旧字段名）、Implementation Decisions（那是 Spec 正文里规划时写下的节）、待确认的决定（不是待处理队列里的新类别）
+
+**Ruling（结论）**：
+Spec 轴对一条 `conflict` 或 `known-gap` 的判定：允许这样做、必须改、或必须人来定。有这类决定却缺结论，该次审查为 `invalid-output`。
+_Avoid_: 裁决、批注
+
 **Overlay（覆盖层）**：
 平台叠在 matt skill 之上的规则，让 skill 原样在无人值守的 Run 里跑：替 skill 回答它本来要问人的问题，并加上平台的约束。和它对应的 Skills SHA 绑定。
 _Avoid_: 补丁、包装 prompt、fork
@@ -169,14 +177,14 @@ _Avoid_: 白名单、豁免路径
 
 **Waiting queue（待处理队列）**：
 需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。
-_Avoid_: pending 队列、待处理项
+_Avoid_: pending 队列、待处理项、待确认的决定
 
 **Notification（通知）**：
 平台在需要人回来、或流程可以往下走时，发到人眼前的一条短消息。标题是事件类型，正文是显示编号、标题和一句原因，并带对应页面的链接。不是票卡住时页面上那份结构化说明，也不是验收包。
 _Avoid_: 推送、提醒
 
 **Finding（意见）**：
-review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）和「建议」（只写进验收包，由人看）。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，不表示已有人或复审验证过问题确实修好；收尾（final-review）只跑一次，final-fix 之后不复审。
+review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）和「建议」（只写进验收包，由人看）。审查之后那次只看改动的 Spec 轴给出的必须修不派 fix，等人批准这次改测试或改票。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，不表示已有人或复审验证过问题确实修好。收尾的 final-review 默认只跑一次；审查之后的修复或 Update-branch 若改了已有测试或配置，合并前再跑一次只看这次改动的 Spec 轴。
 _Avoid_: 评论、issue
 
 **Review axis（审查轴）**：

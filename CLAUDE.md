@@ -4,11 +4,11 @@
 
 ### Issue tracker
 
-Specs and tickets live in the AFK platform (the `plat` CLI), not in the code host's issues. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in this repo. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The default label strings: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+Five canonical triage roles with matching label strings on GitHub. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
