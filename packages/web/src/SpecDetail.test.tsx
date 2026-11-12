@@ -419,6 +419,7 @@ describe("the spec page", () => {
           protectedPathApprovals: [
             { ticket: "T-1", paths: [".github/ci.yml"] },
           ],
+          flakyTests: [{ name: "flakes then passes", classname: "orders" }],
           standardsSources: [
             {
               ticket: "T-1",
@@ -518,6 +519,8 @@ describe("the spec page", () => {
       screen.getByRole("link", { name: "backend #7" }).getAttribute("target"),
     ).toBe("_blank");
     expect(screen.getByText(/3 个测试，跳过 1 个，4.0 s/)).toBeTruthy();
+    expect(screen.getByText("重跑通过的不稳定测试：")).toBeTruthy();
+    expect(screen.getByText("orders flakes then passes")).toBeTruthy();
     expect(screen.getByText(/\.github\/ci.yml/)).toBeTruthy();
     // the pack opens with the merge order and has a section for each repo, in that order
     expect(screen.getByTestId("pack-merge-order").textContent).toContain(

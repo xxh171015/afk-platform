@@ -155,7 +155,8 @@ export class FakeAgentRunner implements AgentRunner {
   }
 }
 
-// The gate's "fresh sandbox": a detached worktree of the ref, where commands really run with `sh -c`.
+// The gate's "fresh sandbox": a detached worktree of the ref, where string commands run with `sh -c` and argv
+// commands run without a shell.
 export class FakeGateSandbox implements GateSandbox {
   readonly opened: string[] = [];
   readonly placements: (SandboxPlacement | undefined)[] = [];
@@ -185,11 +186,18 @@ export class FakeGateSandbox implements GateSandbox {
       // GNU timeout is not on every host; time the process in Node and use
       // timeout(1)'s exit 124 when it is killed.
       exec: async (command, options) => {
-        const result = exec("sh", ["-c", command], {
-          cwd: worktree,
-          env: { ...process.env, ...placement?.env }, // what docker({ env }) sets inside the container
-          timeoutMs: options.timeoutSeconds * 1000,
-        });
+        const result =
+          typeof command === "string"
+            ? exec("sh", ["-c", command], {
+                cwd: worktree,
+                env: { ...process.env, ...placement?.env }, // what docker({ env }) sets inside the container
+                timeoutMs: options.timeoutSeconds * 1000,
+              })
+            : exec(command[0] ?? "", [...command.slice(1)], {
+                cwd: worktree,
+                env: { ...process.env, ...placement?.env },
+                timeoutMs: options.timeoutSeconds * 1000,
+              });
         return {
           exitCode: result.timedOut ? 124 : result.code,
           output: result.out,
@@ -198,6 +206,11 @@ export class FakeGateSandbox implements GateSandbox {
       readFile: async (path) => {
         const full = join(worktree, path);
         return existsSync(full) ? readFileSync(full, "utf8") : undefined;
+      },
+      writeFile: async (path, contents) => {
+        const full = join(worktree, path);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, contents);
       },
       close: async () => {
         git(this.repoDir, ["worktree", "remove", "--force", worktree]);

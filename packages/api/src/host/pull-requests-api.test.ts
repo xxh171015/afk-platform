@@ -1425,6 +1425,12 @@ describe("the acceptance pack", () => {
     { name: "rejects an empty range", classname: "orders", status: "failed" },
     { name: "keeps the order", classname: "orders", status: "skipped" },
     { name: "orders > has a header", classname: "", status: "passed" },
+    {
+      name: "flakes then passes",
+      classname: "orders",
+      status: "passed",
+      flaky: true,
+    },
   ];
   const stages: StageResults = {
     implement: {
@@ -1571,6 +1577,16 @@ describe("the acceptance pack", () => {
       status: "unverified",
       reason: "the agent named no test",
     });
+  });
+
+  it("lists tests that failed then passed on the same commit, not as findings", async () => {
+    const { acceptancePack } = await packOf();
+    expect(acceptancePack.repos[0].flakyTests).toEqual([
+      { name: "flakes then passes", classname: "orders" },
+    ]);
+    expect(
+      acceptancePack.repos[0].findings.map((f: { body: string }) => f.body),
+    ).not.toContain("flakes then passes");
   });
 
   it("shows the Standards sources the review used, including CONTRIBUTING.md", async () => {

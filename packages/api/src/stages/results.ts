@@ -78,6 +78,7 @@ const GateFacts = z.object({
         name: z.string(),
         classname: z.string(),
         status: z.enum(["passed", "failed", "skipped"]),
+        flaky: z.boolean().optional(),
       }),
     )
     .max(20_000)

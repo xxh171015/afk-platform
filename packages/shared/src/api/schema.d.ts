@@ -2541,6 +2541,7 @@ export interface paths {
                   classname: string;
                   /** @enum {string} */
                   status: "passed" | "failed" | "skipped";
+                  flaky?: boolean;
                 }[];
               } | null;
             };
@@ -3514,6 +3515,11 @@ export interface paths {
                       ms: number;
                     }[];
                   } | null;
+                  /** @default [] */
+                  flakyTests: {
+                    name: string;
+                    classname: string;
+                  }[];
                   tickets: {
                     displayId: string;
                     title: string;

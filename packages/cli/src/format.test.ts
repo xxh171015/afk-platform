@@ -359,4 +359,35 @@ describe("the e2e before the pull requests", () => {
     );
     expect(lines.join("\n")).toContain("[unverified] it downloads");
   });
+
+  it("lists unstable tests that passed on rerun, apart from findings", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [
+        {
+          repo: "backend",
+          pullRequest: null,
+          gate: {
+            commitSha: "abcdef12",
+            testsTotal: 3,
+            testsSkipped: 0,
+            durationMs: 1000,
+            steps: [],
+          },
+          flakyTests: [{ name: "flakes then passes", classname: "orders" }],
+          tickets: [],
+          findings: [],
+          scopeCreep: [],
+          uncertainties: [],
+          protectedPathApprovals: [],
+          standardsSources: [],
+        },
+      ],
+      cancelledTickets: [],
+    } as never);
+    expect(text).toContain("unstable tests (passed on rerun):");
+    expect(text).toContain("orders flakes then passes");
+    expect(text).not.toMatch(/findings:[\s\S]*flakes then passes/);
+  });
 });

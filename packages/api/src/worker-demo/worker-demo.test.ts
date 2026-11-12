@@ -60,7 +60,13 @@ function runWorker(opts: Parameters<typeof startWorker>[0]) {
 }
 
 // The test command counts tests from a file in the repo (3 unless the work says otherwise) and fails on BROKEN.
+const FLAKY_FAIL = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"><failure message="boom"/></testcase></testsuite></testsuites>`;
+const FLAKY_PASS = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"/></testsuite></testsuites>`;
 const COUNT_TESTS =
+  "if [ -f FLAKY ]; then mkdir -p reports; if [ -f .gate-tried ]; then " +
+  `echo ${Buffer.from(FLAKY_PASS).toString("base64")} | base64 -d > reports/junit.xml; exit 0; ` +
+  "else touch .gate-tried; " +
+  `echo ${Buffer.from(FLAKY_FAIL).toString("base64")} | base64 -d > reports/junit.xml; exit 1; fi; fi; ` +
   "test ! -f BROKEN && mkdir -p reports && n=$(cat tests.count 2>/dev/null || echo 3) && " +
   `printf '<testsuites tests="%s"><testsuite name="a" tests="%s" skipped="0"/></testsuites>' "$n" "$n" > reports/junit.xml`;
 const GATES = [
@@ -604,6 +610,46 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       expect(entries).not.toContain("backend");
       expect(entries).not.toContain("lock");
     }
+  });
+
+  it("does not send gate-fix when a test fails once and passes on the same commit", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { FLAKY: "1\n", "src/a.ts": "a\n" }, output: DONE };
+        if (ctx.stage === "gate-fix")
+          throw new Error("gate-fix must not run for a flaky test");
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const stages = await db.pool.query(
+      "SELECT stage, result FROM runs ORDER BY id",
+    );
+    expect(stages.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
+      "implement:done",
+      "gate:passed",
+      "review:pass",
+      "review:pass",
+      "merge:merged",
+      "final-review:pass",
+      "final-review:pass",
+    ]);
+    const cases = await db.pool.query<{ test_cases: { flaky?: boolean }[] }>(
+      "SELECT test_cases FROM gate_results WHERE kind = 'gate' ORDER BY id",
+    );
+    expect(
+      cases.rows.some((row) =>
+        (row.test_cases ?? []).some((c) => c.flaky === true),
+      ),
+    ).toBe(true);
   });
 
   it("fixes a failing gate once and goes on to done", async () => {

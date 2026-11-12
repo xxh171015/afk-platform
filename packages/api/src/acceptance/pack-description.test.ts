@@ -61,6 +61,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       scopeCreep: [],
       uncertainties: [{ source: "T-1 implement", text: "date format" }],
       protectedPathApprovals: [],
+      flakyTests: [{ name: "flakes then passes", classname: "orders" }],
       standardsSources: [
         {
           ticket: "T-1",
@@ -86,6 +87,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       scopeCreep: [],
       uncertainties: [],
       protectedPathApprovals: [],
+      flakyTests: [],
       standardsSources: [],
     },
   ],
@@ -180,6 +182,18 @@ describe("renderPackSection", () => {
     );
     expect(renderPackSection(gitlab, "backend", 1).summary).toContain(
       "too long for a GitLab description",
+    );
+  });
+
+  it("lists unstable tests that passed on rerun, apart from findings", () => {
+    const { section } = renderPackSection(pack(), "backend", 1);
+    expect(section).toContain("### Unstable tests");
+    expect(section).toContain("orders flakes then passes");
+    expect(section.indexOf("### Findings")).toBeLessThan(
+      section.indexOf("### Unstable tests"),
+    );
+    expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
+      "Unstable tests",
     );
   });
 

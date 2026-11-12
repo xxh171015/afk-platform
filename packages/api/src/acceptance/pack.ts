@@ -56,12 +56,19 @@ const Gate = z.object({
   steps: z.array(Step),
 });
 
+const FlakyTest = z.object({
+  name: z.string(),
+  classname: z.string(),
+});
+
 // What one repo of the spec brings to the decision: its pull request, the gate of its integration branch, the
 // tickets done in it with each criterion's verdict, and what the agents and reviewers were unsure about.
 const RepoSection = z.object({
   repo: z.string(),
   pullRequest: PullRequestRow.nullable(), // read live
   gate: Gate.nullable(),
+  // Cases that failed the first gate run and passed the same-commit rerun; listed apart from findings.
+  flakyTests: z.array(FlakyTest).default([]),
   tickets: z.array(
     z.object({
       displayId: z.string(),
@@ -228,6 +235,7 @@ interface TestCaseRow {
   name: string;
   classname: string;
   status: "passed" | "failed" | "skipped";
+  flaky?: boolean;
 }
 
 // A criterion is verified when every test the agent named for it is in the JUnit report of the integration
@@ -315,6 +323,14 @@ export async function buildAcceptancePack(
     [specId],
   );
   const casesOf = new Map(gateRows.rows.map((g) => [g.repo_id, g.test_cases]));
+  const flakyOf = new Map(
+    gateRows.rows.map((g) => [
+      g.repo_id,
+      (g.test_cases ?? [])
+        .filter((c) => c.flaky)
+        .map((c) => ({ name: c.name, classname: c.classname })),
+    ]),
+  );
 
   const tickets = await client.query<{
     id: number;
@@ -341,6 +357,7 @@ export async function buildAcceptancePack(
         repo: name,
         pullRequest: null,
         gate: null,
+        flakyTests: flakyOf.get(repoId) ?? [],
         tickets: [],
         findings: [],
         scopeCreep: [],
@@ -749,6 +766,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         repo: typeof repo.repo === "string" ? repo.repo : "",
         pullRequest: repo.pullRequest ?? null,
         gate: repo.gate ?? null,
+        flakyTests: asArray(repo.flakyTests as never[]),
         tickets: asArray(repo.tickets as never[]).map((ticket) => {
           const row =
             ticket && typeof ticket === "object"

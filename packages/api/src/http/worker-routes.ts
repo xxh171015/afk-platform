@@ -651,6 +651,7 @@ const gateResultRoute = holderRoute(
               name: z.string(),
               classname: z.string(),
               status: z.enum(["passed", "failed", "skipped"]),
+              flaky: z.boolean().optional(),
             }),
           )
           .optional(),

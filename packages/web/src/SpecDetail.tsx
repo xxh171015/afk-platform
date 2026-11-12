@@ -413,6 +413,18 @@ function PackRepoSection({
           )
         </p>
       ) : null}
+      {list(repo.flakyTests).length > 0 ? (
+        <>
+          <p className="note">重跑通过的不稳定测试：</p>
+          <ul className="flaky-tests">
+            {list(repo.flakyTests).map((c) => (
+              <li key={`${c.classname}-${c.name}`}>
+                {c.classname ? `${c.classname} ${c.name}` : c.name}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {list(repo.protectedPathApprovals).length > 0 ? (
         <ul className="approvals">
           {list(repo.protectedPathApprovals).map((approval) => (

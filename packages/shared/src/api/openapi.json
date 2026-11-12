@@ -4301,6 +4301,9 @@
                               "status": {
                                 "type": "string",
                                 "enum": ["passed", "failed", "skipped"]
+                              },
+                              "flaky": {
+                                "type": "boolean"
                               }
                             },
                             "required": ["name", "classname", "status"]
@@ -6762,6 +6765,22 @@
                                   "durationMs",
                                   "steps"
                                 ]
+                              },
+                              "flakyTests": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "classname": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["name", "classname"]
+                                },
+                                "default": []
                               },
                               "tickets": {
                                 "type": "array",
