@@ -6,6 +6,7 @@ export const TICKET_STATES = [
   "done",
   "blocked",
   "cancelled",
+  "taken-over",
 ] as const;
 export type TicketState = (typeof TICKET_STATES)[number];
 
@@ -52,7 +53,11 @@ export type TicketEvent =
   | { type: "approve-protected" }
   | { type: "cancel" }
   // The whole spec is cancelled: every ticket that has not finished goes with it, even one under way.
-  | { type: "spec-cancelled" };
+  | { type: "spec-cancelled" }
+  // A person takes the ticket's branch: jobs stop, the scheduler leaves it alone.
+  | { type: "takeover" }
+  // They give it back: the platform takes the remote tip and goes on, without rewriting their commits.
+  | { type: "handback" };
 
 type PlainState = Exclude<TicketState, "blocked">;
 
@@ -68,23 +73,36 @@ const TRANSITIONS: Partial<
     enqueue: "queued",
     cancel: "cancelled",
     "spec-cancelled": "cancelled",
+    takeover: "taken-over",
   },
   queued: {
     claim: "running",
     "resume-e2e": "merging",
     "spec-cancelled": "cancelled",
+    takeover: "taken-over",
   },
-  running: { "checks-passed": "merging", "spec-cancelled": "cancelled" },
+  running: {
+    "checks-passed": "merging",
+    "spec-cancelled": "cancelled",
+    takeover: "taken-over",
+  },
   blocked: {
     retry: "pending",
     "approve-protected": "running",
     cancel: "cancelled",
     "spec-cancelled": "cancelled",
+    takeover: "taken-over",
   },
   merging: {
     "merge-succeeded": "done",
     "merge-fix-needed": "running",
     "await-fix": "pending",
+    "spec-cancelled": "cancelled",
+    takeover: "taken-over",
+  },
+  "taken-over": {
+    handback: "pending",
+    cancel: "cancelled",
     "spec-cancelled": "cancelled",
   },
 };

@@ -180,7 +180,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     );
   }
 
-  it("a ticket's state must be one of the seven ticket states", async () => {
+  it("a ticket's state must be one of the ticket states", async () => {
     expect(await ticketWith("state", "'queued'")).toBe("ok");
     expect(await ticketWith("state", "'paused'")).toBe(CHECK_VIOLATION);
   });

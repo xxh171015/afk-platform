@@ -87,24 +87,61 @@ describe("ticketTransition: blocked, retry, cancel", () => {
     });
   });
 
-  it.each(["pending", "blocked"] as const)("cancels from %s", (from) => {
-    expect(ticketTransition(from, { type: "cancel" })).toEqual({
-      ok: true,
-      state: "cancelled",
-    });
-  });
-});
-
-describe("ticketTransition: the spec is cancelled", () => {
-  it.each(["pending", "queued", "running", "merging", "blocked"] as const)(
-    "a ticket that is %s is cancelled with its spec",
+  it.each(["pending", "blocked", "taken-over"] as const)(
+    "cancels from %s",
     (from) => {
-      expect(ticketTransition(from, { type: "spec-cancelled" })).toEqual({
+      expect(ticketTransition(from, { type: "cancel" })).toEqual({
         ok: true,
         state: "cancelled",
       });
     },
   );
+});
+
+describe("ticketTransition: a person takes the ticket over and hands it back", () => {
+  it.each(["pending", "queued", "running", "merging", "blocked"] as const)(
+    "%s can be taken over",
+    (from) => {
+      expect(ticketTransition(from, { type: "takeover" })).toEqual({
+        ok: true,
+        state: "taken-over",
+      });
+    },
+  );
+
+  it("hands a taken-over ticket back to pending", () => {
+    expect(ticketTransition("taken-over", { type: "handback" })).toEqual({
+      ok: true,
+      state: "pending",
+    });
+  });
+
+  it.each(["done", "cancelled", "taken-over"] as const)(
+    "%s cannot be taken over",
+    (from) => {
+      expect(ticketTransition(from, { type: "takeover" }).ok).toBe(false);
+    },
+  );
+
+  it("does not retry a taken-over ticket: that is a handback", () => {
+    expect(ticketTransition("taken-over", { type: "retry" }).ok).toBe(false);
+  });
+});
+
+describe("ticketTransition: the spec is cancelled", () => {
+  it.each([
+    "pending",
+    "queued",
+    "running",
+    "merging",
+    "blocked",
+    "taken-over",
+  ] as const)("a ticket that is %s is cancelled with its spec", (from) => {
+    expect(ticketTransition(from, { type: "spec-cancelled" })).toEqual({
+      ok: true,
+      state: "cancelled",
+    });
+  });
 
   it.each(["done", "cancelled"] as const)(
     "a %s ticket stays as it is",

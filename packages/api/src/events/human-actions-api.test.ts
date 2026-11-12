@@ -187,4 +187,24 @@ describe("a person's actions", () => {
     ).toBe(409);
     expect(await actions("ticket_id IS NOT NULL")).toEqual([]);
   });
+
+  it("records takeover from the page and from plat, but for the source", async () => {
+    await runningSpec(["a", "b"]);
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    await plat("ticket", "takeover", "T-2");
+    expect(await actions("ticket_id IS NOT NULL")).toEqual([
+      {
+        spec_id: 1,
+        ticket_id: 1,
+        source: "page",
+        data: { action: "takeover", host: hostname() },
+      },
+      {
+        spec_id: 1,
+        ticket_id: 2,
+        source: "cli",
+        data: { action: "takeover", host: hostname() },
+      },
+    ]);
+  });
 });

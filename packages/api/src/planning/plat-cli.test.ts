@@ -1124,6 +1124,27 @@ describe("plat", () => {
     );
   });
 
+  it("takes a ticket over and hands it back, and retry points at handback", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    expect(await plat("ticket", "takeover", "T-1")).toEqual({
+      code: 0,
+      stdout: "T-1 is taken-over\n",
+      stderr: "",
+    });
+    expect((await plat("blocked")).stdout).not.toMatch(/\bT-1\b/);
+    const retry = await plat("ticket", "retry", "T-1", "--mode", "continue");
+    expect(retry.code).toBe(1);
+    expect(retry.stderr).toMatch(/plat ticket handback/);
+    expect(await plat("ticket", "handback", "T-1")).toEqual({
+      code: 0,
+      stdout: "T-1 is queued\n",
+      stderr: "",
+    });
+  });
+
   it("retries, cancels and approves, and refuses what does not apply", async () => {
     await blockedContract();
     expect((await plat("ticket", "approve-protected", "T-1")).stderr).toMatch(
@@ -1247,7 +1268,7 @@ describe("plat", () => {
     );
     expect(next).toEqual({ cancelled: ["T-2"], blocked: [], skipped: [] });
     expect((await plat("ticket", "cancel", "T-2")).stderr).toMatch(
-      /only a pending or blocked ticket/,
+      /only a pending, blocked or taken-over ticket/,
     );
   });
 

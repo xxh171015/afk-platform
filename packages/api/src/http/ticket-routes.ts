@@ -26,10 +26,12 @@ import {
   cancelSpec,
   cancelTicket,
   editTicket,
+  handbackTicket,
   parkedRetryNote,
   resumeSpec,
   retrySpecCleanup,
   retryTicket,
+  takeoverTicket,
 } from "../tickets/actions.ts";
 import { TIMELINE_KINDS } from "../tickets/timeline.ts";
 import {
@@ -798,7 +800,7 @@ const editRoute = createRoute({
       z.object({ id: Id, contentVersion: Id, changed: z.boolean() }),
     ),
     404: reply("No such ticket", ErrorReply),
-    409: reply("The ticket is not pending or blocked", ErrorReply),
+    409: reply("The ticket is not pending, blocked or taken-over", ErrorReply),
     422: reply(
       "The file is not a valid ticket file, or changes something that cannot be changed",
       ErrorReply,
@@ -859,7 +861,41 @@ const cancelRoute = createRoute({
       }),
     ),
     404: reply("No such ticket", ErrorReply),
-    409: reply("Only a pending or blocked ticket can be cancelled", ErrorReply),
+    409: reply(
+      "Only a pending, blocked or taken-over ticket can be cancelled",
+      ErrorReply,
+    ),
+  },
+});
+
+const takeoverRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/takeover",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The ticket is taken over; its jobs are stopped",
+      z.object({ state: z.enum(TICKET_STATES) }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply(
+      "Only a pending, queued, running, merging or blocked ticket can be taken over",
+      ErrorReply,
+    ),
+  },
+});
+
+const handbackRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/handback",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Back to pending (or already queued again)",
+      z.object({ state: z.enum(TICKET_STATES) }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply("Only a taken-over ticket can be handed back", ErrorReply),
   },
 });
 
@@ -1068,6 +1104,28 @@ export function registerTicketRoutes(
     const { mode, note } = c.req.valid("json");
     const result = await aroundTicket(context, id, () =>
       retryTicket(pool, id, mode, note),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(takeoverRoute, async (c) => {
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      takeoverTicket(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ state: result.state }, 200);
+  });
+
+  app.openapi(handbackRoute, async (c) => {
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      handbackTicket(pool, c.req.valid("param").id),
     );
     if (result.status === "no-ticket")
       return c.json({ error: "no such ticket" }, 404);

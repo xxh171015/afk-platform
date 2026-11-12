@@ -275,6 +275,375 @@ describe("retry", () => {
   });
 });
 
+describe("takeover and handback", () => {
+  const jobsOf = async (ticketId: number) =>
+    (
+      await db.pool.query<{
+        state: string;
+        error: string | null;
+        payload: { stage: string };
+      }>(
+        `SELECT state, error, payload FROM jobs
+         WHERE (payload->>'ticketId')::int = $1 AND type <> 'host-sync' ORDER BY id`,
+        [ticketId],
+      )
+    ).rows;
+  const openJobs = async () =>
+    Number(
+      (
+        await db.pool.query(
+          `SELECT count(*) AS n FROM jobs
+           WHERE state IN ('queued', 'running') AND type NOT IN ('spec-cleanup', 'host-sync')`,
+        )
+      ).rows[0].n,
+    );
+  const inFlightRuns = async (ticketId: number) =>
+    (
+      await db.pool.query(
+        "SELECT result FROM runs WHERE ticket_id = $1 AND finished_at IS NULL",
+        [ticketId],
+      )
+    ).rows;
+  const finishedRuns = async (ticketId: number) =>
+    (
+      await db.pool.query<{ result: string | null }>(
+        "SELECT result FROM runs WHERE ticket_id = $1 AND finished_at IS NOT NULL ORDER BY id",
+        [ticketId],
+      )
+    ).rows.map((r) => r.result);
+  const ticketMeta = async (id: number) =>
+    (
+      await db.pool.query(
+        `SELECT state, blocked_reason, content_version, fix_counts, reviewed, restart,
+                resume_stage, job_floor FROM tickets WHERE id = $1`,
+        [id],
+      )
+    ).rows[0];
+  const actions = async () =>
+    (
+      await db.pool.query<{ data: { action: string } }>(
+        "SELECT data FROM events WHERE type = 'action' AND ticket_id = 1 ORDER BY id",
+      )
+    ).rows.map((r) => r.data.action);
+  const queuedStage = async () =>
+    (
+      await db.pool.query<{ stage: string }>(
+        `SELECT payload->>'stage' AS stage FROM jobs
+         WHERE state IN ('queued', 'running') AND payload ? 'ticketId' ORDER BY id`,
+      )
+    ).rows.map((r) => r.stage);
+
+  it.each(["pending", "queued", "running", "merging", "blocked"] as const)(
+    "takes a %s ticket over",
+    async (from) => {
+      await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+      if (from === "blocked") await stage("implement", GAVE_UP);
+      else if (from === "running") await worker.claim();
+      else if (from === "merging") {
+        await stage("implement", DONE);
+        await stage("gate", { outcome: "passed" });
+        await stage("review", { outcome: "pass" });
+      } else if (from === "pending") {
+        await db.pool.query(
+          "UPDATE tickets SET state = 'pending' WHERE id = 1",
+        );
+        await db.pool.query(
+          "UPDATE jobs SET state = 'failed', error = 'parked' WHERE (payload->>'ticketId')::int = 1 AND state IN ('queued', 'running')",
+        );
+      }
+      const result = await call("POST", "/tickets/1/takeover");
+      expect(result).toMatchObject({
+        status: 200,
+        body: { state: "taken-over" },
+      });
+      expect(await states()).toEqual(["1:taken-over", "2:pending"]);
+    },
+  );
+
+  it("refuses a done or cancelled ticket with a clear error", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await db.pool.query("UPDATE tickets SET state = 'done' WHERE id = 1");
+    const done = await call("POST", "/tickets/1/takeover");
+    expect(done.status).toBe(409);
+    expect(done.body.error).toMatch(/done/);
+    await db.pool.query("UPDATE tickets SET state = 'cancelled' WHERE id = 1");
+    const cancelled = await call("POST", "/tickets/1/takeover");
+    expect(cancelled.status).toBe(409);
+    expect(cancelled.body.error).toMatch(/cancelled/);
+    expect((await call("POST", "/tickets/99/takeover")).status).toBe(404);
+  });
+
+  it("stops queued and running jobs and cancels the in-flight Run, without blocking as job-failed", async () => {
+    await runningSpec([ticket("a")]);
+    const held = (await worker.claim()).body.job as Claimed;
+    const taken = await call("POST", "/tickets/1/takeover");
+    expect(taken).toMatchObject({
+      status: 200,
+      body: { state: "taken-over" },
+    });
+    expect(await openJobs()).toBe(0);
+    expect((await jobsOf(1)).map((j) => [j.state, j.error])).toEqual([
+      ["failed", "the ticket was taken over"],
+    ]);
+    expect(await finishedRuns(1)).toEqual(["cancelled"]);
+    expect(await inFlightRuns(1)).toEqual([]);
+    expect(await states()).toEqual(["1:taken-over"]);
+    expect(
+      (
+        await worker.complete(held.id, held.attempt, {
+          stage: "implement",
+          ...DONE,
+        })
+      ).status,
+    ).toBe(409);
+    expect(await states()).toEqual(["1:taken-over"]);
+  });
+
+  it("from merging, frees the integration lock so the next ticket in the same repo can merge", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    const second = new FakeWorker(api.url, "w2", []);
+    const success: Record<string, Record<string, unknown>> = {
+      implement: DONE,
+      gate: { outcome: "passed" },
+      review: { outcome: "pass" },
+    };
+    const firstMerge = async () => {
+      const held: Claimed[] = [];
+      for (let i = 0; i < 30 && held.length === 0; i++) {
+        const job = (await worker.claim()).body.job as Claimed | null;
+        if (!job) break;
+        if (job.payload.stage === "merge") {
+          held.push(job);
+          break;
+        }
+        await worker.complete(job.id, job.attempt, {
+          stage: job.payload.stage,
+          ...success[job.payload.stage],
+        });
+      }
+      return held[0] as Claimed;
+    };
+    const merge = await firstMerge();
+    expect(merge.payload.stage).toBe("merge");
+    for (let i = 0; i < 10; i++) {
+      const job = (await second.claim()).body.job as Claimed | null;
+      if (!job) break;
+      await second.complete(job.id, job.attempt, {
+        stage: job.payload.stage,
+        ...success[job.payload.stage],
+      });
+    }
+    expect(
+      (
+        await db.pool.query(
+          "SELECT 1 FROM jobs WHERE type = 'merge' AND state = 'queued'",
+        )
+      ).rowCount,
+    ).toBe(1);
+    expect((await second.claim()).body.job).toBeNull();
+    expect(
+      (await call("POST", `/tickets/${merge.payload.ticketId}/takeover`))
+        .status,
+    ).toBe(200);
+    const next = (await second.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("merge");
+    expect(next.payload.ticketId).not.toBe(merge.payload.ticketId);
+    expect(next.id).not.toBe(merge.id);
+  });
+
+  it("is not dispatched, holds no concurrency slot, and is not listed in the waiting queue", async () => {
+    await runningSpec([ticket("a"), ticket("b")]);
+    const held = (await worker.claim()).body.job as Claimed;
+    const takenId = held.payload.ticketId;
+    const otherId = takenId === 1 ? 2 : 1;
+    expect((await call("POST", `/tickets/${takenId}/takeover`)).status).toBe(
+      200,
+    );
+    expect((await states()).sort()).toEqual(
+      [`${takenId}:taken-over`, `${otherId}:queued`].sort(),
+    );
+    expect((await worker.claim()).body.job?.payload).toMatchObject({
+      ticketId: otherId,
+      stage: "implement",
+    });
+    expect((await call("GET", "/blocked")).body.tickets).toEqual([]);
+    expect((await call("GET", "/specs")).body.specs[0].progress.active).toBe(1);
+  });
+
+  it("can be edited and cancelled; retry and restart are refused with a handback hint", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await stage("implement", GAVE_UP);
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    const file = (await call("GET", "/tickets/1")).body.ticket.file as string;
+    const edited = await call("POST", "/tickets/1/edit", {
+      file: file.replace("title: Ticket a", "title: Person's a"),
+    });
+    expect(edited).toMatchObject({
+      status: 200,
+      body: { contentVersion: 2, changed: true },
+    });
+    expect((await ticketMeta(1)).content_version).toBe(2);
+    const retry = await call("POST", "/tickets/1/retry", { mode: "continue" });
+    expect(retry.status).toBe(409);
+    expect(retry.body.error).toMatch(/plat ticket handback/);
+    const restart = await call("POST", "/tickets/1/retry", { mode: "restart" });
+    expect(restart.status).toBe(409);
+    expect(restart.body.error).toMatch(/plat ticket handback/);
+    const cancelled = await call("POST", "/tickets/1/cancel", {
+      cascade: false,
+    });
+    expect(cancelled.body).toMatchObject({
+      cancelled: ["T-1"],
+      blocked: ["T-2"],
+    });
+    expect(await states()).toEqual([
+      "1:cancelled",
+      "2:blocked/upstream-cancelled",
+    ]);
+  });
+
+  it("cancelling the spec cancels a taken-over ticket with it", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await worker.claim();
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await call("POST", `/specs/${specId}/cancel`)).status).toBe(200);
+    expect(await states()).toEqual(["1:cancelled"]);
+  });
+
+  it("does not let an appended ticket stand in front of it", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await worker.claim();
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    const appended = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, {
+        tickets: [ticket("extra")],
+        edges: [{ from: "extra", to: "T-1" }],
+      }),
+    );
+    expect(appended.status).toBe(422);
+    expect(JSON.stringify(appended.body)).toMatch(/T-1 is taken-over/);
+  });
+
+  it("hands back to implement when the remote has no ticket branch", async () => {
+    await runningSpec([ticket("a")]);
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    const result = await call("POST", "/tickets/1/handback");
+    expect(result).toMatchObject({ status: 200, body: { state: "queued" } });
+    expect(await queuedStage()).toEqual(["implement"]);
+    expect(await ticketMeta(1)).toMatchObject({
+      resume_stage: null,
+      restart: false,
+    });
+  });
+
+  it("hands back to the gate, keeps the person's commits and fix counts, and clears the review", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", { outcome: "done", run: { headSha: "person-1" } });
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "boom" } },
+    });
+    await stage("gate-fix", { outcome: "done", run: { headSha: "person-2" } });
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "still boom" } },
+    });
+    expect(await ticketMeta(1)).toMatchObject({
+      state: "blocked",
+      fix_counts: { "gate-fix": 1, "review-fix": 0, "merge-fix": 0 },
+    });
+    await db.pool.query("UPDATE tickets SET reviewed = true WHERE id = 1");
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    expect(await queuedStage()).toEqual(["gate"]);
+    expect(await ticketMeta(1)).toMatchObject({
+      state: "queued",
+      reviewed: false,
+      restart: false,
+      resume_stage: null,
+      fix_counts: { "gate-fix": 1, "review-fix": 0, "merge-fix": 0 },
+    });
+    const shas = await db.pool.query<{ head_sha: string }>(
+      "SELECT head_sha FROM runs WHERE ticket_id = 1 AND head_sha IS NOT NULL ORDER BY id",
+    );
+    expect(shas.rows.map((r) => r.head_sha)).toEqual(["person-1", "person-2"]);
+  });
+
+  it("hands an already-merged integration ticket back to e2e when there are no new commits", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:frontend",
+      name: "frontend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "e2e",
+      title: "E2e",
+    });
+    expect(
+      (
+        await call(
+          "POST",
+          `/specs/${spec.body.id}/tickets/import`,
+          importBody(spec.body.id, {
+            tickets: [
+              {
+                key: "e2e",
+                repo: "frontend",
+                type: "integration",
+                title: "E2e",
+                modules: ["e2e/**"],
+                acceptance: ["it works"],
+              },
+            ],
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect((await call("POST", `/specs/${spec.body.id}/confirm`)).status).toBe(
+      200,
+    );
+    await stage("implement", { outcome: "done", run: { headSha: "h1" } });
+    await stage("gate", { outcome: "passed" });
+    await stage("review", { outcome: "pass" });
+    await stage("merge", { outcome: "merged", headSha: "m1" });
+    expect(await row(1)).toMatchObject({ state: "merging" });
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "e2e",
+    );
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    expect(await queuedStage()).toEqual(["e2e"]);
+  });
+
+  it("does not block on the first job failure after a handback that followed two earlier ones", async () => {
+    await runningSpec([ticket("a")]);
+    const failOnce = async () => {
+      const job = (await worker.claim()).body.job as Claimed;
+      await worker.fail(job.id, job.attempt, "sandbox exited with code 137");
+    };
+    await failOnce();
+    await failOnce();
+    expect(await row(1)).toMatchObject({ state: "running" });
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await failOnce();
+    expect(await row(1)).toMatchObject({ state: "running" });
+  });
+
+  it("records a human action for takeover and for handback, and takeover does not bump the content version", async () => {
+    await runningSpec([ticket("a")]);
+    const before = await ticketMeta(1);
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await ticketMeta(1)).content_version).toBe(before.content_version);
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    expect(await actions()).toEqual(["takeover", "handback"]);
+  });
+});
+
 describe("retry note", () => {
   async function nextBundle() {
     const job = (await worker.claim()).body.job as Claimed;

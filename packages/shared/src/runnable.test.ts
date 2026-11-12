@@ -21,6 +21,7 @@ describe("isRunnable: ticket state and same-spec edges", () => {
     "done",
     "blocked",
     "cancelled",
+    "taken-over",
   ] as const)("a %s ticket cannot be started again", (state) => {
     const result = isRunnable({ state, edges: [], limits: roomToSpare });
     expect(result.runnable).toBe(false);

@@ -23,6 +23,7 @@ export const TICKET_STATE_LABELS: Record<TicketState, string> = {
   done: "已完成",
   blocked: "已卡住",
   cancelled: "已取消",
+  "taken-over": "人接手",
 };
 
 export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {

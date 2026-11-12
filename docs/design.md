@@ -439,7 +439,7 @@ erDiagram
 状态机：
 
 - **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 收到 PR 评论时进入 reworking，返工完成回到 awaiting-review。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的票留着，随后由 worker 关掉它还开着的 PR、删掉它的分支；已 merged 的，以及有 PR 已被合并、又还有开着的 PR 的 spec 不能取消，因为合并的东西取消收不回（部分 PR 已合并、其余都已关闭的可以取消，已合并的部分留在 main 上）；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
-- **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。running 内部的阶段（implement、门禁、review、fix，联调票还有 e2e、diagnose）记在 Run 上，不拆成票的状态。done 是终态：做完的票不重开，要改就追加新票。联调票的 e2e 失败、平台建了修复票后，联调票回到 pending，等修复票 done 再从 e2e 阶段开始。
+- **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。人可以从 pending / queued / running / merging / blocked 接手，票进 taken-over，调度停派作业；交回回到 pending。running 内部的阶段（implement、门禁、review、fix，联调票还有 e2e、diagnose）记在 Run 上，不拆成票的状态。done 是终态：做完的票不重开，要改就追加新票。联调票的 e2e 失败、平台建了修复票后，联调票回到 pending，等修复票 done 再从 e2e 阶段开始。
 - **能不能开工实时计算，不存成状态**：只有 pending 是存下来的状态，“可开工”（runnable）由调度器每次算：票是 pending、所有入边都满足、没超并发和预算上限。这样就不会出现“标了可开工、其实还被挡着”的情况。
 
 Spec 状态机：
@@ -472,6 +472,7 @@ Ticket 状态机（running 里的各个阶段记在 Run 上）：
 ```mermaid
 stateDiagram-v2
     direction LR
+    state "taken-over" as taken_over
     [*] --> pending: 导入
     pending --> queued: 可开工，实时计算
     queued --> running: worker 拿到租约
@@ -483,9 +484,18 @@ stateDiagram-v2
     blocked --> pending: 人重试或改票
     blocked --> cancelled: 人取消
     pending --> cancelled: 人取消
+    pending --> taken_over: 人接手
+    queued --> taken_over: 人接手
+    running --> taken_over: 人接手
+    merging --> taken_over: 人接手
+    blocked --> taken_over: 人接手
+    taken_over --> pending: 交回
+    taken_over --> cancelled: 人取消或需求取消
     done --> [*]
     cancelled --> [*]
 ```
+
+人接手（`taken-over`）：`plat ticket takeover T-n`（或 HTTP）停掉该票 queued/running 的作业，进行中的 Run 记为 cancelled，票不是 `job-failed`。从 merging 接手会放开集成分支的锁，同仓库下一张票可以进合并。接手中的票不派作业、不占并发、不进待处理队列；可以改正文、可以取消；重试拒绝并提示 `plat ticket handback`；追加不能让新票挡住它。交回取远端 tip、不改写人的提交：没有票分支从 implement 起；有集成分支没有的提交从门禁起（清 `reviewed`，fix 次数不变）；联调票已经在集成分支上且没有新提交从 e2e 起。接手和交回各记一条人的操作事件，接手不加 Content version。
 
 调度器每次计算可开工的票：
 
@@ -674,7 +684,7 @@ sequenceDiagram
 
 ## blocked 处理
 
-票进 blocked 时带一个原因码和一份简报（失败步骤、相关日志指针、agent 的结构化输出）。人在页面或用 `plat` 选择处理动作。
+票进 blocked 时带一个原因码和一份简报（失败步骤、相关日志指针、agent 的结构化输出）。人在页面或用 `plat` 选择处理动作。人也可以在票还没 blocked 时接手（`plat ticket takeover`）：停作业、票进 taken-over。接手中改正文或取消，不走下面的重试；交回（`plat ticket handback`）才回到 pending。
 
 | 原因码                                     | 含义                                                       |
 | ------------------------------------------ | ---------------------------------------------------------- |
@@ -697,6 +707,8 @@ sequenceDiagram
 | 接着重试         | 保留分支和 commits，回到 pending，fix 次数清零。不带说明、且 agent 已经做完并推送过分支时，从门禁接着跑（门禁结果复用，随后照常 review）；带说明则从 implement 开始，让 agent 按说明改 |
 | 从头重试         | 删除 `agent/<ticket-id>` 分支和 worktree，回到 pending                                                                                                                                 |
 | 改票后重试       | `plat ticket edit`：内容版本号加一，再按上面两种方式之一重试                                                                                                                           |
+| 人接手           | 停掉该票作业，进 taken-over。不占并发、不进待处理队列。从 merging 接手会放开集成分支的锁                                                                                                 |
+| 交回             | 只对 taken-over：回到 pending。没有票分支从 implement 起；有人推过的提交从门禁起；联调票已合入且没有新提交从 e2e 起                                                                       |
 | 批准保护路径改动 | 只用于 `protected-path-changed`，跳过这一项检查继续门禁                                                                                                                                |
 | 拆票             | 用 `plat tickets import --append` 追加新票，原票取消                                                                                                                                   |
 | 取消             | 下游票进 blocked（`upstream-cancelled`），或选择一并取消                                                                                                                               |
@@ -707,12 +719,14 @@ flowchart LR
     act -->|接着重试| a1["保留分支和 commits<br/>fix 次数清零"]
     act -->|从头重试| a2["删 agent 分支和 worktree"]
     act -->|改票后重试| a3["内容版本号加一"]
+    act -->|人接手| to(["taken-over"])
     act -->|批准保护路径改动| a4["跳过保护路径检查"]
     act -->|拆票| a5["导入新票"]
     act -->|取消| c(["原票 cancelled"])
     a1 --> p(["pending"])
     a2 --> p
     a3 --> p
+    to -->|交回| p
     a4 --> g["回到门禁"]
     a5 --> c
     c --> down{"下游票"}
@@ -1197,11 +1211,13 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | `plat spec confirm S-12`                                                                                                         | 确认拆分，spec 开始运行（页面上也能做）。在规划仓库里跑时把规划文档的改动作为补丁带上，平台先做规划提交、再派票；页面确认带不上本地改动                             |
 | `plat spec retry-planning S-12` / `plat spec waive-planning S-12`                                                                | 规划文档合不进默认分支时：本地解决后重新发送，或放弃这些文档照常开工                                                                                                |
 | `plat spec show S-12` / `plat ticket view T-123`                                                                                 | 查看                                                                                                                                                                |
-| `plat ticket edit T-123 --file t.md`                                                                                             | 改 pending / blocked 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版）                                                                        |
+| `plat ticket edit T-123 --file t.md`                                                                                             | 改 pending / blocked / taken-over 的票的内容，版本号加一并留快照（`plat ticket view --version n` 看旧版）                                                            |
+| `plat ticket takeover T-123`                                                                                                     | 停掉该票作业，票进 taken-over                                                                                                                                       |
+| `plat ticket handback T-123`                                                                                                     | 交回 taken-over 的票，回到 pending                                                                                                                                  |
 | `plat ticket retry T-123 --mode continue\|restart`                                                                               | 处理 blocked；可选带 Retry note，只对下一次 Run 有效                                                                                                                |
 | `plat ticket approve-protected T-123`                                                                                            | 批准保护路径改动                                                                                                                                                    |
 | `plat ticket allow-path T-123 <path>...`                                                                                         | 给已阻塞的票追加批准的保护路径（再 retry）                                                                                                                          |
-| `plat ticket cancel T-123 [--cascade]`                                                                                           | 取消，可选一并取消下游                                                                                                                                              |
+| `plat ticket cancel T-123 [--cascade]`                                                                                           | 取消 pending / blocked / taken-over 的票，可选一并取消下游                                                                                                          |
 | `plat spec cancel S-12`                                                                                                          | 取消整个 spec（没做完的票、作业一并停掉，随后关 PR、删分支；有 PR 已合并的不能取消）                                                                                |
 | `plat spec cleanup S-12`                                                                                                         | 再排一次已取消或已 merged 的 spec 的清理（关 PR、删分支）                                                                                                           |
 | `plat blocked`                                                                                                                   | 列出待处理的 blocked 票、paused 的 spec，关闭未合并或读不出来的 PR，以及三次都没做完的清理                                                                          |

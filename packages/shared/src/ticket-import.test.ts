@@ -534,6 +534,28 @@ describe("appending to a spec that already has tickets", () => {
     ).toEqual([expect.stringMatching(/T-3 is running.*cannot be blocked/)]);
   });
 
+  it("refuses a new ticket that would stand in front of a taken-over one", () => {
+    expect(
+      planImport(
+        {
+          tickets: [ticket("n")],
+          edges: [{ from: "n", to: "T-3" }],
+        },
+        repos,
+        12,
+        {
+          ...existing,
+          tickets: existing.tickets.map((t) =>
+            t.key === "T-3" ? { ...t, state: "taken-over" } : t,
+          ),
+        },
+      ),
+    ).toMatchObject({
+      ok: false,
+      errors: [expect.stringMatching(/T-3 is taken-over.*cannot be blocked/)],
+    });
+  });
+
   it("refuses an edge between two existing tickets", () => {
     expect(
       appendErrors({

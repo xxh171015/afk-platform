@@ -1776,7 +1776,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   ticketCommands
     .command("edit <ticket>")
     .description(
-      "change a pending or blocked ticket from a ticket file (what plat ticket view --md prints): its title, body, modules and approved protected paths; the acceptance criteria are read from the body. The content version goes up by one if anything changed",
+      "change a pending, blocked or taken-over ticket from a ticket file (what plat ticket view --md prints): its title, body, modules and approved protected paths; the acceptance criteria are read from the body. The content version goes up by one if anything changed",
     )
     .requiredOption("--file <file>", "the ticket file")
     .action(async (id: string, options) => {
@@ -1829,6 +1829,32 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `${id} is ${data.state}`);
     });
   ticketCommands
+    .command("takeover <ticket>")
+    .description(
+      "stop the ticket's jobs and hold it so a person can push the ticket branch; the scheduler leaves it alone until plat ticket handback",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/takeover",
+        { params: { path: { id: ticketIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+  ticketCommands
+    .command("handback <ticket>")
+    .description(
+      "give a taken-over ticket back: the platform takes the remote tip and goes on from the gate (or implement / e2e), without rewriting the person's commits",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/handback",
+        { params: { path: { id: ticketIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id} is ${data.state}`);
+    });
+  ticketCommands
     .command("approve-protected <ticket>")
     .description(
       "accept the protected path changes of a ticket blocked by protected-path-changed",
@@ -1865,7 +1891,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   ticketCommands
     .command("cancel <ticket>")
     .description(
-      "cancel a pending or blocked ticket; the tickets behind it go to blocked unless --cascade",
+      "cancel a pending, blocked or taken-over ticket; the tickets behind it go to blocked unless --cascade",
     )
     .option("--cascade", "cancel everything downstream too")
     .action(async (id: string, options) => {
