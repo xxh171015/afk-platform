@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import {
   type AGENT_FAILURES,
   type CombinedReview,
+  coerceDecisionsInput,
   combinedReview,
+  DecisionsField,
   type FinalStep,
   REVIEW_AXES,
   type ReviewAxis,
@@ -21,12 +23,12 @@ export const CANNOT_PROCEED_REASONS = [
   "contract-change-needed",
 ] as const;
 
-export const ImplementOutputSchema = z.discriminatedUnion("status", [
+const ImplementOutputObject = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("done"),
     summary: z.string(),
     acceptance: z.record(z.string(), z.array(z.string())),
-    uncertainties: z.array(z.string()),
+    decisions: DecisionsField,
   }),
   z.object({
     status: z.literal("cannot-proceed"),
@@ -34,10 +36,14 @@ export const ImplementOutputSchema = z.discriminatedUnion("status", [
     detail: z.string().min(1),
     summary: z.string().default(""),
     acceptance: z.record(z.string(), z.array(z.string())).default({}),
-    uncertainties: z.array(z.string()).default([]),
+    decisions: DecisionsField.default([]),
   }),
 ]);
-export type ImplementOutput = z.infer<typeof ImplementOutputSchema>;
+export const ImplementOutputSchema = z.preprocess(
+  coerceDecisionsInput,
+  ImplementOutputObject,
+);
+export type ImplementOutput = z.infer<typeof ImplementOutputObject>;
 
 const ReviewObject = z.object({
   verdict: z.enum(["pass", "fix"]),

@@ -26,6 +26,18 @@ export {
   parseTicketBranch,
   SETUP_BRANCH,
 } from "./branches.ts";
+export type { Decision, DecisionKind } from "./decisions.ts";
+export {
+  CODE_CHANGING_STAGES,
+  coerceDecisionsInput,
+  DECISION_KIND_LABELS,
+  DECISION_KINDS,
+  DecisionSchema,
+  DecisionsField,
+  decisionsOf,
+  decisionTally,
+  isListedDecisionKind,
+} from "./decisions.ts";
 export {
   advanceDiskAlert,
   DEFAULT_DISK_STOP_GIB,

@@ -226,6 +226,34 @@ describe("notifications from events", () => {
     }
   });
 
+  it("does not notify or queue when implement records a conflict", async () => {
+    await runningSpec();
+    const job = (await worker.claim()).body.job as Claimed;
+    await worker.complete(job.id, job.attempt, {
+      stage: "implement",
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            {
+              kind: "conflict",
+              text: "ticket vs User Story 6; picked the story",
+            },
+          ],
+        },
+      },
+    });
+    await flushWindow();
+    expect(notices).toEqual([]);
+    const blocked = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as { tickets: unknown[] };
+    expect(blocked.tickets).toEqual([]);
+  });
+
   it("coalesces the same spec's events in a 30s window, prefers 票卡住 over 需求已合并, and lists each body", async () => {
     const specId = await runningSpec();
     const stream = await openEvents();

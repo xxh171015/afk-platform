@@ -1,4 +1,7 @@
 import {
+  CODE_CHANGING_STAGES,
+  DECISION_KINDS,
+  decisionsOf,
   findingResolutionPhrase,
   formatDisplayId,
   HOST_KINDS,
@@ -62,7 +65,7 @@ const FlakyTest = z.object({
 });
 
 // What one repo of the spec brings to the decision: its pull request, the gate of its integration branch, the
-// tickets done in it with each criterion's verdict, and what the agents and reviewers were unsure about.
+// tickets done in it with each criterion's verdict, and the decisions agents made on code-changing Runs.
 const RepoSection = z.object({
   repo: z.string(),
   pullRequest: PullRequestRow.nullable(), // read live
@@ -103,7 +106,15 @@ const RepoSection = z.object({
       body: z.string(),
     }),
   ),
-  uncertainties: z.array(z.object({ source: z.string(), text: z.string() })),
+  decisions: z.array(
+    z.object({
+      source: z.string(),
+      run: z.string(),
+      kind: z.enum(DECISION_KINDS),
+      text: z.string(),
+      ref: z.string().optional(),
+    }),
+  ),
   protectedPathApprovals: z.array(
     z.object({ ticket: z.string(), paths: z.array(z.string()) }),
   ),
@@ -361,7 +372,7 @@ export async function buildAcceptancePack(
         tickets: [],
         findings: [],
         scopeCreep: [],
-        uncertainties: [],
+        decisions: [],
         protectedPathApprovals: [],
         standardsSources: [],
       };
@@ -392,20 +403,6 @@ export async function buildAcceptancePack(
       [ticket.id, AGENT_STAGES_WITH_TESTS],
     );
     const named = namedTests(runs.rows.map((r) => r.output));
-    const lastImplement = runs.rows
-      .filter((r) => r.stage === "implement")
-      .at(-1);
-    for (const text of strings(record(lastImplement?.output).uncertainties))
-      section.uncertainties.push({ source: `${display} implement`, text });
-    // both axes of the newest review (a review made before there were axes has one Run without an axis)
-    const review = await client.query<{ output: unknown }>(
-      `SELECT DISTINCT ON (axis) output FROM runs
-       WHERE ticket_id = $1 AND stage = 'review' AND output IS NOT NULL ORDER BY axis DESC, id DESC`,
-      [ticket.id],
-    );
-    for (const row of review.rows)
-      for (const text of strings(record(row.output).uncertainties))
-        section.uncertainties.push({ source: `${display} review`, text });
     if (ticket.type === "integration") {
       integrationTickets.push({ ticket, named });
     } else {
@@ -429,22 +426,37 @@ export async function buildAcceptancePack(
         paths: ticket.allowed_protected_paths,
       });
   }
-  const finalReviews = await client.query<{
+  const decisionRuns = await client.query<{
+    id: number;
+    spec_id: number;
+    stage: string;
+    ticket_id: number | null;
     repo_id: number;
-    name: string;
+    repo: string;
     output: unknown;
   }>(
-    `SELECT DISTINCT ON (r.repo_id, r.axis) r.repo_id, rp.name, r.output FROM runs r JOIN repos rp ON rp.id = r.repo_id
-     WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = 'final-review' AND r.output IS NOT NULL
-     ORDER BY r.repo_id, r.axis DESC, r.id DESC`,
-    [specId],
+    `SELECT r.id, r.spec_id, r.stage, r.ticket_id, r.repo_id, rp.name AS repo, r.output
+     FROM runs r JOIN repos rp ON rp.id = r.repo_id
+     WHERE r.spec_id = $1 AND r.stage = ANY($2) AND r.result = 'done' AND r.output IS NOT NULL
+     ORDER BY r.id`,
+    [specId, [...CODE_CHANGING_STAGES]],
   );
-  for (const row of finalReviews.rows)
-    for (const text of strings(record(row.output).uncertainties))
-      sectionOf(row.repo_id, row.name).uncertainties.push({
-        source: `${formatDisplayId("spec", specId)} final review`,
-        text,
+  for (const row of decisionRuns.rows) {
+    const who =
+      row.ticket_id != null
+        ? formatDisplayId("ticket", row.ticket_id)
+        : formatDisplayId("spec", row.spec_id);
+    const run = formatDisplayId("run", row.id);
+    for (const decision of decisionsOf(row.output)) {
+      sectionOf(row.repo_id, row.repo).decisions.push({
+        source: `${who} ${row.stage}`,
+        run,
+        kind: decision.kind,
+        text: decision.text,
+        ...(decision.ref ? { ref: decision.ref } : {}),
       });
+    }
+  }
 
   const findings = await client.query<{
     ticket_id: number | null;
@@ -730,6 +742,28 @@ export async function saveAcceptancePack(
 const asArray = <T>(value: T[] | undefined | null): T[] =>
   Array.isArray(value) ? value : [];
 
+function storedDecisions(
+  repo: Record<string, unknown>,
+): AcceptancePack["repos"][number]["decisions"] {
+  const listed = asArray(repo.decisions as never[]);
+  if (listed.length > 0) return listed;
+  return asArray(
+    repo.uncertainties as { source?: string; text?: string }[] | undefined,
+  )
+    .filter(
+      (item) =>
+        item &&
+        typeof item.source === "string" &&
+        typeof item.text === "string",
+    )
+    .map((item) => ({
+      source: item.source as string,
+      run: "",
+      kind: "choice" as const,
+      text: item.text as string,
+    }));
+}
+
 function coerceStoredPack(raw: unknown): AcceptancePack | null {
   if (!raw || typeof raw !== "object") return null;
   const pack = raw as Record<string, unknown>;
@@ -785,7 +819,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         }),
         findings: asArray(repo.findings as never[]),
         scopeCreep: asArray(repo.scopeCreep as never[]),
-        uncertainties: asArray(repo.uncertainties as never[]),
+        decisions: storedDecisions(repo),
         protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
         standardsSources: asArray(repo.standardsSources as never[]),
       };

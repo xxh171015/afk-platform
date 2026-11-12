@@ -422,7 +422,26 @@ describe("the spec page", () => {
               body: "an export flag nobody asked for",
             },
           ],
-          uncertainties: [{ source: "T-1 implement", text: "date format?" }],
+          decisions: [
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "conflict",
+              text: "ticket vs User Story 6; picked the story",
+            },
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "choice",
+              text: "date format?",
+            },
+            {
+              source: "T-1 gate-fix",
+              run: "R-5",
+              kind: "workaround",
+              text: "skipped drizzle generate",
+            },
+          ],
           protectedPathApprovals: [
             { ticket: "T-1", paths: [".github/ci.yml"] },
           ],
@@ -450,7 +469,7 @@ describe("the spec page", () => {
           ],
           findings: [],
           scopeCreep: [],
-          uncertainties: [],
+          decisions: [],
           protectedPathApprovals: [],
         },
       ],
@@ -518,7 +537,21 @@ describe("the spec page", () => {
       screen.getByText(/an export flag nobody asked for/).closest("ul")
         ?.className,
     ).toBe("scope-creep");
-    expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
+    expect(screen.getByText("决定：")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /冲突 T-1 implement R-2: ticket vs User Story 6; picked the story/,
+      ),
+    ).toBeTruthy();
+    const counted = screen
+      .getByText("小事 1 条，绕过 1 条")
+      .closest("details") as HTMLDetailsElement;
+    expect(counted.open).toBe(false);
+    expect(screen.queryByText("模型不确定的地方：")).toBeNull();
+    fireEvent.click(screen.getByText("小事 1 条，绕过 1 条"));
+    expect(counted.open).toBe(true);
+    expect(within(counted).getByText(/date format\?/)).toBeTruthy();
+    expect(within(counted).getByText(/skipped drizzle generate/)).toBeTruthy();
     expect(screen.getByText(/AGENTS.md, CONTRIBUTING.md/)).toBeTruthy();
     expect(screen.getByText(/门禁：/));
     expect(screen.getByRole("button", { name: /0123456/ })).toBeTruthy();

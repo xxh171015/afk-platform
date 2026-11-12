@@ -127,6 +127,31 @@ const GAVE_UP = {
 };
 const DONE = { outcome: "done" };
 
+describe("a conflict Decision", () => {
+  it("lets the ticket go on to the gate and stays off the waiting queue", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            {
+              kind: "conflict",
+              text: "ticket said 422; contract omitted the status; used 400",
+            },
+          ],
+        },
+      },
+    });
+    expect((await call("GET", "/blocked")).body.tickets).toEqual([]);
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("gate");
+  });
+});
+
 describe("retry", () => {
   async function blockedAfterFixes() {
     const specId = await runningSpec([ticket("a")]);

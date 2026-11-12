@@ -1,4 +1,5 @@
 import {
+  decisionTally,
   formatDisplayId,
   HOST_KIND_LABELS,
   type HostKind,
@@ -81,7 +82,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     standardsSourceLines(section),
     gateLines(section),
     flakyTestLines(section),
-    uncertaintyLines(section),
+    decisionLines(section),
   ].filter(Boolean);
   return blocks.join("\n\n");
 }
@@ -162,12 +163,21 @@ function flakyTestLines(section: AcceptancePack["repos"][number]): string {
   ].join("\n");
 }
 
-function uncertaintyLines(section: AcceptancePack["repos"][number]): string {
-  if (section.uncertainties.length === 0) return "";
-  return [
-    "### Uncertainties",
-    ...section.uncertainties.map((item) => `- ${item.source}: ${item.text}`),
-  ].join("\n");
+function decisionLines(section: AcceptancePack["repos"][number]): string {
+  const tally = decisionTally(section.decisions);
+  if (tally.listed.length === 0 && tally.choice === 0 && tally.workaround === 0)
+    return "";
+  const lines = ["### Decisions"];
+  for (const item of tally.listed) {
+    const ref = item.ref ? ` (${item.ref})` : "";
+    lines.push(
+      `- [${item.kind}] ${item.source} ${item.run}: ${item.text}${ref}`,
+    );
+  }
+  if (tally.choice > 0 || tally.workaround > 0) {
+    lines.push(`- choice: ${tally.choice}, workaround: ${tally.workaround}`);
+  }
+  return lines.join("\n");
 }
 
 function integrationLines(pack: AcceptancePack, kind: HostKind): string {

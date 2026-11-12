@@ -1,3 +1,4 @@
+import { DECISION_KIND_LABELS, decisionsOf } from "@afk/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
@@ -97,6 +98,7 @@ export function RunDetail({
     ? Object.entries(run.contractShas)
     : [];
   const refEntries = run.refShas ? Object.entries(run.refShas) : [];
+  const decisions = decisionsOf(run.output);
 
   return (
     <Page
@@ -204,6 +206,22 @@ export function RunDetail({
           </dd>
         </div>
       </dl>
+      {decisions.length > 0 ? (
+        <section className="mt-5">
+          <h2 className="mb-2 text-sm font-medium">决定</h2>
+          <ul className="decisions space-y-1 text-sm">
+            {decisions.map((item) => (
+              <li key={`${item.kind}-${item.text}`}>
+                <span className="text-muted-foreground">
+                  {DECISION_KIND_LABELS[item.kind]}
+                </span>{" "}
+                {item.text}
+                {item.ref ? ` (${item.ref})` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <RunLog runId={runId} pollMs={logPollMs} durationMs={run.durationMs} />
       <Tabs value={tab} onValueChange={setTab} className="mt-7">
         <TabsList>

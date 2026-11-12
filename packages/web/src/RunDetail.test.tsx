@@ -212,4 +212,34 @@ describe("the run page", () => {
     expect(await screen.findByRole("button", { name: /abcdef1/ })).toBeTruthy();
     expect(screen.queryByText(/implement the export/)).toBeNull();
   });
+
+  it("lists decisions by kind", async () => {
+    renderWithApp(
+      <RunDetail runId={4} />,
+      fakeServer({
+        "GET /runs/4": () => ({
+          json: run({
+            output: {
+              status: "done",
+              decisions: [
+                {
+                  kind: "conflict",
+                  text: "ticket vs User Story 6; picked the story",
+                },
+                { kind: "deferred", text: "openapi extra field", ref: "new" },
+              ],
+            },
+          }),
+        }),
+        "GET /runs/4/logs": () => finishedLog(""),
+      }),
+    );
+    await screen.findByRole("heading", { name: "决定" });
+    expect(screen.getByText("冲突")).toBeTruthy();
+    expect(
+      screen.getByText("ticket vs User Story 6; picked the story"),
+    ).toBeTruthy();
+    expect(screen.getByText("留给别的票")).toBeTruthy();
+    expect(screen.getByText(/openapi extra field/)).toBeTruthy();
+  });
 });

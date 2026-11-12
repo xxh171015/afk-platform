@@ -1,5 +1,6 @@
 import {
   type AcceptancePackView,
+  decisionTally,
   LOCATE_REASON_LABELS,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
@@ -597,8 +598,28 @@ const brokenOrderLine = (b: { repo: string; skipped: string[] }) =>
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
+function decisionRows(
+  items: {
+    kind: string;
+    source: string;
+    run: string;
+    text: string;
+    ref?: string;
+  }[],
+): string[] {
+  const tally = decisionTally(items);
+  const rows = tally.listed.map((item) => {
+    const ref = item.ref ? ` (${item.ref})` : "";
+    return `      [${item.kind}] ${item.source} ${item.run}: ${item.text}${ref}`;
+  });
+  if (tally.choice > 0 || tally.workaround > 0) {
+    rows.push(`      choice: ${tally.choice}, workaround: ${tally.workaround}`);
+  }
+  return rows;
+}
+
 // What a person reads before merging: the order to merge in, then a section for each repo (its pull request, which
-// criteria are backed by a passing test, what the reviews said and what the agents were unsure of, its gate, and
+// criteria are backed by a passing test, what the reviews said and the decisions agents made, its gate, and
 // approved exceptions), and the tickets that were cancelled.
 export function acceptancePackText(pack: AcceptancePackView): string {
   const order = pack.mergeOrder;
@@ -674,10 +695,7 @@ export function acceptancePackText(pack: AcceptancePackView): string {
             (s) => `      ${s.ticket ?? "spec"} ${s.run}: ${s.body}`,
           ),
         ),
-        ...section(
-          "uncertainties",
-          repo.uncertainties.map((u) => `      ${u.source}: ${u.text}`),
-        ),
+        ...section("decisions", decisionRows(repo.decisions ?? [])),
         ...section(
           "gate",
           repo.gate

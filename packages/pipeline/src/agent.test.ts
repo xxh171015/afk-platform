@@ -52,10 +52,10 @@ afterEach(() => {
 });
 
 const DONE = {
-  status: "done",
+  status: "done" as const,
   summary: "did it",
   acceptance: { "returns csv": ["csv test"] },
-  uncertainties: [],
+  decisions: [],
 };
 
 describe("the structured outputs", () => {
@@ -84,6 +84,41 @@ describe("the structured outputs", () => {
       ImplementOutputSchema.safeParse({
         status: "cannot-proceed",
         reason: "old style",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts typed decisions on implement, maps a legacy string array to choice, and rejects an unknown kind", () => {
+    const done = {
+      status: "done" as const,
+      summary: "did it",
+      acceptance: { "returns csv": ["csv test"] },
+    };
+    expect(
+      ImplementOutputSchema.parse({
+        ...done,
+        decisions: [
+          { kind: "choice", text: "named it export" },
+          {
+            kind: "conflict",
+            text: "ticket said one file; tdd needed a test file; added the test",
+          },
+          { kind: "known-gap", text: "list reload skips the note filter" },
+          { kind: "deferred", text: "openapi extra field", ref: "new" },
+          { kind: "workaround", text: "skipped drizzle generate" },
+        ],
+      }).decisions,
+    ).toHaveLength(5);
+    expect(
+      ImplementOutputSchema.parse({
+        ...done,
+        uncertainties: ["picked ISO dates"],
+      }).decisions,
+    ).toEqual([{ kind: "choice", text: "picked ISO dates" }]);
+    expect(
+      ImplementOutputSchema.safeParse({
+        ...done,
+        decisions: [{ kind: "question", text: "ask someone" }],
       }).success,
     ).toBe(false);
   });
@@ -163,16 +198,8 @@ const result = <T>(over: Partial<AgentRunResult<T>>): AgentRunResult<T> => ({
 
 describe("classifying an implement or fix run", () => {
   const cases: [string, AgentRunResult<ImplementOutput>, string][] = [
-    [
-      "done with a commit",
-      result({ output: DONE as ImplementOutput, commits: ["c1"] }),
-      "done",
-    ],
-    [
-      "done without a commit",
-      result({ output: DONE as ImplementOutput }),
-      "no-commits",
-    ],
+    ["done with a commit", result({ output: DONE, commits: ["c1"] }), "done"],
+    ["done without a commit", result({ output: DONE }), "no-commits"],
     [
       "cannot-proceed: gave up",
       result({
@@ -182,7 +209,7 @@ describe("classifying an implement or fix run", () => {
           detail: "d",
           summary: "",
           acceptance: {},
-          uncertainties: [],
+          decisions: [],
         },
       }),
       "agent-gave-up",
@@ -196,7 +223,7 @@ describe("classifying an implement or fix run", () => {
           detail: "d",
           summary: "",
           acceptance: {},
-          uncertainties: [],
+          decisions: [],
         },
       }),
       "contract-change-needed",
@@ -221,7 +248,7 @@ describe("classifying an implement or fix run", () => {
         detail: "needs a decision",
         summary: "",
         acceptance: {},
-        uncertainties: [],
+        decisions: [],
       },
     });
     expect(classifyAgentRun(run)).toEqual({
@@ -611,6 +638,7 @@ describe("the prompts", () => {
       expect(prompt).toContain("agent-gave-up");
       expect(prompt).toContain("contract-change-needed");
       expect(prompt).toContain("<result>");
+      expect(prompt).toContain("decisions");
     }
     for (const stage of ["review", "final-review"] as const) {
       expect(whole(stage)).toContain("verdict");
@@ -655,6 +683,7 @@ describe("the prompts", () => {
       "git diff <baseSha>...HEAD",
       "spec 在哪",
       "uncertainties",
+      "decisions",
       "cannot-proceed",
       "不要 push",
       "保护路径",
@@ -664,6 +693,23 @@ describe("the prompts", () => {
       "单个测试文件怎么跑看仓库的 `AGENTS.md`",
     ])
       expect(overlay).toContain(word);
+  });
+
+  it("gives conflict examples and the three cannot-proceed cases", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const section = overlay.slice(
+      overlay.indexOf("## 没有人回答你"),
+      overlay.indexOf("## /context 就是 tracker"),
+    );
+    expect(section).toContain("conflict");
+    expect(section).toContain("状态码");
+    expect(section).toContain("User Story");
+    expect(section).toContain("tdd");
+    expect(section).toContain("known-gap");
+    expect(section).toContain("cannot-proceed");
+    expect(section).toContain("缺做下去必需的东西");
+    expect(section).toContain("没批准的保护路径");
+    expect(section).toContain("契约非改不可");
   });
 
   it("tells the agent to write long gate and full-suite output to a file instead of reading it all", () => {
@@ -848,7 +894,8 @@ describe("the prompts", () => {
       "cannot-proceed",
       "<result>",
       "e2e",
-      "uncertainties",
+      "decisions",
+      "known-gap",
       "BACKEND_URL",
       "/context/ticket.md",
     ])

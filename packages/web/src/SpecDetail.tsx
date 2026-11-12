@@ -1,4 +1,7 @@
 import {
+  DECISION_KIND_LABELS,
+  type DecisionKind,
+  decisionTally,
   FAILURE_SOURCE_LABELS,
   type FailureSource,
   HOST_KIND_LABELS,
@@ -299,6 +302,56 @@ function DependencyGraph({
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 type PackRepo = NonNullable<SpecView["acceptancePack"]>["repos"][number];
+type PackDecision = {
+  source: string;
+  run: string;
+  kind: string;
+  text: string;
+  ref?: string;
+};
+
+function PackDecisions({ repo }: { repo: PackRepo }) {
+  const tally = decisionTally(
+    list((repo as PackRepo & { decisions?: PackDecision[] }).decisions),
+  );
+  if (tally.listed.length === 0 && tally.choice === 0 && tally.workaround === 0)
+    return null;
+  const countedSummary = [
+    tally.choice > 0 ? `小事 ${tally.choice} 条` : null,
+    tally.workaround > 0 ? `绕过 ${tally.workaround} 条` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join("，");
+  const line = (item: PackDecision) => {
+    const kind = DECISION_KIND_LABELS[item.kind as DecisionKind] ?? item.kind;
+    const ref = item.ref ? ` (${item.ref})` : "";
+    return `${kind} ${item.source} ${item.run}: ${item.text}${ref}`;
+  };
+  return (
+    <>
+      <p className="note">决定：</p>
+      {tally.listed.length > 0 ? (
+        <ul className="decisions">
+          {tally.listed.map((item) => (
+            <li key={`${item.run}-${item.kind}-${item.text}`}>{line(item)}</li>
+          ))}
+        </ul>
+      ) : null}
+      {countedSummary ? (
+        <details className="afk-disclosure mt-2 text-sm">
+          <summary>{countedSummary}</summary>
+          <ul className="decisions-counted mt-1">
+            {tally.counted.map((item) => (
+              <li key={`${item.run}-${item.kind}-${item.text}`}>
+                {line(item)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </>
+  );
+}
 
 function PackRepoSection({
   repo,
@@ -385,18 +438,7 @@ function PackRepoSection({
           </ul>
         </>
       ) : null}
-      {list(repo.uncertainties).length > 0 ? (
-        <>
-          <p className="note">模型不确定的地方：</p>
-          <ul className="uncertainties">
-            {list(repo.uncertainties).map((u) => (
-              <li key={`${u.source}-${u.text}`}>
-                {u.source}: {u.text}
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
+      <PackDecisions repo={repo} />
       {repo.gate ? (
         <p className="gates">
           门禁：{" "}

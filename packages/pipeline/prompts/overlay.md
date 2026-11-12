@@ -3,10 +3,14 @@
 
 ## 没有人回答你
 
-没有人会回答你的问题，也不要停下来等。不要向任何人提问、请求确认或等待输入。遇到不明确的事：
+没有人会回答你的问题，也不要停下来等。不要向任何人提问、请求确认或等待输入。继续做，把取舍交出来。会改代码的阶段写进结果的 `decisions`（`{ kind, text, ref? }`）：
 
-- 能撤回的小事（命名、一个次要的取舍）：自己决定，把你的决定和理由写进结果的 `uncertainties`，然后继续。
-- 必须由人决定的事（要不要改契约、验收标准互相矛盾、缺少做下去必需的东西）：结果格式里有 `cannot-proceed` 的阶段就输出它，`blockedReason` 写 `contract-change-needed`（认为契约要改）或 `agent-gave-up`（其他），`detail` 写清楚卡在哪里、需要什么；没有 `cannot-proceed` 的阶段（审查、诊断）把它写进 `uncertainties`，按保守的一边下结论。
+- 能撤回的小事（命名、一个次要的取舍）：`kind` 是 `choice`，然后继续。
+- 票、需求、契约、现有代码对不上，你选了一边：`kind` 是 `conflict`，写清两边原文和选了哪边，然后继续。契约没写的状态码、字段、校验，票和 User Story 写法不同，票的约束和 tdd 冲突（票写「只改这个文件」但红 → 绿要加测试文件），都是 `conflict`，不是停下的理由。
+- 知道没做、或做了但有问题：`kind` 是 `known-gap`。联调 implement 怀疑别的仓库有问题时也记成 `known-gap`，写明哪个仓库、什么现象。
+- 留给别的票：`kind` 是 `deferred`，`ref` 写票的显示编号（T-n），没有现成的票写 `new`。
+- 绕过仓库或环境的问题：`kind` 是 `workaround`。
+- `cannot-proceed` 只留给三种情况：缺做下去必需的东西、要改没批准的保护路径、契约非改不可。有 `cannot-proceed` 的阶段就输出它，`blockedReason` 写 `contract-change-needed`（契约非改不可）或 `agent-gave-up`（其他），`detail` 写清楚卡在哪里、需要什么。没有 `cannot-proceed` 的阶段（审查、诊断）把它写进 `uncertainties`，按保守的一边下结论。
 
 ## /context 就是 tracker
 
@@ -20,7 +24,7 @@
 
 - implement 的"reference 不明确就问"：票就是 `/context/ticket.md`，不会有别的引用。
 - implement 的"经常跑类型检查和单个测试文件"：单个测试文件怎么跑看仓库的 `AGENTS.md`。
-- tdd 的"写测试前和用户确认 seams"：`/context/spec.md` 的 Testing Decisions 里的 seams 已经确认过，不要再确认；没有写 seams 时，在已有测试的最高一层写，并把你选的 seam 写进 `uncertainties`。
+- tdd 的"写测试前和用户确认 seams"：`/context/spec.md` 的 Testing Decisions 里的 seams 已经确认过，不要再确认；没有写 seams 时，在已有测试的最高一层写，并把你选的 seam 写进 `decisions`（`kind` 是 `choice`）。
 - code-review 的"向用户要固定点"：固定点是 `/context/run.json` 的 `baseSha`，按 skill 原文用三点 diff：`git diff <baseSha>...HEAD`。
 - code-review 的"问 spec 在哪"：由这个阶段的 prompt 给出。
 - 其他没有列到的提问：按上面"没有人回答你"的规则办。

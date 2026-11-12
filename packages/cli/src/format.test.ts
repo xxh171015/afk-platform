@@ -404,7 +404,20 @@ describe("the e2e before the pull requests", () => {
           tickets: [],
           findings: [],
           scopeCreep: [],
-          uncertainties: [],
+          decisions: [
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "conflict",
+              text: "ticket vs User Story 6; picked the story",
+            },
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "choice",
+              text: "named it export",
+            },
+          ],
           protectedPathApprovals: [],
           standardsSources: [],
         },
@@ -414,5 +427,12 @@ describe("the e2e before the pull requests", () => {
     expect(text).toContain("unstable tests (passed on rerun):");
     expect(text).toContain("orders flakes then passes");
     expect(text).not.toMatch(/findings:[\s\S]*flakes then passes/);
+    expect(text).toContain("decisions:");
+    expect(text).toContain(
+      "[conflict] T-1 implement R-2: ticket vs User Story 6; picked the story",
+    );
+    expect(text).toContain("choice: 1, workaround: 0");
+    expect(text).not.toContain("named it export");
+    expect(text).not.toContain("uncertainties:");
   });
 });

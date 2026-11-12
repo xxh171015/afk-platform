@@ -1446,7 +1446,13 @@ describe("the acceptance pack", () => {
             "has a header": ["has a header"],
             "has a footer": ["footer test that does not exist"],
           },
-          uncertainties: ["not sure the date format is right"],
+          decisions: [
+            {
+              kind: "conflict",
+              text: "ticket vs User Story 6; picked the story",
+            },
+            { kind: "choice", text: "named the file export.csv" },
+          ],
         },
       },
     },
@@ -1622,12 +1628,23 @@ describe("the acceptance pack", () => {
         body: "an export flag nobody asked for",
       },
     ]);
-    expect(acceptancePack.repos[0].uncertainties).toEqual([
-      { source: "T-1 implement", text: "not sure the date format is right" },
-      { source: "T-1 review", text: "the review could not run the export" },
-      { source: "T-1 review", text: "the ticket does not say the date format" },
-      { source: "S-1 final review", text: "migration order" },
+    expect(acceptancePack.repos[0].decisions).toEqual([
+      {
+        source: "T-1 implement",
+        run: expect.stringMatching(/^R-\d+$/),
+        kind: "conflict",
+        text: "ticket vs User Story 6; picked the story",
+      },
+      {
+        source: "T-1 implement",
+        run: expect.stringMatching(/^R-\d+$/),
+        kind: "choice",
+        text: "named the file export.csv",
+      },
     ]);
+    expect(JSON.stringify(acceptancePack.repos[0].decisions)).not.toMatch(
+      /the review could not run the export|the ticket does not say the date format|migration order/,
+    );
   });
 
   it("after final-fix is done, wrap-up must-fix findings are handed to fix in the pack and pull request, not unhandled", async () => {
@@ -1639,7 +1656,22 @@ describe("the acceptance pack", () => {
           outcome: "fix",
           findings: [{ kind: "must-fix", body: "names disagree" }],
         },
-        "final-fix": { outcome: "done" },
+        "final-fix": {
+          outcome: "done",
+          run: {
+            output: {
+              status: "done",
+              summary: "fixed",
+              acceptance: {},
+              decisions: [
+                {
+                  kind: "known-gap",
+                  text: "reload still skips the note filter",
+                },
+              ],
+            },
+          },
+        },
         "final-merge": { outcome: "merged", headSha: "settled" },
       },
     });
@@ -1666,6 +1698,18 @@ describe("the acceptance pack", () => {
       "[已交给 fix 处理] spec final-review must-fix: names disagree",
     );
     expect(task.section).not.toContain("unhandled");
+    expect(acceptancePack.repos[0].decisions).toEqual(
+      expect.arrayContaining([
+        {
+          source: expect.stringMatching(/^S-\d+ final-fix$/),
+          run: expect.stringMatching(/^R-\d+$/),
+          kind: "known-gap",
+          text: "reload still skips the note filter",
+        },
+      ]),
+    );
+    expect(task.section).toContain("[known-gap] S-1 final-fix");
+    expect(task.section).toContain("reload still skips the note filter");
   });
 
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {
@@ -1844,6 +1888,7 @@ describe("the acceptance pack", () => {
                   ],
                 },
               ],
+              uncertainties: [{ source: "T-1 implement", text: "ISO dates" }],
             },
           ],
         }),
@@ -1853,6 +1898,14 @@ describe("the acceptance pack", () => {
     expect(acceptancePack.cancelledTickets).toEqual([]);
     expect(acceptancePack.repos[0].findings).toEqual([]);
     expect(acceptancePack.repos[0].tickets[0].criteria[0].tests).toEqual([]);
+    expect(acceptancePack.repos[0].decisions).toEqual([
+      {
+        source: "T-1 implement",
+        run: "",
+        kind: "choice",
+        text: "ISO dates",
+      },
+    ]);
     const stored = await db.pool.query("SELECT content FROM acceptance_packs");
     expect(stored.rows[0].content.cancelledTickets).toBeUndefined();
   });
@@ -1902,7 +1955,12 @@ describe("the acceptance pack", () => {
     );
     expect(out).toContain("scope creep (not asked for)");
     expect(out).toMatch(/T-1 R-\d+: an export flag nobody asked for/);
-    expect(out).toContain("T-1 implement: not sure the date format is right");
+    expect(out).toMatch(
+      /\[conflict\] T-1 implement R-\d+: ticket vs User Story 6; picked the story/,
+    );
+    expect(out).toContain("choice: 1, workaround: 0");
+    expect(out).not.toContain("named the file export.csv");
+    expect(out).not.toContain("uncertainties:");
     expect(out).toContain(
       "backend @ head: 3 tests, 1 skipped, 4.0 s (setup 1.5 s, test 2.5 s)",
     );

@@ -3621,9 +3621,18 @@ export interface paths {
                     run: string;
                     body: string;
                   }[];
-                  uncertainties: {
+                  decisions: {
                     source: string;
+                    run: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
                     text: string;
+                    ref?: string;
                   }[];
                   protectedPathApprovals: {
                     ticket: string;

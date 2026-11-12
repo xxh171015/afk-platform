@@ -7117,7 +7117,7 @@
                                   "required": ["ticket", "run", "body"]
                                 }
                               },
-                              "uncertainties": {
+                              "decisions": {
                                 "type": "array",
                                 "items": {
                                   "type": "object",
@@ -7125,11 +7125,27 @@
                                     "source": {
                                       "type": "string"
                                     },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "choice",
+                                        "conflict",
+                                        "known-gap",
+                                        "deferred",
+                                        "workaround"
+                                      ]
+                                    },
                                     "text": {
+                                      "type": "string"
+                                    },
+                                    "ref": {
                                       "type": "string"
                                     }
                                   },
-                                  "required": ["source", "text"]
+                                  "required": ["source", "run", "kind", "text"]
                                 }
                               },
                               "protectedPathApprovals": {
@@ -7188,7 +7204,7 @@
                               "tickets",
                               "findings",
                               "scopeCreep",
-                              "uncertainties",
+                              "decisions",
                               "protectedPathApprovals"
                             ]
                           }

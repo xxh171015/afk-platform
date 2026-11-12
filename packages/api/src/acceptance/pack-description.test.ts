@@ -59,7 +59,32 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
         },
       ],
       scopeCreep: [],
-      uncertainties: [{ source: "T-1 implement", text: "date format" }],
+      decisions: [
+        {
+          source: "T-1 implement",
+          run: "R-2",
+          kind: "conflict",
+          text: "ticket vs User Story 6; picked the story",
+        },
+        {
+          source: "T-1 implement",
+          run: "R-3",
+          kind: "known-gap",
+          text: "reload still skips the note filter",
+        },
+        {
+          source: "T-1 implement",
+          run: "R-2",
+          kind: "choice",
+          text: "date format",
+        },
+        {
+          source: "T-1 gate-fix",
+          run: "R-5",
+          kind: "workaround",
+          text: "skipped drizzle generate",
+        },
+      ],
       protectedPathApprovals: [],
       flakyTests: [{ name: "flakes then passes", classname: "orders" }],
       standardsSources: [
@@ -85,7 +110,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       ],
       findings: [],
       scopeCreep: [],
-      uncertainties: [],
+      decisions: [],
       protectedPathApprovals: [],
       flakyTests: [],
       standardsSources: [],
@@ -203,6 +228,24 @@ describe("renderPackSection", () => {
     expect(section).toContain("T-1 R-2 review: AGENTS.md, CONTRIBUTING.md");
     expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
       "Standards sources",
+    );
+  });
+
+  it("lists conflict and known-gap under Decisions with their run, and only counts choice and workaround", () => {
+    const { section } = renderPackSection(pack(), "backend", 1);
+    expect(section).toContain("### Decisions");
+    expect(section).toContain(
+      "[conflict] T-1 implement R-2: ticket vs User Story 6; picked the story",
+    );
+    expect(section).toContain(
+      "[known-gap] T-1 implement R-3: reload still skips the note filter",
+    );
+    expect(section).toContain("choice: 1, workaround: 1");
+    expect(section).not.toContain("date format");
+    expect(section).not.toContain("skipped drizzle generate");
+    expect(section).not.toContain("Uncertainties");
+    expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
+      "### Decisions",
     );
   });
 
