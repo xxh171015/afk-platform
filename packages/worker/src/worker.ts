@@ -290,7 +290,21 @@ export async function processJob(
         log(`${job.type} ok`);
         return "completed";
       }
-      const body = await runHostTask(options.host, task, log);
+      const localRepos =
+        task.kind === "spec-cleanup"
+          ? [
+              ...new Set(
+                task.branches
+                  .map((item) => options.executor.repos.findByUrl(item.repoUrl))
+                  .filter((dir): dir is string => dir !== undefined),
+              ),
+            ]
+          : undefined;
+      const body = await runHostTask(
+        { ...options.host, ...(localRepos ? { localRepos } : {}) },
+        task,
+        log,
+      );
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";

@@ -56,6 +56,11 @@ import {
   type ReviewAxis,
   unrecoverableJobError,
 } from "@afk/shared";
+import {
+  alignTicketBranch,
+  originSha,
+  type TicketAlign,
+} from "./align-ticket-branch.ts";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { fetchContracts } from "./contracts.ts";
 import { type Credentials, withCredentials } from "./credentials.ts";
@@ -228,6 +233,85 @@ function bringBranches(slot: Slot, mainDir: string, refs: string[]) {
   }
 }
 
+const SKIP_TICKET_ALIGN = new Set(["e2e", "diagnose", "final-review"]);
+
+function orphanRunFields(align: TicketAlign): {
+  orphanRef?: string;
+  orphanSha?: string;
+} {
+  return align.orphan
+    ? { orphanRef: align.orphan.ref, orphanSha: align.orphan.sha }
+    : {};
+}
+
+function assertRemoteUnchanged(
+  repoDir: string,
+  branch: string,
+  expectedOld: string,
+): void {
+  const now = originSha(repoDir, branch) ?? "";
+  if (now !== expectedOld) {
+    throwPushFailure("stale info", {
+      remoteTip: now,
+      startedFrom: expectedOld,
+    });
+  }
+}
+
+async function publishLocalAhead(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  agent: string,
+): Promise<void> {
+  const local = hasRef(mainDir, `refs/heads/${agent}`)
+    ? tip(mainDir, agent)
+    : undefined;
+  const remote = originSha(mainDir, agent);
+  if (
+    !local ||
+    !remote ||
+    local === remote ||
+    !isAncestor(mainDir, remote, local)
+  )
+    return;
+  if (
+    context.signal.aborted ||
+    (await deps.api.prePush(context.job)) === "lost"
+  ) {
+    throw new JobLostError("the lease was lost before the push");
+  }
+  const pushed = deps.push({
+    repoDir: mainDir,
+    source: `refs/heads/${agent}`,
+    target: `refs/heads/${agent}`,
+    expectedOld: remote,
+  });
+  if (!pushed.ok) {
+    throwPushFailure(pushed.error, {
+      remoteTip: originSha(mainDir, agent) ?? "",
+      startedFrom: remote,
+    });
+  }
+}
+
+function publishedTip(mainDir: string, agent: string): string {
+  const remote = originSha(mainDir, agent);
+  const local = hasRef(mainDir, `refs/heads/${agent}`)
+    ? tip(mainDir, agent)
+    : undefined;
+  if (remote && local && remote !== local) {
+    throwPushFailure("stale info", {
+      remoteTip: remote,
+      startedFrom: local,
+    });
+  }
+  const sha = remote ?? local;
+  if (!sha)
+    throw new InfrastructureError(`${agent} is not on origin or locally`);
+  return sha;
+}
+
 async function runStage(
   deps: ExecutorDeps,
   context: StageContext,
@@ -236,42 +320,39 @@ async function runStage(
 ): Promise<StageOutcomeBody> {
   const { bundle } = context;
   const integration = bundle.integrationBranch as string;
-  // A restart-retry: the old ticket branch goes, and the implement run starts again from the integration branch.
-  // What origin still has under that name is replaced at the push, under a lease on the tip it had.
-  let replaced: string | undefined;
-  if (bundle.job.stage === "implement" && bundle.ticket?.restart) {
-    const ref = `refs/heads/${bundle.agentBranch}`;
-    // The lease is on what origin has, which the main clone may not have fetched.
-    const onOrigin = git(mainDir, ["ls-remote", "origin", ref])
-      .stdout.split("\t")[0]
-      ?.trim();
-    replaced =
-      onOrigin || (hasRef(mainDir, ref) ? tip(mainDir, ref) : undefined);
-    if (hasRef(mainDir, ref)) gitOrThrow(mainDir, ["update-ref", "-d", ref]);
-    if (replaced)
-      context.log(`restart: dropped ${bundle.agentBranch} (was ${replaced})`);
-  }
+  const restart =
+    bundle.job.stage === "implement" && bundle.ticket?.restart === true;
+  const align = SKIP_TICKET_ALIGN.has(bundle.job.stage)
+    ? { expectedOld: "" }
+    : alignTicketBranch(mainDir, bundle.agentBranch, { restart });
+  if (restart)
+    context.log(
+      `restart: dropped ${bundle.agentBranch}${align.remoteTip ? ` (origin was ${align.remoteTip})` : ""}`,
+    );
+  if (align.orphan)
+    context.log(
+      `align: ${bundle.agentBranch} follows origin ${align.remoteTip}; kept ${align.orphan.sha} at ${align.orphan.ref}`,
+    );
   bringBranches(slot, mainDir, [integration, bundle.agentBranch]);
   switch (bundle.job.stage) {
     case "implement":
     case "gate-fix":
     case "review-fix":
     case "merge-fix":
-      return agentChange(deps, context, mainDir, slot, replaced);
     case "final-fix":
-      return agentChange(deps, context, mainDir, slot);
+      return agentChange(deps, context, mainDir, slot, align);
     case "review":
     case "final-review":
-      return review(deps, context, mainDir, slot);
+      return review(deps, context, mainDir, slot, align);
     case "gate":
-      return gate(deps, context, mainDir, slot);
+      return gate(deps, context, mainDir, slot, align);
     case "merge":
     case "final-merge":
-      return merge(deps, context, mainDir, slot);
+      return merge(deps, context, mainDir, slot, align);
     case "update-branch":
       return context.job.type === "agent-run"
-        ? agentChange(deps, context, mainDir, slot)
-        : merge(deps, context, mainDir, slot);
+        ? agentChange(deps, context, mainDir, slot, align)
+        : merge(deps, context, mainDir, slot, align);
     case "e2e":
       return e2e(deps, context, mainDir, slot);
     case "diagnose":
@@ -283,13 +364,7 @@ async function runStage(
 
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
-
-function originTip(repoDir: string, ref: string): string | undefined {
-  const sha = git(repoDir, ["ls-remote", "origin", ref])
-    .stdout.split("\t")[0]
-    ?.trim();
-  return sha || undefined;
-}
+const originTip = originSha;
 
 function throwPushFailure(error: string, tips: PushFailureTips): never {
   const kind = classifyPushError(error);
@@ -383,7 +458,7 @@ async function agentChange(
   context: StageContext,
   mainDir: string,
   slot: Slot,
-  replaced?: string, // the tip of the ticket branch that a restart threw away
+  align: TicketAlign,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const stage = bundle.job.stage as
@@ -397,15 +472,16 @@ async function agentChange(
   const integration = bundle.integrationBranch as string;
   const baseSha = branchBase(mainDir, integration, agent);
   const before = exists(mainDir, agent) ? tip(mainDir, agent) : baseSha;
-  // implement owns every commit of the branch, those an interrupted run left in it included, unless an earlier
-  // run already stamped them (and maybe published them): those are not rewritten. A fix owns its own commits.
+  // Trailers only on commits origin does not already have. implement still owns unstamped salvaged
+  // commits when this branch has never been on origin.
   const stampFrom =
-    stage === "implement" &&
+    align.remoteTip ??
+    (stage === "implement" &&
     !/^Run: /m.test(
       git(mainDir, ["log", "--format=%B", `${baseSha}..${before}`]).stdout,
     )
       ? baseSha
-      : before;
+      : before);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
     const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
@@ -418,6 +494,7 @@ async function agentChange(
     const { refs, refShas } = snapshotRefs(deps, bundle);
     log(`${stage}: running the agent on ${agent}`);
     const options = runOptions(deps, context);
+    assertRemoteUnchanged(mainDir, agent, align.expectedOld);
     // An integration ticket's agent works in its integration environment: it writes the e2e against real services,
     // and a fix reproduces the failure there. The environment is gone again when the run is over.
     const runAgent = (placement?: SandboxPlacement) =>
@@ -461,6 +538,7 @@ async function agentChange(
       ...agentFacts(deps, options, given.prompt),
       ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
+      ...orphanRunFields(align),
     };
     if (verdict.outcome !== "done")
       return { stage, outcome: verdict.outcome, run: facts };
@@ -495,10 +573,10 @@ async function agentChange(
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
       target: `refs/heads/${agent}`,
-      ...(replaced ? { expectedOld: replaced } : {}),
+      expectedOld: align.expectedOld,
     };
     // Network blips: wait 10, 30, 90, 180 s and push again from this run, so a flake does not re-run the agent.
-    // Each attempt re-checks the lease first: a worker that lost it must not publish anything.
+    // Each attempt re-checks the job lease first: a worker that lost it must not publish anything.
     const waitSeconds = [10, 30, 90, 180];
     const wait = deps.sleep ?? sleep;
     let pushed: ReturnType<PushFn> = { ok: false, error: "" };
@@ -509,6 +587,7 @@ async function agentChange(
       ) {
         throw new JobLostError("the lease was lost before the push");
       }
+      assertRemoteUnchanged(mainDir, agent, align.expectedOld);
       pushed = deps.push(request);
       if (pushed.ok) break;
       if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
@@ -518,7 +597,7 @@ async function agentChange(
     if (!pushed.ok)
       throwPushFailure(pushed.error, {
         remoteTip: originTip(mainDir, request.target),
-        startedFrom: request.expectedOld ?? replaced ?? before,
+        startedFrom: align.expectedOld,
       });
     facts.headSha = tip(mainDir, agent);
     facts.commits = gitOrThrow(mainDir, [
@@ -545,10 +624,14 @@ async function review(
   context: StageContext,
   mainDir: string,
   slot: Slot,
+  align: TicketAlign,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const agent = bundle.agentBranch;
   const stage = bundle.job.stage as "review" | "final-review";
+  if (stage === "review") {
+    await publishLocalAhead(deps, context, mainDir, agent);
+  }
   // A ticket is reviewed against where its branch left the integration branch; a whole spec against where the
   // integration branch left the default branch.
   const baseSha =
@@ -565,7 +648,7 @@ async function review(
   const reviewed =
     stage === "final-review"
       ? tip(mainDir, bundle.integrationBranch as string)
-      : tip(mainDir, agent);
+      : publishedTip(mainDir, agent);
   const branches = new Map(
     REVIEW_AXES.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
   );
@@ -631,7 +714,7 @@ async function review(
       stage,
       outcome: verdict.outcome,
       // the Standards run is the job's own Run; the Spec run is recorded beside it
-      run: { ...first?.run, axis: first?.axis },
+      run: { ...first?.run, axis: first?.axis, ...orphanRunFields(align) },
       findings: first?.findings ?? [],
       extraRuns: others.map((r) => ({
         run: { ...r.run, axis: r.axis },
@@ -698,10 +781,13 @@ async function gate(
   context: StageContext,
   mainDir: string,
   slot: Slot,
+  align: TicketAlign,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
+  await publishLocalAhead(deps, context, mainDir, agent);
+  const commitSha = publishedTip(mainDir, agent);
   if (!exists(mainDir, agent))
     throw new InfrastructureError(`${agent} is not there to gate`);
   const baseSha = branchBase(mainDir, integration, agent);
@@ -719,7 +805,12 @@ async function gate(
     return {
       stage: "gate",
       outcome: "protected-path-changed",
-      run: { branch: agent, baseSha, output: { unapproved: check.unapproved } },
+      run: {
+        branch: agent,
+        baseSha,
+        output: { unapproved: check.unapproved },
+        ...orphanRunFields(align),
+      },
     };
   }
 
@@ -744,6 +835,7 @@ async function gate(
         branch: agent,
         baseSha,
         output: { detail, mismatches: copies },
+        ...orphanRunFields(align),
       },
     };
   }
@@ -764,7 +856,7 @@ async function gate(
     sandbox: deps.makeGateSandbox(slot.dir, runIdOf(bundle)),
     signal: context.signal,
     ref: agent,
-    commitSha: tip(mainDir, agent),
+    commitSha,
     configSha: tip(mainDir, integration),
     ...(baseline ? { baseline } : {}),
     records: gateRecords(deps, context),
@@ -780,6 +872,7 @@ async function gate(
       baseSha,
       headSha: outcome.commitSha,
       output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
+      ...orphanRunFields(align),
     },
     gate: gateFacts(outcome),
   };
@@ -787,17 +880,19 @@ async function gate(
 
 const MAX_MERGE_ATTEMPTS = 3;
 
-// If the integration branch moved while the candidate was being gated, the push is refused by its lease. The
+// If the integration branch moved while the candidate was being gated, --force-with-lease refuses the push. The
 // answer is not to fail but to fetch and begin again: a new candidate on the new tip, gated again.
 async function merge(
   deps: ExecutorDeps,
   context: StageContext,
   mainDir: string,
   slot: Slot,
+  align: TicketAlign,
 ): Promise<StageOutcomeBody> {
   const { bundle } = context;
+  let ticketAlign = align;
   for (let attempt = 1; ; attempt++) {
-    const outcome = await mergeOnce(deps, context, mainDir, slot);
+    const outcome = await mergeOnce(deps, context, mainDir, slot, ticketAlign);
     if (!("integrationMoved" in outcome)) return outcome;
     if (attempt === MAX_MERGE_ATTEMPTS) {
       throw new InfrastructureError(
@@ -812,6 +907,7 @@ async function merge(
       bundle.repo.url,
       bundle.repo.defaultBranch,
     );
+    ticketAlign = alignTicketBranch(mainDir, bundle.agentBranch);
   }
 }
 
@@ -896,12 +992,18 @@ async function mergeOnce(
   context: StageContext,
   mainDir: string,
   slot: Slot,
+  align: TicketAlign,
 ): Promise<StageOutcomeBody | { integrationMoved: string }> {
   const { bundle, log, job } = context;
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
   const stage = bundle.job.stage;
+  if (exists(mainDir, agent) || originSha(mainDir, agent)) {
+    await publishLocalAhead(deps, context, mainDir, agent);
+    if (exists(mainDir, agent) || originSha(mainDir, agent))
+      publishedTip(mainDir, agent);
+  }
   // A first update-branch has no temp branch yet: merge the default branch. After the merge agent, the temp exists
   // and is what gets merge-treed into the integration branch.
   const incoming =
@@ -926,7 +1028,7 @@ async function mergeOnce(
       stage,
       outcome: "merged",
       headSha: head,
-      run: { headSha: head },
+      run: { headSha: head, ...orphanRunFields(align) },
       ...(measured ? { gate: gateFacts(measured) } : {}),
     };
   }
@@ -1023,7 +1125,7 @@ async function mergeOnce(
     outcome: "merged",
     headSha: candidate.candidate,
     // recorded on the Run, so the next gate can be measured against what this merge measured
-    run: { headSha: candidate.candidate },
+    run: { headSha: candidate.candidate, ...orphanRunFields(align) },
     gate: gateFacts(outcome),
   };
 }

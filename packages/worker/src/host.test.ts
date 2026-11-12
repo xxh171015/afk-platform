@@ -502,6 +502,30 @@ describe("a spec-cleanup task", () => {
     ).resolves.toMatchObject({ closed: [5] });
   });
 
+  it("deletes local orphan refs of the spec's branches", async () => {
+    const repo = makeRepo();
+    const branch = "agent/T-1";
+    gitOrThrow(repo.dir, ["branch", branch]);
+    const sha = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const orphan = `refs/afk/orphan/${branch}/${sha}`;
+    gitOrThrow(repo.dir, ["update-ref", orphan, sha]);
+    try {
+      await runHostTask(
+        { adapter: recorder(), repoRef: ref, localRepos: [repo.dir] },
+        cleanup({
+          pulls: [],
+          branches: [{ repoUrl: "https://github.com/me/pilot.git", branch }],
+        }),
+        log,
+      );
+      expect(
+        git(repo.dir, ["show-ref", "--verify", "--quiet", orphan]).code,
+      ).not.toBe(0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("deletes the branches of a spec that carries its database's id, and refuses a look-alike", async () => {
     const adapter = recorder();
     const lines: string[] = [];

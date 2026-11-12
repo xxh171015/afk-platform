@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAppTokenSource, createGitHubAdapter } from "@afk/host";
 import { FakeGitHub } from "@afk/host/testing";
-import { composePrompt, git, gitOut, promptFor } from "@afk/pipeline";
+import {
+  composePrompt,
+  git,
+  gitOrThrow,
+  gitOut,
+  promptFor,
+} from "@afk/pipeline";
 import {
   type FakeAgentContext,
   FakeAgentRunner,
@@ -2514,6 +2520,209 @@ describe("trouble reaching the API, or no room to work", {
       job,
     );
     expect(seenWhileRunning).toContain("implement: running the agent");
+  });
+});
+
+describe("the ticket branch follows origin", { timeout: 60_000 }, () => {
+  function plantOnOrigin(branch: string, file: string, message: string) {
+    const wd = join(home, `plant-${file}`);
+    git(home, ["clone", "--quiet", origin, wd]);
+    const has = git(wd, [
+      "ls-remote",
+      "--heads",
+      "origin",
+      `refs/heads/${branch}`,
+    ]).stdout.trim();
+    if (has) git(wd, ["checkout", "--quiet", "-B", branch, `origin/${branch}`]);
+    else git(wd, ["checkout", "--quiet", "-b", branch]);
+    writeFileSync(join(wd, file), `${message}\n`);
+    git(wd, ["add", file]);
+    git(wd, [
+      "-c",
+      "user.name=other",
+      "-c",
+      "user.email=o@x",
+      "commit",
+      "--quiet",
+      "-m",
+      message,
+    ]);
+    git(wd, ["push", "--quiet", "origin", branch]);
+    return gitOut(wd, ["rev-parse", "HEAD"]);
+  }
+
+  it("stops after one implement run when the ticket branch is pushed while the agent is working", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage !== "implement") return undefined;
+        implementRuns += 1;
+        plantOnOrigin(`agent/${ID}/T-1`, "intruder.ts", "intruder");
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(await stateOf()).toEqual(["1:blocked/branch-moved"]);
+    expect(gitOut(origin, ["show", `agent/${ID}/T-1:intruder.ts`])).toBe(
+      "intruder",
+    );
+  });
+
+  it("stops after one final-fix run when that branch is pushed while the agent is working", async () => {
+    await confirmedSpec([ticket("a")]);
+    let finalFixRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "final-review")
+          return {
+            output: {
+              verdict: "fix",
+              mustFix: [
+                {
+                  file: "src/a.ts",
+                  line: 1,
+                  problem: "a and b name the same thing differently",
+                },
+              ],
+              suggestions: [],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        if (ctx.stage === "final-fix") {
+          finalFixRuns += 1;
+          plantOnOrigin(`agent/${ID}/S-1-final`, "intruder.ts", "intruder");
+          return {
+            files: { "src/shared-name.ts": "export const name = 1;\n" },
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(finalFixRuns).toBe(1);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT step, state, blocked_reason FROM finalizations",
+        )
+      ).rows[0],
+    ).toEqual({
+      step: "final-fix",
+      state: "blocked",
+      blocked_reason: "branch-moved",
+    });
+  });
+
+  it("gates the remote tip when origin has moved past the main clone", async () => {
+    await confirmedSpec([ticket("a")]);
+    const api2 = workerFor();
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    await processJob({ api: api2, executor: deps(), heartbeatMs: 20 }, job);
+    const extra = plantOnOrigin(`agent/${ID}/T-1`, "extra.ts", "on origin");
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const gated = await db.pool.query<{ commit_sha: string }>(
+      "SELECT commit_sha FROM gate_results WHERE kind = 'gate' ORDER BY id LIMIT 1",
+    );
+    expect(gated.rows[0]?.commit_sha).toBe(extra);
+  });
+
+  it("starts from origin when the main clone has diverged, keeps the local tip as an orphan, and records it", async () => {
+    await confirmedSpec([ticket("a")]);
+    const wd = join(home, "salvaged");
+    git(home, ["clone", "--quiet", origin, wd]);
+    git(wd, ["checkout", "--quiet", "-b", `agent/${ID}/T-1`]);
+    writeFileSync(join(wd, "salvaged.ts"), "export const s = 1;\n");
+    git(wd, ["add", "."]);
+    git(wd, [
+      "-c",
+      "user.name=agent",
+      "-c",
+      "user.email=agent@example.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "local line",
+    ]);
+    const localTip = gitOut(wd, ["rev-parse", "HEAD"]);
+    const mainClone = new RepoStore(join(home, "repos")).ensure(
+      "backend",
+      origin,
+      "main",
+    );
+    git(wd, ["push", "--quiet", mainClone, `agent/${ID}/T-1`]);
+    const remoteTip = plantOnOrigin(
+      `agent/${ID}/T-1`,
+      "other.ts",
+      "origin line",
+    );
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(git(origin, ["cat-file", "-e", `${remoteTip}:other.ts`]).code).toBe(
+      0,
+    );
+    expect(
+      git(origin, ["cat-file", "-e", `agent/${ID}/T-1:salvaged.ts`]).code,
+    ).not.toBe(0);
+    const run = (
+      await db.pool.query<{
+        output: { orphanRef?: string; orphanSha?: string };
+      }>(
+        "SELECT output FROM runs WHERE stage = 'implement' ORDER BY id LIMIT 1",
+      )
+    ).rows[0];
+    expect(run.output.orphanSha).toBe(localTip);
+    expect(run.output.orphanRef).toBe(
+      `refs/afk/orphan/agent/${ID}/T-1/${localTip}`,
+    );
+    expect(
+      gitOrThrow(mainClone, ["rev-parse", run.output.orphanRef as string]),
+    ).toBe(localTip);
+    const events = await db.pool.query<{
+      type: string;
+      from_state: string;
+      to_state: string;
+    }>(
+      `SELECT type, from_state, to_state FROM events
+       WHERE data->>'orphanSha' = $1`,
+      [localTip],
+    );
+    expect(events.rows[0]).toMatchObject({
+      type: "ticket",
+      from_state: events.rows[0]?.to_state,
+    });
+    expect(events.rows[0]?.from_state).not.toBe("blocked");
+    const waiting = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as {
+      tickets: unknown[];
+    };
+    expect(waiting.tickets).toEqual([]);
   });
 });
 

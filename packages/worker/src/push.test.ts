@@ -22,7 +22,7 @@ afterEach(() => {
   rmSync(remoteRoot, { recursive: true, force: true });
 });
 
-// A new integration branch is pushed with a lease that says it must not exist yet.
+// A new branch is pushed with an expected-old that says it must not exist yet.
 const push = (
   target: string,
   over: Partial<Parameters<typeof pushRef>[0]> = {},
@@ -31,7 +31,7 @@ const push = (
     repoDir: local.dir,
     source: "HEAD",
     target,
-    ...(target.startsWith("refs/heads/spec/") ? { expectedOld: "" } : {}),
+    expectedOld: "",
     ...over,
   });
 const remoteHas = (ref: string) =>
@@ -69,7 +69,7 @@ describe("the push exit", () => {
     expect(gitOut(remote, ["for-each-ref"])).toBe(before);
   });
 
-  it("refuses to move an integration branch without saying where it is expected to be", () => {
+  it("refuses to move a branch without saying where it is expected to be", () => {
     expect(() =>
       pushRef({
         repoDir: local.dir,
@@ -77,30 +77,24 @@ describe("the push exit", () => {
         target: "refs/heads/spec/s",
       }),
     ).toThrow(/without the SHA/);
-    expect(remoteHas("refs/heads/spec/s")).toBe(false);
-  });
-
-  it('a lease of "" means the branch must not exist yet', () => {
-    expect(push("refs/heads/spec/s")).toEqual({ ok: true });
-    local.commit({ "x.txt": "x\n" }, "second");
-    expect(push("refs/heads/spec/s").ok).toBe(false); // it exists now
-  });
-
-  it("refuses to move an integration branch without saying where it is expected to be", () => {
     expect(() =>
       pushRef({
         repoDir: local.dir,
         source: "HEAD",
-        target: "refs/heads/spec/s",
+        target: "refs/heads/agent/T-1",
       }),
     ).toThrow(/without the SHA/);
     expect(remoteHas("refs/heads/spec/s")).toBe(false);
+    expect(remoteHas("refs/heads/agent/T-1")).toBe(false);
   });
 
-  it('a lease of "" means the branch must not exist yet', () => {
+  it('an expected-old of "" means the branch must not exist yet', () => {
     expect(push("refs/heads/spec/s")).toEqual({ ok: true });
     local.commit({ "x.txt": "x\n" }, "second");
-    expect(push("refs/heads/spec/s").ok).toBe(false); // it exists now
+    expect(push("refs/heads/spec/s").ok).toBe(false);
+    expect(push("refs/heads/agent/T-1")).toEqual({ ok: true });
+    local.commit({ "y.txt": "y\n" }, "agent second");
+    expect(push("refs/heads/agent/T-1").ok).toBe(false);
   });
 
   it("never deletes: an empty source is refused", () => {
@@ -126,7 +120,7 @@ describe("the push exit", () => {
     );
   });
 
-  it("with a lease, refuses to overwrite a branch that moved meanwhile", () => {
+  it("with --force-with-lease, refuses to overwrite a branch that moved meanwhile", () => {
     push("refs/heads/spec/s");
     const first = gitOut(local.dir, ["rev-parse", "HEAD"]);
     local.commit({ "x.txt": "x\n" }, "second");
@@ -148,7 +142,12 @@ describe("the push exit", () => {
       join(remoteRoot, "missing.git"),
     ]);
     const failed = pushRef(
-      { repoDir: local.dir, source: "HEAD", target: "refs/heads/agent/T-2" },
+      {
+        repoDir: local.dir,
+        source: "HEAD",
+        target: "refs/heads/agent/T-2",
+        expectedOld: "",
+      },
       { token: "s3cret-token" },
     );
     expect(failed.ok).toBe(false);

@@ -34,7 +34,7 @@ export interface PushRequest {
   source: string; // what to push: a commit or a ref
   target: string; // the full ref on the remote, refs/heads/agent/T-1
   // For --force-with-lease: the sha the remote branch must still have, or "" when it must not exist yet.
-  // Required for integration branches (spec/*): moving one without saying where it was is not allowed.
+  // Required for every push this exit makes. Git's compare-and-swap is not a job lease.
   expectedOld?: string;
 }
 
@@ -76,10 +76,7 @@ export function pushRef(
       `refusing to push ${request.target}: only refs/heads/agent/* and refs/heads/spec/*`,
     );
   }
-  if (
-    request.target.startsWith("refs/heads/spec/") &&
-    request.expectedOld === undefined
-  ) {
+  if (request.expectedOld === undefined) {
     throw new RangeError(
       `refusing to push ${request.target} without the SHA it is expected to have`,
     );
@@ -87,16 +84,15 @@ export function pushRef(
   const header = options.token
     ? `AUTHORIZATION: ${basicAuth(options.token)}`
     : undefined;
-  const lease =
-    request.expectedOld === undefined
-      ? []
-      : [`--force-with-lease=${request.target}:${request.expectedOld}`];
+  const compare = [
+    `--force-with-lease=${request.target}:${request.expectedOld}`,
+  ];
   const result = exec(
     "git",
     [
       "push",
       "--quiet",
-      ...lease,
+      ...compare,
       request.remote ?? "origin",
       `${request.source}:${request.target}`,
     ],

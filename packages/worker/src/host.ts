@@ -14,6 +14,7 @@ import {
   parseTrailers,
   splicePackSection,
 } from "@afk/shared";
+import { deleteOrphanRefs } from "./align-ticket-branch.ts";
 import { InfrastructureError } from "./executor.ts";
 
 // The jobs that talk to the code host. The worker does them because the host's credentials are only here.
@@ -24,6 +25,8 @@ export interface HostDeps {
   checkAccess?: (repo: RepoRef) => Promise<AppAccess | GitLabAccess>;
   // default-branch clone for index-pr-links; host-sync never clones
   repoDir?: string;
+  // main clones whose local orphan refs belong to the branches this spec-cleanup deletes
+  localRepos?: string[];
 }
 
 export interface PrLinkRow {
@@ -299,6 +302,13 @@ async function cleanUp(
         branch,
       });
       log(`${branch} of ${repoUrl}: ${outcome}`);
+    });
+  }
+  const names = [...new Set(task.branches.map((item) => item.branch))];
+  for (const dir of deps.localRepos ?? []) {
+    await attempt(`deleting orphan refs in ${dir}`, async () => {
+      const gone = deleteOrphanRefs(dir, names);
+      if (gone.length > 0) log(`orphan refs deleted: ${gone.join(", ")}`);
     });
   }
   if (failures.length > 0)
