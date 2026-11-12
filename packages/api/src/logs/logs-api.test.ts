@@ -272,26 +272,34 @@ describe("fencing", () => {
     expect((await readLog(runId)).body.text).toBe("before\n");
   });
 
-  it("gives a re-dispatched job a fresh log and shuts the old holder out", async () => {
+  it("gives the try after a lost lease a Run and log of its own, and shuts the old holder out", async () => {
     const w1 = new FakeWorker(api.url, "w1", []);
     const { job, runId } = await claimedRun(w1);
     await appendLog(runId, "w1", job.attempt, "old attempt\n");
 
-    clock.advanceSeconds(121); // the lease runs out; another worker takes over
+    clock.advanceSeconds(121); // the lease runs out: the job fails, its stage is queued again, another worker takes it
     const w2 = new FakeWorker(api.url, "w2", []);
     const retaken = (await w2.claim()).body.job;
-    expect(retaken).toMatchObject({ id: job.id, attempt: 2 });
-    // same Run, no second one
-    expect(
-      Number((await db.pool.query("SELECT count(*) FROM runs")).rows[0].count),
-    ).toBe(1);
+    expect(retaken.id).not.toBe(job.id);
+    const runs = (
+      await db.pool.query<{ id: number; result: string | null }>(
+        "SELECT id, result FROM runs ORDER BY id",
+      )
+    ).rows;
+    expect(runs).toEqual([
+      { id: runId, result: "job-failed" },
+      { id: expect.any(Number), result: null },
+    ]);
+    const newRunId = runs[1]?.id as number;
 
     expect((await appendLog(runId, "w1", 1, "zombie\n")).status).toBe(409);
-    expect((await appendLog(runId, "w2", 2, "new attempt\n")).status).toBe(200);
+    expect(
+      (await appendLog(newRunId, "w2", retaken.attempt, "new attempt\n"))
+        .status,
+    ).toBe(200);
 
-    // reads default to the newest attempt; the old one can still be asked for
-    expect((await readLog(runId)).body).toMatchObject({
-      attempt: 2,
+    // each Run keeps the log of its own try
+    expect((await readLog(newRunId)).body).toMatchObject({
       text: "new attempt\n",
     });
     expect((await readLog(runId, "?attempt=1")).body).toMatchObject({

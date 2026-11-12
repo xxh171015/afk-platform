@@ -102,7 +102,9 @@ export async function claimJob(
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtext('afk-job-claim'))",
     );
-    // A lease that ran out puts the job back in the queue; the bumped attempt shuts the old holder out.
+    // A lease that ran out puts the job back in the queue; the bumped attempt shuts the old holder out. The claim
+    // route has already failed the ones that are a stage of something (failExpiredLeases): what is left here
+    // is a job that has no failure count of its own (host-sync, a repo access check, ...).
     await client.query(
       `UPDATE jobs SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL, attempt = attempt + 1
        WHERE state = 'running' AND lease_expires_at <= $1`,
@@ -147,6 +149,31 @@ export async function claimJob(
   } finally {
     client.release(broken);
   }
+}
+
+// Running jobs whose lease ran out: their worker died, hung or could not reach the API.
+export async function expiredJobIds(pool: Queryable, now: Date) {
+  const { rows } = await pool.query<{ id: number }>(
+    "SELECT id FROM jobs WHERE state = 'running' AND lease_expires_at <= $1 ORDER BY id",
+    [now],
+  );
+  return rows.map((row) => row.id);
+}
+
+// Fails a job whose lease ran out, if nobody got to it first. The bumped attempt shuts the old holder out.
+export async function failExpiredJob(
+  pool: Queryable,
+  jobId: number,
+  now: Date,
+  error: string,
+): Promise<Pick<Job, "id" | "type" | "payload"> | undefined> {
+  const { rows } = await pool.query<Pick<Job, "id" | "type" | "payload">>(
+    `UPDATE jobs SET state = 'failed', error = $3, lease_owner = NULL, lease_expires_at = NULL, attempt = attempt + 1
+     WHERE id = $1 AND state = 'running' AND lease_expires_at <= $2
+     RETURNING id, type, payload`,
+    [jobId, now, error],
+  );
+  return rows[0];
 }
 
 // What a worker's call about a job it claims to hold can turn out to be.

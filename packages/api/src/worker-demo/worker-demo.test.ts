@@ -1933,7 +1933,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
     ]);
     expect(mergesAfterFirst).toBe("1"); // it did push
 
-    clock.advanceSeconds(121); // the lease of the merge job runs out, another attempt takes it
+    clock.advanceSeconds(121); // the lease of the merge job runs out: it fails, and the merge stage is queued again
     await runWorker({
       api: workerFor("w2"),
       executor: deps(),
@@ -1951,9 +1951,10 @@ describe("the merge stage", { timeout: 60_000 }, () => {
       ]),
     ).toBe("1");
     const jobs = await db.pool.query(
-      "SELECT attempt FROM jobs WHERE type = 'merge'",
+      "SELECT state, error FROM jobs WHERE type = 'merge' ORDER BY id",
     );
-    expect(jobs.rows[0].attempt).toBe(2);
+    expect(jobs.rows.map((j) => j.state)).toEqual(["failed", "done"]);
+    expect(jobs.rows[0].error).toMatch(/^lease-expired:/);
   });
 
   it("records the head of a merge it recognises, so the next gate is measured against that merge", async () => {
@@ -2009,7 +2010,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
     });
     expect(await stateOf()).toEqual(["1:done", "2:merging", "3:pending"]);
 
-    clock.advanceSeconds(121); // b's merge job is dispatched again and finds its merge already on the branch
+    clock.advanceSeconds(121); // b's merge is tried again (the lost try ended job-failed) and finds its merge on the branch
     await runWorker({
       api: workerFor("w2"),
       executor: deps({ script }),
@@ -2021,7 +2022,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
     const merge = await db.pool.query(
       `SELECT r.head_sha, g.tests_total FROM runs r
        LEFT JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
-       WHERE r.ticket_id = 2 AND r.stage = 'merge'`,
+       WHERE r.ticket_id = 2 AND r.stage = 'merge' AND r.result <> 'job-failed'`,
     );
     expect(merge.rows).toHaveLength(1);
     expect(merge.rows[0].head_sha).toMatch(/^[0-9a-f]{40}$/);
@@ -2071,7 +2072,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
     const merge = await db.pool.query(
       `SELECT r.head_sha, r.result, g.commit_sha AS measured FROM runs r
        LEFT JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha
-       WHERE r.stage = 'merge'`,
+       WHERE r.stage = 'merge' AND r.result <> 'job-failed'`,
     );
     expect(merge.rows).toEqual([
       {

@@ -54,6 +54,8 @@ import {
   checkHolder,
   claimJob,
   completeJob,
+  expiredJobIds,
+  failExpiredJob,
   failJob,
   type HolderOutcome,
   heartbeat,
@@ -75,7 +77,7 @@ import {
 } from "../planning/readiness-gate.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { buildBundle } from "../stages/bundle.ts";
-import { recordJobFailure } from "../stages/failures.ts";
+import { LEASE_EXPIRED_ERROR, recordJobFailure } from "../stages/failures.ts";
 import { findPassingGate } from "../stages/gate-records.ts";
 import { markClaimed, recordStageResult } from "../stages/results.ts";
 import { recordWorkerCleanup } from "../workers.ts";
@@ -674,6 +676,41 @@ function inWorkerReport<T>(
   });
 }
 
+// Thrown to roll back failing a job that turns out to be no stage of anything: claimJob puts it back instead.
+class NoFailureCount extends Error {}
+
+// Each job whose lease ran out is a failed try of its stage, counted as if its worker had reported it
+// (recordJobFailure): queued again under a new key, or blocked at the third. Before this, a job whose worker kept
+// losing it (a hung push, an API it could not reach) was handed out again and again, its agent run each time.
+async function failExpiredLeases(context: AppContext): Promise<void> {
+  const now = context.clock();
+  for (const id of await expiredJobIds(context.pool, now)) {
+    try {
+      await aroundJob(context, id, () =>
+        inWorkerReport(context, id, async (client) => {
+          const job = await failExpiredJob(
+            client,
+            id,
+            now,
+            LEASE_EXPIRED_ERROR,
+          );
+          if (!job) return { status: "taken" as const }; // another claim got to it first
+          const failure = await recordJobFailure(
+            client,
+            job,
+            LEASE_EXPIRED_ERROR,
+            now,
+          );
+          if (failure.status === "not-a-stage") throw new NoFailureCount();
+          return { status: "ok" as const };
+        }),
+      );
+    } catch (error) {
+      if (!(error instanceof NoFailureCount)) throw error;
+    }
+  }
+}
+
 export function registerWorkerRoutes(
   app: OpenAPIHono,
   context: AppContext,
@@ -710,6 +747,7 @@ export function registerWorkerRoutes(
     ) {
       return c.json({ job: null }, 200);
     }
+    await failExpiredLeases(context);
     const job = await claimJob(context.pool, {
       workerId,
       capabilities,

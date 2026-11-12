@@ -397,9 +397,9 @@ describe("a job the worker could not carry out", () => {
     const job = (await claim()) as Claimed;
     clock.advanceSeconds(121);
     const other = new FakeWorker(api.url, "w2", []);
-    await other.claim(); // takes the job over at attempt 2
+    await other.claim(); // the lost lease failed the job; w2 takes the stage again
     expect((await worker.fail(job.id, job.attempt, "zombie")).status).toBe(409);
-    expect((await keys()).map((k) => k.state)).toEqual(["running"]);
+    expect((await keys()).map((k) => k.state)).toEqual(["failed", "running"]);
   });
 
   it("a job that is no stage of anything just fails", async () => {
@@ -409,6 +409,69 @@ describe("a job the worker could not carry out", () => {
     const job = (await claim()) as Claimed;
     expect((await worker.fail(job.id, job.attempt, "x")).status).toBe(200);
     expect((await keys())[0]?.state).toBe("failed");
+  });
+});
+
+describe("a lease that ran out", () => {
+  // The worker holding the job died, hung, or could not reach the API: nobody renewed the lease.
+  async function loseLease() {
+    const job = (await claim()) as Claimed;
+    clock.advanceSeconds(121);
+    return job;
+  }
+
+  it("counts as a failure of the stage: queued again under a new key, and the ticket stays where it was", async () => {
+    await runningSpec([ticket("a")]);
+    await loseLease();
+    const again = await claim();
+    expect(again?.payload.stage).toBe("implement");
+    expect(await keys()).toEqual([
+      { idempotency_key: "T-1:1:implement:1", state: "failed" },
+      { idempotency_key: "T-1:1:implement:2", state: "running" },
+    ]);
+    expect((await state()).state).toBe("running");
+  });
+
+  it("blocks the ticket with job-failed at the third, instead of handing the job out for ever", async () => {
+    await runningSpec([ticket("a")]);
+    await loseLease();
+    await loseLease();
+    expect((await state()).state).toBe("running");
+    await loseLease();
+    expect(await claim()).toBeNull(); // the third lost lease is seen here, and nothing is queued again
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.tickets[0]).toMatchObject({
+      blockedReason: "job-failed",
+      brief: {
+        stage: "implement",
+        result: "job-failed",
+        output: { error: expect.stringContaining("lease-expired") },
+      },
+    });
+  });
+
+  it("adds up with the failures the worker reports", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext("docker daemon not running");
+    await loseLease();
+    await failNext("docker daemon not running");
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+  });
+
+  it("puts a job that is no stage of anything back in the queue, as before", async () => {
+    await db.pool.query(
+      "INSERT INTO jobs (type, idempotency_key) VALUES ('open-pr', 'k')",
+    );
+    const lost = await loseLease();
+    const again = (await claim()) as Claimed;
+    expect(again).toMatchObject({ id: lost.id, attempt: lost.attempt + 1 });
   });
 });
 
