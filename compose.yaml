@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgres:15
+    # back by itself after Docker restarts (a settings change, a crash); `docker compose stop postgres` still stops it
+    restart: unless-stopped
     environment:
       POSTGRES_USER: afk
       POSTGRES_PASSWORD: afk

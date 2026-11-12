@@ -37,6 +37,7 @@ export interface WorkerOptions {
   heartbeatMs?: number; // the lease is 120 s; the design renews every 30 s
   logFlushMs?: number; // how often a running stage uploads what it has logged so far; default 400 ms
   pollMs?: number; // wait between claims when the queue is empty
+  retryMs?: number; // wait before claiming again after the API failed; default 5 s
   concurrency?: number; // jobs at once; no more than there are slots
   stopWhenIdle?: boolean; // return as soon as a claim finds nothing (tests, one-shot runs)
   signal?: AbortSignal; // stop: claim nothing more and abandon the jobs in hand
@@ -52,6 +53,7 @@ export interface WorkerOptions {
 }
 
 const MAX_FAILED_HEARTBEATS = 3;
+const DEFAULT_RETRY_MS = 5_000;
 const COMPLETE_ATTEMPTS = 3;
 export const DEFAULT_LOG_FLUSH_MS = 400;
 export const LOG_FLUSH_BYTES = 64 * 1024;
@@ -75,32 +77,48 @@ export async function runWorker(
   options: WorkerOptions,
 ): Promise<{ jobs: number }> {
   let jobs = 0;
+  const claim = () =>
+    options.api.claim([
+      ...(options.capabilities ?? []),
+      ...(options.host ? [HOST_CAPABILITY] : []),
+    ]);
   const loop = async () => {
     let lastDiskLevel: DiskLevel | undefined;
     while (!options.signal?.aborted) {
-      if (options.disk) {
-        const free = await options.disk.free();
-        const level = diskLevel(
-          free,
-          options.disk.warnBelow ?? DEFAULT_DISK_WARN_GIB * GIB,
-          options.disk.stopBelow,
-        );
-        if (level !== lastDiskLevel) {
-          lastDiskLevel = level;
-          await options.disk.report?.(free);
-        }
-        if (level === "stop") {
-          options.log?.(
-            `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
+      let job: ClaimedJob | null;
+      try {
+        if (options.disk) {
+          const free = await options.disk.free();
+          const level = diskLevel(
+            free,
+            options.disk.warnBelow ?? DEFAULT_DISK_WARN_GIB * GIB,
+            options.disk.stopBelow,
           );
-          await sleep(options.pollMs ?? 2_000, options.signal);
-          continue;
+          if (level !== lastDiskLevel) {
+            try {
+              await options.disk.report?.(free);
+              lastDiskLevel = level; // only once the API has it, so a failed report is sent again
+            } catch (error) {
+              // the report only feeds the page's banner: claiming does not wait for it
+              options.log?.(`disk report failed: ${String(error)}`);
+            }
+          }
+          if (level === "stop") {
+            options.log?.(
+              `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
+            );
+            await sleep(options.pollMs ?? 2_000, options.signal);
+            continue;
+          }
         }
+        job = await claim();
+      } catch (error) {
+        // The API or its database is down for a moment (Docker restarting, say): wait and ask again. Exiting
+        // would also abandon the jobs the other loops are running.
+        options.log?.(`claim failed, retrying: ${String(error)}`);
+        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, options.signal);
+        continue;
       }
-      const job = await options.api.claim([
-        ...(options.capabilities ?? []),
-        ...(options.host ? [HOST_CAPABILITY] : []),
-      ]);
       if (!job) {
         if (options.stopWhenIdle) return;
         await sleep(options.pollMs ?? 2_000, options.signal);
