@@ -1,6 +1,6 @@
 # AGENTS.md
 
-给在这个仓库里工作的 agent 看。AFK 运行时没有人回答问题：遇到必须由人决定的事，按 prompt 的要求输出 `cannot-proceed` 并结束，不要停下来提问。
+给在这个仓库里工作的 agent 看：平台 worker 在沙箱里跑的 agent 和本机开发的 agent 读的都是这一份，所以这里只写两边都成立的内容。只对 AFK 运行成立的规则在平台覆盖层（`packages/pipeline/prompts/overlay.md`），只对本机成立的在 `CLAUDE.md`。
 
 ## 这个仓库是什么
 
@@ -23,19 +23,11 @@ pnpm install --frozen-lockfile
 eval "$(scripts/pg-temp.sh start)"   # 导出 DATABASE_URL
 pnpm typecheck
 pnpm test                            # vitest run，JUnit 写到 reports/junit.xml
+pnpm test packages/api/src/xxx.test.ts   # 只跑一个测试文件
 pnpm lint                            # biome check .
 ```
 
 提交前这三条都要通过。门禁跑的就是它们，配置在 `.sandcastle/gates.yaml`。改了 `packages/api/src/db/schema.ts` 要 `pnpm --filter @afk/api db:generate` 并把生成的 SQL 一起提交。改了 API 路由要 `pnpm gen:api` 更新 OpenAPI 和生成的类型。
-
-**本机平台栈（checkout / 重启 / 镜像）：** 没有「平台向 worker 推文件」的通道。跑 worker 的机器上 `git pull` 到含改动的 commit，改 `packages/pipeline/skills` 或 pipeline 后 **重启 worker**（`scripts/up.sh`），改 API 后重启 api，改 `.sandcastle/Dockerfile` 后重建 `sandcastle:afk-platform` 再重启 worker。业务仓代码走 Git 远端，不靠本机未提交改动。细节见 `docs/operations-manual.md` §1 与 §9。
-
-## 在这个仓库里规划（grill / to-spec / to-tickets）
-
-`skills/` 里的规划 skill 是 Matt 原文的复制，会装到每个团队的规划机器上，只对这个仓库成立的规划规则写在这里，不写进那些副本。
-
-- 推荐答案里说到平台现在怎么做（票的阶段、需求收尾、什么只跑一次、什么会重试）时，先读源码再推荐：从上面的目录说明出发，读 `stage-flow.ts`、`finalize-flow.ts` 这类它点名的文件。没读过就不要当事实说，把问题留到下一轮去查。
-- 同一个行为在**票的流水线**和**需求收尾**（联调、最终 e2e 之类）两条路上都要成立时，验收标准里把两条路都写出来，审查才能发现只修了一边的改动。
 
 ## 编码规范
 
@@ -44,11 +36,11 @@ pnpm lint                            # biome check .
 - API 层测试用真 Postgres；不要为了测试去 mock 自己的模块。系统边界（GitHub/GitLab HTTP、agent 运行器、时间）才允许假对象。
 - 不要删除或跳过已有测试（`it.skip`、`it.only`、`describe.skip` 都不行）。门禁会比较测试总数和跳过数，变少就判失败。
 - 术语以 `GLOSSARY.md` 为准。不要引入它明确 Avoid 的叫法。
-- commit 信息用英文祈使句，一个 commit 做一件事。不要自己加 `Spec:` / `Ticket:` / `Run:` trailer，平台会补。
+- commit 信息用英文祈使句，一个 commit 做一件事。
 
 ## 保护路径
 
-下面这些路径不要改。确实需要改时，在结构化输出里说明，由人决定：
+下面这些路径不要改。确实需要改时，交给人决定：
 
 - `.sandcastle/**`
 - `.github/**`
