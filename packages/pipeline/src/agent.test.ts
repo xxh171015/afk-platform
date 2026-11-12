@@ -666,7 +666,7 @@ describe("the prompts", () => {
       expect(overlay).toContain(word);
   });
 
-  it("tells the agent to keep long gate and full-suite output out of the context", () => {
+  it("tells the agent to write long gate and full-suite output to a file instead of reading it all", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const bounds = overlay.slice(overlay.indexOf("## 做事的边界"));
     expect(bounds).toContain("/context/run.json");
@@ -782,6 +782,14 @@ describe("the prompts", () => {
     expect(readFileSync(PROMPTS.reviewFix, "utf8")).toContain(
       "/context/review.json",
     );
+  });
+
+  it("tells gate-fix, merge-fix and final-fix to run the files in cases.json first when that file exists", () => {
+    for (const file of [PROMPTS.gateFix, PROMPTS.mergeFix, PROMPTS.finalFix]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("/context/failure/cases.json");
+      expect(prompt).toMatch(/先只跑/);
+    }
   });
 
   it("picks the prompt by stage", () => {

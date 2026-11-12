@@ -324,6 +324,16 @@ const Bundle = z.object({
   ),
   note: z.string().nullable(),
   failureLog: z.string().nullable(),
+  failedCases: z
+    .array(
+      z.object({
+        name: z.string(),
+        classname: z.string(),
+        file: z.string().optional(),
+        message: z.string().optional(),
+      }),
+    )
+    .nullable(),
   review: z.unknown(),
   gateBaseline: z
     .object({ tests: z.number().int(), skipped: z.number().int() })
@@ -669,6 +679,8 @@ const gateResultRoute = holderRoute(
               name: z.string(),
               classname: z.string(),
               status: z.enum(["passed", "failed", "skipped"]),
+              file: z.string().optional(),
+              message: z.string().optional(),
               flaky: z.boolean().optional(),
             }),
           )

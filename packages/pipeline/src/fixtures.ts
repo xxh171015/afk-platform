@@ -76,6 +76,7 @@ export function bundleFor(
     environment: [],
     note: null,
     failureLog: null,
+    failedCases: null,
     review: null,
     gateBaseline: null,
     gateBaselines: [],

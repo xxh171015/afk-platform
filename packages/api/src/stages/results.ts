@@ -78,6 +78,8 @@ const GateFacts = z.object({
         name: z.string(),
         classname: z.string(),
         status: z.enum(["passed", "failed", "skipped"]),
+        file: z.string().optional(),
+        message: z.string().optional(),
         flaky: z.boolean().optional(),
       }),
     )

@@ -66,6 +66,7 @@ export {
   gitOut,
 } from "./exec.ts";
 export type {
+  FailedCase,
   GateConfig,
   GateOutcome,
   GateRecords,
@@ -79,6 +80,7 @@ export type {
   TestCounts,
 } from "./gate.ts";
 export {
+  failedCasesOf,
   GATE_CONFIG_PATH,
   GateSetupError,
   junitCases,

@@ -62,7 +62,24 @@ function runWorker(opts: Parameters<typeof startWorker>[0]) {
 // The test command counts tests from a file in the repo (3 unless the work says otherwise) and fails on BROKEN.
 const FLAKY_FAIL = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"><failure message="boom"/></testcase></testsuite></testsuites>`;
 const FLAKY_PASS = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"/></testsuite></testsuites>`;
+const TWO_FAIL = `<testsuites tests="2"><testsuite name="a" tests="2" skipped="0"><testcase file="src/a.test.ts" classname="orders" name="exports"><failure message="boom">stack a</failure></testcase><testcase file="src/b.test.ts" classname="orders" name="imports"><failure message="nope">stack b</failure></testcase></testsuite></testsuites>`;
+const TWO_FAIL_CASES = [
+  {
+    name: "exports",
+    classname: "orders",
+    file: "src/a.test.ts",
+    message: "boom\nstack a",
+  },
+  {
+    name: "imports",
+    classname: "orders",
+    file: "src/b.test.ts",
+    message: "nope\nstack b",
+  },
+];
 const COUNT_TESTS =
+  "if [ -f TWOFAIL ] || { [ -f from-a ] && [ -f from-b ] && [ ! -f SETTLED ]; }; then mkdir -p reports; " +
+  `echo ${Buffer.from(TWO_FAIL).toString("base64")} | base64 -d > reports/junit.xml; exit 1; fi; ` +
   "if [ -f FLAKY ]; then mkdir -p reports; if [ -f .gate-tried ]; then " +
   `echo ${Buffer.from(FLAKY_PASS).toString("base64")} | base64 -d > reports/junit.xml; exit 0; ` +
   "else touch .gate-tried; " +
@@ -683,7 +700,6 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "implement:done",
       "gate:passed",
       "review:pass",
-      "review:pass",
       "merge:merged",
       "final-review:pass",
       "final-review:pass",
@@ -707,6 +723,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
         if (ctx.stage === "gate-fix") {
           // the fix reads what the gate said
           expect(ctx.context("failure/gate.log")).toContain("test failed");
+          expect(ctx.context("failure/cases.json")).toBeUndefined();
           return { remove: ["BROKEN"], output: DONE };
         }
         return undefined;
@@ -728,11 +745,70 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "gate-fix:done",
       "gate:passed",
       "review:pass",
-      "review:pass",
       "merge:merged",
       "final-review:pass",
       "final-review:pass",
     ]);
+  });
+
+  it("hands gate-fix the still-failing cases after a rerun", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { TWOFAIL: "x\n", "src/a.ts": "a\n" }, output: DONE };
+        if (ctx.stage === "gate-fix") {
+          expect(
+            JSON.parse(ctx.context("failure/cases.json") as string),
+          ).toEqual(TWO_FAIL_CASES);
+          expect(ctx.context("failure/gate.log")).toContain("test failed");
+          return { remove: ["TWOFAIL"], output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+  });
+
+  it("hands merge-fix the still-failing cases of a candidate gate", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") {
+          const which = ctx.branch.endsWith("T-1") ? "a" : "b";
+          return {
+            files: {
+              [`from-${which}`]: "x\n",
+              [`src/${ctx.branch.split("/").at(-1)}.ts`]:
+                "export const n = 1;\n",
+            },
+            output: DONE,
+          };
+        }
+        if (ctx.stage === "merge-fix") {
+          expect(
+            JSON.parse(ctx.context("failure/cases.json") as string),
+          ).toEqual(TWO_FAIL_CASES);
+          return { files: { SETTLED: "1\n" }, output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
   });
 
   it("blocks a ticket whose agent gives up, and starts nothing behind it", async () => {

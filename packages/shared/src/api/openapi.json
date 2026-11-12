@@ -3414,6 +3414,27 @@
                     "failureLog": {
                       "type": ["string", "null"]
                     },
+                    "failedCases": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "classname": {
+                            "type": "string"
+                          },
+                          "file": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["name", "classname"]
+                      }
+                    },
                     "review": {},
                     "gateBaseline": {
                       "type": ["object", "null"],
@@ -3507,6 +3528,7 @@
                     "environment",
                     "note",
                     "failureLog",
+                    "failedCases",
                     "gateBaseline",
                     "gateBaselines",
                     "limits",
@@ -4393,6 +4415,12 @@
                               "status": {
                                 "type": "string",
                                 "enum": ["passed", "failed", "skipped"]
+                              },
+                              "file": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
                               },
                               "flaky": {
                                 "type": "boolean"

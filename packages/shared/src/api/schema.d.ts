@@ -2057,6 +2057,14 @@ export interface paths {
               }[];
               note: string | null;
               failureLog: string | null;
+              failedCases:
+                | {
+                    name: string;
+                    classname: string;
+                    file?: string;
+                    message?: string;
+                  }[]
+                | null;
               review?: unknown;
               gateBaseline: {
                 tests: number;
@@ -2569,6 +2577,8 @@ export interface paths {
                   classname: string;
                   /** @enum {string} */
                   status: "passed" | "failed" | "skipped";
+                  file?: string;
+                  message?: string;
                   flaky?: boolean;
                 }[];
               } | null;

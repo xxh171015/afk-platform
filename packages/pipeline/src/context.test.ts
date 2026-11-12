@@ -166,7 +166,35 @@ describe("renderContext", () => {
       review,
     });
     expect(read(dir, "failure/gate.log")).toBe("boom\n");
+    expect(existsSync(join(dir, "failure", "cases.json"))).toBe(false);
     expect(JSON.parse(read(dir, "review.json"))).toEqual(review);
+  });
+
+  it("writes the still-failing cases beside the log, and omits the file when there are none", () => {
+    const dir = ctxDir();
+    const failedCases = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        message: "boom\ntrace",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        message: "nope",
+      },
+    ];
+    renderContext({
+      dir,
+      bundle: bundleFor({ stage: "gate-fix" }),
+      run,
+      failureLog: "boom\n",
+      failedCases,
+    });
+    expect(read(dir, "failure/gate.log")).toBe("boom\n");
+    expect(JSON.parse(read(dir, "failure/cases.json"))).toEqual(failedCases);
   });
 
   it("writes neither when there is nothing to show", () => {

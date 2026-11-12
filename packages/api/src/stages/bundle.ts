@@ -102,6 +102,13 @@ export interface Bundle {
   note: string | null;
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
+  // Still-failing JUnit cases of that gate, when the report named them. Null when there were none.
+  failedCases: Array<{
+    name: string;
+    classname: string;
+    file?: string;
+    message?: string;
+  }> | null;
   review: unknown;
   // What the last merge into the integration branch measured: a gate may not find fewer tests or more skipped ones
   // than this. Null before the spec has merged anything.
@@ -139,6 +146,26 @@ const runSettings = (
     stageModels: parseStageModels(stageModels),
   };
 };
+
+function failedCasesFrom(raw: unknown): Bundle["failedCases"] {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const cases: NonNullable<Bundle["failedCases"]> = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.name !== "string" || typeof rec.classname !== "string")
+      continue;
+    cases.push({
+      name: rec.name,
+      classname: rec.classname,
+      ...(typeof rec.file === "string" && rec.file ? { file: rec.file } : {}),
+      ...(typeof rec.message === "string" && rec.message
+        ? { message: rec.message }
+        : {}),
+    });
+  }
+  return cases.length > 0 ? cases : null;
+}
 
 function domainOf(row: {
   planning_sha: string | null;
@@ -251,8 +278,8 @@ export async function buildBundle(
   );
   // What the previous stages found, kept in the output of their Runs, so a worker needs no memory of its own.
   // Only the most recent gate or merge counts: an old failure that was fixed since is not news.
-  const failed = await pool.query<{ log: string | null }>(
-    `SELECT output->>'failureLog' AS log FROM runs
+  const failed = await pool.query<{ log: string | null; cases: unknown }>(
+    `SELECT output->>'failureLog' AS log, output->'failedCases' AS cases FROM runs
      WHERE id = (SELECT max(id) FROM runs WHERE ticket_id = $1 AND stage IN ('gate', 'merge', 'e2e') AND result IS NOT NULL)
        AND result IN ('failed', 'gate-failed', 'conflict')`,
     [ticketId],
@@ -307,6 +334,7 @@ export async function buildBundle(
     environment,
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
+    failedCases: failedCasesFrom(failed.rows[0]?.cases),
     review: await reviewJsonOf(pool, "ticket_id = $1 AND stage = 'review'", [
       ticketId,
     ]),
@@ -352,8 +380,8 @@ async function buildFinalBundle(
     [job.id],
   );
   // the review that asked for the fix, and the log of the merge or gate that failed last
-  const failed = await pool.query<{ log: string | null }>(
-    `SELECT output->>'failureLog' AS log FROM runs
+  const failed = await pool.query<{ log: string | null; cases: unknown }>(
+    `SELECT output->>'failureLog' AS log, output->'failedCases' AS cases FROM runs
      WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'final-merge' AND result IN ('conflict', 'gate-failed')
      ORDER BY id DESC LIMIT 1`,
     [final.specId],
@@ -403,6 +431,7 @@ async function buildFinalBundle(
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
+    failedCases: failedCasesFrom(failed.rows[0]?.cases),
     review: await reviewJsonOf(
       pool,
       "spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-review'",
@@ -446,8 +475,8 @@ async function buildUpdateBranchBundle(
     "SELECT id, retry_note FROM runs WHERE job_id = $1",
     [job.id],
   );
-  const failed = await pool.query<{ log: string | null }>(
-    `SELECT output->>'failureLog' AS log FROM runs
+  const failed = await pool.query<{ log: string | null; cases: unknown }>(
+    `SELECT output->>'failureLog' AS log, output->'failedCases' AS cases FROM runs
      WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'update-branch' AND result IN ('conflict', 'gate-failed')
      ORDER BY id DESC LIMIT 1`,
     [update.specId],
@@ -493,6 +522,7 @@ async function buildUpdateBranchBundle(
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
+    failedCases: failedCasesFrom(failed.rows[0]?.cases),
     review: null,
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
@@ -580,6 +610,7 @@ async function buildLocateBundle(
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: null,
+    failedCases: null,
     review: null,
     gateBaseline: null,
     gateBaselines: [],

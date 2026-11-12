@@ -9,6 +9,7 @@ import { gitOrThrow } from "./exec.ts";
 
 export const GATE_CONFIG_PATH = ".sandcastle/gates.yaml";
 export const FAILURE_LOG_LINES = 200;
+export const FAILURE_MESSAGE_LINES = 8;
 const SETUP_TIMEOUT_SECONDS = 600;
 const DEFAULT_JUNIT_PATH = "reports/junit.xml";
 
@@ -113,7 +114,31 @@ export interface TestCase {
   classname: string;
   status: TestCaseStatus;
   file?: string; // JUnit `file` attribute, used to rerun only the failed files
+  message?: string; // first lines of <failure> / <error>, for gate-fix
   flaky?: boolean; // failed the first run and passed the same-commit rerun
+}
+
+export type FailedCase = {
+  name: string;
+  classname: string;
+  file?: string;
+  message?: string;
+};
+
+export function failedCasesOf(
+  cases: TestCase[] | undefined,
+): FailedCase[] | undefined {
+  const failed: FailedCase[] = [];
+  for (const c of cases ?? []) {
+    if (c.status !== "failed") continue;
+    failed.push({
+      name: c.name,
+      classname: c.classname,
+      ...(c.file ? { file: c.file } : {}),
+      ...(c.message ? { message: c.message } : {}),
+    });
+  }
+  return failed.length > 0 ? failed : undefined;
 }
 
 const MAX_TEST_CASES = 20_000;
@@ -144,11 +169,13 @@ export function junitCases(xml: string): TestCase[] {
       : /<skipped\b/.test(body)
         ? "skipped"
         : "passed";
+    const message = status === "failed" ? failureMessage(body) : undefined;
     cases.push({
       name: attributes.name,
       classname: attributes.classname ?? "",
       status,
       ...(attributes.file ? { file: attributes.file } : {}),
+      ...(message ? { message } : {}),
     });
     if (cases.length >= MAX_TEST_CASES) break;
   }
@@ -304,9 +331,7 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
   }
 
   const testCases =
-    counts && junit !== undefined
-      ? publishedCases(junitCases(junit), flaky)
-      : undefined;
+    junit !== undefined ? publishedCases(junitCases(junit), flaky) : undefined;
 
   return {
     ...about,
@@ -349,8 +374,29 @@ function publishedCases(cases: TestCase[], flaky: TestCase[]): TestCase[] {
     name: c.name,
     classname: c.classname,
     status: c.status,
+    ...(c.file ? { file: c.file } : {}),
+    ...(c.status === "failed" && c.message ? { message: c.message } : {}),
     ...(flakyKeys.has(caseKey(c)) ? { flaky: true as const } : {}),
   }));
+}
+
+function failureMessage(body: string): string | undefined {
+  const block =
+    /<(?:failure|error)\b([^>]*)\/>/.exec(body) ??
+    /<(?:failure|error)\b([^>]*)>([\s\S]*?)<\/(?:failure|error)>/.exec(body);
+  if (!block) return undefined;
+  const attr = /(?:^|\s)message="([^"]*)"/.exec(block[1] ?? "")?.[1];
+  const inner = (block[2] ?? "").trim();
+  const parts = [
+    attr ? unescapeXml(attr) : "",
+    inner ? unescapeXml(inner) : "",
+  ].filter((part) => part.length > 0);
+  if (parts.length === 0) return undefined;
+  return parts
+    .join("\n")
+    .split("\n")
+    .slice(0, FAILURE_MESSAGE_LINES)
+    .join("\n");
 }
 
 const escapeXml = (text: string) =>
@@ -371,8 +417,12 @@ function serializeJunit(counts: TestCounts, cases: TestCase[]): string {
       ]
         .filter(Boolean)
         .join(" ");
-      if (c.status === "failed")
-        return `<testcase ${attrs}><failure/></testcase>`;
+      if (c.status === "failed") {
+        const fail = c.message
+          ? `<failure>${escapeXml(c.message)}</failure>`
+          : `<failure/>`;
+        return `<testcase ${attrs}>${fail}</testcase>`;
+      }
       if (c.status === "skipped")
         return `<testcase ${attrs}><skipped/></testcase>`;
       return `<testcase ${attrs}/>`;

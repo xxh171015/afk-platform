@@ -1044,6 +1044,7 @@ describe("the bundle", () => {
     });
     const fix = (await worker.claim()).body.job as Claimed;
     expect((await bundle(fix)).body.failureLog).toBe("# test failed\nboom");
+    expect((await bundle(fix)).body.failedCases).toBeNull();
     await worker.complete(fix.id, fix.attempt, {
       stage: "gate-fix",
       outcome: "done",
@@ -1080,6 +1081,7 @@ describe("the bundle", () => {
     });
     const mergeFix = (await worker.claim()).body.job as Claimed;
     expect((await bundle(mergeFix)).body.failureLog).toBe("conflict in a.ts");
+    expect((await bundle(mergeFix)).body.failedCases).toBeNull();
     await worker.complete(mergeFix.id, mergeFix.attempt, {
       stage: "merge-fix",
       outcome: "done",
@@ -1087,6 +1089,49 @@ describe("the bundle", () => {
     await stage("gate", GATE_PASSED);
     const merge = (await worker.claim()).body.job as Claimed;
     expect((await bundle(merge)).body.failureLog).toBeNull();
+    expect((await bundle(merge)).body.failedCases).toBeNull();
+  });
+
+  it("hands a gate-fix the still-failing cases, and a merge-fix the candidate's", async () => {
+    const cases = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        message: "boom",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        message: "nope",
+      },
+    ];
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: {
+        output: { failureLog: "# test failed\nboom", failedCases: cases },
+      },
+    });
+    const fix = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(fix)).body.failedCases).toEqual(cases);
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "gate-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", {
+      outcome: "gate-failed",
+      run: {
+        output: { failureLog: "# test failed\nboom", failedCases: cases },
+      },
+    });
+    const mergeFix = (await worker.claim()).body.job as Claimed;
+    expect(mergeFix.payload.stage).toBe("merge-fix");
+    expect((await bundle(mergeFix)).body.failedCases).toEqual(cases);
   });
 
   it("shows the pipeline progress to a fix stage", async () => {

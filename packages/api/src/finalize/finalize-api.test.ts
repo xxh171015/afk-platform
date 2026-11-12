@@ -436,6 +436,7 @@ describe("the overall review and the one fix", () => {
       agentBranch: `agent/${id}/S-1-final`,
       repo: { name: "backend" },
       failureLog: null,
+      failedCases: null,
       review: null,
     });
     expect(first.run).not.toBeNull();
@@ -463,6 +464,41 @@ describe("when it goes wrong", () => {
     await allTicketsDone();
     await step("final-review", REVIEW_FIX);
   }
+
+  it("hands a final-fix the still-failing cases of a failed final-merge", async () => {
+    await toFinalFix();
+    const cases = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        message: "boom",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        message: "nope",
+      },
+    ];
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, output)
+       VALUES (1, 1, 'final-merge', 'gate-failed', $1::jsonb)`,
+      [
+        JSON.stringify({
+          failureLog: "# test failed\nboom",
+          failedCases: cases,
+        }),
+      ],
+    );
+    const fix = (await claim()) as Claimed;
+    expect(fix.payload.stage).toBe("final-fix");
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${fix.id}/bundle?workerId=w1&attempt=${fix.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.failureLog).toBe("# test failed\nboom");
+    expect(bundle.failedCases).toEqual(cases);
+  });
 
   it("leaves wrap-up must-fix findings unhandled when final-fix does not finish", async () => {
     await toFinalFix();

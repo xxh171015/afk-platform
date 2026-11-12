@@ -20,6 +20,13 @@ export interface ContextInput {
   bundle: Bundle;
   run: RunFacts;
   failureLog?: string; // gate-fix and merge-fix: the tail of the failing gate
+  // gate-fix / merge-fix / final-fix: still-failing JUnit cases after the same-commit rerun
+  failedCases?: {
+    name: string;
+    classname: string;
+    file?: string;
+    message?: string;
+  }[];
   review?: unknown; // review-fix: the review's structured result
   contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
   // Planning commit files (GLOSSARY.md, docs/adr/**). Omit for the planning repo's own tickets.
@@ -136,6 +143,13 @@ export function renderContext(input: ContextInput): void {
   if (input.failureLog !== undefined) {
     mkdirSync(join(dir, "failure"), { recursive: true });
     writeFileSync(join(dir, "failure", "gate.log"), input.failureLog);
+  }
+  if (input.failedCases?.length) {
+    mkdirSync(join(dir, "failure"), { recursive: true });
+    writeFileSync(
+      join(dir, "failure", "cases.json"),
+      `${JSON.stringify(input.failedCases, null, 2)}\n`,
+    );
   }
   if (input.review !== undefined) {
     writeFileSync(

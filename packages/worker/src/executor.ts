@@ -18,6 +18,7 @@ import {
   type Environment,
   EnvironmentError,
   type EnvironmentRepo,
+  failedCasesOf,
   type GateConfig,
   type GateOutcome,
   type GateRecords,
@@ -470,6 +471,7 @@ function renderFor(
       branch: bundle.agentBranch,
     },
     ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
+    ...(bundle.failedCases?.length ? { failedCases: bundle.failedCases } : {}),
     ...(bundle.review ? { review: bundle.review } : {}),
     ...(bundle.contracts.length
       ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
@@ -820,6 +822,15 @@ function gateFacts(outcome: GateOutcome) {
   };
 }
 
+function gateFailureOutput(outcome: GateOutcome) {
+  const failedCases = failedCasesOf(outcome.testCases);
+  return {
+    failureLog: outcome.failureLog,
+    reasons: outcome.reasons,
+    ...(failedCases ? { failedCases } : {}),
+  };
+}
+
 function logGate(log: (line: string) => void, outcome: GateOutcome) {
   if (outcome.reusedFrom)
     log(
@@ -946,7 +957,7 @@ async function gate(
       branch: agent,
       baseSha,
       headSha: outcome.commitSha,
-      output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
+      output: gateFailureOutput(outcome),
       ...orphanRunFields(align),
     },
     gate: gateFacts(outcome),
@@ -1331,7 +1342,7 @@ async function mergeOnce(
       stage,
       outcome: "gate-failed",
       run: {
-        output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
+        output: gateFailureOutput(outcome),
       },
       gate: gateFacts(outcome),
     };
