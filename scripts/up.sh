@@ -265,11 +265,18 @@ set -m # every pipeline below gets its own process group, so Ctrl-C reaches only
 pgids=() # process groups, started order
 names=()
 
+# Everything the processes print also goes to a file, so a crash can be looked at after the terminal is gone.
+# One file per start; files older than 14 days are deleted.
+log_dir="$afk_home/logs"
+mkdir -p "$log_dir"
+find "$log_dir" -name 'up-*.log' -type f -mtime +14 -delete 2>/dev/null || true
+up_log="$log_dir/up-$(date +%Y%m%d-%H%M%S).log"
+
 # start <name> <command...>: run it in the background with every output line prefixed by the name
 start() {
   local name=$1
   shift
-  "$@" 2>&1 | sed -u "s/^/[$name] /" &
+  "$@" 2>&1 | sed -u "s/^/[$name] /" | tee -a "$up_log" &
   pgids+=("$(ps -o pgid= -p "$!" | tr -d ' ')")
   names+=("$name")
 }
@@ -332,6 +339,7 @@ done
 [ "${WORKER:-1}" = 0 ] || start worker pnpm worker
 
 echo "up: API $AFK_API_URL, page http://127.0.0.1:5173 (Postgres stays up when you stop; docker compose stop postgres to stop it)"
+echo "log: $up_log"
 echo "next: in Cursor, with the project's repos in the workspace, run /afk-setup (install it once: npx skills@latest add xxh171015/afk-platform)"
 
 # leave as soon as any process dies, then stop the rest (macOS bash 3.2 has no `wait -n`)
@@ -339,7 +347,7 @@ while :; do
   check_signal
   for i in "${!pgids[@]}"; do
     if ! kill -0 -- "-${pgids[i]}" 2>/dev/null; then
-      echo "${names[i]} exited; stopping the rest" >&2
+      echo "${names[i]} exited; stopping the rest (log: $up_log)" | tee -a "$up_log" >&2
       exit 1
     fi
   done

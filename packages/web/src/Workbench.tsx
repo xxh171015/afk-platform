@@ -13,6 +13,7 @@ import { Mono, Pill } from "./components/afk/badges.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
+import { feishuClosedMessage } from "./feishu-status.ts";
 import { hostKindOfRepos, pullAbbrev } from "./host-copy.ts";
 import { stageLabel } from "./lib/labels.ts";
 import { LIST_POLL_MS } from "./live.ts";
@@ -21,7 +22,6 @@ import { paths } from "./paths.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 import { formatElapsed } from "./time.ts";
-import { feishuClosedMessage } from "./feishu-status.ts";
 import { waitingCount } from "./waiting.ts";
 
 export const EMPTY_WAITING = "没有在等你的事。平台在自己跑。";
@@ -153,9 +153,7 @@ export function Workbench() {
       title="工作台"
       actions={<StaleNotice error={data ? board.error : null} />}
     >
-      {data ? (
-        <Onboarding feishu={data.status?.feishu} />
-      ) : null}
+      {data ? <Onboarding feishu={data.status?.feishu} /> : null}
       {!data ? (
         <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
           <p className="sr-only">加载工作台…</p>
