@@ -6,6 +6,7 @@ import {
   pauseReasonLabel,
   pullPhrase,
   type StructuredBrief,
+  type TicketReviewMode,
 } from "@afk/shared";
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
@@ -15,6 +16,7 @@ export function projectText(project: {
   name: string;
   defaultAgent: string | null;
   feishuChatId?: string | null;
+  ticketReview?: TicketReviewMode;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
@@ -23,6 +25,9 @@ export function projectText(project: {
   }
   if (project.feishuChatId) {
     lines.push(`feishu-chat: ${project.feishuChatId}`);
+  }
+  if (project.ticketReview) {
+    lines.push(`ticket-review: ${project.ticketReview}`);
   }
   return lines.join("\n");
 }

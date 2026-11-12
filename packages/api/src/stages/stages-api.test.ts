@@ -850,6 +850,7 @@ describe("the bundle", () => {
     expect(plain.body).toMatchObject({
       limits: { runIdleSeconds: 600, runWallclockSeconds: 3600 },
       model: null,
+      ticketReview: "spec",
     });
     await db.pool.query(
       "UPDATE projects SET default_model = 'composer-2', limits = $1",

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_TICKET_REVIEW,
   type ExistingGraph,
   formatDisplayId,
   type HostKind,
@@ -8,6 +9,7 @@ import {
   parseDisplayId,
   planImport,
   type SPEC_TYPES,
+  type TicketReviewMode,
 } from "@afk/shared";
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
@@ -33,6 +35,7 @@ export interface NewProject {
   budgetLimit?: number;
   mergePolicy?: string;
   limits?: LimitOverrides;
+  ticketReview?: TicketReviewMode;
 }
 
 export async function createProject(
@@ -40,8 +43,8 @@ export async function createProject(
   project: NewProject,
 ): Promise<{ id: number; name: string }> {
   const { rows } = await pool.query(
-    `INSERT INTO projects (name, default_agent, default_model, protected_paths, max_concurrency, budget_limit, merge_policy, limits)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, name`,
+    `INSERT INTO projects (name, default_agent, default_model, protected_paths, max_concurrency, budget_limit, merge_policy, limits, ticket_review)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name`,
     [
       project.name,
       project.defaultAgent ?? null,
@@ -51,6 +54,7 @@ export async function createProject(
       project.budgetLimit ?? null,
       project.mergePolicy ?? null,
       JSON.stringify(project.limits ?? {}),
+      project.ticketReview ?? DEFAULT_TICKET_REVIEW,
     ],
   );
   return rows[0];
@@ -65,6 +69,7 @@ export type ProjectEdit = Partial<
     | "maxConcurrency"
     | "budgetLimit"
     | "limits"
+    | "ticketReview"
   >
 > & {
   feishuChatId?: string | null;
@@ -96,6 +101,7 @@ export async function editProject(
     set("limits", JSON.stringify(edit.limits), "limits || $::jsonb");
   if (edit.feishuChatId !== undefined)
     set("feishu_chat_id", edit.feishuChatId === "" ? null : edit.feishuChatId);
+  if (edit.ticketReview !== undefined) set("ticket_review", edit.ticketReview);
   // An empty edit still has to tell a missing project from an existing one.
   const { rowCount } = await pool.query(
     `UPDATE projects SET ${assignments.join(", ") || "id = id"} WHERE id = $1`,

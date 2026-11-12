@@ -182,8 +182,15 @@ export type {
   CombinedReview,
   ReviewAxis,
   ReviewItem,
+  TicketReviewMode,
 } from "./review-axes.ts";
-export { combinedReview, REVIEW_AXES } from "./review-axes.ts";
+export {
+  combinedReview,
+  DEFAULT_TICKET_REVIEW,
+  REVIEW_AXES,
+  reviewAxesFor,
+  TICKET_REVIEW_MODES,
+} from "./review-axes.ts";
 export type {
   Capacity,
   IncomingEdge,

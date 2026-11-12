@@ -371,7 +371,7 @@ describe("the two axes of a review", () => {
       combineReviewRuns({
         standards: ran(withSources),
         spec: ran(out("pass")),
-      }).combined?.standards.sources,
+      }).combined?.standards?.sources,
     ).toEqual(["AGENTS.md", "CONTRIBUTING.md"]);
   });
 
@@ -394,6 +394,20 @@ describe("the two axes of a review", () => {
     expect(
       combineReviewRuns({ standards: slow, spec: ran(out("pass")) }).combined,
     ).toBeUndefined();
+  });
+
+  it("combines a spec-only ticket review without a Standards result", () => {
+    const spec = out("fix", {
+      mustFix: [{ file: "t.ts", problem: "missing" }],
+    });
+    const { classification, combined } = combineReviewRuns({ spec: ran(spec) });
+    expect(classification).toEqual({ kind: "outcome", outcome: "fix" });
+    expect(combined).toEqual({
+      verdict: "fix",
+      mustFix: [{ axis: "spec", file: "t.ts", problem: "missing" }],
+      spec,
+    });
+    expect(combined).not.toHaveProperty("standards");
   });
 
   it("points each axis at its own prompt: the ticket and the contract for Spec, with spec.md as background only", () => {

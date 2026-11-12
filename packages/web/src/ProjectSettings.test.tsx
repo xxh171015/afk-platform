@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { TicketReviewMode } from "@afk/shared";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectSettings } from "./ProjectSettings.tsx";
@@ -14,6 +15,7 @@ type ProjectDetail = {
   name: string;
   defaultAgent: null;
   feishuChatId: string | null;
+  ticketReview: TicketReviewMode;
   repos: {
     name: string;
     url: string;
@@ -28,6 +30,7 @@ const projectDetail = (repos: ProjectDetail["repos"]): ProjectDetail => ({
   name: "shop",
   defaultAgent: null,
   feishuChatId: "oc_shop",
+  ticketReview: "spec",
   repos,
 });
 
@@ -177,5 +180,27 @@ describe("the project Feishu page", () => {
     expect(alert.textContent).toContain("还没保存群号");
     expect(alert.textContent).toContain("oc_");
     expect(alert.textContent).not.toContain("no Feishu chat configured");
+  });
+
+  it("lets you see and change ticketReview", async () => {
+    const project = projectDetail([]);
+    const fake = fakeServer({
+      ...workbench(),
+      "GET /projects/1": () => ({ json: project }),
+      "PATCH /projects/1": ({ body }) => {
+        const next = (body as { ticketReview?: TicketReviewMode }).ticketReview;
+        if (next) project.ticketReview = next;
+        return { json: { id: 1 } };
+      },
+    });
+    renderWithApp(<ProjectSettings projectId={1} />, fake);
+    const select = (await screen.findByRole("combobox", {
+      name: "票级审查",
+    })) as HTMLSelectElement;
+    expect(select.value).toBe("spec");
+    fireEvent.change(select, { target: { value: "both" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存审查设置" }));
+    await waitFor(() => expect(fake.calls).toContain("PATCH /projects/1"));
+    expect(project.ticketReview).toBe("both");
   });
 });

@@ -111,6 +111,10 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "ticketReview": {
+                    "type": "string",
+                    "enum": ["spec", "both"]
                   }
                 },
                 "required": ["name"],
@@ -142,7 +146,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported",
+            "description": "The default agent is not supported, or ticketReview is not spec or both",
             "content": {
               "application/json": {
                 "schema": {
@@ -245,6 +249,10 @@
                     "feishuChatId": {
                       "type": ["string", "null"]
                     },
+                    "ticketReview": {
+                      "type": "string",
+                      "enum": ["spec", "both"]
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -282,6 +290,7 @@
                     "name",
                     "defaultAgent",
                     "feishuChatId",
+                    "ticketReview",
                     "repos"
                   ]
                 }
@@ -413,6 +422,10 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "ticketReview": {
+                    "type": "string",
+                    "enum": ["spec", "both"]
                   }
                 },
                 "additionalProperties": false
@@ -440,7 +453,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported",
+            "description": "The default agent is not supported, or ticketReview is not spec or both",
             "content": {
               "application/json": {
                 "schema": {
@@ -3398,6 +3411,10 @@
                     },
                     "model": {
                       "type": ["string", "null"]
+                    },
+                    "ticketReview": {
+                      "type": "string",
+                      "enum": ["spec", "both"]
                     }
                   },
                   "required": [
@@ -3420,7 +3437,8 @@
                     "gateBaseline",
                     "gateBaselines",
                     "limits",
-                    "model"
+                    "model",
+                    "ticketReview"
                   ]
                 }
               }

@@ -60,8 +60,8 @@ import {
   formatPushFailure,
   isNetworkPushError,
   type PushFailureTips,
-  REVIEW_AXES,
   type ReviewAxis,
+  reviewAxesFor,
   unrecoverableJobError,
 } from "@afk/shared";
 import {
@@ -699,14 +699,16 @@ async function review(
         ])
       : branchBase(mainDir, bundle.integrationBranch as string, agent);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
-  // The two axes are two agent runs in two sandboxes at once. A branch can be checked out in one sandbox only, so each
-  // axis gets a branch of its own at the same commit, which is gone again afterwards. A review only reads.
+  // Ticket-level review is Spec-only by default; final-review (and ticketReview: both) still run both axes.
+  // A branch can be checked out in one sandbox only, so each axis gets a branch of its own at the same commit,
+  // which is gone again afterwards. A review only reads.
   const reviewed =
     stage === "final-review"
       ? tip(mainDir, bundle.integrationBranch as string)
       : publishedTip(mainDir, agent);
+  const axes = reviewAxesFor(stage, bundle.ticketReview);
   const branches = new Map(
-    REVIEW_AXES.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
+    axes.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
   );
   for (const branch of branches.values())
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
@@ -716,7 +718,7 @@ async function review(
     const { refs, refShas } = snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     const runs = await Promise.all(
-      REVIEW_AXES.map(async (axis) => {
+      axes.map(async (axis) => {
         const given = writePrompt(join(tmp, axis), promptFor(stage, { axis }));
         const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
           stage,
@@ -736,7 +738,7 @@ async function review(
       throw new JobLostError("the lease was lost during the review");
     const byAxis = Object.fromEntries(
       runs.map((r) => [r.axis, r.run]),
-    ) as Record<ReviewAxis, (typeof runs)[number]["run"]>;
+    ) as Partial<Record<ReviewAxis, (typeof runs)[number]["run"]>>;
     const { classification: verdict } = combineReviewRuns(byAxis);
     if (verdict.kind === "infrastructure-failure") {
       const [first, ...others] = runs;
@@ -775,7 +777,7 @@ async function review(
     return {
       stage,
       outcome: verdict.outcome,
-      // the Standards run is the job's own Run; the Spec run is recorded beside it
+      // the first axis is the job's own Run; any other axis is recorded beside it
       run: { ...first?.run, axis: first?.axis, ...orphanRunFields(align) },
       findings: first?.findings ?? [],
       extraRuns: others.map((r) => ({

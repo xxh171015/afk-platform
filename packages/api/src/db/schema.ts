@@ -16,6 +16,7 @@ import {
   PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
+  TICKET_REVIEW_MODES,
   TICKET_STATES,
   TICKET_TYPES,
 } from "@afk/shared";
@@ -50,24 +51,35 @@ const oneOf = (column: AnyPgColumn, values: readonly string[]) =>
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-export const projects = pgTable("projects", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  defaultAgent: text("default_agent"),
-  defaultModel: text("default_model"),
-  protectedPaths: text("protected_paths").array().notNull().default([]),
-  maxConcurrency: integer("max_concurrency"),
-  budgetLimit: integer("budget_limit"),
-  mergePolicy: text("merge_policy"),
-  // Overrides of DEFAULT_LIMITS in @afk/shared; anything not listed uses the default.
-  limits: jsonb("limits").notNull().default({}),
-  // When a worker last claimed a job of this project. Claim picks the project served longest ago so
-  // projects take turns (packages/api/src/jobs/queue.ts). Null until the first claim.
-  lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
-  // Feishu group chat_id for this project's notifications. Null until plat project edit --feishu-chat.
-  feishuChatId: text("feishu_chat_id"),
-  createdAt: createdAt(),
-});
+export const projects = pgTable(
+  "projects",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    defaultAgent: text("default_agent"),
+    defaultModel: text("default_model"),
+    protectedPaths: text("protected_paths").array().notNull().default([]),
+    maxConcurrency: integer("max_concurrency"),
+    budgetLimit: integer("budget_limit"),
+    mergePolicy: text("merge_policy"),
+    // Overrides of DEFAULT_LIMITS in @afk/shared; anything not listed uses the default.
+    limits: jsonb("limits").notNull().default({}),
+    // When a worker last claimed a job of this project. Claim picks the project served longest ago so
+    // projects take turns (packages/api/src/jobs/queue.ts). Null until the first claim.
+    lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
+    // Feishu group chat_id for this project's notifications. Null until plat project edit --feishu-chat.
+    feishuChatId: text("feishu_chat_id"),
+    // Ticket-level review: Spec only (default) or both axes. final-review is always both (ADR 0002).
+    ticketReview: text("ticket_review").notNull().default("spec"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check(
+      "projects_ticket_review_check",
+      oneOf(t.ticketReview, TICKET_REVIEW_MODES),
+    ),
+  ],
+);
 
 export const repos = pgTable(
   "repos",

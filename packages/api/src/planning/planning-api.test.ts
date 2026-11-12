@@ -577,6 +577,7 @@ describe("project view", () => {
       name: "shop",
       defaultAgent: null,
       feishuChatId: null,
+      ticketReview: "spec",
       repos: [
         {
           name: "backend",
@@ -775,6 +776,54 @@ describe("project edit", () => {
       (await post(`/specs/${specId}/tickets/import`, importBody(specId, file)))
         .status,
     ).toBe(200);
+  });
+});
+
+describe("ticketReview", () => {
+  it("defaults to spec, stores both, and refuses any other value", async () => {
+    const created = await post("/projects", { name: "shop" });
+    expect(created.status).toBe(201);
+    expect(
+      (
+        await fetch(`${api.url}/projects/${created.body.id}`).then((r) =>
+          r.json(),
+        )
+      ).ticketReview,
+    ).toBe("spec");
+    expect(
+      (await patch(`/projects/${created.body.id}`, { ticketReview: "both" }))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT ticket_review FROM projects WHERE id = $1",
+          [created.body.id],
+        )
+      ).rows[0].ticket_review,
+    ).toBe("both");
+    expect(
+      (
+        await fetch(`${api.url}/projects/${created.body.id}`).then((r) =>
+          r.json(),
+        )
+      ).ticketReview,
+    ).toBe("both");
+    const refused = await patch(`/projects/${created.body.id}`, {
+      ticketReview: "off",
+    });
+    expect(refused.status).toBe(400);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT ticket_review FROM projects WHERE id = $1",
+          [created.body.id],
+        )
+      ).rows[0].ticket_review,
+    ).toBe("both");
+    expect(
+      (await post("/projects", { name: "nope", ticketReview: "off" })).status,
+    ).toBe(400);
   });
 });
 

@@ -17,6 +17,8 @@ import {
   parseDisplayId,
   purgedLogMessage,
   SETUP_BRANCH,
+  TICKET_REVIEW_MODES,
+  type TicketReviewMode,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import {
@@ -222,6 +224,12 @@ const toOffset = (value: string): number => {
     throw new InvalidArgumentError("must be a non-negative integer");
   }
   return Number(value);
+};
+const toTicketReview = (value: string): TicketReviewMode => {
+  if (!(TICKET_REVIEW_MODES as readonly string[]).includes(value)) {
+    throw new InvalidArgumentError("must be spec or both");
+  }
+  return value as TicketReviewMode;
 };
 const collect = (value: string, previous: string[] = []) => [
   ...previous,
@@ -448,6 +456,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "override a concurrency or budget default, e.g. repoConcurrency=3 (repeatable)",
       collect,
     )
+    .option(
+      "--ticket-review <mode>",
+      "ticket-level review: spec (default, Spec axis only) or both",
+      toTicketReview,
+    )
     .action(async (name: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const { data, response, error } = await api().POST("/projects", {
@@ -460,6 +473,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           budgetLimit: options.budgetLimit,
           mergePolicy: options.mergePolicy,
           limits: parseLimits(options.limit),
+          ticketReview: options.ticketReview,
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -496,6 +510,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--feishu-chat <chat_id>",
       "Feishu group chat_id for this project's notifications (empty clears it)",
     )
+    .option(
+      "--ticket-review <mode>",
+      "ticket-level review: spec (Spec axis only) or both",
+      toTicketReview,
+    )
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
@@ -506,10 +525,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         budgetLimit: options.budgetLimit,
         limits: parseLimits(options.limit),
         feishuChatId: options.feishuChat as string | undefined,
+        ticketReview: options.ticketReview,
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit or --feishu-chat",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit, --feishu-chat or --ticket-review",
         );
       }
       const projectId = toInt(id);

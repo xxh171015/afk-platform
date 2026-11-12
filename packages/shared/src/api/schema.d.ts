@@ -69,6 +69,8 @@ export interface paths {
               updateBranchBehindCommits?: number;
               updateBranchBehindHours?: number;
             };
+            /** @enum {string} */
+            ticketReview?: "spec" | "both";
           };
         };
       };
@@ -85,7 +87,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported */
+        /** @description The default agent is not supported, or ticketReview is not spec or both */
         400: {
           headers: {
             [name: string]: unknown;
@@ -133,6 +135,8 @@ export interface paths {
               name: string;
               defaultAgent: string | null;
               feishuChatId: string | null;
+              /** @enum {string} */
+              ticketReview: "spec" | "both";
               repos: {
                 name: string;
                 url: string;
@@ -192,6 +196,8 @@ export interface paths {
               updateBranchBehindCommits?: number;
               updateBranchBehindHours?: number;
             };
+            /** @enum {string} */
+            ticketReview?: "spec" | "both";
           };
         };
       };
@@ -207,7 +213,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported */
+        /** @description The default agent is not supported, or ticketReview is not spec or both */
         400: {
           headers: {
             [name: string]: unknown;
@@ -2052,6 +2058,8 @@ export interface paths {
                 maxIntegrationEnvironments: number;
               };
               model: string | null;
+              /** @enum {string} */
+              ticketReview: "spec" | "both";
             };
           };
         };

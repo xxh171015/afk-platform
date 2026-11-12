@@ -300,14 +300,15 @@ export function reviewFindings(
  * on either axis is a fix. `combined` is what a review-fix reads as review.json: every must-fix with its axis.
  */
 export function combineReviewRuns(
-  runs: Record<ReviewAxis, AgentRunResult<ReviewOutput>>,
+  runs: Partial<Record<ReviewAxis, AgentRunResult<ReviewOutput>>>,
 ): {
   classification: Classification<ReviewOutcome>;
   combined: CombinedReview | undefined;
 } {
-  const verdicts = REVIEW_AXES.map((axis) => ({
+  const present = REVIEW_AXES.filter((axis) => runs[axis] !== undefined);
+  const verdicts = present.map((axis) => ({
     axis,
-    verdict: classifyReviewRun(runs[axis]),
+    verdict: classifyReviewRun(runs[axis] as AgentRunResult<ReviewOutput>),
   }));
   for (const { verdict } of verdicts) {
     if (
@@ -316,10 +317,10 @@ export function combineReviewRuns(
     )
       return { classification: verdict, combined: undefined };
   }
-  const outputs = {
-    standards: runs.standards.output as ReviewOutput,
-    spec: runs.spec.output as ReviewOutput,
-  };
+  const outputs: Partial<Record<ReviewAxis, ReviewOutput>> = {};
+  for (const axis of present) {
+    outputs[axis] = runs[axis]?.output as ReviewOutput;
+  }
   const combined = combinedReview(outputs);
   return {
     classification: {

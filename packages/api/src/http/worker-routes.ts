@@ -1,4 +1,4 @@
-import { HOST_KINDS, REVIEW_AXES } from "@afk/shared";
+import { HOST_KINDS, REVIEW_AXES, TICKET_REVIEW_MODES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { pauseForProvider } from "../agents-pause.ts";
@@ -336,6 +336,7 @@ const Bundle = z.object({
     maxIntegrationEnvironments: z.number().int(),
   }),
   model: z.string().nullable(),
+  ticketReview: z.enum(TICKET_REVIEW_MODES),
 });
 
 const bundleRoute = createRoute({

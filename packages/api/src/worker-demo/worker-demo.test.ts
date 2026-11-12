@@ -315,12 +315,11 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       heartbeatMs: 50,
     });
 
-    // a review is two agent runs, one per axis, each with the prompt of its axis
+    // ticket-level review is Spec only; final-review is still both axes
     expect(seen.map((s) => s.stage).sort()).toEqual([
       "final-review",
       "final-review",
       "implement",
-      "review",
       "review",
     ]);
     for (const s of seen) {
@@ -333,10 +332,13 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     }
     expect(
       seen.filter((s) => s.stage === "review").map((s) => s.prompt),
+    ).toEqual([composePrompt(promptFor("review", { axis: "spec" }))]);
+    expect(
+      seen.filter((s) => s.stage === "final-review").map((s) => s.prompt),
     ).toEqual(
       expect.arrayContaining([
-        composePrompt(promptFor("review", { axis: "standards" })),
-        composePrompt(promptFor("review", { axis: "spec" })),
+        composePrompt(promptFor("final-review", { axis: "standards" })),
+        composePrompt(promptFor("final-review", { axis: "spec" })),
       ]),
     );
     // the agent reads the ticket file the API shows, byte for byte
@@ -350,7 +352,6 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     );
     expect(runs.rows.filter((r) => r.prompt).map((r) => r.stage)).toEqual([
       "implement",
-      "review",
       "review",
       "final-review",
       "final-review",
@@ -377,8 +378,44 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   const isSpecAxis = (prompt: string) =>
     prompt.includes("阶段：review，Spec 轴");
 
-  it("reviews a ticket on two axes at once, fixes what the Spec axis asks for with both results at hand", async () => {
+  it("on the default spec-only ticket review, review-fix sees only the Spec axis", async () => {
     await confirmedSpec([ticket("a")]);
+    let fixSaw: unknown;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "review") return { output: MUST_FIX };
+        if (ctx.stage === "review-fix") {
+          fixSaw = JSON.parse(ctx.context("review.json") as string);
+          return {
+            files: { "src/more.ts": "export const more = 1;\n" },
+            message: "do what the ticket asked",
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const reviews = await db.pool.query(
+      "SELECT axis, attempt, result FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(reviews.rows).toEqual([{ axis: "spec", attempt: 1, result: "fix" }]);
+    expect(fixSaw).toMatchObject({
+      verdict: "fix",
+      mustFix: [{ axis: "spec", file: "src/a.ts" }],
+      spec: { scopeCreep: ["an extra flag"] },
+    });
+    expect(fixSaw).not.toHaveProperty("standards");
+  });
+
+  it("reviews a ticket on two axes at once, fixes what the Spec axis asks for with both results at hand", async () => {
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     let fixSaw: unknown;
     const executor = deps({
       script: (ctx) => {
@@ -429,7 +466,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 
   it("a Standards review that names no sources is invalid-output", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     await runWorker({
       api: workerFor(),
       executor: deps({
@@ -459,7 +496,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 
   it("records a CONTRIBUTING.md hard rule as a must-fix with that file in the Run's sources", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     await runWorker({
       api: workerFor(),
       executor: deps({
@@ -507,7 +544,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 
   it("takes the failure of one axis as the failure of the whole review, and leaves no branch of the axes behind", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     const executor = deps({
       script: (ctx) =>
         ctx.stage === "review" && isSpecAxis(ctx.prompt)
@@ -2061,7 +2098,8 @@ describe("token usage on a run", { timeout: 60_000 }, () => {
         "SELECT id, axis FROM runs WHERE stage = 'review' ORDER BY axis",
       )
     ).rows;
-    expect(reviews).toHaveLength(2);
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]?.axis).toBe("spec");
     for (const row of reviews) {
       const body = await fetch(`${api.url}/runs/${row.id}`).then((r) =>
         r.json(),
@@ -2083,8 +2121,8 @@ describe("token usage on a run", { timeout: 60_000 }, () => {
         }),
         expect.objectContaining({
           stage: "review",
-          inputTokens: 100,
-          cacheReadTokens: 104,
+          inputTokens: 50,
+          cacheReadTokens: 52,
         }),
         expect.objectContaining({ stage: "final-review" }),
       ]),
@@ -2153,7 +2191,7 @@ describe("token usage on a run", { timeout: 60_000 }, () => {
   });
 
   it("keeps usage on both review axes when the spec axis then fails infrastructure", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     await runWorker({
       api: workerFor(),
       executor: deps({
