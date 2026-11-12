@@ -24,6 +24,26 @@ import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
 import { formatDuration, formatSeconds } from "./time.ts";
+import { formatTokens, tokenCounts } from "./token-usage.ts";
+
+function usageLabel(usage: unknown): string {
+  const counts = tokenCounts(usage);
+  const parts = [
+    counts.inputTokens !== undefined
+      ? `输入 ${formatTokens(counts.inputTokens)}`
+      : null,
+    counts.outputTokens !== undefined
+      ? `输出 ${formatTokens(counts.outputTokens)}`
+      : null,
+    counts.cacheReadTokens !== undefined
+      ? `缓存读 ${formatTokens(counts.cacheReadTokens)}`
+      : null,
+    counts.cacheWriteTokens !== undefined
+      ? `缓存写 ${formatTokens(counts.cacheWriteTokens)}`
+      : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
 
 export function RunDetail({
   runId,
@@ -120,6 +140,20 @@ export function RunDetail({
         <div className="flex items-center gap-2">
           <dt className="text-muted-foreground">耗时</dt>
           <dd>{formatSeconds(run.durationMs)}</dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">API 耗时</dt>
+          <dd>{formatSeconds(run.durationApiMs ?? null)}</dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">CLI 版本</dt>
+          <dd>
+            <Mono>{run.cursorCliVersion ?? "—"}</Mono>
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">用量</dt>
+          <dd data-testid="run-usage">{usageLabel(run.tokenUsage)}</dd>
         </div>
         <div className="flex items-center gap-2">
           <dt className="text-muted-foreground">模型</dt>

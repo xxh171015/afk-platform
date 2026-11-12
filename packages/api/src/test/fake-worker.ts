@@ -228,11 +228,25 @@ export class FakeWorker {
     jobId: number,
     attempt: number,
     error = "boom",
+    run?: {
+      tokenUsage?: unknown;
+      durationApiMs?: number;
+      cursorCliVersion?: string;
+      axis?: "standards" | "spec";
+    },
+    extraRuns?: Array<{
+      tokenUsage?: unknown;
+      durationApiMs?: number;
+      cursorCliVersion?: string;
+      axis?: "standards" | "spec";
+    }>,
   ): Promise<Reply<{ ok?: boolean; error?: string }>> {
     return this.post(`/worker/jobs/${jobId}/fail`, {
       workerId: this.id,
       attempt,
       error,
+      ...(run ? { run } : {}),
+      ...(extraRuns && extraRuns.length > 0 ? { extraRuns } : {}),
     });
   }
 

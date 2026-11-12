@@ -2008,6 +2008,189 @@ describe("what the project says about a run", { timeout: 60_000 }, () => {
   });
 });
 
+describe("token usage on a run", { timeout: 60_000 }, () => {
+  const usageLine = (n: number) =>
+    JSON.stringify({
+      type: "result",
+      duration_api_ms: 1000 + n,
+      cli_version: "2026.10.22-27dcf5f",
+      usage: {
+        inputTokens: n,
+        outputTokens: n + 1,
+        cacheReadTokens: n + 2,
+        cacheWriteTokens: n + 3,
+      },
+    });
+
+  const withUsage: Script = (ctx) => {
+    const rawLines = [usageLine(ctx.stage === "review" ? 50 : 10)];
+    if (ctx.stage === "review" || ctx.stage === "final-review")
+      return { output: PASS, rawLines };
+    return {
+      files: {
+        [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,
+      },
+      message: `${ctx.stage} on ${ctx.branch}`,
+      output: DONE,
+      rawLines,
+    };
+  };
+
+  it("stores usage, API duration and CLI version from a result line", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps({ script: withUsage }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const implement = await fetch(`${api.url}/runs/1`).then((r) => r.json());
+    expect(implement).toMatchObject({
+      stage: "implement",
+      tokenUsage: {
+        inputTokens: 10,
+        outputTokens: 11,
+        cacheReadTokens: 12,
+        cacheWriteTokens: 13,
+      },
+      durationApiMs: 1010,
+      cursorCliVersion: "2026.10.22-27dcf5f",
+    });
+    const reviews = (
+      await db.pool.query<{ id: number; axis: string }>(
+        "SELECT id, axis FROM runs WHERE stage = 'review' ORDER BY axis",
+      )
+    ).rows;
+    expect(reviews).toHaveLength(2);
+    for (const row of reviews) {
+      const body = await fetch(`${api.url}/runs/${row.id}`).then((r) =>
+        r.json(),
+      );
+      expect(body.tokenUsage).toEqual({
+        inputTokens: 50,
+        outputTokens: 51,
+        cacheReadTokens: 52,
+        cacheWriteTokens: 53,
+      });
+    }
+    const spec = await fetch(`${api.url}/specs/1`).then((r) => r.json());
+    expect(spec.usageByStage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "implement",
+          inputTokens: 10,
+          cacheReadTokens: 12,
+        }),
+        expect.objectContaining({
+          stage: "review",
+          inputTokens: 100,
+          cacheReadTokens: 104,
+        }),
+        expect.objectContaining({ stage: "final-review" }),
+      ]),
+    );
+    const finalReviews = (
+      await db.pool.query<{ id: number }>(
+        "SELECT id FROM runs WHERE stage = 'final-review'",
+      )
+    ).rows;
+    expect(finalReviews.length).toBeGreaterThanOrEqual(2);
+    for (const row of finalReviews) {
+      const body = await fetch(`${api.url}/runs/${row.id}`).then((r) =>
+        r.json(),
+      );
+      expect(body.tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 11,
+        cacheReadTokens: 12,
+        cacheWriteTokens: 13,
+      });
+    }
+  });
+
+  it("leaves usage empty when the stream has no result line", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const implement = await fetch(`${api.url}/runs/1`).then((r) => r.json());
+    expect(implement.tokenUsage).toBeNull();
+    expect(implement.durationApiMs).toBeNull();
+  });
+
+  it("keeps usage when the agent finished and the push then failed", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({ script: withUsage });
+    const real = executor.push;
+    executor.push = (request, token) => {
+      if (!request.target.startsWith("refs/heads/agent/"))
+        return real(request, token);
+      return {
+        ok: false,
+        error:
+          "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+      };
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const implement = await fetch(`${api.url}/runs/1`).then((r) => r.json());
+    expect(implement.result).toBe("job-failed");
+    expect(implement.tokenUsage).toEqual({
+      inputTokens: 10,
+      outputTokens: 11,
+      cacheReadTokens: 12,
+      cacheWriteTokens: 13,
+    });
+    expect(implement.cursorCliVersion).toBe("2026.10.22-27dcf5f");
+  });
+
+  it("keeps usage on both review axes when the spec axis then fails infrastructure", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) => {
+          if (ctx.stage === "review" && ctx.branch.includes("review-spec/")) {
+            return {
+              error: { kind: "other", message: "sandbox died" },
+              rawLines: [usageLine(50)],
+            };
+          }
+          return withUsage(ctx);
+        },
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const reviews = (
+      await db.pool.query<{ axis: string | null; token_usage: unknown }>(
+        "SELECT axis, token_usage FROM runs WHERE stage = 'review' ORDER BY axis",
+      )
+    ).rows;
+    expect(new Set(reviews.map((row) => row.axis))).toEqual(
+      new Set(["spec", "standards"]),
+    );
+    expect(reviews.length).toBeGreaterThanOrEqual(2);
+    for (const row of reviews) {
+      expect(row.token_usage).toEqual({
+        inputTokens: 50,
+        outputTokens: 51,
+        cacheReadTokens: 52,
+        cacheWriteTokens: 53,
+      });
+    }
+  });
+});
+
 describe("a flood of raw event lines", { timeout: 60_000 }, () => {
   it("is uploaded in pieces the API accepts, up to a limit, and the rest is left out with a note", async () => {
     await confirmedSpec([ticket("a")]);

@@ -2601,6 +2601,20 @@ export interface paths {
             workerId: string;
             attempt: number;
             error: string;
+            run?: {
+              tokenUsage?: unknown;
+              durationApiMs?: number;
+              cursorCliVersion?: string;
+              /** @enum {string} */
+              axis?: "standards" | "spec";
+            };
+            extraRuns?: {
+              tokenUsage?: unknown;
+              durationApiMs?: number;
+              cursorCliVersion?: string;
+              /** @enum {string} */
+              axis?: "standards" | "spec";
+            }[];
           };
         };
       };
@@ -3118,6 +3132,8 @@ export interface paths {
               output?: unknown;
               commits: string[];
               sources: string[] | null;
+              durationApiMs: number | null;
+              tokenUsage?: unknown;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";
@@ -3686,6 +3702,12 @@ export interface paths {
                 pullRequestNumber: number | null;
                 pullRequestUrl: string | null;
                 pullNumber: number | null;
+              }[];
+              usageByStage: {
+                stage: string;
+                inputTokens: number;
+                outputTokens: number;
+                cacheReadTokens: number;
               }[];
             };
           };

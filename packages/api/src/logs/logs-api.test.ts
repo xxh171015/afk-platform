@@ -280,6 +280,7 @@ describe("fencing", () => {
     clock.advanceSeconds(121); // the lease runs out: the job fails, its stage is queued again, another worker takes it
     const w2 = new FakeWorker(api.url, "w2", []);
     const retaken = (await w2.claim()).body.job;
+    if (!retaken) throw new Error("no job");
     expect(retaken.id).not.toBe(job.id);
     const runs = (
       await db.pool.query<{ id: number; result: string | null }>(

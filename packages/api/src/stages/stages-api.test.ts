@@ -421,6 +421,12 @@ describe("what is recorded", () => {
         commits: ["c1", "c2"],
         durationMs: 146_000,
         durationApiMs: 120_000,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 1,
+        },
         output: { status: "done" },
         logUrl: "logs/1",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -431,7 +437,7 @@ describe("what is recorded", () => {
     await stage("gate-fix", IMPLEMENT_DONE);
     await stage("gate", GATE_PASSED);
     const runs = await db.pool.query(
-      "SELECT stage, attempt, result, agent, model, branch, commits, duration_ms, duration_api_ms, ticket_version, output FROM runs ORDER BY id",
+      "SELECT stage, attempt, result, agent, model, branch, commits, duration_ms, duration_api_ms, token_usage, ticket_version, output FROM runs ORDER BY id",
     );
     expect(runs.rows.map((r) => [r.stage, r.attempt, r.result])).toEqual([
       ["implement", 1, "done"],
@@ -446,6 +452,12 @@ describe("what is recorded", () => {
       commits: ["c1", "c2"],
       duration_ms: 146_000,
       duration_api_ms: 120_000,
+      token_usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 1,
+      },
       ticket_version: 1,
       output: { status: "done" },
     });

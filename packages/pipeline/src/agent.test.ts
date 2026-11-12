@@ -928,6 +928,45 @@ describe("a fake agent run, end to end", () => {
     git(repo.dir, ["status"]);
   });
 
+  it("takes usage from a result line on the event stream", async () => {
+    repo = makeRepo();
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 20,
+      cacheWriteTokens: 1,
+    };
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      output: DONE,
+      rawLines: [
+        JSON.stringify({ type: "assistant", message: { content: "hi" } }),
+        JSON.stringify({
+          type: "result",
+          duration_api_ms: 1200,
+          cli_version: "2026.10.22-27dcf5f",
+          usage,
+        }),
+      ],
+    }));
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.tokenUsage).toEqual(usage);
+    expect(run.durationApiMs).toBe(1200);
+    expect(run.cursorCliVersion).toBe("2026.10.22-27dcf5f");
+  });
+
+  it("leaves usage empty when the stream has no result line", async () => {
+    repo = makeRepo();
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      output: DONE,
+    }));
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.tokenUsage).toBeUndefined();
+    expect(run.durationApiMs).toBeUndefined();
+    expect(run.cursorCliVersion).toBeUndefined();
+  });
+
   it("a review run is read-only: it commits nothing and returns a verdict", async () => {
     repo = makeRepo();
     git(repo.dir, ["branch", "agent/T-123"]);

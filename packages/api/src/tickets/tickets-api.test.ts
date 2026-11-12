@@ -2314,6 +2314,14 @@ describe("what a person sees", () => {
       outcome: "done",
       run: {
         durationMs: 146000,
+        durationApiMs: 120000,
+        cursorCliVersion: "2026.10.22-27dcf5f",
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 1,
+        },
         prompt: "overlay + implement",
         output: { outcome: "done" },
         commits: ["abc1234"],
@@ -2332,6 +2340,14 @@ describe("what a person sees", () => {
       attempt: 1,
       result: "done",
       durationMs: 146000,
+      durationApiMs: 120000,
+      cursorCliVersion: "2026.10.22-27dcf5f",
+      tokenUsage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 1,
+      },
       prompt: "overlay + implement",
       output: { outcome: "done" },
       commits: ["abc1234"],
@@ -2357,8 +2373,64 @@ describe("what a person sees", () => {
       prompt: null,
       output: null,
       commits: [],
+      tokenUsage: null,
+      durationApiMs: null,
     });
     expect((await call("GET", "/runs/99")).status).toBe(404);
+  });
+
+  it("totals token usage by stage on the spec, and leaves a run without a result line empty", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 1,
+        },
+      },
+    });
+    await stage("gate", { outcome: "passed" });
+    await stage("review", {
+      outcome: "pass",
+      run: {
+        axis: "standards",
+        tokenUsage: {
+          inputTokens: 3,
+          outputTokens: 1,
+          cacheReadTokens: 8,
+        },
+      },
+      extraRuns: [
+        {
+          run: {
+            axis: "spec",
+            tokenUsage: {
+              inputTokens: 5,
+              outputTokens: 2,
+              cacheReadTokens: 9,
+            },
+          },
+        },
+      ],
+    });
+    const spec = await call("GET", `/specs/${specId}`);
+    expect(spec.body.usageByStage).toEqual([
+      {
+        stage: "implement",
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 20,
+      },
+      {
+        stage: "review",
+        inputTokens: 8,
+        outputTokens: 3,
+        cacheReadTokens: 17,
+      },
+    ]);
   });
 });
 

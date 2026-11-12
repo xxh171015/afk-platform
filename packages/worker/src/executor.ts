@@ -125,16 +125,41 @@ function runOptions(deps: ExecutorDeps, context: StageContext) {
   };
 }
 
-// What a Run records about the agent that ran: its model and the skills it ran with. Gates run no agent and record neither.
+// Usage, API duration and CLI version from the Cursor result line, to keep on a Run after the agent.
+function billedFacts(
+  run: {
+    tokenUsage?: unknown;
+    durationApiMs?: number;
+    cursorCliVersion?: string;
+  } = {},
+) {
+  return {
+    ...(run.tokenUsage !== undefined ? { tokenUsage: run.tokenUsage } : {}),
+    ...(run.durationApiMs !== undefined
+      ? { durationApiMs: run.durationApiMs }
+      : {}),
+    ...(run.cursorCliVersion ? { cursorCliVersion: run.cursorCliVersion } : {}),
+  };
+}
+
+type BilledFacts = ReturnType<typeof billedFacts> & { axis?: ReviewAxis };
+
+// What a Run records about the agent that ran: model, skills, prompt, and the Cursor result-line facts.
 function agentFacts(
   deps: ExecutorDeps,
   options: { model?: string },
   prompt: string,
+  run?: {
+    tokenUsage?: unknown;
+    durationApiMs?: number;
+    cursorCliVersion?: string;
+  },
 ) {
   return {
     prompt,
     ...(options.model ? { model: options.model } : {}),
     ...(deps.skillsSha ? { skillsSha: deps.skillsSha } : {}),
+    ...billedFacts(run),
   };
 }
 
@@ -142,8 +167,12 @@ function agentFacts(
 // unless the error is one that will not recover by running it again (Cursor auth, a bad model, a spent quota,
 // a failed integration image build). Those are rewritten here to the human sentence the brief shows.
 export class InfrastructureError extends Error {
-  constructor(message: string) {
+  readonly run?: BilledFacts;
+  readonly extraRuns?: BilledFacts[];
+  constructor(message: string, run?: BilledFacts, extraRuns?: BilledFacts[]) {
     super(unrecoverableJobError(message) ?? message);
+    this.run = run;
+    this.extraRuns = extraRuns;
   }
 }
 // Nothing to run on right now: every slot is taken. The job is left alone and comes back when its lease runs out.
@@ -256,13 +285,18 @@ function assertRemoteUnchanged(
   repoDir: string,
   branch: string,
   expectedOld: string,
+  run?: ReturnType<typeof billedFacts>,
 ): void {
   const now = originSha(repoDir, branch) ?? "";
   if (now !== expectedOld) {
-    throwPushFailure("stale info", {
-      remoteTip: now,
-      startedFrom: expectedOld,
-    });
+    throwPushFailure(
+      "stale info",
+      {
+        remoteTip: now,
+        startedFrom: expectedOld,
+      },
+      run,
+    );
   }
 }
 
@@ -374,7 +408,11 @@ const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
 const originTip = originSha;
 
-function throwPushFailure(error: string, tips: PushFailureTips): never {
+function throwPushFailure(
+  error: string,
+  tips: PushFailureTips,
+  run?: ReturnType<typeof billedFacts>,
+): never {
   const kind = classifyPushError(error);
   if (kind === "branch-moved" || kind === "host-permission") {
     throw new InfrastructureError(
@@ -382,9 +420,10 @@ function throwPushFailure(error: string, tips: PushFailureTips): never {
         remoteTip: tips.remoteTip ?? "",
         startedFrom: tips.startedFrom ?? "",
       }),
+      run,
     );
   }
-  throw new InfrastructureError(`push failed: ${error}`);
+  throw new InfrastructureError(`push failed: ${error}`, run);
 }
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -533,17 +572,18 @@ async function agentChange(
       inherited ? { ...run, commits: [before] } : run,
     );
     if (verdict.kind === "infrastructure-failure")
-      throw new InfrastructureError(verdict.error);
+      throw new InfrastructureError(verdict.error, billedFacts(run));
     log(
       `${stage}: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
     );
 
+    const billed = billedFacts(run);
     const facts: Record<string, unknown> = {
       branch: agent,
       baseSha,
       commits: run.commits,
       durationMs: run.durationMs,
-      ...agentFacts(deps, options, given.prompt),
+      ...agentFacts(deps, options, given.prompt, run),
       ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
       ...orphanRunFields(align),
@@ -563,6 +603,7 @@ async function agentChange(
     if (!taken.fetched)
       throw new InfrastructureError(
         `could not take ${agent} back: ${taken.error ?? "no such branch in the slot"}`,
+        billed,
       );
     const stamped = stampTrailers({
       repoDir: mainDir,
@@ -576,7 +617,10 @@ async function agentChange(
       },
     });
     if (stamped.error)
-      throw new InfrastructureError(`stamping failed: ${stamped.error}`);
+      throw new InfrastructureError(
+        `stamping failed: ${stamped.error}`,
+        billed,
+      );
     const request = {
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
@@ -595,7 +639,7 @@ async function agentChange(
       ) {
         throw new JobLostError("the lease was lost before the push");
       }
-      assertRemoteUnchanged(mainDir, agent, align.expectedOld);
+      assertRemoteUnchanged(mainDir, agent, align.expectedOld, billed);
       pushed = deps.push(request);
       if (pushed.ok) break;
       if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
@@ -603,10 +647,14 @@ async function agentChange(
       await wait(waitSeconds[i] * 1000, context.signal);
     }
     if (!pushed.ok)
-      throwPushFailure(pushed.error, {
-        remoteTip: originTip(mainDir, request.target),
-        startedFrom: align.expectedOld,
-      });
+      throwPushFailure(
+        pushed.error,
+        {
+          remoteTip: originTip(mainDir, request.target),
+          startedFrom: align.expectedOld,
+        },
+        billed,
+      );
     facts.headSha = tip(mainDir, agent);
     facts.commits = gitOrThrow(mainDir, [
       "rev-list",
@@ -690,8 +738,14 @@ async function review(
       runs.map((r) => [r.axis, r.run]),
     ) as Record<ReviewAxis, (typeof runs)[number]["run"]>;
     const { classification: verdict } = combineReviewRuns(byAxis);
-    if (verdict.kind === "infrastructure-failure")
-      throw new InfrastructureError(verdict.error);
+    if (verdict.kind === "infrastructure-failure") {
+      const [first, ...others] = runs;
+      throw new InfrastructureError(
+        verdict.error,
+        first ? { ...billedFacts(first.run), axis: first.axis } : undefined,
+        others.map((r) => ({ ...billedFacts(r.run), axis: r.axis })),
+      );
+    }
     log(`${stage}: ${verdict.outcome}`);
     for (const { axis, run } of runs)
       if (run.commits.length > 0)
@@ -709,7 +763,7 @@ async function review(
           baseSha,
           commits: run.commits,
           durationMs: run.durationMs,
-          ...agentFacts(deps, options, given.prompt),
+          ...agentFacts(deps, options, given.prompt, run),
           ...(refs.length ? { refShas } : {}),
           output: run.output ?? { error: run.error },
           ...(sources ? { sources } : {}),
@@ -1500,7 +1554,7 @@ async function diagnose(
         throw new JobLostError("the lease was lost during the diagnosis");
       const verdict = classifyDiagnoseRun(run.run);
       if (verdict.kind === "infrastructure-failure")
-        throw new InfrastructureError(verdict.error);
+        throw new InfrastructureError(verdict.error, billedFacts(run.run));
       log(
         `diagnose: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
       );
@@ -1519,7 +1573,7 @@ async function diagnose(
           refShas: run.environment.shas,
           envUpMs: run.environment.upMs,
           durationMs: run.run.durationMs,
-          ...agentFacts(deps, options, given.prompt),
+          ...agentFacts(deps, options, given.prompt, run.run),
           output: output ?? { error: run.run.error },
         },
         // a repo is only named when the outcome is "diagnosed"
@@ -1595,7 +1649,7 @@ async function locateBug(
         throw new JobLostError("the lease was lost during locate");
       const verdict = classifyLocateRun(run);
       if (verdict.kind === "infrastructure-failure")
-        throw new InfrastructureError(verdict.error);
+        throw new InfrastructureError(verdict.error, billedFacts(run));
       context.log(
         `locate-bug: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
       );
@@ -1622,7 +1676,7 @@ async function locateBug(
           headSha: head,
           refShas,
           durationMs: run.durationMs,
-          ...agentFacts(deps, options, given.prompt),
+          ...agentFacts(deps, options, given.prompt, run),
           output: output ?? { error: run.error },
         },
       };

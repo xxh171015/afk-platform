@@ -43,6 +43,8 @@ export {
 } from "./context.ts";
 export type { ContractCopyProblem, ProvidedContract } from "./contract-copy.ts";
 export { checkContractCopies, copyPathOf } from "./contract-copy.ts";
+export type { CursorRunFacts } from "./cursor-result.ts";
+export { factsFromCursorLine, factsFromCursorLines } from "./cursor-result.ts";
 export type {
   E2eCounts,
   E2eOutcome,

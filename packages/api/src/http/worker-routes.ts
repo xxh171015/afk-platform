@@ -1,4 +1,4 @@
-import { HOST_KINDS } from "@afk/shared";
+import { HOST_KINDS, REVIEW_AXES } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { pauseForProvider } from "../agents-pause.ts";
@@ -617,9 +617,20 @@ const leaseRoute = createRoute({
   },
 });
 
+const FailRunFacts = z.object({
+  tokenUsage: z.unknown().optional(),
+  durationApiMs: z.number().int().min(0).optional(),
+  cursorCliVersion: z.string().optional(),
+  axis: z.enum(REVIEW_AXES).optional(),
+});
+
 const failRoute = holderRoute(
   "fail",
-  { error: z.string() },
+  {
+    error: z.string(),
+    run: FailRunFacts.optional(),
+    extraRuns: z.array(FailRunFacts).max(8).optional(),
+  },
   z.object({ ok: z.literal(true) }),
 );
 
@@ -1098,7 +1109,7 @@ export function registerWorkerRoutes(
 
   app.openapi(failRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const { workerId, attempt, error } = c.req.valid("json");
+    const { workerId, attempt, error, run, extraRuns } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
     const outcome = await aroundJob(context, id, () =>
       inWorkerReport(context, id, async (client) => {
@@ -1127,6 +1138,8 @@ export function registerWorkerRoutes(
             job.rows[0],
             error,
             context.clock(),
+            run,
+            extraRuns,
           );
           const sync = readHostSyncPayload(job.rows[0]);
           const access = readRepoAccessPayload(job.rows[0]);

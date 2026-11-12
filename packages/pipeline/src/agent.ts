@@ -146,6 +146,10 @@ export interface AgentRunResult<Output> {
   error?: string;
   errorKind?: "invalid-output" | "timeout" | "other";
   durationMs: number;
+  // From the Cursor result line, as written: stored on the Run. Absent when the stream had no result.
+  tokenUsage?: unknown;
+  durationApiMs?: number;
+  cursorCliVersion?: string;
 }
 
 export interface AgentRunner {

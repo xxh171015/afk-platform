@@ -22,6 +22,8 @@ const run = (over: Record<string, unknown> = {}) => ({
   skillsSha: null,
   axis: null,
   cursorCliVersion: null,
+  durationApiMs: null,
+  tokenUsage: null,
   contractShas: null,
   refShas: null,
   startedAt: "2026-10-28T10:00:00.000Z",
@@ -71,6 +73,7 @@ describe("the run page", () => {
     expect(screen.getByText("done")).toBeTruthy();
     expect(screen.getByText("耗时")).toBeTruthy();
     expect(screen.getByText("146 s")).toBeTruthy();
+    expect(screen.getByTestId("run-usage").textContent).toBe("—");
     expect(screen.getByRole("link", { name: /T-9/ }).getAttribute("href")).toBe(
       "/tickets/9",
     );
@@ -84,6 +87,43 @@ describe("the run page", () => {
     expect(screen.getByRole("tab", { name: "提交" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "提交" }));
     expect(await screen.findByText("没有提交记录")).toBeTruthy();
+  });
+
+  it("shows this run's token usage, API duration and CLI version", async () => {
+    renderWithApp(
+      <RunDetail runId={4} logPollMs={20} />,
+      fakeServer({
+        "GET /runs/4": () => ({
+          json: run({
+            cursorCliVersion: "2026.10.22-27dcf5f",
+            durationApiMs: 120_000,
+            tokenUsage: {
+              inputTokens: 143000,
+              outputTokens: 33000,
+              cacheReadTokens: 5110000,
+              cacheWriteTokens: 12000,
+            },
+          }),
+        }),
+        "GET /runs/4/logs": () => finishedLog(""),
+      }),
+    );
+    await screen.findByRole("heading", { level: 1, name: /R-4/ });
+    expect(screen.getByText("API 耗时")).toBeTruthy();
+    expect(screen.getByText("120 s")).toBeTruthy();
+    expect(screen.getByText("2026.10.22-27dcf5f")).toBeTruthy();
+    expect(screen.getByTestId("run-usage").textContent).toContain(
+      "输入 143,000",
+    );
+    expect(screen.getByTestId("run-usage").textContent).toContain(
+      "输出 33,000",
+    );
+    expect(screen.getByTestId("run-usage").textContent).toContain(
+      "缓存读 5,110,000",
+    );
+    expect(screen.getByTestId("run-usage").textContent).toContain(
+      "缓存写 12,000",
+    );
   });
 
   it("links a finishing run with no ticket back to the spec", async () => {

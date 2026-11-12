@@ -72,6 +72,7 @@ import {
   prCiLabel,
   prReviewLabel,
   specTypeLabel,
+  stageLabel,
 } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
@@ -109,6 +110,7 @@ import { blockedReasonLabel, ticketStateLabel } from "./status.ts";
 import { peekTicketClick, TicketSheet } from "./TicketDetail.tsx";
 import { TraceSection } from "./TraceSection.tsx";
 import { formatCompactDuration, formatShanghaiTime } from "./time.ts";
+import { formatTokens } from "./token-usage.ts";
 
 const list = <T,>(value: T[] | undefined | null): T[] =>
   Array.isArray(value) ? value : [];
@@ -589,6 +591,7 @@ export function SpecDetail({
     finalRuns,
     potentialConflicts,
     leadTime,
+    usageByStage,
     links,
   } = data;
   const timeline = visibleTimeline(timelineEvents);
@@ -832,6 +835,7 @@ export function SpecDetail({
           hostKind={hostKind}
           potentialConflicts={potentialConflicts ?? []}
           leadTime={leadTime ?? null}
+          usageByStage={usageByStage ?? []}
           links={links ?? []}
         />
       ) : null}
@@ -954,6 +958,7 @@ function Overview({
   hostKind,
   potentialConflicts,
   leadTime,
+  usageByStage,
   links,
 }: {
   spec: SpecView["spec"];
@@ -972,6 +977,7 @@ function Overview({
   hostKind: HostKind;
   potentialConflicts: NonNullable<SpecView["potentialConflicts"]>;
   leadTime: SpecView["leadTime"];
+  usageByStage: NonNullable<SpecView["usageByStage"]>;
   links: NonNullable<SpecView["links"]>;
 }) {
   const progress = ticketProgress(tickets);
@@ -1084,6 +1090,21 @@ function Overview({
           </dd>
         </div>
         {leadTime ? <LeadTimeBar leadTime={leadTime} /> : null}
+        {usageByStage.length > 0 ? (
+          <div className="sm:col-span-2" data-testid="usage-by-stage">
+            <dt className="text-xs text-muted-foreground">用量</dt>
+            <dd className="mt-1 space-y-1 text-sm">
+              {usageByStage.map((row) => (
+                <div key={row.stage}>
+                  {stageLabel[row.stage] ?? row.stage} 输入{" "}
+                  {formatTokens(row.inputTokens)} 输出{" "}
+                  {formatTokens(row.outputTokens)} 缓存读{" "}
+                  {formatTokens(row.cacheReadTokens)}
+                </div>
+              ))}
+            </dd>
+          </div>
+        ) : null}
         {spec.planningSha ? (
           <div>
             <dt className="text-xs text-muted-foreground">规划提交</dt>

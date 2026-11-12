@@ -234,6 +234,8 @@ const RunView = RunRow.extend({
   commits: z.array(z.string()),
   // the standards-source files a Standards review used; null on every other Run
   sources: z.array(z.string()).nullable(),
+  durationApiMs: Id.nullable(),
+  tokenUsage: z.unknown().nullable(),
   repoUrl: z.string(),
   hostKind: z.enum(HOST_KINDS),
 });
@@ -433,6 +435,14 @@ const specRoute = createRoute({
           })
           .nullable(),
         links: z.array(LinkRow),
+        usageByStage: z.array(
+          z.object({
+            stage: z.string(),
+            inputTokens: z.number().int(),
+            outputTokens: z.number().int(),
+            cacheReadTokens: z.number().int(),
+          }),
+        ),
       }),
     ),
     404: reply("No such spec", ErrorReply),

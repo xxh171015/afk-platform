@@ -548,9 +548,10 @@ export async function writeFacts(
     );
     const inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, stage, attempt, agent, model, skills_sha, axis,
-         prompt, branch, base_sha, head_sha, commits, duration_ms, result, output, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-         COALESCE($19, (SELECT started_at FROM runs WHERE id = $21)), COALESCE($20, now()))
+         prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage,
+         result, output, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+         COALESCE($22, (SELECT started_at FROM runs WHERE id = $24)), COALESCE($23, now()))
        RETURNING id`,
       [
         owner.spec_id,
@@ -564,11 +565,16 @@ export async function writeFacts(
         extra.run.skillsSha ?? null,
         extra.run.axis ?? null,
         extra.run.prompt ?? null,
+        extra.run.cursorCliVersion ?? null,
         extra.run.branch ?? null,
         extra.run.baseSha ?? null,
         extra.run.headSha ?? null,
         extra.run.commits ?? [],
         extra.run.durationMs ?? null,
+        extra.run.durationApiMs ?? null,
+        extra.run.tokenUsage === undefined
+          ? null
+          : JSON.stringify(extra.run.tokenUsage),
         extra.run.result ?? result?.outcome ?? "invalid-output",
         JSON.stringify(extra.run.output ?? null),
         extra.run.startedAt ?? null,

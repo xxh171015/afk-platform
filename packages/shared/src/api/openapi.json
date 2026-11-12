@@ -4385,6 +4385,44 @@
                   },
                   "error": {
                     "type": "string"
+                  },
+                  "run": {
+                    "type": "object",
+                    "properties": {
+                      "tokenUsage": {},
+                      "durationApiMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "cursorCliVersion": {
+                        "type": "string"
+                      },
+                      "axis": {
+                        "type": "string",
+                        "enum": ["standards", "spec"]
+                      }
+                    }
+                  },
+                  "extraRuns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tokenUsage": {},
+                        "durationApiMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cursorCliVersion": {
+                          "type": "string"
+                        },
+                        "axis": {
+                          "type": "string",
+                          "enum": ["standards", "spec"]
+                        }
+                      }
+                    },
+                    "maxItems": 8
                   }
                 },
                 "required": ["workerId", "attempt", "error"]
@@ -5547,6 +5585,10 @@
                         "type": "string"
                       }
                     },
+                    "durationApiMs": {
+                      "type": ["integer", "null"]
+                    },
+                    "tokenUsage": {},
                     "repoUrl": {
                       "type": "string"
                     },
@@ -5578,6 +5620,7 @@
                     "prompt",
                     "commits",
                     "sources",
+                    "durationApiMs",
                     "repoUrl",
                     "hostKind"
                   ]
@@ -7404,6 +7447,32 @@
                           "pullNumber"
                         ]
                       }
+                    },
+                    "usageByStage": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "stage": {
+                            "type": "string"
+                          },
+                          "inputTokens": {
+                            "type": "integer"
+                          },
+                          "outputTokens": {
+                            "type": "integer"
+                          },
+                          "cacheReadTokens": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "stage",
+                          "inputTokens",
+                          "outputTokens",
+                          "cacheReadTokens"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -7420,7 +7489,8 @@
                     "finalRuns",
                     "potentialConflicts",
                     "leadTime",
-                    "links"
+                    "links",
+                    "usageByStage"
                   ]
                 }
               }

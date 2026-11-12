@@ -53,6 +53,12 @@ const view = (
       waitingMs: number;
       totalMs: number;
     } | null;
+    usageByStage?: {
+      stage: string;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+    }[];
     mergeOrder?: {
       ordered: string[];
       after: Record<string, string[]>;
@@ -95,6 +101,7 @@ const view = (
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
   leadTime: over.leadTime ?? null,
+  usageByStage: over.usageByStage ?? [],
   links: over.links ?? [],
 });
 
@@ -789,6 +796,40 @@ describe("the spec page", () => {
     expect(bar.textContent).toContain("门禁");
     expect(bar.textContent).toContain("排队");
     expect(bar.textContent).toContain("等人");
+  });
+
+  it("shows token usage totals by stage on the overview", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            usageByStage: [
+              {
+                stage: "implement",
+                inputTokens: 143000,
+                outputTokens: 33000,
+                cacheReadTokens: 5110000,
+              },
+              {
+                stage: "review",
+                inputTokens: 76000,
+                outputTokens: 15000,
+                cacheReadTokens: 500000,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const usage = await screen.findByTestId("usage-by-stage");
+    expect(usage.textContent).toContain("用量");
+    expect(usage.textContent).toContain("实现");
+    expect(usage.textContent).toContain("输入 143,000");
+    expect(usage.textContent).toContain("缓存读 5,110,000");
+    expect(usage.textContent).toContain("自审");
+    expect(usage.textContent).toContain("输入 76,000");
   });
 
   it("shows the overall review of a finalizing spec", async () => {

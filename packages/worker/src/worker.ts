@@ -357,7 +357,14 @@ export async function processJob(
     log(`failed: ${message}`);
     if (!(error instanceof InfrastructureError))
       log("unexpected error, failing the job");
-    await api.fail(job, message.slice(0, 1000)).catch(() => undefined);
+    await api
+      .fail(
+        job,
+        message.slice(0, 1000),
+        error instanceof InfrastructureError ? error.run : undefined,
+        error instanceof InfrastructureError ? error.extraRuns : undefined,
+      )
+      .catch(() => undefined);
     return "failed";
   } finally {
     stoppedBeats = true;

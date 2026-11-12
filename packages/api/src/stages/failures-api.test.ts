@@ -93,9 +93,23 @@ const keys = async () =>
     )
   ).rows;
 
-async function failNext(error = "docker daemon not running") {
+async function failNext(
+  error = "docker daemon not running",
+  run?: {
+    tokenUsage?: unknown;
+    durationApiMs?: number;
+    cursorCliVersion?: string;
+    axis?: "standards" | "spec";
+  },
+  extraRuns?: Array<{
+    tokenUsage?: unknown;
+    durationApiMs?: number;
+    cursorCliVersion?: string;
+    axis?: "standards" | "spec";
+  }>,
+) {
   const job = (await claim()) as Claimed;
-  const reply = await worker.fail(job.id, job.attempt, error);
+  const reply = await worker.fail(job.id, job.attempt, error, run, extraRuns);
   expect(reply.status).toBe(200);
   return job;
 }
@@ -222,6 +236,84 @@ describe("a job the worker could not carry out", () => {
       });
     },
   );
+
+  it("keeps token usage on a job-failed run when the agent had already finished", async () => {
+    await runningSpec([ticket("a")]);
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 20,
+      cacheWriteTokens: 1,
+    };
+    await failNext("push failed: remote: fatal error in commit_refs", {
+      tokenUsage: usage,
+      durationApiMs: 1200,
+      cursorCliVersion: "2026.10.22-27dcf5f",
+    });
+    const run = await call("GET", "/runs/1");
+    expect(run.body).toMatchObject({
+      result: "job-failed",
+      tokenUsage: usage,
+      durationApiMs: 1200,
+      cursorCliVersion: "2026.10.22-27dcf5f",
+    });
+    expect(run.body.output).toEqual({
+      error: "push failed: remote: fatal error in commit_refs",
+    });
+  });
+
+  it("records extra review-axis usage when the job fails after both agents finished", async () => {
+    await runningSpec([ticket("a")]);
+    const implement = (await claim()) as Claimed;
+    await worker.complete(implement.id, implement.attempt, {
+      stage: "implement",
+      outcome: "done",
+    });
+    const gate = (await claim()) as Claimed;
+    await worker.complete(gate.id, gate.attempt, {
+      stage: "gate",
+      outcome: "passed",
+    });
+    const standards = {
+      inputTokens: 3,
+      outputTokens: 1,
+      cacheReadTokens: 8,
+    };
+    const spec = {
+      inputTokens: 5,
+      outputTokens: 2,
+      cacheReadTokens: 9,
+    };
+    await failNext(
+      "sandbox died",
+      {
+        axis: "standards",
+        tokenUsage: standards,
+        durationApiMs: 100,
+        cursorCliVersion: "2026.10.22-27dcf5f",
+      },
+      [
+        {
+          axis: "spec",
+          tokenUsage: spec,
+          durationApiMs: 90,
+          cursorCliVersion: "2026.10.22-27dcf5f",
+        },
+      ],
+    );
+    const listed = (
+      await db.pool.query<{
+        axis: string | null;
+        token_usage: unknown;
+      }>(
+        "SELECT axis, token_usage FROM runs WHERE stage = 'review' ORDER BY axis",
+      )
+    ).rows;
+    expect(listed).toEqual([
+      { axis: "spec", token_usage: spec },
+      { axis: "standards", token_usage: standards },
+    ]);
+  });
 
   it("takes the ticket over at once as branch-moved on a non-fast-forward, without a second job", async () => {
     await runningSpec([ticket("a")]);
