@@ -150,10 +150,43 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
   },
   cancelledTickets: [],
   agentSeconds: 4,
+  needsDecision: [],
   ...over,
 });
 
 describe("renderPackSection", () => {
+  it("puts needs-human and unfinished deferred at the front", () => {
+    const rendered = renderPackSection(
+      pack({
+        needsDecision: [
+          {
+            kind: "needs-human",
+            id: "R-1#0",
+            source: "T-1 implement",
+            text: "reload skips the filter",
+          },
+          {
+            kind: "deferred",
+            id: "R-1#1",
+            source: "T-1 implement",
+            text: "openapi extra field",
+            ref: "new",
+          },
+        ],
+      }),
+      "backend",
+      1,
+    );
+    expect(rendered.section.startsWith("## 合并前要你定的\n")).toBe(true);
+    expect(rendered.section).toContain(
+      "[needs-human] R-1#0 T-1 implement: reload skips the filter",
+    );
+    expect(rendered.section).toContain(
+      "[deferred] R-1#1 T-1 implement: openapi extra field (new)",
+    );
+    expect(rendered.summary).toContain("## 合并前要你定的");
+  });
+
   it("says in the planning repo's pull request that its planning docs were left out, and only there", () => {
     const waived = pack({ planningDocs: { repo: "backend", state: "waived" } });
     expect(renderPackSection(waived, "backend", 1).section).toContain(

@@ -23,6 +23,7 @@ export interface ReviewItem {
   file: string;
   line?: number;
   problem: string;
+  id?: string;
 }
 
 // What one axis's agent ends with.
@@ -32,6 +33,8 @@ export interface AxisReview {
   suggestions: string[];
   scopeCreep: string[];
   uncertainties: string[];
+  // Spec axis: a Ruling for each conflict and known-gap. Standards leaves this off.
+  rulings?: { id: string; verdict: "accepted" | "must-fix" | "needs-human" }[];
   // files the Standards axis used as standards sources; Spec leaves this off
   sources?: string[];
 }

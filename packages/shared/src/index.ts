@@ -214,6 +214,16 @@ export {
   reviewAxesFor,
   TICKET_REVIEW_MODES,
 } from "./review-axes.ts";
+export type { NeedsDecisionItem, Ruling, RulingVerdict } from "./rulings.ts";
+export {
+  checkReviewRulings,
+  collectNeedsDecision,
+  isListedForRuling,
+  listedDecisionsForReview,
+  RULING_VERDICTS,
+  RulingSchema,
+  rulingsOf,
+} from "./rulings.ts";
 export type {
   Capacity,
   IncomingEdge,

@@ -2106,7 +2106,11 @@ export interface paths {
                     text: string;
                     ref?: string;
                   }[];
-                  rulings: unknown[];
+                  rulings: {
+                    id: string;
+                    /** @enum {string} */
+                    verdict: "accepted" | "must-fix" | "needs-human";
+                  }[];
                 } | null;
                 doneTickets: {
                   displayId: string;
@@ -2124,7 +2128,11 @@ export interface paths {
                     text: string;
                     ref?: string;
                   }[];
-                  rulings: unknown[];
+                  rulings: {
+                    id: string;
+                    /** @enum {string} */
+                    verdict: "accepted" | "must-fix" | "needs-human";
+                  }[];
                 }[];
                 spec: {
                   displayId: string;
@@ -2142,7 +2150,11 @@ export interface paths {
                     text: string;
                     ref?: string;
                   }[];
-                  rulings: unknown[];
+                  rulings: {
+                    id: string;
+                    /** @enum {string} */
+                    verdict: "accepted" | "must-fix" | "needs-human";
+                  }[];
                 } | null;
               };
               approvedRemovedTests:
@@ -3752,6 +3764,15 @@ export interface paths {
                   state: "committed" | "unchanged" | "waived";
                 } | null;
                 agentSeconds: number;
+                /** @default [] */
+                needsDecision: {
+                  /** @enum {string} */
+                  kind: "needs-human" | "deferred";
+                  id: string;
+                  source: string;
+                  text: string;
+                  ref?: string;
+                }[];
               } | null;
               edges: {
                 from: string;

@@ -4,6 +4,7 @@ import {
   decisionsOf,
 } from "./decisions.ts";
 import { formatDisplayId } from "./display-id.ts";
+import { type Ruling, rulingsOf } from "./rulings.ts";
 
 // Decision log in /context: this ticket's earlier Decisions, plus done siblings, plus wrap-up
 // runs for a spec-level stage. Computed from Run output; no extra table. Identity is R-n#index.
@@ -20,7 +21,7 @@ export type DecisionLogItem = {
 export type DecisionLogGroup = {
   displayId: string;
   decisions: DecisionLogItem[];
-  rulings: unknown[];
+  rulings: Ruling[];
 };
 
 export type DecisionLog = {
@@ -33,6 +34,7 @@ export type DecisionLogRun = {
   id: number;
   stage: string;
   ticketId: number | null;
+  axis?: string | null;
   output: unknown;
 };
 
@@ -54,6 +56,12 @@ export function itemsFromRun(run: DecisionLogRun): DecisionLogItem[] {
   }));
 }
 
+function rulingsFromRun(run: DecisionLogRun): Ruling[] {
+  if (run.stage !== "review" && run.stage !== "final-review") return [];
+  if (run.axis === "standards") return [];
+  return rulingsOf(run.output);
+}
+
 export function decisionLogFromRuns(input: {
   specDisplayId: string;
   ticketId: number | null;
@@ -69,7 +77,7 @@ export function decisionLogFromRuns(input: {
   ): DecisionLogGroup => ({
     displayId,
     decisions: runs.flatMap(itemsFromRun),
-    rulings: [],
+    rulings: runs.flatMap(rulingsFromRun),
   });
   const ofTicket = (ticketId: number) =>
     prior.filter((run) => run.ticketId === ticketId);

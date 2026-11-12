@@ -4,12 +4,14 @@ import { fileURLToPath } from "node:url";
 import {
   type AGENT_FAILURES,
   type CombinedReview,
+  checkReviewRulings,
   coerceDecisionsInput,
   combinedReview,
   DecisionsField,
   type FinalStep,
   REVIEW_AXES,
   type ReviewAxis,
+  RulingSchema,
   type Stage,
 } from "@afk/shared";
 import { z } from "zod";
@@ -52,12 +54,16 @@ const ReviewObject = z.object({
       file: z.string(),
       line: z.number().int().optional(),
       problem: z.string().min(1),
+      // a must-fix Ruling points at the Decision by this id (R-n#index)
+      id: z.string().min(1).optional(),
     }),
   ),
   suggestions: z.array(z.string()),
   // the Spec axis's (b): behaviour nobody asked for. It goes to the acceptance pack, never to a fix.
   scopeCreep: z.array(z.string()).default([]),
   uncertainties: z.array(z.string()),
+  // Spec axis: a Ruling for each conflict and known-gap. Standards leaves this off.
+  rulings: z.array(RulingSchema).optional(),
   // files this review used as standards sources. Required on the Standards axis.
   sources: z.array(z.string()).optional(),
 });
@@ -270,11 +276,26 @@ export function classifyLocateRun(
 
 export function classifyReviewRun(
   result: AgentRunResult<ReviewOutput>,
+  listed?: { id: string; kind: string }[],
 ): Classification<ReviewOutcome> {
   const failure = failureOf(result);
   if (failure) return failure;
   if (!result.output) {
     return { kind: "outcome", outcome: "invalid-output", detail: "no result" };
+  }
+  if (listed) {
+    const check = checkReviewRulings({
+      decisions: listed,
+      rulings: result.output.rulings ?? [],
+      mustFix: result.output.mustFix,
+    });
+    if (!check.ok) {
+      return {
+        kind: "outcome",
+        outcome: "invalid-output",
+        detail: check.reason,
+      };
+    }
   }
   return { kind: "outcome", outcome: result.output.verdict };
 }

@@ -25,6 +25,7 @@ import {
 } from "../scheduling/scheduler.ts";
 import { contractsOf } from "./contracts.ts";
 import { createFixTicket } from "./integration.ts";
+import { reviewOutcomeWithRulings } from "./review-rulings.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -258,8 +259,25 @@ export async function recordStageResult(
   }
 
   const parsed = StageResultSchema.safeParse(result);
-  const valid =
+  let valid =
     parsed.success && parsed.data.stage === stage ? parsed.data : undefined;
+  if (valid?.stage === "review") {
+    const outcome = await reviewOutcomeWithRulings(client, {
+      specId: ticket.spec_id,
+      ticketId: ticket.id,
+      jobId: job.id,
+      stage,
+      outcome: valid.outcome,
+      run: valid.run,
+      extraRuns: valid.extraRuns,
+    });
+    if (outcome !== valid.outcome) {
+      valid = {
+        ...valid,
+        outcome: outcome as "pass" | "fix" | "invalid-output" | "timeout",
+      };
+    }
+  }
   await writeFacts(
     client,
     {

@@ -1,4 +1,9 @@
 import { type Io, run } from "@afk/cli";
+import {
+  CODE_CHANGING_STAGES,
+  decisionsOf,
+  isListedForRuling,
+} from "@afk/shared";
 import type pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveAcceptancePack } from "../acceptance/pack.ts";
@@ -75,6 +80,73 @@ const ticket = (
   acceptance,
   ...extra,
 });
+
+async function withAcceptedRulings(
+  stage: string,
+  specId: number | undefined,
+  ticketId: number | undefined,
+  result: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (stage !== "review" && stage !== "final-review") return result;
+  const run = result.run as
+    | { axis?: string; output?: Record<string, unknown> }
+    | undefined;
+  const extras =
+    (result.extraRuns as {
+      run?: { axis?: string; output?: Record<string, unknown> };
+    }[]) ?? [];
+  const specOut =
+    [run, ...extras.map((e) => e.run)].find((item) => item?.axis === "spec")
+      ?.output ?? (run && !run.axis ? run.output : undefined);
+  if (specOut && Array.isArray(specOut.rulings)) return result;
+  const id =
+    specId ??
+    (
+      await db.pool.query<{ spec_id: number }>(
+        "SELECT spec_id FROM tickets WHERE id = $1",
+        [ticketId],
+      )
+    ).rows[0]?.spec_id;
+  if (id == null) return result;
+  const runs = await db.pool.query<{ id: number; output: unknown }>(
+    `SELECT id, output FROM runs
+     WHERE spec_id = $1 AND result = 'done' AND stage = ANY($2) AND output IS NOT NULL
+     ORDER BY id`,
+    [id, [...CODE_CHANGING_STAGES]],
+  );
+  const rulings: { id: string; verdict: "accepted" }[] = [];
+  for (const row of runs.rows) {
+    decisionsOf(row.output).forEach((decision, index) => {
+      if (isListedForRuling(decision.kind))
+        rulings.push({ id: `R-${row.id}#${index}`, verdict: "accepted" });
+    });
+  }
+  if (rulings.length === 0) return result;
+  const withRulings = (output: Record<string, unknown> | undefined) => ({
+    ...(output ?? { verdict: "pass", mustFix: [], suggestions: [] }),
+    rulings,
+  });
+  if (extras.some((extra) => extra.run?.axis === "spec")) {
+    return {
+      ...result,
+      extraRuns: extras.map((extra) =>
+        extra.run?.axis === "spec"
+          ? {
+              ...extra,
+              run: {
+                ...extra.run,
+                output: withRulings(extra.run?.output),
+              },
+            }
+          : extra,
+      ),
+    };
+  }
+  return {
+    ...result,
+    run: { ...(run ?? {}), output: withRulings(run?.output) },
+  };
+}
 
 // A spec whose tickets are all done and whose repos' overall reviews have all passed: it is time for pull requests.
 type StageResults = Record<
@@ -171,7 +243,12 @@ async function settledSpec(
       : planned;
     await worker.complete(claimed.id, claimed.attempt, {
       stage: claimed.payload.stage,
-      ...result,
+      ...(await withAcceptedRulings(
+        claimed.payload.stage as string,
+        claimed.payload.specId as number | undefined,
+        claimed.payload.ticketId as number | undefined,
+        result as Record<string, unknown>,
+      )),
     });
   }
   return { specId: spec.body.id as number, held };
@@ -1710,6 +1787,55 @@ describe("the acceptance pack", () => {
     );
     expect(task.section).toContain("[known-gap] S-1 final-fix");
     expect(task.section).toContain("reload still skips the note filter");
+  });
+
+  it("omits a deferred whose ticket is done, and puts an unfinished one at the front of the pack and the PR", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [
+        ticket("a", "backend"),
+        ticket("b", "backend", undefined, { blocked_by: ["a"] }),
+      ],
+      stages: {
+        implement: [
+          {
+            outcome: "done",
+            run: {
+              output: {
+                status: "done",
+                summary: "a",
+                acceptance: {},
+                decisions: [
+                  { kind: "deferred", text: "left to b", ref: "T-2" },
+                  {
+                    kind: "deferred",
+                    text: "openapi extra field",
+                    ref: "new",
+                  },
+                ],
+              },
+            },
+          },
+          { outcome: "done" },
+        ],
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.needsDecision).toEqual([
+      {
+        kind: "deferred",
+        id: expect.stringMatching(/^R-\d+#1$/),
+        source: "T-1 implement",
+        text: "openapi extra field",
+        ref: "new",
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toMatch(/^## 合并前要你定的\n/);
+    expect(task.section).toContain("openapi extra field (new)");
+    expect(task.section).not.toContain("left to b");
   });
 
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {

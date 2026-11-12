@@ -62,6 +62,7 @@ import {
   classifyPushError,
   formatPushFailure,
   isNetworkPushError,
+  listedDecisionsForReview,
   modelFor,
   type PushFailureTips,
   type ReviewAxis,
@@ -754,7 +755,21 @@ async function review(
     const byAxis = Object.fromEntries(
       runs.map((r) => [r.axis, r.run]),
     ) as Partial<Record<ReviewAxis, (typeof runs)[number]["run"]>>;
-    const { classification: verdict } = combineReviewRuns(byAxis);
+    let { classification: verdict } = combineReviewRuns(byAxis);
+    if (
+      verdict.kind === "outcome" &&
+      (verdict.outcome === "pass" || verdict.outcome === "fix") &&
+      byAxis.spec
+    ) {
+      const listed = listedDecisionsForReview(
+        bundle.decisionLog,
+        stage === "final-review" ? "spec" : "ticket",
+      );
+      const rulings = classifyReviewRun(byAxis.spec, listed);
+      if (rulings.kind === "outcome" && rulings.outcome === "invalid-output") {
+        verdict = rulings;
+      }
+    }
     if (verdict.kind === "infrastructure-failure") {
       const [first, ...others] = runs;
       throw new InfrastructureError(

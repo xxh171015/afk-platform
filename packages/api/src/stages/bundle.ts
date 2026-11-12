@@ -327,10 +327,14 @@ async function decisionLogFor(
     id: number;
     stage: string;
     ticket_id: number | null;
+    axis: string | null;
     output: unknown;
   }>(
-    `SELECT id, stage, ticket_id, output FROM runs
-     WHERE spec_id = $1 AND result = 'done' AND output IS NOT NULL AND stage = ANY($2)
+    `SELECT id, stage, ticket_id, axis, output FROM runs
+     WHERE spec_id = $1 AND output IS NOT NULL AND (
+       (stage = ANY($2) AND result = 'done')
+       OR (stage IN ('review', 'final-review') AND result IN ('pass', 'fix'))
+     )
      ORDER BY id`,
     [specId, [...CODE_CHANGING_STAGES]],
   );
@@ -344,6 +348,7 @@ async function decisionLogFor(
       id: row.id,
       stage: row.stage,
       ticketId: row.ticket_id,
+      axis: row.axis,
       output: row.output,
     })),
   });

@@ -488,8 +488,34 @@ function AcceptancePackMeta({
 }: {
   pack: NonNullable<SpecView["acceptancePack"]>;
 }) {
+  const needsDecision = list(
+    (
+      pack as {
+        needsDecision?: {
+          kind: string;
+          id: string;
+          source: string;
+          text: string;
+          ref?: string;
+        }[];
+      }
+    ).needsDecision,
+  );
   return (
     <>
+      {needsDecision.length > 0 ? (
+        <section className="mb-4" data-testid="pack-needs-decision">
+          <h4>合并前要你定的</h4>
+          <ul>
+            {needsDecision.map((item) => (
+              <li key={item.id}>
+                [{item.kind}] {item.id} {item.source}: {item.text}
+                {item.ref ? ` (${item.ref})` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {list(pack.orderBroken).map((b) => (
         <p key={b.repo} className="error">
           合并顺序被打破：{b.repo} 合在了 {b.skipped.join("、")} 前面。

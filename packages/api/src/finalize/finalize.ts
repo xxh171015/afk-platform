@@ -16,6 +16,7 @@ import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
+import { reviewOutcomeWithRulings } from "../stages/review-rulings.ts";
 import { type ActionResult, parkedRetryNote } from "../tickets/actions.ts";
 import { retryFinalE2e, settleFinalization } from "./final-e2e.ts";
 
@@ -83,8 +84,25 @@ export async function recordFinalResult(
   }
 
   const parsed = FinalResultSchema.safeParse(result);
-  const valid =
+  let valid =
     parsed.success && parsed.data.stage === read.step ? parsed.data : undefined;
+  if (valid && valid.stage === "final-review") {
+    const outcome = await reviewOutcomeWithRulings(client, {
+      specId: read.specId,
+      ticketId: null,
+      jobId: job.id,
+      stage: "final-review",
+      outcome: valid.outcome,
+      run: valid.run,
+      extraRuns: valid.extraRuns,
+    });
+    if (outcome !== valid.outcome) {
+      valid = {
+        ...valid,
+        outcome: outcome as "pass" | "fix" | "invalid-output" | "timeout",
+      };
+    }
+  }
   await writeFacts(
     client,
     {

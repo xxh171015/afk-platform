@@ -385,6 +385,39 @@ describe("the e2e before the pull requests", () => {
     expect(lines.join("\n")).toContain("[unverified] it downloads");
   });
 
+  it("puts 合并前要你定的 first in the pack", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: [], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [],
+      cancelledTickets: [],
+      needsDecision: [
+        {
+          kind: "needs-human",
+          id: "R-1#0",
+          source: "T-1 implement",
+          text: "reload skips the filter",
+        },
+        {
+          kind: "deferred",
+          id: "R-1#1",
+          source: "T-1 implement",
+          text: "openapi extra field",
+          ref: "new",
+        },
+      ],
+    } as never);
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("acceptance pack:");
+    expect(lines[1]).toBe("  合并前要你定的:");
+    expect(text).toContain(
+      "[needs-human] R-1#0 T-1 implement: reload skips the filter",
+    );
+    expect(text).toContain(
+      "[deferred] R-1#1 T-1 implement: openapi extra field (new)",
+    );
+  });
+
   it("lists unstable tests that passed on rerun, apart from findings", () => {
     const text = acceptancePackText({
       mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },

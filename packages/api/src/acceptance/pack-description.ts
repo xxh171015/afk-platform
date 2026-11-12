@@ -25,6 +25,7 @@ export function renderPackSection(
   const spec = formatDisplayId("spec", specId);
   const kind: HostKind = pack.hostKind ?? "github";
   const section = [
+    needsDecisionLines(pack),
     planningDocsLines(pack, repo, kind),
     mergeOrderLines(pack),
     repoLines(pack, repo),
@@ -39,6 +40,7 @@ export function renderPackSection(
   const verified = criteria.filter((c) => c.status === "verified").length;
   const summary = [
     `The acceptance pack for ${spec} ${repo} is too long for a ${HOST_KIND_LABELS[kind]} description.`,
+    needsDecisionLines(pack),
     mergeOrderLines(pack),
     `Acceptance criteria: ${unverified} unverified, ${verified} verified.`,
     `See ${spec} on the platform: ${delivery}`,
@@ -58,6 +60,18 @@ function planningDocsLines(
   return docs.state === "waived"
     ? `## Planning docs\n\n**Left out**: the planning docs did not apply to the default branch and were given up, so this ${phrase} does not carry them.`
     : `## Planning docs\n\nThe first commit of this ${phrase} is the planning docs (glossary, ADRs) the spec was planned with, committed by the platform.`;
+}
+
+function needsDecisionLines(pack: AcceptancePack): string {
+  const items = pack.needsDecision ?? [];
+  if (items.length === 0) return "";
+  const lines = ["## 合并前要你定的"];
+  for (const item of items) {
+    const ref = item.ref ? ` (${item.ref})` : "";
+    const kind = item.kind === "deferred" ? "deferred" : "needs-human";
+    lines.push(`- [${kind}] ${item.id} ${item.source}: ${item.text}${ref}`);
+  }
+  return lines.join("\n");
 }
 
 function mergeOrderLines(pack: AcceptancePack): string {

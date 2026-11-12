@@ -2,6 +2,7 @@ import {
   DECISION_KINDS,
   HOST_KINDS,
   REVIEW_AXES,
+  RULING_VERDICTS,
   StageModelsSchema,
   TICKET_REVIEW_MODES,
 } from "@afk/shared";
@@ -251,7 +252,12 @@ const DecisionLogGroup = z.object({
       ref: z.string().optional(),
     }),
   ),
-  rulings: z.array(z.unknown()),
+  rulings: z.array(
+    z.object({
+      id: z.string(),
+      verdict: z.enum(RULING_VERDICTS),
+    }),
+  ),
 });
 const Bundle = z.object({
   job: z.object({

@@ -372,6 +372,15 @@ describe("the spec page", () => {
         unordered: [],
       },
       orderBroken: [],
+      needsDecision: [
+        {
+          kind: "deferred",
+          id: "R-2#1",
+          source: "T-1 implement",
+          text: "openapi extra field",
+          ref: "new",
+        },
+      ],
       repos: [
         {
           repo: "backend",
@@ -537,6 +546,12 @@ describe("the spec page", () => {
       screen.getByText(/an export flag nobody asked for/).closest("ul")
         ?.className,
     ).toBe("scope-creep");
+    expect(screen.getByTestId("pack-needs-decision").textContent).toContain(
+      "合并前要你定的",
+    );
+    expect(screen.getByTestId("pack-needs-decision").textContent).toContain(
+      "openapi extra field",
+    );
     expect(screen.getByText("决定：")).toBeTruthy();
     expect(
       screen.getByText(

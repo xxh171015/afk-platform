@@ -289,6 +289,25 @@ describe("classifying a review run", () => {
     });
   });
 
+  it("a known-gap without a ruling is invalid-output", () => {
+    expect(
+      classifyReviewRun(result({ output: output("pass") }), [
+        { id: "R-1#0", kind: "known-gap" },
+      ]),
+    ).toMatchObject({ outcome: "invalid-output" });
+    expect(
+      classifyReviewRun(
+        result({
+          output: {
+            ...output("pass"),
+            rulings: [{ id: "R-1#0", verdict: "accepted" }],
+          },
+        }),
+        [{ id: "R-1#0", kind: "known-gap" }],
+      ),
+    ).toMatchObject({ outcome: "pass" });
+  });
+
   it("a review needs no commit", () => {
     expect(
       classifyReviewRun(result({ output: output("pass"), commits: [] })),
@@ -804,6 +823,19 @@ describe("the prompts", () => {
     expect(readFileSync(PROMPTS.mergeFix, "utf8")).toContain("不读 skill");
     expect(readFileSync(PROMPTS.updateBranch, "utf8")).toContain(
       "git merge <defaultBranch>",
+    );
+  });
+
+  it("tells the Spec axis to rule on conflict and known-gap", () => {
+    for (const file of [PROMPTS.reviewSpec, PROMPTS.finalReviewSpec]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("/context/decisions.json");
+      expect(prompt).toContain("rulings");
+      expect(prompt).toContain("needs-human");
+    }
+    expect(readFileSync(PROMPTS.finalReviewSpec, "utf8")).toContain("deferred");
+    expect(readFileSync(PROMPTS.finalReviewSpec, "utf8")).toContain(
+      "不要写进 `mustFix`",
     );
   });
 

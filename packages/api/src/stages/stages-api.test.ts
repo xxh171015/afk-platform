@@ -1294,3 +1294,158 @@ describe("the bundle", () => {
     );
   });
 });
+
+describe("Spec-axis rulings", () => {
+  const knownGap = {
+    outcome: "done",
+    run: {
+      output: {
+        status: "done",
+        summary: "did it",
+        acceptance: {},
+        decisions: [
+          {
+            kind: "known-gap",
+            text: "reload still skips the note filter",
+          },
+        ],
+      },
+    },
+  };
+
+  async function bundleOf(job: Claimed) {
+    return (
+      await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      ).then((r) => r.json())
+    ).decisionLog as {
+      ticket: { decisions: { id: string }[] } | null;
+    };
+  }
+
+  it("replays a known-gap: Spec-axis must-fix goes to review-fix", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+    expect(id).toMatch(/^R-\d+#0$/);
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "fix",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "fix",
+          mustFix: [
+            {
+              file: "src/a.ts",
+              problem: "reload still skips the note filter",
+              id,
+            },
+          ],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "must-fix" }],
+        },
+      },
+      findings: [
+        {
+          kind: "must-fix",
+          body: "src/a.ts reload still skips the note filter",
+        },
+      ],
+    });
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("review-fix");
+  });
+
+  it("a known-gap without a ruling is invalid-output", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "invalid-output",
+    });
+  });
+
+  it("a must-fix ruling without a matching mustFix item is invalid-output", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "fix",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", problem: "something else" }],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "must-fix" }],
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "invalid-output",
+    });
+  });
+
+  it("a timeout is still a timeout when a known-gap has no ruling", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    await stage("review", { outcome: "timeout" });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "timeout",
+    });
+  });
+
+  it("needs-human with no must-fix lets the ticket merge, and it is not on the waiting queue", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "needs-human" }],
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({ state: "merging" });
+    const blocked = await (await fetch(`${api.url}/blocked`)).json();
+    expect(blocked.tickets).toEqual([]);
+    await stage("merge", MERGED);
+    expect(await ticketRow()).toMatchObject({ state: "done" });
+    expect((await (await fetch(`${api.url}/blocked`)).json()).tickets).toEqual(
+      [],
+    );
+  });
+});

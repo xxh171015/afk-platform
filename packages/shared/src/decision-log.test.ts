@@ -50,6 +50,34 @@ describe("decisionLogFromRuns", () => {
     expect(decisionId(10, 0)).toBe("R-10#0");
   });
 
+  it("puts Spec-axis rulings on the ticket group", () => {
+    const log = decisionLogFromRuns({
+      specDisplayId: "S-1",
+      ticketId: 1,
+      ticketDisplayId: "T-1",
+      currentRunId: 30,
+      tickets: [{ id: 1, state: "running" }],
+      runs: [
+        run(10, "implement", 1, [
+          { kind: "known-gap", text: "reload skips the filter" },
+        ]),
+        {
+          id: 20,
+          stage: "review",
+          ticketId: 1,
+          axis: "spec",
+          output: {
+            verdict: "pass",
+            rulings: [{ id: "R-10#0", verdict: "needs-human" }],
+          },
+        },
+      ],
+    });
+    expect(log.ticket?.rulings).toEqual([
+      { id: "R-10#0", verdict: "needs-human" },
+    ]);
+  });
+
   it("lists done siblings and omits tickets that are not done", () => {
     const log = decisionLogFromRuns({
       specDisplayId: "S-1",

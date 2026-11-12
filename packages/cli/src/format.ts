@@ -621,12 +621,25 @@ function decisionRows(
 // What a person reads before merging: the order to merge in, then a section for each repo (its pull request, which
 // criteria are backed by a passing test, what the reviews said and the decisions agents made, its gate, and
 // approved exceptions), and the tickets that were cancelled.
+function needsDecisionLines(pack: AcceptancePackView): string[] {
+  const items = pack.needsDecision ?? [];
+  if (items.length === 0) return [];
+  return [
+    "  合并前要你定的:",
+    ...items.map((item) => {
+      const ref = item.ref ? ` (${item.ref})` : "";
+      return `    [${item.kind}] ${item.id} ${item.source}: ${item.text}${ref}`;
+    }),
+  ];
+}
+
 export function acceptancePackText(pack: AcceptancePackView): string {
   const order = pack.mergeOrder;
   const integration = pack.integration;
   const phrase = pullPhrase(pack.hostKind === "gitlab" ? "gitlab" : "github");
   return [
     "acceptance pack:",
+    ...needsDecisionLines(pack),
     // what a person must not miss: the e2e before the pull requests failed and they were let through
     ...(integration?.failedBeforePullRequest
       ? [

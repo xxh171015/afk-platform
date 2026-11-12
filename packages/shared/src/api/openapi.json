@@ -3562,7 +3562,23 @@
                             },
                             "rulings": {
                               "type": "array",
-                              "items": {}
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "accepted",
+                                      "must-fix",
+                                      "needs-human"
+                                    ]
+                                  }
+                                },
+                                "required": ["id", "verdict"]
+                              }
                             }
                           },
                           "required": ["displayId", "decisions", "rulings"]
@@ -3617,7 +3633,23 @@
                               },
                               "rulings": {
                                 "type": "array",
-                                "items": {}
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "verdict": {
+                                      "type": "string",
+                                      "enum": [
+                                        "accepted",
+                                        "must-fix",
+                                        "needs-human"
+                                      ]
+                                    }
+                                  },
+                                  "required": ["id", "verdict"]
+                                }
                               }
                             },
                             "required": ["displayId", "decisions", "rulings"]
@@ -3671,7 +3703,23 @@
                             },
                             "rulings": {
                               "type": "array",
-                              "items": {}
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "accepted",
+                                      "must-fix",
+                                      "needs-human"
+                                    ]
+                                  }
+                                },
+                                "required": ["id", "verdict"]
+                              }
                             }
                           },
                           "required": ["displayId", "decisions", "rulings"]
@@ -7565,6 +7613,32 @@
                         },
                         "agentSeconds": {
                           "type": "integer"
+                        },
+                        "needsDecision": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["needs-human", "deferred"]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["kind", "id", "source", "text"]
+                          },
+                          "default": []
                         }
                       },
                       "required": [

@@ -1,11 +1,14 @@
 import {
   CODE_CHANGING_STAGES,
+  collectNeedsDecision,
   DECISION_KINDS,
+  decisionLogFromRuns,
   decisionsOf,
   findingResolutionPhrase,
   formatDisplayId,
   HOST_KINDS,
   type HostKind,
+  type NeedsDecisionItem,
   REVIEW_AXES,
   type ReviewAxis,
 } from "@afk/shared";
@@ -206,6 +209,18 @@ export const AcceptancePack = z.object({
     .nullable()
     .optional(),
   agentSeconds: z.number().int(),
+  // Spec-axis needs-human and unfinished deferred: the front of the pack and of the PR description.
+  needsDecision: z
+    .array(
+      z.object({
+        kind: z.enum(["needs-human", "deferred"]),
+        id: z.string(),
+        source: z.string(),
+        text: z.string(),
+        ref: z.string().optional(),
+      }),
+    )
+    .default([]),
 });
 export type AcceptancePack = z.infer<typeof AcceptancePack>;
 
@@ -569,6 +584,75 @@ export async function buildAcceptancePack(
     integration: await integrationSection(client, specId, integrationTickets),
     cancelledTickets,
     agentSeconds: Math.round(Number(agent.rows[0]?.ms) / 1000),
+    needsDecision: await needsDecisionOf(client, specId),
+  });
+}
+
+async function needsDecisionOf(
+  client: Pick<pg.PoolClient, "query">,
+  specId: number,
+): Promise<NeedsDecisionItem[]> {
+  const tickets = await client.query<{ id: number; state: string }>(
+    "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  const runs = await client.query<{
+    id: number;
+    stage: string;
+    ticket_id: number | null;
+    axis: string | null;
+    output: unknown;
+  }>(
+    `SELECT id, stage, ticket_id, axis, output FROM runs
+     WHERE spec_id = $1 AND output IS NOT NULL AND (
+       (stage = ANY($2) AND result = 'done')
+       OR (stage IN ('review', 'final-review') AND result IN ('pass', 'fix'))
+     )
+     ORDER BY id`,
+    [specId, [...CODE_CHANGING_STAGES]],
+  );
+  const log = decisionLogFromRuns({
+    specDisplayId: formatDisplayId("spec", specId),
+    ticketId: null,
+    ticketDisplayId: null,
+    currentRunId: null,
+    tickets: tickets.rows,
+    runs: runs.rows.map((row) => ({
+      id: row.id,
+      stage: row.stage,
+      ticketId: row.ticket_id,
+      axis: row.axis,
+      output: row.output,
+    })),
+  });
+  const sourced = (
+    displayId: string,
+    items: {
+      id: string;
+      kind: string;
+      text: string;
+      ref?: string;
+      stage: string;
+    }[],
+  ) =>
+    items.map((item) => ({
+      ...item,
+      source: `${displayId} ${item.stage}`,
+    }));
+  const decisions = [
+    ...log.doneTickets.flatMap((group) =>
+      sourced(group.displayId, group.decisions),
+    ),
+    ...(log.spec ? sourced(log.spec.displayId, log.spec.decisions) : []),
+  ];
+  return collectNeedsDecision({
+    decisions,
+    ticketRulings: log.doneTickets.flatMap((group) => group.rulings),
+    specRulings: log.spec?.rulings ?? [],
+    tickets: tickets.rows.map((ticket) => ({
+      displayId: formatDisplayId("ticket", ticket.id),
+      state: ticket.state,
+    })),
   });
 }
 
@@ -779,6 +863,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         ? pack.generatedAt
         : new Date(0).toISOString(),
     agentSeconds: typeof pack.agentSeconds === "number" ? pack.agentSeconds : 0,
+    needsDecision: asArray(pack.needsDecision as never[]),
     integration: pack.integration ?? null,
     cancelledTickets: asArray(pack.cancelledTickets as never[]),
     orderBroken: asArray(pack.orderBroken as never[]),
