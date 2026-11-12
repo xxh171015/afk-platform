@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   ClipboardCheck,
+  Hand,
   Inbox,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -184,6 +185,27 @@ export function Workbench() {
         </div>
       ) : (
         <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
+          {(data.takenOver ?? []).length > 0 ? (
+            <Quadrant
+              title="人接手"
+              icon={<Hand className="size-4 text-state-paused" />}
+              count={data.takenOver.length}
+            >
+              {data.takenOver.map((ticket) => (
+                <ItemLink
+                  key={`taken-${ticket.id}`}
+                  href={paths.ticket(ticket.id)}
+                  displayId={ticket.displayId}
+                  title={ticket.title}
+                >
+                  <StatusBadge kind="ticket" code="taken-over" />
+                  <span>
+                    属于 <Mono>{ticket.specDisplayId}</Mono>
+                  </span>
+                </ItemLink>
+              ))}
+            </Quadrant>
+          ) : null}
           <Quadrant
             title="等你处理"
             icon={<Inbox className="size-4 text-destructive" />}

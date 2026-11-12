@@ -8765,7 +8765,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
+            "description": "The four workbench quadrants, taken-over tickets, and the status area (disk, workers, last cleanup)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9155,6 +9155,40 @@
                         "required": ["spec", "tickets"]
                       }
                     },
+                    "takenOver": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "repo"
+                        ]
+                      }
+                    },
                     "awaitingAcceptance": {
                       "type": "array",
                       "items": {
@@ -9535,6 +9569,7 @@
                   "required": [
                     "waiting",
                     "running",
+                    "takenOver",
                     "awaitingAcceptance",
                     "recentlyCompleted",
                     "status"

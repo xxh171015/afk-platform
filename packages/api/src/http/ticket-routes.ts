@@ -725,11 +725,21 @@ const workbenchRoute = createRoute({
   path: "/workbench",
   responses: {
     200: reply(
-      "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
+      "The four workbench quadrants, taken-over tickets, and the status area (disk, workers, last cleanup)",
       z.object({
         waiting: WorkbenchWaiting,
         running: z.array(
           z.object({ spec: SpecListItem, tickets: z.array(RunningTicket) }),
+        ),
+        takenOver: z.array(
+          z.object({
+            id: Id,
+            displayId: z.string(),
+            specId: Id,
+            specDisplayId: z.string(),
+            title: z.string(),
+            repo: z.string(),
+          }),
         ),
         awaitingAcceptance: z.array(
           z.object({

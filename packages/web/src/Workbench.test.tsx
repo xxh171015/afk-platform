@@ -26,6 +26,7 @@ const emptyWaiting = {
 const empty = {
   waiting: emptyWaiting,
   running: [],
+  takenOver: [],
   awaitingAcceptance: [],
   recentlyCompleted: [],
   status: emptyWorkbench.status,
@@ -230,6 +231,52 @@ describe("the workbench", () => {
     );
     expect(done.getByTitle("2026-11-01 18:00:00")).toBeTruthy();
     expect(done.getByText("2026-11-01 18:00")).toBeTruthy();
+  });
+
+  it("lists taken-over tickets and keeps them out of waiting", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            ...empty,
+            takenOver: [
+              {
+                id: 8,
+                displayId: "T-8",
+                specId: 3,
+                specDisplayId: "S-3",
+                title: "Person's branch",
+                repo: "backend",
+              },
+            ],
+            waiting: {
+              ...emptyWaiting,
+              tickets: [
+                {
+                  id: 9,
+                  displayId: "T-9",
+                  specId: 3,
+                  title: "Stuck",
+                  blockedReason: "agent-gave-up",
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+    const taken = within(await screen.findByTestId("quadrant-人接手"));
+    expect(taken.getByText("T-8").closest("a")?.getAttribute("href")).toBe(
+      "/tickets/8",
+    );
+    expect(taken.getByText("Person's branch")).toBeTruthy();
+    expect(taken.getByTitle("taken-over").textContent).toBe("人接手");
+    expect(taken.queryByText("T-9")).toBeNull();
+    const waiting = within(screen.getByTestId("quadrant-等你处理"));
+    expect(waiting.getByText("T-9")).toBeTruthy();
+    expect(waiting.queryByText("T-8")).toBeNull();
   });
 
   it("says MR when the spec's repos are on GitLab", async () => {

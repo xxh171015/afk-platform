@@ -177,6 +177,38 @@ describe("the spec page", () => {
     expect(new Set(borders).size).toBe(4);
   });
 
+  it("draws a taken-over ticket unlike running or blocked, and names the state in the legend", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            tickets: [
+              ticket(1, "running"),
+              ticket(2, "blocked", { blockedReason: "agent-gave-up" }),
+              ticket(3, "taken-over"),
+            ],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    await screen.findByTestId("node-T-3");
+    expect(node("T-3").getAttribute("data-state")).toBe("taken-over");
+    expect(node("T-3").textContent).toContain("人接手");
+    expect((node("T-3") as HTMLElement).style.borderColor).not.toBe(
+      (node("T-1") as HTMLElement).style.borderColor,
+    );
+    expect((node("T-3") as HTMLElement).style.borderColor).not.toBe(
+      (node("T-2") as HTMLElement).style.borderColor,
+    );
+    const legend = screen.getByRole("list", { name: "票状态图例" });
+    expect(within(legend).getByText("人接手")).toBeTruthy();
+    expect(within(legend).getByText("运行中")).toBeTruthy();
+    expect(within(legend).getByText("已卡住")).toBeTruthy();
+  });
+
   it("names the repo of each ticket on its node in the graph", async () => {
     const server = fakeServer({
       "GET /specs/1": () => ({

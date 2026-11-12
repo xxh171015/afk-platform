@@ -72,4 +72,15 @@ describe("STATE_COLORS", () => {
     expect(STATE_COLORS.blocked.border).toBe("#fa5252");
     expect(STATE_COLORS.done.border).toBe("#40c057");
   });
+
+  it("makes taken-over tickets look unlike running or blocked", () => {
+    expect(STATE_COLORS["taken-over"].border).not.toBe(
+      STATE_COLORS.running.border,
+    );
+    expect(STATE_COLORS["taken-over"].border).not.toBe(
+      STATE_COLORS.blocked.border,
+    );
+    expect(STATE_COLORS["taken-over"].fill).not.toBe(STATE_COLORS.running.fill);
+    expect(STATE_COLORS["taken-over"].fill).not.toBe(STATE_COLORS.blocked.fill);
+  });
 });

@@ -4203,7 +4203,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The four workbench quadrants plus the status area (disk, workers, last cleanup) */
+        /** @description The four workbench quadrants, taken-over tickets, and the status area (disk, workers, last cleanup) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -4317,6 +4317,14 @@ export interface paths {
                   meanMs: number | null;
                   slow: boolean;
                 }[];
+              }[];
+              takenOver: {
+                id: number;
+                displayId: string;
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                repo: string;
               }[];
               awaitingAcceptance: {
                 spec: {
