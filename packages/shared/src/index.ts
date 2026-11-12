@@ -227,6 +227,14 @@ export {
   MAX_INTEGRATION_ROUNDS,
   STAGES,
 } from "./stage-flow.ts";
+export type { StageModelKey, StageModels } from "./stage-models.ts";
+export {
+  mergeStageModels,
+  modelFor,
+  parseStageModels,
+  STAGE_MODEL_KEYS,
+  StageModelsSchema,
+} from "./stage-models.ts";
 export type {
   StructuredBrief,
   StructuredBriefCommand,

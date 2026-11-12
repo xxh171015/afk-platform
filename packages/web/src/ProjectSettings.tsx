@@ -1,4 +1,9 @@
-import type { TicketReviewMode } from "@afk/shared";
+import {
+  STAGE_MODEL_KEYS,
+  type StageModelKey,
+  type StageModels,
+  type TicketReviewMode,
+} from "@afk/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
@@ -37,6 +42,14 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
     useState<TicketReviewMode | null>(null);
   const storedReview = project.data?.ticketReview ?? "spec";
   const ticketReview = ticketReviewDraft ?? storedReview;
+  const [stageModelDraft, setStageModelDraft] = useState<
+    Partial<Record<StageModelKey, string>>
+  >({});
+  const storedModels = project.data?.stageModels ?? {};
+  const stageModelValue = (key: StageModelKey) =>
+    Object.hasOwn(stageModelDraft, key)
+      ? (stageModelDraft[key] ?? "")
+      : (storedModels[key] ?? "");
   const feishu = board.data?.status.feishu;
   const closed = feishu ? feishuClosedMessage(feishu) : null;
 
@@ -62,6 +75,17 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
       const { data, error } = await api.PATCH("/projects/{projectId}", {
         params: { path: { projectId } },
         body: { ticketReview: next },
+      });
+      if (!data) throw new Error(describeError(error));
+      await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      return data;
+    },
+  });
+  const saveStageModels = useMutation({
+    mutationFn: async (next: StageModels) => {
+      const { data, error } = await api.PATCH("/projects/{projectId}", {
+        params: { path: { projectId } },
+        body: { stageModels: next },
       });
       if (!data) throw new Error(describeError(error));
       await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
@@ -105,7 +129,7 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
   return (
     <Page
       title={project.data ? `项目：${project.data.name}` : "项目"}
-      subtitle="此页改飞书群、票级审查，并查仓库托管。模型、并发、保护路径用 plat project edit。"
+      subtitle="此页改飞书群、票级审查、阶段模型，并查仓库托管。默认模型、并发、保护路径用 plat project edit。"
       actions={<StaleNotice error={project.data ? project.error : null} />}
     >
       {!project.data ? (
@@ -141,6 +165,45 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
             </Button>
             {saveReview.error ? (
               <p role="alert">{saveReview.error.message}</p>
+            ) : null}
+          </section>
+          <section aria-label="阶段模型" className="space-y-4">
+            <h2 className="text-sm font-medium">阶段模型</h2>
+            <Hint>
+              只读或机械的环节可以单独指定模型。空白表示用项目默认模型。implement、gate-fix
+              和 Spec 轴不开放。
+            </Hint>
+            {STAGE_MODEL_KEYS.map((key) => (
+              <div key={key} className="block space-y-1 text-sm">
+                <label htmlFor={`stage-model-${key}`}>{key}</label>
+                <Input
+                  id={`stage-model-${key}`}
+                  aria-label={key}
+                  value={stageModelValue(key)}
+                  onChange={(event) =>
+                    setStageModelDraft((prev) => ({
+                      ...prev,
+                      [key]: event.target.value,
+                    }))
+                  }
+                  placeholder="项目默认模型"
+                />
+              </div>
+            ))}
+            <Button
+              type="button"
+              disabled={saveStageModels.isPending}
+              onClick={() => {
+                const next: StageModels = {};
+                for (const key of STAGE_MODEL_KEYS)
+                  next[key] = stageModelValue(key);
+                saveStageModels.mutate(next);
+              }}
+            >
+              保存阶段模型
+            </Button>
+            {saveStageModels.error ? (
+              <p role="alert">{saveStageModels.error.message}</p>
             ) : null}
           </section>
           <section aria-label="飞书通知" className="space-y-4">

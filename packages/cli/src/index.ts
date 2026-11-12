@@ -17,6 +17,8 @@ import {
   parseDisplayId,
   purgedLogMessage,
   SETUP_BRANCH,
+  STAGE_MODEL_KEYS,
+  type StageModels,
   TICKET_REVIEW_MODES,
   type TicketReviewMode,
 } from "@afk/shared";
@@ -461,6 +463,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "ticket-level review: spec (default, Spec axis only) or both",
       toTicketReview,
     )
+    .option(
+      "--stage-model <name=model>",
+      "model for standards, update-branch, or merge-fix (repeatable; empty clears)",
+      collect,
+    )
     .action(async (name: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const { data, response, error } = await api().POST("/projects", {
@@ -474,6 +481,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           mergePolicy: options.mergePolicy,
           limits: parseLimits(options.limit),
           ticketReview: options.ticketReview,
+          stageModels: stageModelsFromPairs(options.stageModel),
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -515,6 +523,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "ticket-level review: spec (Spec axis only) or both",
       toTicketReview,
     )
+    .option(
+      "--stage-model <name=model>",
+      "model for standards, update-branch, or merge-fix (repeatable; empty clears that key)",
+      collect,
+    )
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
@@ -526,10 +539,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         limits: parseLimits(options.limit),
         feishuChatId: options.feishuChat as string | undefined,
         ticketReview: options.ticketReview,
+        stageModels: stageModelsFromPairs(options.stageModel),
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit, --feishu-chat or --ticket-review",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit, --feishu-chat, --ticket-review or --stage-model",
         );
       }
       const projectId = toInt(id);
@@ -2162,6 +2176,32 @@ function specIdOf(text: string): number {
     throw new Failure(`${text} is not a spec id like S-12`);
   }
   return parsed.id;
+}
+
+// --stage-model name=model; empty model clears that key. Other names are refused here so plat
+// does not wait for the API's 400.
+function stageModelsFromPairs(
+  pairs: string[] | undefined,
+): StageModels | undefined {
+  if (!pairs) return undefined;
+  const models: StageModels = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) {
+      throw new Failure(
+        `--stage-model ${pair}: expected name=model (standards, update-branch or merge-fix)`,
+      );
+    }
+    const name = pair.slice(0, eq);
+    const model = pair.slice(eq + 1);
+    if (!(STAGE_MODEL_KEYS as readonly string[]).includes(name)) {
+      throw new Failure(
+        `--stage-model ${pair}: name must be standards, update-branch or merge-fix`,
+      );
+    }
+    models[name as (typeof STAGE_MODEL_KEYS)[number]] = model;
+  }
+  return models;
 }
 
 // --limit name=value, validated by the API against the known limit names.

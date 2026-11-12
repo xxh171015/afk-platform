@@ -87,5 +87,6 @@ export function bundleFor(
     model: null,
     ...rest,
     ticketReview: rest.ticketReview ?? "spec",
+    stageModels: rest.stageModels ?? {},
   };
 }

@@ -2,7 +2,9 @@ import {
   branchNames,
   DEFAULT_TICKET_REVIEW,
   formatDisplayId,
+  parseStageModels,
   resolveLimits,
+  type StageModels,
   type TicketReviewMode,
   type TicketState,
 } from "@afk/shared";
@@ -117,6 +119,8 @@ export interface Bundle {
   model: string | null;
   // Ticket-level review: spec (default) or both. final-review ignores this and always runs both axes.
   ticketReview: TicketReviewMode;
+  // Per-role model overrides (standards, update-branch, merge-fix). Empty: the default model / AFK_MODEL.
+  stageModels: StageModels;
 }
 
 // Defaults where the project sets nothing; only the limits a worker acts on travel, the rest is the API's business.
@@ -124,6 +128,7 @@ const runSettings = (
   limits: unknown,
   defaultModel: unknown,
   ticketReview: unknown,
+  stageModels: unknown,
 ) => {
   const { runIdleSeconds, runWallclockSeconds, maxIntegrationEnvironments } =
     resolveLimits(limits);
@@ -131,6 +136,7 @@ const runSettings = (
     limits: { runIdleSeconds, runWallclockSeconds, maxIntegrationEnvironments },
     model: (defaultModel as string | null) ?? null,
     ticketReview: ticketReview === "both" ? "both" : DEFAULT_TICKET_REVIEW,
+    stageModels: parseStageModels(stageModels),
   };
 };
 
@@ -216,7 +222,7 @@ export async function buildBundle(
             r.id AS repo_id, r.name, r.url, r.default_branch,
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
-            p.protected_paths, p.limits, p.default_model, p.ticket_review
+            p.protected_paths, p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
@@ -306,7 +312,12 @@ export async function buildBundle(
     ]),
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
     gateBaselines: await gateBaselinesFor(pool, row.spec_id, row.repo_id),
-    ...runSettings(row.limits, row.default_model, row.ticket_review),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
   };
 }
 
@@ -324,7 +335,7 @@ async function buildFinalBundle(
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
             p.protected_paths,
-            p.limits, p.default_model, p.ticket_review
+            p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
      LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE s.id = $1`,
@@ -399,7 +410,12 @@ async function buildFinalBundle(
     ),
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
     gateBaselines: await gateBaselinesFor(pool, final.specId, final.repoId),
-    ...runSettings(row.limits, row.default_model, row.ticket_review),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
   };
 }
 
@@ -418,7 +434,7 @@ async function buildUpdateBranchBundle(
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
             p.protected_paths,
-            p.limits, p.default_model, p.ticket_review
+            p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
      LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE s.id = $1`,
@@ -480,7 +496,12 @@ async function buildUpdateBranchBundle(
     review: null,
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
-    ...runSettings(row.limits, row.default_model, row.ticket_review),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
   };
 }
 
@@ -497,7 +518,7 @@ async function buildLocateBundle(
             r.id AS repo_id, r.name, r.url, r.default_branch,
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
-            p.protected_paths, p.limits, p.default_model, p.ticket_review
+            p.protected_paths, p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
      LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE s.id = $1`,
@@ -562,6 +583,11 @@ async function buildLocateBundle(
     review: null,
     gateBaseline: null,
     gateBaselines: [],
-    ...runSettings(row.limits, row.default_model, row.ticket_review),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
   };
 }

@@ -5,6 +5,7 @@ import {
   type PullRequestRowView,
   pauseReasonLabel,
   pullPhrase,
+  type StageModels,
   type StructuredBrief,
   type TicketReviewMode,
 } from "@afk/shared";
@@ -17,6 +18,7 @@ export function projectText(project: {
   defaultAgent: string | null;
   feishuChatId?: string | null;
   ticketReview?: TicketReviewMode;
+  stageModels?: StageModels;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
@@ -29,6 +31,11 @@ export function projectText(project: {
   if (project.ticketReview) {
     lines.push(`ticket-review: ${project.ticketReview}`);
   }
+  const stageModels = Object.entries(project.stageModels ?? {})
+    .filter(([, model]) => model)
+    .map(([role, model]) => `${role}=${model}`)
+    .join(", ");
+  if (stageModels) lines.push(`stage-models: ${stageModels}`);
   return lines.join("\n");
 }
 

@@ -115,6 +115,7 @@ describe("plat init", () => {
         defaultAgent: null,
         feishuChatId: null,
         ticketReview: "spec",
+        stageModels: {},
         repos: [
           {
             name: "afk-pilot-backend",

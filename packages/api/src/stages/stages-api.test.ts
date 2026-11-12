@@ -851,6 +851,21 @@ describe("the bundle", () => {
       limits: { runIdleSeconds: 600, runWallclockSeconds: 3600 },
       model: null,
       ticketReview: "spec",
+      stageModels: {},
+    });
+    await db.pool.query("UPDATE projects SET stage_models = $1", [
+      JSON.stringify({
+        standards: "s",
+        "update-branch": "u",
+        "merge-fix": "m",
+      }),
+    ]);
+    expect((await bundle(claimed)).body).toMatchObject({
+      stageModels: {
+        standards: "s",
+        "update-branch": "u",
+        "merge-fix": "m",
+      },
     });
     await db.pool.query(
       "UPDATE projects SET default_model = 'composer-2', limits = $1",

@@ -115,6 +115,24 @@
                   "ticketReview": {
                     "type": "string",
                     "enum": ["spec", "both"]
+                  },
+                  "stageModels": {
+                    "type": "object",
+                    "properties": {
+                      "standards": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "update-branch": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "merge-fix": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": ["name"],
@@ -146,7 +164,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported, or ticketReview is not spec or both",
+            "description": "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
             "content": {
               "application/json": {
                 "schema": {
@@ -253,6 +271,24 @@
                       "type": "string",
                       "enum": ["spec", "both"]
                     },
+                    "stageModels": {
+                      "type": "object",
+                      "properties": {
+                        "standards": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "update-branch": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "merge-fix": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "additionalProperties": false
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -291,6 +327,7 @@
                     "defaultAgent",
                     "feishuChatId",
                     "ticketReview",
+                    "stageModels",
                     "repos"
                   ]
                 }
@@ -426,6 +463,24 @@
                   "ticketReview": {
                     "type": "string",
                     "enum": ["spec", "both"]
+                  },
+                  "stageModels": {
+                    "type": "object",
+                    "properties": {
+                      "standards": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "update-branch": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "merge-fix": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -453,7 +508,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported, or ticketReview is not spec or both",
+            "description": "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
             "content": {
               "application/json": {
                 "schema": {
@@ -3415,6 +3470,24 @@
                     "ticketReview": {
                       "type": "string",
                       "enum": ["spec", "both"]
+                    },
+                    "stageModels": {
+                      "type": "object",
+                      "properties": {
+                        "standards": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "update-branch": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "merge-fix": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -3438,7 +3511,8 @@
                     "gateBaselines",
                     "limits",
                     "model",
-                    "ticketReview"
+                    "ticketReview",
+                    "stageModels"
                   ]
                 }
               }

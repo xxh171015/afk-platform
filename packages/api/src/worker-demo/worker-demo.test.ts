@@ -2010,6 +2010,85 @@ describe("what the project says about a run", { timeout: 60_000 }, () => {
     expect(new Set(seen)).toEqual(new Set(["project-model"]));
   });
 
+  it("uses stageModels.standards on both layers' Standards runs, and the default model on Spec and implement", async () => {
+    await confirmedSpec([ticket("a")], {
+      defaultModel: "default-model",
+      ticketReview: "both",
+      stageModels: { standards: "standards-model" },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const rows = (
+      await db.pool.query<{
+        stage: string;
+        axis: string | null;
+        model: string | null;
+      }>(
+        "SELECT stage, axis, model FROM runs WHERE stage IN ('implement', 'review', 'final-review') ORDER BY id",
+      )
+    ).rows;
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { stage: "implement", axis: null, model: "default-model" },
+        { stage: "review", axis: "standards", model: "standards-model" },
+        { stage: "review", axis: "spec", model: "default-model" },
+        { stage: "final-review", axis: "standards", model: "standards-model" },
+        { stage: "final-review", axis: "spec", model: "default-model" },
+      ]),
+    );
+    expect(rows).toHaveLength(5);
+  });
+
+  it("uses stageModels merge-fix on the merge-fix Run and the default model on implement", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      defaultModel: "default-model",
+      stageModels: { "merge-fix": "merge-model" },
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") {
+          return { files: { "shared.txt": `${ctx.branch}\n` }, output: DONE };
+        }
+        if (ctx.stage === "merge-fix") {
+          git(ctx.dir, [
+            "fetch",
+            "--quiet",
+            ".",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
+          ]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
+          return { files: { "shared.txt": "settled\n" }, output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    const models = (
+      await db.pool.query<{ stage: string; model: string | null }>(
+        "SELECT stage, model FROM runs WHERE stage IN ('implement', 'merge-fix') ORDER BY id",
+      )
+    ).rows;
+    expect(models.filter((row) => row.stage === "implement")).toEqual([
+      { stage: "implement", model: "default-model" },
+      { stage: "implement", model: "default-model" },
+    ]);
+    expect(models.filter((row) => row.stage === "merge-fix")).toEqual([
+      { stage: "merge-fix", model: "merge-model" },
+    ]);
+  });
+
   it("uploads Cursor's raw event lines to the Run's log, without the secrets", async () => {
     await confirmedSpec([ticket("a")]);
     const secret = "key_abcdef0123456789";

@@ -59,6 +59,7 @@ import {
   classifyPushError,
   formatPushFailure,
   isNetworkPushError,
+  modelFor,
   type PushFailureTips,
   type ReviewAxis,
   reviewAxesFor,
@@ -113,9 +114,19 @@ export interface StageContext {
 }
 
 // What a run is asked for, from the project's say (the bundle) and the worker's own defaults.
-function runOptions(deps: ExecutorDeps, context: StageContext) {
+function runOptions(
+  deps: ExecutorDeps,
+  context: StageContext,
+  axis?: ReviewAxis,
+) {
   const { bundle } = context;
-  const model = bundle.model ?? deps.model;
+  const model = modelFor({
+    stage: bundle.job.stage,
+    axis,
+    stageModels: bundle.stageModels,
+    defaultModel: bundle.model,
+    workerModel: deps.model,
+  });
   return {
     idleSeconds: bundle.limits.runIdleSeconds,
     wallClockMs: bundle.limits.runWallclockSeconds * 1000,
@@ -716,10 +727,10 @@ async function review(
     bringBranches(slot, mainDir, [...branches.values()]);
     const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
     const { refs, refShas } = snapshotRefs(deps, bundle);
-    const options = runOptions(deps, context);
     const runs = await Promise.all(
       axes.map(async (axis) => {
         const given = writePrompt(join(tmp, axis), promptFor(stage, { axis }));
+        const options = runOptions(deps, context, axis);
         const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
           stage,
           branch: branches.get(axis) as string,
@@ -731,7 +742,7 @@ async function review(
           ...options,
           signal: context.signal,
         });
-        return { axis, given, run };
+        return { axis, given, run, options };
       }),
     );
     if (context.signal.aborted)
@@ -754,7 +765,7 @@ async function review(
         log(
           `review: WARNING the ${axis} review made ${run.commits.length} commit(s); it should only read`,
         );
-    const factsOf = ({ axis, given, run }: (typeof runs)[number]) => {
+    const factsOf = ({ axis, given, run, options }: (typeof runs)[number]) => {
       const sources = reviewSources(run.output);
       return {
         axis,

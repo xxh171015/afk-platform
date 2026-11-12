@@ -578,6 +578,7 @@ describe("project view", () => {
       defaultAgent: null,
       feishuChatId: null,
       ticketReview: "spec",
+      stageModels: {},
       repos: [
         {
           name: "backend",
@@ -823,6 +824,66 @@ describe("ticketReview", () => {
     ).toBe("both");
     expect(
       (await post("/projects", { name: "nope", ticketReview: "off" })).status,
+    ).toBe(400);
+  });
+});
+
+describe("stageModels", () => {
+  it("stores the three roles, clears one, and refuses any other key", async () => {
+    const created = await post("/projects", {
+      name: "shop",
+      stageModels: { standards: "s", "update-branch": "u" },
+    });
+    expect(created.status).toBe(201);
+    expect(
+      (
+        await fetch(`${api.url}/projects/${created.body.id}`).then((r) =>
+          r.json(),
+        )
+      ).stageModels,
+    ).toEqual({ standards: "s", "update-branch": "u" });
+    expect(
+      (
+        await patch(`/projects/${created.body.id}`, {
+          stageModels: { "merge-fix": "m" },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await db.pool.query("SELECT stage_models FROM projects WHERE id = $1", [
+          created.body.id,
+        ])
+      ).rows[0].stage_models,
+    ).toEqual({ standards: "s", "update-branch": "u", "merge-fix": "m" });
+    expect(
+      (
+        await patch(`/projects/${created.body.id}`, {
+          stageModels: { standards: "" },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await fetch(`${api.url}/projects/${created.body.id}`).then((r) =>
+          r.json(),
+        )
+      ).stageModels,
+    ).toEqual({ "update-branch": "u", "merge-fix": "m" });
+    expect(
+      (
+        await patch(`/projects/${created.body.id}`, {
+          stageModels: { implement: "x" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await post("/projects", { name: "nope", stageModels: { spec: "x" } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await post("/projects", { name: "nope", stageModels: { review: "x" } }))
+        .status,
     ).toBe(400);
   });
 });

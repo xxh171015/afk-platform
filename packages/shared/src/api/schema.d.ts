@@ -71,6 +71,11 @@ export interface paths {
             };
             /** @enum {string} */
             ticketReview?: "spec" | "both";
+            stageModels?: {
+              standards?: string;
+              "update-branch"?: string;
+              "merge-fix"?: string;
+            };
           };
         };
       };
@@ -87,7 +92,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported, or ticketReview is not spec or both */
+        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -137,6 +142,11 @@ export interface paths {
               feishuChatId: string | null;
               /** @enum {string} */
               ticketReview: "spec" | "both";
+              stageModels: {
+                standards?: string;
+                "update-branch"?: string;
+                "merge-fix"?: string;
+              };
               repos: {
                 name: string;
                 url: string;
@@ -198,6 +208,11 @@ export interface paths {
             };
             /** @enum {string} */
             ticketReview?: "spec" | "both";
+            stageModels?: {
+              standards?: string;
+              "update-branch"?: string;
+              "merge-fix"?: string;
+            };
           };
         };
       };
@@ -213,7 +228,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported, or ticketReview is not spec or both */
+        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -2060,6 +2075,11 @@ export interface paths {
               model: string | null;
               /** @enum {string} */
               ticketReview: "spec" | "both";
+              stageModels: {
+                standards?: string;
+                "update-branch"?: string;
+                "merge-fix"?: string;
+              };
             };
           };
         };

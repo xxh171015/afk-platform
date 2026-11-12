@@ -5,10 +5,13 @@ import {
   type HostKind,
   type ImportWarning,
   type LimitOverrides,
+  mergeStageModels,
   type PlanningDocsAtImport,
   parseDisplayId,
+  parseStageModels,
   planImport,
   type SPEC_TYPES,
+  type StageModels,
   type TicketReviewMode,
 } from "@afk/shared";
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
@@ -36,6 +39,7 @@ export interface NewProject {
   mergePolicy?: string;
   limits?: LimitOverrides;
   ticketReview?: TicketReviewMode;
+  stageModels?: StageModels;
 }
 
 export async function createProject(
@@ -43,8 +47,8 @@ export async function createProject(
   project: NewProject,
 ): Promise<{ id: number; name: string }> {
   const { rows } = await pool.query(
-    `INSERT INTO projects (name, default_agent, default_model, protected_paths, max_concurrency, budget_limit, merge_policy, limits, ticket_review)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name`,
+    `INSERT INTO projects (name, default_agent, default_model, protected_paths, max_concurrency, budget_limit, merge_policy, limits, ticket_review, stage_models)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, name`,
     [
       project.name,
       project.defaultAgent ?? null,
@@ -55,6 +59,7 @@ export async function createProject(
       project.mergePolicy ?? null,
       JSON.stringify(project.limits ?? {}),
       project.ticketReview ?? DEFAULT_TICKET_REVIEW,
+      JSON.stringify(parseStageModels(project.stageModels ?? {})),
     ],
   );
   return rows[0];
@@ -70,6 +75,7 @@ export type ProjectEdit = Partial<
     | "budgetLimit"
     | "limits"
     | "ticketReview"
+    | "stageModels"
   >
 > & {
   feishuChatId?: string | null;
@@ -102,6 +108,19 @@ export async function editProject(
   if (edit.feishuChatId !== undefined)
     set("feishu_chat_id", edit.feishuChatId === "" ? null : edit.feishuChatId);
   if (edit.ticketReview !== undefined) set("ticket_review", edit.ticketReview);
+  if (edit.stageModels !== undefined) {
+    const current = await pool.query(
+      "SELECT stage_models FROM projects WHERE id = $1",
+      [projectId],
+    );
+    if (current.rowCount === 0) return { status: "no-project" };
+    set(
+      "stage_models",
+      JSON.stringify(
+        mergeStageModels(current.rows[0].stage_models, edit.stageModels),
+      ),
+    );
+  }
   // An empty edit still has to tell a missing project from an existing one.
   const { rowCount } = await pool.query(
     `UPDATE projects SET ${assignments.join(", ") || "id = id"} WHERE id = $1`,

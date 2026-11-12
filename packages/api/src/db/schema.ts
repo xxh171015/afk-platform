@@ -71,6 +71,8 @@ export const projects = pgTable(
     feishuChatId: text("feishu_chat_id"),
     // Ticket-level review: Spec only (default) or both axes. final-review is always both (ADR 0002).
     ticketReview: text("ticket_review").notNull().default("spec"),
+    // Per-role model overrides: standards, update-branch, merge-fix. Empty object: the default model.
+    stageModels: jsonb("stage_models").notNull().default({}),
     createdAt: createdAt(),
   },
   (t) => [
