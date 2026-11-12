@@ -2,7 +2,7 @@
 
 ## 本机用哪份 skill
 
-用 `.claude/skills/` 里的 Matt 原版（按 `skills-lock.json` 装的）。`packages/pipeline/skills/` 是 worker 挂进沙箱的副本，根目录 `skills/` 是装到各团队规划机器上的副本：本机开发不读它们，也不手改（见各自的 `VENDORED.md`）。
+用 `.claude/skills/` 里的 Matt 原版（软链到 `.agents/skills/`，按 `skills-lock.json` 装的）。`packages/pipeline/skills/` 是 worker 挂进沙箱的副本，根目录 `skills/` 是装到各团队规划机器上的副本：本机开发不读它们，也不手改（见各自的 `VENDORED.md`）。
 
 ## 本机平台栈（checkout / 重启 / 镜像）
 
