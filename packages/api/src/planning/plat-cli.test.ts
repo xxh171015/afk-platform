@@ -526,6 +526,29 @@ describe("plat", () => {
     expect(none.stderr).toMatch(/nothing to change/);
   });
 
+  it("writes and reads a project's Feishu chat id with --feishu-chat", async () => {
+    await plat("project", "create", "shop");
+    const edited = await plat(
+      "project",
+      "edit",
+      "1",
+      "--feishu-chat",
+      "oc_shop",
+    );
+    expect(edited).toEqual({
+      code: 0,
+      stdout: "project 1 updated\n",
+      stderr: "",
+    });
+    expect(
+      (await db.pool.query("SELECT feishu_chat_id FROM projects WHERE id = 1"))
+        .rows[0].feishu_chat_id,
+    ).toBe("oc_shop");
+    const shown = await plat("project", "show", "1");
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain("oc_shop");
+  });
+
   it("refuses project create with --default-agent claude-code and says only Cursor is supported", async () => {
     const refused = await plat(
       "project",
@@ -1383,6 +1406,151 @@ describe("plat", () => {
     });
     expect(code).toBe(1);
     expect(errors).toMatch(/^error: cannot reach the API/);
+  });
+});
+
+describe("plat spec create --source", () => {
+  it("writes the original spec on a bug and GET returns its display id", async () => {
+    await register();
+    const created = await plat(
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "bug",
+      "--title",
+      "Export crash",
+      "--slug",
+      "export-crash",
+      "--source",
+      "S-1",
+    );
+    expect(created.code).toBe(0);
+    expect(created.stdout).toBe("S-2\n");
+    const view = (await (await fetch(`${api.url}/specs/2`)).json()) as {
+      spec: { sourceSpec: { displayId: string } | null };
+    };
+    expect(view.spec.sourceSpec?.displayId).toBe("S-1");
+  });
+
+  it("creates a bug without --source and leaves the original spec empty", async () => {
+    await plat("project", "create", "shop");
+    const created = await plat(
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "bug",
+      "--title",
+      "Unknown crash",
+      "--slug",
+      "unknown-crash",
+    );
+    expect(created.code).toBe(0);
+    const view = (await (await fetch(`${api.url}/specs/1`)).json()) as {
+      spec: { sourceSpec: { displayId: string } | null };
+    };
+    expect(view.spec.sourceSpec).toBeNull();
+  });
+});
+
+describe("plat bug", () => {
+  const REPORT =
+    "TypeError: Cannot read properties of undefined (reading 'id')\nat exportOrders (src/orders.ts:12)";
+
+  it("creates a bug draft from the report and enqueues one locate-bug job", async () => {
+    await plat("project", "create", "shop");
+    await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "backend",
+      "--url",
+      "git@github.com:acme/backend.git",
+    );
+    files["report.txt"] = REPORT;
+    const created = await plat("bug", "--project", "1", "--file", "report.txt");
+    expect(created.code).toBe(0);
+    expect(created.stdout).toBe("S-1\n");
+    const view = (await (await fetch(`${api.url}/specs/1`)).json()) as {
+      spec: { type: string; state: string; body: string };
+      tickets: unknown[];
+    };
+    expect(view.spec).toMatchObject({
+      type: "bug",
+      state: "draft",
+      body: REPORT,
+    });
+    expect(view.tickets).toEqual([]);
+    const jobs = await db.pool.query<{
+      type: string;
+      payload: Record<string, unknown>;
+    }>("SELECT type, payload FROM jobs WHERE (payload->>'specId')::int = 1");
+    expect(jobs.rows).toHaveLength(1);
+    expect(jobs.rows[0]).toMatchObject({
+      type: "agent-run",
+      payload: { stage: "locate-bug", specId: 1 },
+    });
+    expect(jobs.rows[0]?.payload).not.toHaveProperty("ticketId");
+  });
+});
+
+describe("plat spec retry-locate", () => {
+  it("enqueues locate again and does not import tickets or confirm", async () => {
+    await plat("project", "create", "shop");
+    await plat(
+      "repo",
+      "add",
+      "--project",
+      "1",
+      "--name",
+      "backend",
+      "--url",
+      "git@github.com:acme/backend.git",
+    );
+    files["report.txt"] = "no such file in this project";
+    expect(
+      (await plat("bug", "--project", "1", "--file", "report.txt")).code,
+    ).toBe(0);
+    const worker = new FakeWorker(api.url, "w1", []);
+    const job = (await worker.claim()).body.job;
+    await worker.complete(job?.id as number, job?.attempt as number, {
+      stage: "locate-bug",
+      outcome: "unlocated",
+      locate: {
+        repo: "",
+        files: [],
+        evidence: "none",
+        reproduction: "",
+        commits: [],
+      },
+      run: {
+        output: {
+          result: "unlocated",
+          repo: "",
+          files: [],
+          evidence: "none",
+          reproduction: "",
+        },
+      },
+    });
+    const retried = await plat("spec", "retry-locate", "S-1");
+    expect(retried.code).toBe(0);
+    const view = (await (await fetch(`${api.url}/specs/1`)).json()) as {
+      spec: { state: string };
+      tickets: unknown[];
+    };
+    expect(view.spec.state).toBe("draft");
+    expect(view.tickets).toEqual([]);
+    const jobs = await db.pool.query(
+      `SELECT payload FROM jobs WHERE (payload->>'specId')::int = 1 AND payload->>'stage' = 'locate-bug'`,
+    );
+    expect(jobs.rows).toHaveLength(2);
+    expect((await plat("spec", "retry-locate", "S-1")).code).toBe(1);
   });
 });
 

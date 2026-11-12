@@ -278,6 +278,19 @@ export function Workbench() {
                     <StatusBadge kind="spec" code="paused" />
                   </ItemLink>
                 ))}
+                {(data.waiting.locates ?? []).map((item) => (
+                  <ItemLink
+                    key={`locate-${item.specId}`}
+                    href={paths.spec(item.specId)}
+                    displayId={item.specDisplayId}
+                    title={item.title}
+                  >
+                    <StatusBadge
+                      kind="blocked"
+                      code={item.reason ?? "bug-unlocated"}
+                    />
+                  </ItemLink>
+                ))}
               </>
             )}
           </Quadrant>
@@ -382,6 +395,17 @@ export function Workbench() {
   );
 }
 
+export function feishuClosedMessage(feishu: {
+  open: boolean;
+  closedReason: "missing" | "permissions" | "invalid" | null;
+}): string | null {
+  if (feishu.open) return null;
+  if (feishu.closedReason === "permissions")
+    return "飞书渠道已关闭：密钥文件权限过宽";
+  if (feishu.closedReason === "invalid") return "飞书渠道已关闭：密钥文件无效";
+  return "飞书渠道已关闭：密钥文件不存在";
+}
+
 function StatusArea({
   status,
 }: {
@@ -389,6 +413,10 @@ function StatusArea({
     logDirBytes: number;
     apiFreeBytes: number;
     lastCleanup: { at: string | null; runs: number; orphans: number };
+    feishu?: {
+      open: boolean;
+      closedReason: "missing" | "permissions" | "invalid" | null;
+    };
     workers: Array<{
       id: string;
       reportedAt: string;
@@ -397,6 +425,9 @@ function StatusArea({
     }>;
   };
 }) {
+  const feishuClosed = status.feishu
+    ? feishuClosedMessage(status.feishu)
+    : null;
   return (
     <footer
       data-testid="workbench-status"
@@ -424,6 +455,7 @@ function StatusArea({
           ? `最近清理删了 ${status.lastCleanup.runs} 个 Run 日志、${status.lastCleanup.orphans} 个孤儿目录`
           : "还没有做过日志清理"}
       </p>
+      {feishuClosed ? <p>{feishuClosed}</p> : null}
     </footer>
   );
 }

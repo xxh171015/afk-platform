@@ -36,8 +36,7 @@ _Avoid_: setup PR、接入 PR
 平台在规划仓库的集成分支上提交本 Spec 规划文档改动得到的那个提交，叠在 Setup commit 之上；没有规划文档改动时，是 Setup commit，两者都没有时，是规划仓库默认分支当时的最新提交。所有票开工前它就要存在，其他仓库的票按它读规划文档。身份是 SHA，不是分支名。
 _Avoid_: 规划 SHA、文档提交、规划分支
 
-**Spec（需求）**：
-一个要交付的需求（feature / bug / improvement），是拆票的来源。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
+**Spec（需求）*一个要交付的需求（feature / bug / improvement），是拆票的来源。bug 类型可以指向它所修的原 Spec，也可以没有原 Spec。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
 **User Story（用户故事）**：
@@ -66,6 +65,11 @@ _Avoid_: bug 票、返工票
 
 **Diagnosis（诊断）**：
 联调票的 e2e 失败后，agent 在一个新起的联调环境里只看不改，查出哪个仓库有问题（`failingRepo`，查不出来是 `unknown`），并给出证据和失败用例。平台据此建修复票。
+_Avoid_: 定位
+
+**Locate（定位）**：
+一次只读的 agent 运行，把一份 bug 报告对到仓库、文件、原 Ticket 和原 Spec。不是 Diagnosis，也不建 Fix ticket。
+_Avoid_: 诊断、triage、自动拆票
 
 **Integration round（联调轮）**：
 一次失败的 e2e 加随后建出的修复票算一轮，最多两轮；第三次 e2e 失败就进 blocked。人「重新跑 e2e」时轮数清零。每次 e2e（不论成败）叫一次联调运行（attempt）。
@@ -164,7 +168,7 @@ _Avoid_: 白名单、豁免路径
 票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。
 
 **Waiting queue（待处理队列）**：
-需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec。不是 Ticket 状态 pending。
+需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。
 _Avoid_: pending 队列、待处理项
 
 **Notification（通知）**：
@@ -180,7 +184,8 @@ _Avoid_: 评论、issue
 _Avoid_: 维度、审查类型
 
 **Link（追溯链接）**：
-commit 与 Ticket、Spec、PR、缺陷之间的对应关系。
+commit 与 Ticket、Spec、PR 之间的对应关系。bug 类型的 Spec 是其中的 Spec，不是另一种实体。
+_Avoid_: 缺陷、追溯表、关联
 
 **Acceptance pack（验收包）**：
 Spec 收尾时给人看的简报，人据此决定是否合并。出现在平台上，并写入各仓库 PR 的描述（该仓库那一节，外加合并顺序和联调）。
@@ -193,8 +198,12 @@ _Avoid_: 发布顺序、上线顺序
 ## 度量
 
 **Event（事件）**：
-平台记下的一件已经发生的事：一次状态变化，或人的一次操作，带时间、来源和原因码，只追加不修改。度量从事件算。
+平台记下的一件已经发生的事：一次状态变化、人的一次操作，或一项系统状况，带时间、来源和原因码，只追加不修改。度量从事件算。
 _Avoid_: 日志、记录、审计
+
+**System condition（系统状况）**：
+不是需求或票的状态变化、也不是人的操作，但已经发生、要让人知道的事：磁盘告警、agent 暂停、令牌到期。记成 Event。
+_Avoid_: 旁路通知
 
 **Failure source（失败来源）**：
 一次失败或 blocked 该算在谁头上：平台、外部服务、agent、需求本身（包括项目自己的门禁、联调和契约配置）。由原因码决定，发生时就定下，不事后改判。

@@ -6,10 +6,11 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import type pg from "pg";
 import { type DiskSample, sampleDisk, volumeFreeBytes } from "./disk.ts";
-import { EventsHub } from "./events/hub.ts";
+import { bindEventsHub, EventsHub } from "./events/hub.ts";
 import { withOrigin } from "./events/origin.ts";
 import { registerCliRoutes } from "./http/cli-routes.ts";
 import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
+import { registerLinkRoutes } from "./http/link-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerMetricsRoutes } from "./http/metrics-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
@@ -18,9 +19,19 @@ import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
 import { LogStore } from "./logs/log-store.ts";
 import {
+  fanOutNotifications,
+  macosNotifications,
   type NotificationChannel,
+  type RunCommand,
   silentNotifications,
 } from "./notify/channel.ts";
+import { bindDispatcher, NotificationDispatcher } from "./notify/dispatch.ts";
+import {
+  createFeishuChannel,
+  type FeishuHandle,
+  type FeishuHttp,
+  feishuSecretsPath,
+} from "./notify/feishu.ts";
 
 export interface AppOptions {
   pool: pg.Pool;
@@ -32,7 +43,20 @@ export interface AppOptions {
   statDisk?: (path: string) => Promise<DiskSample>;
   events?: EventsHub;
   notifications?: NotificationChannel;
+  // When true and notifications is omitted, assemble macOS plus an open Feishu channel.
+  liveNotifications?: boolean;
+  macosRun?: RunCommand;
+  feishu?: {
+    secretsPath?: string;
+    http?: FeishuHttp;
+    defaultChatId?: string;
+    clock?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    log?: (message: string) => void;
+  };
   sseKeepaliveMs?: number;
+  // Tests inject this so the 30s notice window can fire when FakeClock advances.
+  schedule?: (ms: number, fn: () => unknown) => () => void;
 }
 
 export interface AppContext {
@@ -46,7 +70,9 @@ export interface AppContext {
   freeBytes: (path: string) => Promise<number>;
   events: EventsHub;
   notifications: NotificationChannel;
+  feishu: FeishuHandle;
   sseKeepaliveMs: number;
+  schedule: (ms: number, fn: () => unknown) => () => void;
 }
 
 export const LEASE_SECONDS = 120;
@@ -57,6 +83,32 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 export function createApp(options: AppOptions): OpenAPIHono {
   const logDir = options.logDir ?? mkdtempSync(join(tmpdir(), "afk-logs-"));
   const injectedStat = options.statDisk;
+  const feishu = createFeishuChannel({
+    secretsPath: options.feishu?.secretsPath ?? feishuSecretsPath(),
+    http: options.feishu?.http,
+    clock: options.feishu?.clock,
+    sleep: options.feishu?.sleep,
+    log: options.feishu?.log,
+    defaultChatId:
+      options.feishu?.defaultChatId ?? process.env.AFK_FEISHU_DEFAULT_CHAT,
+    resolveChatId: async (projectId) => {
+      if (typeof options.pool?.query !== "function" || projectId == null) {
+        return undefined;
+      }
+      try {
+        const { rows } = await options.pool.query<{
+          feishu_chat_id: string | null;
+        }>("SELECT feishu_chat_id FROM projects WHERE id = $1", [projectId]);
+        return rows[0]?.feishu_chat_id ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  });
+  const live = fanOutNotifications([
+    macosNotifications(options.macosRun),
+    ...(feishu.state.open ? [feishu.channel] : []),
+  ]);
   const context: AppContext = {
     pool: options.pool,
     clock: options.clock ?? (() => new Date()),
@@ -68,10 +120,36 @@ export function createApp(options: AppOptions): OpenAPIHono {
       ? async (path) => (await injectedStat(path)).freeBytes
       : volumeFreeBytes,
     events: options.events ?? new EventsHub(),
-    notifications: options.notifications ?? silentNotifications,
+    notifications:
+      options.notifications ??
+      (options.liveNotifications ? live : silentNotifications),
+    feishu,
     sseKeepaliveMs: options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS,
+    schedule:
+      options.schedule ??
+      ((ms, fn) => {
+        const timer = setTimeout(fn, ms);
+        timer.unref?.();
+        return () => clearTimeout(timer);
+      }),
   };
   const app = new OpenAPIHono();
+  bindEventsHub(app, context.events);
+  bindDispatcher(
+    app,
+    new NotificationDispatcher({
+      pool: context.pool,
+      hub: context.events,
+      notifications: context.notifications,
+      schedule: context.schedule,
+    }),
+  );
+  if (
+    options.events === undefined &&
+    typeof options.pool?.connect === "function"
+  ) {
+    void context.events.listen(options.pool);
+  }
   // The API starts agents and has no login, so it only talks to this machine. CORS alone would only stop a foreign
   // page from reading answers: a plain cross-site POST would still be carried out. So a request that names a
   // foreign Origin (a browser on another site) or a foreign Host (DNS rebinding) is refused outright.
@@ -113,6 +191,7 @@ export function createApp(options: AppOptions): OpenAPIHono {
   registerWorkerRoutes(app, context);
   registerLogRoutes(app, context);
   registerTicketRoutes(app, context);
+  registerLinkRoutes(app, context);
   registerMetricsRoutes(app, context);
   registerEventRoutes(app, context);
   return app;

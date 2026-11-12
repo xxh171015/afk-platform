@@ -58,6 +58,10 @@ export const emptyWorkbench = {
     warnGib: 10,
     stopGib: 5,
     lastCleanup: { at: null as string | null, runs: 0, orphans: 0 },
+    feishu: {
+      open: false as boolean,
+      closedReason: "missing" as "missing" | "permissions" | "invalid" | null,
+    },
     workers: [] as Array<{
       id: string;
       reportedAt: string;

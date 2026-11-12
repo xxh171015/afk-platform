@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FAILURE_SOURCE_OF_REASON,
   failureSourceOf,
+  isSandboxOomError,
   PAUSE_REASONS,
   pauseReasonLabel,
   REASON_CODES,
@@ -16,7 +17,9 @@ describe("failure source of a reason code", () => {
     expect(failureSourceOf("integration-environment-failed")).toBe("spec");
     expect(failureSourceOf("update-branch-gate-failed")).toBe("spec");
     expect(failureSourceOf("planning-conflict")).toBe("spec");
+    expect(failureSourceOf("bug-unlocated")).toBe("spec");
     expect(failureSourceOf("lease-expired")).toBe("platform");
+    expect(failureSourceOf("sandbox-oom")).toBe("platform");
     expect(failureSourceOf("sync-error")).toBe("external");
   });
 
@@ -36,6 +39,12 @@ describe("failure source of a reason code", () => {
 
   it("treats an unknown code as the platform's", () => {
     expect(failureSourceOf("something-new")).toBe("platform");
+  });
+
+  it("recognises a sandbox OOMKilled error as sandbox-oom", () => {
+    expect(isSandboxOomError("sandbox-oom: container OOMKilled")).toBe(true);
+    expect(isSandboxOomError("OOMKilled")).toBe(true);
+    expect(isSandboxOomError("docker daemon not running")).toBe(false);
   });
 });
 

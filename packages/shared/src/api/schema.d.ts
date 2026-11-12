@@ -131,6 +131,7 @@ export interface paths {
               id: number;
               name: string;
               defaultAgent: string | null;
+              feishuChatId: string | null;
               repos: {
                 name: string;
                 url: string;
@@ -174,6 +175,7 @@ export interface paths {
           "application/json": {
             defaultAgent?: string;
             defaultModel?: string;
+            feishuChatId?: string;
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -342,6 +344,80 @@ export interface paths {
       };
     };
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/projects/{projectId}/feishu-test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          projectId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description A test card was sent to the project's group or the default group */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              sent: true;
+              chatId: string;
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Feishu is closed or no chat is configured */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Feishu send failed */
+        502: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;
@@ -797,6 +873,76 @@ export interface paths {
     };
     trace?: never;
   };
+  "/bugs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            projectId: number;
+            body: string;
+            title?: string;
+            slug?: string;
+            planningRepo?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description A bug draft was created and a locate-bug job was queued */
+        201: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              displayId: string;
+            };
+          };
+        };
+        /** @description No such project */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The project has no repo, or the planning repo name is unknown */
+        422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs": {
     parameters: {
       query?: never;
@@ -913,6 +1059,7 @@ export interface paths {
             title: string;
             body?: string;
             planningRepo?: string;
+            sourceSpecId?: number;
           };
         };
       };
@@ -951,7 +1098,7 @@ export interface paths {
             };
           };
         };
-        /** @description The project has no repo of that name */
+        /** @description The project has no repo of that name, or the source spec is not allowed */
         422: {
           headers: {
             [name: string]: unknown;
@@ -1143,6 +1290,68 @@ export interface paths {
         };
         /** @description The patch is too large */
         422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{specId}/locate/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          specId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Locate is queued again; the draft stays a draft */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {boolean} */
+              ok: true;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Locate is not waiting for a retry */
+        409: {
           headers: {
             [name: string]: unknown;
           };
@@ -1898,7 +2107,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -1962,6 +2171,16 @@ export interface paths {
                   /** @enum {string} */
                   kind: "repo-access";
                   repoUrl: string;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "index-pr-links";
+                  repoUrl: string;
+                  repoName: string;
+                  defaultBranch: string;
+                  number: number;
+                  mergeSha: string | null;
+                  squashSha: string | null;
                 };
           };
         };
@@ -2991,6 +3210,30 @@ export interface paths {
                   message: string;
                 }[];
                 tokenMerged: boolean;
+                sourceSpec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                } | null;
+                bugs: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                }[];
               };
               tickets: {
                 id: number;
@@ -3372,7 +3615,8 @@ export interface paths {
                   | "ticket-appended"
                   | "pause"
                   | "resume"
-                  | "merged";
+                  | "merged"
+                  | "action";
                 at: string;
                 text: string;
                 runId?: number;
@@ -3380,6 +3624,7 @@ export interface paths {
                 /** @enum {string} */
                 failureSource?: "platform" | "external" | "agent" | "spec";
               }[];
+              timelineLegacy: boolean;
               finalRuns: {
                 id: number;
                 displayId: string;
@@ -3406,6 +3651,22 @@ export interface paths {
                 waitingMs: number;
                 totalMs: number;
               } | null;
+              links: {
+                /** @enum {string} */
+                kind: "ticket" | "pr";
+                repo: string;
+                sha: string;
+                specId: number;
+                specDisplayId: string;
+                ticketId: number | null;
+                ticketDisplayId: string | null;
+                runId: number | null;
+                runDisplayId: string | null;
+                pullRequestId: number | null;
+                pullRequestNumber: number | null;
+                pullRequestUrl: string | null;
+                pullNumber: number | null;
+              }[];
             };
           };
         };
@@ -3832,6 +4093,27 @@ export interface paths {
                   | "spec"
                   | null;
               }[];
+              locates: {
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                reason: string;
+                waitingSince?: string;
+                blocking?: {
+                  downstream: string[];
+                  finalization: boolean;
+                  pullRequests: boolean;
+                  spec: boolean;
+                  merge: boolean;
+                };
+                /** @enum {string|null} */
+                failureSource?:
+                  | "platform"
+                  | "external"
+                  | "agent"
+                  | "spec"
+                  | null;
+              }[];
               items: (
                 | {
                     /** @enum {string} */
@@ -3872,6 +4154,11 @@ export interface paths {
                     /** @enum {string} */
                     kind: "pausedSpec";
                     id: number;
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "locate";
+                    specId: number;
                   }
               )[];
             };
@@ -3950,6 +4237,12 @@ export interface paths {
                   id: number;
                   displayId: string;
                   title: string;
+                }[];
+                locates: {
+                  specId: number;
+                  specDisplayId: string;
+                  title: string;
+                  reason: string;
                 }[];
               };
               running: {
@@ -4119,6 +4412,11 @@ export interface paths {
                     snapshots: number;
                   };
                 }[];
+                feishu: {
+                  open: boolean;
+                  /** @enum {string|null} */
+                  closedReason: "missing" | "permissions" | "invalid" | null;
+                };
               };
             };
           };
@@ -4927,6 +5225,225 @@ export interface paths {
         };
         /** @description The spec is not cancelled or merged, or a clean-up of it is already waiting */
         409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          sha: string;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description ticket (and later pr) Links for this commit SHA */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              links: {
+                /** @enum {string} */
+                kind: "ticket" | "pr";
+                repo: string;
+                sha: string;
+                specId: number;
+                specDisplayId: string;
+                ticketId: number | null;
+                ticketDisplayId: string | null;
+                runId: number | null;
+                runDisplayId: string | null;
+                pullRequestId: number | null;
+                pullRequestNumber: number | null;
+                pullRequestUrl: string | null;
+                pullNumber: number | null;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Links recorded for this spec */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              links: {
+                /** @enum {string} */
+                kind: "ticket" | "pr";
+                repo: string;
+                sha: string;
+                specId: number;
+                specDisplayId: string;
+                ticketId: number | null;
+                ticketDisplayId: string | null;
+                runId: number | null;
+                runDisplayId: string | null;
+                pullRequestId: number | null;
+                pullRequestNumber: number | null;
+                pullRequestUrl: string | null;
+                pullNumber: number | null;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/context": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            repo?: string;
+            repoUrl?: string;
+            files: {
+              path: string;
+              commits: {
+                sha: string;
+                spec?: string;
+                ticket?: string;
+                run?: string;
+              }[];
+            }[];
+          };
+        };
+      };
+      responses: {
+        /** @description Pointers from blamed commits to specs, tickets, pull requests, and planning headings; never the file or spec bodies */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              files: {
+                path: string;
+                specs: {
+                  id: number;
+                  displayId: string;
+                }[];
+                tickets: {
+                  id: number;
+                  displayId: string;
+                }[];
+                pullRequests: {
+                  number: number;
+                  url: string;
+                }[];
+                decisions: {
+                  specDisplayId: string;
+                  heading: string;
+                }[];
+                outOfScope: {
+                  specDisplayId: string;
+                  heading: string;
+                }[];
+                adrs: {
+                  path: string;
+                }[];
+              }[];
+            };
+          };
+        };
+        /** @description Repo is missing or matches more than one registered repo */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description No registered repo matches */
+        404: {
           headers: {
             [name: string]: unknown;
           };

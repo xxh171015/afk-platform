@@ -30,6 +30,7 @@ beforeEach(async () => {
     testApp({
       pool: db.pool,
       clock: clock.now,
+      schedule: clock.schedule,
       notifications: {
         async notify(notice) {
           notices.push(notice);
@@ -2247,10 +2248,28 @@ class EventStream {
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
   private readonly decoder = new TextDecoder();
   private buffer = "";
+  private pending:
+    | ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>
+    | undefined;
   constructor(response: Response) {
     const body = response.body;
     if (!body) throw new Error("no body");
     this.reader = body.getReader();
+  }
+
+  private async pull(timeoutMs: number): Promise<void> {
+    this.pending ??= this.reader.read();
+    const result = await Promise.race([
+      this.pending.then((chunk) => ({ kind: "chunk" as const, chunk })),
+      new Promise<{ kind: "timeout" }>((resolve) =>
+        setTimeout(() => resolve({ kind: "timeout" }), timeoutMs),
+      ),
+    ]);
+    if (result.kind === "timeout") return;
+    this.pending = undefined;
+    if (result.chunk.value) {
+      this.buffer += this.decoder.decode(result.chunk.value, { stream: true });
+    }
   }
 
   async nextInvalidate(timeoutMs = 2_000): Promise<Record<string, number>> {
@@ -2258,18 +2277,7 @@ class EventStream {
     while (Date.now() < deadline) {
       const parsed = this.takeInvalidate();
       if (parsed) return parsed;
-      const remaining = deadline - Date.now();
-      const chunk = await Promise.race([
-        this.reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(
-            () => resolve({ done: true, value: undefined }),
-            remaining,
-          ),
-        ),
-      ]);
-      if (chunk.value)
-        this.buffer += this.decoder.decode(chunk.value, { stream: true });
+      await this.pull(deadline - Date.now());
     }
     throw new Error(`no invalidate in ${this.buffer}`);
   }
@@ -2279,6 +2287,16 @@ class EventStream {
     if (!match) return undefined;
     this.buffer = this.buffer.slice((match.index ?? 0) + match[0].length);
     return JSON.parse(match[1] as string) as Record<string, number>;
+  }
+
+  async drainInvalidates(quietMs = 150): Promise<void> {
+    for (;;) {
+      try {
+        await this.nextInvalidate(quietMs);
+      } catch {
+        return;
+      }
+    }
   }
 
   async close(): Promise<void> {
@@ -2333,6 +2351,7 @@ describe("host-sync snapshots and invalidate", () => {
     await specWithOpenPr();
     const stream = await openEvents();
     try {
+      await stream.drainInvalidates();
       await look([asOpened(1)]);
       await expect(stream.nextInvalidate(200)).rejects.toThrow(/no invalidate/);
     } finally {
@@ -2340,20 +2359,22 @@ describe("host-sync snapshots and invalidate", () => {
     }
   });
 
-  it("streams invalidate and notifies when a pull request's state, CI, review or head changes", async () => {
+  it("streams invalidate and notifies when a pull request's state, CI or review changes", async () => {
     const { specId } = await specWithOpenPr();
     const stream = await openEvents();
     try {
+      await stream.drainInvalidates();
       await look([asOpened(1, { ci: "failure" })]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
 
       await look([asOpened(1, { ci: "failure", review: "approved" })]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
 
+      // head_sha is not an event (drizzle/0035_events.sql), so a look that only moves head does not invalidate.
       await look([
         asOpened(1, { ci: "failure", review: "approved", headSha: "head-2" }),
       ]);
-      expect(await stream.nextInvalidate()).toMatchObject({ specId });
+      await expect(stream.nextInvalidate(200)).rejects.toThrow(/no invalidate/);
 
       notices.length = 0;
       await look([
@@ -2365,6 +2386,9 @@ describe("host-sync snapshots and invalidate", () => {
         }),
       ]);
       expect(await stream.nextInvalidate()).toMatchObject({ specId });
+      expect(notices).toEqual([]);
+      clock.advanceSeconds(30);
+      await clock.flush();
       expect(notices).toEqual([
         {
           title: "待处理",
@@ -2414,6 +2438,181 @@ describe("host-sync snapshots and invalidate", () => {
     queries.reset();
     await look([asOpened(1)]);
     expect(queries.count()).toBeLessThanOrEqual(baseline + 2);
+  });
+});
+
+describe("indexing pr Links after a pull request is first merged", () => {
+  const MERGE_SHA = "d".repeat(40);
+
+  async function openThenSync(
+    extra: Record<string, unknown>,
+  ): Promise<{ pullId: number }> {
+    await settledSpec(["backend"]);
+    const openJob = await claimOf("open-pr");
+    await worker.complete(openJob.id, openJob.attempt, opened(7));
+    await syncWith([synced(1, { state: "merged", ...extra })]);
+    const pull = await db.pool.query<{ id: number }>(
+      "SELECT id FROM pull_requests WHERE number = 7",
+    );
+    return { pullId: pull.rows[0]?.id as number };
+  }
+
+  it("queues an index-pr-links job when the host first reports merged with a merge SHA, and does not clone in host-sync", async () => {
+    await openThenSync({ mergeSha: MERGE_SHA });
+    expect(await jobsOf("index-pr-links")).toMatchObject([
+      {
+        state: "queued",
+        lock_key: null,
+        payload: { pullId: 1, mergeSha: MERGE_SHA },
+      },
+    ]);
+    expect(await jobsOf("host-sync")).toMatchObject([{ state: "done" }]);
+  });
+
+  async function claimIndex() {
+    for (let i = 0; i < 8; i++) {
+      const job = (await worker.claim()).body.job;
+      if (!job) break;
+      if (job.type === "index-pr-links")
+        return job as { id: number; attempt: number; payload: Json };
+      if (job.type === "spec-cleanup") {
+        await worker.complete(job.id, job.attempt, {
+          stage: "spec-cleanup",
+          closed: [],
+        });
+        continue;
+      }
+      if (await completeIfPatch(job)) continue;
+      if (job.type === "host-sync") {
+        await worker.complete(job.id, job.attempt, {
+          stage: "host-sync",
+          pulls: [],
+        });
+        continue;
+      }
+      throw new Error(`unexpected ${job.type} job`);
+    }
+    throw new Error("no index-pr-links job");
+  }
+
+  it("after the job runs, a pr Link with the pull request number is readable over HTTP", async () => {
+    await openThenSync({ mergeSha: MERGE_SHA });
+    const job = await claimIndex();
+    expect((await taskOf(job)).body).toMatchObject({
+      kind: "index-pr-links",
+      number: 7,
+      mergeSha: MERGE_SHA,
+      repoUrl: "https://github.com/me/shop-backend.git",
+    });
+    expect(
+      (
+        await worker.complete(job.id, job.attempt, {
+          stage: "index-pr-links",
+          links: [{ sha: MERGE_SHA, spec: "S-1", ticket: "T-1" }],
+        })
+      ).status,
+    ).toBe(200);
+    const bySha = await call("GET", `/links?sha=${MERGE_SHA}`);
+    expect(bySha.status).toBe(200);
+    expect(bySha.body.links).toEqual([
+      expect.objectContaining({
+        kind: "pr",
+        sha: MERGE_SHA,
+        specId: 1,
+        specDisplayId: "S-1",
+        ticketId: 1,
+        ticketDisplayId: "T-1",
+        pullNumber: 7,
+      }),
+    ]);
+  });
+
+  it("a squash merge writes a pr Link with Spec from the pull request body and no Ticket", async () => {
+    const squashSha = "e".repeat(40);
+    await openThenSync({ squashSha });
+    const job = await claimIndex();
+    expect((await taskOf(job)).body).toMatchObject({
+      kind: "index-pr-links",
+      squashSha,
+      mergeSha: null,
+    });
+    expect(
+      (
+        await worker.complete(job.id, job.attempt, {
+          stage: "index-pr-links",
+          links: [{ sha: squashSha, spec: "S-1", ticket: null }],
+        })
+      ).status,
+    ).toBe(200);
+    const bySha = await call("GET", `/links?sha=${squashSha}`);
+    expect(bySha.body.links).toEqual([
+      expect.objectContaining({
+        kind: "pr",
+        sha: squashSha,
+        specId: 1,
+        specDisplayId: "S-1",
+        ticketId: null,
+        ticketDisplayId: null,
+        pullNumber: 7,
+      }),
+    ]);
+  });
+
+  it("does not queue a second job or write a second Link when the same pull request is synced again", async () => {
+    await openThenSync({ mergeSha: MERGE_SHA });
+    expect(await jobsOf("index-pr-links")).toHaveLength(1);
+    await db.pool.query(
+      `UPDATE jobs SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL, not_before = NULL
+       WHERE type = 'host-sync'`,
+    );
+    await syncWith([synced(1, { state: "merged", mergeSha: MERGE_SHA })]);
+    expect(await jobsOf("index-pr-links")).toHaveLength(1);
+
+    const job = await claimIndex();
+    await worker.complete(job.id, job.attempt, {
+      stage: "index-pr-links",
+      links: [
+        { sha: MERGE_SHA, spec: "S-1", ticket: "T-1" },
+        { sha: MERGE_SHA, spec: "S-1", ticket: "T-1" },
+      ],
+    });
+    const bySha = await call("GET", `/links?sha=${MERGE_SHA}`);
+    expect(bySha.body.links).toHaveLength(1);
+    expect(bySha.body.links[0]).toMatchObject({
+      kind: "pr",
+      sha: MERGE_SHA,
+      pullNumber: 7,
+    });
+  });
+
+  it("records a pr Link even when that commit already has a ticket Link", async () => {
+    await openThenSync({ mergeSha: MERGE_SHA });
+    const runId = (
+      await db.pool.query<{ id: number }>(
+        "SELECT id FROM runs ORDER BY id LIMIT 1",
+      )
+    ).rows[0]?.id as number;
+    await db.pool.query(
+      `INSERT INTO links (repo_id, commit_sha, spec_id, ticket_id, run_id, kind)
+       VALUES (1, $1, 1, 1, $2, 'ticket')`,
+      [MERGE_SHA, runId],
+    );
+    const job = await claimIndex();
+    await worker.complete(job.id, job.attempt, {
+      stage: "index-pr-links",
+      links: [{ sha: MERGE_SHA, spec: "S-1", ticket: "T-1" }],
+    });
+    const bySha = await call("GET", `/links?sha=${MERGE_SHA}`);
+    expect(bySha.body.links.map((row: Json) => row.kind).sort()).toEqual([
+      "pr",
+      "ticket",
+    ]);
+    expect(bySha.body.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "ticket", pullNumber: null }),
+        expect.objectContaining({ kind: "pr", pullNumber: 7 }),
+      ]),
+    );
   });
 });
 

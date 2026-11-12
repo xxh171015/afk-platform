@@ -1,5 +1,6 @@
 import {
   type AcceptancePackView,
+  LOCATE_REASON_LABELS,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
   pauseReasonLabel,
@@ -13,11 +14,15 @@ export function projectText(project: {
   id: number;
   name: string;
   defaultAgent: string | null;
+  feishuChatId?: string | null;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
     const inactive = project.defaultAgent === "cursor" ? "" : "（当前不生效）";
     lines.push(`default-agent: ${project.defaultAgent}${inactive}`);
+  }
+  if (project.feishuChatId) {
+    lines.push(`feishu-chat: ${project.feishuChatId}`);
   }
   return lines.join("\n");
 }
@@ -222,7 +227,8 @@ type WaitingRef =
   | { kind: "cleanup"; specId: number }
   | { kind: "readyFailure"; specId: number; repo: string; number: number }
   | { kind: "planning"; specId: number }
-  | { kind: "pausedSpec"; id: number };
+  | { kind: "pausedSpec"; id: number }
+  | { kind: "locate"; specId: number };
 
 interface CleanupLike {
   specId?: number;
@@ -268,7 +274,17 @@ interface BlockedQueueLike {
   readyFailures: ReadyFailureLike[];
   planning: PlanningLike[];
   specs: PausedSpecLike[];
+  locates?: LocateLike[];
   items?: WaitingRef[];
+}
+
+interface LocateLike {
+  specId?: number;
+  specDisplayId: string;
+  title: string;
+  reason: string;
+  waitingSince?: string;
+  blocking?: BlockingLike;
 }
 
 function rankOf(blocking: BlockingLike): number {
@@ -385,6 +401,18 @@ function pausedSpecLines(s: PausedSpecLike): string[] {
   ];
 }
 
+function locateReasonLabel(reason: string): string {
+  return (LOCATE_REASON_LABELS as Record<string, string>)[reason] ?? reason;
+}
+
+function locateLines(item: LocateLike): string[] {
+  return [
+    `${item.specDisplayId}  locate  ${item.title}: ${locateReasonLabel(item.reason)}`,
+    ...waitingLines(item.blocking, item.waitingSince),
+    `    then: plat spec retry-locate ${item.specDisplayId} (run locate again), or plat spec create --type bug --source S-n after filling the original spec`,
+  ];
+}
+
 function pullLines(p: PullRequestProblemLike): string[] {
   return [
     ...pullRequestProblemLines(p),
@@ -429,6 +457,10 @@ function linesFor(ref: WaitingRef, queue: BlockedQueueLike): string[] {
     const item = queue.planning.find((row) => row.specId === ref.specId);
     return item ? planningLines(item) : [];
   }
+  if (ref.kind === "locate") {
+    const item = (queue.locates ?? []).find((row) => row.specId === ref.specId);
+    return item ? locateLines(item) : [];
+  }
   const spec = queue.specs.find((row) => row.id === ref.id);
   return spec ? pausedSpecLines(spec) : [];
 }
@@ -441,7 +473,8 @@ export function blockedText(queue: BlockedQueueLike): string {
     queue.cleanups.length === 0 &&
     queue.readyFailures.length === 0 &&
     queue.planning.length === 0 &&
-    queue.specs.length === 0
+    queue.specs.length === 0 &&
+    (queue.locates?.length ?? 0) === 0
   ) {
     return "nothing is waiting for you";
   }
@@ -456,6 +489,7 @@ export function blockedText(queue: BlockedQueueLike): string {
     ...queue.readyFailures.flatMap(readyFailureLines),
     ...queue.planning.flatMap(planningLines),
     ...queue.specs.flatMap(pausedSpecLines),
+    ...(queue.locates ?? []).flatMap(locateLines),
   ].join("\n");
 }
 
@@ -761,4 +795,42 @@ export function specText(view: {
         ]
       : []),
   ].join("\n");
+}
+
+export function contextText(data: {
+  files: {
+    path: string;
+    specs: { displayId: string }[];
+    tickets: { displayId: string }[];
+    pullRequests: { number: number; url: string }[];
+    decisions: { specDisplayId: string; heading: string }[];
+    outOfScope: { specDisplayId: string; heading: string }[];
+    adrs: { path: string }[];
+  }[];
+}): string {
+  if (data.files.length === 0) return "no committed lines";
+  return data.files
+    .map((file) => {
+      const lines = [file.path];
+      const specs = file.specs.map((spec) => spec.displayId);
+      if (specs.length) lines.push(`  specs: ${specs.join(", ")}`);
+      const tickets = file.tickets.map((ticket) => ticket.displayId);
+      if (tickets.length) lines.push(`  tickets: ${tickets.join(", ")}`);
+      for (const pull of file.pullRequests) {
+        lines.push(`  pull request: ${pull.url}`);
+      }
+      for (const decision of file.decisions) {
+        lines.push(
+          `  decisions: ${decision.specDisplayId} ${decision.heading}`,
+        );
+      }
+      for (const scope of file.outOfScope) {
+        lines.push(`  out of scope: ${scope.specDisplayId} ${scope.heading}`);
+      }
+      for (const adr of file.adrs) {
+        lines.push(`  adr: ${adr.path}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n");
 }

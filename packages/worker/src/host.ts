@@ -6,10 +6,12 @@ import {
   parseRepoUrl,
   type RepoRef,
 } from "@afk/host";
+import { git } from "@afk/pipeline";
 import {
   fitPrDescription,
   type HostTask,
   isPlatformBranch,
+  parseTrailers,
   splicePackSection,
 } from "@afk/shared";
 import { InfrastructureError } from "./executor.ts";
@@ -20,6 +22,74 @@ export interface HostDeps {
   repoRef?: (url: string) => RepoRef;
   // whether the GitHub App or GitLab PAT can work on a repo; absent where this worker has no credentials to check
   checkAccess?: (repo: RepoRef) => Promise<AppAccess | GitLabAccess>;
+  // default-branch clone for index-pr-links; host-sync never clones
+  repoDir?: string;
+}
+
+export interface PrLinkRow {
+  sha: string;
+  spec: string;
+  ticket: string | null;
+  run: string | null;
+}
+
+export function indexPrLinksFromRepo(input: {
+  repoDir: string;
+  mergeSha: string | null;
+  squashSha: string | null;
+  pullBody: string;
+}): PrLinkRow[] {
+  if (input.squashSha) {
+    const spec = parseTrailers(input.pullBody).spec;
+    if (!spec) return [];
+    const resolved = git(input.repoDir, [
+      "rev-parse",
+      "--verify",
+      `${input.squashSha}^{commit}`,
+    ]);
+    if (resolved.code !== 0) {
+      throw new InfrastructureError(
+        `could not resolve squash commit ${input.squashSha}: ${resolved.out.slice(0, 400)}`,
+      );
+    }
+    return [
+      {
+        sha: resolved.stdout.trim().toLowerCase(),
+        spec,
+        ticket: null,
+        run: null,
+      },
+    ];
+  }
+  if (!input.mergeSha) return [];
+  const listing = git(input.repoDir, [
+    "rev-list",
+    "--reverse",
+    `${input.mergeSha}^1..${input.mergeSha}`,
+  ]);
+  if (listing.code !== 0) {
+    throw new InfrastructureError(
+      `could not walk commits of ${input.mergeSha}: ${listing.out.slice(0, 400)}`,
+    );
+  }
+  const links: PrLinkRow[] = [];
+  for (const sha of listing.stdout.split("\n").filter(Boolean)) {
+    const message = git(input.repoDir, [
+      "log",
+      "-1",
+      "--format=%B",
+      sha,
+    ]).stdout;
+    const trailers = parseTrailers(message);
+    if (!trailers.spec) continue;
+    links.push({
+      sha: sha.toLowerCase(),
+      spec: trailers.spec,
+      ticket: trailers.ticket ?? null,
+      run: trailers.run ?? null,
+    });
+  }
+  return links;
 }
 
 export async function runHostTask(
@@ -109,6 +179,35 @@ export async function runHostTask(
     }
   }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
+  if (task.kind === "index-pr-links") {
+    if (!deps.repoDir)
+      throw new InfrastructureError(
+        "index-pr-links needs a clone of the default branch",
+      );
+    let pullBody = "";
+    if (task.squashSha) {
+      try {
+        pullBody = await deps.adapter.getPullRequestBody({
+          repo: repoRef(task.repoUrl),
+          number: task.number,
+        });
+      } catch (error) {
+        throw new InfrastructureError(
+          error instanceof HostError || error instanceof RangeError
+            ? error.message
+            : `could not read the pull request body: ${String(error)}`,
+        );
+      }
+    }
+    const links = indexPrLinksFromRepo({
+      repoDir: deps.repoDir,
+      mergeSha: task.mergeSha,
+      squashSha: task.squashSha,
+      pullBody,
+    });
+    log(`indexed ${links.length} pr Link(s) for pull request ${task.number}`);
+    return { stage: "index-pr-links", links };
+  }
   const pulls = [];
   for (const pull of task.pulls ?? []) {
     try {
@@ -127,6 +226,8 @@ export async function runHostTask(
         mergedAt: info.mergedAt,
         mergedByPlatform: info.mergedByPlatform,
         conflictsWithDefault: info.conflictsWithDefault,
+        mergeSha: info.mergeSha,
+        squashSha: info.squashSha,
       });
     } catch (error) {
       if (error instanceof HostError && error.status === 429)

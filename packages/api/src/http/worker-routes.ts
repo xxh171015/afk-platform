@@ -19,6 +19,7 @@ import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import { reportHosts } from "../host/code-hosts.ts";
 import {
   readHostSyncPayload,
+  readIndexPrLinksPayload,
   readOpenPrPayload,
   readPatchPrBodyPayload,
   readPrReadyPayload,
@@ -28,6 +29,7 @@ import {
   buildHostTask,
   hostSyncFailed,
   recordHostSync,
+  recordIndexPrLinks,
   recordOpenPr,
   recordPrReady,
   recordSpecCleanup,
@@ -57,7 +59,11 @@ import {
   heartbeat,
   isLeaseLive,
 } from "../jobs/queue.ts";
-import type { Notice } from "../notify/notices.ts";
+import {
+  markLocateClaimed,
+  readLocatePayload,
+  recordLocateResult,
+} from "../planning/locate-bug.ts";
 import {
   buildPlanningTask,
   readPlanningPayload,
@@ -409,6 +415,15 @@ const HostTask = z.discriminatedUnion("kind", [
     kind: z.literal("repo-access"),
     repoUrl: z.string(),
   }),
+  z.object({
+    kind: z.literal("index-pr-links"),
+    repoUrl: z.string(),
+    repoName: z.string(),
+    defaultBranch: z.string(),
+    number: z.number().int(),
+    mergeSha: z.string().nullable(),
+    squashSha: z.string().nullable(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -424,7 +439,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -680,9 +695,7 @@ export function registerWorkerRoutes(
       freeBytes,
     );
     const sample = await context.statDisk(context.logDir);
-    await refreshDiskStatus(context.pool, sample, (notice) =>
-      context.notifications.notify(notice),
-    );
+    await refreshDiskStatus(context.pool, sample);
     return c.json({ ok: true as const }, 200);
   });
 
@@ -712,6 +725,7 @@ export function registerWorkerRoutes(
         await markClaimed(client, job);
         await markFinalClaimed(client, job);
         await markUpdateBranchClaimed(client, job);
+        await markLocateClaimed(client, job);
       }),
     );
     const run = await context.pool.query<{ id: number }>(
@@ -806,6 +820,10 @@ export function registerWorkerRoutes(
             await recordTrialMergeResult(client, job.rows[0], result);
             return finished;
           }
+          if (readLocatePayload(job.rows[0].payload)) {
+            await recordLocateResult(client, job.rows[0], result);
+            return finished;
+          }
           const planning = readPlanningPayload(job.rows[0]);
           // the e2e before the pull requests runs the ticket stages, but for the spec's finalization
           const recorded = planning
@@ -837,13 +855,13 @@ export function registerWorkerRoutes(
                 const cleanup = readSpecCleanupPayload(job.rows[0]);
                 const ready = readPrReadyPayload(job.rows[0]);
                 const access = readRepoAccessPayload(job.rows[0]);
+                const indexLinks = readIndexPrLinksPayload(job.rows[0]);
                 if (access)
                   await recordRepoAccess(
                     client,
                     access,
                     (result ?? {}) as Record<string, unknown>,
                     context.clock(),
-                    (notice) => context.notifications.notify(notice),
                   );
                 else if (openPr)
                   await recordOpenPr(client, openPr, result, context.clock());
@@ -852,6 +870,8 @@ export function registerWorkerRoutes(
                 else if (cleanup)
                   await recordSpecCleanup(client, cleanup, result);
                 else if (ready) await recordPrReady(client, ready, result);
+                else if (indexLinks)
+                  await recordIndexPrLinks(client, indexLinks, result);
               }
             }
           }
@@ -919,7 +939,8 @@ export function registerWorkerRoutes(
         readHostSyncPayload(row) ??
         readPrReadyPayload(row) ??
         readSpecCleanupPayload(row) ??
-        readPatchPrBodyPayload(row));
+        readPatchPrBodyPayload(row) ??
+        readIndexPrLinksPayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)
@@ -1031,7 +1052,6 @@ export function registerWorkerRoutes(
     const { id } = c.req.valid("param");
     const { workerId, attempt, error } = c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
-    let notice: Notice | undefined;
     const outcome = await aroundJob(context, id, () =>
       inWorkerReport(context, id, async (client) => {
         const failed = await failJob(
@@ -1052,7 +1072,6 @@ export function registerWorkerRoutes(
             context.clock(),
           );
           if (paused !== false) {
-            notice = paused;
             return failed;
           }
           const failure = await recordJobFailure(
@@ -1080,7 +1099,6 @@ export function registerWorkerRoutes(
       const { body, status } = refusal(outcome);
       return c.json(body, status);
     }
-    if (notice) await context.notifications.notify(notice);
     return c.json({ ok: true as const }, 200);
   });
 }

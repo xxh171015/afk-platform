@@ -108,6 +108,7 @@ describe("GET /workbench", () => {
         readyFailures: [],
         planning: [],
         specs: [],
+        locates: [],
       },
       running: [],
       awaitingAcceptance: [],
@@ -121,6 +122,7 @@ describe("GET /workbench", () => {
         stopGib: 5,
         lastCleanup: { at: null, runs: 0, orphans: 0 },
         workers: [],
+        feishu: { open: false, closedReason: "missing" },
       },
     });
   });

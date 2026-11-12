@@ -3,6 +3,13 @@ import { formatShanghaiTime } from "./time.ts";
 
 export { FAILURE_SOURCE_LABELS };
 
+export function waitingReasonHint(
+  reason: string | null | undefined,
+): string | null {
+  if (reason === "sandbox-oom") return "把沙箱内存调大后再试";
+  return null;
+}
+
 // How many items sit in the waiting queue: the nav badge and the workbench 等你处理 quadrant share this.
 
 export function waitingCount(queue: {
@@ -13,6 +20,7 @@ export function waitingCount(queue: {
   readyFailures: readonly unknown[];
   planning?: readonly unknown[];
   specs: readonly unknown[];
+  locates?: readonly unknown[];
 }): number {
   return (
     queue.tickets.length +
@@ -21,7 +29,8 @@ export function waitingCount(queue: {
     queue.cleanups.length +
     queue.readyFailures.length +
     (queue.planning?.length ?? 0) +
-    queue.specs.length
+    queue.specs.length +
+    (queue.locates?.length ?? 0)
   );
 }
 
@@ -40,7 +49,8 @@ export type WaitingRef =
   | { kind: "cleanup"; specId: number }
   | { kind: "readyFailure"; specId: number; repo: string; number: number }
   | { kind: "planning"; specId: number }
-  | { kind: "pausedSpec"; id: number };
+  | { kind: "pausedSpec"; id: number }
+  | { kind: "locate"; specId: number };
 
 export function rankOf(blocking: Blocking): number {
   if (blocking.downstream.length > 0) return 0;
@@ -100,7 +110,10 @@ export function filterWaiting(
   if (type === "cleanup")
     return items.filter((item) => item.kind === "cleanup");
   return items.filter(
-    (item) => item.kind === "pausedSpec" || item.kind === "planning",
+    (item) =>
+      item.kind === "pausedSpec" ||
+      item.kind === "planning" ||
+      item.kind === "locate",
   );
 }
 

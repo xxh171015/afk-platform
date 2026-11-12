@@ -15,8 +15,10 @@ export const NOTICE_KINDS = [
   "ticket-blocked",
   "final-blocked",
   "spec-paused",
+  "locate-failed",
   "awaiting-review",
   "pr-ready",
+  "locate-succeeded",
   "spec-merged",
   "waiting-other",
 ] as const;
@@ -26,11 +28,27 @@ export const NOTICE_TITLES: Record<NoticeKind, string> = {
   "ticket-blocked": "票卡住",
   "final-blocked": "收尾卡住",
   "spec-paused": "需求已暂停",
+  "locate-failed": "定位失败",
   "awaiting-review": "可以来验收了",
   "pr-ready": "PR 已转 ready",
+  "locate-succeeded": "定位成功",
   "spec-merged": "需求已合并",
   "waiting-other": "待处理",
 };
+
+// Ticket stuck first so a coalesced window never hides a block behind a later merge (ADR 0009).
+// Locate failed ranks above other waiting; locate succeeded ranks just above a merged spec.
+export const NOTICE_PRIORITY: readonly NoticeKind[] = [
+  "ticket-blocked",
+  "final-blocked",
+  "spec-paused",
+  "locate-failed",
+  "waiting-other",
+  "pr-ready",
+  "awaiting-review",
+  "locate-succeeded",
+  "spec-merged",
+];
 
 export function noticeTitle(
   kind: NoticeKind,
@@ -60,6 +78,21 @@ export function composeNotice(
   return {
     title: noticeTitle(draft.kind, hostKind),
     body: `${draft.displayId} ${draft.title}：${draft.reason}\n${pageUrl(draft.path)}`,
+  };
+}
+
+export function composeWindow(
+  drafts: readonly NoticeDraft[],
+  hostKind: HostKind = "github",
+): Notice {
+  const winner = drafts.reduce((best, draft) =>
+    NOTICE_PRIORITY.indexOf(draft.kind) < NOTICE_PRIORITY.indexOf(best.kind)
+      ? draft
+      : best,
+  );
+  return {
+    title: noticeTitle(winner.kind, hostKind),
+    body: drafts.map((draft) => composeNotice(draft, hostKind).body).join("\n"),
   };
 }
 

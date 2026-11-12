@@ -428,6 +428,62 @@
       "when": 1794450000000,
       "tag": "0060_planning_docs_at_import",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794460000000,
+      "tag": "0061_events_notify",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794470000000,
+      "tag": "0062_sandbox_oom",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1794480000000,
+      "tag": "0063_notify_from_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1794490000000,
+      "tag": "0064_project_feishu_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0065_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794510000000,
+      "tag": "0066_pr_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794520000000,
+      "tag": "0067_spec_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794530000000,
+      "tag": "0068_locate",
+      "breakpoints": true
     }
   ]
 }

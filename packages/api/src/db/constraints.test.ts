@@ -197,6 +197,9 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(
       await ticketWith("state, blocked_reason", "'blocked', 'gate-failed'"),
     ).toBe("ok");
+    expect(
+      await ticketWith("state, blocked_reason", "'blocked', 'sandbox-oom'"),
+    ).toBe("ok");
     expect(await ticketWith("state", "'blocked'")).toBe(CHECK_VIOLATION);
     expect(await ticketWith("state, blocked_reason", "'blocked', 'oops'")).toBe(
       CHECK_VIOLATION,
@@ -219,6 +222,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
       );
     expect(await block("the review went wrong")).toBe(CHECK_VIOLATION);
     expect(await block("merge-conflict")).toBe("ok");
+    expect(await block("sandbox-oom")).toBe("ok");
 
     const e2e = await insert("INSERT INTO final_e2e (spec_id) VALUES ($1)", [
       specId,
@@ -231,6 +235,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(await blockE2e("gate-failed")).toBe(CHECK_VIOLATION);
     expect(await blockE2e("final-e2e-failed")).toBe("ok");
     expect(await blockE2e("job-failed")).toBe("ok");
+    expect(await blockE2e("sandbox-oom")).toBe("ok");
   });
 
   it("a paused spec must carry a known pause reason, and only a paused spec may", async () => {
@@ -270,6 +275,38 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
         [specId],
       ),
     ).toBe("ok");
+  });
+
+  it("only a bug may point at a source spec, which must be another spec in the same project", async () => {
+    const { projectId, specId } = await seed();
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES ($1, 'feature', 'from-feature', 't', $2)",
+        [projectId, specId],
+      ),
+    ).toBe(CHECK_VIOLATION);
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES ($1, 'bug', 'from-feature', 't', $2)",
+        [projectId, specId],
+      ),
+    ).toBe("ok");
+    const bugId = await insert(
+      "INSERT INTO specs (project_id, type, slug, title) VALUES ($1, 'bug', 'self', 't')",
+      [projectId],
+    );
+    expect(
+      await outcome("UPDATE specs SET source_spec_id = $1 WHERE id = $1", [
+        bugId,
+      ]),
+    ).toBe(CHECK_VIOLATION);
+    const other = await insert("INSERT INTO projects (name) VALUES ('other')");
+    expect(
+      await outcome(
+        "INSERT INTO specs (project_id, type, slug, title, source_spec_id) VALUES ($1, 'bug', 'cross', 't', $2)",
+        [other, specId],
+      ),
+    ).toBe(FOREIGN_KEY_VIOLATION);
   });
 
   it("a spec's type and state must be known values", async () => {

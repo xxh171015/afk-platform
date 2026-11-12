@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
-import { type ExecResult, exec } from "@afk/pipeline";
+import { type ExecResult, exec, SANDBOX_KIND_LABEL } from "@afk/pipeline";
 
 export type Docker = (
   args: string[],
@@ -50,32 +50,62 @@ export function removeSandboxesUnder(
     );
     return [];
   };
+  const names = namesOf(dir);
+  const matching = (ids: string[]): string[] | "failed" => {
+    if (ids.length === 0) return [];
+    // one line per container: its id, then the host path of each mount, tab separated. A container that exited
+    // between the two calls makes inspect fail but the others are still printed, so the output is read regardless
+    // (unless inspect timed out).
+    const inspected = docker([
+      "inspect",
+      "--format",
+      "{{.Id}}\t{{range .Mounts}}{{.Source}}\t{{end}}",
+      ...ids,
+    ]);
+    if (inspected.timedOut) {
+      giveUp("inspect", inspected);
+      return "failed";
+    }
+    return inspected.stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t").filter(Boolean))
+      .filter(([, ...sources]) =>
+        sources.some((source) =>
+          names.some(
+            (name) => source === name || source.startsWith(name + sep),
+          ),
+        ),
+      )
+      .map(([id]) => id as string);
+  };
+
+  // Labels first: leftover AFK sandboxes carry afk.kind. Mount path is the fallback for containers that
+  // never got a label (a worker from before hardening, or a create that died mid-run).
+  const labelled = docker([
+    "ps",
+    "-a",
+    "-q",
+    "--filter",
+    `label=${SANDBOX_KIND_LABEL}`,
+  ]);
+  if (labelled.code !== 0) return giveUp("ps", labelled);
+  const byLabel = matching(labelled.stdout.split("\n").filter(Boolean));
+  if (byLabel === "failed") return [];
+
   // -a: a sandbox whose network was gone is left `Created`, and still holds its mounts
   const listed = docker(["ps", "-a", "-q"]);
   if (listed.code !== 0) return giveUp("ps", listed);
-  const running = listed.stdout.split("\n").filter(Boolean);
-  if (running.length === 0) return [];
-  // one line per container: its id, then the host path of each mount, tab separated. A container that exited
-  // between the two calls makes inspect fail but the others are still printed, so the output is read regardless
-  // (unless inspect timed out).
-  const inspected = docker([
-    "inspect",
-    "--format",
-    "{{.Id}}\t{{range .Mounts}}{{.Source}}\t{{end}}",
-    ...running,
-  ]);
-  if (inspected.timedOut) return giveUp("inspect", inspected);
-  const names = namesOf(dir);
-  const here = inspected.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => line.split("\t").filter(Boolean))
-    .filter(([, ...sources]) =>
-      sources.some((source) =>
-        names.some((name) => source === name || source.startsWith(name + sep)),
-      ),
-    )
-    .map(([id]) => id as string);
+  const byMount = matching(listed.stdout.split("\n").filter(Boolean));
+  if (byMount === "failed") return [];
+
+  const seen = new Set<string>();
+  const here: string[] = [];
+  for (const id of [...byLabel, ...byMount]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    here.push(id);
+  }
   if (here.length === 0) return [];
   const removed = docker(["rm", "-f", ...here]);
   return removed.code === 0 ? here : giveUp("rm", removed);

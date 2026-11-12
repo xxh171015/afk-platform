@@ -66,7 +66,9 @@ export type ProjectEdit = Partial<
     | "budgetLimit"
     | "limits"
   >
->;
+> & {
+  feishuChatId?: string | null;
+};
 
 // Only the fields that are given change. Limits are merged key by key over the stored overrides; protected paths
 // are replaced as a whole. Tickets already made keep what they have; bundles are built from the project when read.
@@ -92,6 +94,8 @@ export async function editProject(
   if (edit.budgetLimit !== undefined) set("budget_limit", edit.budgetLimit);
   if (edit.limits !== undefined)
     set("limits", JSON.stringify(edit.limits), "limits || $::jsonb");
+  if (edit.feishuChatId !== undefined)
+    set("feishu_chat_id", edit.feishuChatId === "" ? null : edit.feishuChatId);
   // An empty edit still has to tell a missing project from an existing one.
   const { rowCount } = await pool.query(
     `UPDATE projects SET ${assignments.join(", ") || "id = id"} WHERE id = $1`,
@@ -195,13 +199,16 @@ export interface NewSpec {
   body?: string;
   // The repo plat spec create ran in (its tracker doc names it): the spec's planning repo.
   planningRepo?: string;
+  // A bug may point at the spec it came from (GLOSSARY Spec). Omitted or undefined: none.
+  sourceSpecId?: number;
 }
 
 export type CreateSpecResult =
   | { status: "ok"; spec: { id: number; displayId: string } }
   | { status: "no-project" }
   | { status: "no-repo"; message: string }
-  | { status: "slug-taken" };
+  | { status: "slug-taken" }
+  | { status: "invalid-source"; message: string };
 
 export async function createSpec(
   pool: pg.Pool,
@@ -211,6 +218,8 @@ export async function createSpec(
     spec.projectId,
   ]);
   if (project.rowCount === 0) return { status: "no-project" };
+  const source = await resolveSourceSpec(pool, spec);
+  if (source.status === "invalid-source") return source;
   let planningRepoId: number | null = null;
   if (spec.planningRepo !== undefined) {
     const repo = await pool.query<{ id: number }>(
@@ -229,8 +238,8 @@ export async function createSpec(
     // in a transaction, so the spec's first event says who made it
     const { rows } = await inTransaction(pool, (client) =>
       client.query(
-        `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id)
-       SELECT $1, $2, $3, $4, $5, id, $6 FROM instance RETURNING id`,
+        `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id, source_spec_id)
+       SELECT $1, $2, $3, $4, $5, id, $6, $7 FROM instance RETURNING id`,
         [
           spec.projectId,
           spec.type,
@@ -238,6 +247,7 @@ export async function createSpec(
           spec.title,
           spec.body ?? "",
           planningRepoId,
+          source.sourceSpecId,
         ],
       ),
     );
@@ -495,4 +505,38 @@ async function existingGraph(
 async function rollback<T>(client: pg.PoolClient, result: T): Promise<T> {
   await client.query("ROLLBACK");
   return result;
+}
+
+// A bug may point at another spec in the same project. Feature and improvement cannot.
+async function resolveSourceSpec(
+  pool: pg.Pool,
+  spec: NewSpec,
+): Promise<
+  | { status: "ok"; sourceSpecId: number | null }
+  | { status: "invalid-source"; message: string }
+> {
+  if (spec.sourceSpecId === undefined) {
+    return { status: "ok", sourceSpecId: null };
+  }
+  if (spec.type !== "bug") {
+    return {
+      status: "invalid-source",
+      message: "only a bug spec can point at a source spec",
+    };
+  }
+  const found = await pool.query<{ id: number; project_id: number }>(
+    "SELECT id, project_id FROM specs WHERE id = $1",
+    [spec.sourceSpecId],
+  );
+  const row = found.rows[0];
+  if (!row) {
+    return { status: "invalid-source", message: "no such source spec" };
+  }
+  if (row.project_id !== spec.projectId) {
+    return {
+      status: "invalid-source",
+      message: "the source spec must belong to the same project",
+    };
+  }
+  return { status: "ok", sourceSpecId: row.id };
 }

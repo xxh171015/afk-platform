@@ -31,8 +31,15 @@ import {
 } from "commander";
 import { afkHome } from "./afk-home.ts";
 import { planAgentDocs } from "./agent-docs.ts";
+import { inspectContextCheckout } from "./context.ts";
 import { collectDoctorReport, formatDoctorText } from "./doctor.ts";
-import { blockedText, projectText, specText, ticketText } from "./format.ts";
+import {
+  blockedText,
+  contextText,
+  projectText,
+  specText,
+  ticketText,
+} from "./format.ts";
 import { isTracked, missingExcludes } from "./git-exclude.ts";
 import {
   codeHostProblems,
@@ -485,6 +492,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "override a concurrency or budget default, merged with the ones already set (repeatable)",
       collect,
     )
+    .option(
+      "--feishu-chat <chat_id>",
+      "Feishu group chat_id for this project's notifications (empty clears it)",
+    )
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
@@ -494,10 +505,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         maxConcurrency: options.maxConcurrency,
         budgetLimit: options.budgetLimit,
         limits: parseLimits(options.limit),
+        feishuChatId: options.feishuChat as string | undefined,
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit or --limit",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit or --feishu-chat",
         );
       }
       const projectId = toInt(id);
@@ -1180,6 +1192,40 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       io.stdout(doc);
     });
 
+  program
+    .command("bug")
+    .description(
+      "create a bug draft from a report and locate the original spec",
+    )
+    .requiredOption("--project <id>", "project id", toInt)
+    .requiredOption("--file <path>", "the report (stack, error, what you saw)")
+    .option("--title <title>", "default: the first line of the report")
+    .option("--slug <slug>", "default: derived from the title")
+    .action(async (options) => {
+      const body = await io.readFile(options.file);
+      if (body.trim().length === 0) {
+        throw new Failure("the report file is empty");
+      }
+      const target = await io
+        .readFile(TRACKER_DOC_PATH)
+        .then(trackerDocTarget)
+        .catch(() => null);
+      const planningRepo =
+        target && target.project === options.project ? target.repo : undefined;
+      const { data, response, error } = await api().POST("/bugs", {
+        body: {
+          projectId: options.project,
+          body,
+          ...(options.title ? { title: options.title } : {}),
+          ...(options.slug ? { slug: options.slug } : {}),
+          ...(planningRepo ? { planningRepo } : {}),
+        },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, data.displayId);
+      await warnAboutPlanningMachine(options.project);
+    });
+
   const spec = program.command("spec").description("specs");
   spec
     .command("create")
@@ -1189,6 +1235,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .requiredOption("--title <title>")
     .option("--slug <slug>", "default: derived from the title")
     .option("--file <path>", "markdown body")
+    .option("--source <spec>", "original spec (S-n) this bug points at")
     .action(async (options) => {
       const slug = options.slug ?? slugify(options.title);
       const body = options.file
@@ -1201,6 +1248,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         .catch(() => null);
       const planningRepo =
         target && target.project === options.project ? target.repo : undefined;
+      const sourceSpecId = options.source
+        ? specIdOf(options.source)
+        : undefined;
       const { data, response, error } = await api().POST("/specs", {
         body: {
           projectId: options.project,
@@ -1209,6 +1259,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           title: options.title,
           body,
           planningRepo,
+          ...(sourceSpecId !== undefined ? { sourceSpecId } : {}),
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -1567,6 +1618,18 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("retry-locate <spec>")
+    .description("run locate again on a bug draft that could not be located")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{specId}/locate/retry",
+        { params: { path: { specId: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: locate queued again`);
+    });
+
+  spec
     .command("waive-planning <spec>")
     .description(
       "give up the planning docs that did not apply: the planning commit is the default branch's head, the tickets start, and the acceptance pack says the docs were left out",
@@ -1838,6 +1901,48 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   program
+    .command("context")
+    .description(
+      "pointers from blamed files in this checkout back to specs, tickets, pull requests and planning docs",
+    )
+    .requiredOption("--files <paths...>", "files to blame in this checkout")
+    .option(
+      "--repo <name>",
+      "platform repo name when this checkout's origin does not match a registered repo",
+    )
+    .action(async (options: { files: string[]; repo?: string }) => {
+      const cwd = io.cwd ?? process.cwd();
+      const checkout = inspectContextCheckout(cwd, options.files);
+      if ("error" in checkout) throw new Failure(checkout.error);
+      let originMatches = false;
+      if (checkout.origin) {
+        const listed = await api().GET("/projects", {
+          params: { query: { repoUrl: checkout.origin } },
+        });
+        if (!listed.data) throw failureFrom(listed.response, listed.error);
+        originMatches = listed.data.projects.length > 0;
+      }
+      if (!originMatches && options.repo === undefined) {
+        throw new Failure(
+          checkout.origin
+            ? "this checkout's origin does not match a registered repo; pass --repo <name>"
+            : "this checkout has no origin remote; pass --repo <name>",
+        );
+      }
+      const { data, response, error } = await api().POST("/context", {
+        body: {
+          ...(options.repo !== undefined ? { repo: options.repo } : {}),
+          ...(originMatches && checkout.origin
+            ? { repoUrl: checkout.origin }
+            : {}),
+          files: checkout.files,
+        },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(data, contextText(data));
+    });
+
+  program
     .command("agents")
     .description("agent jobs, paused while the model provider refuses work")
     .command("resume")
@@ -1853,6 +1958,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           ? "agent jobs are handed out again"
           : "agent jobs were not paused",
       );
+    });
+
+  const feishuCommands = program
+    .command("feishu")
+    .description("Feishu notifications");
+  feishuCommands
+    .command("test")
+    .description(
+      "send a test card to the project's Feishu group, or the platform default group",
+    )
+    .requiredOption("--project <id>", "project id", toInt)
+    .action(async (options: { project: number }) => {
+      const { data, response, error } = await api().POST(
+        "/projects/{projectId}/feishu-test",
+        { params: { path: { projectId: options.project } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `sent a test card to ${data.chatId}`);
     });
 
   program

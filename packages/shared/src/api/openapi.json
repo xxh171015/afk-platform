@@ -239,6 +239,9 @@
                     "defaultAgent": {
                       "type": ["string", "null"]
                     },
+                    "feishuChatId": {
+                      "type": ["string", "null"]
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -271,7 +274,13 @@
                       }
                     }
                   },
-                  "required": ["id", "name", "defaultAgent", "repos"]
+                  "required": [
+                    "id",
+                    "name",
+                    "defaultAgent",
+                    "feishuChatId",
+                    "repos"
+                  ]
                 }
               }
             }
@@ -322,6 +331,10 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500
+                  },
+                  "feishuChatId": {
+                    "type": "string",
+                    "maxLength": 200
                   },
                   "protectedPaths": {
                     "type": "array",
@@ -663,6 +676,92 @@
           },
           "404": {
             "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/feishu-test": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A test card was sent to the project's group or the default group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sent": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "chatId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sent", "chatId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Feishu is closed or no chat is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Feishu send failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -1353,6 +1452,102 @@
         }
       }
     },
+    "/bugs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000000
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "slug": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                  },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": ["projectId", "body"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A bug draft was created and a locate-bug job was queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    "displayId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "displayId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The project has no repo, or the planning repo name is unknown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/specs": {
       "post": {
         "requestBody": {
@@ -1388,6 +1583,11 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500
+                  },
+                  "sourceSpecId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
                   }
                 },
                 "required": ["projectId", "type", "slug", "title"]
@@ -1450,7 +1650,7 @@
             }
           },
           "422": {
-            "description": "The project has no repo of that name",
+            "description": "The project has no repo of that name, or the source spec is not allowed",
             "content": {
               "application/json": {
                 "schema": {
@@ -2008,6 +2208,73 @@
           },
           "422": {
             "description": "The patch is too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{specId}/locate/retry": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Locate is queued again; the draft stays a draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Locate is not waiting for a retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -3227,7 +3494,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body or repo-access job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -3419,6 +3686,42 @@
                         }
                       },
                       "required": ["kind", "repoUrl"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["index-pr-links"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "repoName": {
+                          "type": "string"
+                        },
+                        "defaultBranch": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "mergeSha": {
+                          "type": ["string", "null"]
+                        },
+                        "squashSha": {
+                          "type": ["string", "null"]
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "repoName",
+                        "defaultBranch",
+                        "number",
+                        "mergeSha",
+                        "squashSha"
+                      ]
                     }
                   ]
                 }
@@ -5445,6 +5748,66 @@
                         },
                         "tokenMerged": {
                           "type": "boolean"
+                        },
+                        "sourceSpec": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "displayId": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "displayId", "title", "type"]
+                        },
+                        "bugs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "type",
+                              "state"
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -5464,7 +5827,9 @@
                         "planningRepo",
                         "planning",
                         "prechecks",
-                        "tokenMerged"
+                        "tokenMerged",
+                        "sourceSpec",
+                        "bugs"
                       ]
                     },
                     "tickets": {
@@ -6792,7 +7157,8 @@
                               "ticket-appended",
                               "pause",
                               "resume",
-                              "merged"
+                              "merged",
+                              "action"
                             ]
                           },
                           "at": {
@@ -6814,6 +7180,9 @@
                         },
                         "required": ["kind", "at", "text"]
                       }
+                    },
+                    "timelineLegacy": {
+                      "type": "boolean"
                     },
                     "finalRuns": {
                       "type": "array",
@@ -6924,6 +7293,69 @@
                         "waitingMs",
                         "totalMs"
                       ]
+                    },
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["ticket", "pr"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "ticketId": {
+                            "type": ["integer", "null"]
+                          },
+                          "ticketDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "runId": {
+                            "type": ["integer", "null"]
+                          },
+                          "runDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestNumber": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestUrl": {
+                            "type": ["string", "null"]
+                          },
+                          "pullNumber": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "repo",
+                          "sha",
+                          "specId",
+                          "specDisplayId",
+                          "ticketId",
+                          "ticketDisplayId",
+                          "runId",
+                          "runDisplayId",
+                          "pullRequestId",
+                          "pullRequestNumber",
+                          "pullRequestUrl",
+                          "pullNumber"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -6936,9 +7368,11 @@
                     "acceptancePack",
                     "edges",
                     "timeline",
+                    "timelineLegacy",
                     "finalRuns",
                     "potentialConflicts",
-                    "leadTime"
+                    "leadTime",
+                    "links"
                   ]
                 }
               }
@@ -8098,6 +8532,75 @@
                         "required": ["id", "displayId", "title", "reason"]
                       }
                     },
+                    "locates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "waitingSince": {
+                            "type": "string"
+                          },
+                          "blocking": {
+                            "type": "object",
+                            "properties": {
+                              "downstream": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "finalization": {
+                                "type": "boolean"
+                              },
+                              "pullRequests": {
+                                "type": "boolean"
+                              },
+                              "spec": {
+                                "type": "boolean"
+                              },
+                              "merge": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "downstream",
+                              "finalization",
+                              "pullRequests",
+                              "spec",
+                              "merge"
+                            ]
+                          },
+                          "failureSource": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "platform",
+                              "external",
+                              "agent",
+                              "spec",
+                              null
+                            ]
+                          }
+                        },
+                        "required": [
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "reason"
+                        ]
+                      }
+                    },
                     "items": {
                       "type": "array",
                       "items": {
@@ -8207,6 +8710,19 @@
                               }
                             },
                             "required": ["kind", "id"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["locate"]
+                              },
+                              "specId": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["kind", "specId"]
                           }
                         ]
                       }
@@ -8220,6 +8736,7 @@
                     "readyFailures",
                     "planning",
                     "specs",
+                    "locates",
                     "items"
                   ]
                 }
@@ -8404,6 +8921,32 @@
                             },
                             "required": ["id", "displayId", "title"]
                           }
+                        },
+                        "locates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "specId": {
+                                "type": "integer"
+                              },
+                              "specDisplayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "specId",
+                              "specDisplayId",
+                              "title",
+                              "reason"
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -8413,7 +8956,8 @@
                         "cleanups",
                         "readyFailures",
                         "planning",
-                        "specs"
+                        "specs",
+                        "locates"
                       ]
                     },
                     "running": {
@@ -8939,6 +9483,24 @@
                               "cleaned"
                             ]
                           }
+                        },
+                        "feishu": {
+                          "type": "object",
+                          "properties": {
+                            "open": {
+                              "type": "boolean"
+                            },
+                            "closedReason": {
+                              "type": ["string", "null"],
+                              "enum": [
+                                "missing",
+                                "permissions",
+                                "invalid",
+                                null
+                              ]
+                            }
+                          },
+                          "required": ["open", "closedReason"]
                         }
                       },
                       "required": [
@@ -8949,7 +9511,8 @@
                         "warnGib",
                         "stopGib",
                         "lastCleanup",
-                        "workers"
+                        "workers",
+                        "feishu"
                       ]
                     }
                   },
@@ -9916,6 +10479,427 @@
           },
           "409": {
             "description": "The spec is not cancelled or merged, or a clean-up of it is already waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/links": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "required": true,
+            "name": "sha",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ticket (and later pr) Links for this commit SHA",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["ticket", "pr"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "ticketId": {
+                            "type": ["integer", "null"]
+                          },
+                          "ticketDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "runId": {
+                            "type": ["integer", "null"]
+                          },
+                          "runDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestNumber": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestUrl": {
+                            "type": ["string", "null"]
+                          },
+                          "pullNumber": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "repo",
+                          "sha",
+                          "specId",
+                          "specDisplayId",
+                          "ticketId",
+                          "ticketDisplayId",
+                          "runId",
+                          "runDisplayId",
+                          "pullRequestId",
+                          "pullRequestNumber",
+                          "pullRequestUrl",
+                          "pullNumber"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["links"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/links": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Links recorded for this spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["ticket", "pr"]
+                          },
+                          "repo": {
+                            "type": "string"
+                          },
+                          "sha": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "ticketId": {
+                            "type": ["integer", "null"]
+                          },
+                          "ticketDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "runId": {
+                            "type": ["integer", "null"]
+                          },
+                          "runDisplayId": {
+                            "type": ["string", "null"]
+                          },
+                          "pullRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestNumber": {
+                            "type": ["integer", "null"]
+                          },
+                          "pullRequestUrl": {
+                            "type": ["string", "null"]
+                          },
+                          "pullNumber": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "repo",
+                          "sha",
+                          "specId",
+                          "specDisplayId",
+                          "ticketId",
+                          "ticketDisplayId",
+                          "runId",
+                          "runDisplayId",
+                          "pullRequestId",
+                          "pullRequestNumber",
+                          "pullRequestUrl",
+                          "pullNumber"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["links"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "repoUrl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "commits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sha": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{40}$"
+                              },
+                              "spec": {
+                                "type": "string"
+                              },
+                              "ticket": {
+                                "type": "string"
+                              },
+                              "run": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sha"]
+                          }
+                        }
+                      },
+                      "required": ["path", "commits"]
+                    }
+                  }
+                },
+                "required": ["files"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pointers from blamed commits to specs, tickets, pull requests, and planning headings; never the file or spec bodies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "specs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "displayId"]
+                            }
+                          },
+                          "tickets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer"
+                                },
+                                "displayId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["id", "displayId"]
+                            }
+                          },
+                          "pullRequests": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "number": {
+                                  "type": "integer"
+                                },
+                                "url": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["number", "url"]
+                            }
+                          },
+                          "decisions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "specDisplayId": {
+                                  "type": "string"
+                                },
+                                "heading": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["specDisplayId", "heading"]
+                            }
+                          },
+                          "outOfScope": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "specDisplayId": {
+                                  "type": "string"
+                                },
+                                "heading": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["specDisplayId", "heading"]
+                            }
+                          },
+                          "adrs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["path"]
+                            }
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "specs",
+                          "tickets",
+                          "pullRequests",
+                          "decisions",
+                          "outOfScope",
+                          "adrs"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["files"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Repo is missing or matches more than one registered repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No registered repo matches",
             "content": {
               "application/json": {
                 "schema": {

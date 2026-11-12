@@ -16,6 +16,8 @@ const info = (url: string): PullRequestInfo => ({
   mergedAt: null,
   mergedByPlatform: false,
   conflictsWithDefault: false,
+  mergeSha: null,
+  squashSha: null,
 });
 
 function fakeAdapter(name: string): HostAdapter {

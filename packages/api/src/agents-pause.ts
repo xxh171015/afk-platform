@@ -1,8 +1,7 @@
 import { isAgentProviderUnavailable, unrecoverableJobError } from "@afk/shared";
 import type pg from "pg";
+import { recordSystemEvent } from "./events/system.ts";
 import type { Queryable } from "./jobs/queue.ts";
-import type { Notice } from "./notify/notices.ts";
-import { pageUrl } from "./page-url.ts";
 
 // When the agents' provider refuses work (its usage ran out, it refuses the key), every agent job would fail the same
 // way: retrying it three times and blocking the ticket only makes a person retry each ticket afterwards. Instead the
@@ -33,14 +32,14 @@ export async function agentsPause(
 }
 
 // A failed agent job whose error says the provider refuses work: its Run ends as provider-unavailable and lets go of
-// the job, the job goes back to the queue under a new attempt, and the agents are paused. Returns the notice to send
-// when this is what paused them, undefined when it was already paused; false when the failure is an ordinary one.
+// the job, the job goes back to the queue under a new attempt, and the agents are paused. Returns undefined when they
+// were already paused (or just paused, with a system event inserted); false when the failure is an ordinary one.
 export async function pauseForProvider(
   client: pg.PoolClient,
   job: { id: number; type: string },
   error: string,
   now: Date,
-): Promise<Notice | undefined | false> {
+): Promise<undefined | false> {
   if (job.type !== AGENT_JOB_TYPE || !isAgentProviderUnavailable(error))
     return false;
   // The Run keeps the failure, in the person's words, in the history; the job's next claim starts a Run of its own.
@@ -64,10 +63,8 @@ export async function pauseForProvider(
     [now, brief.slice(0, 1000)],
   );
   if (paused.rowCount === 0) return undefined;
-  return {
-    title: "Agent 已暂停",
-    body: `${brief}\n恢复后在页面上点「恢复」，或运行 plat agents resume\n${pageUrl("/")}`,
-  };
+  await recordSystemEvent(client, { kind: "agents-paused", reason: brief });
+  return undefined;
 }
 
 // A person says the provider takes work again: agent jobs are claimed again, starting with the ones put back.

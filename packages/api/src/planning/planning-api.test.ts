@@ -25,6 +25,7 @@ interface Reply {
   tickets: { key: string; id: number; displayId: string }[];
   warnings: { type: string; tickets: string[] }[];
   errors: string[];
+  error?: string;
 }
 
 async function post(path: string, body: unknown) {
@@ -557,6 +558,7 @@ describe("project view", () => {
       id: projectId,
       name: "shop",
       defaultAgent: null,
+      feishuChatId: null,
       repos: [
         {
           name: "backend",
@@ -660,6 +662,18 @@ describe("project edit", () => {
       max_concurrency: 2,
       limits: { repoConcurrency: 3 },
     });
+  });
+
+  it("writes and returns the Feishu chat id", async () => {
+    await post("/projects", { name: "shop" });
+    expect(
+      (await patch("/projects/1", { feishuChatId: "oc_shop" })).status,
+    ).toBe(200);
+    expect((await projectRow()).feishu_chat_id).toBe("oc_shop");
+    const view = await fetch(`${api.url}/projects/1`).then((r) => r.json());
+    expect(view).toMatchObject({ feishuChatId: "oc_shop" });
+    expect((await patch("/projects/1", { feishuChatId: "" })).status).toBe(200);
+    expect((await projectRow()).feishu_chat_id).toBeNull();
   });
 
   it("changes the default model", async () => {
@@ -1145,5 +1159,230 @@ describe("repo edit", () => {
           .status,
       ).toBe(400);
     }
+  });
+});
+
+describe("bug specs and the spec they came from", () => {
+  it("creating a bug with a source spec stores the original spec's display id on GET", async () => {
+    const { projectId, specId } = await setup();
+    const bug = await post("/specs", {
+      projectId,
+      type: "bug",
+      slug: "export-crash",
+      title: "Export crash",
+      sourceSpecId: specId,
+    });
+    expect(bug.status).toBe(201);
+    const view = (await (
+      await fetch(`${api.url}/specs/${bug.body.id}`)
+    ).json()) as { spec: { sourceSpec: { displayId: string } | null } };
+    expect(view.spec.sourceSpec?.displayId).toBe(`S-${specId}`);
+  });
+
+  it("creating a bug without a source spec leaves the original spec empty", async () => {
+    const { projectId } = await setup();
+    const bug = await post("/specs", {
+      projectId,
+      type: "bug",
+      slug: "unknown-crash",
+      title: "Unknown crash",
+    });
+    expect(bug.status).toBe(201);
+    const view = (await (
+      await fetch(`${api.url}/specs/${bug.body.id}`)
+    ).json()) as { spec: { sourceSpec: { displayId: string } | null } };
+    expect(view.spec.sourceSpec).toBeNull();
+  });
+
+  it("refuses a source spec on a non-bug, from another project, or pointing at itself", async () => {
+    const { projectId, specId } = await setup();
+    const feature = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "not-a-bug",
+      title: "Not a bug",
+      sourceSpecId: specId,
+    });
+    expect(feature.status).toBe(422);
+    expect(feature.body.error).toMatch(/only a bug/i);
+
+    const other = await post("/projects", { name: "other" });
+    const cross = await post("/specs", {
+      projectId: other.body.id,
+      type: "bug",
+      slug: "from-elsewhere",
+      title: "From elsewhere",
+      sourceSpecId: specId,
+    });
+    expect(cross.status).toBe(422);
+    expect(cross.body.error).toMatch(/same project/i);
+
+    const self = await post("/specs", {
+      projectId,
+      type: "bug",
+      slug: "points-at-self",
+      title: "Points at self",
+      sourceSpecId: specId + 1,
+    });
+    // The next serial id does not exist yet, so a create cannot name itself as source.
+    expect(self.status).toBe(422);
+    expect(self.body.error).toMatch(
+      /no such source spec|cannot point at itself/i,
+    );
+  });
+
+  it("lets a bug point at a feature, a bug, or an improvement in the same project", async () => {
+    const { projectId, specId } = await setup();
+    const otherBug = await post("/specs", {
+      projectId,
+      type: "bug",
+      slug: "first-bug",
+      title: "First bug",
+    });
+    const improvement = await post("/specs", {
+      projectId,
+      type: "improvement",
+      slug: "faster-export",
+      title: "Faster export",
+    });
+    expect(otherBug.status).toBe(201);
+    expect(improvement.status).toBe(201);
+
+    const pointed = [];
+    for (const [slug, sourceSpecId] of [
+      ["from-feature", specId],
+      ["from-bug", otherBug.body.id],
+      ["from-improvement", improvement.body.id],
+    ] as const) {
+      const bug = await post("/specs", {
+        projectId,
+        type: "bug",
+        slug,
+        title: slug,
+        sourceSpecId,
+      });
+      expect(bug.status).toBe(201);
+      const view = (await (
+        await fetch(`${api.url}/specs/${bug.body.id}`)
+      ).json()) as { spec: { sourceSpec: { displayId: string } | null } };
+      pointed.push(view.spec.sourceSpec?.displayId);
+    }
+    expect(pointed).toEqual([
+      `S-${specId}`,
+      `S-${otherBug.body.id}`,
+      `S-${improvement.body.id}`,
+    ]);
+  });
+
+  it("GET of a spec includes the original spec and the bugs that point at it", async () => {
+    const { projectId, specId } = await setup();
+    const bug = await post("/specs", {
+      projectId,
+      type: "bug",
+      slug: "export-crash",
+      title: "Export crash",
+      sourceSpecId: specId,
+    });
+    expect(bug.status).toBe(201);
+
+    const origin = (await (
+      await fetch(`${api.url}/specs/${specId}`)
+    ).json()) as {
+      spec: {
+        sourceSpec: unknown;
+        bugs: { displayId: string; title: string; type: string }[];
+      };
+    };
+    expect(origin.spec.sourceSpec).toBeNull();
+    expect(origin.spec.bugs).toEqual([
+      expect.objectContaining({
+        displayId: `S-${bug.body.id}`,
+        title: "Export crash",
+        type: "bug",
+      }),
+    ]);
+
+    const view = (await (
+      await fetch(`${api.url}/specs/${bug.body.id}`)
+    ).json()) as {
+      spec: {
+        sourceSpec: { displayId: string; title: string };
+        bugs: unknown[];
+      };
+    };
+    expect(view.spec.sourceSpec).toEqual(
+      expect.objectContaining({
+        displayId: `S-${specId}`,
+        title: "Order export",
+      }),
+    );
+    expect(view.spec.bugs).toEqual([]);
+  });
+
+  it("GET of a spec includes its Links (commit, ticket, PR) without a workspace path", async () => {
+    const { specId } = await setup();
+    const imported = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, { tickets: [ticket("a")] }),
+    );
+    expect(imported.status).toBe(200);
+    const ticketId = imported.body.tickets[0].id;
+    const repoId = (
+      await db.pool.query<{ id: number }>(
+        "SELECT id FROM repos WHERE name = 'backend'",
+      )
+    ).rows[0].id;
+    const commitSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const prSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const runId = (
+      await db.pool.query<{ id: number }>(
+        `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, result)
+         VALUES ($1, $2, $3, 'implement', 'done') RETURNING id`,
+        [specId, repoId, ticketId],
+      )
+    ).rows[0].id;
+    const pullRequestId = (
+      await db.pool.query<{ id: number }>(
+        `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha, synced_at)
+         VALUES ($1, $2, 12, 'https://github.com/acme/backend/pull/12', $3, now())
+         RETURNING id`,
+        [specId, repoId, prSha],
+      )
+    ).rows[0].id;
+    await db.pool.query(
+      `INSERT INTO links (repo_id, commit_sha, spec_id, ticket_id, run_id, kind)
+       VALUES ($1, $2, $3, $4, $5, 'ticket')`,
+      [repoId, commitSha, specId, ticketId, runId],
+    );
+    await db.pool.query(
+      `INSERT INTO links (repo_id, commit_sha, spec_id, pull_request_id, kind)
+       VALUES ($1, $2, $3, $4, 'pr')`,
+      [repoId, prSha, specId, pullRequestId],
+    );
+
+    const response = await fetch(`${api.url}/specs/${specId}`);
+    expect(response.url).toBe(`${api.url}/specs/${specId}`);
+    const view = (await response.json()) as {
+      links: {
+        kind: string;
+        sha: string;
+        ticketDisplayId: string | null;
+        pullRequestNumber: number | null;
+      }[];
+    };
+    expect(view.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "ticket",
+          sha: commitSha,
+          ticketDisplayId: `T-${ticketId}`,
+        }),
+        expect.objectContaining({
+          kind: "pr",
+          sha: prSha,
+          pullRequestNumber: 12,
+        }),
+      ]),
+    );
   });
 });

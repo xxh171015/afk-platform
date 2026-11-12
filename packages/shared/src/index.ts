@@ -19,6 +19,7 @@ export {
   PLAT_HEADER,
   PLAT_OUTDATED,
 } from "./api/client.ts";
+export { committedShasFromBlame, UNCOMMITTED_SHA } from "./blame.ts";
 export {
   branchNames,
   isPlatformBranch,
@@ -61,6 +62,8 @@ export type {
   EventType,
   FailureSource,
   HumanAction,
+  LocateReason,
+  LocateState,
   PauseReason,
   ReasonCode,
 } from "./failure-source.ts";
@@ -76,6 +79,10 @@ export {
   failureSourceOf,
   HUMAN_ACTIONS,
   isPlatformProblem,
+  isSandboxOomError,
+  LOCATE_REASON_LABELS,
+  LOCATE_REASONS,
+  LOCATE_STATES,
   PAUSE_REASON_LABELS,
   PAUSE_REASONS,
   pauseReasonLabel,
@@ -158,6 +165,7 @@ export {
   repoDisplayName,
   repoHost,
   repoHtmlUrl,
+  sameRepoUrl,
   treeHtmlUrl,
   tryParseRepoUrl,
 } from "./repo-url.ts";
@@ -176,10 +184,11 @@ export type {
   RunnableInput,
 } from "./runnable.ts";
 export { isRunnable } from "./runnable.ts";
-export type { Edge, EdgeKind, Spec, Ticket } from "./schemas.ts";
+export type { Edge, EdgeKind, LinkKind, Spec, Ticket } from "./schemas.ts";
 export {
   EDGE_KINDS,
   EdgeSchema,
+  LINK_KINDS,
   SPEC_TYPES,
   SpecSchema,
   TICKET_TYPES,
@@ -249,6 +258,8 @@ export {
   TICKET_STATES,
   ticketTransition,
 } from "./ticket-state.ts";
+export type { ParsedTrailers } from "./trailers.ts";
+export { parseTrailers } from "./trailers.ts";
 export {
   CURSOR_AUTH_BRIEF,
   IMAGE_BUILD_BRIEF,

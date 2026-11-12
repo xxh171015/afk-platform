@@ -17,6 +17,8 @@ interface FakeMr {
   pipeline: string | null;
   mergedBy: string | null;
   mergedAt: string | null;
+  mergeCommitSha: string | null;
+  squashCommitSha: string | null;
   approvedBy: string[];
   reviewers: { username: string; state: string }[];
   hasConflicts: boolean;
@@ -112,11 +114,21 @@ export class FakeGitLab {
     this.mr(iid).sha = sha;
   }
 
-  mergeMr(iid: number, extra: { by?: string; at?: string } = {}): void {
+  mergeMr(
+    iid: number,
+    extra: {
+      by?: string;
+      at?: string;
+      mergeSha?: string;
+      squashSha?: string;
+    } = {},
+  ): void {
     const mr = this.mr(iid);
     mr.state = "merged";
     mr.mergedBy = extra.by ?? mr.mergedBy;
     mr.mergedAt = extra.at ?? mr.mergedAt ?? "2026-11-09T10:00:00.000Z";
+    if (extra.mergeSha) mr.mergeCommitSha = extra.mergeSha;
+    if (extra.squashSha) mr.squashCommitSha = extra.squashSha;
   }
 
   closeMr(iid: number): void {
@@ -154,6 +166,8 @@ export class FakeGitLab {
       merged_by: user,
       merge_user: user,
       merged_at: mr.mergedAt,
+      merge_commit_sha: mr.mergeCommitSha,
+      squash_commit_sha: mr.squashCommitSha,
       head_pipeline: mr.pipeline ? { status: mr.pipeline } : null,
       reviewers: mr.reviewers.map((row) => ({
         user: { username: row.username },
@@ -277,6 +291,8 @@ export class FakeGitLab {
         pipeline: null,
         mergedBy: null,
         mergedAt: null,
+        mergeCommitSha: null,
+        squashCommitSha: null,
         approvedBy: [],
         reviewers: [],
         hasConflicts: false,

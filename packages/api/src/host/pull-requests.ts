@@ -2,6 +2,7 @@ import {
   type BlockedReason,
   branchNames,
   formatDisplayId,
+  parseDisplayId,
   type SpecState,
   specTransition,
 } from "@afk/shared";
@@ -12,10 +13,12 @@ import { renderPackSection } from "../acceptance/pack-description.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import {
   enqueueHostSync,
+  enqueueIndexPrLinks,
   enqueueOpenPr,
   enqueuePrReady,
   enqueueSpecCleanup,
   type HostSyncPayload,
+  type IndexPrLinksPayload,
   type OpenPrPayload,
   type PatchPrBodyPayload,
   type PrReadyPayload,
@@ -69,6 +72,15 @@ export type HostTask =
       number: number;
       section: string;
       summary: string;
+    }
+  | {
+      kind: "index-pr-links";
+      repoUrl: string;
+      repoName: string;
+      defaultBranch: string;
+      number: number;
+      mergeSha: string | null;
+      squashSha: string | null;
     };
 
 const PullFacts = {
@@ -81,6 +93,8 @@ const PullFacts = {
   mergedAt: z.string().nullable().optional(),
   mergedByPlatform: z.boolean().optional(),
   conflictsWithDefault: z.boolean().optional(),
+  mergeSha: z.string().nullable().optional(),
+  squashSha: z.string().nullable().optional(),
 };
 
 export const OpenPrResultSchema = z.object({
@@ -99,6 +113,18 @@ export const PrReadyResultSchema = z.object({
 export const SpecCleanupResultSchema = z.object({
   stage: z.literal("spec-cleanup"),
   closed: z.array(z.number().int()), // pull request ids the worker closed
+});
+
+export const IndexPrLinksResultSchema = z.object({
+  stage: z.literal("index-pr-links"),
+  links: z.array(
+    z.object({
+      sha: z.string().regex(/^[0-9a-f]{40}$/),
+      spec: z.string(),
+      ticket: z.string().nullable().optional(),
+      run: z.string().nullable().optional(),
+    }),
+  ),
 });
 
 export const HostSyncResultSchema = z.object({
@@ -151,8 +177,35 @@ export async function buildHostTask(
     | HostSyncPayload
     | SpecCleanupPayload
     | PrReadyPayload
-    | PatchPrBodyPayload,
+    | PatchPrBodyPayload
+    | IndexPrLinksPayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "index-pr-links") {
+    const { pullId, mergeSha, squashSha } = payload as IndexPrLinksPayload;
+    const pull = (
+      await pool.query<{
+        number: number;
+        url: string;
+        name: string;
+        default_branch: string;
+      }>(
+        `SELECT p.number, r.url, r.name, r.default_branch
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    return pull
+      ? {
+          kind: "index-pr-links",
+          repoUrl: pull.url,
+          repoName: pull.name,
+          defaultBranch: pull.default_branch,
+          number: pull.number,
+          mergeSha: mergeSha ?? null,
+          squashSha: squashSha ?? null,
+        }
+      : undefined;
+  }
   if (job.type === "patch-pr-body") {
     const { specId, pullId } = payload as PatchPrBodyPayload;
     const pull = (
@@ -329,6 +382,65 @@ export async function recordSpecCleanup(
   return { status: "applied" };
 }
 
+// Trailers on the default branch after a pull request first merged: one pr Link per commit (squash: Spec from
+// the pull request body, no Ticket). The same (repo, SHA, kind) is not written twice.
+export async function recordIndexPrLinks(
+  client: pg.PoolClient,
+  read: IndexPrLinksPayload,
+  result: unknown,
+): Promise<RecordHostResult> {
+  const parsed = IndexPrLinksResultSchema.safeParse(result);
+  if (!parsed.success)
+    return { status: "ignored", reason: "index-pr-links result is not valid" };
+  const owner = await client.query<{
+    repo_id: number;
+  }>("SELECT repo_id FROM pull_requests WHERE id = $1", [read.pullId]);
+  const pull = owner.rows[0];
+  if (!pull) return { status: "ignored", reason: "no such pull request" };
+  for (const link of parsed.data.links) {
+    const spec = parseDisplayId(link.spec);
+    if (spec?.kind !== "spec") continue;
+    const ticket = link.ticket ? parseDisplayId(link.ticket) : undefined;
+    const ticketId =
+      ticket?.kind === "ticket"
+        ? (
+            await client.query<{ id: number }>(
+              "SELECT id FROM tickets WHERE id = $1 AND spec_id = $2",
+              [ticket.id, spec.id],
+            )
+          ).rows[0]?.id
+        : undefined;
+    const run = link.run ? parseDisplayId(link.run) : undefined;
+    const runId =
+      run?.kind === "run"
+        ? (
+            await client.query<{ id: number }>(
+              "SELECT id FROM runs WHERE id = $1",
+              [run.id],
+            )
+          ).rows[0]?.id
+        : undefined;
+    const specRow = await client.query("SELECT 1 FROM specs WHERE id = $1", [
+      spec.id,
+    ]);
+    if (!specRow.rowCount) continue;
+    await client.query(
+      `INSERT INTO links (repo_id, commit_sha, spec_id, ticket_id, run_id, pull_request_id, kind)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pr')
+       ON CONFLICT (repo_id, commit_sha, kind) DO NOTHING`,
+      [
+        pull.repo_id,
+        link.sha,
+        spec.id,
+        ticketId ?? null,
+        runId ?? null,
+        read.pullId,
+      ],
+    );
+  }
+  return { status: "applied" };
+}
+
 // The worker turned a draft pull request ready (or found it already so): the platform does not wait for the next
 // look at the host to know.
 export async function recordPrReady(
@@ -395,11 +507,12 @@ export async function recordOpenPr(
     return { status: "ignored", reason: "open-pr result is not valid" };
   }
   const pr = parsed.data;
-  await client.query(
+  const inserted = await client.query<{ id: number }>(
     `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, draft, head_sha, platform_head_sha, ci, review, synced_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, now())
      ON CONFLICT (spec_id, repo_id) DO UPDATE SET number = $3, url = $4, state = $5, draft = $6,
-       head_sha = $7, platform_head_sha = $7, ci = $8, review = $9, synced_at = now()`,
+       head_sha = $7, platform_head_sha = $7, ci = $8, review = $9, synced_at = now()
+     RETURNING id`,
     [
       read.specId,
       read.repoId,
@@ -433,6 +546,12 @@ export async function recordOpenPr(
     // a pull request that was already merged when it was found (opened by an earlier try) may be the last one
     await markMergedWhenAllAre(client, read.specId);
   }
+  if (pr.state === "merged")
+    await enqueueIndexPrLinksIfMerged(client, {
+      id: inserted.rows[0]?.id ?? 0,
+      mergeSha: pr.mergeSha,
+      squashSha: pr.squashSha,
+    });
   const projectId = await projectOf(client, read.specId);
   if (projectId !== undefined) await enqueueHostSync(client, projectId);
   return { status: "applied" };
@@ -526,8 +645,11 @@ export async function recordHostSync(
       pull.mergedAt != null && !Number.isNaN(Date.parse(pull.mergedAt))
         ? pull.mergedAt
         : null;
-    const previous = await client.query<{ conflicts_with_default: boolean }>(
-      "SELECT conflicts_with_default FROM pull_requests WHERE id = $1",
+    const previous = await client.query<{
+      conflicts_with_default: boolean;
+      state: string;
+    }>(
+      "SELECT conflicts_with_default, state FROM pull_requests WHERE id = $1",
       [pull.id],
     );
     await client.query(
@@ -559,6 +681,8 @@ export async function recordHostSync(
       pull,
       previous.rows[0]?.conflicts_with_default === true,
     );
+    if (pull.state === "merged" && previous.rows[0]?.state !== "merged")
+      await enqueueIndexPrLinksIfMerged(client, pull);
   }
   for (const { spec_id: specId } of owners.rows) {
     await markMergedWhenAllAre(client, specId);
@@ -572,6 +696,33 @@ export async function recordHostSync(
 // merged. One a person has already turned ready is not a draft any more and is left alone; one that has had a job
 // (waiting, running, failed or done) is not queued again by this: a failed one waits in plat blocked for a person,
 // and one the host still shows as a draft after a job succeeded is not asked again every minute.
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+function commitSha(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const sha = value.toLowerCase();
+  return COMMIT_SHA.test(sha) ? sha : undefined;
+}
+
+async function enqueueIndexPrLinksIfMerged(
+  client: pg.PoolClient,
+  pull: {
+    id: number;
+    mergeSha?: string | null;
+    squashSha?: string | null;
+  },
+) {
+  if (!Number.isInteger(pull.id) || pull.id < 1) return;
+  const mergeSha = commitSha(pull.mergeSha ?? undefined);
+  const squashSha = commitSha(pull.squashSha ?? undefined);
+  if (!mergeSha && !squashSha) return;
+  await enqueueIndexPrLinks(client, {
+    pullId: pull.id,
+    ...(mergeSha ? { mergeSha } : {}),
+    ...(squashSha ? { squashSha } : {}),
+  });
+}
+
 async function queueReadyPullRequests(client: pg.PoolClient, specId: number) {
   const order = await mergeOrderOf(client, specId);
   const pulls = await client.query<{

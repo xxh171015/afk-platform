@@ -10,6 +10,9 @@ import {
   FINDING_RESOLUTIONS,
   HOST_KINDS,
   JOB_STATES,
+  LINK_KINDS,
+  LOCATE_REASONS,
+  LOCATE_STATES,
   PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
@@ -23,6 +26,7 @@ import {
   bigserial,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -60,6 +64,8 @@ export const projects = pgTable("projects", {
   // When a worker last claimed a job of this project. Claim picks the project served longest ago so
   // projects take turns (packages/api/src/jobs/queue.ts). Null until the first claim.
   lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
+  // Feishu group chat_id for this project's notifications. Null until plat project edit --feishu-chat.
+  feishuChatId: text("feishu_chat_id"),
   createdAt: createdAt(),
 });
 
@@ -114,6 +120,10 @@ export const instance = pgTable(
     // person resumes them. The reason is the error that paused them.
     agentsPausedAt: timestamp("agents_paused_at", { withTimezone: true }),
     agentsPauseReason: text("agents_pause_reason"),
+    // Events through this id have been handed to the notice dispatcher; restart continues after it (ADR 0009).
+    lastNotifiedEventId: bigint("last_notified_event_id", { mode: "number" })
+      .notNull()
+      .default(0),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
@@ -180,11 +190,29 @@ export const specs = pgTable(
     planningDocsAtImport: jsonb("planning_docs_at_import")
       .notNull()
       .default({ status: "unknown" }),
+    // Locate of a bug draft: pending while the job is out, found after it filled the original spec,
+    // failed when a person has to retry or fill the source by hand. Null on specs that never located.
+    locateState: text("locate_state"),
+    locateReason: text("locate_reason"),
     createdAt: createdAt(),
   },
   (t) => [
     index("specs_project_idx").on(t.projectId),
     unique("specs_project_slug_unique").on(t.projectId, t.slug),
+    unique("specs_id_project_unique").on(t.id, t.projectId),
+    foreignKey({
+      name: "specs_source_same_project_fk",
+      columns: [t.sourceSpecId, t.projectId],
+      foreignColumns: [t.id, t.projectId],
+    }),
+    check(
+      "specs_source_bug_check",
+      sql`${t.sourceSpecId} is null or ${t.type} = 'bug'`,
+    ),
+    check(
+      "specs_source_not_self_check",
+      sql`${t.sourceSpecId} is null or ${t.sourceSpecId} <> ${t.id}`,
+    ),
     check("specs_type_check", oneOf(t.type, SPEC_TYPES)),
     check("specs_state_check", oneOf(t.state, SPEC_STATES)),
     check(
@@ -202,6 +230,14 @@ export const specs = pgTable(
     check(
       "specs_pause_reason_check",
       sql`(${t.state} = 'paused') = (${t.pauseReason} is not null) and (${t.pauseReason} is null or ${oneOf(t.pauseReason, PAUSE_REASONS)})`,
+    ),
+    check(
+      "specs_locate_state_check",
+      sql`${t.locateState} is null or ${oneOf(t.locateState, LOCATE_STATES)}`,
+    ),
+    check(
+      "specs_locate_reason_check",
+      sql`(${t.locateState} = 'failed') = (${t.locateReason} is not null) and (${t.locateReason} is null or ${oneOf(t.locateReason, LOCATE_REASONS)})`,
     ),
   ],
 );
@@ -717,6 +753,40 @@ export const workers = pgTable("workers", {
   // Free bytes on the worker's home volume, last time it posted /worker/status.
   freeBytes: bigint("free_bytes", { mode: "number" }),
 });
+
+// Commit ↔ Ticket / Spec / PR (GLOSSARY Link). ticket kind is written when a ticket or wrap-up fix
+// merges into the integration branch, from the rewritten SHAs the run recorded. pr kind is written
+// when host-sync first sees a pull request merged, from trailers on the default branch (squash: Spec
+// from the pull request body, no Ticket).
+export const links = pgTable(
+  "links",
+  {
+    id: serial("id").primaryKey(),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repos.id),
+    commitSha: text("commit_sha").notNull(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    ticketId: integer("ticket_id").references(() => tickets.id),
+    runId: integer("run_id").references(() => runs.id),
+    pullRequestId: integer("pull_request_id").references(() => pullRequests.id),
+    kind: text("kind").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("links_repo_sha_kind_unique").on(t.repoId, t.commitSha, t.kind),
+    index("links_spec_idx").on(t.specId),
+    index("links_sha_idx").on(t.commitSha),
+    check("links_kind_check", oneOf(t.kind, LINK_KINDS)),
+    check("links_sha_check", sql`${t.commitSha} ~ '^[0-9a-f]{40}$'`),
+    check(
+      "links_ticket_kind_run_check",
+      sql`${t.kind} <> 'ticket' or ${t.runId} is not null`,
+    ),
+  ],
+);
 
 // Last `plat doctor` result for one planning machine of a project. GET returns the newest across machines.
 export const doctorReports = pgTable(

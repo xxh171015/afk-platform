@@ -41,6 +41,7 @@ import {
   ticketView,
 } from "../tickets/views.ts";
 import { workbench } from "../tickets/workbench.ts";
+import { LinkRow } from "./link-routes.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int();
@@ -155,6 +156,7 @@ const WaitingRef = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("planning"), specId: Id }),
   z.object({ kind: z.literal("pausedSpec"), id: Id }),
+  z.object({ kind: z.literal("locate"), specId: Id }),
 ]);
 
 const TicketSummary = z
@@ -355,6 +357,23 @@ const specRoute = createRoute({
             }),
           ),
           tokenMerged: z.boolean(),
+          sourceSpec: z
+            .object({
+              id: Id,
+              displayId: z.string(),
+              title: z.string(),
+              type: z.string(),
+            })
+            .nullable(),
+          bugs: z.array(
+            z.object({
+              id: Id,
+              displayId: z.string(),
+              title: z.string(),
+              type: z.string(),
+              state: z.enum(SPEC_STATES),
+            }),
+          ),
         }),
         tickets: z.array(TicketSummary),
         finalizations: z.array(Finalization),
@@ -375,6 +394,8 @@ const specRoute = createRoute({
             failureSource: z.enum(FAILURE_SOURCES).optional(),
           }),
         ),
+        // true when this spec has no events and the timeline is the old domain-table assembly
+        timelineLegacy: z.boolean(),
         finalRuns: z.array(
           z.object({
             id: Id,
@@ -409,6 +430,7 @@ const specRoute = createRoute({
             totalMs: z.number().int(),
           })
           .nullable(),
+        links: z.array(LinkRow),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -563,6 +585,16 @@ const BlockedQueue = z.object({
       })
       .merge(WaitingFields),
   ),
+  locates: z.array(
+    z
+      .object({
+        specId: Id,
+        specDisplayId: z.string(),
+        title: z.string(),
+        reason: z.string(),
+      })
+      .merge(WaitingFields),
+  ),
   items: z.array(WaitingRef),
 });
 
@@ -621,6 +653,14 @@ const WorkbenchWaiting = z.object({
       title: z.string(),
     }),
   ),
+  locates: z.array(
+    z.object({
+      specId: Id,
+      specDisplayId: z.string(),
+      title: z.string(),
+      reason: z.string(),
+    }),
+  ),
 });
 
 const blockedRoute = createRoute({
@@ -672,6 +712,10 @@ const WorkbenchStatus = z.object({
       }),
     }),
   ),
+  feishu: z.object({
+    open: z.boolean(),
+    closedReason: z.enum(["missing", "permissions", "invalid"]).nullable(),
+  }),
 });
 
 const workbenchRoute = createRoute({
@@ -997,11 +1041,22 @@ export function registerTicketRoutes(
   app.openapi(workbenchRoute, async (c) => {
     const board = await workbench(pool, context.clock());
     const sample = await context.statDisk(context.logDir);
-    const status = await refreshDiskStatus(pool, sample, (notice) =>
-      context.notifications.notify(notice),
-    );
+    const status = await refreshDiskStatus(pool, sample);
     const agentsPaused = await agentsPause(pool);
-    return c.json({ ...board, status: { ...status, agentsPaused } }, 200);
+    const feishu = context.feishu.state;
+    return c.json(
+      {
+        ...board,
+        status: {
+          ...status,
+          agentsPaused,
+          feishu: feishu.open
+            ? { open: true, closedReason: null }
+            : { open: false, closedReason: feishu.closedReason },
+        },
+      },
+      200,
+    );
   });
 
   app.openapi(resumeAgentsRoute, async (c) =>

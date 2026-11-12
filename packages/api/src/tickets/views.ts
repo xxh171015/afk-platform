@@ -16,6 +16,7 @@ import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 import { potentialConflictsOf } from "../host/trial-merge.ts";
+import { linksBySpec } from "../links/view.ts";
 import {
   type IntegrationAttempt,
   integrationAttempts,
@@ -705,8 +706,12 @@ export async function specView(
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
             s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo,
-            s.planning_state, s.planning_conflict, s.token_merged, s.planning_docs_at_import
-     FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
+            s.planning_state, s.planning_conflict, s.token_merged, s.planning_docs_at_import,
+            src.id AS source_id, src.title AS source_title, src.type AS source_type
+     FROM specs s
+     LEFT JOIN repos r ON r.id = s.planning_repo_id
+     LEFT JOIN specs src ON src.id = s.source_spec_id
+     WHERE s.id = $1`,
     [specId],
   );
   const row = spec.rows[0];
@@ -727,6 +732,7 @@ export async function specView(
     ticketStories.rows.map((ticket) => ticket.stories),
   );
   const planningSha = (row.planning_sha as string | null) ?? null;
+  const timeline = await specTimeline(pool, specId);
   const projectRepos = await pool.query<{
     id: number;
     name: string;
@@ -741,6 +747,15 @@ export async function specView(
     branch: string;
   }[];
   const repos = (await reposBySpecIds(pool, [specId])).get(specId) ?? [];
+  const bugs = await pool.query<{
+    id: number;
+    title: string;
+    type: string;
+    state: string;
+  }>(
+    `SELECT id, title, type, state FROM specs WHERE source_spec_id = $1 ORDER BY id`,
+    [specId],
+  );
   return {
     spec: {
       id: row.id as number,
@@ -783,6 +798,21 @@ export async function specView(
             )
           : prechecksOf(false, warnings),
       tokenMerged: row.token_merged as boolean,
+      sourceSpec: row.source_id
+        ? {
+            id: row.source_id as number,
+            displayId: formatDisplayId("spec", row.source_id as number),
+            title: row.source_title as string,
+            type: row.source_type as string,
+          }
+        : null,
+      bugs: bugs.rows.map((bug) => ({
+        id: bug.id,
+        displayId: formatDisplayId("spec", bug.id),
+        title: bug.title,
+        type: bug.type,
+        state: bug.state as SpecState,
+      })),
     },
     tickets,
     finalizations: [
@@ -793,10 +823,12 @@ export async function specView(
     orderBroken: row.order_broken as { repo: string; skipped: string[] }[],
     pullRequests: await pullRequestRows(pool, specId),
     acceptancePack: await readAcceptancePack(pool, specId),
-    timeline: await specTimeline(pool, specId),
+    timeline: timeline.items,
+    timelineLegacy: timeline.legacy,
     finalRuns: await finalRunsOf(pool, specId),
     potentialConflicts: await potentialConflictsOf(pool, specId),
     leadTime: await specLeadTime(pool, specId, now),
+    links: (await linksBySpec(pool, specId)) ?? [],
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
@@ -1240,6 +1272,23 @@ async function blockedPlanning(pool: pg.Pool) {
   }));
 }
 
+async function failedLocates(pool: pg.Pool) {
+  const { rows } = await pool.query<{
+    id: number;
+    title: string;
+    locate_reason: string;
+  }>(
+    `SELECT id, title, locate_reason FROM specs
+     WHERE locate_state = 'failed' AND state <> 'cancelled' ORDER BY id`,
+  );
+  return rows.map((row) => ({
+    specId: row.id,
+    specDisplayId: formatDisplayId("spec", row.id),
+    title: row.title,
+    reason: row.locate_reason,
+  }));
+}
+
 export async function blockedQueue(
   pool: pg.Pool,
   options: { brief?: boolean; rank?: boolean } = {},
@@ -1279,6 +1328,12 @@ export async function blockedQueue(
       displayId: formatDisplayId("spec", s.id),
       title: s.title as string,
       reason: s.pause_reason as string,
+    })),
+    locates: (await failedLocates(pool)).map((item) => ({
+      specId: item.specId,
+      specDisplayId: item.specDisplayId,
+      title: item.title,
+      reason: item.reason,
     })),
   };
   if (options.rank === false) return queue;

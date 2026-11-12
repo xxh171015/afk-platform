@@ -2,9 +2,11 @@ import { serve } from "@hono/node-server";
 import type pg from "pg";
 import { createApp } from "./app.ts";
 import { assertMigrated } from "./db/migrate.ts";
+import { eventsHubOf } from "./events/hub.ts";
 import { defaultLogDir, LogStore } from "./logs/log-store.ts";
 import { retainLogs } from "./logs/retention.ts";
-import { macosNotifications } from "./notify/channel.ts";
+import { dispatcherOf } from "./notify/dispatch.ts";
+import { feishuSecretsPath } from "./notify/feishu.ts";
 import { scheduleRunningSpecs } from "./scheduling/scheduler.ts";
 
 // The API process. It only listens on this machine (no login: the platform is for one person, docs/specs/
@@ -35,8 +37,14 @@ export async function startServer(options: {
   const app = createApp({
     pool: options.pool,
     logDir,
-    notifications: macosNotifications(),
+    liveNotifications: true,
+    feishu: {
+      secretsPath: feishuSecretsPath(),
+      defaultChatId: process.env.AFK_FEISHU_DEFAULT_CHAT,
+    },
   });
+  await eventsHubOf(app)?.whenReady();
+  await dispatcherOf(app)?.start();
   const sweep = periodicScheduling(
     options.pool,
     options.scheduleEveryMs ?? 60_000,
@@ -55,6 +63,8 @@ export async function startServer(options: {
         resolve({
           url: `http://${HOST}:${info.port}`,
           close: async () => {
+            await dispatcherOf(app)?.stop();
+            await eventsHubOf(app)?.stop();
             await sweep.stop();
             await retention.stop();
             await new Promise<void>((done) => server.close(() => done()));

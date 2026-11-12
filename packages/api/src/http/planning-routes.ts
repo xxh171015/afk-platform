@@ -21,6 +21,7 @@ import {
   requestRepoAccess,
 } from "../host/repo-access.ts";
 import { getDoctorReport, putDoctorReport } from "../planning/doctor.ts";
+import { retryLocate, submitBug } from "../planning/locate-bug.ts";
 import {
   addRepo,
   createProject,
@@ -68,6 +69,9 @@ const projectSettings = {
   limits: LimitOverridesSchema.optional(),
 };
 
+// Empty clears the project's Feishu group. Not on create: set it with plat project edit --feishu-chat.
+const FeishuChatId = z.string().max(200);
+
 const projectRoute = createRoute({
   method: "post",
   path: "/projects",
@@ -107,6 +111,7 @@ const projectViewRoute = createRoute({
         id: Id,
         name: z.string(),
         defaultAgent: z.string().nullable(),
+        feishuChatId: z.string().nullable(),
         repos: z.array(
           z.object({
             name: z.string(),
@@ -153,6 +158,7 @@ const projectEditRoute = createRoute({
           .object({
             defaultAgent: Text.optional(),
             defaultModel: Text.optional(),
+            feishuChatId: FeishuChatId.optional(),
             ...projectSettings,
           })
           .strict(),
@@ -163,6 +169,25 @@ const projectEditRoute = createRoute({
     200: reply("Updated", z.object({ id: Id })),
     400: reply("The default agent is not supported", ErrorReply),
     404: reply("No such project", ErrorReply),
+  },
+});
+
+const projectFeishuTestRoute = createRoute({
+  method: "post",
+  path: "/projects/{projectId}/feishu-test",
+  request: {
+    params: z.object({
+      projectId: z.coerce.number().int().min(1).max(INT4_MAX),
+    }),
+  },
+  responses: {
+    200: reply(
+      "A test card was sent to the project's group or the default group",
+      z.object({ sent: z.literal(true), chatId: z.string() }),
+    ),
+    404: reply("No such project", ErrorReply),
+    409: reply("Feishu is closed or no chat is configured", ErrorReply),
+    502: reply("Feishu send failed", ErrorReply),
   },
 });
 
@@ -362,6 +387,39 @@ const repoEditRoute = createRoute({
   },
 });
 
+const bugRoute = createRoute({
+  method: "post",
+  path: "/bugs",
+  request: {
+    body: {
+      content: json(
+        z.object({
+          projectId: Id,
+          body: z.string().min(1).max(1_000_000),
+          title: Text.optional(),
+          slug: z
+            .string()
+            .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+            .max(100)
+            .optional(),
+          planningRepo: Text.optional(),
+        }),
+      ),
+    },
+  },
+  responses: {
+    201: reply(
+      "A bug draft was created and a locate-bug job was queued",
+      z.object({ id: Id, displayId: z.string() }),
+    ),
+    404: reply("No such project", ErrorReply),
+    422: reply(
+      "The project has no repo, or the planning repo name is unknown",
+      ErrorReply,
+    ),
+  },
+});
+
 const specRoute = createRoute({
   method: "post",
   path: "/specs",
@@ -379,6 +437,8 @@ const specRoute = createRoute({
           body: z.string().max(1_000_000).optional(),
           // the repo the spec is made in, which holds its planning docs (ADR 0005)
           planningRepo: Text.optional(),
+          // a bug may point at the spec it came from; omitted means none
+          sourceSpecId: Id.optional(),
         }),
       ),
     },
@@ -387,7 +447,10 @@ const specRoute = createRoute({
     201: reply("Created", z.object({ id: Id, displayId: z.string() })),
     404: reply("No such project", ErrorReply),
     409: reply("The project already has a spec with this slug", ErrorReply),
-    422: reply("The project has no repo of that name", ErrorReply),
+    422: reply(
+      "The project has no repo of that name, or the source spec is not allowed",
+      ErrorReply,
+    ),
   },
 });
 
@@ -523,6 +586,22 @@ const planningRetryRoute = createRoute({
   },
 });
 
+const locateRetryRoute = createRoute({
+  method: "post",
+  path: "/specs/{specId}/locate/retry",
+  request: {
+    params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+  },
+  responses: {
+    200: reply(
+      "Locate is queued again; the draft stays a draft",
+      z.object({ ok: z.literal(true) }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("Locate is not waiting for a retry", ErrorReply),
+  },
+});
+
 const planningWaiveRoute = createRoute({
   method: "post",
   path: "/specs/{specId}/planning/waive",
@@ -591,7 +670,7 @@ export function registerPlanningRoutes(
   app.openapi(projectViewRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const project = await pool.query(
-      "SELECT id, name, default_agent FROM projects WHERE id = $1",
+      "SELECT id, name, default_agent, feishu_chat_id FROM projects WHERE id = $1",
       [projectId],
     );
     if (!project.rows[0]) return c.json({ error: "no such project" }, 404);
@@ -604,6 +683,7 @@ export function registerPlanningRoutes(
         id: project.rows[0].id as number,
         name: project.rows[0].name as string,
         defaultAgent: (project.rows[0].default_agent as string | null) ?? null,
+        feishuChatId: (project.rows[0].feishu_chat_id as string | null) ?? null,
         repos: repos.rows.map((r) => ({
           name: r.name as string,
           url: r.url as string,
@@ -679,6 +759,25 @@ export function registerPlanningRoutes(
       return c.json({ error: "no such project" }, 404);
     }
     return c.json({ id: projectId }, 200);
+  });
+
+  app.openapi(projectFeishuTestRoute, async (c) => {
+    const { projectId } = c.req.valid("param");
+    const project = await pool.query("SELECT 1 FROM projects WHERE id = $1", [
+      projectId,
+    ]);
+    if (project.rowCount === 0) {
+      return c.json({ error: "no such project" }, 404);
+    }
+    const result = await context.feishu.sendTest(projectId);
+    if (result.sent) return c.json({ sent: true, chatId: result.chatId }, 200);
+    if (result.reason === "channel-closed") {
+      return c.json({ error: "feishu channel is closed" }, 409);
+    }
+    if (result.reason === "no-chat") {
+      return c.json({ error: "no Feishu chat configured" }, 409);
+    }
+    return c.json({ error: "feishu send failed" }, 502);
   });
 
   app.openapi(hostsRoute, async (c) =>
@@ -771,12 +870,23 @@ export function registerPlanningRoutes(
     return c.json(result.repo, 200);
   });
 
+  app.openapi(bugRoute, async (c) => {
+    const result = await submitBug(pool, c.req.valid("json"));
+    if (result.status === "no-project") {
+      return c.json({ error: "no such project" }, 404);
+    }
+    if (result.status === "no-repo" || result.status === "invalid") {
+      return c.json({ error: result.message }, 422);
+    }
+    return c.json(result.spec, 201);
+  });
+
   app.openapi(specRoute, async (c) => {
     const result = await createSpec(pool, c.req.valid("json"));
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);
     }
-    if (result.status === "no-repo") {
+    if (result.status === "no-repo" || result.status === "invalid-source") {
       return c.json({ error: result.message }, 422);
     }
     if (result.status === "slug-taken") {
@@ -785,7 +895,6 @@ export function registerPlanningRoutes(
         409,
       );
     }
-    context.events.publish({ specId: result.spec.id });
     return c.json(result.spec, 201);
   });
 
@@ -833,6 +942,18 @@ export function registerPlanningRoutes(
       return c.json({ error: result.message }, 409);
     if (result.status === "invalid")
       return c.json({ error: result.message }, 422);
+    return c.json({ ok: true as const }, 200);
+  });
+
+  app.openapi(locateRetryRoute, async (c) => {
+    const { specId } = c.req.valid("param");
+    const result = await aroundSpec(context, specId, () =>
+      retryLocate(pool, specId),
+    );
+    if (result.status === "no-spec")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "not-failed")
+      return c.json({ error: result.message }, 409);
     return c.json({ ok: true as const }, 200);
   });
 

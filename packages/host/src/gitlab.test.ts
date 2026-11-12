@@ -141,6 +141,30 @@ describe("getPullRequest", () => {
     expect((await a.getPullRequest({ repo, number: 1 })).state).toBe("merged");
   });
 
+  it("maps a merge commit SHA from GitLab into the pull request", async () => {
+    const a = adapter();
+    await open(a);
+    const mergeSha = "d".repeat(40);
+    gitlab.mergeMr(1, { mergeSha });
+    expect(await a.getPullRequest({ repo, number: 1 })).toMatchObject({
+      state: "merged",
+      mergeSha,
+      squashSha: null,
+    });
+  });
+
+  it("maps a squash commit SHA from GitLab into the pull request", async () => {
+    const a = adapter();
+    await open(a);
+    const squashSha = "e".repeat(40);
+    gitlab.mergeMr(1, { squashSha });
+    expect(await a.getPullRequest({ repo, number: 1 })).toMatchObject({
+      state: "merged",
+      mergeSha: null,
+      squashSha,
+    });
+  });
+
   it("keeps the branch head after merge, including a commit a person pushed", async () => {
     const a = adapter();
     const opened = await open(a);

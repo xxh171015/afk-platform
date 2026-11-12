@@ -1,5 +1,6 @@
 import {
   type BlockedReason,
+  isSandboxOomError,
   type TicketState,
   ticketTransition,
   unrecoverableJobError,
@@ -31,6 +32,7 @@ import {
   readFinalPayload,
   readStagePayload,
 } from "../jobs/stage-jobs.ts";
+import { recordLocateJobFailure } from "../planning/locate-bug.ts";
 import {
   planningCommitFailed,
   readPlanningPayload,
@@ -120,6 +122,12 @@ export async function recordJobFailure(
   if (cleanup) return specCleanupFailed(client, cleanup, now);
   const ready = readPrReadyPayload(job);
   if (ready) return prReadyFailed(client, ready, now);
+  const locate = await recordLocateJobFailure(client, job, error);
+  if (locate.status !== "not-locate") {
+    return locate.status === "ignored"
+      ? { status: "ignored" }
+      : { status: "blocked", failures: 1 };
+  }
   return { status: "not-a-stage" };
 }
 
@@ -162,8 +170,9 @@ async function ticketStageFailed(
     }),
     row.job_floor,
   );
+  const oom = isSandboxOomError(error);
   const unrecoverable = Boolean(unrecoverableJobError(error));
-  if (!unrecoverable && failures < MAX_JOB_FAILURES) {
+  if (!oom && !unrecoverable && failures < MAX_JOB_FAILURES) {
     await enqueueStageJob(
       client,
       {
@@ -178,9 +187,11 @@ async function ticketStageFailed(
   }
   // A ticket that never got to start counts as running now, so that the state machine can block it.
   const from: TicketState = row.state === "queued" ? "running" : row.state;
-  const reason = unrecoverable
-    ? JOB_FAILED
-    : reasonOfFailed(read.stage, row.type);
+  const reason: BlockedReason = oom
+    ? "sandbox-oom"
+    : unrecoverable
+      ? JOB_FAILED
+      : reasonOfFailed(read.stage, row.type);
   const blocked = ticketTransition(from, { type: "block", reason });
   if (!blocked.ok) throw new Error(blocked.reason);
   await client.query(
@@ -221,13 +232,14 @@ async function finalStepFailed(
     }),
     fin.job_floor,
   );
-  if (!unrecoverableJobError(error) && failures < MAX_JOB_FAILURES) {
+  const oom = isSandboxOomError(error);
+  if (!oom && !unrecoverableJobError(error) && failures < MAX_JOB_FAILURES) {
     await enqueueFinalJob(client, read, read.step);
     return { status: "requeued", failures };
   }
   await client.query(
     "UPDATE finalizations SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
-    [fin.id, JOB_FAILED],
+    [fin.id, oom ? "sandbox-oom" : JOB_FAILED],
   );
   return { status: "blocked", failures };
 }

@@ -17,6 +17,7 @@ import type pg from "pg";
 import { z } from "zod";
 import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueStageJob, readStagePayload } from "../jobs/stage-jobs.ts";
+import { recordTicketLinks } from "../links/record.ts";
 import {
   finishTicket,
   lockSpec,
@@ -459,6 +460,12 @@ export async function writeFacts(
        )`,
       [owner.spec_id, owner.repo_id],
     );
+  }
+  if (
+    result?.outcome === "merged" &&
+    (stage === "merge" || stage === "final-merge")
+  ) {
+    await recordTicketLinks(client, owner, stage);
   }
   await insertFindings(client, runId, result?.findings ?? []);
   // the other axes of a review: a Run each, which belongs to no job of its own

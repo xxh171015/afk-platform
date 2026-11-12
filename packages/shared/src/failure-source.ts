@@ -28,6 +28,7 @@ export const FINAL_E2E_BLOCKED_REASONS = [
   FINAL_E2E_FAILED,
   "integration-environment-failed",
   "job-failed",
+  "sandbox-oom",
 ] as const;
 
 // Why the platform paused a spec.
@@ -59,8 +60,30 @@ export const REASON_CODES = [
   "lease-expired",
   // host-sync could not read a pull request from the code host
   "sync-error",
+  // Locate could not map a bug report onto an original spec
+  "bug-unlocated",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
+
+// A Locate run on a bug draft: pending while the job is out, found after it filled
+// the original spec, failed when a person has to retry or fill the source by hand.
+export const LOCATE_STATES = ["pending", "found", "failed"] as const;
+export type LocateState = (typeof LOCATE_STATES)[number];
+
+export const LOCATE_REASONS = [
+  "bug-unlocated",
+  "sandbox-oom",
+  "job-failed",
+  "invalid-output",
+] as const;
+export type LocateReason = (typeof LOCATE_REASONS)[number];
+
+export const LOCATE_REASON_LABELS: Record<LocateReason, string> = {
+  "bug-unlocated": "未能定位原需求",
+  "sandbox-oom": "沙箱内存不足",
+  "job-failed": "作业失败",
+  "invalid-output": "输出不合法",
+};
 
 // null: not counted against anyone (the ticket went with the one it waited for).
 // job-failed is the platform's unless its error names a known outside service (failureSourceOf).
@@ -86,7 +109,9 @@ export const FAILURE_SOURCE_OF_REASON: Record<
   "update-branch-conflict": "spec",
   "update-branch-gate-failed": "spec",
   "planning-conflict": "spec",
+  "bug-unlocated": "spec",
   "job-failed": "platform",
+  "sandbox-oom": "platform",
   "lease-expired": "platform",
   "sync-error": "external",
   "upstream-cancelled": null,
@@ -109,6 +134,10 @@ export const EXTERNAL_ERROR_PATTERNS = [
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
   (pattern) => new RegExp(pattern, "i"),
 );
+
+export function isSandboxOomError(error: string): boolean {
+  return /\bOOMKilled\b|\bsandbox-oom\b/.test(error);
+}
 
 export function failureSourceOf(
   reason: string,
@@ -158,6 +187,10 @@ export const EVENT_TYPES = [
   "pull-request-sync",
   // a person's action (HUMAN_ACTIONS), written by the action's code
   "action",
+  // disk, agent pause, token expiry: inserted on the edge, not by a state trigger (ADR 0009)
+  "system",
+  // a Locate run found the original spec, or failed to
+  "locate",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -176,5 +209,6 @@ export const HUMAN_ACTIONS = [
   "retry-cleanup",
   "retry-planning",
   "waive-planning",
+  "retry-locate",
 ] as const;
 export type HumanAction = (typeof HUMAN_ACTIONS)[number];
