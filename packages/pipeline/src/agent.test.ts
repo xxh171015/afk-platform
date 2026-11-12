@@ -666,6 +666,19 @@ describe("the prompts", () => {
       expect(overlay).toContain(word);
   });
 
+  it("tells the agent to keep long gate and full-suite output out of the context", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const bounds = overlay.slice(overlay.indexOf("## 做事的边界"));
+    expect(bounds).toContain("/context/run.json");
+    expect(bounds).toContain("`gate`");
+    expect(bounds).toContain("全量测试");
+    expect(bounds).toContain("写进文件");
+    expect(bounds).toContain("退出码");
+    expect(bounds).toContain("失败的部分");
+    expect(bounds).toContain("最后几十行");
+    expect(bounds).toContain("单个测试文件");
+  });
+
   it("has afk-setup write how to run a single test file into AGENTS.md", () => {
     const skill = readFileSync(
       join(PROMPT_DIR, "../../../skills/afk-setup/SKILL.md"),
