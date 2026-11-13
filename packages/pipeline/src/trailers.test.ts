@@ -70,14 +70,17 @@ describe("stampTrailers", () => {
     ]);
     git(repo.dir, ["checkout", "--quiet", "main"]);
     stamp(base);
+    // %at is the instant: git's %aI prints +00:00 or Z for UTC depending on version.
     expect(
       gitOut(repo.dir, [
         "log",
         "-1",
-        "--format=%an <%ae> %aI | %cn",
+        "--format=%an <%ae> %at | %cn",
         "agent/T-123",
       ]),
-    ).toBe("Ada <ada@example.com> 2026-01-02T03:04:05+00:00 | afk-worker");
+    ).toBe(
+      `Ada <ada@example.com> ${Math.floor(Date.parse("2026-01-02T03:04:05Z") / 1000)} | afk-worker`,
+    );
   });
 
   it("leaves the base and the main branch alone and needs no worktree", () => {
