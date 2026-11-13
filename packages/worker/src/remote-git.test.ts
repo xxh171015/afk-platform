@@ -81,12 +81,11 @@ const job: ClaimedJob = {
 function trialMergeOn(
   hung: HungOrigin,
   store: RepoStore,
-  heartbeat: (beat: number) => "held" | "lost",
+  heartbeat: () => "held" | "lost",
 ) {
   const failures: string[] = [];
-  let beats = 0;
   const api = {
-    heartbeat: async () => heartbeat(++beats),
+    heartbeat: async () => heartbeat(),
     trialMergeTask: async () => ({
       spec: { id: 1, displayId: "S-1", title: "A" },
       repo: { name: "backend", url: hung.url, defaultBranch: "main" },
@@ -103,7 +102,6 @@ function trialMergeOn(
   } as unknown as WorkerOptions["executor"];
   return {
     failures,
-    beats: () => beats,
     run: () => processJob({ api, executor, heartbeatMs: 20 }, job),
   };
 }
@@ -113,15 +111,15 @@ describe("git that talks to origin", { timeout: 30_000 }, () => {
     const hung = await hungOrigin();
     const store = new RepoStore(tmp("afk-repos-"));
     cloneThenHang(store, hung);
-    // renews for a while, then the API says the lease is gone
-    const worker = trialMergeOn(hung, store, (beat) =>
-      beat < 10 ? "held" : "lost",
+    // once git is waiting on origin, renews ten times, then the API says the lease is gone
+    let whileHung = 0;
+    const worker = trialMergeOn(hung, store, () =>
+      hung.open() > 0 && ++whileHung >= 10 ? "lost" : "held",
     );
     const outcome = worker.run();
     expect(await until(() => hung.open() > 0)).toBe(true);
     expect(await outcome).toBe("abandoned");
-    // ten beats of 20 ms came while git was waiting on origin
-    expect(worker.beats()).toBeGreaterThanOrEqual(10);
+    expect(whileHung).toBe(10);
     expect(worker.failures).toEqual([]);
     // git was killed, so its connection is gone: nothing is left running
     expect(await until(() => hung.open() === 0)).toBe(true);
