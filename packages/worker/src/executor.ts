@@ -27,6 +27,7 @@ import {
   generatedCommandsNote,
   generatedGroupsFor,
   generatedOnlyConflicts,
+  generatedRunCommand,
   git,
   gitOrThrow,
   hasRef,
@@ -1032,6 +1033,10 @@ async function regenerateGeneratedConflicts(
   { ok: true; candidate: string } | { ok: false; failureLog: string }
 > {
   const { bundle, log } = context;
+  const upstreamSha =
+    bundle.job.stage === "update-branch"
+      ? tip(mainDir, input.incoming)
+      : tip(mainDir, input.integration);
   const ours = mergeTakingOurs(
     mainDir,
     input.integration,
@@ -1057,9 +1062,12 @@ async function regenerateGeneratedConflicts(
     }
     for (const group of input.groups) {
       log(`merge: regenerating ${group.paths.join(", ")}`);
-      const result = await session.exec(group.run, {
-        timeoutSeconds: GENERATE_TIMEOUT_SECONDS,
-      });
+      const result = await session.exec(
+        generatedRunCommand(group.run, upstreamSha),
+        {
+          timeoutSeconds: GENERATE_TIMEOUT_SECONDS,
+        },
+      );
       logs.push(`# ${group.run}\n${result.output}`);
       if (result.exitCode !== 0) {
         return {

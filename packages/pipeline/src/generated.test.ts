@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  GENERATED_UPSTREAM_ENV,
   generatedCommandsNote,
   generatedConflictShare,
   generatedGroupsFor,
   generatedOnlyConflicts,
+  generatedRunCommand,
 } from "./generated.ts";
 
 const api = { paths: ["packages/shared/src/api/**"], run: "pnpm gen:api" };
@@ -50,6 +52,15 @@ describe("generatedGroupsFor", () => {
         [api, drizzle],
       ),
     ).toEqual([api, drizzle]);
+  });
+});
+
+describe("generatedRunCommand", () => {
+  it("prefixes the upstream commit env without shell injection", () => {
+    const sha = "abc123'def";
+    expect(generatedRunCommand("scripts/rebase-migrations.sh", sha)).toBe(
+      `${GENERATED_UPSTREAM_ENV}='abc123'\\''def' scripts/rebase-migrations.sh`,
+    );
   });
 });
 
