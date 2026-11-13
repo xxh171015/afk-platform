@@ -36,7 +36,11 @@ export interface WorkerApi {
   // Is this job still running under a live lease at this attempt? Throws when the API cannot be asked.
   isHeld(jobId: number, attempt: number): Promise<boolean>;
   complete(job: ClaimedJob, result: unknown): Promise<Holding>;
-  fail(job: ClaimedJob, error: string): Promise<Holding>;
+  fail(
+    job: ClaimedJob,
+    error: string,
+    facts?: { orphanRef?: string; orphanSha?: string },
+  ): Promise<Holding>;
   // An earlier passing gate of the job's repo; undefined when there is none or the lease is gone.
   gateResult(
     job: ClaimedJob,
@@ -165,13 +169,22 @@ export function createWorkerApi(
         ).response.status,
       );
     },
-    async fail(job, error) {
+    async fail(job, error, facts) {
       const { params, body } = call(job);
       return holding(
         (
           await client.POST("/worker/jobs/{id}/fail", {
             params,
-            body: { ...body, error },
+            body: {
+              ...body,
+              error,
+              ...(facts?.orphanRef && facts.orphanSha
+                ? {
+                    orphanRef: facts.orphanRef,
+                    orphanSha: facts.orphanSha,
+                  }
+                : {}),
+            },
           })
         ).response.status,
       );

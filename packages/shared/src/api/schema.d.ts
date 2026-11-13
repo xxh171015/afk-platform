@@ -2602,6 +2602,8 @@ export interface paths {
             workerId: string;
             attempt: number;
             error: string;
+            orphanRef?: string;
+            orphanSha?: string;
           };
         };
       };

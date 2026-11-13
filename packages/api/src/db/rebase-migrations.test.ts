@@ -296,7 +296,10 @@ describe("scripts/rebase-migrations.sh", () => {
     expect(read(repo, "packages/api/drizzle/0003_alpha.sql")).toBe(sql.alpha);
     expect(() => read(repo, "packages/api/drizzle/0002_alpha.sql")).toThrow();
     expect(
-      gitOut(repo.dir, ["show", `${mainTip}:packages/api/drizzle/0002_main.sql`]).trimEnd(),
+      gitOut(repo.dir, [
+        "show",
+        `${mainTip}:packages/api/drizzle/0002_main.sql`,
+      ]).trimEnd(),
     ).toBe(sql.beta.trimEnd());
     const entries = entriesOf(repo);
     expect(entries.map((e) => e.tag)).toEqual([

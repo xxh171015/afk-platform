@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   BRANCH_MOVED_BRIEF,
+  blockedReasonForReportedPush,
   classifyPushError,
   formatPushFailure,
   HOST_PERMISSION_BRIEF,
+  isDeterministicPushFailure,
   isNetworkPushError,
   reportedPushError,
+  tipsFromPushFailure,
 } from "./push-error.ts";
 import {
   CURSOR_AUTH_BRIEF,
@@ -13,6 +16,36 @@ import {
 } from "./unrecoverable-job-error.ts";
 
 describe("reportedPushError", () => {
+  it("maps a worker brief onto the ticket or wrap-up reason", () => {
+    expect(blockedReasonForReportedPush(BRANCH_MOVED_BRIEF)).toBe(
+      "branch-moved",
+    );
+    expect(blockedReasonForReportedPush(HOST_PERMISSION_BRIEF)).toBe(
+      "job-failed",
+    );
+    expect(
+      blockedReasonForReportedPush(
+        "! [rejected] agent/T-1 -> agent/T-1 (non-fast-forward)",
+      ),
+    ).toBeUndefined();
+    expect(isDeterministicPushFailure("branch-moved")).toBe(true);
+    expect(isDeterministicPushFailure("host-permission")).toBe(true);
+    expect(isDeterministicPushFailure("network")).toBe(false);
+  });
+
+  it("reads the remote tip and this round's start out of a formatted brief", () => {
+    expect(
+      tipsFromPushFailure(
+        [
+          BRANCH_MOVED_BRIEF,
+          "远端 tip: aaa111",
+          "本轮起点: bbb222",
+          "! [rejected] (non-fast-forward)",
+        ].join("\n"),
+      ),
+    ).toEqual({ remoteTip: "aaa111", startedFrom: "bbb222" });
+  });
+
   it("only trusts worker briefs, not raw git text", () => {
     expect(reportedPushError(BRANCH_MOVED_BRIEF)).toBe("branch-moved");
     expect(reportedPushError(HOST_PERMISSION_BRIEF)).toBe("host-permission");

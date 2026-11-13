@@ -1,8 +1,8 @@
 import {
   AGENT_FAILURES,
+  blockedReasonForReportedPush,
   formatDisplayId,
   type PauseReason,
-  reportedPushError,
   resolveLimits,
   type SpecState,
   specTransition,
@@ -569,13 +569,7 @@ export async function updateBranchJobFailed(
   const specState = spec.rows[0]?.state;
   if (!specState || !SPECS_THAT_WATCH_MAIN.includes(specState))
     return "ignored";
-  const kind = reportedPushError(error);
-  const reason: PauseReason | undefined =
-    kind === "branch-moved"
-      ? "branch-moved"
-      : kind === "host-permission"
-        ? "job-failed"
-        : undefined;
+  const reason = blockedReasonForReportedPush(error) as PauseReason | undefined;
   if (!reason) return "ignored";
   await pauseForUpdateBranch(client, read.specId, reason);
   return "paused";

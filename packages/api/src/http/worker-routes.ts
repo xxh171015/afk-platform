@@ -620,7 +620,11 @@ const leaseRoute = createRoute({
 
 const failRoute = holderRoute(
   "fail",
-  { error: z.string() },
+  {
+    error: z.string(),
+    orphanRef: z.string().min(1).optional(),
+    orphanSha: z.string().min(1).optional(),
+  },
   z.object({ ok: z.literal(true) }),
 );
 
@@ -1099,7 +1103,8 @@ export function registerWorkerRoutes(
 
   app.openapi(failRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const { workerId, attempt, error } = c.req.valid("json");
+    const { workerId, attempt, error, orphanRef, orphanSha } =
+      c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
     const outcome = await aroundJob(context, id, () =>
       inWorkerReport(context, id, async (client) => {
@@ -1128,6 +1133,7 @@ export function registerWorkerRoutes(
             job.rows[0],
             error,
             context.clock(),
+            orphanRef && orphanSha ? { orphanRef, orphanSha } : undefined,
           );
           const sync = readHostSyncPayload(job.rows[0]);
           const access = readRepoAccessPayload(job.rows[0]);

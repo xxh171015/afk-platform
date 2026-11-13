@@ -53,6 +53,31 @@ export function isNetworkPushError(error: string): boolean {
   return classifyPushError(error) === "network";
 }
 
+// What a ticket or wrap-up does with a worker-marked push refusal: branch-moved, or job-failed for a host denial.
+export function blockedReasonForReportedPush(
+  error: string,
+): "branch-moved" | "job-failed" | undefined {
+  const kind = reportedPushError(error);
+  if (kind === "branch-moved") return "branch-moved";
+  if (kind === "host-permission") return "job-failed";
+  return undefined;
+}
+
+export function isDeterministicPushFailure(kind: PushErrorKind): boolean {
+  return kind === "branch-moved" || kind === "host-permission";
+}
+
+export function tipsFromPushFailure(error: string): PushFailureTips {
+  const remoteTip = /(?:^|\n)远端 tip: (.*)$/m.exec(error)?.[1];
+  const startedFrom = /(?:^|\n)本轮起点: (.*)$/m.exec(error)?.[1];
+  const value = (text: string | undefined) =>
+    text === undefined ? undefined : text === "(none)" ? "" : text;
+  return {
+    ...(remoteTip !== undefined ? { remoteTip: value(remoteTip) } : {}),
+    ...(startedFrom !== undefined ? { startedFrom: value(startedFrom) } : {}),
+  };
+}
+
 export function formatPushFailure(
   error: string,
   tips: PushFailureTips = {},

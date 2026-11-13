@@ -97,7 +97,7 @@ describe("alignTicketBranch", () => {
     expect(aligned).toEqual({
       expectedOld: remoteTip,
       remoteTip,
-      orphan: { ref: orphan, sha: localTip },
+      orphan: { orphanRef: orphan, orphanSha: localTip },
     });
     expect(shaOf(local.dir, HEADS)).toBe(remoteTip);
     expect(shaOf(local.dir, orphan)).toBe(localTip);

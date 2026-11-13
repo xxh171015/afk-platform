@@ -3,10 +3,7 @@ import { globMatches } from "./protected-paths.ts";
 // Commit that must stay unchanged when the platform regenerates after a generated-only merge conflict.
 export const GENERATED_UPSTREAM_ENV = "AFK_GENERATED_UPSTREAM_SHA";
 
-export function generatedRunCommand(
-  run: string,
-  upstreamSha: string,
-): string {
+export function generatedRunCommand(run: string, upstreamSha: string): string {
   const quoted = `'${upstreamSha.replaceAll("'", `'\\''`)}'`;
   return `${GENERATED_UPSTREAM_ENV}=${quoted} ${run}`;
 }
@@ -60,15 +57,4 @@ export function generatedCommandsNote(
   ].join("\n");
 }
 
-// Of merge results that recorded whether the conflict was generated-only, the share that were.
-export function generatedConflictShare(
-  merges: readonly { generatedOnlyConflict?: boolean }[],
-): number | undefined {
-  const counted = merges.filter(
-    (row) => row.generatedOnlyConflict !== undefined,
-  );
-  if (counted.length === 0) return undefined;
-  return (
-    counted.filter((row) => row.generatedOnlyConflict).length / counted.length
-  );
-}
+export { generatedConflictShare } from "@afk/shared";

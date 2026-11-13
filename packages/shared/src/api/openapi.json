@@ -4388,6 +4388,14 @@
                   },
                   "error": {
                     "type": "string"
+                  },
+                  "orphanRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "orphanSha": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": ["workerId", "attempt", "error"]

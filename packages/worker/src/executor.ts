@@ -60,6 +60,7 @@ import {
   type Bundle,
   classifyPushError,
   formatPushFailure,
+  isDeterministicPushFailure,
   isNetworkPushError,
   type PushFailureTips,
   REVIEW_AXES,
@@ -113,6 +114,7 @@ export interface StageContext {
   signal: AbortSignal;
   log: (line: string) => void;
   logRaw: (line: string) => void; // goes to the Run's log only, not to the worker's own output
+  align?: TicketAlign;
 }
 
 // What a run is asked for, from the project's say (the bundle) and the worker's own defaults.
@@ -145,6 +147,8 @@ function agentFacts(
 // unless the error is one that will not recover by running it again (Cursor auth, a bad model, a spent quota,
 // a failed integration image build). Those are rewritten here to the human sentence the brief shows.
 export class InfrastructureError extends Error {
+  orphanRef?: string;
+  orphanSha?: string;
   constructor(message: string) {
     super(unrecoverableJobError(message) ?? message);
   }
@@ -246,13 +250,22 @@ function bringBranches(slot: Slot, mainDir: string, refs: string[]) {
 
 const SKIP_TICKET_ALIGN = new Set(["e2e", "diagnose", "final-review"]);
 
-function orphanRunFields(align: TicketAlign): {
-  orphanRef?: string;
-  orphanSha?: string;
-} {
-  return align.orphan
-    ? { orphanRef: align.orphan.ref, orphanSha: align.orphan.sha }
-    : {};
+function withOrphanRun(
+  body: StageOutcomeBody,
+  align: TicketAlign,
+): StageOutcomeBody {
+  if (!align.orphan) return body;
+  const run =
+    body.run && typeof body.run === "object" && !Array.isArray(body.run)
+      ? (body.run as Record<string, unknown>)
+      : {};
+  return { ...body, run: { ...run, ...align.orphan } };
+}
+
+function attachOrphan(error: unknown, align: TicketAlign): void {
+  if (!(error instanceof InfrastructureError) || !align.orphan) return;
+  error.orphanRef = align.orphan.orphanRef;
+  error.orphanSha = align.orphan.orphanSha;
 }
 
 function assertRemoteUnchanged(
@@ -306,6 +319,10 @@ async function publishLocalAhead(
   }
 }
 
+function assertPublishedTip(mainDir: string, agent: string): void {
+  publishedTip(mainDir, agent);
+}
+
 function publishedTip(mainDir: string, agent: string): string {
   const remote = originSha(mainDir, agent);
   const local = hasRef(mainDir, `refs/heads/${agent}`)
@@ -340,70 +357,87 @@ async function runStage(
     context.log(
       `restart: dropped ${bundle.agentBranch}${align.remoteTip ? ` (origin was ${align.remoteTip})` : ""}`,
     );
+  context.align = align;
   if (align.orphan)
     context.log(
-      `align: ${bundle.agentBranch} follows origin ${align.remoteTip}; kept ${align.orphan.sha} at ${align.orphan.ref}`,
+      `align: ${bundle.agentBranch} follows origin ${align.remoteTip}; kept ${align.orphan.orphanSha} at ${align.orphan.orphanRef}`,
     );
   bringBranches(slot, mainDir, [integration, bundle.agentBranch]);
-  if (
-    bundle.handbackResolve &&
-    bundle.job.stage === "implement" &&
-    bundle.ticket
-  ) {
-    const resume = handbackResumeStage(
-      mainDir,
-      bundle.agentBranch,
-      integration,
-      bundle.ticket.type,
-    );
-    const remote = align.remoteTip ?? originSha(mainDir, bundle.agentBranch);
-    context.log(`handback: resume from ${resume} (origin ${remote ?? "none"})`);
-    return {
-      stage: "implement",
-      outcome: "handback-resolved",
-      handback: { resumeStage: resume },
-      run: {
-        branch: bundle.agentBranch,
-        ...(remote ? { headSha: remote } : {}),
-        ...orphanRunFields(align),
-      },
-    };
-  }
-  switch (bundle.job.stage) {
-    case "implement":
-    case "gate-fix":
-    case "review-fix":
-    case "merge-fix":
-    case "final-fix":
-      return agentChange(deps, context, mainDir, slot, align);
-    case "review":
-    case "final-review":
-      return review(deps, context, mainDir, slot, align);
-    case "gate":
-      return gate(deps, context, mainDir, slot, align);
-    case "merge":
-    case "final-merge":
-      return merge(deps, context, mainDir, slot, align);
-    case "update-branch":
-      return context.job.type === "agent-run"
-        ? agentChange(deps, context, mainDir, slot, align)
-        : merge(deps, context, mainDir, slot, align);
-    case "e2e":
-      return e2e(deps, context, mainDir, slot);
-    case "diagnose":
-      return diagnose(deps, context, mainDir, slot);
-    default:
-      throw new InfrastructureError(`unknown stage ${bundle.job.stage}`);
+  try {
+    let body: StageOutcomeBody;
+    if (
+      bundle.handbackResolve &&
+      bundle.job.stage === "implement" &&
+      bundle.ticket
+    ) {
+      const resume = handbackResumeStage(
+        mainDir,
+        bundle.agentBranch,
+        integration,
+        bundle.ticket.type,
+      );
+      const remote = align.remoteTip ?? originSha(mainDir, bundle.agentBranch);
+      context.log(
+        `handback: resume from ${resume} (origin ${remote ?? "none"})`,
+      );
+      body = {
+        stage: "implement",
+        outcome: "handback-resolved",
+        handback: { resumeStage: resume },
+        run: {
+          branch: bundle.agentBranch,
+          ...(remote ? { headSha: remote } : {}),
+        },
+      };
+    } else {
+      switch (bundle.job.stage) {
+        case "implement":
+        case "gate-fix":
+        case "review-fix":
+        case "merge-fix":
+        case "final-fix":
+          body = await agentChange(deps, context, mainDir, slot, align);
+          break;
+        case "review":
+        case "final-review":
+          body = await review(deps, context, mainDir, slot);
+          break;
+        case "gate":
+          body = await gate(deps, context, mainDir, slot);
+          break;
+        case "merge":
+        case "final-merge":
+          body = await merge(deps, context, mainDir, slot, align);
+          break;
+        case "update-branch":
+          body =
+            context.job.type === "agent-run"
+              ? await agentChange(deps, context, mainDir, slot, align)
+              : await merge(deps, context, mainDir, slot, align);
+          break;
+        case "e2e":
+          body = await e2e(deps, context, mainDir, slot);
+          break;
+        case "diagnose":
+          body = await diagnose(deps, context, mainDir, slot);
+          break;
+        default:
+          throw new InfrastructureError(`unknown stage ${bundle.job.stage}`);
+      }
+    }
+    return withOrphanRun(body, context.align ?? align);
+  } catch (error) {
+    attachOrphan(error, context.align ?? align);
+    throw error;
   }
 }
 
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
-const originTip = originSha;
 
 function throwPushFailure(error: string, tips: PushFailureTips): never {
   const kind = classifyPushError(error);
-  if (kind === "branch-moved" || kind === "host-permission") {
+  if (isDeterministicPushFailure(kind)) {
     throw new InfrastructureError(
       formatPushFailure(error, {
         remoteTip: tips.remoteTip ?? "",
@@ -573,7 +607,6 @@ async function agentChange(
       ...agentFacts(deps, options, given.prompt),
       ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
-      ...orphanRunFields(align),
     };
     if (verdict.outcome !== "done")
       return { stage, outcome: verdict.outcome, run: facts };
@@ -631,7 +664,7 @@ async function agentChange(
     }
     if (!pushed.ok)
       throwPushFailure(pushed.error, {
-        remoteTip: originTip(mainDir, request.target),
+        remoteTip: originSha(mainDir, request.target),
         startedFrom: align.expectedOld,
       });
     facts.headSha = tip(mainDir, agent);
@@ -659,7 +692,6 @@ async function review(
   context: StageContext,
   mainDir: string,
   slot: Slot,
-  align: TicketAlign,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const agent = bundle.agentBranch;
@@ -749,7 +781,7 @@ async function review(
       stage,
       outcome: verdict.outcome,
       // the Standards run is the job's own Run; the Spec run is recorded beside it
-      run: { ...first?.run, axis: first?.axis, ...orphanRunFields(align) },
+      run: { ...first?.run, axis: first?.axis },
       findings: first?.findings ?? [],
       extraRuns: others.map((r) => ({
         run: { ...r.run, axis: r.axis },
@@ -818,7 +850,6 @@ async function gate(
   context: StageContext,
   mainDir: string,
   slot: Slot,
-  align: TicketAlign,
 ): Promise<StageOutcomeBody> {
   const { bundle, log } = context;
   const agent = bundle.agentBranch;
@@ -846,7 +877,6 @@ async function gate(
         branch: agent,
         baseSha,
         output: { unapproved: check.unapproved },
-        ...orphanRunFields(align),
       },
     };
   }
@@ -872,7 +902,6 @@ async function gate(
         branch: agent,
         baseSha,
         output: { detail, mismatches: copies },
-        ...orphanRunFields(align),
       },
     };
   }
@@ -909,7 +938,6 @@ async function gate(
       baseSha,
       headSha: outcome.commitSha,
       output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
-      ...orphanRunFields(align),
     },
     gate: gateFacts(outcome),
   };
@@ -929,7 +957,7 @@ async function merge(
   const { bundle } = context;
   let ticketAlign = align;
   for (let attempt = 1; ; attempt++) {
-    const outcome = await mergeOnce(deps, context, mainDir, slot, ticketAlign);
+    const outcome = await mergeOnce(deps, context, mainDir, slot);
     if (!("integrationMoved" in outcome)) return outcome;
     if (attempt === MAX_MERGE_ATTEMPTS) {
       throw new InfrastructureError(
@@ -945,6 +973,7 @@ async function merge(
       bundle.repo.defaultBranch,
     );
     ticketAlign = alignTicketBranch(mainDir, bundle.agentBranch);
+    context.align = ticketAlign;
   }
 }
 
@@ -1151,7 +1180,6 @@ async function mergeOnce(
   context: StageContext,
   mainDir: string,
   slot: Slot,
-  align: TicketAlign,
 ): Promise<StageOutcomeBody | { integrationMoved: string }> {
   const { bundle, log, job } = context;
   const agent = bundle.agentBranch;
@@ -1161,7 +1189,7 @@ async function mergeOnce(
   if (exists(mainDir, agent) || originSha(mainDir, agent)) {
     await publishLocalAhead(deps, context, mainDir, agent);
     if (exists(mainDir, agent) || originSha(mainDir, agent))
-      publishedTip(mainDir, agent);
+      assertPublishedTip(mainDir, agent);
   }
   // A first update-branch has no temp branch yet: merge the default branch. After the merge agent, the temp exists
   // and is what gets merge-treed into the integration branch.
@@ -1187,7 +1215,7 @@ async function mergeOnce(
       stage,
       outcome: "merged",
       headSha: head,
-      run: { headSha: head, ...orphanRunFields(align) },
+      run: { headSha: head },
       ...(measured ? { gate: gateFacts(measured) } : {}),
     };
   }
@@ -1317,7 +1345,7 @@ async function mergeOnce(
   if (!pushed.ok) {
     if (classifyPushError(pushed.error) === "host-permission") {
       throwPushFailure(pushed.error, {
-        remoteTip: originTip(mainDir, integrationRef),
+        remoteTip: originSha(mainDir, integrationRef),
         startedFrom: oldTip,
       });
     }
@@ -1332,7 +1360,6 @@ async function mergeOnce(
     // recorded on the Run, so the next gate can be measured against what this merge measured
     run: {
       headSha: candidateSha,
-      ...orphanRunFields(align),
       ...(generatedOnlyConflict
         ? {
             output: {

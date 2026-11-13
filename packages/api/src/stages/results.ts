@@ -287,10 +287,10 @@ export async function recordStageResult(
     await client.query(
       `UPDATE tickets SET handback_pending = false, resume_stage = $2,
          reviewed = CASE WHEN $3 THEN false ELSE reviewed END,
-         last_pushed_sha = COALESCE($4, last_pushed_sha),
+         last_pushed_sha = NULL,
          restart = false, state = 'pending'
        WHERE id = $1`,
-      [ticket.id, nextResume, resume === "gate", valid.run?.headSha ?? null],
+      [ticket.id, nextResume, resume === "gate"],
     );
     await schedulePass(client, ticket.spec_id);
     return {
@@ -390,28 +390,41 @@ function outputWithOrphan(
   return { ...base, orphanRef: run.orphanRef, orphanSha: run.orphanSha };
 }
 
-async function recordOrphanEvent(
+export async function recordOrphanEvent(
   client: pg.PoolClient,
   owner: RunOwner,
   job: StageJob,
   run: { orphanRef?: string; orphanSha?: string } | undefined,
 ): Promise<void> {
   if (!run?.orphanRef || !run.orphanSha) return;
-  const kind = owner.ticket_id != null ? "ticket" : "finalization";
-  const state =
-    owner.ticket_id != null
-      ? (
-          await client.query<{ state: string }>(
-            "SELECT state FROM tickets WHERE id = $1",
-            [owner.ticket_id],
-          )
-        ).rows[0]?.state
-      : (
-          await client.query<{ state: string }>(
-            "SELECT state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
-            [owner.spec_id, owner.repo_id],
-          )
-        ).rows[0]?.state;
+  let kind: "ticket" | "finalization" | "spec";
+  let state: string | undefined;
+  if (owner.ticket_id != null) {
+    kind = "ticket";
+    state = (
+      await client.query<{ state: string }>(
+        "SELECT state FROM tickets WHERE id = $1",
+        [owner.ticket_id],
+      )
+    ).rows[0]?.state;
+  } else {
+    state = (
+      await client.query<{ state: string }>(
+        "SELECT state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+        [owner.spec_id, owner.repo_id],
+      )
+    ).rows[0]?.state;
+    if (state) kind = "finalization";
+    else {
+      kind = "spec";
+      state = (
+        await client.query<{ state: string }>(
+          "SELECT state FROM specs WHERE id = $1",
+          [owner.spec_id],
+        )
+      ).rows[0]?.state;
+    }
+  }
   if (!state) return;
   await client.query(
     `SELECT afk_record_event($1, $2, $3, $4, $5, $6, $6, NULL, NULL, $7::jsonb)`,
@@ -493,7 +506,11 @@ export async function writeFacts(
   }
   const runId = inserted.rows[0]?.id as number;
   await recordOrphanEvent(client, owner, job, run);
-  if (owner.ticket_id !== null && run?.headSha) {
+  if (
+    owner.ticket_id !== null &&
+    run?.headSha &&
+    result?.outcome !== "handback-resolved"
+  ) {
     await client.query(
       "UPDATE tickets SET last_pushed_sha = $2 WHERE id = $1",
       [owner.ticket_id, run.headSha],

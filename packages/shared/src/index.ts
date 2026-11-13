@@ -92,6 +92,7 @@ export type { FinalDecision, FinalReport, FinalStep } from "./finalize-flow.ts";
 export { advanceFinalization, FINAL_STEPS } from "./finalize-flow.ts";
 export type { FindingResolution } from "./findings.ts";
 export { FINDING_RESOLUTIONS, findingResolutionPhrase } from "./findings.ts";
+export { generatedConflictShare } from "./generated-conflict.ts";
 export {
   DEFAULT_BRANCH_PEER_SPEC_ID,
   HOST_CAPABILITY,
@@ -159,11 +160,14 @@ export {
 export type { PushErrorKind, PushFailureTips } from "./push-error.ts";
 export {
   BRANCH_MOVED_BRIEF,
+  blockedReasonForReportedPush,
   classifyPushError,
   formatPushFailure,
   HOST_PERMISSION_BRIEF,
+  isDeterministicPushFailure,
   isNetworkPushError,
   reportedPushError,
+  tipsFromPushFailure,
 } from "./push-error.ts";
 export { redactSecrets } from "./redact.ts";
 export type { RepoRef } from "./repo-url.ts";

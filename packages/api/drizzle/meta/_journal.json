@@ -519,6 +519,13 @@
       "when": 1794580000000,
       "tag": "0073_handback_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794590000000,
+      "tag": "0074_spec_pause_event_reason",
+      "breakpoints": true
     }
   ]
 }

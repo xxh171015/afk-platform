@@ -19,7 +19,7 @@ export type TicketAlign = {
   // What --force-with-lease must still see on origin at push time, or "" if the branch must not exist yet.
   expectedOld: string;
   remoteTip?: string;
-  orphan?: { ref: string; sha: string };
+  orphan?: { orphanRef: string; orphanSha: string };
 };
 
 // Make the main clone's ticket branch follow origin, except a restart which drops it so the stage starts from
@@ -79,7 +79,7 @@ export function alignTicketBranch(
   return {
     expectedOld: remote,
     remoteTip: remote,
-    orphan: { ref, sha: local },
+    orphan: { orphanRef: ref, orphanSha: local },
   };
 }
 

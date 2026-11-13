@@ -196,10 +196,19 @@ async function stopTicketWork(
   );
 }
 
+export type TakeoverDetails = {
+  reason?: "branch-moved" | "remote-moved";
+  remoteTip?: string;
+  startedFrom?: string;
+  remoteSha?: string;
+  lastPushedSha?: string;
+};
+
 // Stop the ticket's jobs and hold it as taken-over. Used by a person and by host-sync / a refused push.
 export async function applyTakeover(
   client: pg.PoolClient,
   ticketId: number,
+  details: TakeoverDetails = {},
 ): Promise<ActionResult<{ state: TicketState }>> {
   const ticket = await loadLocked(client, ticketId);
   if (!ticket) return { status: "no-ticket" };
@@ -214,10 +223,12 @@ export async function applyTakeover(
     [ticketId],
   );
   await stopTicketWork(client, ticketId);
-  await recordAction(client, "takeover", {
-    specId: ticket.spec_id,
-    ticketId,
-  });
+  await recordAction(
+    client,
+    "takeover",
+    { specId: ticket.spec_id, ticketId },
+    details,
+  );
   await schedulePass(client, ticket.spec_id);
   return { status: "ok", state: next.state };
 }

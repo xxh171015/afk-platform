@@ -591,7 +591,11 @@ describe("takeover and handback", () => {
     const shas = await db.pool.query<{ head_sha: string }>(
       "SELECT head_sha FROM runs WHERE ticket_id = 1 AND head_sha IS NOT NULL ORDER BY id",
     );
-    expect(shas.rows.map((r) => r.head_sha)).toEqual(["person-1", "person-2"]);
+    expect(shas.rows.map((r) => r.head_sha)).toEqual([
+      "person-1",
+      "person-2",
+      "person-2",
+    ]);
   });
 
   it("hands an already-merged integration ticket back to e2e when there are no new commits", async () => {
@@ -705,13 +709,22 @@ describe("takeover and handback", () => {
   });
 
   it("records a human action for takeover and for handback, and takeover does not bump the content version", async () => {
-    await runningSpec([ticket("a")]);
+    const specId = await runningSpec([ticket("a")]);
     const before = await ticketMeta(1);
     expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
     expect((await ticketMeta(1)).content_version).toBe(before.content_version);
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
     await resolveHandback("implement");
     expect(await actions()).toEqual(["takeover", "handback"]);
+    const timeline = (await call("GET", `/specs/${specId}`)).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(
+      timeline
+        .filter((event) => event.kind === "action")
+        .map((event) => event.text),
+    ).toEqual(["人接手 T-1", "交回 T-1"]);
   });
 });
 
