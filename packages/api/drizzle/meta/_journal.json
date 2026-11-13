@@ -561,6 +561,13 @@
       "when": 1794640000000,
       "tag": "0079_gate_setup_timeout_external",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794650000000,
+      "tag": "0080_agents_probe",
+      "breakpoints": true
     }
   ]
 }

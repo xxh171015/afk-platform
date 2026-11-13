@@ -130,10 +130,15 @@ export const instance = pgTable(
       .notNull()
       .default(0),
     diskNoticed: text("disk_noticed").notNull().default("none"),
-    // Set while the agents' provider refuses work (out of usage, key refused): no agent job is claimed until a
-    // person resumes them. The reason is the error that paused them.
+    // Set while the agents' provider refuses work (out of usage, key refused): no agent job is claimed until they
+    // are resumed. The reason is the error that paused them.
     agentsPausedAt: timestamp("agents_paused_at", { withTimezone: true }),
     agentsPauseReason: text("agents_pause_reason"),
+    // A pause because the usage ran out hands out one agent job at this time to try the provider again (none for a
+    // refused key); agents_probes counts the tries so far, agents_probe_job_id is the job of the last one.
+    agentsProbeAt: timestamp("agents_probe_at", { withTimezone: true }),
+    agentsProbes: integer("agents_probes").notNull().default(0),
+    agentsProbeJobId: integer("agents_probe_job_id"),
     // Events through this id have been handed to the notice dispatcher; restart continues after it (ADR 0009).
     lastNotifiedEventId: bigint("last_notified_event_id", { mode: "number" })
       .notNull()

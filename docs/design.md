@@ -745,7 +745,7 @@ flowchart LR
 - **幂等键**：每个阶段的幂等键是 `(ticket, 内容版本, 阶段, 序号)`。重跑时先查这个阶段有没有已记录的结果，有就跳过。合并阶段额外检查：agent 分支的 head 已经是集成分支的祖先，就当作已合并。
 - **能力标签**：作业声明需要的能力（docker、能访问哪些仓库），worker 只拉自己能做的。
 - **互斥键**：作业可带 `lock_key`，领取时 API 排除“同键已有未过期租约”的作业，持有期等于租约期，过期自动释放。僵尸 worker 的防护：推送集成分支前先调 API 校验 (作业号, attempt) 仍是当前持有者并续期；推送本身用 `--force-with-lease`；若僵尸抢先推送成功，新持有者靠“agent 分支的 head 已是集成分支的祖先”的幂等检查当作已合并。校验和推送之间有一个很窄的时间窗，由后两层兜住。
-- **作业失败**：worker 自己跑不下去（沙箱起不来、推送一再被拒、门禁的 setup 失败）时报作业失败，同一阶段重排，三次都失败票才以 `job-failed` 等人处理。例外是 agent 的提供方拒绝一切工作（额度用完、密钥被拒，见 `isAgentProviderUnavailable`）：这次 Run 以 `provider-unavailable` 结束并和作业脱钩，作业原样回到队列，平台暂停所有 `agent-run` 作业（instance 表的 `agents_paused_at`），发一次通知，页面顶部显示原因和「恢复」按钮（也可以 `plat agents resume`）。暂停期间门禁、合并照常领取；票不进 blocked，也不计失败次数。
+- **作业失败**：worker 自己跑不下去（沙箱起不来、推送一再被拒、门禁的 setup 失败）时报作业失败，同一阶段重排，三次都失败票才以 `job-failed` 等人处理。例外是 agent 的提供方拒绝一切工作（额度用完、密钥被拒，见 `isAgentProviderUnavailable`）：这次 Run 以 `provider-unavailable` 结束并和作业脱钩，作业原样回到队列，平台暂停所有 `agent-run` 作业（instance 表的 `agents_paused_at`），发一次通知，页面顶部显示原因和「恢复」按钮（也可以 `plat agents resume`）。额度用完的暂停会自己探活：15 分钟后放出一个 agent 作业（`agents_probe_at`，此时没有 agent 作业在跑），没成功就把间隔翻倍（30、60 分钟，最长 1 小时）；探活作业交回结果就自动恢复，写系统事件 `agents-resumed`（`automatic: true`）并通知。密钥被拒的暂停不探活，只等人恢复。暂停期间门禁、合并照常领取；票不进 blocked，也不计失败次数。
 - 队列库用 graphile-worker、pg-boss，或者直接在 Postgres 表上自己实现都行，前提是满足上面的语义；选型时先确认租约续期和 attempt 是否可用。
 
 作业类型：

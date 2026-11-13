@@ -10037,9 +10037,12 @@
                             },
                             "reason": {
                               "type": "string"
+                            },
+                            "nextProbeAt": {
+                              "type": ["string", "null"]
                             }
                           },
-                          "required": ["since", "reason"]
+                          "required": ["since", "reason", "nextProbeAt"]
                         },
                         "logDirBytes": {
                           "type": "number"

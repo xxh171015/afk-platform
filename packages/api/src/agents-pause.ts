@@ -1,18 +1,29 @@
-import { isAgentProviderUnavailable, unrecoverableJobError } from "@afk/shared";
+import {
+  isAgentProviderUnavailable,
+  QUOTA_EXHAUSTED_BRIEF,
+  unrecoverableJobError,
+} from "@afk/shared";
 import type pg from "pg";
 import { recordSystemEvent } from "./events/system.ts";
 import type { Queryable } from "./jobs/queue.ts";
 
 // When the agents' provider refuses work (its usage ran out, it refuses the key), every agent job would fail the same
 // way: retrying it three times and blocking the ticket only makes a person retry each ticket afterwards. Instead the
-// failed job goes back to the queue as it was, no agent job is claimed until a person resumes them, and the gates and
+// failed job goes back to the queue as it was, no agent job is claimed until the agents are resumed, and the gates and
 // merges that need no agent go on meanwhile.
+//
+// Usage comes back by itself, so a pause for it tries the provider again: after PROBE_FIRST_MINUTES one agent job is
+// handed out (claimJob), and the wait doubles after each try up to PROBE_MAX_MINUTES. A probe that comes back with a
+// result resumes the agents. A refused key does not mend itself: only a person resumes that pause.
 
 export const AGENT_JOB_TYPE = "agent-run";
+export const PROBE_FIRST_MINUTES = 15;
+export const PROBE_MAX_MINUTES = 60;
 
 export interface AgentsPause {
   since: string;
   reason: string;
+  nextProbeAt: string | null; // null: it waits for a person
 }
 
 export async function agentsPause(
@@ -21,12 +32,16 @@ export async function agentsPause(
   const { rows } = await pool.query<{
     agents_paused_at: Date | null;
     agents_pause_reason: string | null;
-  }>("SELECT agents_paused_at, agents_pause_reason FROM instance");
+    agents_probe_at: Date | null;
+  }>(
+    "SELECT agents_paused_at, agents_pause_reason, agents_probe_at FROM instance",
+  );
   const row = rows[0];
   return row?.agents_paused_at
     ? {
         since: row.agents_paused_at.toISOString(),
         reason: row.agents_pause_reason ?? "",
+        nextProbeAt: row.agents_probe_at?.toISOString() ?? null,
       }
     : null;
 }
@@ -57,21 +72,81 @@ export async function pauseForProvider(
      WHERE id = $1`,
     [job.id],
   );
+  const usage = brief === QUOTA_EXHAUSTED_BRIEF;
   const paused = await client.query(
-    `UPDATE instance SET agents_paused_at = $1::timestamptz, agents_pause_reason = $2
+    `UPDATE instance SET agents_paused_at = $1::timestamptz, agents_pause_reason = $2,
+       agents_probe_at = CASE WHEN $3 THEN $1::timestamptz + make_interval(mins => $4) END,
+       agents_probes = 0, agents_probe_job_id = NULL
      WHERE agents_paused_at IS NULL RETURNING 1`,
-    [now, brief.slice(0, 1000)],
+    [now, brief.slice(0, 1000), usage, PROBE_FIRST_MINUTES],
   );
-  if (paused.rowCount === 0) return undefined;
+  if (paused.rowCount === 0) {
+    // a probe found the key refused this time: that pause waits for a person
+    if (!usage)
+      await client.query(
+        `UPDATE instance SET agents_pause_reason = $1, agents_probe_at = NULL
+         WHERE agents_paused_at IS NOT NULL`,
+        [brief.slice(0, 1000)],
+      );
+    return undefined;
+  }
   await recordSystemEvent(client, { kind: "agents-paused", reason: brief });
   return undefined;
 }
 
-// A person says the provider takes work again: agent jobs are claimed again, starting with the ones put back.
-export async function resumeAgents(pool: Queryable): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `UPDATE instance SET agents_paused_at = NULL, agents_pause_reason = NULL
-     WHERE agents_paused_at IS NOT NULL`,
+// Called in the claim's transaction when an agent job was handed out: while paused that job is the probe, and the
+// next one waits twice as long as the last wait (15, 30, 60 minutes, no longer than PROBE_MAX_MINUTES).
+export async function probeHandedOut(
+  client: Pick<pg.PoolClient, "query">,
+  jobId: number,
+  now: Date,
+): Promise<void> {
+  await client.query(
+    `UPDATE instance SET agents_probes = agents_probes + 1, agents_probe_job_id = $1,
+       agents_probe_at = $2::timestamptz
+         + make_interval(mins => LEAST($3 * power(2, agents_probes + 1), $4)::int)
+     WHERE agents_paused_at IS NOT NULL AND agents_probe_at IS NOT NULL`,
+    [jobId, now, PROBE_FIRST_MINUTES, PROBE_MAX_MINUTES],
   );
-  return (rowCount ?? 0) > 0;
+}
+
+// A job came back with a result: when it was the probe, the provider takes work again and the agents resume.
+export async function resumeAfterProbe(
+  client: Pick<pg.PoolClient, "query">,
+  jobId: number,
+  now: Date,
+): Promise<void> {
+  await resume(client, now, false, jobId);
+}
+
+// A person says the provider takes work again: agent jobs are claimed again, starting with the ones put back.
+export async function resumeAgents(
+  client: Pick<pg.PoolClient, "query">,
+  now: Date,
+): Promise<boolean> {
+  return resume(client, now, true);
+}
+
+async function resume(
+  client: Pick<pg.PoolClient, "query">,
+  now: Date,
+  byPerson: boolean,
+  probeJobId?: number,
+): Promise<boolean> {
+  const { rows } = await client.query<{ since: Date }>(
+    `WITH paused AS (SELECT agents_paused_at AS since FROM instance WHERE agents_paused_at IS NOT NULL FOR UPDATE)
+     UPDATE instance SET agents_paused_at = NULL, agents_pause_reason = NULL, agents_probe_at = NULL,
+       agents_probes = 0, agents_probe_job_id = NULL
+     FROM paused WHERE ($1::int IS NULL OR agents_probe_job_id = $1)
+     RETURNING paused.since`,
+    [probeJobId ?? null],
+  );
+  const since = rows[0]?.since;
+  if (!since) return false;
+  await recordSystemEvent(client, {
+    kind: "agents-resumed",
+    automatic: !byPerson,
+    pausedMinutes: Math.round((now.getTime() - since.getTime()) / 60_000),
+  });
+  return true;
 }

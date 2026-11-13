@@ -4597,6 +4597,7 @@ export interface paths {
                 agentsPaused: {
                   since: string;
                   reason: string;
+                  nextProbeAt: string | null;
                 } | null;
                 logDirBytes: number;
                 apiFreeBytes: number;

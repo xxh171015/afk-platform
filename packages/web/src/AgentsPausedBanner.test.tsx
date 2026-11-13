@@ -28,6 +28,7 @@ describe("the agents-paused banner", () => {
               ? {
                   since: "2026-11-10T17:04:45Z",
                   reason: "ActionRequiredError: You're out of usage.",
+                  nextProbeAt: null,
                 }
               : null,
           },
@@ -47,5 +48,47 @@ describe("the agents-paused banner", () => {
       expect(screen.queryByTestId("agents-paused-banner")).toBeNull(),
     );
     expect(server.calls).toContain("POST /agents/resume");
+  });
+
+  it("says when the platform tries the provider again on its own", async () => {
+    const server = fakeServer({
+      "GET /workbench": () => ({
+        json: {
+          ...emptyWorkbench,
+          status: {
+            ...emptyWorkbench.status,
+            agentsPaused: {
+              since: "2026-11-10T17:04:45Z",
+              reason: "Cursor 额度用完，充值或换模型后再试",
+              nextProbeAt: "2026-11-10T17:19:45Z",
+            },
+          },
+        },
+      }),
+    });
+    renderWithApp(<AgentsPausedBanner />, server);
+    const banner = await screen.findByTestId("agents-paused-banner");
+    expect(banner.textContent).toContain("2026-11-11 01:19 自动再试一次");
+  });
+
+  it("says a refused key waits for a person", async () => {
+    const server = fakeServer({
+      "GET /workbench": () => ({
+        json: {
+          ...emptyWorkbench,
+          status: {
+            ...emptyWorkbench.status,
+            agentsPaused: {
+              since: "2026-11-10T17:04:45Z",
+              reason: "Cursor 密钥失效或没有权限",
+              nextProbeAt: null,
+            },
+          },
+        },
+      }),
+    });
+    renderWithApp(<AgentsPausedBanner />, server);
+    const banner = await screen.findByTestId("agents-paused-banner");
+    expect(banner.textContent).not.toContain("自动再试");
   });
 });
