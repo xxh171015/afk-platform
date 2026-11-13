@@ -11,7 +11,7 @@ import { RepoStore } from "./repos.ts";
 // The planning commit (ADR 0005), against a real origin repo, the worker's real clone cache and real pushes.
 
 const cleanups: (() => void)[] = [];
-afterEach(() => {
+afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
 
@@ -51,11 +51,11 @@ const task = (repo: TestRepo, patch: string | null): PlanningTask => ({
   message: "Planning docs for S-1 Bulk ship\n\nSpec: S-1",
 });
 
-function run(repo: TestRepo, patch: string | null) {
+async function run(repo: TestRepo, patch: string | null) {
   const repos = new RepoStore(tmp("afk-worker-repos-"));
   return {
     repos,
-    result: runPlanningCommit(
+    result: await runPlanningCommit(
       { repos, push: (request) => pushRef(request) },
       task(repo, patch),
       () => {},
@@ -64,7 +64,7 @@ function run(repo: TestRepo, patch: string | null) {
 }
 
 describe("the planning commit", () => {
-  it("commits the patch onto the default branch's head as the platform, and pushes it as the integration branch", () => {
+  it("commits the patch onto the default branch's head as the platform, and pushes it as the integration branch", async () => {
     const repo = origin();
     const patch = patchFrom(repo, {
       "GLOSSARY.md": "# Orders\n\nline 2, sharpened\n\nline 3\n",
@@ -72,7 +72,7 @@ describe("the planning commit", () => {
     });
     const main = gitOrThrow(repo.dir, ["rev-parse", "main"]);
 
-    const { result } = run(repo, patch);
+    const { result } = await run(repo, patch);
 
     expect(result.outcome).toBe("committed");
     const sha = (result as { sha: string }).sha;
@@ -91,7 +91,7 @@ describe("the planning commit", () => {
     );
   });
 
-  it("merges the patch three ways with what reached the default branch after the person's base", () => {
+  it("merges the patch three ways with what reached the default branch after the person's base", async () => {
     const repo = origin();
     const patch = patchFrom(repo, {
       "GLOSSARY.md": "# Orders\n\nline 2, sharpened\n\nline 3\n",
@@ -101,7 +101,7 @@ describe("the planning commit", () => {
       "theirs",
     );
 
-    const { result } = run(repo, patch);
+    const { result } = await run(repo, patch);
 
     expect(result.outcome).toBe("committed");
     const sha = (result as { sha: string }).sha;
@@ -110,7 +110,7 @@ describe("the planning commit", () => {
     );
   });
 
-  it("names the files that conflict, and pushes nothing", () => {
+  it("names the files that conflict, and pushes nothing", async () => {
     const repo = origin();
     const patch = patchFrom(repo, {
       "GLOSSARY.md": "# Orders\n\nline 2, mine\n\nline 3\n",
@@ -120,7 +120,7 @@ describe("the planning commit", () => {
       "theirs",
     );
 
-    const { result } = run(repo, patch);
+    const { result } = await run(repo, patch);
 
     expect(result).toEqual({
       stage: "planning-commit",
@@ -132,11 +132,11 @@ describe("the planning commit", () => {
     ).toBe("");
   });
 
-  it("without a patch takes the default branch's head and makes no branch", () => {
+  it("without a patch takes the default branch's head and makes no branch", async () => {
     const repo = origin();
     const main = gitOrThrow(repo.dir, ["rev-parse", "main"]);
 
-    const { result } = run(repo, null);
+    const { result } = await run(repo, null);
 
     expect(result).toEqual({
       stage: "planning-commit",
@@ -148,12 +148,12 @@ describe("the planning commit", () => {
     ).toBe("");
   });
 
-  it("run again after its push went through, gives the commit it made instead of failing", () => {
+  it("run again after its push went through, gives the commit it made instead of failing", async () => {
     const repo = origin();
     const patch = patchFrom(repo, { "docs/adr/0002-bulk.md": "# Bulk\n" });
-    const first = run(repo, patch).result as { sha: string };
+    const first = (await run(repo, patch)).result as { sha: string };
 
-    const again = run(repo, patch).result;
+    const again = (await run(repo, patch)).result;
 
     expect(again).toEqual({
       stage: "planning-commit",
@@ -170,7 +170,7 @@ describe("the planning commit", () => {
       return sha;
     }
 
-    it("commits the planning docs on top of the setup commit", () => {
+    it("commits the planning docs on top of the setup commit", async () => {
       const repo = origin();
       const main = gitOrThrow(repo.dir, ["rev-parse", "main"]);
       const setup = pushSetup(repo, {
@@ -179,7 +179,7 @@ describe("the planning commit", () => {
       });
       const patch = patchFrom(repo, { "docs/adr/0002-bulk.md": "# Bulk\n" });
 
-      const { result } = run(repo, patch);
+      const { result } = await run(repo, patch);
 
       expect(result.outcome).toBe("committed");
       const sha = (result as { sha: string }).sha;
@@ -195,7 +195,7 @@ describe("the planning commit", () => {
       ).toBe("# Bulk");
     });
 
-    it("takes planning docs written in the afk/setup worktree: their AGENTS.md is the setup's, sharpened", () => {
+    it("takes planning docs written in the afk/setup worktree: their AGENTS.md is the setup's, sharpened", async () => {
       const repo = origin();
       pushSetup(repo, { "AGENTS.md": "# Backend\n\nline 2\n" });
       // the person planned on afk/setup; plat takes the patch against afk/setup as origin has it
@@ -223,7 +223,7 @@ describe("the planning commit", () => {
         "AGENTS.md",
       ]).stdout;
 
-      const { result } = run(repo, patch);
+      const { result } = await run(repo, patch);
 
       expect(result.outcome).toBe("committed");
       const sha = (result as { sha: string }).sha;
@@ -232,12 +232,12 @@ describe("the planning commit", () => {
       );
     });
 
-    it("without a patch pushes the setup commit as the integration branch", () => {
+    it("without a patch pushes the setup commit as the integration branch", async () => {
       const repo = origin();
       const main = gitOrThrow(repo.dir, ["rev-parse", "main"]);
       pushSetup(repo, { ".sandcastle/gates.yaml": "steps: []\n" });
 
-      const { result } = run(repo, null);
+      const { result } = await run(repo, null);
 
       expect(result.outcome).toBe("committed");
       const sha = (result as { sha: string }).sha;
@@ -246,7 +246,7 @@ describe("the planning commit", () => {
       );
       expect(gitOrThrow(repo.dir, ["rev-parse", `${sha}^1`])).toBe(main);
 
-      expect(run(repo, null).result).toEqual(result);
+      expect((await run(repo, null)).result).toEqual(result);
     });
   });
 });

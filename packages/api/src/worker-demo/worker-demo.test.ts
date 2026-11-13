@@ -268,7 +268,7 @@ function withAgentRemote(
 ) {
   const real = executor.push;
   let attempts = 0;
-  executor.push = (request, token) => {
+  executor.push = async (request, token) => {
     if (!request.target.startsWith("refs/heads/agent/"))
       return real(request, token);
     attempts += 1;
@@ -1559,7 +1559,7 @@ describe("work an interrupted run left behind", { timeout: 60_000 }, () => {
     ctx.stage === "implement" ? { output: DONE } : undefined;
 
   // A commit on agent/T-1 as slot salvage leaves it: in the main clone, and on origin too when the run had pushed.
-  function leaveCommit(message: string, published: boolean) {
+  async function leaveCommit(message: string, published: boolean) {
     const wd = join(home, "salvaged");
     git(home, ["clone", "--quiet", origin, wd]);
     git(wd, ["checkout", "--quiet", "-b", `agent/${ID}/T-1`]);
@@ -1575,7 +1575,7 @@ describe("work an interrupted run left behind", { timeout: 60_000 }, () => {
       "-m",
       message,
     ]);
-    const mainClone = new RepoStore(join(home, "repos")).ensure(
+    const mainClone = await new RepoStore(join(home, "repos")).ensure(
       "backend",
       origin,
       "main",
@@ -1587,7 +1587,7 @@ describe("work an interrupted run left behind", { timeout: 60_000 }, () => {
 
   it("counts the commits already in the branch as the implement stage's work, and stamps them", async () => {
     await confirmedSpec([ticket("a")]);
-    leaveCommit("salvaged work", false);
+    await leaveCommit("salvaged work", false);
     await work({ script: implementDoneWithoutCommitting });
     expect(await stateOf()).toEqual(["1:done"]);
     expect(
@@ -1600,7 +1600,7 @@ describe("work an interrupted run left behind", { timeout: 60_000 }, () => {
 
   it("leaves commits an earlier run already stamped and published as they are", async () => {
     await confirmedSpec([ticket("a")]);
-    const tip = leaveCommit(
+    const tip = await leaveCommit(
       "published work\n\nSpec: S-1\nTicket: T-1\nRun: R-99",
       true,
     );
@@ -2436,7 +2436,7 @@ describe("token usage on a run", { timeout: 60_000 }, () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps({ script: withUsage });
     const real = executor.push;
-    executor.push = (request, token) => {
+    executor.push = async (request, token) => {
       if (!request.target.startsWith("refs/heads/agent/"))
         return real(request, token);
       return {
@@ -2645,7 +2645,7 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
       });
       const real = executor.push;
       let finalPushes = 0;
-      executor.push = (request, token) => {
+      executor.push = async (request, token) => {
         if (!request.target.includes("S-1-final")) return real(request, token);
         finalPushes += 1;
         if (finalPushes <= failTimes) return { ok: false, error };
@@ -3257,15 +3257,19 @@ describe("trouble reaching the API, or no room to work", {
   it("stops working when the heartbeat keeps failing", async () => {
     const { api2, job } = await claimed();
     let sawAbort = false;
+    // the network goes once the agent runs: heartbeats go on during the fetches before it
+    let agentRunning = false;
     const flaky = {
       ...api2,
-      heartbeat: async () => {
-        throw new Error("network down");
+      heartbeat: async (held: typeof job) => {
+        if (agentRunning) throw new Error("network down");
+        return api2.heartbeat(held);
       },
     };
     const executor = deps({
       script: async (ctx) => {
         if (ctx.stage !== "implement") return undefined;
+        agentRunning = true;
         await new Promise<void>((resolve) =>
           ctx.signal?.addEventListener("abort", () => resolve()),
         );
@@ -3445,7 +3449,7 @@ describe("the ticket branch follows origin", { timeout: 60_000 }, () => {
       "local line",
     ]);
     const localTip = gitOut(wd, ["rev-parse", "HEAD"]);
-    const mainClone = new RepoStore(join(home, "repos")).ensure(
+    const mainClone = await new RepoStore(join(home, "repos")).ensure(
       "backend",
       origin,
       "main",
@@ -3523,7 +3527,7 @@ describe("the ticket branch follows origin", { timeout: 60_000 }, () => {
       "local line",
     ]);
     const localTip = gitOut(wd, ["rev-parse", "HEAD"]);
-    const mainClone = new RepoStore(join(home, "repos")).ensure(
+    const mainClone = await new RepoStore(join(home, "repos")).ensure(
       "backend",
       origin,
       "main",

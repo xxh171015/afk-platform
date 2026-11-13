@@ -79,12 +79,30 @@ describe("the platform's source", () => {
     expect(hits).toEqual([]);
   });
 
+  it("talks to origin from the worker only through git that does not block the event loop", () => {
+    // the synchronous helpers, called with an argument list that reaches origin
+    const sync =
+      /\b(?:git|gitOrThrow|gitOut)\(\s*[^,()]+,\s*\[([^\]]*)\]|\bexec\(\s*["'`]git["'`],\s*\[([^\]]*)\]/g;
+    const remote = (args: string) =>
+      /["'`]ls-remote["'`]/.test(args) ||
+      (/["'`](?:fetch|push|pull|clone)["'`]/.test(args) &&
+        /["'`]origin["'`]|\burl\b/.test(args));
+    const hits = code
+      .filter(({ file }) => file.startsWith("worker/src/"))
+      .flatMap(({ file, text }) =>
+        [...text.matchAll(sync)]
+          .filter((match) => remote(match[1] ?? match[2] ?? ""))
+          .map((match) => `${file}: ${match[0].slice(0, 80)}`),
+      );
+    expect(hits).toEqual([]);
+  });
+
   it("the push exit lets agent and spec branches through and refuses main", async () => {
     const { pushRef } = await import("./push.ts");
     for (const target of ["refs/heads/main", "main", "refs/heads/master"]) {
-      expect(() => pushRef({ repoDir: ".", source: "HEAD", target })).toThrow(
-        RangeError,
-      );
+      await expect(
+        pushRef({ repoDir: ".", source: "HEAD", target }),
+      ).rejects.toThrow(RangeError);
     }
   });
 });

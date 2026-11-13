@@ -1,4 +1,12 @@
 import { git, gitOrThrow, hasRef, isAncestor } from "@afk/pipeline";
+import {
+  oneAtATime,
+  type RemoteGitOptions,
+  remoteGitOrThrow,
+} from "./remote-git.ts";
+
+// The job these calls to origin belong to, and their time limit (tests shorten it).
+export type Remote = Pick<RemoteGitOptions, "signal" | "timeoutMs">;
 
 // Local history the worker had to drop because origin moved: kept on the main clone, never pushed.
 export const ORPHAN_REF_PREFIX = "refs/afk/orphan/";
@@ -7,10 +15,18 @@ export function orphanRefFor(branch: string, sha: string): string {
   return `${ORPHAN_REF_PREFIX}${branch}/${sha}`;
 }
 
-export function originSha(repoDir: string, branch: string): string | undefined {
+// Undefined when origin has no such branch. Origin out of reach is an error: taking it for "no branch" would
+// start a ticket over or push as if the branch were new.
+export async function originSha(
+  repoDir: string,
+  branch: string,
+  remote: Remote = {},
+): Promise<string | undefined> {
   const ref = branch.startsWith("refs/") ? branch : `refs/heads/${branch}`;
-  const sha = git(repoDir, ["ls-remote", "origin", ref])
-    .stdout.split("\t")[0]
+  const sha = (
+    await remoteGitOrThrow(repoDir, ["ls-remote", "origin", ref], remote)
+  )
+    .split("\t")[0]
     ?.trim();
   return sha || undefined;
 }
@@ -25,24 +41,31 @@ export type TicketAlign = {
 // Make the main clone's ticket branch follow origin, except a restart which drops it so the stage starts from
 // the integration branch. Remote ahead fast-forwards; local strictly ahead is kept for this round to push;
 // a diverge keeps the local tip as an orphan ref and moves the branch to origin.
-export function alignTicketBranch(
+export async function alignTicketBranch(
   repoDir: string,
   branch: string,
-  options: { restart?: boolean } = {},
-): TicketAlign {
+  options: { restart?: boolean } & Remote = {},
+): Promise<TicketAlign> {
   const heads = `refs/heads/${branch}`;
-  const remote = originSha(repoDir, branch);
+  const { restart, ...calls } = options;
+  const remote = await originSha(repoDir, branch, calls);
   if (remote) {
-    gitOrThrow(repoDir, [
-      "fetch",
-      "--quiet",
-      "--no-tags",
-      "origin",
-      `+refs/heads/${branch}:refs/afk/origin/${branch}`,
-    ]);
+    await oneAtATime(repoDir, () =>
+      remoteGitOrThrow(
+        repoDir,
+        [
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "origin",
+          `+refs/heads/${branch}:refs/afk/origin/${branch}`,
+        ],
+        calls,
+      ),
+    );
   }
 
-  if (options.restart) {
+  if (restart) {
     if (hasRef(repoDir, heads))
       gitOrThrow(repoDir, ["update-ref", "-d", heads]);
     return {
@@ -110,13 +133,14 @@ function branchTip(repoDir: string, branch: string): string {
 }
 
 // Where to resume after handback (docs/design.md「人接手」).
-export function handbackResumeStage(
+export async function handbackResumeStage(
   repoDir: string,
   ticketBranch: string,
   integrationBranch: string,
   ticketType: string,
-): HandbackResumeStage {
-  const remote = originSha(repoDir, ticketBranch);
+  calls: Remote = {},
+): Promise<HandbackResumeStage> {
+  const remote = await originSha(repoDir, ticketBranch, calls);
   if (!remote) return "implement";
 
   const integrationTip = branchTip(repoDir, integrationBranch);

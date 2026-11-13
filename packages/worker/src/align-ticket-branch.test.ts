@@ -51,11 +51,13 @@ function cloneWork(name: string): string {
 }
 
 describe("alignTicketBranch", () => {
-  it("expects an empty remote when the ticket branch does not exist yet", () => {
-    expect(alignTicketBranch(local.dir, BRANCH)).toEqual({ expectedOld: "" });
+  it("expects an empty remote when the ticket branch does not exist yet", async () => {
+    expect(await alignTicketBranch(local.dir, BRANCH)).toEqual({
+      expectedOld: "",
+    });
   });
 
-  it("fast-forwards a local branch that origin has moved ahead of", () => {
+  it("fast-forwards a local branch that origin has moved ahead of", async () => {
     gitOrThrow(local.dir, ["branch", BRANCH]);
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
     const first = shaOf(local.dir, HEADS);
@@ -63,27 +65,27 @@ describe("alignTicketBranch", () => {
     const remoteTip = commit(wd, "ahead.txt", "ahead");
     gitOrThrow(wd, ["push", "--quiet", "origin", BRANCH]);
     expect(shaOf(local.dir, HEADS)).toBe(first);
-    expect(alignTicketBranch(local.dir, BRANCH)).toEqual({
+    expect(await alignTicketBranch(local.dir, BRANCH)).toEqual({
       expectedOld: remoteTip,
       remoteTip,
     });
     expect(shaOf(local.dir, HEADS)).toBe(remoteTip);
   });
 
-  it("keeps a local tip that is strictly ahead of origin", () => {
+  it("keeps a local tip that is strictly ahead of origin", async () => {
     gitOrThrow(local.dir, ["branch", BRANCH]);
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
     const remoteTip = shaOf(local.dir, HEADS);
     gitOrThrow(local.dir, ["symbolic-ref", "HEAD", HEADS]);
     const localTip = commit(local.dir, "local.txt", "local ahead");
-    expect(alignTicketBranch(local.dir, BRANCH)).toEqual({
+    expect(await alignTicketBranch(local.dir, BRANCH)).toEqual({
       expectedOld: remoteTip,
       remoteTip,
     });
     expect(shaOf(local.dir, HEADS)).toBe(localTip);
   });
 
-  it("keeps a diverged local tip as an orphan ref and follows origin", () => {
+  it("keeps a diverged local tip as an orphan ref and follows origin", async () => {
     gitOrThrow(local.dir, ["branch", BRANCH]);
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
     gitOrThrow(local.dir, ["symbolic-ref", "HEAD", HEADS]);
@@ -92,7 +94,7 @@ describe("alignTicketBranch", () => {
     const remoteTip = commit(wd, "other.txt", "origin line");
     gitOrThrow(wd, ["push", "--quiet", "origin", BRANCH]);
 
-    const aligned = alignTicketBranch(local.dir, BRANCH);
+    const aligned = await alignTicketBranch(local.dir, BRANCH);
     const orphan = orphanRefFor(BRANCH, localTip);
     expect(aligned).toEqual({
       expectedOld: remoteTip,
@@ -106,11 +108,13 @@ describe("alignTicketBranch", () => {
     ).not.toBe(0);
   });
 
-  it("drops the local branch on a restart and expects origin's current tip", () => {
+  it("drops the local branch on a restart and expects origin's current tip", async () => {
     gitOrThrow(local.dir, ["branch", BRANCH]);
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
     const remoteTip = shaOf(local.dir, HEADS);
-    expect(alignTicketBranch(local.dir, BRANCH, { restart: true })).toEqual({
+    expect(
+      await alignTicketBranch(local.dir, BRANCH, { restart: true }),
+    ).toEqual({
       expectedOld: remoteTip,
       remoteTip,
     });
@@ -119,15 +123,15 @@ describe("alignTicketBranch", () => {
     ).not.toBe(0);
   });
 
-  it("picks handback resume from the remote tip", () => {
+  it("picks handback resume from the remote tip", async () => {
     gitOrThrow(local.dir, ["checkout", "--quiet", "-b", INTEGRATION]);
     const integrationTip = commit(local.dir, "spec/base.txt", "integration");
     gitOrThrow(local.dir, ["branch", BRANCH]);
     const ticketTip = commit(local.dir, "ticket.txt", "ticket work");
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
-    expect(handbackResumeStage(local.dir, BRANCH, INTEGRATION, "feature")).toBe(
-      "gate",
-    );
+    expect(
+      await handbackResumeStage(local.dir, BRANCH, INTEGRATION, "feature"),
+    ).toBe("gate");
     gitOrThrow(local.dir, [
       "push",
       "--quiet",
@@ -135,21 +139,21 @@ describe("alignTicketBranch", () => {
       `:refs/heads/${BRANCH}`,
     ]);
     gitOrThrow(local.dir, ["update-ref", "-d", HEADS]);
-    expect(handbackResumeStage(local.dir, BRANCH, INTEGRATION, "feature")).toBe(
-      "implement",
-    );
+    expect(
+      await handbackResumeStage(local.dir, BRANCH, INTEGRATION, "feature"),
+    ).toBe("implement");
     gitOrThrow(local.dir, ["update-ref", HEADS, ticketTip]);
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
     gitOrThrow(local.dir, ["checkout", "--quiet", INTEGRATION]);
     gitOrThrow(local.dir, ["merge", "--quiet", "--ff-only", BRANCH]);
     expect(
-      handbackResumeStage(local.dir, BRANCH, INTEGRATION, "integration"),
+      await handbackResumeStage(local.dir, BRANCH, INTEGRATION, "integration"),
     ).toBe("e2e");
     gitOrThrow(local.dir, ["checkout", "--quiet", BRANCH]);
     commit(local.dir, "more.txt", "more work");
     gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
     expect(
-      handbackResumeStage(local.dir, BRANCH, INTEGRATION, "integration"),
+      await handbackResumeStage(local.dir, BRANCH, INTEGRATION, "integration"),
     ).toBe("gate");
     void integrationTip;
   });

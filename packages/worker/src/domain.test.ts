@@ -40,7 +40,7 @@ const SHA = {
 };
 
 describe("fetchDomain", () => {
-  it("reads GLOSSARY and ADRs at the planning SHA and omits AGENTS.md", () => {
+  it("reads GLOSSARY and ADRs at the planning SHA and omits AGENTS.md", async () => {
     const planning = origin({
       "GLOSSARY.md": "# v1\n",
       "AGENTS.md": "secret\n",
@@ -57,28 +57,32 @@ describe("fetchDomain", () => {
     );
     planning.commit({ "GLOSSARY.md": "# v3\n" }, "later");
     expect(
-      fetchDomain(store(), { ...SHA, url: planning.dir, sha }, "frontend"),
+      await fetchDomain(
+        store(),
+        { ...SHA, url: planning.dir, sha },
+        "frontend",
+      ),
     ).toEqual([
       { path: "GLOSSARY.md", content: "# v2\n" },
       { path: "docs/adr/0001.md", content: "# adr2\n" },
     ]);
   });
 
-  it("does not mount domain files for the planning repo's own tickets", () => {
+  it("does not mount domain files for the planning repo's own tickets", async () => {
     const planning = origin({ "GLOSSARY.md": "# t\n" });
     const sha = gitOrThrow(planning.dir, ["rev-parse", "HEAD"]);
     expect(
-      fetchDomain(store(), { ...SHA, url: planning.dir, sha }, "backend"),
+      await fetchDomain(store(), { ...SHA, url: planning.dir, sha }, "backend"),
     ).toBeUndefined();
   });
 
-  it("gives nothing when confirm stored no planning commit", () => {
-    expect(fetchDomain(store(), null, "frontend")).toBeUndefined();
+  it("gives nothing when confirm stored no planning commit", async () => {
+    expect(await fetchDomain(store(), null, "frontend")).toBeUndefined();
   });
 });
 
 describe("cutIntegrationBranch", () => {
-  it("starts the planning repo's integration branch at the planning SHA, not at main", () => {
+  it("starts the planning repo's integration branch at the planning SHA, not at main", async () => {
     const planning = origin({ "GLOSSARY.md": "# v1\n" });
     const initial = gitOrThrow(planning.dir, ["rev-parse", "HEAD"]);
     const sha = planning.commit({ "GLOSSARY.md": "# v2\n" }, "planning");
@@ -86,7 +90,7 @@ describe("cutIntegrationBranch", () => {
     gitOrThrow(planning.dir, ["update-ref", "refs/heads/main", initial]);
 
     const repos = store();
-    const mainDir = repos.ensure("backend", planning.dir, "main");
+    const mainDir = await repos.ensure("backend", planning.dir, "main");
     const bundle = bundleFor({
       repo: {
         id: 1,
@@ -102,7 +106,12 @@ describe("cutIntegrationBranch", () => {
         sha,
       },
     });
-    cutIntegrationBranch(repos, (request) => pushRef(request), mainDir, bundle);
+    await cutIntegrationBranch(
+      repos,
+      (request) => pushRef(request),
+      mainDir,
+      bundle,
+    );
     expect(gitOrThrow(mainDir, ["rev-parse", "spec/1/order-export"])).toBe(sha);
     expect(gitOrThrow(planning.dir, ["rev-parse", "spec/1/order-export"])).toBe(
       sha,
@@ -110,11 +119,11 @@ describe("cutIntegrationBranch", () => {
     expect(sha).not.toBe(initial);
   });
 
-  it("starts another repo's integration branch at its default branch", () => {
+  it("starts another repo's integration branch at its default branch", async () => {
     const frontend = origin({ "src/a.ts": "a\n" });
     const head = gitOrThrow(frontend.dir, ["rev-parse", "HEAD"]);
     const repos = store();
-    const mainDir = repos.ensure("frontend", frontend.dir, "main");
+    const mainDir = await repos.ensure("frontend", frontend.dir, "main");
     const bundle = bundleFor({
       repo: {
         id: 2,
@@ -130,18 +139,23 @@ describe("cutIntegrationBranch", () => {
         sha: "0123456789abcdef0123456789abcdef01234567",
       },
     });
-    cutIntegrationBranch(repos, (request) => pushRef(request), mainDir, bundle);
+    await cutIntegrationBranch(
+      repos,
+      (request) => pushRef(request),
+      mainDir,
+      bundle,
+    );
     expect(gitOrThrow(mainDir, ["rev-parse", "spec/1/order-export"])).toBe(
       head,
     );
   });
 
-  it("starts at master when that is the repo's default branch", () => {
+  it("starts at master when that is the repo's default branch", async () => {
     const frontend = origin({ "src/a.ts": "a\n" });
     gitOrThrow(frontend.dir, ["branch", "-m", "main", "master"]);
     const head = gitOrThrow(frontend.dir, ["rev-parse", "HEAD"]);
     const repos = store();
-    const mainDir = repos.ensure("frontend", frontend.dir, "master");
+    const mainDir = await repos.ensure("frontend", frontend.dir, "master");
     const bundle = bundleFor({
       repo: {
         id: 2,
@@ -157,18 +171,23 @@ describe("cutIntegrationBranch", () => {
         sha: "0123456789abcdef0123456789abcdef01234567",
       },
     });
-    cutIntegrationBranch(repos, (request) => pushRef(request), mainDir, bundle);
+    await cutIntegrationBranch(
+      repos,
+      (request) => pushRef(request),
+      mainDir,
+      bundle,
+    );
     expect(gitOrThrow(mainDir, ["rev-parse", "spec/1/order-export"])).toBe(
       head,
     );
   });
 
-  it("leaves an integration branch that already exists", () => {
+  it("leaves an integration branch that already exists", async () => {
     const planning = origin({ "GLOSSARY.md": "# v1\n" });
     const first = gitOrThrow(planning.dir, ["rev-parse", "HEAD"]);
     const later = planning.commit({ "GLOSSARY.md": "# v2\n" }, "planning");
     const repos = store();
-    const mainDir = repos.ensure("backend", planning.dir, "main");
+    const mainDir = await repos.ensure("backend", planning.dir, "main");
     gitOrThrow(mainDir, [
       "update-ref",
       "refs/heads/spec/1/order-export",
@@ -189,16 +208,21 @@ describe("cutIntegrationBranch", () => {
         sha: later,
       },
     });
-    cutIntegrationBranch(repos, (request) => pushRef(request), mainDir, bundle);
+    await cutIntegrationBranch(
+      repos,
+      (request) => pushRef(request),
+      mainDir,
+      bundle,
+    );
     expect(gitOrThrow(mainDir, ["rev-parse", "spec/1/order-export"])).toBe(
       first,
     );
   });
 
   describe("with an afk/setup branch on origin", () => {
-    const cut = (repo: TestRepo) => {
+    const cut = async (repo: TestRepo) => {
       const repos = store();
-      const mainDir = repos.ensure("frontend", repo.dir, "main");
+      const mainDir = await repos.ensure("frontend", repo.dir, "main");
       const bundle = bundleFor({
         repo: {
           id: 2,
@@ -209,7 +233,7 @@ describe("cutIntegrationBranch", () => {
         integrationBranch: "spec/1/order-export",
         domain: null,
       });
-      cutIntegrationBranch(
+      await cutIntegrationBranch(
         repos,
         (request) => pushRef(request),
         mainDir,
@@ -218,7 +242,7 @@ describe("cutIntegrationBranch", () => {
       return gitOrThrow(repo.dir, ["rev-parse", "spec/1/order-export"]);
     };
 
-    it("starts at afk/setup merged onto the default branch's head, so the gate and the agent read the setup", () => {
+    it("starts at afk/setup merged onto the default branch's head, so the gate and the agent read the setup", async () => {
       const frontend = origin({ "src/a.ts": "a\n", "AGENTS.md": "# old\n" });
       const setup = pushSetup(frontend, {
         ".sandcastle/gates.yaml": "steps: []\n",
@@ -226,7 +250,7 @@ describe("cutIntegrationBranch", () => {
       });
       const head = frontend.commit({ "src/b.ts": "b\n" }, "later on main");
 
-      const start = cut(frontend);
+      const start = await cut(frontend);
 
       expect(
         gitOrThrow(frontend.dir, ["log", "-1", "--format=%P%n%an%n%s", start]),
@@ -239,7 +263,7 @@ describe("cutIntegrationBranch", () => {
       expect(gitOrThrow(frontend.dir, ["show", `${start}:src/b.ts`])).toBe("b");
     });
 
-    it("starts at the default branch once the default branch has the setup", () => {
+    it("starts at the default branch once the default branch has the setup", async () => {
       const frontend = origin({ "src/a.ts": "a\n" });
       pushSetup(frontend, { ".sandcastle/gates.yaml": "steps: []\n" });
       // a spec that carried it was merged
@@ -253,15 +277,15 @@ describe("cutIntegrationBranch", () => {
       ]);
       const head = gitOrThrow(frontend.dir, ["rev-parse", "main"]);
 
-      expect(cut(frontend)).toBe(head);
+      expect(await cut(frontend)).toBe(head);
     });
 
-    it("refuses a setup that no longer merges, naming the files and what to do", () => {
+    it("refuses a setup that no longer merges, naming the files and what to do", async () => {
       const frontend = origin({ "AGENTS.md": "# old\n" });
       pushSetup(frontend, { "AGENTS.md": "# setup\n" });
       frontend.commit({ "AGENTS.md": "# someone else\n" }, "on main");
 
-      expect(() => cut(frontend)).toThrow(
+      await expect(cut(frontend)).rejects.toThrow(
         "afk/setup in frontend no longer merges into main (AGENTS.md): run the afk-setup skill again",
       );
       expect(

@@ -43,8 +43,8 @@ describe("the push exit", () => {
     "refs/heads/spec/order-export",
     "refs/heads/spec/team/order-export",
     "refs/heads/agent/T-1.v2",
-  ])("lets %s through", (target) => {
-    expect(push(target)).toEqual({ ok: true });
+  ])("lets %s through", async (target) => {
+    expect(await push(target)).toEqual({ ok: true });
     expect(remoteHas(target)).toBe(true);
   });
 
@@ -63,77 +63,77 @@ describe("the push exit", () => {
     "refs/heads/spec/..",
     "agent/T-1", // not a full ref
     "refs/heads/spec/x y",
-  ])("refuses %s, and nothing reaches the remote", (target) => {
+  ])("refuses %s, and nothing reaches the remote", async (target) => {
     const before = gitOut(remote, ["for-each-ref"]);
-    expect(() => push(target)).toThrow(RangeError);
+    await expect(push(target)).rejects.toThrow(RangeError);
     expect(gitOut(remote, ["for-each-ref"])).toBe(before);
   });
 
-  it("refuses to move a branch without saying where it is expected to be", () => {
-    expect(() =>
+  it("refuses to move a branch without saying where it is expected to be", async () => {
+    await expect(
       pushRef({
         repoDir: local.dir,
         source: "HEAD",
         target: "refs/heads/spec/s",
       }),
-    ).toThrow(/without the SHA/);
-    expect(() =>
+    ).rejects.toThrow(/without the SHA/);
+    await expect(
       pushRef({
         repoDir: local.dir,
         source: "HEAD",
         target: "refs/heads/agent/T-1",
       }),
-    ).toThrow(/without the SHA/);
+    ).rejects.toThrow(/without the SHA/);
     expect(remoteHas("refs/heads/spec/s")).toBe(false);
     expect(remoteHas("refs/heads/agent/T-1")).toBe(false);
   });
 
-  it('an expected-old of "" means the branch must not exist yet', () => {
-    expect(push("refs/heads/spec/s")).toEqual({ ok: true });
+  it('an expected-old of "" means the branch must not exist yet', async () => {
+    expect(await push("refs/heads/spec/s")).toEqual({ ok: true });
     local.commit({ "x.txt": "x\n" }, "second");
-    expect(push("refs/heads/spec/s").ok).toBe(false);
-    expect(push("refs/heads/agent/T-1")).toEqual({ ok: true });
+    expect((await push("refs/heads/spec/s")).ok).toBe(false);
+    expect(await push("refs/heads/agent/T-1")).toEqual({ ok: true });
     local.commit({ "y.txt": "y\n" }, "agent second");
-    expect(push("refs/heads/agent/T-1").ok).toBe(false);
+    expect((await push("refs/heads/agent/T-1")).ok).toBe(false);
   });
 
-  it("never deletes: an empty source is refused", () => {
-    push("refs/heads/agent/T-1");
-    expect(() => push("refs/heads/agent/T-1", { source: "" })).toThrow(
+  it("never deletes: an empty source is refused", async () => {
+    await push("refs/heads/agent/T-1");
+    await expect(push("refs/heads/agent/T-1", { source: "" })).rejects.toThrow(
       /refusing to push from/,
     );
     expect(remoteHas("refs/heads/agent/T-1")).toBe(true);
   });
 
-  it("only takes a plain commit or ref as the source, not a refspec or an option", () => {
-    expect(() =>
+  it("only takes a plain commit or ref as the source, not a refspec or an option", async () => {
+    await expect(
       push("refs/heads/agent/T-1", { source: "HEAD:refs/heads/main" }),
-    ).toThrow(/refusing to push from/);
-    expect(() => push("refs/heads/agent/T-1", { source: "--delete" })).toThrow(
-      /refusing to push from/,
-    );
+    ).rejects.toThrow(/refusing to push from/);
+    await expect(
+      push("refs/heads/agent/T-1", { source: "--delete" }),
+    ).rejects.toThrow(/refusing to push from/);
   });
 
-  it("only pushes to origin", () => {
-    expect(() => push("refs/heads/agent/T-1", { remote: "evil" })).toThrow(
-      /only origin/,
-    );
+  it("only pushes to origin", async () => {
+    await expect(
+      push("refs/heads/agent/T-1", { remote: "evil" }),
+    ).rejects.toThrow(/only origin/);
   });
 
-  it("with --force-with-lease, refuses to overwrite a branch that moved meanwhile", () => {
-    push("refs/heads/spec/s");
+  it("with --force-with-lease, refuses to overwrite a branch that moved meanwhile", async () => {
+    await push("refs/heads/spec/s");
     const first = gitOut(local.dir, ["rev-parse", "HEAD"]);
     local.commit({ "x.txt": "x\n" }, "second");
-    expect(push("refs/heads/spec/s", { expectedOld: first })).toEqual({
+    expect(await push("refs/heads/spec/s", { expectedOld: first })).toEqual({
       ok: true,
     });
     local.commit({ "y.txt": "y\n" }, "third");
-    const stale = push("refs/heads/spec/s", { expectedOld: first });
+    const stale = await push("refs/heads/spec/s", { expectedOld: first });
     expect(stale.ok).toBe(false);
   });
 
-  it("reports a failed push instead of throwing, and leaves tokens out of the message", () => {
-    const result = push("refs/heads/agent/T-1", { remote: undefined });
+  it("reports a failed push instead of throwing, and leaves tokens out of the message", async () => {
+    const result = await push("refs/heads/agent/T-1", { remote: undefined });
     expect(result.ok).toBe(true);
     git(local.dir, [
       "remote",
@@ -141,7 +141,7 @@ describe("the push exit", () => {
       "origin",
       join(remoteRoot, "missing.git"),
     ]);
-    const failed = pushRef(
+    const failed = await pushRef(
       {
         repoDir: local.dir,
         source: "HEAD",

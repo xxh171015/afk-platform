@@ -46,6 +46,9 @@ export function exec(
 
 export interface ExecAsyncOptions extends ExecOptions {
   signal?: AbortSignal; // the program is killed when this is aborted
+  // Run it in a process group of its own and kill the whole group: for a program whose helpers would otherwise
+  // outlive it holding its output open (git's remote helpers), so that neither they nor the wait are left behind.
+  killGroup?: boolean;
 }
 
 // The same without blocking the event loop: for programs that take minutes (docker build, compose up), where the
@@ -61,6 +64,7 @@ export function execAsync(
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
       stdio: ["pipe", "pipe", "pipe"],
+      detached: options.killGroup === true,
     });
     let stdout = "";
     let out = "";
@@ -75,7 +79,16 @@ export function execAsync(
     child.stderr.on("data", (chunk: string) => {
       out = keep(out + chunk);
     });
-    const kill = () => child.kill("SIGKILL"); // a program that ignores SIGTERM must not outlive its timeout
+    // a program that ignores SIGTERM must not outlive its timeout
+    const kill = () => {
+      if (options.killGroup && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+          return;
+        } catch {} // the group is gone already
+      }
+      child.kill("SIGKILL");
+    };
     const timer = options.timeoutMs
       ? setTimeout(() => {
           timedOut = true;

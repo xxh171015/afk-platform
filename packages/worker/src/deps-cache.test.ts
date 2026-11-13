@@ -26,7 +26,7 @@ function slotClone(mainClone: string) {
 }
 
 describe("the gate's dependency cache folder", () => {
-  it("is the same for every slot of one repo, and different for a repo of the same name on another host", () => {
+  it("is the same for every slot of one repo, and different for a repo of the same name on another host", async () => {
     const github = makeRepo({ "a.txt": "github\n" });
     const gitlab = makeRepo({ "a.txt": "gitlab\n" });
     cleanups.push(
@@ -34,8 +34,8 @@ describe("the gate's dependency cache folder", () => {
       () => gitlab.cleanup(),
     );
     const repos = new RepoStore(tempDir("afk-repos-"));
-    const githubMain = repos.ensure("backend", github.dir, "main");
-    const gitlabMain = repos.ensure("backend", gitlab.dir, "main");
+    const githubMain = await repos.ensure("backend", github.dir, "main");
+    const gitlabMain = await repos.ensure("backend", gitlab.dir, "main");
     const root = tempDir("afk-cache-");
 
     const first = depsCacheDirOf(root, slotClone(githubMain));
