@@ -93,12 +93,14 @@ describe("failure source of a failed job", () => {
     "模型名无效，检查项目的默认模型或 AFK_MODEL",
     "Cursor 额度用完，充值或换模型后再试",
     "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
+    "gate setup failed (exit 124)\nProgress: resolved 812, reused 790, downloaded 3",
   ];
   const platform = [
     "could not push agent/T-4: ! [rejected] agent/T-4 -> agent/T-4 (non-fast-forward)",
     "commit-tree failed: fatal: not a valid object name",
     "sandbox exited with code 137",
     "GitHub answered 404 reading pull request 512",
+    'gate setup failed (exit 1)\nERROR: relation "users" does not exist',
     "",
   ];
 

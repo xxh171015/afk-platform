@@ -68,7 +68,19 @@ export interface Progress {
   integrationRounds?: number;
   // review-fix / merge-fix changed existing tests or config; merge waits on Recheck.
   recheckPending?: boolean;
+  // The ticket's one automatic retry of an agent stage that timed out or gave no result is spent (a person's
+  // retry gives it back).
+  autoRetried?: boolean;
 }
+
+// A timeout or a missing <result> is mostly the model's or the network's passing trouble: the stage runs again once
+// on its own, with a note from the platform, before a person is asked.
+export const AUTO_RETRY_OUTCOMES = ["timeout", "invalid-output"] as const;
+export type AutoRetryOutcome = (typeof AUTO_RETRY_OUTCOMES)[number];
+export const isAutoRetryOutcome = (
+  outcome: string,
+): outcome is AutoRetryOutcome =>
+  (AUTO_RETRY_OUTCOMES as readonly string[]).includes(outcome);
 
 // A failed e2e and the fix ticket after it make a round; the third failure is one too many.
 export const MAX_INTEGRATION_ROUNDS = 2;
@@ -80,6 +92,8 @@ export type StageDecision =
       // Applied to the ticket before the job is queued (running -> merging, merging -> running).
       event?: TicketEvent;
       progress: Progress;
+      // the same stage again, on its own, after this outcome: the API leaves the next Run a note saying so
+      autoRetry?: AutoRetryOutcome;
     }
   | { type: "block"; reason: BlockedReason }
   // The diagnosis is in: a fix ticket is to be made, and the ticket waits for it (back to pending).
@@ -117,6 +131,20 @@ export function advanceStage(
   progress: Progress,
   ticketType?: string,
 ): StageDecision {
+  if (
+    report.stage !== "gate" &&
+    report.stage !== "merge" &&
+    report.stage !== "e2e" &&
+    isAutoRetryOutcome(report.outcome) &&
+    !progress.autoRetried
+  ) {
+    return {
+      type: "enqueue",
+      stage: report.stage,
+      progress: { ...progress, autoRetried: true },
+      autoRetry: report.outcome,
+    };
+  }
   switch (report.stage) {
     case "implement":
     case "gate-fix":

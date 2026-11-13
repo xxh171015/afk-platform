@@ -61,6 +61,7 @@ const server = () =>
             humanCommitsRate: null,
             untouchedRate: null,
           },
+          agentsPauses: [],
         })),
       },
     }),

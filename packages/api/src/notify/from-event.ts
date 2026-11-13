@@ -463,7 +463,17 @@ function systemNotice(data: Record<string, unknown>): MappedNotice | undefined {
     return {
       notice: {
         title: "Agent 已暂停",
-        body: `${reason}\n恢复后在页面上点「恢复」，或运行 plat agents resume\n${pageUrl("/")}`,
+        body: `${reason}\n额度用完时平台每隔一段时间自己试一次；也可以在页面上点「恢复」，或运行 plat agents resume\n${pageUrl("/")}`,
+      },
+      hostKind: "github",
+    };
+  }
+  if (kind === "agents-resumed") {
+    const minutes = Number(data.pausedMinutes);
+    return {
+      notice: {
+        title: data.automatic === true ? "Agent 已自动恢复" : "Agent 已恢复",
+        body: `暂停了 ${Number.isFinite(minutes) ? minutes : "?"} 分钟，排队的 agent 作业接着跑\n${pageUrl("/")}`,
       },
       hostKind: "github",
     };

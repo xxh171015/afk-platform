@@ -217,6 +217,9 @@ describe("blocked reason codes", () => {
     "%s reporting %s blocks the ticket with that code",
     async (stageName, _name, result, reason) => {
       await runningSpec([ticket("a")]);
+      // a timeout or a missing result is run again once on its own before it blocks
+      if (reason === "timeout" || reason === "invalid-output")
+        await stage(stageName, result);
       await stage(stageName, result);
       expect(await ticketRow()).toMatchObject({
         state: "blocked",
@@ -1365,7 +1368,7 @@ describe("Spec-axis rulings", () => {
     await runningSpec([ticket("a")]);
     await stage("implement", knownGap);
     await stage("gate", GATE_PASSED);
-    await stage("review", {
+    const noRuling = {
       outcome: "pass",
       run: {
         axis: "spec",
@@ -1376,7 +1379,10 @@ describe("Spec-axis rulings", () => {
           uncertainties: [],
         },
       },
-    });
+    };
+    // the first is run again once on its own
+    await stage("review", noRuling);
+    await stage("review", noRuling);
     expect(await ticketRow()).toMatchObject({
       state: "blocked",
       blocked_reason: "invalid-output",
@@ -1387,22 +1393,25 @@ describe("Spec-axis rulings", () => {
     await runningSpec([ticket("a")]);
     await stage("implement", knownGap);
     await stage("gate", GATE_PASSED);
-    const review = (await worker.claim()).body.job as Claimed;
-    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
-    await worker.complete(review.id, review.attempt, {
-      stage: "review",
-      outcome: "fix",
-      run: {
-        axis: "spec",
-        output: {
-          verdict: "fix",
-          mustFix: [{ file: "src/a.ts", problem: "something else" }],
-          suggestions: [],
-          uncertainties: [],
-          rulings: [{ id, verdict: "must-fix" }],
+    // the first is run again once on its own
+    for (let i = 0; i < 2; i++) {
+      const review = (await worker.claim()).body.job as Claimed;
+      const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+      await worker.complete(review.id, review.attempt, {
+        stage: "review",
+        outcome: "fix",
+        run: {
+          axis: "spec",
+          output: {
+            verdict: "fix",
+            mustFix: [{ file: "src/a.ts", problem: "something else" }],
+            suggestions: [],
+            uncertainties: [],
+            rulings: [{ id, verdict: "must-fix" }],
+          },
         },
-      },
-    });
+      });
+    }
     expect(await ticketRow()).toMatchObject({
       state: "blocked",
       blocked_reason: "invalid-output",
@@ -1413,6 +1422,8 @@ describe("Spec-axis rulings", () => {
     await runningSpec([ticket("a")]);
     await stage("implement", knownGap);
     await stage("gate", GATE_PASSED);
+    // the first is run again once on its own
+    await stage("review", { outcome: "timeout" });
     await stage("review", { outcome: "timeout" });
     expect(await ticketRow()).toMatchObject({
       state: "blocked",

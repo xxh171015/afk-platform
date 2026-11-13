@@ -276,6 +276,8 @@ describe("the failure source the database works out", () => {
     "docker build of backend (backend) failed (exit 1)",
     "Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试",
     "模型名无效，检查项目的默认模型或 AFK_MODEL",
+    "gate setup failed (exit 124)\nProgress: resolved 812",
+    "gate setup failed (exit 1)\nERR_PNPM_LOCKFILE",
   ];
 
   it("agrees with @afk/shared on every reason code and error", async () => {

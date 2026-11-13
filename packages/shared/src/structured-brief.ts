@@ -46,6 +46,8 @@ export type StructuredBriefInput = {
   repo?: string;
   contractBlockedBy?: readonly string[];
   wrapUpStep?: string;
+  // the stage that blocked was already run again once on its own after a timeout or a missing result
+  autoRetried?: boolean;
   brief: StructuredBriefSource | null;
 };
 
@@ -98,7 +100,9 @@ export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
   const result: StructuredBrief = {
     reason: input.reason,
     step: input.brief?.stage ?? "",
-    summary: SUMMARY[reason] ?? input.reason,
+    summary: `${SUMMARY[reason] ?? input.reason}${
+      input.autoRetried ? "（已自动重试过一次）" : ""
+    }`,
     evidence: evidenceOf(input.reason, input.brief),
     recommendedAction: RECOMMENDED_ACTION[reason] ?? "看这次 Run 后决定下一步",
     commands: commandsOf(input),

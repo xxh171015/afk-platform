@@ -3804,7 +3804,8 @@ export interface paths {
                   | "pause"
                   | "resume"
                   | "merged"
-                  | "action";
+                  | "action"
+                  | "auto-retry";
                 at: string;
                 text: string;
                 runId?: number;
@@ -4597,6 +4598,7 @@ export interface paths {
                 agentsPaused: {
                   since: string;
                   reason: string;
+                  nextProbeAt: string | null;
                 } | null;
                 logDirBytes: number;
                 apiFreeBytes: number;
@@ -6127,6 +6129,10 @@ export interface paths {
                   humanCommitsRate: number | null;
                   untouchedRate: number | null;
                 };
+                agentsPauses: {
+                  pausedMinutes: number;
+                  automatic: boolean;
+                }[];
               }[];
             };
           };

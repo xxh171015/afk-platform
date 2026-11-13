@@ -53,7 +53,12 @@ export type WeekMetrics = {
     humanCommitsRate: number | null;
     untouchedRate: number | null;
   };
+  // the agents' pauses that ended this week (agents-pause.ts), in order: they pause the whole instance, so every
+  // project shows them
+  agentsPauses: AgentsPauseRow[];
 };
+
+export type AgentsPauseRow = { pausedMinutes: number; automatic: boolean };
 
 export type MetricsView = {
   since: string | null;
@@ -67,6 +72,9 @@ type FailureRow = {
   reason: string | null;
   failure_source: FailureSource;
   job_id: number | null;
+  // a stage run again on its own (stages/auto-retry.ts) that went on without a person: its ticket or finalization
+  // got a job for another stage before it next blocked, or never blocked again
+  recovered_by_retry: boolean;
 };
 
 type JobRow = {
@@ -125,23 +133,26 @@ export async function metricsView(
     [projectId ?? null],
   );
 
-  const byWeek = new Map<string, typeof ended.rows>();
-  for (const row of ended.rows) {
-    if (!row.ended_at) continue;
-    const week = weekStartYmd(row.ended_at);
-    if (!weekSet.has(week)) continue;
-    const list = byWeek.get(week) ?? [];
-    list.push(row);
-    byWeek.set(week, list);
-  }
+  const specsByWeek = byWeek(ended.rows, (row) => row.ended_at, weekSet);
 
   const specIds = ended.rows.map((row) => row.id);
   const failures = specIds.length
     ? (
         await pool.query<FailureRow>(
-          `SELECT spec_id, type, to_state, reason, failure_source, job_id
-           FROM events
-           WHERE spec_id = ANY($1::int[]) AND failure_source IS NOT NULL`,
+          `SELECT e.spec_id, e.type, e.to_state, e.reason, e.failure_source, e.job_id,
+                  COALESCE((e.data->>'autoRetry')::boolean, false) AND NOT EXISTS (
+                    SELECT 1 FROM events b
+                    WHERE b.id > e.id AND b.type = e.type AND b.to_state = 'blocked' AND b.spec_id = e.spec_id
+                      AND b.ticket_id IS NOT DISTINCT FROM e.ticket_id AND b.repo_id IS NOT DISTINCT FROM e.repo_id
+                      AND NOT EXISTS (
+                        SELECT 1 FROM events p
+                        WHERE p.type = 'job' AND p.id > e.id AND p.id < b.id AND p.spec_id = e.spec_id
+                          AND p.ticket_id IS NOT DISTINCT FROM e.ticket_id AND p.repo_id IS NOT DISTINCT FROM e.repo_id
+                          AND p.data ? 'stage' AND p.data->>'stage' <> e.data->>'stage'
+                      )
+                  ) AS recovered_by_retry
+           FROM events e
+           WHERE e.spec_id = ANY($1::int[]) AND e.failure_source IS NOT NULL`,
           [specIds],
         )
       ).rows
@@ -160,15 +171,7 @@ export async function metricsView(
   const failuresBySpec = groupBy(failures, (row) => row.spec_id);
   const jobsBySpec = groupBy(jobs, (row) => row.spec_id);
   const pulls = await pullOutcomes(pool, projectId);
-  const pullsByWeek = new Map<string, PullOutcome[]>();
-  for (const pull of pulls) {
-    if (!pull.ended_at) continue;
-    const week = weekStartYmd(pull.ended_at);
-    if (!weekSet.has(week)) continue;
-    const list = pullsByWeek.get(week) ?? [];
-    list.push(pull);
-    pullsByWeek.set(week, list);
-  }
+  const pullsByWeek = byWeek(pulls, (pull) => pull.ended_at, weekSet);
   const touched = await touchedSpecs(
     pool,
     ended.rows
@@ -176,9 +179,11 @@ export async function metricsView(
       .map((row) => ({ id: row.id, endedAt: row.ended_at as Date })),
   );
 
+  const pausesByWeek = await agentsPausesByWeek(pool, weekSet);
+
   const out: WeekMetrics[] = [];
   for (const weekStart of weeks) {
-    const rows = byWeek.get(weekStart) ?? [];
+    const rows = specsByWeek.get(weekStart) ?? [];
     const merged = rows.filter((row) => row.state === "merged");
     const endedIds = rows.map((row) => row.id);
     const specFailures = endedIds.flatMap((id) => failuresBySpec.get(id) ?? []);
@@ -193,10 +198,34 @@ export async function metricsView(
         merged.map((row) => row.id),
         touched,
       ),
+      agentsPauses: pausesByWeek.get(weekStart) ?? [],
     });
   }
 
   return { since: since ? ymdInZone(since) : null, weeks: out };
+}
+
+async function agentsPausesByWeek(
+  pool: pg.Pool,
+  weekSet: Set<string>,
+): Promise<Map<string, AgentsPauseRow[]>> {
+  const { rows } = await pool.query<{
+    at: Date;
+    paused_minutes: number;
+    automatic: boolean;
+  }>(
+    `SELECT at, (data->>'pausedMinutes')::int AS paused_minutes,
+            COALESCE((data->>'automatic')::boolean, false) AS automatic
+     FROM events
+     WHERE type = 'system' AND data->>'kind' = 'agents-resumed'
+     ORDER BY id`,
+  );
+  return byWeek(
+    rows,
+    (row) => row.at,
+    weekSet,
+    (row) => ({ pausedMinutes: row.paused_minutes, automatic: row.automatic }),
+  );
 }
 
 async function weekLeadTime(
@@ -242,10 +271,11 @@ function weekAttribution(events: FailureRow[]): WeekMetrics["attribution"] {
   );
   const recovered = events.filter(
     (event) =>
-      event.type === "job" &&
-      (event.to_state === "failed" || event.reason === "lease-expired") &&
-      event.reason &&
-      (event.job_id === null || !humanJobs.has(event.job_id)),
+      event.recovered_by_retry ||
+      (event.type === "job" &&
+        (event.to_state === "failed" || event.reason === "lease-expired") &&
+        event.reason &&
+        (event.job_id === null || !humanJobs.has(event.job_id))),
   );
   return { recovered: tally(recovered), needsHuman: tally(needsHuman) };
 }
@@ -391,6 +421,26 @@ function weekSuccess(
         : mergedSpecIds.filter((id) => !touched.has(id)).length /
           mergedSpecIds.length,
   };
+}
+
+// Rows by the week they ended in, for the weeks shown; rows with no end, or outside those weeks, are left out.
+function byWeek<T, R = T>(
+  rows: T[],
+  endedAt: (row: T) => Date | null,
+  weekSet: Set<string>,
+  as: (row: T) => R = (row) => row as unknown as R,
+): Map<string, R[]> {
+  const map = new Map<string, R[]>();
+  for (const row of rows) {
+    const at = endedAt(row);
+    if (!at) continue;
+    const week = weekStartYmd(at);
+    if (!weekSet.has(week)) continue;
+    const list = map.get(week) ?? [];
+    list.push(as(row));
+    map.set(week, list);
+  }
+  return map;
 }
 
 function groupBy<T>(rows: T[], keyOf: (row: T) => number): Map<number, T[]> {

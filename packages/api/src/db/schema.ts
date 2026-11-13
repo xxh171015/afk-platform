@@ -130,10 +130,15 @@ export const instance = pgTable(
       .notNull()
       .default(0),
     diskNoticed: text("disk_noticed").notNull().default("none"),
-    // Set while the agents' provider refuses work (out of usage, key refused): no agent job is claimed until a
-    // person resumes them. The reason is the error that paused them.
+    // Set while the agents' provider refuses work (out of usage, key refused): no agent job is claimed until they
+    // are resumed. The reason is the error that paused them.
     agentsPausedAt: timestamp("agents_paused_at", { withTimezone: true }),
     agentsPauseReason: text("agents_pause_reason"),
+    // A pause because the usage ran out hands out one agent job at this time to try the provider again (none for a
+    // refused key); agents_probes counts the tries so far, agents_probe_job_id is the job of the last one.
+    agentsProbeAt: timestamp("agents_probe_at", { withTimezone: true }),
+    agentsProbes: integer("agents_probes").notNull().default(0),
+    agentsProbeJobId: integer("agents_probe_job_id"),
     // Events through this id have been handed to the notice dispatcher; restart continues after it (ADR 0009).
     lastNotifiedEventId: bigint("last_notified_event_id", { mode: "number" })
       .notNull()
@@ -294,6 +299,8 @@ export const tickets = pgTable(
       .default([]),
     // review-fix / merge-fix hit existing tests or config; the gate then enqueues Recheck.
     recheckPending: boolean("recheck_pending").notNull().default(false),
+    // The one automatic retry of an agent stage that timed out or gave no result is spent; a person's retry clears it.
+    autoRetried: boolean("auto_retried").notNull().default(false),
     // Names of repos: read-only references for the agent, and the repos an integration ticket's e2e environment starts.
     refs: text("refs").array().notNull().default([]),
     environment: text("environment").array().notNull().default([]),
@@ -450,6 +457,10 @@ export const finalizations = pgTable(
     step: text("step").notNull().default("final-review"),
     state: text("state").notNull().default("active"),
     blockedReason: text("blocked_reason"),
+    // The finalization's one automatic retry of a step that timed out or gave no result is spent.
+    autoRetried: boolean("auto_retried").notNull().default(false),
+    // The platform's note for this repo's next Run of the step (the spec's own note is shared by all its repos).
+    retryNote: text("retry_note"),
     jobFloor: integer("job_floor").notNull().default(0), // as on tickets
     createdAt: createdAt(),
   },

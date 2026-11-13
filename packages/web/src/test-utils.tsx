@@ -52,7 +52,11 @@ export const emptyWorkbench = {
   awaitingAcceptance: [] as unknown[],
   recentlyCompleted: [] as unknown[],
   status: {
-    agentsPaused: null as { since: string; reason: string } | null,
+    agentsPaused: null as {
+      since: string;
+      reason: string;
+      nextProbeAt: string | null;
+    } | null,
     logDirBytes: 0,
     apiFreeBytes: 20 * 1024 ** 3,
     diskLevel: "ok" as const,

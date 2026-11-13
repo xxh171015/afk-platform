@@ -1,4 +1,8 @@
-import type { AGENT_FAILURES } from "./stage-flow.ts";
+import {
+  type AGENT_FAILURES,
+  type AutoRetryOutcome,
+  isAutoRetryOutcome,
+} from "./stage-flow.ts";
 import type { BlockedReason } from "./ticket-state.ts";
 
 // After every ticket of a spec is done, each repo's integration branch gets one overall review and, if the
@@ -30,11 +34,22 @@ export type FinalReport =
     };
 
 export type FinalDecision =
-  | { type: "enqueue"; step: FinalStep }
+  // autoRetry: the same step again, on its own, after a timeout or a missing result (once per finalization)
+  | { type: "enqueue"; step: FinalStep; autoRetry?: AutoRetryOutcome }
   | { type: "done" }
   | { type: "block"; reason: BlockedReason };
 
-export function advanceFinalization(report: FinalReport): FinalDecision {
+// `autoRetried`: this finalization has spent its one automatic retry (a person's retry gives it back).
+export function advanceFinalization(
+  report: FinalReport,
+  autoRetried = false,
+): FinalDecision {
+  if (
+    report.step !== "final-merge" &&
+    isAutoRetryOutcome(report.outcome) &&
+    !autoRetried
+  )
+    return { type: "enqueue", step: report.step, autoRetry: report.outcome };
   switch (report.step) {
     case "final-review":
       if (report.outcome === "pass") return { type: "done" };

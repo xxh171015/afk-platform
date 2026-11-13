@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { describeError, useApi } from "./api.tsx";
 import { Button } from "./components/ui/button.tsx";
+import { formatShanghaiTime } from "./time.ts";
 import { useWorkbench, WORKBENCH_KEY } from "./Workbench.tsx";
 
-// The agents' provider refused work (usage ran out, the key was refused): no agent job is handed out until a person
-// says it takes work again. Gates and merges go on meanwhile, and no ticket was blocked for it.
+// The agents' provider refused work (usage ran out, the key was refused): no agent job is handed out until it takes
+// work again. When the usage ran out the platform tries it again on its own at nextProbeAt; a refused key waits for a
+// person. Gates and merges go on meanwhile, and no ticket was blocked for it.
 export function AgentsPausedBanner() {
   const board = useWorkbench();
   const api = useApi();
@@ -28,6 +30,9 @@ export function AgentsPausedBanner() {
       <span className="min-w-0 flex-1">
         Agent
         已暂停：模型服务拒绝了请求（额度用完或密钥失效），票没有被卡住，额度恢复后点恢复继续。
+        {paused.nextProbeAt
+          ? ` ${formatShanghaiTime(paused.nextProbeAt)} 自动再试一次，成功就自动恢复。`
+          : null}
         <span
           className="block truncate text-xs opacity-80"
           title={paused.reason}

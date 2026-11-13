@@ -1,5 +1,6 @@
 import type { JobState } from "@afk/shared";
 import type pg from "pg";
+import { AGENT_JOB_TYPE, probeHandedOut } from "../agents-pause.ts";
 import { applyOrigin } from "../events/origin.ts";
 
 // The job queue lives on the `jobs` table (docs/specs/m1-platform.md「作业队列」).
@@ -117,8 +118,11 @@ export async function claimJob(
          WHERE j.state = 'queued'
            AND (j.not_before IS NULL OR j.not_before <= $4)
            AND j.required_capabilities <@ $3::text[]
-           -- while the agents' provider refuses work, no agent job is handed out (agents-pause.ts)
-           AND NOT (j.type = 'agent-run' AND EXISTS (SELECT 1 FROM instance WHERE agents_paused_at IS NOT NULL))
+           -- while the agents' provider refuses work, no agent job is handed out (agents-pause.ts), but for one
+           -- that tries it again once the probe is due and no agent job is running
+           AND NOT (j.type = 'agent-run' AND EXISTS (SELECT 1 FROM instance i WHERE i.agents_paused_at IS NOT NULL
+             AND NOT (COALESCE(i.agents_probe_at <= $4, false)
+               AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.type = 'agent-run' AND r.state = 'running'))))
            AND (j.lock_key IS NULL OR (
              -- the key is free: nobody holds a live lease on it ...
              NOT EXISTS (SELECT 1 FROM jobs h WHERE h.lock_key = j.lock_key AND h.state = 'running' AND h.lease_expires_at > $4)
@@ -130,6 +134,8 @@ export async function claimJob(
       [request.workerId, leaseExpiresAt, request.capabilities, request.now],
     );
     const job = (rows[0] as LeasedJob | undefined) ?? null;
+    if (job?.type === AGENT_JOB_TYPE)
+      await probeHandedOut(client, job.id, request.now);
     if (job) {
       await client.query(
         `UPDATE projects SET last_claimed_at = $2

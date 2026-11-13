@@ -554,6 +554,27 @@
       "when": 1794630000000,
       "tag": "0078_recheck",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794640000000,
+      "tag": "0079_gate_setup_timeout_external",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794650000000,
+      "tag": "0080_agents_probe",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1794660000000,
+      "tag": "0081_auto_retry",
+      "breakpoints": true
     }
   ]
 }

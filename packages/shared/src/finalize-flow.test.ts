@@ -35,7 +35,9 @@ describe("finalization of a spec's integration branch", () => {
   ] as const)(
     "%s reporting %s blocks the finalization with that reason",
     (step, outcome) => {
-      expect(advanceFinalization({ step, outcome } as FinalReport)).toEqual({
+      expect(
+        advanceFinalization({ step, outcome } as FinalReport, true),
+      ).toEqual({
         type: "block",
         reason: outcome,
       });
@@ -82,4 +84,38 @@ describe("finalization of a spec's integration branch", () => {
       "final-merge",
     ]);
   });
+
+  it.each([
+    ["final-review", "timeout"],
+    ["final-review", "invalid-output"],
+    ["final-fix", "timeout"],
+    ["final-fix", "invalid-output"],
+    ["recheck", "timeout"],
+    ["recheck", "invalid-output"],
+  ] as const)(
+    "runs %s again once after %s, before blocking",
+    (step, outcome) => {
+      expect(advanceFinalization({ step, outcome } as FinalReport)).toEqual({
+        type: "enqueue",
+        step,
+        autoRetry: outcome,
+      });
+      expect(
+        advanceFinalization({ step, outcome } as FinalReport, true),
+      ).toEqual({
+        type: "block",
+        reason: step === "recheck" ? "recheck-failed" : outcome,
+      });
+    },
+  );
+
+  it.each(["no-commits", "agent-gave-up", "contract-change-needed"] as const)(
+    "does not retry a final-fix that reports %s",
+    (outcome) => {
+      expect(advanceFinalization({ step: "final-fix", outcome })).toEqual({
+        type: "block",
+        reason: outcome,
+      });
+    },
+  );
 });

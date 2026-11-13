@@ -19,6 +19,7 @@ import { refreshDiskStatus } from "../disk.ts";
 import { aroundSpec, aroundTicket } from "../events/announce.ts";
 import { waiveFinalE2e } from "../finalize/final-e2e.ts";
 import { retryFinalization } from "../finalize/finalize.ts";
+import { inTransaction } from "../scheduling/scheduler.ts";
 import {
   allowPaths,
   allowSpec,
@@ -705,7 +706,14 @@ const RunningTicket = z.object({
 
 const WorkbenchStatus = z.object({
   // set while the agents' provider refuses work and no agent job is claimed
-  agentsPaused: z.object({ since: z.string(), reason: z.string() }).nullable(),
+  agentsPaused: z
+    .object({
+      since: z.string(),
+      reason: z.string(),
+      // when one agent job is next handed out to try the provider again; null: it waits for a person
+      nextProbeAt: z.string().nullable(),
+    })
+    .nullable(),
   logDirBytes: z.number(),
   apiFreeBytes: z.number(),
   diskLevel: z.enum(["ok", "warn", "stop"]),
@@ -1190,7 +1198,14 @@ export function registerTicketRoutes(
   });
 
   app.openapi(resumeAgentsRoute, async (c) =>
-    c.json({ resumed: await resumeAgents(pool) }, 200),
+    c.json(
+      {
+        resumed: await inTransaction(pool, (client) =>
+          resumeAgents(client, context.clock()),
+        ),
+      },
+      200,
+    ),
   );
 
   app.openapi(retryRoute, async (c) => {

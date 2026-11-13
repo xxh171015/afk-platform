@@ -243,6 +243,8 @@ describe("a diagnosis that names a repo", () => {
     await runningSpec();
     await mergeTicket(1);
     await stage("e2e", { outcome: "failed" }, 1);
+    // the first is run again once on its own
+    await stage("diagnose", diagnosed("payments"), 1);
     await stage("diagnose", diagnosed("payments"), 1);
     expect(await ticket(1)).toMatchObject({
       state: "blocked",

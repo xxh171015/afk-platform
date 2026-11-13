@@ -50,6 +50,7 @@ type Week = {
     humanCommitsRate: number | null;
     untouchedRate: number | null;
   };
+  agentsPauses: { pausedMinutes: number; automatic: boolean }[];
 };
 
 const LEAD_MS: Record<LeadTimeSegment, (week: Week) => number> = {
@@ -152,6 +153,7 @@ export function Metrics() {
 
   const selected = weeks[Math.min(leadWeek, Math.max(0, weeks.length - 1))];
   const failedWeeks = attributionWeeks(weeks);
+  const pausedWeeks = weeks.filter((week) => week.agentsPauses.length > 0);
 
   return (
     <Page
@@ -241,6 +243,19 @@ export function Metrics() {
         <section data-testid="metrics-success">
           <h2 className="mb-3 text-sm font-semibold">成功标准</h2>
           <SuccessTable weeks={weeks} />
+        </section>
+
+        <section data-testid="metrics-agents-pauses">
+          <h2 className="mb-3 text-sm font-semibold">Agent 暂停</h2>
+          {pausedWeeks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">无</p>
+          ) : (
+            <ul className="space-y-3">
+              {pausedWeeks.map((week) => (
+                <WeekPauses key={week.weekStart} week={week} />
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </Page>
@@ -337,6 +352,33 @@ function WeekAttribution({ week }: { week: Week }) {
         <AttributionTable title="要人处理" rows={week.attribution.needsHuman} />
         <AttributionTable title="自动恢复" rows={week.attribution.recovered} />
       </div>
+    </li>
+  );
+}
+
+function WeekPauses({ week }: { week: Week }) {
+  const automatic = week.agentsPauses.filter((pause) => pause.automatic).length;
+  return (
+    <li>
+      <div className="mb-1 flex flex-wrap items-baseline gap-2 text-xs">
+        <span className="font-mono tabular">{week.weekStart}</span>
+        <span className="text-muted-foreground">
+          暂停 {week.agentsPauses.length} 次，自动恢复 {automatic} 次
+        </span>
+      </div>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        {week.agentsPauses.map((pause, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: pauses have no id and keep their order
+          <li key={index}>
+            <span className="font-mono tabular">
+              {formatCompactDuration(pause.pausedMinutes * 60_000)}
+            </span>{" "}
+            <span className="text-muted-foreground">
+              {pause.automatic ? "自动恢复" : "手动恢复"}
+            </span>
+          </li>
+        ))}
+      </ul>
     </li>
   );
 }
