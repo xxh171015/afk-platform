@@ -131,8 +131,9 @@ export const FAILURE_SOURCE_OF_REASON: Record<
 };
 
 // Signs in a failed job's error that an outside service let it down: Cursor's login or rate limit, a 5xx from the
-// code host, a package registry or image registry that could not be reached. Matched case-insensitively. Written so
-// JavaScript and Postgres (~*) read them alike: the events trigger matches the same list (drizzle/0035_events.sql).
+// code host, a package registry or image registry that could not be reached, a gate setup that ran out of time.
+// Matched case-insensitively. Written so JavaScript and Postgres (~*) read them alike: the events trigger matches
+// the same list (afk_failure_source, last redefined in the latest drizzle migration that touches it).
 export const EXTERNAL_ERROR_PATTERNS = [
   "(github|gitlab).*(answered |http |[(])(401|403|5[0-9][0-9])([^0-9]|$)",
   "authentication required|not authenticated|cursor-agent login|unauthorized|invalid username or token",
@@ -142,6 +143,8 @@ export const EXTERNAL_ERROR_PATTERNS = [
   "invalid model|unknown model|model not found|model does not exist|no such model",
   "quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted",
   "docker build of .+ failed",
+  // GNU timeout's exit: the gate's setup (installing dependencies, pulling images) ran out of time on the network
+  "gate setup failed \\(exit 124\\)",
 ] as const;
 
 const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
