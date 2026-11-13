@@ -12,6 +12,21 @@ commands:
     run: bash -c 'eval "$(scripts/pg-temp.sh start)" && pnpm test'
     timeoutSeconds: 600
     junit: reports/junit.xml
+    # $0 is the dummy name bash -c requires; filenames are appended as $1… so "$@" is the failed files.
+    rerunFiles:
+      - bash
+      - -c
+      - eval "$(scripts/pg-temp.sh start)" && pnpm test -- "$@"
+      - pnpm
   - name: lint
     run: pnpm lint
     timeoutSeconds: 120
+generated:
+  - paths:
+      - packages/shared/src/api/openapi.json
+      - packages/shared/src/api/schema.d.ts
+    run: pnpm gen:api
+  - paths:
+      - packages/api/drizzle/*.sql
+      - packages/api/drizzle/meta/**
+    run: scripts/rebase-migrations.sh
