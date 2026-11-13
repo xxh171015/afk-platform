@@ -291,6 +291,24 @@ describe("GET /metrics", () => {
     ]);
   });
 
+  it("counts a finalization step that blocked after running again on its own as 要人处理 only", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await report("implement", "done");
+    await report("gate", "passed");
+    await report("review", "pass");
+    await report("merge", "merged", { headSha: "h" });
+    await report("final-review", "timeout");
+    await report("final-review", "timeout");
+    await call("POST", `/specs/${specId}/final/retry`, {});
+    await report("final-review", "pass");
+    await mergeSpec(specId, new Date());
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.attribution.recovered).toEqual([]);
+    expect(week.attribution.needsHuman).toEqual([
+      { source: "agent", reason: "timeout", count: 1 },
+    ]);
+  });
+
   it("lists the agents' pauses with how long each lasted and whether it ended on its own", async () => {
     await runningSpec(["a", "b"]);
     const outOfUsage =

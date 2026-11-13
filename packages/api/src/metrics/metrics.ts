@@ -72,8 +72,8 @@ type FailureRow = {
   reason: string | null;
   failure_source: FailureSource;
   job_id: number | null;
-  // a stage run again on its own (stages/auto-retry.ts) that went on without a person: the first block of its
-  // ticket or finalization after it is not at that stage
+  // a stage run again on its own (stages/auto-retry.ts) that went on without a person: its ticket or finalization
+  // got a job for another stage before it next blocked, or never blocked again
   recovered_by_retry: boolean;
 };
 
@@ -133,32 +133,25 @@ export async function metricsView(
     [projectId ?? null],
   );
 
-  const byWeek = new Map<string, typeof ended.rows>();
-  for (const row of ended.rows) {
-    if (!row.ended_at) continue;
-    const week = weekStartYmd(row.ended_at);
-    if (!weekSet.has(week)) continue;
-    const list = byWeek.get(week) ?? [];
-    list.push(row);
-    byWeek.set(week, list);
-  }
+  const specsByWeek = byWeek(ended.rows, (row) => row.ended_at, weekSet);
 
   const specIds = ended.rows.map((row) => row.id);
   const failures = specIds.length
     ? (
         await pool.query<FailureRow>(
           `SELECT e.spec_id, e.type, e.to_state, e.reason, e.failure_source, e.job_id,
-                  COALESCE((e.data->>'autoRetry')::boolean, false)
-                    AND block.stage IS DISTINCT FROM e.data->>'stage' AS recovered_by_retry
+                  COALESCE((e.data->>'autoRetry')::boolean, false) AND NOT EXISTS (
+                    SELECT 1 FROM events b
+                    WHERE b.id > e.id AND b.type = e.type AND b.to_state = 'blocked' AND b.spec_id = e.spec_id
+                      AND b.ticket_id IS NOT DISTINCT FROM e.ticket_id AND b.repo_id IS NOT DISTINCT FROM e.repo_id
+                      AND NOT EXISTS (
+                        SELECT 1 FROM events p
+                        WHERE p.type = 'job' AND p.id > e.id AND p.id < b.id AND p.spec_id = e.spec_id
+                          AND p.ticket_id IS NOT DISTINCT FROM e.ticket_id AND p.repo_id IS NOT DISTINCT FROM e.repo_id
+                          AND p.data ? 'stage' AND p.data->>'stage' <> e.data->>'stage'
+                      )
+                  ) AS recovered_by_retry
            FROM events e
-           LEFT JOIN LATERAL (
-             SELECT COALESCE(b.data->>'step', j.payload->>'stage') AS stage
-             FROM events b LEFT JOIN jobs j ON j.id = b.job_id
-             WHERE (e.data->>'autoRetry')::boolean AND b.id > e.id AND b.type = e.type
-               AND b.spec_id = e.spec_id AND b.ticket_id IS NOT DISTINCT FROM e.ticket_id
-               AND b.repo_id IS NOT DISTINCT FROM e.repo_id AND b.to_state = 'blocked'
-             ORDER BY b.id LIMIT 1
-           ) block ON true
            WHERE e.spec_id = ANY($1::int[]) AND e.failure_source IS NOT NULL`,
           [specIds],
         )
@@ -178,15 +171,7 @@ export async function metricsView(
   const failuresBySpec = groupBy(failures, (row) => row.spec_id);
   const jobsBySpec = groupBy(jobs, (row) => row.spec_id);
   const pulls = await pullOutcomes(pool, projectId);
-  const pullsByWeek = new Map<string, PullOutcome[]>();
-  for (const pull of pulls) {
-    if (!pull.ended_at) continue;
-    const week = weekStartYmd(pull.ended_at);
-    if (!weekSet.has(week)) continue;
-    const list = pullsByWeek.get(week) ?? [];
-    list.push(pull);
-    pullsByWeek.set(week, list);
-  }
+  const pullsByWeek = byWeek(pulls, (pull) => pull.ended_at, weekSet);
   const touched = await touchedSpecs(
     pool,
     ended.rows
@@ -198,7 +183,7 @@ export async function metricsView(
 
   const out: WeekMetrics[] = [];
   for (const weekStart of weeks) {
-    const rows = byWeek.get(weekStart) ?? [];
+    const rows = specsByWeek.get(weekStart) ?? [];
     const merged = rows.filter((row) => row.state === "merged");
     const endedIds = rows.map((row) => row.id);
     const specFailures = endedIds.flatMap((id) => failuresBySpec.get(id) ?? []);
@@ -235,15 +220,12 @@ async function agentsPausesByWeek(
      WHERE type = 'system' AND data->>'kind' = 'agents-resumed'
      ORDER BY id`,
   );
-  const byWeek = new Map<string, AgentsPauseRow[]>();
-  for (const row of rows) {
-    const week = weekStartYmd(row.at);
-    if (!weekSet.has(week)) continue;
-    const list = byWeek.get(week) ?? [];
-    list.push({ pausedMinutes: row.paused_minutes, automatic: row.automatic });
-    byWeek.set(week, list);
-  }
-  return byWeek;
+  return byWeek(
+    rows,
+    (row) => row.at,
+    weekSet,
+    (row) => ({ pausedMinutes: row.paused_minutes, automatic: row.automatic }),
+  );
 }
 
 async function weekLeadTime(
@@ -439,6 +421,26 @@ function weekSuccess(
         : mergedSpecIds.filter((id) => !touched.has(id)).length /
           mergedSpecIds.length,
   };
+}
+
+// Rows by the week they ended in, for the weeks shown; rows with no end, or outside those weeks, are left out.
+function byWeek<T, R = T>(
+  rows: T[],
+  endedAt: (row: T) => Date | null,
+  weekSet: Set<string>,
+  as: (row: T) => R = (row) => row as unknown as R,
+): Map<string, R[]> {
+  const map = new Map<string, R[]>();
+  for (const row of rows) {
+    const at = endedAt(row);
+    if (!at) continue;
+    const week = weekStartYmd(at);
+    if (!weekSet.has(week)) continue;
+    const list = map.get(week) ?? [];
+    list.push(as(row));
+    map.set(week, list);
+  }
+  return map;
 }
 
 function groupBy<T>(rows: T[], keyOf: (row: T) => number): Map<number, T[]> {
