@@ -54,6 +54,17 @@ describe("finalization of a spec's integration branch", () => {
     });
   });
 
+  it("a Recheck that passes goes to final-merge, and a must-fix blocks without another fix", () => {
+    expect(advanceFinalization({ step: "recheck", outcome: "pass" })).toEqual({
+      type: "enqueue",
+      step: "final-merge",
+    });
+    expect(advanceFinalization({ step: "recheck", outcome: "fix" })).toEqual({
+      type: "block",
+      reason: "recheck-failed",
+    });
+  });
+
   it("blocks tests-removed on final-merge without a second fix", () => {
     expect(
       advanceFinalization({
@@ -67,6 +78,7 @@ describe("finalization of a spec's integration branch", () => {
     expect([...FINAL_STEPS]).toEqual([
       "final-review",
       "final-fix",
+      "recheck",
       "final-merge",
     ]);
   });

@@ -39,6 +39,7 @@ export const PAUSE_REASONS = [
   "branch-moved",
   "job-failed",
   "tests-removed",
+  "recheck-failed",
 ] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 
@@ -49,6 +50,7 @@ export const PAUSE_REASON_LABELS: Record<PauseReason, string> = {
   "branch-moved": "运行期间分支被推过了",
   "job-failed": "作业失败",
   "tests-removed": "删了测试，等人批准",
+  "recheck-failed": "Recheck 不是 pass，等人批准",
 };
 
 export function pauseReasonLabel(reason: string | null | undefined): string {
@@ -112,6 +114,7 @@ export const FAILURE_SOURCE_OF_REASON: Record<
   "merge-conflict": "spec",
   "protected-path-changed": "spec",
   "tests-removed": "spec",
+  "recheck-failed": "spec",
   "contract-copy-mismatch": "spec",
   "contract-change-needed": "spec",
   "integration-environment-failed": "spec",
@@ -210,6 +213,7 @@ export const HUMAN_ACTIONS = [
   "retry",
   "approve-protected",
   "approve-removed-tests",
+  "approve-recheck",
   "allow-paths",
   "edit-ticket",
   "cancel-ticket",

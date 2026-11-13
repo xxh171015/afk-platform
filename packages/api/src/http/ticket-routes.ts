@@ -23,6 +23,8 @@ import {
   allowPaths,
   allowSpec,
   approveProtected,
+  approveRecheck,
+  approveRecheckForSpec,
   approveRemovedTests,
   approveRemovedTestsForSpec,
   cancelSpec,
@@ -886,6 +888,37 @@ const approveRemovedSpecRoute = createRoute({
   },
 });
 
+const approveRecheckRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/approve-recheck",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Approved; the ticket goes on from the merge",
+      z.object({ sha: z.string() }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply("The ticket is not blocked by recheck-failed", ErrorReply),
+  },
+});
+
+const approveRecheckSpecRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/approve-recheck",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Approved; the wrap-up or update-branch goes on",
+      z.object({ sha: z.string() }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply(
+      "The spec is not blocked or paused by recheck-failed",
+      ErrorReply,
+    ),
+  },
+});
+
 const allowPathsRoute = createRoute({
   method: "post",
   path: "/tickets/{id}/allow-paths",
@@ -1226,6 +1259,28 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ approved: result.approved }, 200);
+  });
+
+  app.openapi(approveRecheckRoute, async (c) => {
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      approveRecheck(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ sha: result.sha }, 200);
+  });
+
+  app.openapi(approveRecheckSpecRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      approveRecheckForSpec(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ sha: result.sha }, 200);
   });
 
   app.openapi(editRoute, async (c) => {

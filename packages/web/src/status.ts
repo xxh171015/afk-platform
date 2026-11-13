@@ -45,6 +45,7 @@ export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
   "branch-moved": "运行期间票分支被推过了",
   "sandbox-oom": "沙箱内存不足",
   "tests-removed": "删了测试",
+  "recheck-failed": "Recheck 不是 pass",
 };
 
 export const PR_STATE_LABELS: Record<string, string> = {

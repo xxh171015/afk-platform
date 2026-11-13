@@ -12,6 +12,7 @@ import { z } from "zod";
 import { enqueueJob } from "../jobs/queue.ts";
 import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
+import { recheckTriggerOf } from "../stages/recheck-hit.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
 import { enqueueTrialMerge } from "./trial-merge.ts";
 
@@ -35,6 +36,12 @@ export const UpdateBranchFixResultSchema = z.object({
   ...commonFields,
 });
 
+const RecheckResultSchema = z.object({
+  stage: z.literal("recheck"),
+  outcome: z.enum(["pass", "fix", "invalid-output", "timeout"]),
+  ...commonFields,
+});
+
 export type UpdateBranchPayload = {
   specId: number;
   repoId: number;
@@ -42,6 +49,7 @@ export type UpdateBranchPayload = {
   afterFix: boolean;
   mainSha: string | undefined;
   pauseReason: PauseReason | undefined;
+  recheck: boolean;
 };
 
 const PAUSE_FROM_MERGE: Record<"conflict" | "gate-failed", PauseReason> = {
@@ -67,10 +75,28 @@ type IntegrationBranch = {
 export function readUpdateBranchPayload(
   payload: Record<string, unknown>,
 ): UpdateBranchPayload | undefined {
-  const { specId, repoId, stage, final, mainSha, pauseReason } = payload;
-  if (stage !== "update-branch" || final === true) return undefined;
+  const { specId, repoId, stage, final, mainSha, pauseReason, ticketId } =
+    payload;
+  if (final === true) return undefined;
   if (typeof specId !== "number" || typeof repoId !== "number")
     return undefined;
+  if (stage === "recheck") {
+    if (typeof ticketId === "number") return undefined;
+    return {
+      specId,
+      repoId,
+      fix: false,
+      afterFix: true,
+      mainSha: typeof mainSha === "string" ? mainSha : undefined,
+      pauseReason:
+        pauseReason === "update-branch-conflict" ||
+        pauseReason === "update-branch-gate-failed"
+          ? pauseReason
+          : undefined,
+      recheck: true,
+    };
+  }
+  if (stage !== "update-branch") return undefined;
   return {
     specId,
     repoId,
@@ -82,6 +108,7 @@ export function readUpdateBranchPayload(
       pauseReason === "update-branch-gate-failed"
         ? pauseReason
         : undefined,
+    recheck: false,
   };
 }
 
@@ -91,14 +118,15 @@ export async function markUpdateBranchClaimed(
 ): Promise<void> {
   const read = readUpdateBranchPayload(job.payload);
   if (!read) return;
+  const stage = read.recheck ? "recheck" : "update-branch";
   await pool.query(
     `INSERT INTO runs (spec_id, repo_id, job_id, stage, attempt, retry_note, started_at)
-     SELECT $1, $2, $3, 'update-branch',
-       (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = 'update-branch') + 1,
+     SELECT $1, $2, $3, $4,
+       (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = $4) + 1,
        s.retry_note, now()
      FROM specs s WHERE s.id = $1
      ON CONFLICT (job_id) DO NOTHING`,
-    [read.specId, read.repoId, job.id],
+    [read.specId, read.repoId, job.id, stage],
   );
   await pool.query("UPDATE specs SET retry_note = NULL WHERE id = $1", [
     read.specId,
@@ -188,6 +216,39 @@ export async function enqueueUpdateBranch(
         : {}),
     },
     lockKey: `integration:${target.repoId}:spec/${spec.rows[0]?.slug}`,
+    idempotencyKey: await nextUpdateBranchKey(
+      client,
+      target.specId,
+      target.repoId,
+    ),
+  });
+}
+
+async function enqueueUpdateBranchRecheck(
+  client: pg.PoolClient,
+  target: {
+    specId: number;
+    repoId: number;
+    mainSha: string;
+    pauseReason: PauseReason | undefined;
+    fromSha: string;
+    toSha: string;
+    paths: string[];
+  },
+): Promise<void> {
+  await enqueueJob(client, {
+    type: "agent-run",
+    payload: {
+      stage: "recheck",
+      specId: target.specId,
+      repoId: target.repoId,
+      mainSha: target.mainSha,
+      afterFix: true,
+      pauseReason: target.pauseReason,
+      fromSha: target.fromSha,
+      toSha: target.toSha,
+      paths: target.paths,
+    },
     idempotencyKey: await nextUpdateBranchKey(
       client,
       target.specId,
@@ -591,7 +652,8 @@ async function failQueuedUpdateBranches(
 ): Promise<void> {
   await client.query(
     `UPDATE jobs SET state = 'failed', error = 'the spec was paused', lease_owner = NULL, lease_expires_at = NULL
-     WHERE state = 'queued' AND payload->>'stage' = 'update-branch'
+     WHERE state = 'queued' AND payload->>'stage' IN ('update-branch', 'recheck')
+       AND payload->>'ticketId' IS NULL
        AND (payload->>'specId')::int = $1`,
     [specId],
   );
@@ -667,10 +729,47 @@ export async function recordUpdateBranchResult(
   const read = readUpdateBranchPayload(job.payload);
   if (!read) return { status: "not-update-branch" };
   await lockSpec(client, read.specId);
-  const spec = await client.query<{ state: SpecState }>(
-    "SELECT state FROM specs WHERE id = $1",
-    [read.specId],
-  );
+  const spec = await client.query<{
+    state: SpecState;
+    allowed: string[];
+  }>("SELECT state, allowed_recheck_shas AS allowed FROM specs WHERE id = $1", [
+    read.specId,
+  ]);
+  if (read.recheck) {
+    const parsed = RecheckResultSchema.safeParse(result);
+    const valid = parsed.success ? parsed.data : undefined;
+    await writeFacts(
+      client,
+      {
+        spec_id: read.specId,
+        repo_id: read.repoId,
+        ticket_id: null,
+        content_version: null,
+      },
+      job,
+      "recheck",
+      valid,
+      result,
+    );
+    const specState = spec.rows[0]?.state;
+    if (!specState || !SPECS_THAT_WATCH_MAIN.includes(specState)) {
+      return {
+        status: "ignored",
+        reason: `update-branch result for a spec that is ${specState}`,
+      };
+    }
+    if (valid?.outcome === "pass") {
+      await enqueueUpdateBranch(client, {
+        specId: read.specId,
+        repoId: read.repoId,
+        mainSha: read.mainSha ?? "",
+        afterFix: true,
+      });
+    } else {
+      await pauseForUpdateBranch(client, read.specId, "recheck-failed");
+    }
+    return { status: "applied" };
+  }
   const parsed = read.fix
     ? UpdateBranchFixResultSchema.safeParse(result)
     : UpdateBranchResultSchema.safeParse(result);
@@ -699,6 +798,19 @@ export async function recordUpdateBranchResult(
     return { status: "ignored", reason: "update-branch result is not valid" };
   if (read.fix) {
     if (valid.outcome === "done") {
+      const trigger = recheckTriggerOf(valid.run);
+      if (trigger?.hit && !spec.rows[0]?.allowed.includes(trigger.toSha)) {
+        await enqueueUpdateBranchRecheck(client, {
+          specId: read.specId,
+          repoId: read.repoId,
+          mainSha: read.mainSha ?? "",
+          pauseReason: read.pauseReason,
+          fromSha: trigger.fromSha,
+          toSha: trigger.toSha,
+          paths: trigger.paths,
+        });
+        return { status: "applied" };
+      }
       await enqueueUpdateBranch(client, {
         specId: read.specId,
         repoId: read.repoId,

@@ -155,6 +155,33 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
 });
 
 describe("renderPackSection", () => {
+  it("puts Recheck hits in 合并前要你定的 with their kind", () => {
+    const rendered = renderPackSection(
+      pack({
+        needsDecision: [
+          {
+            kind: "recheck",
+            id: "R-9",
+            source: "T-1 merge-fix",
+            text: "src/a.test.ts · Recheck: fix",
+          },
+          {
+            kind: "needs-human",
+            id: "R-1#0",
+            source: "T-1 implement",
+            text: "reload skips the filter",
+          },
+        ],
+      }),
+      "backend",
+      1,
+    );
+    expect(rendered.section.startsWith("## 合并前要你定的\n")).toBe(true);
+    expect(rendered.section).toContain(
+      "[recheck] R-9 T-1 merge-fix: src/a.test.ts · Recheck: fix",
+    );
+  });
+
   it("puts needs-human and unfinished deferred at the front", () => {
     const rendered = renderPackSection(
       pack({

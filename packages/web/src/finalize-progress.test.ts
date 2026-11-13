@@ -49,6 +49,7 @@ describe("finalizeProgress", () => {
     expect(statuses(backend?.steps ?? [])).toEqual([
       "final-review:done",
       "final-fix:skipped",
+      "recheck:skipped",
       "final-merge:skipped",
     ]);
     expect(backend?.steps[0]?.result).toBe("pass");
@@ -74,6 +75,7 @@ describe("finalizeProgress", () => {
     expect(statuses(frontend?.steps ?? [])).toEqual([
       "final-review:done",
       "final-fix:running",
+      "recheck:waiting",
       "final-merge:waiting",
     ]);
     // a review asks for a fix when either axis does
@@ -107,10 +109,11 @@ describe("finalizeProgress", () => {
     expect(statuses(queued?.steps ?? [])).toEqual([
       "final-review:queued",
       "final-fix:waiting",
+      "recheck:waiting",
       "final-merge:waiting",
     ]);
     expect(blocked?.status).toBe("blocked");
-    expect(blocked?.steps[2]).toMatchObject({
+    expect(blocked?.steps[3]).toMatchObject({
       status: "blocked",
       blockedReason: "merge-conflict",
     });
@@ -133,7 +136,7 @@ describe("finalizeProgress", () => {
         run("frontend", "final-merge", null),
       ],
     );
-    expect(frontend?.steps[2]?.status).toBe("running");
+    expect(frontend?.steps[3]?.status).toBe("running");
   });
 
   it("puts the finish e2e under the spec's integration, not under the repo that ran it", () => {

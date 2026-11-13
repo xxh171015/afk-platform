@@ -201,6 +201,31 @@ describe("plat blocked of a stuck ticket", () => {
     expect(text).toContain("plat ticket retry T-12 --mode continue");
   });
 
+  it("prints approve-recheck for recheck-failed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          blockedReason: "recheck-failed",
+          structuredBrief: {
+            reason: "recheck-failed",
+            step: "recheck",
+            summary: "Recheck 不是 pass",
+            evidence: {},
+            recommendedAction: "确认这次改动可以留下，批准后从合并接着跑",
+            commands: [
+              {
+                label: "批准这次改动",
+                command: "plat ticket approve-recheck T-12",
+              },
+            ],
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain("plat ticket approve-recheck T-12");
+  });
+
   it("prints approve-removed-tests for tests-removed", () => {
     const text = blockedText({
       ...emptyQueue,

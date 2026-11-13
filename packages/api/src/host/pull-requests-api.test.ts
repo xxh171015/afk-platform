@@ -1838,6 +1838,49 @@ describe("the acceptance pack", () => {
     expect(task.section).not.toContain("left to b");
   });
 
+  it("puts Recheck hits and their conclusion at the front of the pack and the PR", async () => {
+    await settledSpec(["backend"], undefined, {
+      stages: {
+        merge: [
+          { outcome: "conflict" },
+          { outcome: "merged", headSha: "head" },
+        ],
+        "merge-fix": {
+          outcome: "done",
+          run: {
+            recheck: {
+              hit: true,
+              paths: ["src/a.test.ts"],
+              fromSha: "aaa111",
+              toSha: "bbb222",
+            },
+          },
+        },
+        recheck: {
+          outcome: "pass",
+          run: {
+            output: { verdict: "pass", mustFix: [], suggestions: [] },
+          },
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.needsDecision[0]).toEqual({
+      kind: "recheck",
+      id: expect.stringMatching(/^R-\d+$/),
+      source: "T-1 merge-fix",
+      text: "src/a.test.ts · Recheck: pass",
+    });
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toMatch(/^## 合并前要你定的\n/);
+    expect(task.section).toContain(
+      "T-1 merge-fix: src/a.test.ts · Recheck: pass",
+    );
+  });
+
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {
     const { acceptancePack } = await packOf();
     expect(acceptancePack.repos[0].gate).toEqual({

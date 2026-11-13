@@ -66,7 +66,7 @@ export function checkReviewRulings(input: {
 }
 
 export type NeedsDecisionItem = {
-  kind: "needs-human" | "deferred";
+  kind: "recheck" | "needs-human" | "deferred";
   id: string;
   source: string;
   text: string;

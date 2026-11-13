@@ -12,6 +12,7 @@ export const STAGES = [
   "gate-fix",
   "review-fix",
   "merge-fix",
+  "recheck",
   "e2e", // an integration ticket's last stage: a worker-run step in a fresh integration environment
   "diagnose", // after a failed e2e: an agent in the environment says which repo is at fault (it changes nothing)
 ] as const;
@@ -47,6 +48,7 @@ export type StageReport =
         | "tests-removed";
     }
   | { stage: "review"; outcome: "pass" | "fix" | "invalid-output" | "timeout" }
+  | { stage: "recheck"; outcome: "pass" | "fix" | "invalid-output" | "timeout" }
   | {
       stage: "merge";
       outcome: "merged" | "conflict" | "gate-failed" | "tests-removed";
@@ -64,6 +66,8 @@ export interface Progress {
   reviewed: boolean; // review runs once per ticket
   // An integration ticket's e2e failures that were followed by a fix ticket (absent: none yet).
   integrationRounds?: number;
+  // review-fix / merge-fix changed existing tests or config; merge waits on Recheck.
+  recheckPending?: boolean;
 }
 
 // A failed e2e and the fix ticket after it make a round; the third failure is one too many.
@@ -133,9 +137,9 @@ export function advanceStage(
         return block("tests-removed");
       }
       if (report.outcome === "passed") {
-        return progress.reviewed
-          ? toMerge(progress)
-          : enqueue("review", progress);
+        if (!progress.reviewed) return enqueue("review", progress);
+        if (progress.recheckPending) return enqueue("recheck", progress);
+        return toMerge(progress);
       }
       const spent = spendFix(progress, "gate-fix");
       return spent ? enqueue("gate-fix", spent) : block("gate-failed");
@@ -150,6 +154,12 @@ export function advanceStage(
       // Review runs once, so review-fix is never spent yet; if it were, merging is all that is left.
       const spent = spendFix(done, "review-fix");
       return spent ? enqueue("review-fix", spent) : toMerge(done);
+    }
+
+    case "recheck": {
+      if (report.outcome === "pass")
+        return toMerge({ ...progress, recheckPending: false });
+      return block("recheck-failed");
     }
 
     case "merge": {

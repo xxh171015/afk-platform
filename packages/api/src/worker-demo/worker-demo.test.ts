@@ -239,7 +239,11 @@ function deps(
       new FakeAgentRunner(slotDir, async (ctx) => {
         const custom = await over.script?.(ctx);
         if (custom) return custom;
-        if (ctx.stage === "review" || ctx.stage === "final-review")
+        if (
+          ctx.stage === "review" ||
+          ctx.stage === "final-review" ||
+          ctx.stage === "recheck"
+        )
           return { output: PASS };
         return {
           files: {
@@ -308,7 +312,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     // the ticket branches were pushed, with the traceability trailers on the agent's commits
     for (const [id, run] of [
       ["T-1", "R-1"],
-      ["T-2", "R-6"], // a review is two Runs, one per axis
+      ["T-2", "R-5"], // ticket review is one Spec-axis Run
     ]) {
       const body = gitOut(origin, [
         "log",
@@ -404,6 +408,61 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   };
   const isSpecAxis = (prompt: string) =>
     prompt.includes("阶段：review，Spec 轴");
+
+  it("Rechecks a review-fix that changed an existing test assertion", async () => {
+    seed.commit(
+      {
+        "src/a.ts": "export const n = 1;\n",
+        "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+      },
+      "existing tests",
+    );
+    gitOrThrow(seed.dir, ["push", "--quiet", origin, "HEAD:refs/heads/main"]);
+    await confirmedSpec([ticket("a")]);
+    let recheckCtx: string | undefined;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") {
+          const files: Record<string, string> = {
+            "src/a.ts": "export const n = 1;\nexport const extra = 2;\n",
+          };
+          return { files, message: "add with tests", output: DONE };
+        }
+        if (ctx.stage === "review") return { output: MUST_FIX };
+        if (ctx.stage === "review-fix") {
+          const files: Record<string, string> = {
+            "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n',
+          };
+          return { files, message: "flip assertion", output: DONE };
+        }
+        if (ctx.stage === "recheck") {
+          recheckCtx = ctx.context("recheck.json");
+          return { output: PASS };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const stages = await db.pool.query(
+      "SELECT stage FROM runs WHERE ticket_id = 1 ORDER BY id",
+    );
+    expect(stages.rows.map((row) => row.stage)).toEqual([
+      "implement",
+      "gate",
+      "review",
+      "review-fix",
+      "gate",
+      "recheck",
+      "merge",
+    ]);
+    expect(recheckCtx).toContain("src/a.test.ts");
+  });
 
   it("on the default spec-only ticket review, review-fix sees only the Spec axis", async () => {
     await confirmedSpec([ticket("a")]);
@@ -639,8 +698,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     expect(runs.rows.map((r) => [r.stage, r.result])).toEqual([
       ["implement", "done"],
       ["gate", "passed"],
-      ["review", "pass"], // Standards
-      ["review", "pass"], // Spec
+      ["review", "pass"],
       ["merge", "merged"],
       ["final-review", "pass"],
       ["final-review", "pass"],
@@ -661,9 +719,9 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     const findings = await db.pool.query(
       "SELECT kind, resolution FROM findings",
     );
-    // each axis of the ticket's review and of the overall review left a suggestion for the acceptance pack
+    // the ticket's Spec-axis review and both axes of the overall review left a suggestion for the pack
     expect(findings.rows).toEqual(
-      Array(4).fill({ kind: "suggestion", resolution: "acceptance-pack" }),
+      Array(3).fill({ kind: "suggestion", resolution: "acceptance-pack" }),
     );
   });
 

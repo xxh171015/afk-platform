@@ -213,7 +213,7 @@ export const AcceptancePack = z.object({
   needsDecision: z
     .array(
       z.object({
-        kind: z.enum(["needs-human", "deferred"]),
+        kind: z.enum(["recheck", "needs-human", "deferred"]),
         id: z.string(),
         source: z.string(),
         text: z.string(),
@@ -645,15 +645,82 @@ async function needsDecisionOf(
     ),
     ...(log.spec ? sourced(log.spec.displayId, log.spec.decisions) : []),
   ];
-  return collectNeedsDecision({
-    decisions,
-    ticketRulings: log.doneTickets.flatMap((group) => group.rulings),
-    specRulings: log.spec?.rulings ?? [],
-    tickets: tickets.rows.map((ticket) => ({
-      displayId: formatDisplayId("ticket", ticket.id),
-      state: ticket.state,
-    })),
-  });
+  return [
+    ...(await recheckNeedsDecisionOf(client, specId, tickets.rows)),
+    ...collectNeedsDecision({
+      decisions,
+      ticketRulings: log.doneTickets.flatMap((group) => group.rulings),
+      specRulings: log.spec?.rulings ?? [],
+      tickets: tickets.rows.map((ticket) => ({
+        displayId: formatDisplayId("ticket", ticket.id),
+        state: ticket.state,
+      })),
+    }),
+  ];
+}
+
+async function recheckNeedsDecisionOf(
+  client: Pick<pg.PoolClient, "query">,
+  specId: number,
+  tickets: { id: number; state: string }[],
+): Promise<NeedsDecisionItem[]> {
+  const hits = await client.query<{
+    id: number;
+    stage: string;
+    ticket_id: number | null;
+    repo_id: number | null;
+    result: string | null;
+    output: unknown;
+  }>(
+    `SELECT id, stage, ticket_id, repo_id, result, output FROM runs
+     WHERE spec_id = $1 AND (
+       (stage IN ('review-fix', 'merge-fix', 'final-fix', 'update-branch')
+         AND output->'recheck'->>'hit' = 'true')
+       OR stage = 'recheck'
+     )
+     ORDER BY id`,
+    [specId],
+  );
+  const ticketById = new Map(
+    tickets.map((ticket) => [ticket.id, formatDisplayId("ticket", ticket.id)]),
+  );
+  const specDisplay = formatDisplayId("spec", specId);
+  const items: NeedsDecisionItem[] = [];
+  const conclusions = hits.rows.filter((row) => row.stage === "recheck");
+  const used = new Set<number>();
+  const displayOf = (ticketId: number | null) =>
+    ticketId != null ? (ticketById.get(ticketId) ?? specDisplay) : specDisplay;
+  for (const row of hits.rows) {
+    if (row.stage === "recheck") continue;
+    const trigger = (row.output as { recheck?: { paths?: unknown } } | null)
+      ?.recheck;
+    const paths = Array.isArray(trigger?.paths)
+      ? trigger.paths.filter((path): path is string => typeof path === "string")
+      : [];
+    const later = conclusions.find(
+      (run) =>
+        run.id > row.id &&
+        run.ticket_id === row.ticket_id &&
+        run.repo_id === row.repo_id,
+    );
+    if (later) used.add(later.id);
+    items.push({
+      kind: "recheck",
+      id: formatDisplayId("run", row.id),
+      source: `${displayOf(row.ticket_id)} ${row.stage}`,
+      text: `${paths.join(", ") || "(paths)"} · Recheck: ${later?.result ?? "waiting"}`,
+    });
+  }
+  for (const row of conclusions) {
+    if (used.has(row.id)) continue;
+    items.push({
+      kind: "recheck",
+      id: formatDisplayId("run", row.id),
+      source: `${displayOf(row.ticket_id)} recheck`,
+      text: `Recheck: ${row.result ?? "unknown"}`,
+    });
+  }
+  return items;
 }
 
 type Section = AcceptancePack["repos"][number];

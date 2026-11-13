@@ -161,6 +161,17 @@ export function renderContext(input: ContextInput): void {
       JSON.stringify(input.review, null, 2),
     );
   }
+  const recheck = (
+    bundle as {
+      recheck?: { fromSha: string; toSha: string; paths: string[] } | null;
+    }
+  ).recheck;
+  if (recheck) {
+    writeFileSync(
+      join(dir, "recheck.json"),
+      `${JSON.stringify(recheck, null, 2)}\n`,
+    );
+  }
   for (const contract of input.contracts ?? []) {
     const file = join(dir, contractFile(contract.repo, contract.path));
     mkdirSync(dirname(file), { recursive: true });

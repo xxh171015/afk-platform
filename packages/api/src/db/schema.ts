@@ -172,6 +172,11 @@ export const specs = pgTable(
     orderBroken: jsonb("order_broken").notNull().default([]),
     // Why the platform paused the spec (PAUSE_REASONS); the waiting queue shows the Chinese label.
     pauseReason: text("pause_reason"),
+    // SHAs a person has allowed Recheck to skip for wrap-up / update-branch. Only that commit.
+    allowedRecheckShas: text("allowed_recheck_shas")
+      .array()
+      .notNull()
+      .default([]),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
     // When the scheduler last started a ticket of the spec. Of two specs of a project holding as many slots, the one
@@ -282,6 +287,13 @@ export const tickets = pgTable(
     allowedRemovedTests: jsonb("allowed_removed_tests")
       .notNull()
       .default(sql`'[]'::jsonb`),
+    // SHAs a person has allowed Recheck to skip for this ticket. Only that commit; a later hit still checks.
+    allowedRecheckShas: text("allowed_recheck_shas")
+      .array()
+      .notNull()
+      .default([]),
+    // review-fix / merge-fix hit existing tests or config; the gate then enqueues Recheck.
+    recheckPending: boolean("recheck_pending").notNull().default(false),
     // Names of repos: read-only references for the agent, and the repos an integration ticket's e2e environment starts.
     refs: text("refs").array().notNull().default([]),
     environment: text("environment").array().notNull().default([]),

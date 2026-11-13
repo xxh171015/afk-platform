@@ -408,7 +408,7 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
           "SELECT stage FROM runs WHERE ticket_id = 2 ORDER BY id",
         )
       ).rows.map((r) => r.stage),
-    ).toEqual(["implement", "gate", "review", "review", "merge", "e2e"]); // a review is a Run per axis
+    ).toEqual(["implement", "gate", "review", "merge", "e2e"]);
   });
 
   it("diagnoses a failed e2e, makes a fix ticket in the repo it names, and gives up after two rounds", async () => {

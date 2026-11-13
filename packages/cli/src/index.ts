@@ -1702,6 +1702,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("approve-recheck <spec>")
+    .description(
+      "accept the Recheck of a wrap-up or update-branch blocked by recheck-failed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/approve-recheck",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: approved ${data.sha}; wrap-up or update goes on`);
+    });
+
+  spec
     .command("approve-removed-tests <spec>")
     .description(
       "accept the missing test names of a wrap-up or update-branch blocked by tests-removed",
@@ -1922,6 +1936,19 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         data,
         `approved: ${data.approved.join(", ")}; ${id} goes on from the gate`,
       );
+    });
+  ticketCommands
+    .command("approve-recheck <ticket>")
+    .description("accept the Recheck of a ticket blocked by recheck-failed")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/approve-recheck",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `approved ${data.sha}; ${id} goes on from the merge`);
     });
   ticketCommands
     .command("approve-removed-tests <ticket>")

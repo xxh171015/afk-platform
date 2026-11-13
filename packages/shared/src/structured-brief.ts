@@ -68,6 +68,7 @@ const SUMMARY: Record<BlockedReason, string> = {
   "branch-moved": "运行期间票分支被推过了",
   "sandbox-oom": "沙箱内存不足",
   "tests-removed": "删了测试",
+  "recheck-failed": "Recheck 不是 pass",
 };
 
 const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
@@ -89,6 +90,7 @@ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
   "branch-moved": "看谁推了票分支，决定从远端继续后再试",
   "sandbox-oom": "把沙箱内存调大后再试",
   "tests-removed": "确认这些测试可以去掉，批准后从门禁接着跑",
+  "recheck-failed": "确认这次改动可以留下，批准后从合并接着跑",
 };
 
 export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
@@ -124,6 +126,14 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
         {
           label: "批准删掉的测试",
           command: `plat spec approve-removed-tests ${input.specDisplayId}`,
+        },
+      ];
+    }
+    if (input.reason === "recheck-failed") {
+      return [
+        {
+          label: "批准这次改动",
+          command: `plat spec approve-recheck ${input.specDisplayId}`,
         },
       ];
     }
@@ -175,6 +185,14 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
       {
         label: "批准删掉的测试",
         command: `plat ticket approve-removed-tests ${ticket}`,
+      },
+    ];
+  }
+  if (input.reason === "recheck-failed") {
+    return [
+      {
+        label: "批准这次改动",
+        command: `plat ticket approve-recheck ${ticket}`,
       },
     ];
   }

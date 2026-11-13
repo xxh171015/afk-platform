@@ -53,6 +53,21 @@ describe("the happy path", () => {
       advanceStage({ stage: "gate", outcome: "passed" }, reviewed(fresh)),
     ).toEqual(enqueue("merge", "checks-passed"));
   });
+
+  it("runs Recheck before merge when a post-review change hit existing tests or config", () => {
+    expect(
+      advanceStage(
+        { stage: "gate", outcome: "passed" },
+        { ...reviewed(fresh), recheckPending: true },
+      ),
+    ).toEqual(enqueue("recheck"));
+    expect(
+      advanceStage({ stage: "recheck", outcome: "pass" }, reviewed(fresh)),
+    ).toEqual(enqueue("merge", "checks-passed"));
+    expect(
+      advanceStage({ stage: "recheck", outcome: "fix" }, reviewed(fresh)),
+    ).toEqual(block("recheck-failed"));
+  });
 });
 
 describe("blocking after an agent run", () => {
@@ -257,6 +272,7 @@ describe("shape", () => {
       "gate-fix",
       "review-fix",
       "merge-fix",
+      "recheck",
       "e2e",
       "diagnose",
     ]);

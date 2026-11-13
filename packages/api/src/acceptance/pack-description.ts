@@ -68,7 +68,7 @@ function needsDecisionLines(pack: AcceptancePack): string {
   const lines = ["## 合并前要你定的"];
   for (const item of items) {
     const ref = item.ref ? ` (${item.ref})` : "";
-    const kind = item.kind === "deferred" ? "deferred" : "needs-human";
+    const kind = item.kind;
     lines.push(`- [${kind}] ${item.id} ${item.source}: ${item.text}${ref}`);
   }
   return lines.join("\n");

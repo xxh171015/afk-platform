@@ -3785,6 +3785,26 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "recheck": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "fromSha": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "toSha": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "paths": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["fromSha", "toSha", "paths"]
                     }
                   },
                   "required": [
@@ -3813,7 +3833,8 @@
                     "limits",
                     "model",
                     "ticketReview",
-                    "stageModels"
+                    "stageModels",
+                    "recheck"
                   ]
                 }
               }
@@ -7621,7 +7642,7 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
-                                "enum": ["needs-human", "deferred"]
+                                "enum": ["recheck", "needs-human", "deferred"]
                               },
                               "id": {
                                 "type": "string"
@@ -10606,6 +10627,138 @@
           },
           "409": {
             "description": "The spec is not blocked or paused by tests-removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/approve-recheck": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved; the ticket goes on from the merge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sha": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sha"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is not blocked by recheck-failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{id}/approve-recheck": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved; the wrap-up or update-branch goes on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sha": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sha"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not blocked or paused by recheck-failed",
             "content": {
               "application/json": {
                 "schema": {

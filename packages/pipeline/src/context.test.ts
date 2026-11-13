@@ -104,6 +104,26 @@ describe("renderContext", () => {
     expect(read(dir, "spec.md")).toContain("Customers want CSV.");
   });
 
+  it("writes recheck.json when the bundle names the hit", () => {
+    const dir = ctxDir();
+    renderContext({
+      dir,
+      bundle: bundleFor({
+        recheck: {
+          fromSha: "aaa111",
+          toSha: "bbb222",
+          paths: ["src/a.test.ts"],
+        },
+      }),
+      run,
+    });
+    expect(JSON.parse(read(dir, "recheck.json"))).toEqual({
+      fromSha: "aaa111",
+      toSha: "bbb222",
+      paths: ["src/a.test.ts"],
+    });
+  });
+
   it("writes spec.md without an assigned-stories section when the ticket has no stories", () => {
     const dir = ctxDir();
     renderContext({ dir, bundle: bundleFor(), run });

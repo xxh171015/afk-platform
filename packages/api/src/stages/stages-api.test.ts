@@ -1449,3 +1449,176 @@ describe("Spec-axis rulings", () => {
     );
   });
 });
+
+describe("Recheck", () => {
+  const HIT = {
+    hit: true,
+    paths: ["src/a.test.ts"],
+    fromSha: "aaa111",
+    toSha: "bbb222",
+  };
+  const CONFIG_HIT = {
+    hit: true,
+    paths: ["vitest.config.ts"],
+    fromSha: "aaa111",
+    toSha: "ccc333",
+  };
+  const MISS = {
+    hit: false,
+    paths: [] as string[],
+    fromSha: "aaa111",
+    toSha: "ddd444",
+  };
+  const RECHECK_FIX = {
+    outcome: "fix",
+    run: {
+      output: {
+        verdict: "fix",
+        mustFix: [
+          { file: "src/a.test.ts", line: 1, problem: "weakened the assertion" },
+        ],
+        suggestions: [],
+        scopeCreep: [],
+        uncertainties: [],
+      },
+    },
+  };
+
+  async function toMergeFix() {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", { outcome: "conflict" });
+  }
+
+  async function toReviewFix() {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "fix",
+      findings: [{ kind: "must-fix", body: "null check" }],
+    });
+  }
+
+  it("runs Recheck after merge-fix changes an existing test", async () => {
+    await toMergeFix();
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    const recheck = (await worker.claim()).body.job as Claimed;
+    expect(recheck.payload.stage).toBe("recheck");
+    expect(recheck.payload).toMatchObject({
+      fromSha: HIT.fromSha,
+      toSha: HIT.toSha,
+      paths: HIT.paths,
+    });
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${recheck.id}/bundle?workerId=w1&attempt=${recheck.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.recheck).toEqual({
+      fromSha: HIT.fromSha,
+      toSha: HIT.toSha,
+      paths: HIT.paths,
+    });
+    await worker.complete(recheck.id, recheck.attempt, {
+      stage: "recheck",
+      outcome: "pass",
+    });
+    expect((await ticketRow()).state).toBe("merging");
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("does not Recheck a source-only merge-fix", async () => {
+    await toMergeFix();
+    await stage("merge-fix", { outcome: "done", run: { recheck: MISS } });
+    await stage("gate", GATE_PASSED);
+    expect((await ticketRow()).state).toBe("merging");
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("runs Recheck after review-fix changes test config", async () => {
+    await toReviewFix();
+    await stage("review-fix", {
+      outcome: "done",
+      run: { recheck: CONFIG_HIT },
+    });
+    await stage("gate", GATE_PASSED);
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "recheck",
+    );
+  });
+
+  it("blocks without a fix when Recheck is not pass, and approve continues from merge", async () => {
+    await toMergeFix();
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    await stage("recheck", RECHECK_FIX);
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "recheck-failed",
+    });
+    await noJobsLeft();
+    const approved = await fetch(`${api.url}/tickets/1/approve-recheck`, {
+      method: "POST",
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+    expect(approved).toEqual({ status: 200, body: { sha: HIT.toSha } });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "approve-recheck" });
+    expect(await ticketRow()).toMatchObject({
+      state: "merging",
+      blocked_reason: null,
+    });
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("skips Recheck for the same SHA after approve, and runs it for a later SHA", async () => {
+    await toReviewFix();
+    await stage("review-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    await stage("recheck", RECHECK_FIX);
+    await fetch(`${api.url}/tickets/1/approve-recheck`, { method: "POST" });
+    await stage("merge", { outcome: "conflict" });
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("does not Recheck implement or gate-fix even when they report a hit", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", { outcome: "failed" });
+    await stage("gate-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "review",
+    );
+  });
+
+  it("is for recheck-failed only", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", { outcome: "agent-gave-up" });
+    const refused = await fetch(`${api.url}/tickets/1/approve-recheck`, {
+      method: "POST",
+    });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toMatch(/recheck-failed/);
+    expect(
+      (await fetch(`${api.url}/tickets/99/approve-recheck`, { method: "POST" }))
+        .status,
+    ).toBe(404);
+  });
+});

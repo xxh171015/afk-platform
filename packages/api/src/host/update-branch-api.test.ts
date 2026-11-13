@@ -749,6 +749,73 @@ describe("the update-branch job", () => {
     expect(later?.payload.approvedRemoved).toBeUndefined();
   });
 
+  it("Rechecks an update-branch fix that hit existing tests; a fail pauses and approve continues the update", async () => {
+    const hit = {
+      hit: true,
+      paths: ["src/a.test.ts"],
+      fromSha: "aaa111",
+      toSha: "bbb222",
+    };
+    const job = await queuedUpdate();
+    await agent.complete(job.id, job.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    expect(
+      (
+        await agent.complete(fix.id, fix.attempt, {
+          stage: "update-branch",
+          outcome: "done",
+          run: { recheck: hit },
+        })
+      ).status,
+    ).toBe(200);
+    const rec = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+      payload: Json;
+    };
+    expect(rec.payload.stage).toBe("recheck");
+    expect(rec.payload).toMatchObject({
+      fromSha: hit.fromSha,
+      toSha: hit.toSha,
+      paths: hit.paths,
+    });
+    expect(rec.payload.ticketId).toBeUndefined();
+    expect(rec.payload.final).toBeUndefined();
+    await agent.complete(rec.id, rec.attempt, {
+      stage: "recheck",
+      outcome: "fix",
+    });
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "recheck-failed",
+    });
+    expect(
+      (await call("GET", "/blocked")).body.specs.some(
+        (s: Json) => s.reason === "recheck-failed",
+      ),
+    ).toBe(true);
+    const approved = await call("POST", "/specs/1/approve-recheck");
+    expect(approved).toMatchObject({
+      status: 200,
+      body: { sha: hit.toSha },
+    });
+    expect(await specRow()).toEqual({ state: "running", pause_reason: null });
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'stage' = 'implement' AND state = 'queued'",
+    );
+    const continued = (await agent.claim()).body.job as {
+      payload: Json;
+    };
+    expect(continued.payload.stage).toBe("update-branch");
+    expect(continued.payload.afterFix).toBe(true);
+  });
+
   it("pauses when the merge agent gives up, with the reason the merge had", async () => {
     const job = await queuedUpdate();
     await agent.complete(job.id, job.attempt, {

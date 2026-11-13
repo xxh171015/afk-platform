@@ -12,7 +12,10 @@ import {
   type TicketState,
 } from "@afk/shared";
 import type pg from "pg";
-import { readUpdateBranchPayload } from "../host/update-branch.ts";
+import {
+  readUpdateBranchPayload,
+  type UpdateBranchPayload,
+} from "../host/update-branch.ts";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 import {
   type LocatePayload,
@@ -146,6 +149,8 @@ export interface Bundle {
   ticketReview: TicketReviewMode;
   // Per-role model overrides (standards, update-branch, merge-fix). Empty: the default model / AFK_MODEL.
   stageModels: StageModels;
+  // Recheck: the commits and paths this Spec-axis look is about. Null on other stages.
+  recheck: { fromSha: string; toSha: string; paths: string[] } | null;
 }
 
 // Defaults where the project sets nothing; only the limits a worker acts on travel, the rest is the API's business.
@@ -184,6 +189,20 @@ function withNames<T extends { tests: number; skipped: number }>(
 ): T & { names?: { classname: string; name: string }[] } {
   const names = testNamesFrom(cases);
   return names.length > 0 ? { ...row, names } : row;
+}
+
+function recheckOf(payload: Record<string, unknown>): Bundle["recheck"] {
+  const fromSha = payload.fromSha;
+  const toSha = payload.toSha;
+  if (typeof fromSha !== "string" || typeof toSha !== "string") return null;
+  if (!fromSha || !toSha) return null;
+  const raw = payload.paths;
+  const paths = Array.isArray(raw)
+    ? raw.filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      )
+    : [];
+  return { fromSha, toSha, paths };
 }
 
 function failedCasesFrom(raw: unknown): Bundle["failedCases"] {
@@ -486,6 +505,7 @@ export async function buildBundle(
       row.ticket_review,
       row.stage_models,
     ),
+    recheck: recheckOf(job.payload),
   };
 }
 
@@ -602,6 +622,7 @@ async function buildFinalBundle(
       row.ticket_review,
       row.stage_models,
     ),
+    recheck: recheckOf(job.payload),
   };
 }
 
@@ -615,7 +636,7 @@ async function buildUpdateBranchBundle(
     attempt: number;
     payload: Record<string, unknown>;
   },
-  update: { specId: number; repoId: number; fix: boolean; afterFix: boolean },
+  update: UpdateBranchPayload,
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
@@ -647,7 +668,11 @@ async function buildUpdateBranchBundle(
     branch: string;
   }[];
   return {
-    job: { id: job.id, stage: "update-branch", attempt: job.attempt },
+    job: {
+      id: job.id,
+      stage: update.recheck ? "recheck" : "update-branch",
+      attempt: job.attempt,
+    },
     run: run.rows[0]
       ? {
           id: run.rows[0].id,
@@ -706,6 +731,7 @@ async function buildUpdateBranchBundle(
       row.ticket_review,
       row.stage_models,
     ),
+    recheck: recheckOf(job.payload),
   };
 }
 
@@ -804,5 +830,6 @@ async function buildLocateBundle(
       row.ticket_review,
       row.stage_models,
     ),
+    recheck: null,
   };
 }

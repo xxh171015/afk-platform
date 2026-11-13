@@ -9,6 +9,7 @@ import type { BlockedReason } from "./ticket-state.ts";
 export const FINAL_STEPS = [
   "final-review",
   "final-fix",
+  "recheck",
   "final-merge",
 ] as const;
 export type FinalStep = (typeof FINAL_STEPS)[number];
@@ -19,6 +20,10 @@ export type FinalReport =
       outcome: "pass" | "fix" | "invalid-output" | "timeout";
     }
   | { step: "final-fix"; outcome: "done" | (typeof AGENT_FAILURES)[number] }
+  | {
+      step: "recheck";
+      outcome: "pass" | "fix" | "invalid-output" | "timeout";
+    }
   | {
       step: "final-merge";
       outcome: "merged" | "conflict" | "gate-failed" | "tests-removed";
@@ -40,6 +45,10 @@ export function advanceFinalization(report: FinalReport): FinalDecision {
       return report.outcome === "done"
         ? { type: "enqueue", step: "final-merge" }
         : { type: "block", reason: report.outcome };
+    case "recheck":
+      if (report.outcome === "pass")
+        return { type: "enqueue", step: "final-merge" };
+      return { type: "block", reason: "recheck-failed" };
     case "final-merge":
       if (report.outcome === "merged") return { type: "done" };
       if (report.outcome === "tests-removed")

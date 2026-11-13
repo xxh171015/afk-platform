@@ -1803,11 +1803,13 @@ describe("the six-step bar and nested pages", () => {
     expect(steps("backend")).toEqual([
       "终审通过",
       "终审修复不需要",
+      "Recheck不需要",
       "最终合并不需要",
     ]);
     expect(steps("frontend")).toEqual([
       "终审需要修复",
       "终审修复运行中",
+      "Recheck未开始",
       "最终合并未开始",
     ]);
     expect(backend.textContent).toContain("终审 · Spec 轴");

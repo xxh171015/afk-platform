@@ -631,6 +631,7 @@ const STAGES_WITH_PROMPTS = [
   "update-branch",
   "final-review",
   "final-fix",
+  "recheck",
   "diagnose",
   "locate-bug",
 ] as const;
@@ -664,6 +665,11 @@ describe("the prompts", () => {
       expect(whole(stage)).toContain("mustFix");
       expect(whole(stage)).toContain("sources");
     }
+    expect(whole("recheck")).toContain("verdict");
+    expect(whole("recheck")).toContain("mustFix");
+    expect(whole("recheck")).toContain("/context/recheck.json");
+    expect(whole("recheck")).toContain("不要求 Ruling");
+    expect(whole("recheck")).toContain("不要用 `git diff <baseSha>...HEAD`");
   });
 
   it("is the overlay and then the stage's own prompt, for every stage", () => {
@@ -880,6 +886,7 @@ describe("the prompts", () => {
     expect(promptFor("review-fix")).toBe(PROMPTS.reviewFix);
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
     expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
+    expect(promptFor("recheck")).toBe(PROMPTS.recheck);
   });
 
   const CODE_CHANGING_PROMPTS = [

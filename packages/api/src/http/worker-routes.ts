@@ -394,6 +394,13 @@ const Bundle = z.object({
   model: z.string().nullable(),
   ticketReview: z.enum(TICKET_REVIEW_MODES),
   stageModels: StageModelsSchema,
+  recheck: z
+    .object({
+      fromSha: z.string().min(1),
+      toSha: z.string().min(1),
+      paths: z.array(z.string()),
+    })
+    .nullable(),
 });
 
 const bundleRoute = createRoute({

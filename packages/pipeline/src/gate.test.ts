@@ -688,6 +688,20 @@ describe("the configuration comes from the trusted commit", () => {
     });
   });
 
+  it("keeps extra Recheck config paths", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "recheckConfig: [ci/timeout.yaml]",
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main").recheckConfig).toEqual([
+      "ci/timeout.yaml",
+    ]);
+  });
+
   it("keeps declared generated groups", () => {
     repo = makeRepo({
       ".sandcastle/gates.yaml": [

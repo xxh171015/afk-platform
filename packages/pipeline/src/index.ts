@@ -129,6 +129,13 @@ export {
   checkProtectedPaths,
   globMatches,
 } from "./protected-paths.ts";
+export type { RecheckTrigger } from "./recheck.ts";
+export {
+  DEFAULT_RECHECK_CONFIG_PATHS,
+  isConfigPath,
+  isTestPath,
+  recheckHit,
+} from "./recheck.ts";
 export type {
   SandboxDocker,
   SandboxKind,

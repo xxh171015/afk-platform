@@ -225,6 +225,7 @@ type TicketAction =
   | { kind: "retry"; mode: "continue" | "restart" }
   | { kind: "approve" }
   | { kind: "approve-removed" }
+  | { kind: "approve-recheck" }
   | { kind: "cancel"; cascade: boolean };
 
 function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
@@ -249,10 +250,14 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
             ? await api.POST("/tickets/{id}/approve-removed-tests", {
                 params: { path: { id } },
               })
-            : await api.POST("/tickets/{id}/cancel", {
-                params: { path: { id } },
-                body: { cascade: action.cascade },
-              });
+            : action.kind === "approve-recheck"
+              ? await api.POST("/tickets/{id}/approve-recheck", {
+                  params: { path: { id } },
+                })
+              : await api.POST("/tickets/{id}/cancel", {
+                  params: { path: { id } },
+                  body: { cascade: action.cascade },
+                });
     if (!data) throw new Error(describeError(error));
   });
   const busy = act.isPending;
@@ -344,6 +349,17 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
             >
               <ShieldCheck />
               批准删掉的测试
+            </Button>
+          ) : null}
+          {ticket.blockedReason === "recheck-failed" ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() => act.mutate({ kind: "approve-recheck" })}
+            >
+              <ShieldCheck />
+              批准这次改动
             </Button>
           ) : null}
           <Button
@@ -487,11 +503,18 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
     );
     if (!data) throw new Error(describeError(error));
   });
+  const approveRecheck = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/approve-recheck", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
   const busy =
     retry.isPending ||
     allow.isPending ||
     cancel.isPending ||
-    approveRemoved.isPending;
+    approveRemoved.isPending ||
+    approveRecheck.isPending;
   return (
     <Card
       category="paused"
@@ -565,6 +588,17 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
               >
                 <ShieldCheck />
                 批准删掉的测试
+              </Button>
+            ) : null}
+            {spec.reason === "recheck-failed" ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() => approveRecheck.mutate()}
+              >
+                <ShieldCheck />
+                批准这次改动
               </Button>
             ) : null}
             <Button
@@ -647,8 +681,18 @@ function BlockedFinalization({
     );
     if (!data) throw new Error(describeError(error));
   });
+  const approveRecheck = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/approve-recheck", {
+      params: { path: { id: item.specId } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
   const beforePullRequests = item.step === "final-e2e";
-  const busy = retry.isPending || waive.isPending || approveRemoved.isPending;
+  const busy =
+    retry.isPending ||
+    waive.isPending ||
+    approveRemoved.isPending ||
+    approveRecheck.isPending;
   const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
@@ -700,6 +744,16 @@ function BlockedFinalization({
             >
               <ShieldCheck />
               批准删掉的测试
+            </Button>
+          ) : null}
+          {item.blockedReason === "recheck-failed" ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => approveRecheck.mutate()}
+            >
+              <ShieldCheck />
+              批准这次改动
             </Button>
           ) : null}
           {beforePullRequests ? (

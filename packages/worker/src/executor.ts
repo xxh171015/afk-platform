@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -43,6 +43,7 @@ import {
   promptFor,
   type RunGateInput,
   readGateConfig,
+  recheckHit,
   reclaimEnvironments,
   renderContext,
   reviewFindings,
@@ -285,7 +286,19 @@ function bringBranches(slot: Slot, mainDir: string, refs: string[]) {
   }
 }
 
-const SKIP_TICKET_ALIGN = new Set(["e2e", "diagnose", "final-review"]);
+const SKIP_TICKET_ALIGN = new Set([
+  "e2e",
+  "diagnose",
+  "final-review",
+  "recheck",
+]);
+
+const RECHECK_TRIGGER_STAGES = new Set([
+  "review-fix",
+  "merge-fix",
+  "final-fix",
+  "update-branch",
+]);
 
 function orphanRunFields(align: TicketAlign): {
   orphanRef?: string;
@@ -401,6 +414,8 @@ async function runStage(
     case "review":
     case "final-review":
       return review(deps, context, mainDir, slot, align);
+    case "recheck":
+      return recheck(deps, context, mainDir, slot, align);
     case "gate":
       return gate(deps, context, mainDir, slot, align);
     case "merge":
@@ -485,6 +500,35 @@ function renderFor(
       : {}),
   });
   return dir;
+}
+
+function extraRecheckConfig(repoDir: string, sha: string): string[] {
+  try {
+    return [...(readGateConfig(repoDir, sha).recheckConfig ?? [])];
+  } catch {
+    return [];
+  }
+}
+
+function recheckArgs(
+  bundle: Bundle,
+  payload: Record<string, unknown>,
+): { fromSha: string; toSha: string; paths: string[] } | undefined {
+  const listed = (
+    bundle as Bundle & {
+      recheck?: { fromSha: string; toSha: string; paths: string[] } | null;
+    }
+  ).recheck;
+  if (listed?.fromSha && listed.toSha) return listed;
+  const fromSha = payload.fromSha;
+  const toSha = payload.toSha;
+  if (typeof fromSha !== "string" || typeof toSha !== "string")
+    return undefined;
+  const raw = payload.paths;
+  const paths = Array.isArray(raw)
+    ? raw.filter((path): path is string => typeof path === "string")
+    : [];
+  return { fromSha, toSha, paths };
 }
 
 // Snapshots of repos at the SHA the bundle names (the head of the default branch when it names none): the ones
@@ -679,6 +723,18 @@ async function agentChange(
     ])
       .split("\n")
       .filter(Boolean);
+    if (
+      RECHECK_TRIGGER_STAGES.has(stage) &&
+      typeof facts.headSha === "string"
+    ) {
+      facts.recheck = recheckHit({
+        repoDir: mainDir,
+        fromSha: before,
+        toSha: facts.headSha,
+        baselineSha: branchBase(mainDir, integration, agent),
+        extraConfigPaths: extraRecheckConfig(mainDir, facts.headSha),
+      });
+    }
     return { stage, outcome: "done", run: facts };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -818,6 +874,85 @@ async function review(
   } finally {
     for (const branch of branches.values())
       git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function recheck(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+  align: TicketAlign,
+): Promise<StageOutcomeBody> {
+  const { bundle, log } = context;
+  const agent = bundle.agentBranch;
+  const hit = recheckArgs(bundle, context.job.payload);
+  const baseSha =
+    hit?.fromSha ??
+    branchBase(mainDir, bundle.integrationBranch as string, agent);
+  const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
+  const reviewed = hasRef(mainDir, `refs/heads/${agent}`)
+    ? tip(mainDir, agent)
+    : publishedTip(mainDir, agent);
+  const branch = `recheck/${subjectLabel(bundle)}`;
+  gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
+  try {
+    bringBranches(slot, mainDir, [branch]);
+    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
+    if (hit) {
+      writeFileSync(
+        join(ctxDir, "recheck.json"),
+        `${JSON.stringify(hit, null, 2)}\n`,
+      );
+    }
+    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const given = writePrompt(tmp, promptFor("recheck"));
+    const options = runOptions(deps, context, "spec");
+    const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
+      stage: "recheck",
+      branch,
+      baseBranch: bundle.integrationBranch as string,
+      promptFile: given.promptFile,
+      ctxDir,
+      refs,
+      schema: reviewOutputSchemaFor("spec"),
+      ...options,
+      signal: context.signal,
+    });
+    if (context.signal.aborted)
+      throw new JobLostError("the lease was lost during Recheck");
+    const verdict = classifyReviewRun(run);
+    if (verdict.kind === "infrastructure-failure")
+      throw new InfrastructureError(verdict.error, billedFacts(run));
+    log(
+      `recheck: ${verdict.kind === "outcome" ? verdict.outcome : "invalid-output"}`,
+    );
+    if (run.commits.length > 0)
+      log(
+        `recheck: WARNING Recheck made ${run.commits.length} commit(s); it should only read`,
+      );
+    const sources = reviewSources(run.output);
+    return {
+      stage: "recheck",
+      outcome: verdict.kind === "outcome" ? verdict.outcome : "invalid-output",
+      run: {
+        result: axisResult(run),
+        axis: "spec",
+        branch: agent,
+        baseSha,
+        commits: run.commits,
+        durationMs: run.durationMs,
+        ...agentFacts(deps, options, given.prompt, run),
+        ...(refs.length ? { refShas } : {}),
+        output: run.output ?? { error: run.error },
+        ...(sources ? { sources } : {}),
+        ...orphanRunFields(align),
+      },
+      findings: run.output ? reviewFindings(run.output) : [],
+    };
+  } finally {
+    git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
     rmSync(tmp, { recursive: true, force: true });
   }
 }

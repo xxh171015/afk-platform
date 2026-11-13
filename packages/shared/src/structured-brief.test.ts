@@ -134,6 +134,37 @@ describe("structuredBrief", () => {
     ]);
   });
 
+  it("gives recheck-failed an approve command and no retry", () => {
+    expect(
+      structuredBrief({
+        reason: "recheck-failed",
+        ...ids,
+        brief: source("recheck", null),
+      }).commands,
+    ).toEqual([
+      {
+        label: "批准这次改动",
+        command: "plat ticket approve-recheck T-12",
+      },
+    ]);
+  });
+
+  it("gives wrap-up recheck-failed a spec approve command", () => {
+    expect(
+      structuredBrief({
+        reason: "recheck-failed",
+        specDisplayId: "S-19",
+        wrapUpStep: "recheck",
+        brief: source("recheck", null),
+      }).commands,
+    ).toEqual([
+      {
+        label: "批准这次改动",
+        command: "plat spec approve-recheck S-19",
+      },
+    ]);
+  });
+
   it("gives tests-removed an approve command and no retry", () => {
     expect(
       structuredBrief({

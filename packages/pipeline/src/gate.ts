@@ -40,6 +40,8 @@ const GateConfigSchema = z
     generated: z.array(GeneratedGroupSchema).min(1).optional(),
     // Default: compare JUnit classname+name when both sides have names. `counts` keeps the old totals.
     testCompare: z.enum(["names", "counts"]).optional(),
+    // Extra test/build config paths that trigger Recheck, on top of the pipeline defaults.
+    recheckConfig: z.array(z.string().min(1)).min(1).optional(),
   })
   .strict();
 export type GateConfig = z.infer<typeof GateConfigSchema>;

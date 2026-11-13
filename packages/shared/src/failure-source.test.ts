@@ -65,6 +65,7 @@ describe("pause reason labels", () => {
       "运行期间分支被推过了",
       "作业失败",
       "删了测试，等人批准",
+      "Recheck 不是 pass，等人批准",
     ]);
   });
 });

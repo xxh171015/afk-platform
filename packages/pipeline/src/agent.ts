@@ -381,6 +381,7 @@ export const PROMPTS = {
   finalReviewStandards: join(PROMPT_DIR, "final-review-standards.md"),
   finalReviewSpec: join(PROMPT_DIR, "final-review-spec.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
+  recheck: join(PROMPT_DIR, "recheck.md"),
 } as const;
 
 // The skills version the overlay was written against, from its first line.
@@ -419,6 +420,7 @@ export function promptFor(
     | "update-branch"
     | "final-review"
     | "final-fix"
+    | "recheck"
     | "diagnose"
     | "locate-bug",
   options: { integration?: boolean; axis?: ReviewAxis } = {},
@@ -430,6 +432,8 @@ export function promptFor(
         : PROMPTS.finalReviewStandards;
     case "final-fix":
       return PROMPTS.finalFix;
+    case "recheck":
+      return PROMPTS.recheck;
     case "diagnose":
       return PROMPTS.diagnose;
     case "locate-bug":

@@ -26,7 +26,7 @@
 - implement 的"reference 不明确就问"：票就是 `/context/ticket.md`，不会有别的引用。
 - implement 的"经常跑类型检查和单个测试文件"：单个测试文件怎么跑看仓库的 `AGENTS.md`。
 - tdd 的"写测试前和用户确认 seams"：`/context/spec.md` 的 Testing Decisions 里的 seams 已经确认过，不要再确认；没有写 seams 时，在已有测试的最高一层写，并把你选的 seam 写进 `decisions`（`kind` 是 `choice`）。
-- code-review 的"向用户要固定点"：固定点是 `/context/run.json` 的 `baseSha`，按 skill 原文用三点 diff：`git diff <baseSha>...HEAD`。
+- code-review 的"向用户要固定点"：固定点是 `/context/run.json` 的 `baseSha`，按 skill 原文用三点 diff：`git diff <baseSha>...HEAD`。recheck 除外：范围是 `/context/recheck.json` 的 `fromSha` 到 `toSha`、`paths` 里的文件，用 `git diff <fromSha> <toSha> --` 加上那些路径，不要用 `git diff <baseSha>...HEAD`。
 - code-review 的"问 spec 在哪"：由这个阶段的 prompt 给出。
 - 其他没有列到的提问：按上面"没有人回答你"的规则办。
 

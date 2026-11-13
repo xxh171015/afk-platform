@@ -93,6 +93,7 @@ export function bundleFor(
       maxIntegrationEnvironments: DEFAULT_LIMITS.maxIntegrationEnvironments,
     },
     model: null,
+    recheck: null,
     ...rest,
     ticketReview: rest.ticketReview ?? "spec",
     stageModels: rest.stageModels ?? {},

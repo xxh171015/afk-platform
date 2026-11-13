@@ -601,6 +601,72 @@ describe("when it goes wrong", () => {
     expect(await claim()).toBeNull();
   });
 
+  const RECHECK_HIT = {
+    hit: true,
+    paths: ["src/a.test.ts"],
+    fromSha: "aaa111",
+    toSha: "bbb222",
+  };
+
+  it("Rechecks a final-fix that hit existing tests; a fail blocks wrap-up and approve continues the merge", async () => {
+    await toFinalFix();
+    await step("final-fix", {
+      outcome: "done",
+      run: { recheck: RECHECK_HIT },
+    });
+    const rec = (await claim()) as Claimed;
+    expect(rec.payload.stage).toBe("recheck");
+    expect(rec.payload).toMatchObject({
+      fromSha: RECHECK_HIT.fromSha,
+      toSha: RECHECK_HIT.toSha,
+      paths: RECHECK_HIT.paths,
+      final: true,
+    });
+    await worker.complete(rec.id, rec.attempt, {
+      stage: "recheck",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.test.ts", problem: "weakened" }],
+        },
+      },
+    });
+    expect(await fin()).toEqual([
+      {
+        step: "recheck",
+        state: "blocked",
+        blocked_reason: "recheck-failed",
+      },
+    ]);
+    expect(await claim()).toBeNull();
+    const approved = await call("POST", "/specs/1/approve-recheck");
+    expect(approved).toMatchObject({
+      status: 200,
+      body: { sha: RECHECK_HIT.toSha },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-merge", state: "active", blocked_reason: null },
+    ]);
+    expect(((await claim()) as Claimed).payload.stage).toBe("final-merge");
+  });
+
+  it("does not Recheck a source-only final-fix", async () => {
+    await toFinalFix();
+    await step("final-fix", {
+      outcome: "done",
+      run: {
+        recheck: {
+          hit: false,
+          paths: [],
+          fromSha: "aaa111",
+          toSha: "ddd444",
+        },
+      },
+    });
+    expect(((await claim()) as Claimed).payload.stage).toBe("final-merge");
+  });
+
   it("removed tests on final-merge block without a second fix, and approve continues that merge", async () => {
     await toFinalFix();
     await step("final-fix", { outcome: "done" });
