@@ -7,8 +7,10 @@ import {
 import type pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveAcceptancePack } from "../acceptance/pack.ts";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import type { Notice } from "../notify/notices.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import {
@@ -27,8 +29,7 @@ let clock: FakeClock;
 let notices: Notice[];
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   clock = new FakeClock();
   notices = [];
   api = await listen(

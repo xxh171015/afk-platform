@@ -9,8 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   FakeClock,
   FakeWorker,
@@ -28,8 +30,7 @@ let clock: FakeClock;
 let logDir: string;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   clock = new FakeClock();
   logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   api = await listen(testApp({ pool: db.pool, clock: clock.now, logDir }));

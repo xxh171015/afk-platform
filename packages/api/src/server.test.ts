@@ -1,8 +1,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { migrate } from "./db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "./db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  createTestDatabase,
+  type TestDatabase,
+} from "./db/test-db.ts";
 import { defaultLogDir } from "./logs/log-store.ts";
 import { HOST, type RunningServer, startServer } from "./server.ts";
 
@@ -24,8 +27,7 @@ describe("the API process", () => {
   });
 
   it("refuses to start on a database that was partly migrated too", async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
     await db.pool.query(
       "DELETE FROM drizzle.__drizzle_migrations WHERE id = (SELECT max(id) FROM drizzle.__drizzle_migrations)",
     );
@@ -35,8 +37,7 @@ describe("the API process", () => {
   });
 
   it("serves on this machine only", async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
     server = await startServer({ pool: db.pool, port: 0 });
     expect(HOST).toBe("127.0.0.1");
     expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
@@ -45,8 +46,7 @@ describe("the API process", () => {
   });
 
   it("lets the page on localhost call it from a browser, and nobody else", async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
     server = await startServer({ pool: db.pool, port: 0 });
     const ask = (origin: string) =>
       fetch(`${server?.url}/specs`, { headers: { origin } }).then((r) =>
@@ -69,8 +69,7 @@ describe("the API process", () => {
 
 describe("requests that do not come from this machine", () => {
   async function running() {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
     server = await startServer({ pool: db.pool, port: 0 });
     const port = new URL(server.url).port;
     return {
@@ -129,8 +128,7 @@ describe("requests that do not come from this machine", () => {
 
 describe("starting the process", () => {
   it("does not hang when the port is taken, and says so", async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
     server = await startServer({ pool: db.pool, port: 0 });
     const port = Number(new URL(server.url).port);
     await expect(startServer({ pool: db.pool, port })).rejects.toThrow(

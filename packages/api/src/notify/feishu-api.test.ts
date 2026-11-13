@@ -10,8 +10,10 @@ import { join } from "node:path";
 import { type Io, run } from "@afk/cli";
 import { GIB } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   FakeClock,
   FakeWorker,
@@ -66,8 +68,7 @@ let macos: string[][];
 let freeBytes: number;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   dir = mkdtempSync(join(tmpdir(), "afk-feishu-api-"));
   secretsPath = join(dir, "app.json");
   fake = new FakeFeishu();

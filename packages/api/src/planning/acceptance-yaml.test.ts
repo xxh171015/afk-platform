@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 
 // The M1 acceptance spec's own ticket files must import as written (docs/specs/m1-acceptance/tickets/).
@@ -12,8 +14,7 @@ import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 let db: TestDatabase;
 let api: RunningApi;
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   api = await listen(testApp({ pool: db.pool }));
   // plat repo add refuses a github.com URL until a worker has reported that host
   await db.pool.query(

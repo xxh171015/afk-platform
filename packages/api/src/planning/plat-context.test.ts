@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 import { type TestTicket, ticketFile } from "../test/ticket-files.ts";
 
@@ -16,8 +18,7 @@ let workDir: string | undefined;
 let checkouts: string[];
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   api = await listen(testApp({ pool: db.pool }));
   await db.pool.query(
     "INSERT INTO code_hosts (host, kind, worker_id) VALUES ('github.com', 'github', 'w1')",

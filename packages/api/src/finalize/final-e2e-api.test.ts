@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   FakeWorker,
   listen,
@@ -17,8 +19,7 @@ let api: RunningApi;
 let worker: FakeWorker;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   api = await listen(testApp({ pool: db.pool }));
   worker = new FakeWorker(api.url, "w1", ["host"]);
 });

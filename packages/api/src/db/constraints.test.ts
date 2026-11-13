@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "./migrate.ts";
-import { createTestDatabase, type TestDatabase } from "./test-db.ts";
+import { createMigratedTestDatabase, type TestDatabase } from "./test-db.ts";
 
 const UNIQUE_VIOLATION = "23505";
 const FOREIGN_KEY_VIOLATION = "23503";
@@ -8,8 +7,7 @@ const CHECK_VIOLATION = "23514";
 
 let db: TestDatabase;
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
 });
 afterEach(() => db.drop());
 
