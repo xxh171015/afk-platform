@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 
 // Which code hosts the platform can work on: the ones a worker has credentials for (docs/specs/m3-platform.md
@@ -10,8 +12,7 @@ let db: TestDatabase;
 let api: RunningApi;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   api = await listen(testApp({ pool: db.pool }));
 });
 afterEach(async () => {

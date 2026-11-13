@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { type Io, run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { LogStore } from "../logs/log-store.ts";
 import { retainLogs } from "../logs/retention.ts";
 import {
@@ -27,8 +29,7 @@ let logDir: string;
 let workDir: string | undefined;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   api = await listen(testApp({ pool: db.pool, logDir }));
   // a worker with the GitHub App has said so

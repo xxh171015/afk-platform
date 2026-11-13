@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import type { Notice } from "../notify/notices.ts";
 import {
   FakeWorker,
@@ -346,8 +348,7 @@ describe("a GitLab PAT's expiry", () => {
   const now = new Date("2026-11-09T12:00:00.000Z");
 
   beforeEach(async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
     notices = [];
     api = await listen(
       testApp({

@@ -20,8 +20,10 @@ import {
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   FakeClock,
   listen,
@@ -63,8 +65,7 @@ const bareOf = (name: string, seed: TestRepo) => {
 };
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   await db.pool.query("UPDATE instance SET id = $1", [ID]);
   api = await listen(testApp({ pool: db.pool, clock: new FakeClock().now }));
   home = mkdtempSync(join(tmpdir(), "afk-locate-home-"));

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Throwaway Postgres for tests, for machines without Docker (sandbox) or without compose.
 # Usage: scripts/pg-temp.sh start|stop   (start prints the DATABASE_URL to use)
+# Durability is off (fsync, full-page writes): the data is thrown away, and CREATE DATABASE, which every test
+# does, is ten times faster without it.
 # Env: PGTEMP_DIR (default /tmp/afk-pg), PGTEMP_PORT (default 54329)
 set -euo pipefail
 
@@ -20,7 +22,7 @@ case "${1:-}" in
       as_pg "$bin/initdb" -D "$dir/data" -U afk --auth=trust --locale=C.UTF-8 >/dev/null
     fi
     if ! as_pg "$bin/pg_isready" -h 127.0.0.1 -p "$port" >/dev/null; then
-      as_pg "$bin/pg_ctl" -D "$dir/data" -o "-p $port -k $dir -c listen_addresses=127.0.0.1" \
+      as_pg "$bin/pg_ctl" -D "$dir/data" -o "-p $port -k $dir -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300" \
         -l "$dir/log" -w start >/dev/null
     fi
     as_pg "$bin/psql" -h 127.0.0.1 -p "$port" -U afk -d postgres -tAc \

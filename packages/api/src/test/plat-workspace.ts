@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { type Io, run } from "@afk/cli";
 import { gitOrThrow } from "@afk/pipeline";
 import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   listen,
   type RunningApi,
@@ -53,8 +55,7 @@ export interface PlatWorkspace {
 }
 
 export async function platWorkspace(): Promise<PlatWorkspace> {
-  const db = await createTestDatabase();
-  await migrate(db.pool);
+  const db = await createMigratedTestDatabase();
   const logDir = await mkdtemp(join(tmpdir(), "afk-logs-"));
   const api = await listen(testApp({ pool: db.pool, logDir }));
   // the hosts a worker with a GitHub App and a gitlab.com PAT reports at start

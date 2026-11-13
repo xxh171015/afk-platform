@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   type ClaimedJob,
   FakeClock,
@@ -16,8 +18,7 @@ let api: RunningApi;
 let clock: FakeClock;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   clock = new FakeClock();
   api = await listen(testApp({ pool: db.pool, clock: clock.now }));
 });

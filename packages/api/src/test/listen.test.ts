@@ -8,8 +8,10 @@ import {
   expect,
   it,
 } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { enqueueJob } from "../jobs/queue.ts";
 import { FakeWorker, listen, testApp } from "./fake-worker.ts";
 
@@ -20,8 +22,7 @@ describe("the test API server", () => {
   let db: TestDatabase;
 
   beforeAll(async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
   }, 30_000);
 
   afterAll(async () => {
@@ -47,8 +48,7 @@ describe("closing while a heartbeat is in flight", () => {
   let db: TestDatabase;
 
   beforeEach(async () => {
-    db = await createTestDatabase();
-    await migrate(db.pool);
+    db = await createMigratedTestDatabase();
   }, 30_000);
 
   afterEach(async () => {

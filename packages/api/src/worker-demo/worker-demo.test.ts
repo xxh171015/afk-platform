@@ -29,8 +29,10 @@ import {
   runWorker as startWorker,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import {
   FakeClock,
   listen,
@@ -115,8 +117,7 @@ const GATES = [
 ].join("\n");
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   await db.pool.query("UPDATE instance SET id = $1", [ID]);
   clock = new FakeClock();
   logDir = mkdtempSync(join(tmpdir(), "afk-demo-logs-"));

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { enqueueJob } from "../jobs/queue.ts";
 import {
   FakeWorker,
@@ -27,8 +29,7 @@ afterEach(async () => {
 });
 
 async function boot() {
-  const nextDb = await createTestDatabase();
-  await migrate(nextDb.pool);
+  const nextDb = await createMigratedTestDatabase();
   const nextApi = await listen(testApp({ pool: nextDb.pool }));
   db = nextDb;
   api = nextApi;

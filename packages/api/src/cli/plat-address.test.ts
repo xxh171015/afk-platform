@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@afk/cli";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrate } from "../db/migrate.ts";
-import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import {
+  createMigratedTestDatabase,
+  type TestDatabase,
+} from "../db/test-db.ts";
 import { listen, type RunningApi, testApp } from "../test/fake-worker.ts";
 
 // plat remembers the platform's address the person confirmed, on the planning machine, so that a platform not on
@@ -15,8 +17,7 @@ let api: RunningApi;
 let home: string;
 
 beforeEach(async () => {
-  db = await createTestDatabase();
-  await migrate(db.pool);
+  db = await createMigratedTestDatabase();
   api = await listen(testApp({ pool: db.pool, logDir: tmpdir() }));
   home = mkdtempSync(join(tmpdir(), "afk-home-"));
 });
