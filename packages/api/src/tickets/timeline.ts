@@ -1,12 +1,15 @@
 import {
+  type AutoRetryOutcome,
   type FailureSource,
   formatDisplayId,
   type HostKind,
   type HumanAction,
+  isAutoRetryOutcome,
   pauseReasonLabel,
   pullAbbrev,
 } from "@afk/shared";
 import type pg from "pg";
+import { AUTO_RETRY_WHY } from "../stages/auto-retry.ts";
 
 // A spec's timeline: with events, state changes and a person's actions come from the event table; PR/MR and
 // the pack still come from domain tables. With none, the old assembly from runs, PRs, the pack and the spec
@@ -28,6 +31,7 @@ export const TIMELINE_KINDS = [
   "resume",
   "merged",
   "action",
+  "auto-retry",
 ] as const;
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number];
@@ -382,6 +386,32 @@ export async function specTimeline(
         kind: "action",
         at: row.at.toISOString(),
         text,
+        ...(row.ticket_id ? { ticketId: row.ticket_id } : {}),
+      });
+    }
+    // a stage that timed out or gave no result, run again once by the platform (stages/auto-retry.ts)
+    const retries = await pool.query<{
+      at: Date;
+      ticket_id: number | null;
+      reason: string | null;
+      stage: string | null;
+    }>(
+      `SELECT at, ticket_id, reason, data->>'stage' AS stage FROM events
+       WHERE spec_id = $1 AND (data->>'autoRetry')::boolean
+       ORDER BY id`,
+      [specId],
+    );
+    for (const row of retries.rows) {
+      const what = row.ticket_id
+        ? formatDisplayId("ticket", row.ticket_id)
+        : "收尾";
+      const why = isAutoRetryOutcome(row.reason ?? "")
+        ? AUTO_RETRY_WHY[row.reason as AutoRetryOutcome]
+        : (row.reason ?? "");
+      items.push({
+        kind: "auto-retry",
+        at: row.at.toISOString(),
+        text: `${what} ${row.stage ?? ""} ${why}，已自动重试一次`,
         ...(row.ticket_id ? { ticketId: row.ticket_id } : {}),
       });
     }

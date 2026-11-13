@@ -593,7 +593,10 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     const reviews = await db.pool.query(
       "SELECT axis, result FROM runs WHERE stage = 'review' ORDER BY id",
     );
+    // the review ran again once on its own before blocking
     expect(reviews.rows).toEqual([
+      { axis: "standards", result: "invalid-output" },
+      { axis: "spec", result: "pass" },
       { axis: "standards", result: "invalid-output" },
       { axis: "spec", result: "pass" },
     ]);
@@ -667,6 +670,8 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     );
     // each Run says what its own axis came to; the ticket is blocked by the review as a whole
     expect(reviews.rows).toEqual([
+      { axis: "standards", result: "pass" },
+      { axis: "spec", result: "invalid-output" },
       { axis: "standards", result: "pass" },
       { axis: "spec", result: "invalid-output" },
     ]);

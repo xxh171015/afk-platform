@@ -253,6 +253,7 @@ export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specResumeTarget, specTransition } from "./spec-state.ts";
 export type {
+  AutoRetryOutcome,
   Progress,
   Stage,
   StageDecision,
@@ -261,7 +262,9 @@ export type {
 export {
   AGENT_FAILURES,
   AGENT_STAGES,
+  AUTO_RETRY_OUTCOMES,
   advanceStage,
+  isAutoRetryOutcome,
   MAX_INTEGRATION_ROUNDS,
   STAGES,
 } from "./stage-flow.ts";

@@ -15,6 +15,7 @@ import { enqueueOpenPr } from "../host/host-jobs.ts";
 import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
+import { applyAutoRetry } from "../stages/auto-retry.ts";
 import { recheckTriggerOf } from "../stages/recheck-hit.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
 import { reviewOutcomeWithRulings } from "../stages/review-rulings.ts";
@@ -77,8 +78,9 @@ export async function recordFinalResult(
     id: number;
     step: FinalStep;
     state: string;
+    auto_retried: boolean;
   }>(
-    "SELECT id, step, state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+    "SELECT id, step, state, auto_retried FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
     [read.specId, read.repoId],
   );
   const fin = found.rows[0];
@@ -123,10 +125,13 @@ export async function recordFinalResult(
     result,
   );
   let decision: FinalDecision = valid
-    ? advanceFinalization({
-        step: valid.stage,
-        outcome: valid.outcome,
-      } as FinalReport)
+    ? advanceFinalization(
+        {
+          step: valid.stage,
+          outcome: valid.outcome,
+        } as FinalReport,
+        fin.auto_retried,
+      )
     : { type: "block", reason: "invalid-output" };
   const trigger = recheckTriggerOf(valid?.run);
   if (
@@ -143,10 +148,22 @@ export async function recordFinalResult(
   }
 
   if (decision.type === "enqueue") {
-    await client.query("UPDATE finalizations SET step = $2 WHERE id = $1", [
-      fin.id,
-      decision.step,
-    ]);
+    await client.query(
+      "UPDATE finalizations SET step = $2, auto_retried = auto_retried OR $3 WHERE id = $1",
+      [fin.id, decision.step, decision.autoRetry !== undefined],
+    );
+    if (decision.autoRetry)
+      await applyAutoRetry(
+        client,
+        {
+          type: "finalization",
+          specId: read.specId,
+          repoId: read.repoId,
+          finalizationId: fin.id,
+        },
+        decision.step,
+        decision.autoRetry,
+      );
     const extra =
       decision.step === "recheck" && trigger
         ? {
@@ -187,14 +204,22 @@ export async function markFinalClaimed(
 ): Promise<void> {
   const read = readFinalPayload(job.payload);
   if (!read) return;
+  // the platform's note for this repo's step comes first; a person's note is the spec's
   await pool.query(
     `INSERT INTO runs (spec_id, repo_id, job_id, stage, attempt, retry_note, started_at)
      SELECT $1, $2, $3, $4,
        (SELECT count(*) FROM runs r WHERE r.spec_id = $1 AND r.ticket_id IS NULL AND r.stage = $4) + 1,
-       s.retry_note, now()
+       COALESCE(
+         (SELECT f.retry_note FROM finalizations f WHERE f.spec_id = $1 AND f.repo_id = $2),
+         s.retry_note),
+       now()
      FROM specs s WHERE s.id = $1
      ON CONFLICT (job_id) DO NOTHING`,
     [read.specId, read.repoId, job.id, read.step],
+  );
+  await pool.query(
+    "UPDATE finalizations SET retry_note = NULL WHERE spec_id = $1 AND repo_id = $2",
+    [read.specId, read.repoId],
   );
   await pool.query("UPDATE specs SET retry_note = NULL WHERE id = $1", [
     read.specId,
@@ -248,7 +273,7 @@ export async function retryFinalization(
     ]);
     for (const row of blocked.rows) {
       await client.query(
-        "UPDATE finalizations SET state = 'active', blocked_reason = NULL,\n           job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
+        "UPDATE finalizations SET state = 'active', blocked_reason = NULL, auto_retried = false,\n           job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
         [row.id],
       );
       // A branch that was settled when the pull request could not be opened needs the pull request, not the

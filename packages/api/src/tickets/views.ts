@@ -49,6 +49,7 @@ function structuredBriefFor(input: {
   repo?: string;
   contractBlockedBy?: readonly string[];
   wrapUpStep?: string;
+  autoRetried?: boolean;
   brief: Brief | null;
 }): StructuredBrief | null {
   if (!input.reason) return null;
@@ -59,8 +60,39 @@ function structuredBriefFor(input: {
     repo: input.repo,
     contractBlockedBy: input.contractBlockedBy,
     wrapUpStep: input.wrapUpStep,
+    autoRetried: input.autoRetried,
     brief: input.brief,
   });
+}
+
+// The stage each ticket's last automatic retry ran again (stages/auto-retry.ts).
+async function autoRetriedStages(
+  pool: pg.Pool,
+  ticketIds: number[],
+): Promise<Map<number, string>> {
+  if (ticketIds.length === 0) return new Map();
+  const { rows } = await pool.query<{ ticket_id: number; stage: string }>(
+    `SELECT DISTINCT ON (ticket_id) ticket_id, data->>'stage' AS stage FROM events
+     WHERE ticket_id = ANY($1) AND (data->>'autoRetry')::boolean
+     ORDER BY ticket_id, id DESC`,
+    [ticketIds],
+  );
+  return new Map(rows.map((row) => [row.ticket_id, row.stage]));
+}
+
+// The step a repo's finalization last ran again on its own.
+async function lastAutoRetriedStep(
+  pool: pg.Pool,
+  specId: number,
+  repoId: number,
+): Promise<string | undefined> {
+  const { rows } = await pool.query<{ stage: string }>(
+    `SELECT data->>'stage' AS stage FROM events
+     WHERE spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND (data->>'autoRetry')::boolean
+     ORDER BY id DESC LIMIT 1`,
+    [specId, repoId],
+  );
+  return rows[0]?.stage;
 }
 
 async function contractUpstreamByTicket(
@@ -155,7 +187,8 @@ async function finalizations(
     // A review that was not finished when its spec was cancelled is cancelled with it, whatever it was waiting for.
     `SELECT f.id, f.spec_id, f.step, r.name AS repo, r.host_kind,
             CASE WHEN f.state <> 'done' AND s.state = 'cancelled' THEN 'cancelled' ELSE f.state END AS state,
-            CASE WHEN s.state = 'cancelled' THEN NULL ELSE f.blocked_reason END AS blocked_reason
+            CASE WHEN s.state = 'cancelled' THEN NULL ELSE f.blocked_reason END AS blocked_reason,
+            f.auto_retried, f.repo_id
      FROM finalizations f JOIN repos r ON r.id = f.repo_id JOIN specs s ON s.id = f.spec_id
      WHERE ${where} ORDER BY f.id`,
     params,
@@ -185,6 +218,13 @@ async function finalizations(
                 specDisplayId,
                 repo: row.repo as string,
                 wrapUpStep: row.step as string,
+                autoRetried:
+                  row.auto_retried &&
+                  (await lastAutoRetriedStep(
+                    pool,
+                    row.spec_id,
+                    row.repo_id,
+                  )) === row.step,
                 brief,
               })
             : null,
@@ -295,7 +335,7 @@ async function summaries(
 ): Promise<TicketSummary[]> {
   const { rows } = await pool.query(
     `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, t.refs, t.environment, t.appended,
-            r.name AS repo, r.url AS repo_url, r.host_kind
+            t.auto_retried, r.name AS repo, r.url AS repo_url, r.host_kind
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE ${where} ORDER BY t.id`,
     params,
   );
@@ -327,6 +367,11 @@ async function summaries(
   if (!includeBrief) {
     return items.map((item) => ({ ...item, structuredBrief: null }));
   }
+  // "run again once on its own" is said only of the stage that was: the ticket's last automatic retry
+  const retried = await autoRetriedStages(
+    pool,
+    rows.filter((row) => row.auto_retried).map((row) => row.id as number),
+  );
   const contractBy = await contractUpstreamByTicket(
     pool,
     items.filter((item) => item.state === "blocked").map((item) => item.id),
@@ -341,6 +386,8 @@ async function summaries(
             ticketDisplayId: item.displayId,
             repo: item.repo,
             contractBlockedBy: contractBy.get(item.id) ?? [],
+            autoRetried:
+              item.brief !== null && retried.get(item.id) === item.brief.stage,
             brief: item.brief,
           })
         : null,

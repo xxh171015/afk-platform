@@ -14,6 +14,8 @@ const used = (...kinds: (keyof Progress["fixCounts"])[]): Progress => {
   for (const kind of kinds) fixCounts[kind] = 1;
   return { fixCounts, reviewed: false };
 };
+// a ticket whose one automatic retry is spent: timeout and invalid-output block it
+const retried: Progress = { ...fresh, autoRetried: true };
 const reviewed = (progress: Progress): Progress => ({
   ...progress,
   reviewed: true,
@@ -87,7 +89,9 @@ describe("blocking after an agent run", () => {
   for (const stage of agentStages) {
     for (const outcome of outcomes) {
       it(`${stage} reporting ${outcome} blocks with that reason`, () => {
-        expect(advanceStage({ stage, outcome }, fresh)).toEqual(block(outcome));
+        expect(advanceStage({ stage, outcome }, retried)).toEqual(
+          block(outcome),
+        );
       });
     }
     it(`${stage} reporting done goes to the gate`, () => {
@@ -154,10 +158,10 @@ describe("review", () => {
 
   it("blocks on unusable review output or a timeout", () => {
     expect(
-      advanceStage({ stage: "review", outcome: "invalid-output" }, fresh),
+      advanceStage({ stage: "review", outcome: "invalid-output" }, retried),
     ).toEqual(block("invalid-output"));
     expect(
-      advanceStage({ stage: "review", outcome: "timeout" }, fresh),
+      advanceStage({ stage: "review", outcome: "timeout" }, retried),
     ).toEqual(block("timeout"));
   });
 });
@@ -337,7 +341,7 @@ describe("an integration ticket", () => {
     ["timeout", "timeout"],
   ] as const)("is blocked when the diagnosis is %s", (outcome, reason) => {
     expect(
-      advanceStage({ stage: "diagnose", outcome }, fresh, "integration"),
+      advanceStage({ stage: "diagnose", outcome }, retried, "integration"),
     ).toEqual(block(reason));
   });
 
@@ -347,5 +351,65 @@ describe("an integration ticket", () => {
         type: "done",
       });
     }
+  });
+});
+
+describe("one automatic retry of an agent stage that timed out or gave no result", () => {
+  const retryable = [
+    "implement",
+    "gate-fix",
+    "review-fix",
+    "merge-fix",
+    "review",
+    "recheck",
+    "diagnose",
+  ] as const;
+  for (const stage of retryable) {
+    for (const outcome of ["timeout", "invalid-output"] as const) {
+      it(`runs ${stage} again once after ${outcome}, and spends the retry`, () => {
+        const progress = { ...reviewed(fresh), recheckPending: true };
+        expect(
+          advanceStage({ stage, outcome } as StageReport, progress),
+        ).toEqual({
+          type: "enqueue",
+          stage,
+          autoRetry: outcome,
+          progress: { ...progress, autoRetried: true },
+        });
+      });
+    }
+  }
+
+  it("blocks a recheck that timed out again as recheck-failed, as before", () => {
+    expect(
+      advanceStage({ stage: "recheck", outcome: "timeout" }, retried),
+    ).toEqual(block("recheck-failed"));
+  });
+
+  it.each(["no-commits", "agent-gave-up", "contract-change-needed"] as const)(
+    "does not retry %s: a person decides",
+    (outcome) => {
+      expect(advanceStage({ stage: "implement", outcome }, fresh)).toEqual(
+        block(outcome),
+      );
+    },
+  );
+
+  it("does not retry a recheck that wants a fix", () => {
+    expect(
+      advanceStage({ stage: "recheck", outcome: "fix" }, reviewed(fresh)),
+    ).toEqual(block("recheck-failed"));
+  });
+
+  it("keeps the spent retry through the stages that follow", () => {
+    const decision = advanceStage(
+      { stage: "implement", outcome: "done" },
+      retried,
+    );
+    expect(decision).toEqual(
+      expect.objectContaining({
+        progress: expect.objectContaining({ autoRetried: true }),
+      }),
+    );
   });
 });

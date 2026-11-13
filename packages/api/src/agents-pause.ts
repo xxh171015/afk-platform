@@ -110,27 +110,11 @@ export async function probeHandedOut(
   );
 }
 
-// A job came back with a result: when it was the probe, the provider takes work again and the agents resume.
-export async function resumeAfterProbe(
-  client: Pick<pg.PoolClient, "query">,
-  jobId: number,
-  now: Date,
-): Promise<void> {
-  await resume(client, now, false, jobId);
-}
-
-// A person says the provider takes work again: agent jobs are claimed again, starting with the ones put back.
+// The agents take work again, starting with the jobs put back. With `probeJobId`, a job came back with a result and
+// resumes them only when it was the probe (automatic); without, a person resumes them.
 export async function resumeAgents(
   client: Pick<pg.PoolClient, "query">,
   now: Date,
-): Promise<boolean> {
-  return resume(client, now, true);
-}
-
-async function resume(
-  client: Pick<pg.PoolClient, "query">,
-  now: Date,
-  byPerson: boolean,
   probeJobId?: number,
 ): Promise<boolean> {
   const { rows } = await client.query<{ since: Date }>(
@@ -145,7 +129,7 @@ async function resume(
   if (!since) return false;
   await recordSystemEvent(client, {
     kind: "agents-resumed",
-    automatic: !byPerson,
+    automatic: probeJobId !== undefined,
     pausedMinutes: Math.round((now.getTime() - since.getTime()) / 60_000),
   });
   return true;

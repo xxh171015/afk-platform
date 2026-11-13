@@ -7722,7 +7722,8 @@
                               "pause",
                               "resume",
                               "merged",
-                              "action"
+                              "action",
+                              "auto-retry"
                             ]
                           },
                           "at": {

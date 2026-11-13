@@ -8,7 +8,7 @@ import {
 } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
-import { pauseForProvider, resumeAfterProbe } from "../agents-pause.ts";
+import { pauseForProvider, resumeAgents } from "../agents-pause.ts";
 import type { AppContext } from "../app.ts";
 import { claimsStopped, refreshDiskStatus } from "../disk.ts";
 import {
@@ -945,7 +945,7 @@ export function registerWorkerRoutes(
             [id],
           );
           // a probe sent while the agents were paused came back with a result: the provider takes work again
-          await resumeAfterProbe(client, id, context.clock());
+          await resumeAgents(client, context.clock(), id);
           const trial = readTrialMergePayload(job.rows[0]);
           if (trial) {
             await recordTrialMergeResult(client, job.rows[0], result);

@@ -825,7 +825,7 @@ describe("when it goes wrong", () => {
       },
     });
     await step("merge", SUCCESS.merge as Record<string, unknown>);
-    await step("final-review", {
+    const noRuling = {
       outcome: "pass",
       run: {
         axis: "spec",
@@ -835,7 +835,10 @@ describe("when it goes wrong", () => {
           suggestions: [],
         },
       },
-    });
+    };
+    // the first is run again once on its own
+    await step("final-review", noRuling);
+    await step("final-review", noRuling);
     expect(await fin()).toEqual([
       {
         step: "final-review",
@@ -880,6 +883,8 @@ describe("when it goes wrong", () => {
       },
     });
     await step("merge", SUCCESS.merge as Record<string, unknown>);
+    // the first is run again once on its own
+    await step("final-review", { outcome: "timeout" });
     await step("final-review", { outcome: "timeout" });
     expect(await fin()).toEqual([
       {

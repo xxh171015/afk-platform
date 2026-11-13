@@ -23,6 +23,7 @@ import {
   lockSpec,
   schedulePass,
 } from "../scheduling/scheduler.ts";
+import { applyAutoRetry } from "./auto-retry.ts";
 import { contractsOf } from "./contracts.ts";
 import { createFixTicket } from "./integration.ts";
 import { mergeRecheckIntoOutput, recheckTriggerOf } from "./recheck-hit.ts";
@@ -204,6 +205,7 @@ interface TicketRow {
   fix_counts: Progress["fixCounts"];
   reviewed: boolean;
   recheck_pending: boolean;
+  auto_retried: boolean;
   allowed_recheck_shas: string[];
   integration_rounds: number;
   title: string;
@@ -264,7 +266,8 @@ export async function recordStageResult(
   const ticket = (
     await client.query<TicketRow>(
       `SELECT t.id, t.spec_id, t.repo_id, t.state, t.type, t.content_version, t.fix_counts, t.reviewed,
-              t.recheck_pending, t.allowed_recheck_shas, t.integration_rounds, t.title, t.acceptance_criteria,
+              t.recheck_pending, t.auto_retried, t.allowed_recheck_shas, t.integration_rounds, t.title,
+              t.acceptance_criteria,
               t.environment, r.name AS repo_name
        FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
       [ticketId],
@@ -384,6 +387,7 @@ export async function recordStageResult(
     reviewed: ticket.reviewed,
     integrationRounds: ticket.integration_rounds,
     recheckPending: ticket.recheck_pending,
+    autoRetried: ticket.auto_retried,
   };
   if (
     valid &&
@@ -800,7 +804,7 @@ async function applyDecision(
     state = next.state;
   }
   await client.query(
-    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4, recheck_pending = $6,
+    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4, recheck_pending = $6, auto_retried = $7,
        resume_stage = CASE WHEN $5 = 'e2e' THEN 'e2e' ELSE resume_stage END WHERE id = $1`,
     [
       ticket.id,
@@ -809,8 +813,22 @@ async function applyDecision(
       decision.progress.reviewed,
       decision.stage,
       decision.progress.recheckPending === true,
+      decision.progress.autoRetried === true,
     ],
   );
+  if (decision.autoRetry) {
+    await applyAutoRetry(
+      client,
+      {
+        type: "ticket",
+        specId: ticket.spec_id,
+        repoId: ticket.repo_id,
+        ticketId: ticket.id,
+      },
+      decision.stage,
+      decision.autoRetry,
+    );
+  }
   const extra =
     decision.stage === "recheck"
       ? await lastFixRecheckPayload(client, ticket.id)

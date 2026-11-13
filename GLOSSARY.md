@@ -52,7 +52,7 @@ Ticket 内容（标题、正文（含验收标准）、模块、已批准的保�
 _Avoid_: 修订号、票版本
 
 **Retry note（重试说明）**：
-人在重试 blocked 的票或收尾时写下的一段话，只对紧接着那一次 Run 有效。不是 Ticket 内容，不加 Content version。
+人在重试 blocked 的票或收尾时写下的一段话，只对紧接着那一次 Run 有效。平台也会写：agent 阶段第一次超时或没有输出 `<result>` 时，平台自动重跑同一阶段一次，并留一条说明。不是 Ticket 内容，不加 Content version。
 _Avoid_: 备注、评论、简报
 
 **Integration ticket（联调票）**：

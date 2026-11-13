@@ -3804,7 +3804,8 @@ export interface paths {
                   | "pause"
                   | "resume"
                   | "merged"
-                  | "action";
+                  | "action"
+                  | "auto-retry";
                 at: string;
                 text: string;
                 runId?: number;
