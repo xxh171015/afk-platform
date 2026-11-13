@@ -956,9 +956,38 @@ function TicketRetry({
     },
     onSuccess: invalidate,
   });
+  const approveRemoved = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST(
+        "/tickets/{id}/approve-removed-tests",
+        { params: { path: { id: ticketId } } },
+      );
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: invalidate,
+  });
+  const approveRecheck = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST("/tickets/{id}/approve-recheck", {
+        params: { path: { id: ticketId } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: invalidate,
+  });
   if (blockedReason === "upstream-cancelled") return null;
-  const busy = retry.isPending || approve.isPending;
-  const actionError = retry.error ?? approve.error;
+  const busy =
+    retry.isPending ||
+    approve.isPending ||
+    approveRemoved.isPending ||
+    approveRecheck.isPending;
+  const actionError =
+    retry.error ??
+    approve.error ??
+    approveRemoved.error ??
+    approveRecheck.error;
   return (
     <div className="ticket-retry space-y-3">
       <RetryNoteField
@@ -995,6 +1024,28 @@ function TicketRetry({
           >
             <ShieldCheck />
             批准这些保护路径
+          </Button>
+        ) : null}
+        {blockedReason === "tests-removed" ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() => approveRemoved.mutate()}
+          >
+            <ShieldCheck />
+            批准删掉的测试
+          </Button>
+        ) : null}
+        {blockedReason === "recheck-failed" ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() => approveRecheck.mutate()}
+          >
+            <ShieldCheck />
+            批准这次改动
           </Button>
         ) : null}
       </div>

@@ -7,8 +7,11 @@ import {
   MAX_PLANNING_PATCH_BYTES,
   PLANNING_STATES,
   PlanningDocsAtImportSchema,
+  parseStageModels,
   SPEC_STATES,
   SPEC_TYPES,
+  StageModelsSchema,
+  TICKET_REVIEW_MODES,
   tryParseRepoUrl,
 } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
@@ -67,6 +70,8 @@ const projectSettings = {
   maxConcurrency: Id.optional(),
   budgetLimit: Id.optional(),
   limits: LimitOverridesSchema.optional(),
+  ticketReview: z.enum(TICKET_REVIEW_MODES).optional(),
+  stageModels: StageModelsSchema.optional(),
 };
 
 // Empty clears the project's Feishu group. Not on create: set it with plat project edit --feishu-chat.
@@ -92,7 +97,10 @@ const projectRoute = createRoute({
   },
   responses: {
     201: reply("Created", z.object({ id: Id, name: z.string() })),
-    400: reply("The default agent is not supported", ErrorReply),
+    400: reply(
+      "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+      ErrorReply,
+    ),
   },
 });
 
@@ -112,6 +120,8 @@ const projectViewRoute = createRoute({
         name: z.string(),
         defaultAgent: z.string().nullable(),
         feishuChatId: z.string().nullable(),
+        ticketReview: z.enum(TICKET_REVIEW_MODES),
+        stageModels: StageModelsSchema,
         repos: z.array(
           z.object({
             name: z.string(),
@@ -173,7 +183,10 @@ const projectEditRoute = createRoute({
   },
   responses: {
     200: reply("Updated", z.object({ id: Id })),
-    400: reply("The default agent is not supported", ErrorReply),
+    400: reply(
+      "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+      ErrorReply,
+    ),
     404: reply("No such project", ErrorReply),
   },
 });
@@ -676,7 +689,7 @@ export function registerPlanningRoutes(
   app.openapi(projectViewRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const project = await pool.query(
-      "SELECT id, name, default_agent, feishu_chat_id FROM projects WHERE id = $1",
+      "SELECT id, name, default_agent, feishu_chat_id, ticket_review, stage_models FROM projects WHERE id = $1",
       [projectId],
     );
     if (!project.rows[0]) return c.json({ error: "no such project" }, 404);
@@ -690,6 +703,9 @@ export function registerPlanningRoutes(
         name: project.rows[0].name as string,
         defaultAgent: (project.rows[0].default_agent as string | null) ?? null,
         feishuChatId: (project.rows[0].feishu_chat_id as string | null) ?? null,
+        ticketReview: project.rows[0]
+          .ticket_review as (typeof TICKET_REVIEW_MODES)[number],
+        stageModels: parseStageModels(project.rows[0].stage_models),
         repos: repos.rows.map((r) => ({
           name: r.name as string,
           url: r.url as string,

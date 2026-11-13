@@ -1,4 +1,11 @@
-import { HOST_KINDS } from "@afk/shared";
+import {
+  DECISION_KINDS,
+  HOST_KINDS,
+  REVIEW_AXES,
+  RULING_VERDICTS,
+  StageModelsSchema,
+  TICKET_REVIEW_MODES,
+} from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { pauseForProvider } from "../agents-pause.ts";
@@ -233,6 +240,25 @@ const completeRoute = holderRoute(
   { result: z.unknown() },
   z.object({ ok: z.literal(true) }),
 );
+const DecisionLogGroup = z.object({
+  displayId: z.string(),
+  decisions: z.array(
+    z.object({
+      id: z.string(),
+      run: z.string(),
+      stage: z.string(),
+      kind: z.enum(DECISION_KINDS),
+      text: z.string(),
+      ref: z.string().optional(),
+    }),
+  ),
+  rulings: z.array(
+    z.object({
+      id: z.string(),
+      verdict: z.enum(RULING_VERDICTS),
+    }),
+  ),
+});
 const Bundle = z.object({
   job: z.object({
     id: z.number().int(),
@@ -319,23 +345,62 @@ const Bundle = z.object({
   ),
   note: z.string().nullable(),
   failureLog: z.string().nullable(),
+  failedCases: z
+    .array(
+      z.object({
+        name: z.string(),
+        classname: z.string(),
+        file: z.string().optional(),
+        message: z.string().optional(),
+      }),
+    )
+    .nullable(),
   review: z.unknown(),
   gateBaseline: z
-    .object({ tests: z.number().int(), skipped: z.number().int() })
+    .object({
+      tests: z.number().int(),
+      skipped: z.number().int(),
+      names: z
+        .array(z.object({ classname: z.string(), name: z.string() }))
+        .optional(),
+    })
     .nullable(),
   gateBaselines: z.array(
     z.object({
       sha: z.string(),
       tests: z.number().int(),
       skipped: z.number().int(),
+      names: z
+        .array(z.object({ classname: z.string(), name: z.string() }))
+        .optional(),
     }),
   ),
+  ticketGateNames: z
+    .array(z.object({ classname: z.string(), name: z.string() }))
+    .nullable(),
+  decisionLog: z.object({
+    ticket: DecisionLogGroup.nullable(),
+    doneTickets: z.array(DecisionLogGroup),
+    spec: DecisionLogGroup.nullable(),
+  }),
+  approvedRemovedTests: z
+    .array(z.object({ classname: z.string(), name: z.string() }))
+    .nullable(),
   limits: z.object({
     runIdleSeconds: z.number().int(),
     runWallclockSeconds: z.number().int(),
     maxIntegrationEnvironments: z.number().int(),
   }),
   model: z.string().nullable(),
+  ticketReview: z.enum(TICKET_REVIEW_MODES),
+  stageModels: StageModelsSchema,
+  recheck: z
+    .object({
+      fromSha: z.string().min(1),
+      toSha: z.string().min(1),
+      paths: z.array(z.string()),
+    })
+    .nullable(),
   handbackResolve: z.boolean().optional(),
 });
 
@@ -618,10 +683,19 @@ const leaseRoute = createRoute({
   },
 });
 
+const FailRunFacts = z.object({
+  tokenUsage: z.unknown().optional(),
+  durationApiMs: z.number().int().min(0).optional(),
+  cursorCliVersion: z.string().optional(),
+  axis: z.enum(REVIEW_AXES).optional(),
+});
+
 const failRoute = holderRoute(
   "fail",
   {
     error: z.string(),
+    run: FailRunFacts.optional(),
+    extraRuns: z.array(FailRunFacts).max(8).optional(),
     orphanRef: z.string().min(1).optional(),
     orphanSha: z.string().min(1).optional(),
   },
@@ -656,6 +730,8 @@ const gateResultRoute = holderRoute(
               name: z.string(),
               classname: z.string(),
               status: z.enum(["passed", "failed", "skipped"]),
+              file: z.string().optional(),
+              message: z.string().optional(),
               flaky: z.boolean().optional(),
             }),
           )
@@ -1103,7 +1179,7 @@ export function registerWorkerRoutes(
 
   app.openapi(failRoute, async (c) => {
     const { id } = c.req.valid("param");
-    const { workerId, attempt, error, orphanRef, orphanSha } =
+    const { workerId, attempt, error, run, extraRuns, orphanRef, orphanSha } =
       c.req.valid("json");
     // the job failing and what that means for its ticket happen together or not at all
     const outcome = await aroundJob(context, id, () =>
@@ -1133,7 +1209,11 @@ export function registerWorkerRoutes(
             job.rows[0],
             error,
             context.clock(),
-            orphanRef && orphanSha ? { orphanRef, orphanSha } : undefined,
+            {
+              ...run,
+              ...(orphanRef && orphanSha ? { orphanRef, orphanSha } : {}),
+            },
+            extraRuns,
           );
           const sync = readHostSyncPayload(job.rows[0]);
           const access = readRepoAccessPayload(job.rows[0]);

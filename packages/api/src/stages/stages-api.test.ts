@@ -287,6 +287,23 @@ describe("blocked reason codes", () => {
     expect(retried.status).toBe(200);
   });
 
+  it("removed tests block after the gate without spending a gate-fix", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "tests-removed",
+      run: {
+        output: { removedTests: [{ classname: "suite", name: "gone" }] },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "tests-removed",
+      fix_counts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
+    });
+    await noJobsLeft();
+  });
+
   it("a gate failure runs gate-fix once; failing again is gate-failed", async () => {
     await runningSpec([ticket("a")]);
     await stage("implement", IMPLEMENT_DONE);
@@ -421,6 +438,12 @@ describe("what is recorded", () => {
         commits: ["c1", "c2"],
         durationMs: 146_000,
         durationApiMs: 120_000,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 1,
+        },
         output: { status: "done" },
         logUrl: "logs/1",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -431,7 +454,7 @@ describe("what is recorded", () => {
     await stage("gate-fix", IMPLEMENT_DONE);
     await stage("gate", GATE_PASSED);
     const runs = await db.pool.query(
-      "SELECT stage, attempt, result, agent, model, branch, commits, duration_ms, duration_api_ms, ticket_version, output FROM runs ORDER BY id",
+      "SELECT stage, attempt, result, agent, model, branch, commits, duration_ms, duration_api_ms, token_usage, ticket_version, output FROM runs ORDER BY id",
     );
     expect(runs.rows.map((r) => [r.stage, r.attempt, r.result])).toEqual([
       ["implement", 1, "done"],
@@ -446,6 +469,12 @@ describe("what is recorded", () => {
       commits: ["c1", "c2"],
       duration_ms: 146_000,
       duration_api_ms: 120_000,
+      token_usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 1,
+      },
       ticket_version: 1,
       output: { status: "done" },
     });
@@ -685,6 +714,24 @@ describe("the gate baseline in the bundle", () => {
       { sha: "old", tests: 9, skipped: 0 },
     ]);
   });
+
+  it("includes the default branch's last gate so a merge against main can three-way", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query(
+      "UPDATE repos SET default_sha = 'main-tip' WHERE id = 1",
+    );
+    await db.pool.query(
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, tests_total, tests_skipped)
+       VALUES (1, 'main-tip', 'c', 7, 1)`,
+    );
+    const job = (await worker.claim()).body.job as Claimed;
+    const body = (await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json())) as { gateBaselines: unknown };
+    expect(body.gateBaselines).toEqual([
+      { sha: "main-tip", tests: 7, skipped: 1 },
+    ]);
+  });
 });
 
 describe("a worker that is faster than the claim bookkeeping", () => {
@@ -838,6 +885,22 @@ describe("the bundle", () => {
     expect(plain.body).toMatchObject({
       limits: { runIdleSeconds: 600, runWallclockSeconds: 3600 },
       model: null,
+      ticketReview: "spec",
+      stageModels: {},
+    });
+    await db.pool.query("UPDATE projects SET stage_models = $1", [
+      JSON.stringify({
+        standards: "s",
+        "update-branch": "u",
+        "merge-fix": "m",
+      }),
+    ]);
+    expect((await bundle(claimed)).body).toMatchObject({
+      stageModels: {
+        standards: "s",
+        "update-branch": "u",
+        "merge-fix": "m",
+      },
     });
     await db.pool.query(
       "UPDATE projects SET default_model = 'composer-2', limits = $1",
@@ -994,6 +1057,83 @@ describe("the bundle", () => {
     expect(run.rows[0].contract_shas).toBeNull();
   });
 
+  it("puts this ticket's earlier decisions on gate-fix and review, with stage and Run id", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [{ kind: "conflict", text: "picked the story" }],
+        },
+      },
+    });
+    const expected = [
+      {
+        id: expect.stringMatching(/^R-\d+#0$/),
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "implement",
+        kind: "conflict",
+        text: "picked the story",
+      },
+    ];
+    await stage("gate", { outcome: "failed" });
+    const fix = (await worker.claim()).body.job as Claimed;
+    expect(fix.payload.stage).toBe("gate-fix");
+    expect((await bundle(fix)).body.decisionLog.ticket?.decisions).toEqual(
+      expected,
+    );
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "gate-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    expect(review.payload.stage).toBe("review");
+    const onReview = (await bundle(review)).body.decisionLog;
+    expect(onReview.ticket?.decisions).toEqual(expected);
+    expect(onReview.spec).toBeNull();
+  });
+
+  it("gives a downstream ticket the upstream's decisions once it is done, and not a pending sibling's", async () => {
+    await runningSpec([
+      ticket("a"),
+      ticket("b", { blocked_by: ["a"] }),
+      ticket("c", { blocked_by: ["b"] }),
+    ]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "a",
+          acceptance: {},
+          decisions: [{ kind: "choice", text: "named it export" }],
+        },
+      },
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", MERGED);
+    const b = (await worker.claim()).body.job as Claimed;
+    expect(b.payload.stage).toBe("implement");
+    const log = (await bundle(b)).body.decisionLog;
+    expect(log.ticket?.displayId).toBe("T-2");
+    expect(log.doneTickets.map((t) => t.displayId)).toEqual(["T-1"]);
+    expect(log.doneTickets[0]?.decisions).toEqual([
+      {
+        id: expect.stringMatching(/^R-\d+#0$/),
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "implement",
+        kind: "choice",
+        text: "named it export",
+      },
+    ]);
+    expect(log.doneTickets.map((t) => t.displayId)).not.toContain("T-3");
+  });
+
   it("names the Run the job started, so logs and commit trailers have somewhere to point", async () => {
     await runningSpec([ticket("a")]);
     const job = (await worker.claim()).body.job as Claimed;
@@ -1016,6 +1156,7 @@ describe("the bundle", () => {
     });
     const fix = (await worker.claim()).body.job as Claimed;
     expect((await bundle(fix)).body.failureLog).toBe("# test failed\nboom");
+    expect((await bundle(fix)).body.failedCases).toBeNull();
     await worker.complete(fix.id, fix.attempt, {
       stage: "gate-fix",
       outcome: "done",
@@ -1052,6 +1193,7 @@ describe("the bundle", () => {
     });
     const mergeFix = (await worker.claim()).body.job as Claimed;
     expect((await bundle(mergeFix)).body.failureLog).toBe("conflict in a.ts");
+    expect((await bundle(mergeFix)).body.failedCases).toBeNull();
     await worker.complete(mergeFix.id, mergeFix.attempt, {
       stage: "merge-fix",
       outcome: "done",
@@ -1059,6 +1201,49 @@ describe("the bundle", () => {
     await stage("gate", GATE_PASSED);
     const merge = (await worker.claim()).body.job as Claimed;
     expect((await bundle(merge)).body.failureLog).toBeNull();
+    expect((await bundle(merge)).body.failedCases).toBeNull();
+  });
+
+  it("hands a gate-fix the still-failing cases, and a merge-fix the candidate's", async () => {
+    const cases = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        message: "boom",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        message: "nope",
+      },
+    ];
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: {
+        output: { failureLog: "# test failed\nboom", failedCases: cases },
+      },
+    });
+    const fix = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(fix)).body.failedCases).toEqual(cases);
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "gate-fix",
+      outcome: "done",
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", {
+      outcome: "gate-failed",
+      run: {
+        output: { failureLog: "# test failed\nboom", failedCases: cases },
+      },
+    });
+    const mergeFix = (await worker.claim()).body.job as Claimed;
+    expect(mergeFix.payload.stage).toBe("merge-fix");
+    expect((await bundle(mergeFix)).body.failedCases).toEqual(cases);
   });
 
   it("shows the pipeline progress to a fix stage", async () => {
@@ -1107,5 +1292,333 @@ describe("the bundle", () => {
     expect(after.rows[0].lease_expires_at).toEqual(
       before.rows[0].lease_expires_at,
     );
+  });
+});
+
+describe("Spec-axis rulings", () => {
+  const knownGap = {
+    outcome: "done",
+    run: {
+      output: {
+        status: "done",
+        summary: "did it",
+        acceptance: {},
+        decisions: [
+          {
+            kind: "known-gap",
+            text: "reload still skips the note filter",
+          },
+        ],
+      },
+    },
+  };
+
+  async function bundleOf(job: Claimed) {
+    return (
+      await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      ).then((r) => r.json())
+    ).decisionLog as {
+      ticket: { decisions: { id: string }[] } | null;
+    };
+  }
+
+  it("replays a known-gap: Spec-axis must-fix goes to review-fix", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+    expect(id).toMatch(/^R-\d+#0$/);
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "fix",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "fix",
+          mustFix: [
+            {
+              file: "src/a.ts",
+              problem: "reload still skips the note filter",
+              id,
+            },
+          ],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "must-fix" }],
+        },
+      },
+      findings: [
+        {
+          kind: "must-fix",
+          body: "src/a.ts reload still skips the note filter",
+        },
+      ],
+    });
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("review-fix");
+  });
+
+  it("a known-gap without a ruling is invalid-output", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "invalid-output",
+    });
+  });
+
+  it("a must-fix ruling without a matching mustFix item is invalid-output", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "fix",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", problem: "something else" }],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "must-fix" }],
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "invalid-output",
+    });
+  });
+
+  it("a timeout is still a timeout when a known-gap has no ruling", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    await stage("review", { outcome: "timeout" });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "timeout",
+    });
+  });
+
+  it("needs-human with no must-fix lets the ticket merge, and it is not on the waiting queue", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", knownGap);
+    await stage("gate", GATE_PASSED);
+    const review = (await worker.claim()).body.job as Claimed;
+    const id = (await bundleOf(review)).ticket?.decisions[0]?.id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "needs-human" }],
+        },
+      },
+    });
+    expect(await ticketRow()).toMatchObject({ state: "merging" });
+    const blocked = await (await fetch(`${api.url}/blocked`)).json();
+    expect(blocked.tickets).toEqual([]);
+    await stage("merge", MERGED);
+    expect(await ticketRow()).toMatchObject({ state: "done" });
+    expect((await (await fetch(`${api.url}/blocked`)).json()).tickets).toEqual(
+      [],
+    );
+  });
+});
+
+describe("Recheck", () => {
+  const HIT = {
+    hit: true,
+    paths: ["src/a.test.ts"],
+    fromSha: "aaa111",
+    toSha: "bbb222",
+  };
+  const CONFIG_HIT = {
+    hit: true,
+    paths: ["vitest.config.ts"],
+    fromSha: "aaa111",
+    toSha: "ccc333",
+  };
+  const MISS = {
+    hit: false,
+    paths: [] as string[],
+    fromSha: "aaa111",
+    toSha: "ddd444",
+  };
+  const RECHECK_FIX = {
+    outcome: "fix",
+    run: {
+      output: {
+        verdict: "fix",
+        mustFix: [
+          { file: "src/a.test.ts", line: 1, problem: "weakened the assertion" },
+        ],
+        suggestions: [],
+        scopeCreep: [],
+        uncertainties: [],
+      },
+    },
+  };
+
+  async function toMergeFix() {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", { outcome: "conflict" });
+  }
+
+  async function toReviewFix() {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "fix",
+      findings: [{ kind: "must-fix", body: "null check" }],
+    });
+  }
+
+  it("runs Recheck after merge-fix changes an existing test", async () => {
+    await toMergeFix();
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    const recheck = (await worker.claim()).body.job as Claimed;
+    expect(recheck.payload.stage).toBe("recheck");
+    expect(recheck.payload).toMatchObject({
+      fromSha: HIT.fromSha,
+      toSha: HIT.toSha,
+      paths: HIT.paths,
+    });
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${recheck.id}/bundle?workerId=w1&attempt=${recheck.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.recheck).toEqual({
+      fromSha: HIT.fromSha,
+      toSha: HIT.toSha,
+      paths: HIT.paths,
+    });
+    await worker.complete(recheck.id, recheck.attempt, {
+      stage: "recheck",
+      outcome: "pass",
+    });
+    expect((await ticketRow()).state).toBe("merging");
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("does not Recheck a source-only merge-fix", async () => {
+    await toMergeFix();
+    await stage("merge-fix", { outcome: "done", run: { recheck: MISS } });
+    await stage("gate", GATE_PASSED);
+    expect((await ticketRow()).state).toBe("merging");
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("runs Recheck after review-fix changes test config", async () => {
+    await toReviewFix();
+    await stage("review-fix", {
+      outcome: "done",
+      run: { recheck: CONFIG_HIT },
+    });
+    await stage("gate", GATE_PASSED);
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "recheck",
+    );
+  });
+
+  it("blocks without a fix when Recheck is not pass, and approve continues from merge", async () => {
+    await toMergeFix();
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    await stage("recheck", RECHECK_FIX);
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "recheck-failed",
+    });
+    await noJobsLeft();
+    const approved = await fetch(`${api.url}/tickets/1/approve-recheck`, {
+      method: "POST",
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+    expect(approved).toEqual({ status: 200, body: { sha: HIT.toSha } });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "approve-recheck" });
+    expect(await ticketRow()).toMatchObject({
+      state: "merging",
+      blocked_reason: null,
+    });
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("skips Recheck for the same SHA after approve, and runs it for a later SHA", async () => {
+    await toReviewFix();
+    await stage("review-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    await stage("recheck", RECHECK_FIX);
+    await fetch(`${api.url}/tickets/1/approve-recheck`, { method: "POST" });
+    await stage("merge", { outcome: "conflict" });
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
+  });
+
+  it("does not Recheck implement or gate-fix even when they report a hit", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", { outcome: "failed" });
+    await stage("gate-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "review",
+    );
+  });
+
+  it("is for recheck-failed only", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", { outcome: "agent-gave-up" });
+    const refused = await fetch(`${api.url}/tickets/1/approve-recheck`, {
+      method: "POST",
+    });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toMatch(/recheck-failed/);
+    expect(
+      (await fetch(`${api.url}/tickets/99/approve-recheck`, { method: "POST" }))
+        .status,
+    ).toBe(404);
   });
 });

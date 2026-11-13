@@ -1,11 +1,21 @@
 import {
   branchNames,
+  CODE_CHANGING_STAGES,
+  DEFAULT_TICKET_REVIEW,
+  type DecisionLog,
+  decisionLogFromRuns,
   formatDisplayId,
+  parseStageModels,
   resolveLimits,
+  type StageModels,
+  type TicketReviewMode,
   type TicketState,
 } from "@afk/shared";
 import type pg from "pg";
-import { readUpdateBranchPayload } from "../host/update-branch.ts";
+import {
+  readUpdateBranchPayload,
+  type UpdateBranchPayload,
+} from "../host/update-branch.ts";
 import { readFinalPayload, readStagePayload } from "../jobs/stage-jobs.ts";
 import {
   type LocatePayload,
@@ -98,13 +108,35 @@ export interface Bundle {
   note: string | null;
   // For gate-fix and merge-fix: the tail of the gate that failed last. For review-fix: the review's result.
   failureLog: string | null;
+  // Still-failing JUnit cases of that gate, when the report named them. Null when there were none.
+  failedCases: Array<{
+    name: string;
+    classname: string;
+    file?: string;
+    message?: string;
+  }> | null;
   review: unknown;
   // What the last merge into the integration branch measured: a gate may not find fewer tests or more skipped ones
-  // than this. Null before the spec has merged anything.
-  gateBaseline: { tests: number; skipped: number } | null;
+  // than this. Names are present when that merge's JUnit listed classname+name. Null before the spec has merged anything.
+  gateBaseline: {
+    tests: number;
+    skipped: number;
+    names?: { classname: string; name: string }[];
+  } | null;
   // Every merge's measurement, newest first, with the commit it was taken at. A ticket's own gate is held only to
   // the newest one its branch already contains: merges that landed after it branched are not its to answer for.
-  gateBaselines: { sha: string; tests: number; skipped: number }[];
+  gateBaselines: {
+    sha: string;
+    tests: number;
+    skipped: number;
+    names?: { classname: string; name: string }[];
+  }[];
+  // Last passing ticket gate's names, for the merge three-way. Null when this job has no ticket or that gate listed none.
+  ticketGateNames: { classname: string; name: string }[] | null;
+  // Decision log for /context: earlier Decisions on this ticket, done siblings, wrap-up runs.
+  decisionLog: DecisionLog;
+  // Names a person has allowed this ticket (or this wrap-up / update-branch job) to drop.
+  approvedRemovedTests: { classname: string; name: string }[] | null;
   // The project's say over how a run is carried out: how long an agent may be silent or run in all, and the model
   // it uses (null: the worker's own AFK_MODEL).
   limits: {
@@ -113,17 +145,87 @@ export interface Bundle {
     maxIntegrationEnvironments: number;
   };
   model: string | null;
+  // Ticket-level review: spec (default) or both. final-review ignores this and always runs both axes.
+  ticketReview: TicketReviewMode;
+  // Per-role model overrides (standards, update-branch, merge-fix). Empty: the default model / AFK_MODEL.
+  stageModels: StageModels;
+  // Recheck: the commits and paths this Spec-axis look is about. Null on other stages.
+  recheck: { fromSha: string; toSha: string; paths: string[] } | null;
+  // After handback, the next implement job resolves the resume stage from the remote tip.
+  handbackResolve?: boolean;
 }
 
 // Defaults where the project sets nothing; only the limits a worker acts on travel, the rest is the API's business.
-const runSettings = (limits: unknown, defaultModel: unknown) => {
+const runSettings = (
+  limits: unknown,
+  defaultModel: unknown,
+  ticketReview: unknown,
+  stageModels: unknown,
+) => {
   const { runIdleSeconds, runWallclockSeconds, maxIntegrationEnvironments } =
     resolveLimits(limits);
   return {
     limits: { runIdleSeconds, runWallclockSeconds, maxIntegrationEnvironments },
     model: (defaultModel as string | null) ?? null,
+    ticketReview: ticketReview === "both" ? "both" : DEFAULT_TICKET_REVIEW,
+    stageModels: parseStageModels(stageModels),
   };
 };
+
+function testNamesFrom(raw: unknown): { classname: string; name: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const names: { classname: string; name: string }[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.name !== "string" || typeof rec.classname !== "string")
+      continue;
+    names.push({ classname: rec.classname, name: rec.name });
+  }
+  return names;
+}
+
+function withNames<T extends { tests: number; skipped: number }>(
+  row: T,
+  cases: unknown,
+): T & { names?: { classname: string; name: string }[] } {
+  const names = testNamesFrom(cases);
+  return names.length > 0 ? { ...row, names } : row;
+}
+
+function recheckOf(payload: Record<string, unknown>): Bundle["recheck"] {
+  const fromSha = payload.fromSha;
+  const toSha = payload.toSha;
+  if (typeof fromSha !== "string" || typeof toSha !== "string") return null;
+  if (!fromSha || !toSha) return null;
+  const raw = payload.paths;
+  const paths = Array.isArray(raw)
+    ? raw.filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      )
+    : [];
+  return { fromSha, toSha, paths };
+}
+
+function failedCasesFrom(raw: unknown): Bundle["failedCases"] {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const cases: NonNullable<Bundle["failedCases"]> = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.name !== "string" || typeof rec.classname !== "string")
+      continue;
+    cases.push({
+      name: rec.name,
+      classname: rec.classname,
+      ...(typeof rec.file === "string" && rec.file ? { file: rec.file } : {}),
+      ...(typeof rec.message === "string" && rec.message
+        ? { message: rec.message }
+        : {}),
+    });
+  }
+  return cases.length > 0 ? cases : null;
+}
 
 function domainOf(row: {
   planning_sha: string | null;
@@ -151,8 +253,9 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   const { rows } = await pool.query<{
     tests_total: number;
     tests_skipped: number | null;
+    test_cases: unknown;
   }>(
-    `SELECT g.tests_total, g.tests_skipped FROM runs r
+    `SELECT g.tests_total, g.tests_skipped, g.test_cases FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
@@ -161,7 +264,10 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   );
   const row = rows[0];
   return row
-    ? { tests: row.tests_total, skipped: row.tests_skipped ?? 0 }
+    ? withNames(
+        { tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
+        row.test_cases,
+      )
     : null;
 }
 
@@ -170,19 +276,103 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
     sha: string;
     tests_total: number;
     tests_skipped: number | null;
+    test_cases: unknown;
   }>(
-    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped FROM runs r
+    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped, g.test_cases FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 50`,
     [specId, repoId],
   );
-  return rows.map((r) => ({
-    sha: r.sha,
-    tests: r.tests_total,
-    skipped: r.tests_skipped ?? 0,
-  }));
+  const listed = rows.map((r) =>
+    withNames(
+      { sha: r.sha, tests: r.tests_total, skipped: r.tests_skipped ?? 0 },
+      r.test_cases,
+    ),
+  );
+  const repo = await pool.query<{ default_sha: string | null }>(
+    "SELECT default_sha FROM repos WHERE id = $1",
+    [repoId],
+  );
+  const sha = repo.rows[0]?.default_sha;
+  if (!sha || listed.some((b) => b.sha === sha)) return listed;
+  const extra = await pool.query<{
+    tests_total: number;
+    tests_skipped: number | null;
+    test_cases: unknown;
+  }>(
+    `SELECT tests_total, tests_skipped, test_cases FROM gate_results
+     WHERE repo_id = $1 AND commit_sha = $2 AND kind = 'gate' AND tests_total IS NOT NULL`,
+    [repoId, sha],
+  );
+  const row = extra.rows[0];
+  if (!row) return listed;
+  return [
+    ...listed,
+    withNames(
+      { sha, tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
+      row.test_cases,
+    ),
+  ];
+}
+
+async function ticketGateNamesFor(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<Bundle["ticketGateNames"]> {
+  const { rows } = await pool.query<{ test_cases: unknown }>(
+    `SELECT g.test_cases FROM runs r
+     JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
+     WHERE r.ticket_id = $1 AND r.stage = 'gate' AND r.result = 'passed'
+     ORDER BY r.id DESC LIMIT 1`,
+    [ticketId],
+  );
+  const names = testNamesFrom(rows[0]?.test_cases);
+  return names.length > 0 ? names : null;
+}
+
+async function decisionLogFor(
+  pool: pg.Pool,
+  specId: number,
+  specDisplayId: string,
+  ticketId: number | null,
+  ticketDisplayId: string | null,
+  currentRunId: number | null,
+): Promise<DecisionLog> {
+  const tickets = await pool.query<{ id: number; state: string }>(
+    "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  const runs = await pool.query<{
+    id: number;
+    stage: string;
+    ticket_id: number | null;
+    axis: string | null;
+    output: unknown;
+  }>(
+    `SELECT id, stage, ticket_id, axis, output FROM runs
+     WHERE spec_id = $1 AND output IS NOT NULL AND (
+       (stage = ANY($2) AND result = 'done')
+       OR (stage IN ('review', 'final-review') AND result IN ('pass', 'fix'))
+     )
+     ORDER BY id`,
+    [specId, [...CODE_CHANGING_STAGES]],
+  );
+  return decisionLogFromRuns({
+    specDisplayId,
+    ticketId,
+    ticketDisplayId,
+    currentRunId,
+    tickets: tickets.rows,
+    runs: runs.rows.map((row) => ({
+      id: row.id,
+      stage: row.stage,
+      ticketId: row.ticket_id,
+      axis: row.axis,
+      output: row.output,
+    })),
+  });
 }
 
 export async function buildBundle(
@@ -201,13 +391,13 @@ export async function buildBundle(
 
   const { rows } = await pool.query(
     `SELECT t.id, t.type, t.title, t.body, t.acceptance_criteria, t.modules, t.state, t.content_version,
-            t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths,
+            t.fix_counts, t.reviewed, t.restart, t.allowed_protected_paths, t.allowed_removed_tests,
             s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
             s.integration_branches, s.branch_namespace, s.planning_sha, s.planning_repo_id,
             r.id AS repo_id, r.name, r.url, r.default_branch,
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
-            p.protected_paths, p.limits, p.default_model
+            p.protected_paths, p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
@@ -236,8 +426,8 @@ export async function buildBundle(
   );
   // What the previous stages found, kept in the output of their Runs, so a worker needs no memory of its own.
   // Only the most recent gate or merge counts: an old failure that was fixed since is not news.
-  const failed = await pool.query<{ log: string | null }>(
-    `SELECT output->>'failureLog' AS log FROM runs
+  const failed = await pool.query<{ log: string | null; cases: unknown }>(
+    `SELECT output->>'failureLog' AS log, output->'failedCases' AS cases FROM runs
      WHERE id = (SELECT max(id) FROM runs WHERE ticket_id = $1 AND stage IN ('gate', 'merge', 'e2e') AND result IS NOT NULL)
        AND result IN ('failed', 'gate-failed', 'conflict')`,
     [ticketId],
@@ -292,15 +482,35 @@ export async function buildBundle(
     environment,
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
+    failedCases: failedCasesFrom(failed.rows[0]?.cases),
     review: await reviewJsonOf(pool, "ticket_id = $1 AND stage = 'review'", [
       ticketId,
     ]),
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
     gateBaselines: await gateBaselinesFor(pool, row.spec_id, row.repo_id),
+    ticketGateNames: await ticketGateNamesFor(pool, row.id),
+    decisionLog: await decisionLogFor(
+      pool,
+      row.spec_id,
+      formatDisplayId("spec", row.spec_id),
+      row.id,
+      formatDisplayId("ticket", row.id),
+      run.rows[0]?.id ?? null,
+    ),
+    approvedRemovedTests: (() => {
+      const names = testNamesFrom(row.allowed_removed_tests);
+      return names.length > 0 ? names : null;
+    })(),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
+    recheck: recheckOf(job.payload),
     ...(job.payload.handbackResolve === true
       ? { handbackResolve: true as const }
       : {}),
-    ...runSettings(row.limits, row.default_model),
   };
 }
 
@@ -308,7 +518,11 @@ export async function buildBundle(
 // or a merge after a failure) what went wrong before.
 async function buildFinalBundle(
   pool: pg.Pool,
-  job: { id: number; attempt: number },
+  job: {
+    id: number;
+    attempt: number;
+    payload: Record<string, unknown>;
+  },
   final: { specId: number; repoId: number; step: string },
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
@@ -318,7 +532,7 @@ async function buildFinalBundle(
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
             p.protected_paths,
-            p.limits, p.default_model
+            p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
      LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE s.id = $1`,
@@ -335,8 +549,8 @@ async function buildFinalBundle(
     [job.id],
   );
   // the review that asked for the fix, and the log of the merge or gate that failed last
-  const failed = await pool.query<{ log: string | null }>(
-    `SELECT output->>'failureLog' AS log FROM runs
+  const failed = await pool.query<{ log: string | null; cases: unknown }>(
+    `SELECT output->>'failureLog' AS log, output->'failedCases' AS cases FROM runs
      WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'final-merge' AND result IN ('conflict', 'gate-failed')
      ORDER BY id DESC LIMIT 1`,
     [final.specId],
@@ -386,6 +600,7 @@ async function buildFinalBundle(
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
+    failedCases: failedCasesFrom(failed.rows[0]?.cases),
     review: await reviewJsonOf(
       pool,
       "spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-review'",
@@ -393,7 +608,26 @@ async function buildFinalBundle(
     ),
     gateBaseline: await gateBaselineFor(pool, final.specId, final.repoId),
     gateBaselines: await gateBaselinesFor(pool, final.specId, final.repoId),
-    ...runSettings(row.limits, row.default_model),
+    ticketGateNames: null,
+    decisionLog: await decisionLogFor(
+      pool,
+      final.specId,
+      formatDisplayId("spec", final.specId),
+      null,
+      null,
+      run.rows[0]?.id ?? null,
+    ),
+    approvedRemovedTests: (() => {
+      const names = testNamesFrom(job.payload.approvedRemoved);
+      return names.length > 0 ? names : null;
+    })(),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
+    recheck: recheckOf(job.payload),
   };
 }
 
@@ -402,8 +636,12 @@ async function buildFinalBundle(
 // merge-trees the default branch when that temp does not exist yet. The Run belongs to the spec, not a ticket.
 async function buildUpdateBranchBundle(
   pool: pg.Pool,
-  job: { id: number; attempt: number },
-  update: { specId: number; repoId: number; fix: boolean; afterFix: boolean },
+  job: {
+    id: number;
+    attempt: number;
+    payload: Record<string, unknown>;
+  },
+  update: UpdateBranchPayload,
 ): Promise<Bundle | undefined> {
   const found = await pool.query(
     `SELECT s.id AS spec_id, s.slug, s.title AS spec_title, s.body AS spec_body, s.type AS spec_type,
@@ -412,7 +650,7 @@ async function buildUpdateBranchBundle(
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
             p.protected_paths,
-            p.limits, p.default_model
+            p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
      LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE s.id = $1`,
@@ -424,8 +662,8 @@ async function buildUpdateBranchBundle(
     "SELECT id, retry_note FROM runs WHERE job_id = $1",
     [job.id],
   );
-  const failed = await pool.query<{ log: string | null }>(
-    `SELECT output->>'failureLog' AS log FROM runs
+  const failed = await pool.query<{ log: string | null; cases: unknown }>(
+    `SELECT output->>'failureLog' AS log, output->'failedCases' AS cases FROM runs
      WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'update-branch' AND result IN ('conflict', 'gate-failed')
      ORDER BY id DESC LIMIT 1`,
     [update.specId],
@@ -435,7 +673,11 @@ async function buildUpdateBranchBundle(
     branch: string;
   }[];
   return {
-    job: { id: job.id, stage: "update-branch", attempt: job.attempt },
+    job: {
+      id: job.id,
+      stage: update.recheck ? "recheck" : "update-branch",
+      attempt: job.attempt,
+    },
     run: run.rows[0]
       ? {
           id: run.rows[0].id,
@@ -471,10 +713,30 @@ async function buildUpdateBranchBundle(
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
+    failedCases: failedCasesFrom(failed.rows[0]?.cases),
     review: null,
     gateBaseline: await gateBaselineFor(pool, update.specId, update.repoId),
     gateBaselines: await gateBaselinesFor(pool, update.specId, update.repoId),
-    ...runSettings(row.limits, row.default_model),
+    ticketGateNames: null,
+    decisionLog: await decisionLogFor(
+      pool,
+      update.specId,
+      formatDisplayId("spec", update.specId),
+      null,
+      null,
+      run.rows[0]?.id ?? null,
+    ),
+    approvedRemovedTests: (() => {
+      const names = testNamesFrom(job.payload.approvedRemoved);
+      return names.length > 0 ? names : null;
+    })(),
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
+    recheck: recheckOf(job.payload),
   };
 }
 
@@ -491,7 +753,7 @@ async function buildLocateBundle(
             r.id AS repo_id, r.name, r.url, r.default_branch,
             pr.name AS planning_repo_name, pr.url AS planning_repo_url,
             pr.default_branch AS planning_default_branch,
-            p.protected_paths, p.limits, p.default_model
+            p.protected_paths, p.limits, p.default_model, p.ticket_review, p.stage_models
      FROM specs s JOIN repos r ON r.id = $2 JOIN projects p ON p.id = s.project_id
      LEFT JOIN repos pr ON pr.id = s.planning_repo_id
      WHERE s.id = $1`,
@@ -553,9 +815,26 @@ async function buildLocateBundle(
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: null,
+    failedCases: null,
     review: null,
     gateBaseline: null,
     gateBaselines: [],
-    ...runSettings(row.limits, row.default_model),
+    ticketGateNames: null,
+    decisionLog: await decisionLogFor(
+      pool,
+      locate.specId,
+      formatDisplayId("spec", locate.specId),
+      null,
+      null,
+      run.rows[0]?.id ?? null,
+    ),
+    approvedRemovedTests: null,
+    ...runSettings(
+      row.limits,
+      row.default_model,
+      row.ticket_review,
+      row.stage_models,
+    ),
+    recheck: null,
   };
 }

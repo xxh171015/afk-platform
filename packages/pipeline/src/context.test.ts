@@ -104,6 +104,26 @@ describe("renderContext", () => {
     expect(read(dir, "spec.md")).toContain("Customers want CSV.");
   });
 
+  it("writes recheck.json when the bundle names the hit", () => {
+    const dir = ctxDir();
+    renderContext({
+      dir,
+      bundle: bundleFor({
+        recheck: {
+          fromSha: "aaa111",
+          toSha: "bbb222",
+          paths: ["src/a.test.ts"],
+        },
+      }),
+      run,
+    });
+    expect(JSON.parse(read(dir, "recheck.json"))).toEqual({
+      fromSha: "aaa111",
+      toSha: "bbb222",
+      paths: ["src/a.test.ts"],
+    });
+  });
+
   it("writes spec.md without an assigned-stories section when the ticket has no stories", () => {
     const dir = ctxDir();
     renderContext({ dir, bundle: bundleFor(), run });
@@ -111,6 +131,47 @@ describe("renderContext", () => {
       "# S-12 Order export\n\n# Order export\n\nCustomers want CSV.\n",
     );
     expect(read(dir, "spec.md")).not.toContain("这张票负责的 User Story");
+  });
+
+  it("writes the decision log next to run.json", () => {
+    const dir = ctxDir();
+    const log = {
+      ticket: {
+        displayId: "T-123",
+        decisions: [
+          {
+            id: "R-8#0",
+            run: "R-8",
+            stage: "implement",
+            kind: "conflict" as const,
+            text: "picked the story",
+          },
+        ],
+        rulings: [],
+      },
+      doneTickets: [
+        {
+          displayId: "T-1",
+          decisions: [
+            {
+              id: "R-2#0",
+              run: "R-2",
+              stage: "implement",
+              kind: "choice" as const,
+              text: "named it export",
+            },
+          ],
+          rulings: [],
+        },
+      ],
+      spec: null,
+    };
+    renderContext({
+      dir,
+      bundle: bundleFor({ decisionLog: log }),
+      run,
+    });
+    expect(JSON.parse(read(dir, "decisions.json"))).toEqual(log);
   });
 
   it("writes ticket.md, spec.md and run.json", () => {
@@ -166,7 +227,35 @@ describe("renderContext", () => {
       review,
     });
     expect(read(dir, "failure/gate.log")).toBe("boom\n");
+    expect(existsSync(join(dir, "failure", "cases.json"))).toBe(false);
     expect(JSON.parse(read(dir, "review.json"))).toEqual(review);
+  });
+
+  it("writes the still-failing cases beside the log, and omits the file when there are none", () => {
+    const dir = ctxDir();
+    const failedCases = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        message: "boom\ntrace",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        message: "nope",
+      },
+    ];
+    renderContext({
+      dir,
+      bundle: bundleFor({ stage: "gate-fix" }),
+      run,
+      failureLog: "boom\n",
+      failedCases,
+    });
+    expect(read(dir, "failure/gate.log")).toBe("boom\n");
+    expect(JSON.parse(read(dir, "failure/cases.json"))).toEqual(failedCases);
   });
 
   it("writes neither when there is nothing to show", () => {

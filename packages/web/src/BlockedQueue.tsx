@@ -224,6 +224,8 @@ function Card({
 type TicketAction =
   | { kind: "retry"; mode: "continue" | "restart" }
   | { kind: "approve" }
+  | { kind: "approve-removed" }
+  | { kind: "approve-recheck" }
   | { kind: "cancel"; cascade: boolean };
 
 function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
@@ -244,10 +246,18 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
           ? await api.POST("/tickets/{id}/approve-protected", {
               params: { path: { id } },
             })
-          : await api.POST("/tickets/{id}/cancel", {
-              params: { path: { id } },
-              body: { cascade: action.cascade },
-            });
+          : action.kind === "approve-removed"
+            ? await api.POST("/tickets/{id}/approve-removed-tests", {
+                params: { path: { id } },
+              })
+            : action.kind === "approve-recheck"
+              ? await api.POST("/tickets/{id}/approve-recheck", {
+                  params: { path: { id } },
+                })
+              : await api.POST("/tickets/{id}/cancel", {
+                  params: { path: { id } },
+                  body: { cascade: action.cascade },
+                });
     if (!data) throw new Error(describeError(error));
   });
   const busy = act.isPending;
@@ -328,6 +338,28 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
             >
               <ShieldCheck />
               批准这些保护路径
+            </Button>
+          ) : null}
+          {ticket.blockedReason === "tests-removed" ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() => act.mutate({ kind: "approve-removed" })}
+            >
+              <ShieldCheck />
+              批准删掉的测试
+            </Button>
+          ) : null}
+          {ticket.blockedReason === "recheck-failed" ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={() => act.mutate({ kind: "approve-recheck" })}
+            >
+              <ShieldCheck />
+              批准这次改动
             </Button>
           ) : null}
           <Button
@@ -464,7 +496,25 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
     });
     if (!data) throw new Error(describeError(error));
   });
-  const busy = retry.isPending || allow.isPending || cancel.isPending;
+  const approveRemoved = useAction(async () => {
+    const { data, error } = await api.POST(
+      "/specs/{id}/approve-removed-tests",
+      { params: { path: { id: spec.id } } },
+    );
+    if (!data) throw new Error(describeError(error));
+  });
+  const approveRecheck = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/approve-recheck", {
+      params: { path: { id: spec.id } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
+  const busy =
+    retry.isPending ||
+    allow.isPending ||
+    cancel.isPending ||
+    approveRemoved.isPending ||
+    approveRecheck.isPending;
   return (
     <Card
       category="paused"
@@ -529,6 +579,28 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
               <Spinner on={allow.isPending} />
               放行
             </Button>
+            {spec.reason === "tests-removed" ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() => approveRemoved.mutate()}
+              >
+                <ShieldCheck />
+                批准删掉的测试
+              </Button>
+            ) : null}
+            {spec.reason === "recheck-failed" ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() => approveRecheck.mutate()}
+              >
+                <ShieldCheck />
+                批准这次改动
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
@@ -538,7 +610,14 @@ function PausedSpec({ spec }: { spec: Queue["specs"][number] }) {
             >
               取消需求
             </Button>
-            <Problem error={retry.error ?? allow.error ?? cancel.error} />
+            <Problem
+              error={
+                retry.error ??
+                allow.error ??
+                cancel.error ??
+                approveRemoved.error
+              }
+            />
           </form>
           <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
             <AlertDialogContent>
@@ -595,8 +674,25 @@ function BlockedFinalization({
     });
     if (!data) throw new Error(describeError(error));
   });
+  const approveRemoved = useAction(async () => {
+    const { data, error } = await api.POST(
+      "/specs/{id}/approve-removed-tests",
+      { params: { path: { id: item.specId } } },
+    );
+    if (!data) throw new Error(describeError(error));
+  });
+  const approveRecheck = useAction(async () => {
+    const { data, error } = await api.POST("/specs/{id}/approve-recheck", {
+      params: { path: { id: item.specId } },
+    });
+    if (!data) throw new Error(describeError(error));
+  });
   const beforePullRequests = item.step === "final-e2e";
-  const busy = retry.isPending || waive.isPending;
+  const busy =
+    retry.isPending ||
+    waive.isPending ||
+    approveRemoved.isPending ||
+    approveRecheck.isPending;
   const pr = pullAbbrev(hostKindOf(item));
   return (
     <Card
@@ -640,6 +736,26 @@ function BlockedFinalization({
             {!retry.isPending && <Play />}
             再跑一次 {item.step}
           </Button>
+          {item.blockedReason === "tests-removed" ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => approveRemoved.mutate()}
+            >
+              <ShieldCheck />
+              批准删掉的测试
+            </Button>
+          ) : null}
+          {item.blockedReason === "recheck-failed" ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => approveRecheck.mutate()}
+            >
+              <ShieldCheck />
+              批准这次改动
+            </Button>
+          ) : null}
           {beforePullRequests ? (
             <Button
               size="sm"
@@ -650,7 +766,7 @@ function BlockedFinalization({
               仍然开 {pr}
             </Button>
           ) : null}
-          <Problem error={retry.error ?? waive.error} />
+          <Problem error={retry.error ?? waive.error ?? approveRemoved.error} />
           <AlertDialog
             open={confirmWaive}
             onOpenChange={(v) => {

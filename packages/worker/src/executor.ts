@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +18,8 @@ import {
   type Environment,
   EnvironmentError,
   type EnvironmentRepo,
+  failedCasesOf,
+  type GateBaseline,
   type GateConfig,
   GateConfigError,
   type GateOutcome,
@@ -37,11 +39,13 @@ import {
   type LocateOutput,
   LocateOutputSchema,
   mergeCandidate,
+  mergeGateCompare,
   mergeTakingOurs,
   projectOf,
   promptFor,
   type RunGateInput,
   readGateConfig,
+  recheckHit,
   reclaimEnvironments,
   renderContext,
   reviewFindings,
@@ -53,7 +57,7 @@ import {
   type SandboxSession,
   stampTrailers,
   startEnvironment,
-  type TestCounts,
+  type TestName,
   writePrompt,
 } from "@afk/pipeline";
 import {
@@ -62,9 +66,11 @@ import {
   formatPushFailure,
   isDeterministicPushFailure,
   isNetworkPushError,
+  listedDecisionsForReview,
+  modelFor,
   type PushFailureTips,
-  REVIEW_AXES,
   type ReviewAxis,
+  reviewAxesFor,
   unrecoverableJobError,
 } from "@afk/shared";
 import {
@@ -118,9 +124,19 @@ export interface StageContext {
 }
 
 // What a run is asked for, from the project's say (the bundle) and the worker's own defaults.
-function runOptions(deps: ExecutorDeps, context: StageContext) {
+function runOptions(
+  deps: ExecutorDeps,
+  context: StageContext,
+  axis?: ReviewAxis,
+) {
   const { bundle } = context;
-  const model = bundle.model ?? deps.model;
+  const model = modelFor({
+    stage: bundle.job.stage,
+    axis,
+    stageModels: bundle.stageModels,
+    defaultModel: bundle.model,
+    workerModel: deps.model,
+  });
   return {
     idleSeconds: bundle.limits.runIdleSeconds,
     wallClockMs: bundle.limits.runWallclockSeconds * 1000,
@@ -130,16 +146,41 @@ function runOptions(deps: ExecutorDeps, context: StageContext) {
   };
 }
 
-// What a Run records about the agent that ran: its model and the skills it ran with. Gates run no agent and record neither.
+// Usage, API duration and CLI version from the Cursor result line, to keep on a Run after the agent.
+function billedFacts(
+  run: {
+    tokenUsage?: unknown;
+    durationApiMs?: number;
+    cursorCliVersion?: string;
+  } = {},
+) {
+  return {
+    ...(run.tokenUsage !== undefined ? { tokenUsage: run.tokenUsage } : {}),
+    ...(run.durationApiMs !== undefined
+      ? { durationApiMs: run.durationApiMs }
+      : {}),
+    ...(run.cursorCliVersion ? { cursorCliVersion: run.cursorCliVersion } : {}),
+  };
+}
+
+type BilledFacts = ReturnType<typeof billedFacts> & { axis?: ReviewAxis };
+
+// What a Run records about the agent that ran: model, skills, prompt, and the Cursor result-line facts.
 function agentFacts(
   deps: ExecutorDeps,
   options: { model?: string },
   prompt: string,
+  run?: {
+    tokenUsage?: unknown;
+    durationApiMs?: number;
+    cursorCliVersion?: string;
+  },
 ) {
   return {
     prompt,
     ...(options.model ? { model: options.model } : {}),
     ...(deps.skillsSha ? { skillsSha: deps.skillsSha } : {}),
+    ...billedFacts(run),
   };
 }
 
@@ -147,10 +188,14 @@ function agentFacts(
 // unless the error is one that will not recover by running it again (Cursor auth, a bad model, a spent quota,
 // a failed integration image build). Those are rewritten here to the human sentence the brief shows.
 export class InfrastructureError extends Error {
+  readonly run?: BilledFacts;
+  readonly extraRuns?: BilledFacts[];
   orphanRef?: string;
   orphanSha?: string;
-  constructor(message: string) {
+  constructor(message: string, run?: BilledFacts, extraRuns?: BilledFacts[]) {
     super(unrecoverableJobError(message) ?? message);
+    this.run = run;
+    this.extraRuns = extraRuns;
   }
 }
 // Nothing to run on right now: every slot is taken. The job is left alone and comes back when its lease runs out.
@@ -248,7 +293,19 @@ function bringBranches(slot: Slot, mainDir: string, refs: string[]) {
   }
 }
 
-const SKIP_TICKET_ALIGN = new Set(["e2e", "diagnose", "final-review"]);
+const SKIP_TICKET_ALIGN = new Set([
+  "e2e",
+  "diagnose",
+  "final-review",
+  "recheck",
+]);
+
+const RECHECK_TRIGGER_STAGES = new Set([
+  "review-fix",
+  "merge-fix",
+  "final-fix",
+  "update-branch",
+]);
 
 function withOrphanRun(
   body: StageOutcomeBody,
@@ -272,13 +329,18 @@ function assertRemoteUnchanged(
   repoDir: string,
   branch: string,
   expectedOld: string,
+  run?: ReturnType<typeof billedFacts>,
 ): void {
   const now = originSha(repoDir, branch) ?? "";
   if (now !== expectedOld) {
-    throwPushFailure("stale info", {
-      remoteTip: now,
-      startedFrom: expectedOld,
-    });
+    throwPushFailure(
+      "stale info",
+      {
+        remoteTip: now,
+        startedFrom: expectedOld,
+      },
+      run,
+    );
   }
 }
 
@@ -402,6 +464,9 @@ async function runStage(
         case "final-review":
           body = await review(deps, context, mainDir, slot);
           break;
+        case "recheck":
+          body = await recheck(deps, context, mainDir, slot);
+          break;
         case "gate":
           body = await gate(deps, context, mainDir, slot);
           break;
@@ -435,7 +500,11 @@ async function runStage(
 const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 const exists = hasRef;
 
-function throwPushFailure(error: string, tips: PushFailureTips): never {
+function throwPushFailure(
+  error: string,
+  tips: PushFailureTips,
+  run?: ReturnType<typeof billedFacts>,
+): never {
   const kind = classifyPushError(error);
   if (isDeterministicPushFailure(kind)) {
     throw new InfrastructureError(
@@ -443,9 +512,10 @@ function throwPushFailure(error: string, tips: PushFailureTips): never {
         remoteTip: tips.remoteTip ?? "",
         startedFrom: tips.startedFrom ?? "",
       }),
+      run,
     );
   }
-  throw new InfrastructureError(`push failed: ${error}`);
+  throw new InfrastructureError(`push failed: ${error}`, run);
 }
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -481,6 +551,7 @@ function renderFor(
       branch: bundle.agentBranch,
     },
     ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
+    ...(bundle.failedCases?.length ? { failedCases: bundle.failedCases } : {}),
     ...(bundle.review ? { review: bundle.review } : {}),
     ...(bundle.contracts.length
       ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
@@ -491,6 +562,35 @@ function renderFor(
       : {}),
   });
   return dir;
+}
+
+function extraRecheckConfig(repoDir: string, sha: string): string[] {
+  try {
+    return [...(readGateConfig(repoDir, sha).recheckConfig ?? [])];
+  } catch {
+    return [];
+  }
+}
+
+function recheckArgs(
+  bundle: Bundle,
+  payload: Record<string, unknown>,
+): { fromSha: string; toSha: string; paths: string[] } | undefined {
+  const listed = (
+    bundle as Bundle & {
+      recheck?: { fromSha: string; toSha: string; paths: string[] } | null;
+    }
+  ).recheck;
+  if (listed?.fromSha && listed.toSha) return listed;
+  const fromSha = payload.fromSha;
+  const toSha = payload.toSha;
+  if (typeof fromSha !== "string" || typeof toSha !== "string")
+    return undefined;
+  const raw = payload.paths;
+  const paths = Array.isArray(raw)
+    ? raw.filter((path): path is string => typeof path === "string")
+    : [];
+  return { fromSha, toSha, paths };
 }
 
 // Snapshots of repos at the SHA the bundle names (the head of the default branch when it names none): the ones
@@ -594,17 +694,18 @@ async function agentChange(
       inherited ? { ...run, commits: [before] } : run,
     );
     if (verdict.kind === "infrastructure-failure")
-      throw new InfrastructureError(verdict.error);
+      throw new InfrastructureError(verdict.error, billedFacts(run));
     log(
       `${stage}: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
     );
 
+    const billed = billedFacts(run);
     const facts: Record<string, unknown> = {
       branch: agent,
       baseSha,
       commits: run.commits,
       durationMs: run.durationMs,
-      ...agentFacts(deps, options, given.prompt),
+      ...agentFacts(deps, options, given.prompt, run),
       ...(refs.length ? { refShas } : {}),
       output: run.output ?? { error: run.error },
     };
@@ -623,6 +724,7 @@ async function agentChange(
     if (!taken.fetched)
       throw new InfrastructureError(
         `could not take ${agent} back: ${taken.error ?? "no such branch in the slot"}`,
+        billed,
       );
     const stamped = stampTrailers({
       repoDir: mainDir,
@@ -636,7 +738,10 @@ async function agentChange(
       },
     });
     if (stamped.error)
-      throw new InfrastructureError(`stamping failed: ${stamped.error}`);
+      throw new InfrastructureError(
+        `stamping failed: ${stamped.error}`,
+        billed,
+      );
     const request = {
       repoDir: mainDir,
       source: `refs/heads/${agent}`,
@@ -655,7 +760,7 @@ async function agentChange(
       ) {
         throw new JobLostError("the lease was lost before the push");
       }
-      assertRemoteUnchanged(mainDir, agent, align.expectedOld);
+      assertRemoteUnchanged(mainDir, agent, align.expectedOld, billed);
       pushed = deps.push(request);
       if (pushed.ok) break;
       if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
@@ -663,10 +768,14 @@ async function agentChange(
       await wait(waitSeconds[i] * 1000, context.signal);
     }
     if (!pushed.ok)
-      throwPushFailure(pushed.error, {
-        remoteTip: originSha(mainDir, request.target),
-        startedFrom: align.expectedOld,
-      });
+      throwPushFailure(
+        pushed.error,
+        {
+          remoteTip: originSha(mainDir, request.target),
+          startedFrom: align.expectedOld,
+        },
+        billed,
+      );
     facts.headSha = tip(mainDir, agent);
     facts.commits = gitOrThrow(mainDir, [
       "rev-list",
@@ -675,6 +784,18 @@ async function agentChange(
     ])
       .split("\n")
       .filter(Boolean);
+    if (
+      RECHECK_TRIGGER_STAGES.has(stage) &&
+      typeof facts.headSha === "string"
+    ) {
+      facts.recheck = recheckHit({
+        repoDir: mainDir,
+        fromSha: before,
+        toSha: facts.headSha,
+        baselineSha: branchBase(mainDir, integration, agent),
+        extraConfigPaths: extraRecheckConfig(mainDir, facts.headSha),
+      });
+    }
     return { stage, outcome: "done", run: facts };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -710,14 +831,16 @@ async function review(
         ])
       : branchBase(mainDir, bundle.integrationBranch as string, agent);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
-  // The two axes are two agent runs in two sandboxes at once. A branch can be checked out in one sandbox only, so each
-  // axis gets a branch of its own at the same commit, which is gone again afterwards. A review only reads.
+  // Ticket-level review is Spec-only by default; final-review (and ticketReview: both) still run both axes.
+  // A branch can be checked out in one sandbox only, so each axis gets a branch of its own at the same commit,
+  // which is gone again afterwards. A review only reads.
   const reviewed =
     stage === "final-review"
       ? tip(mainDir, bundle.integrationBranch as string)
       : publishedTip(mainDir, agent);
+  const axes = reviewAxesFor(stage, bundle.ticketReview);
   const branches = new Map(
-    REVIEW_AXES.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
+    axes.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
   );
   for (const branch of branches.values())
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
@@ -725,10 +848,10 @@ async function review(
     bringBranches(slot, mainDir, [...branches.values()]);
     const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
     const { refs, refShas } = snapshotRefs(deps, bundle);
-    const options = runOptions(deps, context);
     const runs = await Promise.all(
-      REVIEW_AXES.map(async (axis) => {
+      axes.map(async (axis) => {
         const given = writePrompt(join(tmp, axis), promptFor(stage, { axis }));
+        const options = runOptions(deps, context, axis);
         const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
           stage,
           branch: branches.get(axis) as string,
@@ -740,24 +863,44 @@ async function review(
           ...options,
           signal: context.signal,
         });
-        return { axis, given, run };
+        return { axis, given, run, options };
       }),
     );
     if (context.signal.aborted)
       throw new JobLostError("the lease was lost during the review");
     const byAxis = Object.fromEntries(
       runs.map((r) => [r.axis, r.run]),
-    ) as Record<ReviewAxis, (typeof runs)[number]["run"]>;
-    const { classification: verdict } = combineReviewRuns(byAxis);
-    if (verdict.kind === "infrastructure-failure")
-      throw new InfrastructureError(verdict.error);
+    ) as Partial<Record<ReviewAxis, (typeof runs)[number]["run"]>>;
+    let { classification: verdict } = combineReviewRuns(byAxis);
+    if (
+      verdict.kind === "outcome" &&
+      (verdict.outcome === "pass" || verdict.outcome === "fix") &&
+      byAxis.spec
+    ) {
+      const listed = listedDecisionsForReview(
+        bundle.decisionLog,
+        stage === "final-review" ? "spec" : "ticket",
+      );
+      const rulings = classifyReviewRun(byAxis.spec, listed);
+      if (rulings.kind === "outcome" && rulings.outcome === "invalid-output") {
+        verdict = rulings;
+      }
+    }
+    if (verdict.kind === "infrastructure-failure") {
+      const [first, ...others] = runs;
+      throw new InfrastructureError(
+        verdict.error,
+        first ? { ...billedFacts(first.run), axis: first.axis } : undefined,
+        others.map((r) => ({ ...billedFacts(r.run), axis: r.axis })),
+      );
+    }
     log(`${stage}: ${verdict.outcome}`);
     for (const { axis, run } of runs)
       if (run.commits.length > 0)
         log(
           `review: WARNING the ${axis} review made ${run.commits.length} commit(s); it should only read`,
         );
-    const factsOf = ({ axis, given, run }: (typeof runs)[number]) => {
+    const factsOf = ({ axis, given, run, options }: (typeof runs)[number]) => {
       const sources = reviewSources(run.output);
       return {
         axis,
@@ -768,7 +911,7 @@ async function review(
           baseSha,
           commits: run.commits,
           durationMs: run.durationMs,
-          ...agentFacts(deps, options, given.prompt),
+          ...agentFacts(deps, options, given.prompt, run),
           ...(refs.length ? { refShas } : {}),
           output: run.output ?? { error: run.error },
           ...(sources ? { sources } : {}),
@@ -780,7 +923,7 @@ async function review(
     return {
       stage,
       outcome: verdict.outcome,
-      // the Standards run is the job's own Run; the Spec run is recorded beside it
+      // the first axis is the job's own Run; any other axis is recorded beside it
       run: { ...first?.run, axis: first?.axis },
       findings: first?.findings ?? [],
       extraRuns: others.map((r) => ({
@@ -791,6 +934,83 @@ async function review(
   } finally {
     for (const branch of branches.values())
       git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function recheck(
+  deps: ExecutorDeps,
+  context: StageContext,
+  mainDir: string,
+  slot: Slot,
+): Promise<StageOutcomeBody> {
+  const { bundle, log } = context;
+  const agent = bundle.agentBranch;
+  const hit = recheckArgs(bundle, context.job.payload);
+  const baseSha =
+    hit?.fromSha ??
+    branchBase(mainDir, bundle.integrationBranch as string, agent);
+  const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
+  const reviewed = hasRef(mainDir, `refs/heads/${agent}`)
+    ? tip(mainDir, agent)
+    : publishedTip(mainDir, agent);
+  const branch = `recheck/${subjectLabel(bundle)}`;
+  gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
+  try {
+    bringBranches(slot, mainDir, [branch]);
+    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
+    if (hit) {
+      writeFileSync(
+        join(ctxDir, "recheck.json"),
+        `${JSON.stringify(hit, null, 2)}\n`,
+      );
+    }
+    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const given = writePrompt(tmp, promptFor("recheck"));
+    const options = runOptions(deps, context, "spec");
+    const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
+      stage: "recheck",
+      branch,
+      baseBranch: bundle.integrationBranch as string,
+      promptFile: given.promptFile,
+      ctxDir,
+      refs,
+      schema: reviewOutputSchemaFor("spec"),
+      ...options,
+      signal: context.signal,
+    });
+    if (context.signal.aborted)
+      throw new JobLostError("the lease was lost during Recheck");
+    const verdict = classifyReviewRun(run);
+    if (verdict.kind === "infrastructure-failure")
+      throw new InfrastructureError(verdict.error, billedFacts(run));
+    log(
+      `recheck: ${verdict.kind === "outcome" ? verdict.outcome : "invalid-output"}`,
+    );
+    if (run.commits.length > 0)
+      log(
+        `recheck: WARNING Recheck made ${run.commits.length} commit(s); it should only read`,
+      );
+    const sources = reviewSources(run.output);
+    return {
+      stage: "recheck",
+      outcome: verdict.kind === "outcome" ? verdict.outcome : "invalid-output",
+      run: {
+        result: axisResult(run),
+        axis: "spec",
+        branch: agent,
+        baseSha,
+        commits: run.commits,
+        durationMs: run.durationMs,
+        ...agentFacts(deps, options, given.prompt, run),
+        ...(refs.length ? { refShas } : {}),
+        output: run.output ?? { error: run.error },
+        ...(sources ? { sources } : {}),
+      },
+      findings: run.output ? reviewFindings(run.output) : [],
+    };
+  } finally {
+    git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
     rmSync(tmp, { recursive: true, force: true });
   }
 }
@@ -810,6 +1030,49 @@ function gateFacts(outcome: GateOutcome) {
       : {}),
     ...(outcome.testCases ? { testCases: outcome.testCases } : {}),
   };
+}
+
+function gateFailureOutput(outcome: GateOutcome) {
+  const failedCases = failedCasesOf(outcome.testCases);
+  return {
+    failureLog: outcome.failureLog,
+    reasons: outcome.reasons,
+    ...(failedCases ? { failedCases } : {}),
+    ...(outcome.removedTests ? { removedTests: outcome.removedTests } : {}),
+  };
+}
+
+function namesAt(bundle: Bundle, sha: string): TestName[] | undefined {
+  const hit = bundle.gateBaselines.find((b) => b.sha === sha);
+  return hit?.names;
+}
+
+function mergeNameSets(
+  mainDir: string,
+  integration: string,
+  incoming: string,
+  bundle: Bundle,
+): { base: TestName[]; ours: TestName[]; theirs: TestName[] } | undefined {
+  const found = git(mainDir, ["merge-base", integration, incoming]);
+  if (found.code !== 0) return undefined;
+  const baseSha = found.stdout.trim();
+  const oursSha = tip(mainDir, integration);
+  const theirsSha = tip(mainDir, incoming);
+  const base = namesAt(bundle, baseSha);
+  const ours = namesAt(bundle, oursSha) ?? bundle.gateBaseline?.names;
+  const theirs =
+    namesAt(bundle, theirsSha) ?? bundle.ticketGateNames ?? undefined;
+  if (!base?.length || !ours?.length || !theirs?.length) return undefined;
+  return { base, ours, theirs };
+}
+
+function gateOutcomeOf(
+  outcome: GateOutcome,
+): "passed" | "failed" | "tests-removed" {
+  if (outcome.pass) return "passed";
+  if (outcome.removedTests && outcome.removedTests.length > 0)
+    return "tests-removed";
+  return "failed";
 }
 
 function logGate(log: (line: string) => void, outcome: GateOutcome) {
@@ -924,7 +1187,18 @@ async function gate(
     ref: agent,
     commitSha,
     configSha: tip(mainDir, integration),
-    ...(baseline ? { baseline } : {}),
+    ...(baseline
+      ? {
+          baseline: {
+            tests: baseline.tests,
+            skipped: baseline.skipped,
+            ...(baseline.names?.length ? { names: baseline.names } : {}),
+          },
+        }
+      : {}),
+    ...(bundle.approvedRemovedTests?.length
+      ? { approvedRemoved: bundle.approvedRemovedTests }
+      : {}),
     records: gateRecords(deps, context),
   });
   if (context.signal.aborted)
@@ -932,12 +1206,12 @@ async function gate(
   logGate(log, outcome);
   return {
     stage: "gate",
-    outcome: outcome.pass ? "passed" : "failed",
+    outcome: gateOutcomeOf(outcome),
     run: {
       branch: agent,
       baseSha,
       headSha: outcome.commitSha,
-      output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
+      output: gateFailureOutput(outcome),
     },
     gate: gateFacts(outcome),
   };
@@ -984,7 +1258,13 @@ async function gateCommit(
   context: StageContext,
   mainDir: string,
   slot: Slot,
-  commit: { sha: string; configSha: string; baseline?: TestCounts },
+  commit: {
+    sha: string;
+    configSha: string;
+    baseline?: GateBaseline;
+    mergeNames?: { base: TestName[]; ours: TestName[]; theirs: TestName[] };
+    approvedRemoved?: TestName[];
+  },
   lostMessage: string,
 ): Promise<GateOutcome> {
   const gateBranch = `gate/${subjectLabel(context.bundle)}`;
@@ -999,6 +1279,10 @@ async function gateCommit(
       commitSha: commit.sha,
       configSha: commit.configSha,
       ...(commit.baseline ? { baseline: commit.baseline } : {}),
+      ...(commit.mergeNames ? { mergeNames: commit.mergeNames } : {}),
+      ...(commit.approvedRemoved?.length
+        ? { approvedRemoved: commit.approvedRemoved }
+        : {}),
       records: gateRecords(deps, context),
     });
     if (context.signal.aborted) throw new JobLostError(lostMessage);
@@ -1311,6 +1595,7 @@ async function mergeOnce(
   }
 
   // The candidate is gated on a branch of its own; only a passing candidate moves the integration branch.
+  const mergeNames = mergeNameSets(mainDir, integration, incoming, bundle);
   const outcome = await gateCommit(
     deps,
     context,
@@ -1319,16 +1604,22 @@ async function mergeOnce(
     {
       sha: candidateSha,
       configSha: oldTip,
-      ...(bundle.gateBaseline ? { baseline: bundle.gateBaseline } : {}),
+      ...mergeGateCompare(bundle.gateBaseline ?? undefined, mergeNames),
+      ...(bundle.approvedRemovedTests?.length
+        ? { approvedRemoved: bundle.approvedRemovedTests }
+        : {}),
     },
     "the lease was lost during the candidate gate",
   );
   if (!outcome.pass) {
     return {
       stage,
-      outcome: "gate-failed",
+      outcome:
+        gateOutcomeOf(outcome) === "tests-removed"
+          ? "tests-removed"
+          : "gate-failed",
       run: {
-        output: { failureLog: outcome.failureLog, reasons: outcome.reasons },
+        output: gateFailureOutput(outcome),
       },
       gate: gateFacts(outcome),
     };
@@ -1563,7 +1854,7 @@ async function diagnose(
         throw new JobLostError("the lease was lost during the diagnosis");
       const verdict = classifyDiagnoseRun(run.run);
       if (verdict.kind === "infrastructure-failure")
-        throw new InfrastructureError(verdict.error);
+        throw new InfrastructureError(verdict.error, billedFacts(run.run));
       log(
         `diagnose: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
       );
@@ -1582,7 +1873,7 @@ async function diagnose(
           refShas: run.environment.shas,
           envUpMs: run.environment.upMs,
           durationMs: run.run.durationMs,
-          ...agentFacts(deps, options, given.prompt),
+          ...agentFacts(deps, options, given.prompt, run.run),
           output: output ?? { error: run.run.error },
         },
         // a repo is only named when the outcome is "diagnosed"
@@ -1658,7 +1949,7 @@ async function locateBug(
         throw new JobLostError("the lease was lost during locate");
       const verdict = classifyLocateRun(run);
       if (verdict.kind === "infrastructure-failure")
-        throw new InfrastructureError(verdict.error);
+        throw new InfrastructureError(verdict.error, billedFacts(run));
       context.log(
         `locate-bug: ${verdict.outcome}${verdict.detail ? ` (${verdict.detail})` : ""}`,
       );
@@ -1685,7 +1976,7 @@ async function locateBug(
           headSha: head,
           refShas,
           durationMs: run.durationMs,
-          ...agentFacts(deps, options, given.prompt),
+          ...agentFacts(deps, options, given.prompt, run),
           output: output ?? { error: run.error },
         },
       };

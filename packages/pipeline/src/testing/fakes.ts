@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "../agent.ts";
+import { factsFromCursorLines } from "../cursor-result.ts";
 import { exec, git, gitOrThrow } from "../exec.ts";
 import type { GateSandbox, SandboxPlacement, SandboxSession } from "../gate.ts";
 import type { DockerCli, DockerResult } from "../integration-env.ts";
@@ -128,12 +129,14 @@ export class FakeAgentRunner implements AgentRunner {
         .split("\n")
         .filter(Boolean);
       const durationMs = Date.now() - started;
+      const billed = factsFromCursorLines(step.rawLines ?? []);
       if (options.signal?.aborted) {
         return {
           commits: [],
           error: "aborted: the job was lost",
           errorKind: "other",
           durationMs,
+          ...billed,
         };
       }
       if (step.error) {
@@ -142,6 +145,7 @@ export class FakeAgentRunner implements AgentRunner {
           error: step.error.message,
           errorKind: step.error.kind,
           durationMs,
+          ...billed,
         };
       }
       const parsed = options.schema.safeParse(step.output);
@@ -151,9 +155,10 @@ export class FakeAgentRunner implements AgentRunner {
           error: parsed.error.message.slice(0, 400),
           errorKind: "invalid-output",
           durationMs,
+          ...billed,
         };
       }
-      return { output: parsed.data, commits, durationMs };
+      return { output: parsed.data, commits, durationMs, ...billed };
     } finally {
       git(this.repoDir, ["worktree", "remove", "--force", worktree]);
       rmSync(dir, { recursive: true, force: true });

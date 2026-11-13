@@ -26,6 +26,29 @@ export {
   parseTicketBranch,
   SETUP_BRANCH,
 } from "./branches.ts";
+export type {
+  DecisionLog,
+  DecisionLogGroup,
+  DecisionLogItem,
+  DecisionLogRun,
+} from "./decision-log.ts";
+export {
+  decisionId,
+  decisionLogFromRuns,
+  itemsFromRun,
+} from "./decision-log.ts";
+export type { Decision, DecisionKind } from "./decisions.ts";
+export {
+  CODE_CHANGING_STAGES,
+  coerceDecisionsInput,
+  DECISION_KIND_LABELS,
+  DECISION_KINDS,
+  DecisionSchema,
+  DecisionsField,
+  decisionsOf,
+  decisionTally,
+  isListedDecisionKind,
+} from "./decisions.ts";
 export {
   advanceDiskAlert,
   DEFAULT_DISK_STOP_GIB,
@@ -187,8 +210,25 @@ export type {
   CombinedReview,
   ReviewAxis,
   ReviewItem,
+  TicketReviewMode,
 } from "./review-axes.ts";
-export { combinedReview, REVIEW_AXES } from "./review-axes.ts";
+export {
+  combinedReview,
+  DEFAULT_TICKET_REVIEW,
+  REVIEW_AXES,
+  reviewAxesFor,
+  TICKET_REVIEW_MODES,
+} from "./review-axes.ts";
+export type { NeedsDecisionItem, Ruling, RulingVerdict } from "./rulings.ts";
+export {
+  checkReviewRulings,
+  collectNeedsDecision,
+  isListedForRuling,
+  listedDecisionsForReview,
+  RULING_VERDICTS,
+  RulingSchema,
+  rulingsOf,
+} from "./rulings.ts";
 export type {
   Capacity,
   IncomingEdge,
@@ -225,6 +265,14 @@ export {
   MAX_INTEGRATION_ROUNDS,
   STAGES,
 } from "./stage-flow.ts";
+export type { StageModelKey, StageModels } from "./stage-models.ts";
+export {
+  mergeStageModels,
+  modelFor,
+  parseStageModels,
+  STAGE_MODEL_KEYS,
+  StageModelsSchema,
+} from "./stage-models.ts";
 export type {
   StructuredBrief,
   StructuredBriefCommand,

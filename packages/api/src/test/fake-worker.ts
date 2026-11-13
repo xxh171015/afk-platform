@@ -228,13 +228,49 @@ export class FakeWorker {
     jobId: number,
     attempt: number,
     error = "boom",
-    facts?: { orphanRef?: string; orphanSha?: string },
+    run?: {
+      tokenUsage?: unknown;
+      durationApiMs?: number;
+      cursorCliVersion?: string;
+      axis?: "standards" | "spec";
+      orphanRef?: string;
+      orphanSha?: string;
+    },
+    extraRuns?: Array<{
+      tokenUsage?: unknown;
+      durationApiMs?: number;
+      cursorCliVersion?: string;
+      axis?: "standards" | "spec";
+    }>,
   ): Promise<Reply<{ ok?: boolean; error?: string }>> {
+    const billed =
+      run &&
+      (run.tokenUsage !== undefined ||
+        run.durationApiMs !== undefined ||
+        run.cursorCliVersion !== undefined ||
+        run.axis !== undefined)
+        ? {
+            ...(run.tokenUsage !== undefined
+              ? { tokenUsage: run.tokenUsage }
+              : {}),
+            ...(run.durationApiMs !== undefined
+              ? { durationApiMs: run.durationApiMs }
+              : {}),
+            ...(run.cursorCliVersion !== undefined
+              ? { cursorCliVersion: run.cursorCliVersion }
+              : {}),
+            ...(run.axis !== undefined ? { axis: run.axis } : {}),
+          }
+        : undefined;
     return this.post(`/worker/jobs/${jobId}/fail`, {
       workerId: this.id,
       attempt,
       error,
-      ...facts,
+      ...(billed ? { run: billed } : {}),
+      ...(extraRuns && extraRuns.length > 0 ? { extraRuns } : {}),
+      ...(run?.orphanRef && run.orphanSha
+        ? { orphanRef: run.orphanRef, orphanSha: run.orphanSha }
+        : {}),
     });
   }
 

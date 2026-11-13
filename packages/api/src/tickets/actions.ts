@@ -1,4 +1,5 @@
 import {
+  type FinalStep,
   formatDisplayId,
   type HumanAction,
   retryPlan,
@@ -23,7 +24,7 @@ import {
   enqueueUpdateBranch,
   holdFinalReviewForUpdate,
 } from "../host/update-branch.ts";
-import { enqueueStageJob } from "../jobs/stage-jobs.ts";
+import { enqueueFinalJob, enqueueStageJob } from "../jobs/stage-jobs.ts";
 import {
   inTransaction,
   lockSpec,
@@ -43,8 +44,23 @@ interface TicketRow {
   blocked_reason: string | null;
   content_version: number;
   allowed_protected_paths: string[];
+  allowed_removed_tests: { classname: string; name: string }[];
+  allowed_recheck_shas: string[];
   type: string;
   resume_stage: "e2e" | "gate" | null;
+}
+
+function testNamesFrom(raw: unknown): { classname: string; name: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const names: { classname: string; name: string }[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.name !== "string" || typeof rec.classname !== "string")
+      continue;
+    names.push({ classname: rec.classname, name: rec.name });
+  }
+  return names;
 }
 
 async function loadLocked(
@@ -59,7 +75,7 @@ async function loadLocked(
   await lockSpec(client, found.rows[0].spec_id);
   const row = await client.query<TicketRow>(
     `SELECT id, spec_id, repo_id, state, blocked_reason, content_version, allowed_protected_paths,
-            type, resume_stage
+            allowed_removed_tests, allowed_recheck_shas, type, resume_stage
      FROM tickets WHERE id = $1`,
     [ticketId],
   );
@@ -335,6 +351,413 @@ export async function approveProtected(
   });
 }
 
+// Only for tests-removed: the names the gate listed are added to the ticket, the content version goes up, and
+// the ticket goes on from the gate (or the merge, if that is what found the names). The agent does not run again.
+export async function approveRemovedTests(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<ActionResult<{ approved: { classname: string; name: string }[] }>> {
+  return inTransaction(pool, async (client) => {
+    const ticket = await loadLocked(client, ticketId);
+    if (!ticket) return { status: "no-ticket" };
+    if (
+      ticket.state !== "blocked" ||
+      ticket.blocked_reason !== "tests-removed"
+    ) {
+      return refused(
+        `only a ticket blocked by tests-removed can be approved; this one is ${ticket.state}${ticket.blocked_reason ? ` (${ticket.blocked_reason})` : ""}`,
+      );
+    }
+    const last = await client.query<{
+      stage: string;
+      removed: unknown;
+    }>(
+      `SELECT stage, output->'removedTests' AS removed FROM runs
+       WHERE ticket_id = $1 AND result = 'tests-removed' ORDER BY id DESC LIMIT 1`,
+      [ticketId],
+    );
+    const approved = testNamesFrom(last.rows[0]?.removed);
+    if (approved.length === 0) {
+      return refused(
+        "the gate run that found the missing tests has no record of which ones they were",
+      );
+    }
+    const next = ticketTransition(ticket.state, {
+      type: "approve-removed-tests",
+    });
+    if (!next.ok || next.state === "blocked")
+      return refused(next.ok ? "unexpected" : next.reason);
+    const allowed = [
+      ...ticket.allowed_removed_tests,
+      ...approved.filter(
+        (n) =>
+          !ticket.allowed_removed_tests.some(
+            (h) => h.classname === n.classname && h.name === n.name,
+          ),
+      ),
+    ];
+    const resumeMerge =
+      last.rows[0]?.stage === "merge" || last.rows[0]?.stage === "merge-fix";
+    let state = next.state;
+    if (resumeMerge) {
+      const merging = ticketTransition(state, { type: "checks-passed" });
+      if (merging.ok && merging.state !== "blocked") state = merging.state;
+    }
+    const updated = await client.query<{ content_version: number }>(
+      `UPDATE tickets SET state = $2, blocked_reason = NULL, allowed_removed_tests = $3,
+         content_version = content_version + 1,
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
+       WHERE id = $1 RETURNING content_version`,
+      [ticketId, state, JSON.stringify(allowed)],
+    );
+    await snapshotTicket(client, ticketId);
+    await recordAction(
+      client,
+      "approve-removed-tests",
+      { specId: ticket.spec_id, ticketId },
+      { tests: approved },
+    );
+    await enqueueStageJob(
+      client,
+      {
+        id: ticket.id,
+        specId: ticket.spec_id,
+        repoId: ticket.repo_id,
+        contentVersion: updated.rows[0]?.content_version as number,
+      },
+      resumeMerge ? "merge" : "gate",
+    );
+    return { status: "ok", approved };
+  });
+}
+
+// Wrap-up or update-branch tests-removed: the names go on that job only, not on a ticket.
+export async function approveRemovedTestsForSpec(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ approved: { classname: string; name: string }[] }>> {
+  return inTransaction(pool, async (client) => {
+    const exists = await client.query<{
+      state: SpecState;
+      pause_reason: string | null;
+    }>("SELECT state, pause_reason FROM specs WHERE id = $1", [specId]);
+    if (!exists.rows[0]) return { status: "no-ticket" };
+    await lockSpec(client, specId);
+    const spec = (
+      await client.query<{
+        state: SpecState;
+        pause_reason: string | null;
+        project_id: number;
+      }>("SELECT state, pause_reason, project_id FROM specs WHERE id = $1", [
+        specId,
+      ])
+    ).rows[0];
+    if (!spec) return { status: "no-ticket" };
+
+    const finals = await client.query<{
+      id: number;
+      repo_id: number;
+      step: FinalStep;
+    }>(
+      `SELECT id, repo_id, step FROM finalizations
+       WHERE spec_id = $1 AND state = 'blocked' AND blocked_reason = 'tests-removed' ORDER BY id`,
+      [specId],
+    );
+    if (finals.rows.length > 0) {
+      if (spec.state !== "finalizing") {
+        return refused(
+          `${formatDisplayId("spec", specId)} is ${spec.state}, not finalizing`,
+        );
+      }
+      const run = await client.query<{ removed: unknown }>(
+        `SELECT output->'removedTests' AS removed FROM runs
+         WHERE spec_id = $1 AND ticket_id IS NULL AND result = 'tests-removed'
+         ORDER BY id DESC LIMIT 1`,
+        [specId],
+      );
+      const approved = testNamesFrom(run.rows[0]?.removed);
+      if (approved.length === 0) {
+        return refused(
+          "the wrap-up run that found the missing tests has no record of which ones they were",
+        );
+      }
+      for (const row of finals.rows) {
+        await client.query(
+          "UPDATE finalizations SET state = 'active', blocked_reason = NULL,\n             job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1",
+          [row.id],
+        );
+        await enqueueFinalJob(
+          client,
+          { specId, repoId: row.repo_id },
+          row.step,
+          { approvedRemoved: approved },
+        );
+      }
+      await recordAction(
+        client,
+        "approve-removed-tests",
+        { specId },
+        { tests: approved },
+      );
+      return { status: "ok", approved };
+    }
+
+    if (spec.state !== "paused" || spec.pause_reason !== "tests-removed") {
+      return refused(
+        `only a spec paused or blocked by tests-removed can be approved; this one is ${spec.state}${spec.pause_reason ? ` (${spec.pause_reason})` : ""}`,
+      );
+    }
+    const run = await client.query<{
+      repo_id: number;
+      removed: unknown;
+    }>(
+      `SELECT repo_id, output->'removedTests' AS removed FROM runs
+       WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'update-branch' AND result = 'tests-removed'
+       ORDER BY id DESC LIMIT 1`,
+      [specId],
+    );
+    const approved = testNamesFrom(run.rows[0]?.removed);
+    if (approved.length === 0) {
+      return refused(
+        "the update-branch run that found the missing tests has no record of which ones they were",
+      );
+    }
+    const allowed = specTransition(spec.state, "resume");
+    if (!allowed.ok) return refused(allowed.reason);
+    const finalsExist = await client.query(
+      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
+      [specId],
+    );
+    const dest = specResumeTarget({
+      hasFinalizations: (finalsExist.rowCount ?? 0) > 0,
+      pullStates: (
+        await client.query<{ state: "open" | "closed" | "merged" }>(
+          "SELECT state FROM pull_requests WHERE spec_id = $1",
+          [specId],
+        )
+      ).rows.map((row) => row.state),
+    });
+    await client.query(
+      "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
+      [specId, dest],
+    );
+    const repo = await client.query<{ default_sha: string | null }>(
+      "SELECT default_sha FROM repos WHERE id = $1",
+      [run.rows[0]?.repo_id],
+    );
+    const mainSha = repo.rows[0]?.default_sha;
+    if (mainSha && run.rows[0]?.repo_id) {
+      await enqueueUpdateBranch(client, {
+        specId,
+        repoId: run.rows[0].repo_id,
+        mainSha,
+        approvedRemoved: approved,
+      });
+    }
+    await recordAction(
+      client,
+      "approve-removed-tests",
+      { specId },
+      { tests: approved },
+    );
+    await schedulePass(client, specId);
+    return { status: "ok", approved };
+  });
+}
+
+async function recheckShaOf(
+  client: pg.PoolClient,
+  where: string,
+  params: unknown[],
+): Promise<string | undefined> {
+  const found = await client.query<{ sha: string | null }>(
+    `SELECT payload->>'toSha' AS sha FROM jobs
+     WHERE payload->>'stage' = 'recheck' AND ${where}
+     ORDER BY id DESC LIMIT 1`,
+    params,
+  );
+  return found.rows[0]?.sha ?? undefined;
+}
+
+export async function approveRecheck(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<ActionResult<{ sha: string }>> {
+  return inTransaction(pool, async (client) => {
+    const ticket = await loadLocked(client, ticketId);
+    if (!ticket) return { status: "no-ticket" };
+    if (
+      ticket.state !== "blocked" ||
+      ticket.blocked_reason !== "recheck-failed"
+    ) {
+      return refused(
+        `only a ticket blocked by recheck-failed can be approved; this one is ${ticket.state}${ticket.blocked_reason ? ` (${ticket.blocked_reason})` : ""}`,
+      );
+    }
+    const sha = await recheckShaOf(client, "(payload->>'ticketId')::int = $1", [
+      ticketId,
+    ]);
+    if (!sha) {
+      return refused(
+        "the Recheck job has no record of which commit it looked at",
+      );
+    }
+    const next = ticketTransition(ticket.state, { type: "approve-recheck" });
+    if (!next.ok || next.state === "blocked")
+      return refused(next.ok ? "unexpected" : next.reason);
+    const merging = ticketTransition(next.state, { type: "checks-passed" });
+    if (!merging.ok || merging.state === "blocked")
+      return refused(merging.ok ? "unexpected" : merging.reason);
+    const allowed = [...new Set([...(ticket.allowed_recheck_shas ?? []), sha])];
+    const updated = await client.query<{ content_version: number }>(
+      `UPDATE tickets SET state = $2, blocked_reason = NULL, allowed_recheck_shas = $3,
+         recheck_pending = false,
+         content_version = content_version + 1,
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
+       WHERE id = $1 RETURNING content_version`,
+      [ticketId, merging.state, allowed],
+    );
+    await snapshotTicket(client, ticketId);
+    await recordAction(
+      client,
+      "approve-recheck",
+      { specId: ticket.spec_id, ticketId },
+      { sha },
+    );
+    await enqueueStageJob(
+      client,
+      {
+        id: ticket.id,
+        specId: ticket.spec_id,
+        repoId: ticket.repo_id,
+        contentVersion: updated.rows[0]?.content_version as number,
+      },
+      "merge",
+    );
+    return { status: "ok", sha };
+  });
+}
+
+export async function approveRecheckForSpec(
+  pool: pg.Pool,
+  specId: number,
+): Promise<ActionResult<{ sha: string }>> {
+  return inTransaction(pool, async (client) => {
+    const exists = await client.query<{
+      state: SpecState;
+      pause_reason: string | null;
+    }>("SELECT state, pause_reason FROM specs WHERE id = $1", [specId]);
+    if (!exists.rows[0]) return { status: "no-ticket" };
+    await lockSpec(client, specId);
+    const spec = (
+      await client.query<{
+        state: SpecState;
+        pause_reason: string | null;
+        allowed_recheck_shas: string[];
+      }>(
+        "SELECT state, pause_reason, allowed_recheck_shas FROM specs WHERE id = $1",
+        [specId],
+      )
+    ).rows[0];
+    if (!spec) return { status: "no-ticket" };
+
+    const finals = await client.query<{
+      id: number;
+      repo_id: number;
+    }>(
+      `SELECT id, repo_id FROM finalizations
+       WHERE spec_id = $1 AND state = 'blocked' AND blocked_reason = 'recheck-failed' ORDER BY id`,
+      [specId],
+    );
+    const sha = await recheckShaOf(
+      client,
+      "(payload->>'specId')::int = $1 AND payload->>'ticketId' IS NULL",
+      [specId],
+    );
+    if (!sha) {
+      return refused(
+        "the Recheck job has no record of which commit it looked at",
+      );
+    }
+    const wrapUp = finals.rows.length > 0;
+    const paused =
+      spec.state === "paused" && spec.pause_reason === "recheck-failed";
+    if (wrapUp && spec.state !== "finalizing") {
+      return refused(
+        `${formatDisplayId("spec", specId)} is ${spec.state}, not finalizing`,
+      );
+    }
+    if (!wrapUp && !paused) {
+      return refused(
+        `only a spec paused or blocked by recheck-failed can be approved; this one is ${spec.state}${spec.pause_reason ? ` (${spec.pause_reason})` : ""}`,
+      );
+    }
+    const allowed = [...new Set([...(spec.allowed_recheck_shas ?? []), sha])];
+    await client.query(
+      "UPDATE specs SET allowed_recheck_shas = $2 WHERE id = $1",
+      [specId, allowed],
+    );
+
+    if (wrapUp) {
+      for (const row of finals.rows) {
+        await client.query(
+          `UPDATE finalizations SET state = 'active', blocked_reason = NULL, step = 'final-merge',
+             job_floor = (SELECT COALESCE(max(id), 0) FROM jobs) WHERE id = $1`,
+          [row.id],
+        );
+        await enqueueFinalJob(
+          client,
+          { specId, repoId: row.repo_id },
+          "final-merge",
+        );
+      }
+      await recordAction(client, "approve-recheck", { specId }, { sha });
+      return { status: "ok", sha };
+    }
+    const run = await client.query<{ repo_id: number }>(
+      `SELECT repo_id FROM runs
+       WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'recheck'
+       ORDER BY id DESC LIMIT 1`,
+      [specId],
+    );
+    const allowedResume = specTransition(spec.state, "resume");
+    if (!allowedResume.ok) return refused(allowedResume.reason);
+    const finalsExist = await client.query(
+      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
+      [specId],
+    );
+    const dest = specResumeTarget({
+      hasFinalizations: (finalsExist.rowCount ?? 0) > 0,
+      pullStates: (
+        await client.query<{ state: "open" | "closed" | "merged" }>(
+          "SELECT state FROM pull_requests WHERE spec_id = $1",
+          [specId],
+        )
+      ).rows.map((row) => row.state),
+    });
+    await client.query(
+      "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
+      [specId, dest],
+    );
+    const repo = await client.query<{ default_sha: string | null }>(
+      "SELECT default_sha FROM repos WHERE id = $1",
+      [run.rows[0]?.repo_id],
+    );
+    const mainSha = repo.rows[0]?.default_sha;
+    if (mainSha && run.rows[0]?.repo_id) {
+      await enqueueUpdateBranch(client, {
+        specId,
+        repoId: run.rows[0].repo_id,
+        mainSha,
+        afterFix: true,
+      });
+    }
+    await recordAction(client, "approve-recheck", { specId }, { sha });
+    await schedulePass(client, specId);
+    return { status: "ok", sha };
+  });
+}
+
 // For any blocked ticket: more paths are added to its approved ones, for the next run. The ticket stays blocked;
 // a retry is a separate decision. (The route checks the paths like the import's `protected_paths_ok`: non-empty text.)
 export async function allowPaths(
@@ -397,8 +820,8 @@ export async function editTicket(
       );
     }
     const current = await client.query(
-      `SELECT t.spec_id, t.title, t.body, t.acceptance_criteria, t.modules, t.allowed_protected_paths, t.type,
-              t.refs, t.environment, t.stories, t.content_version, r.name AS repo
+      `SELECT t.spec_id, t.title, t.body, t.acceptance_criteria, t.modules, t.allowed_protected_paths,
+              t.allowed_removed_tests, t.type, t.refs, t.environment, t.stories, t.content_version, r.name AS repo
        FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
       [ticketId],
     );
@@ -464,6 +887,11 @@ export async function editTicket(
       "allowed_protected_paths",
       edit.protected_paths_ok,
       now.allowed_protected_paths,
+    );
+    change(
+      "allowed_removed_tests",
+      edit.removed_tests_ok,
+      now.allowed_removed_tests,
     );
     if (changes.length === 0) {
       return {

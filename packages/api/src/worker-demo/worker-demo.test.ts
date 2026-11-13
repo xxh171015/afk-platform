@@ -62,7 +62,34 @@ function runWorker(opts: Parameters<typeof startWorker>[0]) {
 // The test command counts tests from a file in the repo (3 unless the work says otherwise) and fails on BROKEN.
 const FLAKY_FAIL = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"><failure message="boom"/></testcase></testsuite></testsuites>`;
 const FLAKY_PASS = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"/></testsuite></testsuites>`;
+const TWO_FAIL = `<testsuites tests="2"><testsuite name="a" tests="2" skipped="0"><testcase file="src/a.test.ts" classname="orders" name="exports"><failure message="boom">stack a</failure></testcase><testcase file="src/b.test.ts" classname="orders" name="imports"><failure message="nope">stack b</failure></testcase></testsuite></testsuites>`;
+const TWO_FAIL_CASES = [
+  {
+    name: "exports",
+    classname: "orders",
+    file: "src/a.test.ts",
+    message: "boom\nstack a",
+  },
+  {
+    name: "imports",
+    classname: "orders",
+    file: "src/b.test.ts",
+    message: "nope\nstack b",
+  },
+];
+const NAMED_BOTH =
+  '<testsuites tests="2"><testsuite name="a" tests="2" skipped="0"><testcase classname="suite" name="kept"/><testcase classname="suite" name="gone"/></testsuite></testsuites>';
+const NAMED_KEPT =
+  '<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="suite" name="kept"/></testsuite></testsuites>';
 const COUNT_TESTS =
+  "if [ -f NAMED ]; then mkdir -p reports; " +
+  "if [ -f DROP ]; then " +
+  `echo ${Buffer.from(NAMED_KEPT).toString("base64")} | base64 -d > reports/junit.xml; ` +
+  "else " +
+  `echo ${Buffer.from(NAMED_BOTH).toString("base64")} | base64 -d > reports/junit.xml; ` +
+  "fi; exit 0; fi; " +
+  "if [ -f TWOFAIL ] || { [ -f from-a ] && [ -f from-b ] && [ ! -f SETTLED ]; }; then mkdir -p reports; " +
+  `echo ${Buffer.from(TWO_FAIL).toString("base64")} | base64 -d > reports/junit.xml; exit 1; fi; ` +
   "if [ -f FLAKY ]; then mkdir -p reports; if [ -f .gate-tried ]; then " +
   `echo ${Buffer.from(FLAKY_PASS).toString("base64")} | base64 -d > reports/junit.xml; exit 0; ` +
   "else touch .gate-tried; " +
@@ -212,7 +239,11 @@ function deps(
       new FakeAgentRunner(slotDir, async (ctx) => {
         const custom = await over.script?.(ctx);
         if (custom) return custom;
-        if (ctx.stage === "review" || ctx.stage === "final-review")
+        if (
+          ctx.stage === "review" ||
+          ctx.stage === "final-review" ||
+          ctx.stage === "recheck"
+        )
           return { output: PASS };
         return {
           files: {
@@ -298,7 +329,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     // the ticket branches were pushed, with the traceability trailers on the agent's commits
     for (const [id, run] of [
       ["T-1", "R-1"],
-      ["T-2", "R-6"], // a review is two Runs, one per axis
+      ["T-2", "R-5"], // ticket review is one Spec-axis Run
     ]) {
       const body = gitOut(origin, [
         "log",
@@ -332,12 +363,11 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       heartbeatMs: 50,
     });
 
-    // a review is two agent runs, one per axis, each with the prompt of its axis
+    // ticket-level review is Spec only; final-review is still both axes
     expect(seen.map((s) => s.stage).sort()).toEqual([
       "final-review",
       "final-review",
       "implement",
-      "review",
       "review",
     ]);
     for (const s of seen) {
@@ -350,10 +380,13 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     }
     expect(
       seen.filter((s) => s.stage === "review").map((s) => s.prompt),
+    ).toEqual([composePrompt(promptFor("review", { axis: "spec" }))]);
+    expect(
+      seen.filter((s) => s.stage === "final-review").map((s) => s.prompt),
     ).toEqual(
       expect.arrayContaining([
-        composePrompt(promptFor("review", { axis: "standards" })),
-        composePrompt(promptFor("review", { axis: "spec" })),
+        composePrompt(promptFor("final-review", { axis: "standards" })),
+        composePrompt(promptFor("final-review", { axis: "spec" })),
       ]),
     );
     // the agent reads the ticket file the API shows, byte for byte
@@ -367,7 +400,6 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     );
     expect(runs.rows.filter((r) => r.prompt).map((r) => r.stage)).toEqual([
       "implement",
-      "review",
       "review",
       "final-review",
       "final-review",
@@ -394,8 +426,99 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   const isSpecAxis = (prompt: string) =>
     prompt.includes("阶段：review，Spec 轴");
 
-  it("reviews a ticket on two axes at once, fixes what the Spec axis asks for with both results at hand", async () => {
+  it("Rechecks a review-fix that changed an existing test assertion", async () => {
+    seed.commit(
+      {
+        "src/a.ts": "export const n = 1;\n",
+        "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+      },
+      "existing tests",
+    );
+    gitOrThrow(seed.dir, ["push", "--quiet", origin, "HEAD:refs/heads/main"]);
     await confirmedSpec([ticket("a")]);
+    let recheckCtx: string | undefined;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") {
+          const files: Record<string, string> = {
+            "src/a.ts": "export const n = 1;\nexport const extra = 2;\n",
+          };
+          return { files, message: "add with tests", output: DONE };
+        }
+        if (ctx.stage === "review") return { output: MUST_FIX };
+        if (ctx.stage === "review-fix") {
+          const files: Record<string, string> = {
+            "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n',
+          };
+          return { files, message: "flip assertion", output: DONE };
+        }
+        if (ctx.stage === "recheck") {
+          recheckCtx = ctx.context("recheck.json");
+          return { output: PASS };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const stages = await db.pool.query(
+      "SELECT stage FROM runs WHERE ticket_id = 1 ORDER BY id",
+    );
+    expect(stages.rows.map((row) => row.stage)).toEqual([
+      "implement",
+      "gate",
+      "review",
+      "review-fix",
+      "gate",
+      "recheck",
+      "merge",
+    ]);
+    expect(recheckCtx).toContain("src/a.test.ts");
+  });
+
+  it("on the default spec-only ticket review, review-fix sees only the Spec axis", async () => {
+    await confirmedSpec([ticket("a")]);
+    let fixSaw: unknown;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "review") return { output: MUST_FIX };
+        if (ctx.stage === "review-fix") {
+          fixSaw = JSON.parse(ctx.context("review.json") as string);
+          return {
+            files: { "src/more.ts": "export const more = 1;\n" },
+            message: "do what the ticket asked",
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const reviews = await db.pool.query(
+      "SELECT axis, attempt, result FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(reviews.rows).toEqual([{ axis: "spec", attempt: 1, result: "fix" }]);
+    expect(fixSaw).toMatchObject({
+      verdict: "fix",
+      mustFix: [{ axis: "spec", file: "src/a.ts" }],
+      spec: { scopeCreep: ["an extra flag"] },
+    });
+    expect(fixSaw).not.toHaveProperty("standards");
+  });
+
+  it("reviews a ticket on two axes at once, fixes what the Spec axis asks for with both results at hand", async () => {
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     let fixSaw: unknown;
     const executor = deps({
       script: (ctx) => {
@@ -446,7 +569,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 
   it("a Standards review that names no sources is invalid-output", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     await runWorker({
       api: workerFor(),
       executor: deps({
@@ -476,7 +599,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 
   it("records a CONTRIBUTING.md hard rule as a must-fix with that file in the Run's sources", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     await runWorker({
       api: workerFor(),
       executor: deps({
@@ -524,7 +647,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
   });
 
   it("takes the failure of one axis as the failure of the whole review, and leaves no branch of the axes behind", async () => {
-    await confirmedSpec([ticket("a")]);
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
     const executor = deps({
       script: (ctx) =>
         ctx.stage === "review" && isSpecAxis(ctx.prompt)
@@ -592,8 +715,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     expect(runs.rows.map((r) => [r.stage, r.result])).toEqual([
       ["implement", "done"],
       ["gate", "passed"],
-      ["review", "pass"], // Standards
-      ["review", "pass"], // Spec
+      ["review", "pass"],
       ["merge", "merged"],
       ["final-review", "pass"],
       ["final-review", "pass"],
@@ -614,9 +736,9 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     const findings = await db.pool.query(
       "SELECT kind, resolution FROM findings",
     );
-    // each axis of the ticket's review and of the overall review left a suggestion for the acceptance pack
+    // the ticket's Spec-axis review and both axes of the overall review left a suggestion for the pack
     expect(findings.rows).toEqual(
-      Array(4).fill({ kind: "suggestion", resolution: "acceptance-pack" }),
+      Array(3).fill({ kind: "suggestion", resolution: "acceptance-pack" }),
     );
   });
 
@@ -663,7 +785,6 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "implement:done",
       "gate:passed",
       "review:pass",
-      "review:pass",
       "merge:merged",
       "final-review:pass",
       "final-review:pass",
@@ -687,6 +808,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
         if (ctx.stage === "gate-fix") {
           // the fix reads what the gate said
           expect(ctx.context("failure/gate.log")).toContain("test failed");
+          expect(ctx.context("failure/cases.json")).toBeUndefined();
           return { remove: ["BROKEN"], output: DONE };
         }
         return undefined;
@@ -708,11 +830,70 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "gate-fix:done",
       "gate:passed",
       "review:pass",
-      "review:pass",
       "merge:merged",
       "final-review:pass",
       "final-review:pass",
     ]);
+  });
+
+  it("hands gate-fix the still-failing cases after a rerun", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { TWOFAIL: "x\n", "src/a.ts": "a\n" }, output: DONE };
+        if (ctx.stage === "gate-fix") {
+          expect(
+            JSON.parse(ctx.context("failure/cases.json") as string),
+          ).toEqual(TWO_FAIL_CASES);
+          expect(ctx.context("failure/gate.log")).toContain("test failed");
+          return { remove: ["TWOFAIL"], output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+  });
+
+  it("hands merge-fix the still-failing cases of a candidate gate", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") {
+          const which = ctx.branch.endsWith("T-1") ? "a" : "b";
+          return {
+            files: {
+              [`from-${which}`]: "x\n",
+              [`src/${ctx.branch.split("/").at(-1)}.ts`]:
+                "export const n = 1;\n",
+            },
+            output: DONE,
+          };
+        }
+        if (ctx.stage === "merge-fix") {
+          expect(
+            JSON.parse(ctx.context("failure/cases.json") as string),
+          ).toEqual(TWO_FAIL_CASES);
+          return { files: { SETTLED: "1\n" }, output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
   });
 
   it("blocks a ticket whose agent gives up, and starts nothing behind it", async () => {
@@ -1737,6 +1918,38 @@ describe("the test count guard", { timeout: 60_000 }, () => {
     );
   });
 
+  it("fails the gate by missing names when a test is deleted and another is added, until a person approves", async () => {
+    await confirmedSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    await work({
+      script: (ctx) => {
+        if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-1`) {
+          const files: Record<string, string> = { NAMED: "\n" };
+          return { files, output: DONE };
+        }
+        if (ctx.stage === "implement" && ctx.branch === `agent/${ID}/T-2`) {
+          const files: Record<string, string> = { NAMED: "\n", DROP: "\n" };
+          return {
+            files,
+            message: "drop a test",
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:blocked/tests-removed"]);
+    const gates = await db.pool.query(
+      "SELECT result, output FROM runs WHERE ticket_id = 2 AND stage = 'gate' ORDER BY id",
+    );
+    expect(gates.rows[0].result).toBe("tests-removed");
+    expect(gates.rows[0].output.removedTests).toEqual([
+      { classname: "suite", name: "gone" },
+    ]);
+    expect((await post("/tickets/2/approve-removed-tests")).status).toBe(200);
+    await work();
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+  });
+
   it("does not hold a ticket's branch to tests another ticket merged after it started", {
     timeout: 60_000,
   }, async () => {
@@ -1990,6 +2203,85 @@ describe("what the project says about a run", { timeout: 60_000 }, () => {
     expect(new Set(seen)).toEqual(new Set(["project-model"]));
   });
 
+  it("uses stageModels.standards on both layers' Standards runs, and the default model on Spec and implement", async () => {
+    await confirmedSpec([ticket("a")], {
+      defaultModel: "default-model",
+      ticketReview: "both",
+      stageModels: { standards: "standards-model" },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const rows = (
+      await db.pool.query<{
+        stage: string;
+        axis: string | null;
+        model: string | null;
+      }>(
+        "SELECT stage, axis, model FROM runs WHERE stage IN ('implement', 'review', 'final-review') ORDER BY id",
+      )
+    ).rows;
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { stage: "implement", axis: null, model: "default-model" },
+        { stage: "review", axis: "standards", model: "standards-model" },
+        { stage: "review", axis: "spec", model: "default-model" },
+        { stage: "final-review", axis: "standards", model: "standards-model" },
+        { stage: "final-review", axis: "spec", model: "default-model" },
+      ]),
+    );
+    expect(rows).toHaveLength(5);
+  });
+
+  it("uses stageModels merge-fix on the merge-fix Run and the default model on implement", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      defaultModel: "default-model",
+      stageModels: { "merge-fix": "merge-model" },
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") {
+          return { files: { "shared.txt": `${ctx.branch}\n` }, output: DONE };
+        }
+        if (ctx.stage === "merge-fix") {
+          git(ctx.dir, [
+            "fetch",
+            "--quiet",
+            ".",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
+          ]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
+          return { files: { "shared.txt": "settled\n" }, output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    const models = (
+      await db.pool.query<{ stage: string; model: string | null }>(
+        "SELECT stage, model FROM runs WHERE stage IN ('implement', 'merge-fix') ORDER BY id",
+      )
+    ).rows;
+    expect(models.filter((row) => row.stage === "implement")).toEqual([
+      { stage: "implement", model: "default-model" },
+      { stage: "implement", model: "default-model" },
+    ]);
+    expect(models.filter((row) => row.stage === "merge-fix")).toEqual([
+      { stage: "merge-fix", model: "merge-model" },
+    ]);
+  });
+
   it("uploads Cursor's raw event lines to the Run's log, without the secrets", async () => {
     await confirmedSpec([ticket("a")]);
     const secret = "key_abcdef0123456789";
@@ -2022,6 +2314,190 @@ describe("what the project says about a run", { timeout: 60_000 }, () => {
     // a line is cut to a sensible size instead of filling the log
     expect(text.length).toBeLessThan(100_000);
     expect(text).toContain("[line cut]");
+  });
+});
+
+describe("token usage on a run", { timeout: 60_000 }, () => {
+  const usageLine = (n: number) =>
+    JSON.stringify({
+      type: "result",
+      duration_api_ms: 1000 + n,
+      cli_version: "2026.10.22-27dcf5f",
+      usage: {
+        inputTokens: n,
+        outputTokens: n + 1,
+        cacheReadTokens: n + 2,
+        cacheWriteTokens: n + 3,
+      },
+    });
+
+  const withUsage: Script = (ctx) => {
+    const rawLines = [usageLine(ctx.stage === "review" ? 50 : 10)];
+    if (ctx.stage === "review" || ctx.stage === "final-review")
+      return { output: PASS, rawLines };
+    return {
+      files: {
+        [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,
+      },
+      message: `${ctx.stage} on ${ctx.branch}`,
+      output: DONE,
+      rawLines,
+    };
+  };
+
+  it("stores usage, API duration and CLI version from a result line", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps({ script: withUsage }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const implement = await fetch(`${api.url}/runs/1`).then((r) => r.json());
+    expect(implement).toMatchObject({
+      stage: "implement",
+      tokenUsage: {
+        inputTokens: 10,
+        outputTokens: 11,
+        cacheReadTokens: 12,
+        cacheWriteTokens: 13,
+      },
+      durationApiMs: 1010,
+      cursorCliVersion: "2026.10.22-27dcf5f",
+    });
+    const reviews = (
+      await db.pool.query<{ id: number; axis: string }>(
+        "SELECT id, axis FROM runs WHERE stage = 'review' ORDER BY axis",
+      )
+    ).rows;
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]?.axis).toBe("spec");
+    for (const row of reviews) {
+      const body = await fetch(`${api.url}/runs/${row.id}`).then((r) =>
+        r.json(),
+      );
+      expect(body.tokenUsage).toEqual({
+        inputTokens: 50,
+        outputTokens: 51,
+        cacheReadTokens: 52,
+        cacheWriteTokens: 53,
+      });
+    }
+    const spec = await fetch(`${api.url}/specs/1`).then((r) => r.json());
+    expect(spec.usageByStage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "implement",
+          inputTokens: 10,
+          cacheReadTokens: 12,
+        }),
+        expect.objectContaining({
+          stage: "review",
+          inputTokens: 50,
+          cacheReadTokens: 52,
+        }),
+        expect.objectContaining({ stage: "final-review" }),
+      ]),
+    );
+    const finalReviews = (
+      await db.pool.query<{ id: number }>(
+        "SELECT id FROM runs WHERE stage = 'final-review'",
+      )
+    ).rows;
+    expect(finalReviews.length).toBeGreaterThanOrEqual(2);
+    for (const row of finalReviews) {
+      const body = await fetch(`${api.url}/runs/${row.id}`).then((r) =>
+        r.json(),
+      );
+      expect(body.tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 11,
+        cacheReadTokens: 12,
+        cacheWriteTokens: 13,
+      });
+    }
+  });
+
+  it("leaves usage empty when the stream has no result line", async () => {
+    await confirmedSpec([ticket("a")]);
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const implement = await fetch(`${api.url}/runs/1`).then((r) => r.json());
+    expect(implement.tokenUsage).toBeNull();
+    expect(implement.durationApiMs).toBeNull();
+  });
+
+  it("keeps usage when the agent finished and the push then failed", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({ script: withUsage });
+    const real = executor.push;
+    executor.push = (request, token) => {
+      if (!request.target.startsWith("refs/heads/agent/"))
+        return real(request, token);
+      return {
+        ok: false,
+        error:
+          "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+      };
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const implement = await fetch(`${api.url}/runs/1`).then((r) => r.json());
+    expect(implement.result).toBe("job-failed");
+    expect(implement.tokenUsage).toEqual({
+      inputTokens: 10,
+      outputTokens: 11,
+      cacheReadTokens: 12,
+      cacheWriteTokens: 13,
+    });
+    expect(implement.cursorCliVersion).toBe("2026.10.22-27dcf5f");
+  });
+
+  it("keeps usage on both review axes when the spec axis then fails infrastructure", async () => {
+    await confirmedSpec([ticket("a")], { ticketReview: "both" });
+    await runWorker({
+      api: workerFor(),
+      executor: deps({
+        script: (ctx) => {
+          if (ctx.stage === "review" && ctx.branch.includes("review-spec/")) {
+            return {
+              error: { kind: "other", message: "sandbox died" },
+              rawLines: [usageLine(50)],
+            };
+          }
+          return withUsage(ctx);
+        },
+      }),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const reviews = (
+      await db.pool.query<{ axis: string | null; token_usage: unknown }>(
+        "SELECT axis, token_usage FROM runs WHERE stage = 'review' ORDER BY axis",
+      )
+    ).rows;
+    expect(new Set(reviews.map((row) => row.axis))).toEqual(
+      new Set(["spec", "standards"]),
+    );
+    expect(reviews.length).toBeGreaterThanOrEqual(2);
+    for (const row of reviews) {
+      expect(row.token_usage).toEqual({
+        inputTokens: 50,
+        outputTokens: 51,
+        cacheReadTokens: 52,
+        cacheWriteTokens: 53,
+      });
+    }
   });
 });
 
@@ -2093,58 +2569,101 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
     expect(agentPushes()).toBe(3);
   });
 
-  it("retries a disconnected final-fix push in the same job, without running the agent again", async () => {
-    await confirmedSpec([ticket("a")]);
-    let finalFixRuns = 0;
-    const executor = deps({
-      script: (ctx) => {
-        if (ctx.stage === "final-review")
-          return {
-            output: {
-              verdict: "fix",
-              mustFix: [
-                {
-                  file: "src/a.ts",
-                  line: 1,
-                  problem: "a and b name the same thing differently",
-                },
-              ],
-              suggestions: [],
-              uncertainties: [],
-              sources: ["AGENTS.md"],
-            },
-          };
-        if (ctx.stage === "final-fix") {
-          finalFixRuns += 1;
-          return {
-            files: { "src/shared-name.ts": "export const name = 1;\n" },
-            output: DONE,
-          };
-        }
-        return undefined;
-      },
-    });
-    const real = executor.push;
-    let finalPushes = 0;
-    executor.push = (request, token) => {
-      if (!request.target.includes("S-1-final")) return real(request, token);
-      finalPushes += 1;
-      if (finalPushes <= 2) return { ok: false, error: CONNECTION };
-      return real(request, token);
-    };
-    executor.sleep = async () => {};
-    await runWorker({
-      api: workerFor(),
-      executor,
-      stopWhenIdle: true,
-      heartbeatMs: 20,
-    });
-    expect(finalFixRuns).toBe(1);
-    expect(finalPushes).toBe(3);
-    expect(
-      (await db.pool.query("SELECT step, state FROM finalizations")).rows[0],
-    ).toEqual({ step: "final-merge", state: "done" });
-  });
+  it.each([
+    ["commit_refs", "remote: fatal error in commit_refs"],
+    [
+      "an unexplained remote-rejected",
+      `! [remote rejected] agent/${ID}/T-1 -> agent/${ID}/T-1 (failure)`,
+    ],
+  ])(
+    "retries a %s push in the same job, without running the agent again",
+    async (_kind, error) => {
+      await confirmedSpec([ticket("a")]);
+      let implementRuns = 0;
+      const executor = deps({
+        script: (ctx) => {
+          if (ctx.stage === "implement") implementRuns += 1;
+          return undefined;
+        },
+      });
+      const agentPushes = withAgentRemote(executor, (attempt) =>
+        attempt === 1 ? { ok: false, error } : "push",
+      );
+      await runWorker({
+        api: workerFor(),
+        executor,
+        stopWhenIdle: true,
+        heartbeatMs: 20,
+      });
+      expect(await stateOf()).toEqual(["1:done"]);
+      expect(implementRuns).toBe(1);
+      expect(agentPushes()).toBe(2);
+    },
+  );
+
+  it.each([
+    ["disconnected", CONNECTION, 2],
+    ["commit_refs", "remote: fatal error in commit_refs", 1],
+    [
+      "unexplained remote-rejected",
+      `! [remote rejected] agent/${ID}/S-1-final -> agent/${ID}/S-1-final (failure)`,
+      1,
+    ],
+  ] as const)(
+    "retries a %s final-fix push in the same job, without running the agent again",
+    async (_kind, error, failTimes) => {
+      await confirmedSpec([ticket("a")]);
+      let finalFixRuns = 0;
+      const executor = deps({
+        script: (ctx) => {
+          if (ctx.stage === "final-review")
+            return {
+              output: {
+                verdict: "fix",
+                mustFix: [
+                  {
+                    file: "src/a.ts",
+                    line: 1,
+                    problem: "a and b name the same thing differently",
+                  },
+                ],
+                suggestions: [],
+                uncertainties: [],
+                sources: ["AGENTS.md"],
+              },
+            };
+          if (ctx.stage === "final-fix") {
+            finalFixRuns += 1;
+            return {
+              files: { "src/shared-name.ts": "export const name = 1;\n" },
+              output: DONE,
+            };
+          }
+          return undefined;
+        },
+      });
+      const real = executor.push;
+      let finalPushes = 0;
+      executor.push = (request, token) => {
+        if (!request.target.includes("S-1-final")) return real(request, token);
+        finalPushes += 1;
+        if (finalPushes <= failTimes) return { ok: false, error };
+        return real(request, token);
+      };
+      executor.sleep = async () => {};
+      await runWorker({
+        api: workerFor(),
+        executor,
+        stopWhenIdle: true,
+        heartbeatMs: 20,
+      });
+      expect(finalFixRuns).toBe(1);
+      expect(finalPushes).toBe(failTimes + 1);
+      expect(
+        (await db.pool.query("SELECT step, state FROM finalizations")).rows[0],
+      ).toEqual({ step: "final-merge", state: "done" });
+    },
+  );
 
   it("finishes the job after the remote fails to connect three times, without running the agent again", async () => {
     await confirmedSpec([ticket("a")]);
@@ -2173,6 +2692,10 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
     [
       "non-fast-forward",
       "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
+    ],
+    [
+      "fetch first",
+      "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (fetch first)",
     ],
     [
       "a protected branch",

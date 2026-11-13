@@ -201,6 +201,56 @@ describe("plat blocked of a stuck ticket", () => {
     expect(text).toContain("plat ticket retry T-12 --mode continue");
   });
 
+  it("prints approve-recheck for recheck-failed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          blockedReason: "recheck-failed",
+          structuredBrief: {
+            reason: "recheck-failed",
+            step: "recheck",
+            summary: "Recheck 不是 pass",
+            evidence: {},
+            recommendedAction: "确认这次改动可以留下，批准后从合并接着跑",
+            commands: [
+              {
+                label: "批准这次改动",
+                command: "plat ticket approve-recheck T-12",
+              },
+            ],
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain("plat ticket approve-recheck T-12");
+  });
+
+  it("prints approve-removed-tests for tests-removed", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          blockedReason: "tests-removed",
+          structuredBrief: {
+            reason: "tests-removed",
+            step: "gate",
+            summary: "删了测试",
+            evidence: { lastLogLines: "removed tests: suite gone" },
+            recommendedAction: "确认这些测试可以去掉，批准后从门禁接着跑",
+            commands: [
+              {
+                label: "批准删掉的测试",
+                command: "plat ticket approve-removed-tests T-12",
+              },
+            ],
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain("plat ticket approve-removed-tests T-12");
+  });
+
   it("prints the append import command for contract-change-needed", () => {
     const text = blockedText({
       ...emptyQueue,
@@ -360,6 +410,39 @@ describe("the e2e before the pull requests", () => {
     expect(lines.join("\n")).toContain("[unverified] it downloads");
   });
 
+  it("puts 合并前要你定的 first in the pack", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: [], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [],
+      cancelledTickets: [],
+      needsDecision: [
+        {
+          kind: "needs-human",
+          id: "R-1#0",
+          source: "T-1 implement",
+          text: "reload skips the filter",
+        },
+        {
+          kind: "deferred",
+          id: "R-1#1",
+          source: "T-1 implement",
+          text: "openapi extra field",
+          ref: "new",
+        },
+      ],
+    } as never);
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("acceptance pack:");
+    expect(lines[1]).toBe("  合并前要你定的:");
+    expect(text).toContain(
+      "[needs-human] R-1#0 T-1 implement: reload skips the filter",
+    );
+    expect(text).toContain(
+      "[deferred] R-1#1 T-1 implement: openapi extra field (new)",
+    );
+  });
+
   it("lists unstable tests that passed on rerun, apart from findings", () => {
     const text = acceptancePackText({
       mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
@@ -379,7 +462,20 @@ describe("the e2e before the pull requests", () => {
           tickets: [],
           findings: [],
           scopeCreep: [],
-          uncertainties: [],
+          decisions: [
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "conflict",
+              text: "ticket vs User Story 6; picked the story",
+            },
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "choice",
+              text: "named it export",
+            },
+          ],
           protectedPathApprovals: [],
           standardsSources: [],
         },
@@ -389,5 +485,12 @@ describe("the e2e before the pull requests", () => {
     expect(text).toContain("unstable tests (passed on rerun):");
     expect(text).toContain("orders flakes then passes");
     expect(text).not.toMatch(/findings:[\s\S]*flakes then passes/);
+    expect(text).toContain("decisions:");
+    expect(text).toContain(
+      "[conflict] T-1 implement R-2: ticket vs User Story 6; picked the story",
+    );
+    expect(text).toContain("choice: 1, workaround: 0");
+    expect(text).not.toContain("named it export");
+    expect(text).not.toContain("uncertainties:");
   });
 });

@@ -1,11 +1,14 @@
 import {
   type AcceptancePackView,
+  decisionTally,
   LOCATE_REASON_LABELS,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
   pauseReasonLabel,
   pullPhrase,
+  type StageModels,
   type StructuredBrief,
+  type TicketReviewMode,
 } from "@afk/shared";
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
@@ -15,6 +18,8 @@ export function projectText(project: {
   name: string;
   defaultAgent: string | null;
   feishuChatId?: string | null;
+  ticketReview?: TicketReviewMode;
+  stageModels?: StageModels;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
@@ -24,6 +29,14 @@ export function projectText(project: {
   if (project.feishuChatId) {
     lines.push(`feishu-chat: ${project.feishuChatId}`);
   }
+  if (project.ticketReview) {
+    lines.push(`ticket-review: ${project.ticketReview}`);
+  }
+  const stageModels = Object.entries(project.stageModels ?? {})
+    .filter(([, model]) => model)
+    .map(([role, model]) => `${role}=${model}`)
+    .join(", ");
+  if (stageModels) lines.push(`stage-models: ${stageModels}`);
   return lines.join("\n");
 }
 
@@ -585,15 +598,48 @@ const brokenOrderLine = (b: { repo: string; skipped: string[] }) =>
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
+function decisionRows(
+  items: {
+    kind: string;
+    source: string;
+    run: string;
+    text: string;
+    ref?: string;
+  }[],
+): string[] {
+  const tally = decisionTally(items);
+  const rows = tally.listed.map((item) => {
+    const ref = item.ref ? ` (${item.ref})` : "";
+    return `      [${item.kind}] ${item.source} ${item.run}: ${item.text}${ref}`;
+  });
+  if (tally.choice > 0 || tally.workaround > 0) {
+    rows.push(`      choice: ${tally.choice}, workaround: ${tally.workaround}`);
+  }
+  return rows;
+}
+
 // What a person reads before merging: the order to merge in, then a section for each repo (its pull request, which
-// criteria are backed by a passing test, what the reviews said and what the agents were unsure of, its gate, and
+// criteria are backed by a passing test, what the reviews said and the decisions agents made, its gate, and
 // approved exceptions), and the tickets that were cancelled.
+function needsDecisionLines(pack: AcceptancePackView): string[] {
+  const items = pack.needsDecision ?? [];
+  if (items.length === 0) return [];
+  return [
+    "  合并前要你定的:",
+    ...items.map((item) => {
+      const ref = item.ref ? ` (${item.ref})` : "";
+      return `    [${item.kind}] ${item.id} ${item.source}: ${item.text}${ref}`;
+    }),
+  ];
+}
+
 export function acceptancePackText(pack: AcceptancePackView): string {
   const order = pack.mergeOrder;
   const integration = pack.integration;
   const phrase = pullPhrase(pack.hostKind === "gitlab" ? "gitlab" : "github");
   return [
     "acceptance pack:",
+    ...needsDecisionLines(pack),
     // what a person must not miss: the e2e before the pull requests failed and they were let through
     ...(integration?.failedBeforePullRequest
       ? [
@@ -662,10 +708,7 @@ export function acceptancePackText(pack: AcceptancePackView): string {
             (s) => `      ${s.ticket ?? "spec"} ${s.run}: ${s.body}`,
           ),
         ),
-        ...section(
-          "uncertainties",
-          repo.uncertainties.map((u) => `      ${u.source}: ${u.text}`),
-        ),
+        ...section("decisions", decisionRows(repo.decisions ?? [])),
         ...section(
           "gate",
           repo.gate

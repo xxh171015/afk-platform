@@ -53,6 +53,21 @@ describe("the happy path", () => {
       advanceStage({ stage: "gate", outcome: "passed" }, reviewed(fresh)),
     ).toEqual(enqueue("merge", "checks-passed"));
   });
+
+  it("runs Recheck before merge when a post-review change hit existing tests or config", () => {
+    expect(
+      advanceStage(
+        { stage: "gate", outcome: "passed" },
+        { ...reviewed(fresh), recheckPending: true },
+      ),
+    ).toEqual(enqueue("recheck"));
+    expect(
+      advanceStage({ stage: "recheck", outcome: "pass" }, reviewed(fresh)),
+    ).toEqual(enqueue("merge", "checks-passed"));
+    expect(
+      advanceStage({ stage: "recheck", outcome: "fix" }, reviewed(fresh)),
+    ).toEqual(block("recheck-failed"));
+  });
 });
 
 describe("blocking after an agent run", () => {
@@ -94,6 +109,12 @@ describe("the gate", () => {
     expect(
       advanceStage({ stage: "gate", outcome: "contract-copy-mismatch" }, fresh),
     ).toEqual(block("contract-copy-mismatch"));
+  });
+
+  it("blocks on removed tests without spending a gate-fix", () => {
+    expect(
+      advanceStage({ stage: "gate", outcome: "tests-removed" }, fresh),
+    ).toEqual(block("tests-removed"));
   });
 
   it("runs gate-fix once, then blocks gate-failed", () => {
@@ -171,6 +192,15 @@ describe("merge", () => {
     ).toEqual(block("post-merge-gate-failed"));
   });
 
+  it("blocks on removed tests without spending a merge-fix", () => {
+    expect(
+      advanceStage(
+        { stage: "merge", outcome: "tests-removed" },
+        reviewed(fresh),
+      ),
+    ).toEqual(block("tests-removed"));
+  });
+
   it("merge-fix shares the budget between conflicts and candidate gate failures", () => {
     expect(
       advanceStage(
@@ -242,6 +272,7 @@ describe("shape", () => {
       "gate-fix",
       "review-fix",
       "merge-fix",
+      "recheck",
       "e2e",
       "diagnose",
     ]);

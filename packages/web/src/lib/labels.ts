@@ -7,6 +7,7 @@ export const stageLabel: Record<string, string> = {
   "gate-fix": "门禁修复",
   "review-fix": "自审修复",
   "merge-fix": "合并修复",
+  recheck: "Recheck",
   e2e: "端到端测试",
   diagnose: "诊断",
   "final-e2e": "收尾 e2e",

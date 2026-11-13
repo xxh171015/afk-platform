@@ -17,6 +17,10 @@ import {
   parseDisplayId,
   purgedLogMessage,
   SETUP_BRANCH,
+  STAGE_MODEL_KEYS,
+  type StageModels,
+  TICKET_REVIEW_MODES,
+  type TicketReviewMode,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import {
@@ -222,6 +226,12 @@ const toOffset = (value: string): number => {
     throw new InvalidArgumentError("must be a non-negative integer");
   }
   return Number(value);
+};
+const toTicketReview = (value: string): TicketReviewMode => {
+  if (!(TICKET_REVIEW_MODES as readonly string[]).includes(value)) {
+    throw new InvalidArgumentError("must be spec or both");
+  }
+  return value as TicketReviewMode;
 };
 const collect = (value: string, previous: string[] = []) => [
   ...previous,
@@ -448,6 +458,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "override a concurrency or budget default, e.g. repoConcurrency=3 (repeatable)",
       collect,
     )
+    .option(
+      "--ticket-review <mode>",
+      "ticket-level review: spec (default, Spec axis only) or both",
+      toTicketReview,
+    )
+    .option(
+      "--stage-model <name=model>",
+      "model for standards, update-branch, or merge-fix (repeatable; empty clears)",
+      collect,
+    )
     .action(async (name: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const { data, response, error } = await api().POST("/projects", {
@@ -460,6 +480,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           budgetLimit: options.budgetLimit,
           mergePolicy: options.mergePolicy,
           limits: parseLimits(options.limit),
+          ticketReview: options.ticketReview,
+          stageModels: stageModelsFromPairs(options.stageModel),
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -496,6 +518,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--feishu-chat <chat_id>",
       "Feishu group chat_id for this project's notifications (empty clears it)",
     )
+    .option(
+      "--ticket-review <mode>",
+      "ticket-level review: spec (Spec axis only) or both",
+      toTicketReview,
+    )
+    .option(
+      "--stage-model <name=model>",
+      "model for standards, update-branch, or merge-fix (repeatable; empty clears that key)",
+      collect,
+    )
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
@@ -506,10 +538,12 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         budgetLimit: options.budgetLimit,
         limits: parseLimits(options.limit),
         feishuChatId: options.feishuChat as string | undefined,
+        ticketReview: options.ticketReview,
+        stageModels: stageModelsFromPairs(options.stageModel),
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit or --feishu-chat",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit, --feishu-chat, --ticket-review or --stage-model",
         );
       }
       const projectId = toInt(id);
@@ -1668,6 +1702,37 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     });
 
   spec
+    .command("approve-recheck <spec>")
+    .description(
+      "accept the Recheck of a wrap-up or update-branch blocked by recheck-failed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/approve-recheck",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}: approved ${data.sha}; wrap-up or update goes on`);
+    });
+
+  spec
+    .command("approve-removed-tests <spec>")
+    .description(
+      "accept the missing test names of a wrap-up or update-branch blocked by tests-removed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/specs/{id}/approve-removed-tests",
+        { params: { path: { id: specIdOf(id) } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      const names = data.approved
+        .map((n) => (n.classname ? `${n.classname} ${n.name}` : n.name))
+        .join(", ");
+      print(data, `${id}: approved ${names}`);
+    });
+
+  spec
     .command("waive-final <spec>")
     .description(
       "open a spec's pull requests although the e2e before them failed (the acceptance pack says so)",
@@ -1871,6 +1936,37 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         data,
         `approved: ${data.approved.join(", ")}; ${id} goes on from the gate`,
       );
+    });
+  ticketCommands
+    .command("approve-recheck <ticket>")
+    .description("accept the Recheck of a ticket blocked by recheck-failed")
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/approve-recheck",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `approved ${data.sha}; ${id} goes on from the merge`);
+    });
+  ticketCommands
+    .command("approve-removed-tests <ticket>")
+    .description(
+      "accept the missing test names of a ticket blocked by tests-removed",
+    )
+    .action(async (id: string) => {
+      const { data, response, error } = await api().POST(
+        "/tickets/{id}/approve-removed-tests",
+        {
+          params: { path: { id: ticketIdOf(id) } },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      const names = data.approved
+        .map((n) => (n.classname ? `${n.classname} ${n.name}` : n.name))
+        .join(", ");
+      print(data, `approved: ${names}; ${id} goes on from the gate`);
     });
   ticketCommands
     .command("allow-path <ticket> <paths...>")
@@ -2142,6 +2238,32 @@ function specIdOf(text: string): number {
     throw new Failure(`${text} is not a spec id like S-12`);
   }
   return parsed.id;
+}
+
+// --stage-model name=model; empty model clears that key. Other names are refused here so plat
+// does not wait for the API's 400.
+function stageModelsFromPairs(
+  pairs: string[] | undefined,
+): StageModels | undefined {
+  if (!pairs) return undefined;
+  const models: StageModels = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) {
+      throw new Failure(
+        `--stage-model ${pair}: expected name=model (standards, update-branch or merge-fix)`,
+      );
+    }
+    const name = pair.slice(0, eq);
+    const model = pair.slice(eq + 1);
+    if (!(STAGE_MODEL_KEYS as readonly string[]).includes(name)) {
+      throw new Failure(
+        `--stage-model ${pair}: name must be standards, update-branch or merge-fix`,
+      );
+    }
+    models[name as (typeof STAGE_MODEL_KEYS)[number]] = model;
+  }
+  return models;
 }
 
 // --limit name=value, validated by the API against the known limit names.

@@ -515,6 +515,33 @@ describe("plat", () => {
     expect(moved.code).toBe(1);
     expect(moved.stderr).toMatch(/plat repo edit <name>/);
     expect(
+      (await plat("project", "edit", "1", "--ticket-review", "both")).code,
+    ).toBe(0);
+    expect(
+      (await db.pool.query("SELECT ticket_review FROM projects WHERE id = 1"))
+        .rows[0].ticket_review,
+    ).toBe("both");
+    expect(
+      (await plat("project", "edit", "1", "--ticket-review", "off")).code,
+    ).toBe(1);
+    expect(
+      (await plat("project", "edit", "1", "--stage-model", "standards=s")).code,
+    ).toBe(0);
+    expect(
+      (await db.pool.query("SELECT stage_models FROM projects WHERE id = 1"))
+        .rows[0].stage_models,
+    ).toEqual({ standards: "s" });
+    expect(
+      (await plat("project", "edit", "1", "--stage-model", "implement=x")).code,
+    ).toBe(1);
+    expect(
+      (await plat("project", "edit", "1", "--stage-model", "standards=")).code,
+    ).toBe(0);
+    expect(
+      (await db.pool.query("SELECT stage_models FROM projects WHERE id = 1"))
+        .rows[0].stage_models,
+    ).toEqual({});
+    expect(
       (await plat("project", "create", "x", "--contract-path", "a.yaml"))
         .stderr,
     ).toMatch(/plat repo edit <name>/);

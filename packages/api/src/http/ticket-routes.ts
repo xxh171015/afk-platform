@@ -23,6 +23,10 @@ import {
   allowPaths,
   allowSpec,
   approveProtected,
+  approveRecheck,
+  approveRecheckForSpec,
+  approveRemovedTests,
+  approveRemovedTestsForSpec,
   cancelSpec,
   cancelTicket,
   editTicket,
@@ -234,6 +238,8 @@ const RunView = RunRow.extend({
   commits: z.array(z.string()),
   // the standards-source files a Standards review used; null on every other Run
   sources: z.array(z.string()).nullable(),
+  durationApiMs: Id.nullable(),
+  tokenUsage: z.unknown().nullable(),
   repoUrl: z.string(),
   hostKind: z.enum(HOST_KINDS),
 });
@@ -433,6 +439,14 @@ const specRoute = createRoute({
           })
           .nullable(),
         links: z.array(LinkRow),
+        usageByStage: z.array(
+          z.object({
+            stage: z.string(),
+            inputTokens: z.number().int(),
+            outputTokens: z.number().int(),
+            cacheReadTokens: z.number().int(),
+          }),
+        ),
       }),
     ),
     404: reply("No such spec", ErrorReply),
@@ -835,6 +849,76 @@ const approveRoute = createRoute({
   },
 });
 
+const approveRemovedRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/approve-removed-tests",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Approved; the ticket goes on from the gate",
+      z.object({
+        approved: z.array(
+          z.object({ classname: z.string(), name: z.string() }),
+        ),
+      }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply("The ticket is not blocked by tests-removed", ErrorReply),
+  },
+});
+
+const approveRemovedSpecRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/approve-removed-tests",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Approved; the wrap-up or update-branch goes on",
+      z.object({
+        approved: z.array(
+          z.object({ classname: z.string(), name: z.string() }),
+        ),
+      }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply(
+      "The spec is not blocked or paused by tests-removed",
+      ErrorReply,
+    ),
+  },
+});
+
+const approveRecheckRoute = createRoute({
+  method: "post",
+  path: "/tickets/{id}/approve-recheck",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Approved; the ticket goes on from the merge",
+      z.object({ sha: z.string() }),
+    ),
+    404: reply("No such ticket", ErrorReply),
+    409: reply("The ticket is not blocked by recheck-failed", ErrorReply),
+  },
+});
+
+const approveRecheckSpecRoute = createRoute({
+  method: "post",
+  path: "/specs/{id}/approve-recheck",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Approved; the wrap-up or update-branch goes on",
+      z.object({ sha: z.string() }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply(
+      "The spec is not blocked or paused by recheck-failed",
+      ErrorReply,
+    ),
+  },
+});
+
 const allowPathsRoute = createRoute({
   method: "post",
   path: "/tickets/{id}/allow-paths",
@@ -1153,6 +1237,50 @@ export function registerTicketRoutes(
     if (result.status === "refused")
       return c.json({ error: result.message }, 409);
     return c.json({ approved: result.approved }, 200);
+  });
+
+  app.openapi(approveRemovedRoute, async (c) => {
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      approveRemovedTests(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ approved: result.approved }, 200);
+  });
+
+  app.openapi(approveRemovedSpecRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      approveRemovedTestsForSpec(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ approved: result.approved }, 200);
+  });
+
+  app.openapi(approveRecheckRoute, async (c) => {
+    const result = await aroundTicket(context, c.req.valid("param").id, () =>
+      approveRecheck(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such ticket" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ sha: result.sha }, 200);
+  });
+
+  app.openapi(approveRecheckSpecRoute, async (c) => {
+    const result = await aroundSpec(context, c.req.valid("param").id, () =>
+      approveRecheckForSpec(pool, c.req.valid("param").id),
+    );
+    if (result.status === "no-ticket")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ sha: result.sha }, 200);
   });
 
   app.openapi(editRoute, async (c) => {

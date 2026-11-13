@@ -16,7 +16,7 @@
   "status": "done",
   "summary": "一两句话说修了什么",
   "acceptance": {},
-  "uncertainties": ["不确定的点和你自己做的决定；没有就留空数组"]
+  "decisions": []
 }
 </result>
 ```

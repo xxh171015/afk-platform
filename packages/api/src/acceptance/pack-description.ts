@@ -1,4 +1,5 @@
 import {
+  decisionTally,
   formatDisplayId,
   HOST_KIND_LABELS,
   type HostKind,
@@ -24,6 +25,7 @@ export function renderPackSection(
   const spec = formatDisplayId("spec", specId);
   const kind: HostKind = pack.hostKind ?? "github";
   const section = [
+    needsDecisionLines(pack),
     planningDocsLines(pack, repo, kind),
     mergeOrderLines(pack),
     repoLines(pack, repo),
@@ -38,6 +40,7 @@ export function renderPackSection(
   const verified = criteria.filter((c) => c.status === "verified").length;
   const summary = [
     `The acceptance pack for ${spec} ${repo} is too long for a ${HOST_KIND_LABELS[kind]} description.`,
+    needsDecisionLines(pack),
     mergeOrderLines(pack),
     `Acceptance criteria: ${unverified} unverified, ${verified} verified.`,
     `See ${spec} on the platform: ${delivery}`,
@@ -57,6 +60,18 @@ function planningDocsLines(
   return docs.state === "waived"
     ? `## Planning docs\n\n**Left out**: the planning docs did not apply to the default branch and were given up, so this ${phrase} does not carry them.`
     : `## Planning docs\n\nThe first commit of this ${phrase} is the planning docs (glossary, ADRs) the spec was planned with, committed by the platform.`;
+}
+
+function needsDecisionLines(pack: AcceptancePack): string {
+  const items = pack.needsDecision ?? [];
+  if (items.length === 0) return "";
+  const lines = ["## 合并前要你定的"];
+  for (const item of items) {
+    const ref = item.ref ? ` (${item.ref})` : "";
+    const kind = item.kind;
+    lines.push(`- [${kind}] ${item.id} ${item.source}: ${item.text}${ref}`);
+  }
+  return lines.join("\n");
 }
 
 function mergeOrderLines(pack: AcceptancePack): string {
@@ -81,7 +96,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     standardsSourceLines(section),
     gateLines(section),
     flakyTestLines(section),
-    uncertaintyLines(section),
+    decisionLines(section),
   ].filter(Boolean);
   return blocks.join("\n\n");
 }
@@ -162,12 +177,21 @@ function flakyTestLines(section: AcceptancePack["repos"][number]): string {
   ].join("\n");
 }
 
-function uncertaintyLines(section: AcceptancePack["repos"][number]): string {
-  if (section.uncertainties.length === 0) return "";
-  return [
-    "### Uncertainties",
-    ...section.uncertainties.map((item) => `- ${item.source}: ${item.text}`),
-  ].join("\n");
+function decisionLines(section: AcceptancePack["repos"][number]): string {
+  const tally = decisionTally(section.decisions);
+  if (tally.listed.length === 0 && tally.choice === 0 && tally.workaround === 0)
+    return "";
+  const lines = ["### Decisions"];
+  for (const item of tally.listed) {
+    const ref = item.ref ? ` (${item.ref})` : "";
+    lines.push(
+      `- [${item.kind}] ${item.source} ${item.run}: ${item.text}${ref}`,
+    );
+  }
+  if (tally.choice > 0 || tally.workaround > 0) {
+    lines.push(`- choice: ${tally.choice}, workaround: ${tally.workaround}`);
+  }
+  return lines.join("\n");
 }
 
 function integrationLines(pack: AcceptancePack, kind: HostKind): string {

@@ -95,16 +95,21 @@ export type FailureOutcome =
   | { status: "blocked"; failures: number };
 
 export type FailedRunFacts = {
+  tokenUsage?: unknown;
+  durationApiMs?: number;
+  cursorCliVersion?: string;
+  axis?: string;
   orphanRef?: string;
   orphanSha?: string;
 };
 
-// The Run the job started is over, whatever else happens.
+// The Run the job started is over, whatever else happens. Usage from an agent that already ran stays on the Run.
 async function finishRun(
   client: pg.PoolClient,
   job: StageJob,
   error: string,
   run?: FailedRunFacts,
+  extraRuns?: FailedRunFacts[],
 ): Promise<void> {
   const output: Record<string, unknown> = { error };
   if (run?.orphanRef && run.orphanSha) {
@@ -114,9 +119,39 @@ async function finishRun(
   await client.query(
     `UPDATE runs SET finished_at = COALESCE(finished_at, now()), result = 'job-failed',
        duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
-       output = $2::jsonb WHERE job_id = $1`,
-    [job.id, JSON.stringify(output)],
+       duration_api_ms = COALESCE($2, duration_api_ms),
+       cursor_cli_version = COALESCE($3, cursor_cli_version),
+       token_usage = COALESCE($4::jsonb, token_usage),
+       axis = COALESCE($5, axis),
+       output = $6::jsonb WHERE job_id = $1`,
+    [
+      job.id,
+      run?.durationApiMs ?? null,
+      run?.cursorCliVersion ?? null,
+      run?.tokenUsage === undefined ? null : JSON.stringify(run.tokenUsage),
+      run?.axis ?? null,
+      JSON.stringify(output),
+    ],
   );
+  for (const extra of extraRuns ?? []) {
+    await client.query(
+      `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, stage, attempt, axis,
+         duration_api_ms, cursor_cli_version, token_usage, result, output, finished_at)
+       SELECT spec_id, repo_id, ticket_id, ticket_version, stage, attempt, $2,
+         $3, $4, $5::jsonb, 'job-failed', jsonb_build_object('error', $6::text), now()
+       FROM runs WHERE job_id = $1`,
+      [
+        job.id,
+        extra.axis ?? null,
+        extra.durationApiMs ?? null,
+        extra.cursorCliVersion ?? null,
+        extra.tokenUsage === undefined
+          ? null
+          : JSON.stringify(extra.tokenUsage),
+        error,
+      ],
+    );
+  }
   const specId =
     typeof job.payload.specId === "number" ? job.payload.specId : undefined;
   const ticketId =
@@ -196,8 +231,9 @@ export async function recordJobFailure(
   error: string,
   now: Date,
   run?: FailedRunFacts,
+  extraRuns?: FailedRunFacts[],
 ): Promise<FailureOutcome> {
-  await finishRun(client, job, storedJobError(error), run);
+  await finishRun(client, job, storedJobError(error), run, extraRuns);
   await annotatePushFailure(client, job.id, storedJobError(error));
 
   const planning = readPlanningPayload(job);

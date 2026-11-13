@@ -53,6 +53,12 @@ const view = (
       waitingMs: number;
       totalMs: number;
     } | null;
+    usageByStage?: {
+      stage: string;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+    }[];
     mergeOrder?: {
       ordered: string[];
       after: Record<string, string[]>;
@@ -95,6 +101,7 @@ const view = (
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
   leadTime: over.leadTime ?? null,
+  usageByStage: over.usageByStage ?? [],
   links: over.links ?? [],
 });
 
@@ -365,6 +372,15 @@ describe("the spec page", () => {
         unordered: [],
       },
       orderBroken: [],
+      needsDecision: [
+        {
+          kind: "deferred",
+          id: "R-2#1",
+          source: "T-1 implement",
+          text: "openapi extra field",
+          ref: "new",
+        },
+      ],
       repos: [
         {
           repo: "backend",
@@ -415,7 +431,26 @@ describe("the spec page", () => {
               body: "an export flag nobody asked for",
             },
           ],
-          uncertainties: [{ source: "T-1 implement", text: "date format?" }],
+          decisions: [
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "conflict",
+              text: "ticket vs User Story 6; picked the story",
+            },
+            {
+              source: "T-1 implement",
+              run: "R-2",
+              kind: "choice",
+              text: "date format?",
+            },
+            {
+              source: "T-1 gate-fix",
+              run: "R-5",
+              kind: "workaround",
+              text: "skipped drizzle generate",
+            },
+          ],
           protectedPathApprovals: [
             { ticket: "T-1", paths: [".github/ci.yml"] },
           ],
@@ -443,7 +478,7 @@ describe("the spec page", () => {
           ],
           findings: [],
           scopeCreep: [],
-          uncertainties: [],
+          decisions: [],
           protectedPathApprovals: [],
         },
       ],
@@ -511,7 +546,27 @@ describe("the spec page", () => {
       screen.getByText(/an export flag nobody asked for/).closest("ul")
         ?.className,
     ).toBe("scope-creep");
-    expect(screen.getByText(/T-1 implement: date format\?/)).toBeTruthy();
+    expect(screen.getByTestId("pack-needs-decision").textContent).toContain(
+      "合并前要你定的",
+    );
+    expect(screen.getByTestId("pack-needs-decision").textContent).toContain(
+      "openapi extra field",
+    );
+    expect(screen.getByText("决定：")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /冲突 T-1 implement R-2: ticket vs User Story 6; picked the story/,
+      ),
+    ).toBeTruthy();
+    const counted = screen
+      .getByText("小事 1 条，绕过 1 条")
+      .closest("details") as HTMLDetailsElement;
+    expect(counted.open).toBe(false);
+    expect(screen.queryByText("模型不确定的地方：")).toBeNull();
+    fireEvent.click(screen.getByText("小事 1 条，绕过 1 条"));
+    expect(counted.open).toBe(true);
+    expect(within(counted).getByText(/date format\?/)).toBeTruthy();
+    expect(within(counted).getByText(/skipped drizzle generate/)).toBeTruthy();
     expect(screen.getByText(/AGENTS.md, CONTRIBUTING.md/)).toBeTruthy();
     expect(screen.getByText(/门禁：/));
     expect(screen.getByRole("button", { name: /0123456/ })).toBeTruthy();
@@ -789,6 +844,40 @@ describe("the spec page", () => {
     expect(bar.textContent).toContain("门禁");
     expect(bar.textContent).toContain("排队");
     expect(bar.textContent).toContain("等人");
+  });
+
+  it("shows token usage totals by stage on the overview", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            usageByStage: [
+              {
+                stage: "implement",
+                inputTokens: 143000,
+                outputTokens: 33000,
+                cacheReadTokens: 5110000,
+              },
+              {
+                stage: "review",
+                inputTokens: 76000,
+                outputTokens: 15000,
+                cacheReadTokens: 500000,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const usage = await screen.findByTestId("usage-by-stage");
+    expect(usage.textContent).toContain("用量");
+    expect(usage.textContent).toContain("实现");
+    expect(usage.textContent).toContain("输入 143,000");
+    expect(usage.textContent).toContain("缓存读 5,110,000");
+    expect(usage.textContent).toContain("自审");
+    expect(usage.textContent).toContain("输入 76,000");
   });
 
   it("shows the overall review of a finalizing spec", async () => {
@@ -1714,11 +1803,13 @@ describe("the six-step bar and nested pages", () => {
     expect(steps("backend")).toEqual([
       "终审通过",
       "终审修复不需要",
+      "Recheck不需要",
       "最终合并不需要",
     ]);
     expect(steps("frontend")).toEqual([
       "终审需要修复",
       "终审修复运行中",
+      "Recheck未开始",
       "最终合并未开始",
     ]);
     expect(backend.textContent).toContain("终审 · Spec 轴");

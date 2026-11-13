@@ -17,6 +17,8 @@ export interface StoredGateRow {
     name: string;
     classname: string;
     status: "passed" | "failed" | "skipped";
+    file?: string;
+    message?: string;
     flaky?: boolean;
   }[];
 }

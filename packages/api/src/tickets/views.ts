@@ -567,6 +567,8 @@ interface RunDetailRecord extends RunRecord {
   output: unknown;
   commits: string[];
   sources: string[] | null;
+  duration_api_ms: number | null;
+  token_usage: unknown;
 }
 
 function runRow(r: RunRecord) {
@@ -600,7 +602,8 @@ export async function runView(pool: pg.Pool, runId: number) {
   >(
     `SELECT r.id, r.spec_id, r.ticket_id, r.stage, r.attempt, r.result, r.duration_ms, r.started_at, r.finished_at,
             r.agent, r.model, r.skills_sha, r.axis, r.cursor_cli_version, r.contract_shas, r.ref_shas,
-            r.prompt, r.output, r.commits, r.sources, repo.url AS repo_url, repo.host_kind
+            r.prompt, r.output, r.commits, r.sources, r.duration_api_ms, r.token_usage,
+            repo.url AS repo_url, repo.host_kind
      FROM runs r JOIN repos repo ON repo.id = r.repo_id WHERE r.id = $1`,
     [runId],
   );
@@ -618,9 +621,36 @@ export async function runView(pool: pg.Pool, runId: number) {
     output: r.output ?? null,
     commits: r.commits ?? [],
     sources: r.sources ?? null,
+    durationApiMs: r.duration_api_ms,
+    tokenUsage: r.token_usage ?? null,
     repoUrl: r.repo_url,
     hostKind: r.host_kind,
   };
+}
+
+async function usageByStageOf(pool: pg.Pool, specId: number) {
+  const { rows } = await pool.query<{
+    stage: string;
+    input_tokens: string;
+    output_tokens: string;
+    cache_read_tokens: string;
+  }>(
+    `SELECT stage,
+       COALESCE(SUM((token_usage->>'inputTokens')::bigint), 0)::text AS input_tokens,
+       COALESCE(SUM((token_usage->>'outputTokens')::bigint), 0)::text AS output_tokens,
+       COALESCE(SUM((token_usage->>'cacheReadTokens')::bigint), 0)::text AS cache_read_tokens
+     FROM runs
+     WHERE spec_id = $1 AND token_usage IS NOT NULL
+     GROUP BY stage
+     ORDER BY MIN(id)`,
+    [specId],
+  );
+  return rows.map((row) => ({
+    stage: row.stage,
+    inputTokens: Number(row.input_tokens),
+    outputTokens: Number(row.output_tokens),
+    cacheReadTokens: Number(row.cache_read_tokens),
+  }));
 }
 
 async function finalRunsOf(pool: pg.Pool, specId: number) {
@@ -637,7 +667,7 @@ async function finalRunsOf(pool: pg.Pool, specId: number) {
     `SELECT r.id, r.stage, r.axis, r.result, r.duration_ms, r.started_at, r.finished_at, repo.name AS repo
      FROM runs r JOIN repos repo ON repo.id = r.repo_id
      WHERE r.spec_id = $1 AND r.ticket_id IS NULL
-       AND r.stage IN ('final-review', 'final-fix', 'final-merge', 'final-e2e', 'update-branch')
+       AND r.stage IN ('final-review', 'final-fix', 'recheck', 'final-merge', 'final-e2e', 'update-branch')
      ORDER BY r.id`,
     [specId],
   );
@@ -828,6 +858,7 @@ export async function specView(
     finalRuns: await finalRunsOf(pool, specId),
     potentialConflicts: await potentialConflictsOf(pool, specId),
     leadTime: await specLeadTime(pool, specId, now),
+    usageByStage: await usageByStageOf(pool, specId),
     links: (await linksBySpec(pool, specId)) ?? [],
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),

@@ -15,7 +15,9 @@ import { enqueueOpenPr } from "../host/host-jobs.ts";
 import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
+import { recheckTriggerOf } from "../stages/recheck-hit.ts";
 import { commonFields, type StageJob, writeFacts } from "../stages/results.ts";
+import { reviewOutcomeWithRulings } from "../stages/review-rulings.ts";
 import { type ActionResult, parkedRetryNote } from "../tickets/actions.ts";
 import { retryFinalE2e, settleFinalization } from "./final-e2e.ts";
 
@@ -35,8 +37,13 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
     ...commonFields,
   }),
   z.object({
+    stage: z.literal("recheck"),
+    outcome: z.enum(["pass", "fix", "invalid-output", "timeout"]),
+    ...commonFields,
+  }),
+  z.object({
     stage: z.literal("final-merge"),
-    outcome: z.enum(["merged", "conflict", "gate-failed"]),
+    outcome: z.enum(["merged", "conflict", "gate-failed", "tests-removed"]),
     headSha: z.string().min(1).optional(),
     ...commonFields,
   }),
@@ -83,8 +90,25 @@ export async function recordFinalResult(
   }
 
   const parsed = FinalResultSchema.safeParse(result);
-  const valid =
+  let valid =
     parsed.success && parsed.data.stage === read.step ? parsed.data : undefined;
+  if (valid && valid.stage === "final-review") {
+    const outcome = await reviewOutcomeWithRulings(client, {
+      specId: read.specId,
+      ticketId: null,
+      jobId: job.id,
+      stage: "final-review",
+      outcome: valid.outcome,
+      run: valid.run,
+      extraRuns: valid.extraRuns,
+    });
+    if (outcome !== valid.outcome) {
+      valid = {
+        ...valid,
+        outcome: outcome as "pass" | "fix" | "invalid-output" | "timeout",
+      };
+    }
+  }
   await writeFacts(
     client,
     {
@@ -98,19 +122,40 @@ export async function recordFinalResult(
     valid,
     result,
   );
-  const decision: FinalDecision = valid
+  let decision: FinalDecision = valid
     ? advanceFinalization({
         step: valid.stage,
         outcome: valid.outcome,
       } as FinalReport)
     : { type: "block", reason: "invalid-output" };
+  const trigger = recheckTriggerOf(valid?.run);
+  if (
+    valid?.stage === "final-fix" &&
+    valid.outcome === "done" &&
+    trigger?.hit
+  ) {
+    const spec = await client.query<{ allowed: string[] }>(
+      "SELECT allowed_recheck_shas AS allowed FROM specs WHERE id = $1",
+      [read.specId],
+    );
+    if (!spec.rows[0]?.allowed.includes(trigger.toSha))
+      decision = { type: "enqueue", step: "recheck" };
+  }
 
   if (decision.type === "enqueue") {
     await client.query("UPDATE finalizations SET step = $2 WHERE id = $1", [
       fin.id,
       decision.step,
     ]);
-    await enqueueFinalJob(client, read, decision.step);
+    const extra =
+      decision.step === "recheck" && trigger
+        ? {
+            fromSha: trigger.fromSha,
+            toSha: trigger.toSha,
+            paths: trigger.paths,
+          }
+        : {};
+    await enqueueFinalJob(client, read, decision.step, extra);
   } else if (decision.type === "done") {
     await client.query(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",

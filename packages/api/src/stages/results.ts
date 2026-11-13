@@ -25,6 +25,8 @@ import {
 } from "../scheduling/scheduler.ts";
 import { contractsOf } from "./contracts.ts";
 import { createFixTicket } from "./integration.ts";
+import { mergeRecheckIntoOutput, recheckTriggerOf } from "./recheck-hit.ts";
+import { reviewOutcomeWithRulings } from "./review-rulings.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -51,6 +53,15 @@ const RunFacts = z.object({
   tokenUsage: z.unknown().optional(),
   output: z.unknown().optional(),
   refShas: z.record(z.string(), z.string()).optional(),
+  // Recheck trigger from a post-review code-changing stage (existing tests or config).
+  recheck: z
+    .object({
+      hit: z.boolean(),
+      paths: z.array(z.string().min(1)).max(500),
+      fromSha: z.string().min(1),
+      toSha: z.string().min(1),
+    })
+    .optional(),
   // an e2e's JUnit counts and how long the environment took to come up
   testsTotal: z.number().int().min(0).optional(),
   testsFailed: z.number().int().min(0).optional(),
@@ -78,6 +89,8 @@ const GateFacts = z.object({
         name: z.string(),
         classname: z.string(),
         status: z.enum(["passed", "failed", "skipped"]),
+        file: z.string().optional(),
+        message: z.string().optional(),
         flaky: z.boolean().optional(),
       }),
     )
@@ -125,6 +138,7 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
       "failed",
       "protected-path-changed",
       "contract-copy-mismatch",
+      "tests-removed",
     ]),
     ...commonFields,
   }),
@@ -134,8 +148,13 @@ export const StageResultSchema = z.discriminatedUnion("stage", [
     ...commonFields,
   }),
   z.object({
+    stage: z.literal("recheck"),
+    outcome: z.enum(["pass", "fix", "invalid-output", "timeout"]),
+    ...commonFields,
+  }),
+  z.object({
     stage: z.literal("merge"),
-    outcome: z.enum(["merged", "conflict", "gate-failed"]),
+    outcome: z.enum(["merged", "conflict", "gate-failed", "tests-removed"]),
     // the integration branch head after the advance; a contract ticket's contract SHA
     headSha: z.string().min(1).optional(),
     ...commonFields,
@@ -184,6 +203,8 @@ interface TicketRow {
   content_version: number;
   fix_counts: Progress["fixCounts"];
   reviewed: boolean;
+  recheck_pending: boolean;
+  allowed_recheck_shas: string[];
   integration_rounds: number;
   title: string;
   acceptance_criteria: string[];
@@ -199,6 +220,7 @@ export const EXPECTED_STATE: Record<Stage, TicketState> = {
   "gate-fix": "running",
   "review-fix": "running",
   "merge-fix": "running",
+  recheck: "running",
   merge: "merging",
   e2e: "merging", // the ticket is merged and stays merging until its e2e has passed
   diagnose: "merging",
@@ -242,7 +264,8 @@ export async function recordStageResult(
   const ticket = (
     await client.query<TicketRow>(
       `SELECT t.id, t.spec_id, t.repo_id, t.state, t.type, t.content_version, t.fix_counts, t.reviewed,
-              t.integration_rounds, t.title, t.acceptance_criteria, t.environment, r.name AS repo_name
+              t.recheck_pending, t.allowed_recheck_shas, t.integration_rounds, t.title, t.acceptance_criteria,
+              t.environment, r.name AS repo_name
        FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
       [ticketId],
     )
@@ -260,8 +283,25 @@ export async function recordStageResult(
   }
 
   const parsed = StageResultSchema.safeParse(result);
-  const valid =
+  let valid =
     parsed.success && parsed.data.stage === stage ? parsed.data : undefined;
+  if (valid?.stage === "review") {
+    const outcome = await reviewOutcomeWithRulings(client, {
+      specId: ticket.spec_id,
+      ticketId: ticket.id,
+      jobId: job.id,
+      stage,
+      outcome: valid.outcome,
+      run: valid.run,
+      extraRuns: valid.extraRuns,
+    });
+    if (outcome !== valid.outcome) {
+      valid = {
+        ...valid,
+        outcome: outcome as "pass" | "fix" | "invalid-output" | "timeout",
+      };
+    }
+  }
 
   if (
     valid?.stage === "implement" &&
@@ -338,11 +378,29 @@ export async function recordStageResult(
     ticket.state = claimed.state;
   }
 
+  const trigger = recheckTriggerOf(valid?.run);
   const progress: Progress = {
     fixCounts: ticket.fix_counts,
     reviewed: ticket.reviewed,
     integrationRounds: ticket.integration_rounds,
+    recheckPending: ticket.recheck_pending,
   };
+  if (
+    valid &&
+    (valid.stage === "review-fix" || valid.stage === "merge-fix") &&
+    valid.outcome === "done"
+  ) {
+    progress.recheckPending = trigger?.hit === true;
+  }
+  if (
+    valid?.stage === "gate" &&
+    valid.outcome === "passed" &&
+    progress.recheckPending
+  ) {
+    const pending = await lastFixRecheck(client, ticket.id);
+    if (pending && ticket.allowed_recheck_shas.includes(pending.toSha))
+      progress.recheckPending = false;
+  }
   const decision: StageDecision = valid
     ? advanceStage(checkedDiagnosis(valid, ticket), progress, ticket.type)
     : { type: "block", reason: "invalid-output" };
@@ -470,7 +528,12 @@ export async function writeFacts(
     run?.result ?? result?.outcome ?? "invalid-output",
     // what the agent said; for an unusable result, the raw payload so the problem can be seen
     JSON.stringify(
-      result ? outputWithOrphan(run?.output ?? null, run) : (raw ?? null),
+      result
+        ? mergeRecheckIntoOutput(
+            outputWithOrphan(run?.output ?? null, run),
+            recheckTriggerOf(run),
+          )
+        : (raw ?? null),
     ),
     run?.startedAt ?? null,
     run?.finishedAt ?? null,
@@ -605,9 +668,10 @@ export async function writeFacts(
     );
     const inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, stage, attempt, agent, model, skills_sha, axis,
-         prompt, branch, base_sha, head_sha, commits, duration_ms, result, output, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-         COALESCE($19, (SELECT started_at FROM runs WHERE id = $21)), COALESCE($20, now()))
+         prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage,
+         result, output, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+         COALESCE($22, (SELECT started_at FROM runs WHERE id = $24)), COALESCE($23, now()))
        RETURNING id`,
       [
         owner.spec_id,
@@ -621,11 +685,16 @@ export async function writeFacts(
         extra.run.skillsSha ?? null,
         extra.run.axis ?? null,
         extra.run.prompt ?? null,
+        extra.run.cursorCliVersion ?? null,
         extra.run.branch ?? null,
         extra.run.baseSha ?? null,
         extra.run.headSha ?? null,
         extra.run.commits ?? [],
         extra.run.durationMs ?? null,
+        extra.run.durationApiMs ?? null,
+        extra.run.tokenUsage === undefined
+          ? null
+          : JSON.stringify(extra.run.tokenUsage),
         extra.run.result ?? result?.outcome ?? "invalid-output",
         JSON.stringify(extra.run.output ?? null),
         extra.run.startedAt ?? null,
@@ -731,7 +800,7 @@ async function applyDecision(
     state = next.state;
   }
   await client.query(
-    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4,
+    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4, recheck_pending = $6,
        resume_stage = CASE WHEN $5 = 'e2e' THEN 'e2e' ELSE resume_stage END WHERE id = $1`,
     [
       ticket.id,
@@ -739,8 +808,13 @@ async function applyDecision(
       JSON.stringify(decision.progress.fixCounts),
       decision.progress.reviewed,
       decision.stage,
+      decision.progress.recheckPending === true,
     ],
   );
+  const extra =
+    decision.stage === "recheck"
+      ? await lastFixRecheckPayload(client, ticket.id)
+      : {};
   await enqueueStageJob(
     client,
     {
@@ -750,7 +824,36 @@ async function applyDecision(
       contentVersion: ticket.content_version,
     },
     decision.stage,
+    extra,
   );
+}
+
+async function lastFixRecheck(
+  client: pg.PoolClient,
+  ticketId: number,
+): Promise<
+  { hit: boolean; paths: string[]; fromSha: string; toSha: string } | undefined
+> {
+  const found = await client.query<{ recheck: unknown }>(
+    `SELECT output->'recheck' AS recheck FROM runs
+     WHERE ticket_id = $1 AND stage IN ('review-fix', 'merge-fix') AND result = 'done'
+     ORDER BY id DESC LIMIT 1`,
+    [ticketId],
+  );
+  return recheckTriggerOf({ recheck: found.rows[0]?.recheck });
+}
+
+async function lastFixRecheckPayload(
+  client: pg.PoolClient,
+  ticketId: number,
+): Promise<Record<string, unknown>> {
+  const pending = await lastFixRecheck(client, ticketId);
+  if (!pending) return {};
+  return {
+    fromSha: pending.fromSha,
+    toSha: pending.toSha,
+    paths: pending.paths,
+  };
 }
 
 async function blockTicket(

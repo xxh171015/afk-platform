@@ -1,3 +1,4 @@
+import { DECISION_KIND_LABELS, decisionsOf } from "@afk/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, useApi } from "./api.tsx";
@@ -24,6 +25,26 @@ import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
 import { formatDuration, formatSeconds } from "./time.ts";
+import { formatTokens, tokenCounts } from "./token-usage.ts";
+
+function usageLabel(usage: unknown): string {
+  const counts = tokenCounts(usage);
+  const parts = [
+    counts.inputTokens !== undefined
+      ? `输入 ${formatTokens(counts.inputTokens)}`
+      : null,
+    counts.outputTokens !== undefined
+      ? `输出 ${formatTokens(counts.outputTokens)}`
+      : null,
+    counts.cacheReadTokens !== undefined
+      ? `缓存读 ${formatTokens(counts.cacheReadTokens)}`
+      : null,
+    counts.cacheWriteTokens !== undefined
+      ? `缓存写 ${formatTokens(counts.cacheWriteTokens)}`
+      : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
 
 export function RunDetail({
   runId,
@@ -77,6 +98,7 @@ export function RunDetail({
     ? Object.entries(run.contractShas)
     : [];
   const refEntries = run.refShas ? Object.entries(run.refShas) : [];
+  const decisions = decisionsOf(run.output);
 
   return (
     <Page
@@ -120,6 +142,20 @@ export function RunDetail({
         <div className="flex items-center gap-2">
           <dt className="text-muted-foreground">耗时</dt>
           <dd>{formatSeconds(run.durationMs)}</dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">API 耗时</dt>
+          <dd>{formatSeconds(run.durationApiMs ?? null)}</dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">CLI 版本</dt>
+          <dd>
+            <Mono>{run.cursorCliVersion ?? "—"}</Mono>
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <dt className="text-muted-foreground">用量</dt>
+          <dd data-testid="run-usage">{usageLabel(run.tokenUsage)}</dd>
         </div>
         <div className="flex items-center gap-2">
           <dt className="text-muted-foreground">模型</dt>
@@ -170,6 +206,22 @@ export function RunDetail({
           </dd>
         </div>
       </dl>
+      {decisions.length > 0 ? (
+        <section className="mt-5">
+          <h2 className="mb-2 text-sm font-medium">决定</h2>
+          <ul className="decisions space-y-1 text-sm">
+            {decisions.map((item) => (
+              <li key={`${item.kind}-${item.text}`}>
+                <span className="text-muted-foreground">
+                  {DECISION_KIND_LABELS[item.kind]}
+                </span>{" "}
+                {item.text}
+                {item.ref ? ` (${item.ref})` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <RunLog runId={runId} pollMs={logPollMs} durationMs={run.durationMs} />
       <Tabs value={tab} onValueChange={setTab} className="mt-7">
         <TabsList>

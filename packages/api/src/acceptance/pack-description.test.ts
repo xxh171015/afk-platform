@@ -59,7 +59,32 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
         },
       ],
       scopeCreep: [],
-      uncertainties: [{ source: "T-1 implement", text: "date format" }],
+      decisions: [
+        {
+          source: "T-1 implement",
+          run: "R-2",
+          kind: "conflict",
+          text: "ticket vs User Story 6; picked the story",
+        },
+        {
+          source: "T-1 implement",
+          run: "R-3",
+          kind: "known-gap",
+          text: "reload still skips the note filter",
+        },
+        {
+          source: "T-1 implement",
+          run: "R-2",
+          kind: "choice",
+          text: "date format",
+        },
+        {
+          source: "T-1 gate-fix",
+          run: "R-5",
+          kind: "workaround",
+          text: "skipped drizzle generate",
+        },
+      ],
       protectedPathApprovals: [],
       flakyTests: [{ name: "flakes then passes", classname: "orders" }],
       standardsSources: [
@@ -85,7 +110,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       ],
       findings: [],
       scopeCreep: [],
-      uncertainties: [],
+      decisions: [],
       protectedPathApprovals: [],
       flakyTests: [],
       standardsSources: [],
@@ -125,10 +150,70 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
   },
   cancelledTickets: [],
   agentSeconds: 4,
+  needsDecision: [],
   ...over,
 });
 
 describe("renderPackSection", () => {
+  it("puts Recheck hits in 合并前要你定的 with their kind", () => {
+    const rendered = renderPackSection(
+      pack({
+        needsDecision: [
+          {
+            kind: "recheck",
+            id: "R-9",
+            source: "T-1 merge-fix",
+            text: "src/a.test.ts · Recheck: fix",
+          },
+          {
+            kind: "needs-human",
+            id: "R-1#0",
+            source: "T-1 implement",
+            text: "reload skips the filter",
+          },
+        ],
+      }),
+      "backend",
+      1,
+    );
+    expect(rendered.section.startsWith("## 合并前要你定的\n")).toBe(true);
+    expect(rendered.section).toContain(
+      "[recheck] R-9 T-1 merge-fix: src/a.test.ts · Recheck: fix",
+    );
+  });
+
+  it("puts needs-human and unfinished deferred at the front", () => {
+    const rendered = renderPackSection(
+      pack({
+        needsDecision: [
+          {
+            kind: "needs-human",
+            id: "R-1#0",
+            source: "T-1 implement",
+            text: "reload skips the filter",
+          },
+          {
+            kind: "deferred",
+            id: "R-1#1",
+            source: "T-1 implement",
+            text: "openapi extra field",
+            ref: "new",
+          },
+        ],
+      }),
+      "backend",
+      1,
+    );
+    expect(rendered.section.startsWith("## 合并前要你定的\n")).toBe(true);
+    expect(rendered.section).toContain(
+      "[needs-human] R-1#0 T-1 implement: reload skips the filter",
+    );
+    expect(rendered.section).toContain(
+      "[deferred] R-1#1 T-1 implement: openapi extra field (new)",
+    );
+    expect(rendered.summary).toContain("## 合并前要你定的");
+  });
+
   it("says in the planning repo's pull request that its planning docs were left out, and only there", () => {
     const waived = pack({ planningDocs: { repo: "backend", state: "waived" } });
     expect(renderPackSection(waived, "backend", 1).section).toContain(
@@ -203,6 +288,24 @@ describe("renderPackSection", () => {
     expect(section).toContain("T-1 R-2 review: AGENTS.md, CONTRIBUTING.md");
     expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
       "Standards sources",
+    );
+  });
+
+  it("lists conflict and known-gap under Decisions with their run, and only counts choice and workaround", () => {
+    const { section } = renderPackSection(pack(), "backend", 1);
+    expect(section).toContain("### Decisions");
+    expect(section).toContain(
+      "[conflict] T-1 implement R-2: ticket vs User Story 6; picked the story",
+    );
+    expect(section).toContain(
+      "[known-gap] T-1 implement R-3: reload still skips the note filter",
+    );
+    expect(section).toContain("choice: 1, workaround: 1");
+    expect(section).not.toContain("date format");
+    expect(section).not.toContain("skipped drizzle generate");
+    expect(section).not.toContain("Uncertainties");
+    expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
+      "### Decisions",
     );
   });
 

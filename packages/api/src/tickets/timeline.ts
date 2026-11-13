@@ -66,6 +66,8 @@ function actionText(
       return "取消需求";
     case "approve-protected":
       return ticket ? `批准保护路径 ${ticket}` : "批准保护路径";
+    case "approve-removed-tests":
+      return ticket ? `批准删掉的测试 ${ticket}` : "批准删掉的测试";
     case "allow-paths":
       return ticket ? `批准路径 ${ticket}` : "批准路径";
     case "edit-ticket":

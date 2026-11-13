@@ -20,6 +20,13 @@ export interface ContextInput {
   bundle: Bundle;
   run: RunFacts;
   failureLog?: string; // gate-fix and merge-fix: the tail of the failing gate
+  // gate-fix / merge-fix / final-fix: still-failing JUnit cases after the same-commit rerun
+  failedCases?: {
+    name: string;
+    classname: string;
+    file?: string;
+    message?: string;
+  }[];
   review?: unknown; // review-fix: the review's structured result
   contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
   // Planning commit files (GLOSSARY.md, docs/adr/**). Omit for the planning repo's own tickets.
@@ -130,6 +137,10 @@ export function renderContext(input: ContextInput): void {
     ),
   );
   writeFileSync(join(dir, "run.json"), JSON.stringify(runJson(input), null, 2));
+  writeFileSync(
+    join(dir, "decisions.json"),
+    `${JSON.stringify(bundle.decisionLog, null, 2)}\n`,
+  );
   if (bundle.note) {
     writeFileSync(join(dir, "note.md"), bundle.note);
   }
@@ -137,10 +148,28 @@ export function renderContext(input: ContextInput): void {
     mkdirSync(join(dir, "failure"), { recursive: true });
     writeFileSync(join(dir, "failure", "gate.log"), input.failureLog);
   }
+  if (input.failedCases?.length) {
+    mkdirSync(join(dir, "failure"), { recursive: true });
+    writeFileSync(
+      join(dir, "failure", "cases.json"),
+      `${JSON.stringify(input.failedCases, null, 2)}\n`,
+    );
+  }
   if (input.review !== undefined) {
     writeFileSync(
       join(dir, "review.json"),
       JSON.stringify(input.review, null, 2),
+    );
+  }
+  const recheck = (
+    bundle as {
+      recheck?: { fromSha: string; toSha: string; paths: string[] } | null;
+    }
+  ).recheck;
+  if (recheck) {
+    writeFileSync(
+      join(dir, "recheck.json"),
+      `${JSON.stringify(recheck, null, 2)}\n`,
     );
   }
   for (const contract of input.contracts ?? []) {

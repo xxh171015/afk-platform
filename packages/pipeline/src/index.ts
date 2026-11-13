@@ -43,6 +43,8 @@ export {
 } from "./context.ts";
 export type { ContractCopyProblem, ProvidedContract } from "./contract-copy.ts";
 export { checkContractCopies, copyPathOf } from "./contract-copy.ts";
+export type { CursorRunFacts } from "./cursor-result.ts";
+export { factsFromCursorLine, factsFromCursorLines } from "./cursor-result.ts";
 export type {
   E2eCounts,
   E2eOutcome,
@@ -64,10 +66,13 @@ export {
   gitOut,
 } from "./exec.ts";
 export type {
+  FailedCase,
+  GateBaseline,
   GateConfig,
   GateOutcome,
   GateRecords,
   GateSandbox,
+  MergeTestNames,
   RunGateInput,
   SandboxPlacement,
   SandboxSession,
@@ -75,16 +80,20 @@ export type {
   TestCase,
   TestCaseStatus,
   TestCounts,
+  TestName,
 } from "./gate.ts";
 export {
+  failedCasesOf,
   GATE_CONFIG_BRIEF,
   GATE_CONFIG_PATH,
   GateConfigError,
   GateSetupError,
   junitCases,
   junitCounts,
+  mergeGateCompare,
   readGateConfig,
   runGate,
+  testKey,
 } from "./gate.ts";
 export type { GeneratedGroup } from "./generated.ts";
 export {
@@ -124,6 +133,13 @@ export {
   checkProtectedPaths,
   globMatches,
 } from "./protected-paths.ts";
+export type { RecheckTrigger } from "./recheck.ts";
+export {
+  DEFAULT_RECHECK_CONFIG_PATHS,
+  isConfigPath,
+  isTestPath,
+  recheckHit,
+} from "./recheck.ts";
 export type {
   SandboxDocker,
   SandboxKind,

@@ -361,11 +361,15 @@ export async function processJob(
       .fail(
         job,
         message.slice(0, 1000),
-        error instanceof InfrastructureError &&
-          error.orphanRef &&
-          error.orphanSha
-          ? { orphanRef: error.orphanRef, orphanSha: error.orphanSha }
+        error instanceof InfrastructureError
+          ? {
+              ...error.run,
+              ...(error.orphanRef && error.orphanSha
+                ? { orphanRef: error.orphanRef, orphanSha: error.orphanSha }
+                : {}),
+            }
           : undefined,
+        error instanceof InfrastructureError ? error.extraRuns : undefined,
       )
       .catch(() => undefined);
     return "failed";

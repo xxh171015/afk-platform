@@ -16,6 +16,7 @@ import {
   PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
+  TICKET_REVIEW_MODES,
   TICKET_STATES,
   TICKET_TYPES,
 } from "@afk/shared";
@@ -50,24 +51,37 @@ const oneOf = (column: AnyPgColumn, values: readonly string[]) =>
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-export const projects = pgTable("projects", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  defaultAgent: text("default_agent"),
-  defaultModel: text("default_model"),
-  protectedPaths: text("protected_paths").array().notNull().default([]),
-  maxConcurrency: integer("max_concurrency"),
-  budgetLimit: integer("budget_limit"),
-  mergePolicy: text("merge_policy"),
-  // Overrides of DEFAULT_LIMITS in @afk/shared; anything not listed uses the default.
-  limits: jsonb("limits").notNull().default({}),
-  // When a worker last claimed a job of this project. Claim picks the project served longest ago so
-  // projects take turns (packages/api/src/jobs/queue.ts). Null until the first claim.
-  lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
-  // Feishu group chat_id for this project's notifications. Null until plat project edit --feishu-chat.
-  feishuChatId: text("feishu_chat_id"),
-  createdAt: createdAt(),
-});
+export const projects = pgTable(
+  "projects",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    defaultAgent: text("default_agent"),
+    defaultModel: text("default_model"),
+    protectedPaths: text("protected_paths").array().notNull().default([]),
+    maxConcurrency: integer("max_concurrency"),
+    budgetLimit: integer("budget_limit"),
+    mergePolicy: text("merge_policy"),
+    // Overrides of DEFAULT_LIMITS in @afk/shared; anything not listed uses the default.
+    limits: jsonb("limits").notNull().default({}),
+    // When a worker last claimed a job of this project. Claim picks the project served longest ago so
+    // projects take turns (packages/api/src/jobs/queue.ts). Null until the first claim.
+    lastClaimedAt: timestamp("last_claimed_at", { withTimezone: true }),
+    // Feishu group chat_id for this project's notifications. Null until plat project edit --feishu-chat.
+    feishuChatId: text("feishu_chat_id"),
+    // Ticket-level review: Spec only (default) or both axes. final-review is always both (ADR 0002).
+    ticketReview: text("ticket_review").notNull().default("spec"),
+    // Per-role model overrides: standards, update-branch, merge-fix. Empty object: the default model.
+    stageModels: jsonb("stage_models").notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check(
+      "projects_ticket_review_check",
+      oneOf(t.ticketReview, TICKET_REVIEW_MODES),
+    ),
+  ],
+);
 
 export const repos = pgTable(
   "repos",
@@ -158,6 +172,11 @@ export const specs = pgTable(
     orderBroken: jsonb("order_broken").notNull().default([]),
     // Why the platform paused the spec (PAUSE_REASONS); the waiting queue shows the Chinese label.
     pauseReason: text("pause_reason"),
+    // SHAs a person has allowed Recheck to skip for wrap-up / update-branch. Only that commit.
+    allowedRecheckShas: text("allowed_recheck_shas")
+      .array()
+      .notNull()
+      .default([]),
     // Agent seconds a person has added on top of the project's limit when resuming a spec that ran out.
     budgetExtraSeconds: integer("budget_extra_seconds").notNull().default(0),
     // When the scheduler last started a ticket of the spec. Of two specs of a project holding as many slots, the one
@@ -264,6 +283,17 @@ export const tickets = pgTable(
       .array()
       .notNull()
       .default([]),
+    // JUnit classname+name a person has allowed this ticket to drop. Empty until approve-removed-tests.
+    allowedRemovedTests: jsonb("allowed_removed_tests")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // SHAs a person has allowed Recheck to skip for this ticket. Only that commit; a later hit still checks.
+    allowedRecheckShas: text("allowed_recheck_shas")
+      .array()
+      .notNull()
+      .default([]),
+    // review-fix / merge-fix hit existing tests or config; the gate then enqueues Recheck.
+    recheckPending: boolean("recheck_pending").notNull().default(false),
     // Names of repos: read-only references for the agent, and the repos an integration ticket's e2e environment starts.
     refs: text("refs").array().notNull().default([]),
     environment: text("environment").array().notNull().default([]),
@@ -336,6 +366,9 @@ export const ticketVersions = pgTable(
     acceptanceCriteria: text("acceptance_criteria").array().notNull(),
     modules: text("modules").array().notNull(),
     allowedProtectedPaths: text("allowed_protected_paths").array().notNull(),
+    allowedRemovedTests: jsonb("allowed_removed_tests")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     createdAt: createdAt(),
   },
   (t) => [

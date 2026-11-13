@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { StageModels, TicketReviewMode } from "@afk/shared";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectSettings } from "./ProjectSettings.tsx";
@@ -14,6 +15,8 @@ type ProjectDetail = {
   name: string;
   defaultAgent: null;
   feishuChatId: string | null;
+  ticketReview: TicketReviewMode;
+  stageModels: StageModels;
   repos: {
     name: string;
     url: string;
@@ -28,6 +31,8 @@ const projectDetail = (repos: ProjectDetail["repos"]): ProjectDetail => ({
   name: "shop",
   defaultAgent: null,
   feishuChatId: "oc_shop",
+  ticketReview: "spec",
+  stageModels: {},
   repos,
 });
 
@@ -44,7 +49,7 @@ const workbench = () => ({
 });
 
 describe("the project Feishu page", () => {
-  it("lets you change the Feishu chat id, see a closed channel, and send a test card, and has no model or concurrency controls", async () => {
+  it("lets you change the Feishu chat id, see a closed channel, and send a test card, and has no default-model or concurrency controls", async () => {
     const project = projectDetail([]);
     const fake = fakeServer({
       ...workbench(),
@@ -73,7 +78,6 @@ describe("the project Feishu page", () => {
     expect(screen.getByLabelText("飞书通知").textContent).toContain(
       "把这个应用的机器人拉进",
     );
-    expect(screen.queryByLabelText(/模型/)).toBeNull();
     expect(screen.queryByLabelText(/并发/)).toBeNull();
     expect(screen.queryByText(/maxConcurrency/i)).toBeNull();
     expect(screen.queryByText(/defaultModel/i)).toBeNull();
@@ -177,5 +181,49 @@ describe("the project Feishu page", () => {
     expect(alert.textContent).toContain("还没保存群号");
     expect(alert.textContent).toContain("oc_");
     expect(alert.textContent).not.toContain("no Feishu chat configured");
+  });
+
+  it("lets you see and change ticketReview", async () => {
+    const project = projectDetail([]);
+    const fake = fakeServer({
+      ...workbench(),
+      "GET /projects/1": () => ({ json: project }),
+      "PATCH /projects/1": ({ body }) => {
+        const next = (body as { ticketReview?: TicketReviewMode }).ticketReview;
+        if (next) project.ticketReview = next;
+        return { json: { id: 1 } };
+      },
+    });
+    renderWithApp(<ProjectSettings projectId={1} />, fake);
+    const select = (await screen.findByRole("combobox", {
+      name: "票级审查",
+    })) as HTMLSelectElement;
+    expect(select.value).toBe("spec");
+    fireEvent.change(select, { target: { value: "both" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存审查设置" }));
+    await waitFor(() => expect(fake.calls).toContain("PATCH /projects/1"));
+    expect(project.ticketReview).toBe("both");
+  });
+
+  it("lets you see and change stageModels", async () => {
+    const project = projectDetail([]);
+    const fake = fakeServer({
+      ...workbench(),
+      "GET /projects/1": () => ({ json: project }),
+      "PATCH /projects/1": ({ body }) => {
+        const next = (body as { stageModels?: StageModels }).stageModels;
+        if (next) project.stageModels = next;
+        return { json: { id: 1 } };
+      },
+    });
+    renderWithApp(<ProjectSettings projectId={1} />, fake);
+    const standards = (await screen.findByLabelText(
+      "standards",
+    )) as HTMLInputElement;
+    expect(standards.value).toBe("");
+    fireEvent.change(standards, { target: { value: "standards-model" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存阶段模型" }));
+    await waitFor(() => expect(fake.calls).toContain("PATCH /projects/1"));
+    expect(project.stageModels.standards).toBe("standards-model");
   });
 });

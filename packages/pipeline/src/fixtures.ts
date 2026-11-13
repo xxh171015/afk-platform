@@ -76,15 +76,26 @@ export function bundleFor(
     environment: [],
     note: null,
     failureLog: null,
+    failedCases: null,
     review: null,
     gateBaseline: null,
     gateBaselines: [],
+    ticketGateNames: null,
+    decisionLog: {
+      ticket: { displayId: "T-123", decisions: [], rulings: [] },
+      doneTickets: [],
+      spec: null,
+    },
+    approvedRemovedTests: null,
     limits: {
       runIdleSeconds: DEFAULT_LIMITS.runIdleSeconds,
       runWallclockSeconds: DEFAULT_LIMITS.runWallclockSeconds,
       maxIntegrationEnvironments: DEFAULT_LIMITS.maxIntegrationEnvironments,
     },
     model: null,
+    recheck: null,
     ...rest,
+    ticketReview: rest.ticketReview ?? "spec",
+    stageModels: rest.stageModels ?? {},
   };
 }

@@ -1,4 +1,7 @@
 import {
+  DECISION_KIND_LABELS,
+  type DecisionKind,
+  decisionTally,
   FAILURE_SOURCE_LABELS,
   type FailureSource,
   HOST_KIND_LABELS,
@@ -72,6 +75,7 @@ import {
   prCiLabel,
   prReviewLabel,
   specTypeLabel,
+  stageLabel,
 } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
@@ -109,6 +113,7 @@ import { blockedReasonLabel, ticketStateLabel } from "./status.ts";
 import { peekTicketClick, TicketSheet } from "./TicketDetail.tsx";
 import { TraceSection } from "./TraceSection.tsx";
 import { formatCompactDuration, formatShanghaiTime } from "./time.ts";
+import { formatTokens } from "./token-usage.ts";
 
 const list = <T,>(value: T[] | undefined | null): T[] =>
   Array.isArray(value) ? value : [];
@@ -297,6 +302,56 @@ function DependencyGraph({
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 type PackRepo = NonNullable<SpecView["acceptancePack"]>["repos"][number];
+type PackDecision = {
+  source: string;
+  run: string;
+  kind: string;
+  text: string;
+  ref?: string;
+};
+
+function PackDecisions({ repo }: { repo: PackRepo }) {
+  const tally = decisionTally(
+    list((repo as PackRepo & { decisions?: PackDecision[] }).decisions),
+  );
+  if (tally.listed.length === 0 && tally.choice === 0 && tally.workaround === 0)
+    return null;
+  const countedSummary = [
+    tally.choice > 0 ? `小事 ${tally.choice} 条` : null,
+    tally.workaround > 0 ? `绕过 ${tally.workaround} 条` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join("，");
+  const line = (item: PackDecision) => {
+    const kind = DECISION_KIND_LABELS[item.kind as DecisionKind] ?? item.kind;
+    const ref = item.ref ? ` (${item.ref})` : "";
+    return `${kind} ${item.source} ${item.run}: ${item.text}${ref}`;
+  };
+  return (
+    <>
+      <p className="note">决定：</p>
+      {tally.listed.length > 0 ? (
+        <ul className="decisions">
+          {tally.listed.map((item) => (
+            <li key={`${item.run}-${item.kind}-${item.text}`}>{line(item)}</li>
+          ))}
+        </ul>
+      ) : null}
+      {countedSummary ? (
+        <details className="afk-disclosure mt-2 text-sm">
+          <summary>{countedSummary}</summary>
+          <ul className="decisions-counted mt-1">
+            {tally.counted.map((item) => (
+              <li key={`${item.run}-${item.kind}-${item.text}`}>
+                {line(item)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </>
+  );
+}
 
 function PackRepoSection({
   repo,
@@ -383,18 +438,7 @@ function PackRepoSection({
           </ul>
         </>
       ) : null}
-      {list(repo.uncertainties).length > 0 ? (
-        <>
-          <p className="note">模型不确定的地方：</p>
-          <ul className="uncertainties">
-            {list(repo.uncertainties).map((u) => (
-              <li key={`${u.source}-${u.text}`}>
-                {u.source}: {u.text}
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
+      <PackDecisions repo={repo} />
       {repo.gate ? (
         <p className="gates">
           门禁：{" "}
@@ -444,8 +488,34 @@ function AcceptancePackMeta({
 }: {
   pack: NonNullable<SpecView["acceptancePack"]>;
 }) {
+  const needsDecision = list(
+    (
+      pack as {
+        needsDecision?: {
+          kind: string;
+          id: string;
+          source: string;
+          text: string;
+          ref?: string;
+        }[];
+      }
+    ).needsDecision,
+  );
   return (
     <>
+      {needsDecision.length > 0 ? (
+        <section className="mb-4" data-testid="pack-needs-decision">
+          <h4>合并前要你定的</h4>
+          <ul>
+            {needsDecision.map((item) => (
+              <li key={item.id}>
+                [{item.kind}] {item.id} {item.source}: {item.text}
+                {item.ref ? ` (${item.ref})` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {list(pack.orderBroken).map((b) => (
         <p key={b.repo} className="error">
           合并顺序被打破：{b.repo} 合在了 {b.skipped.join("、")} 前面。
@@ -589,6 +659,7 @@ export function SpecDetail({
     finalRuns,
     potentialConflicts,
     leadTime,
+    usageByStage,
     links,
   } = data;
   const timeline = visibleTimeline(timelineEvents);
@@ -832,6 +903,7 @@ export function SpecDetail({
           hostKind={hostKind}
           potentialConflicts={potentialConflicts ?? []}
           leadTime={leadTime ?? null}
+          usageByStage={usageByStage ?? []}
           links={links ?? []}
         />
       ) : null}
@@ -954,6 +1026,7 @@ function Overview({
   hostKind,
   potentialConflicts,
   leadTime,
+  usageByStage,
   links,
 }: {
   spec: SpecView["spec"];
@@ -972,6 +1045,7 @@ function Overview({
   hostKind: HostKind;
   potentialConflicts: NonNullable<SpecView["potentialConflicts"]>;
   leadTime: SpecView["leadTime"];
+  usageByStage: NonNullable<SpecView["usageByStage"]>;
   links: NonNullable<SpecView["links"]>;
 }) {
   const progress = ticketProgress(tickets);
@@ -1084,6 +1158,21 @@ function Overview({
           </dd>
         </div>
         {leadTime ? <LeadTimeBar leadTime={leadTime} /> : null}
+        {usageByStage.length > 0 ? (
+          <div className="sm:col-span-2" data-testid="usage-by-stage">
+            <dt className="text-xs text-muted-foreground">用量</dt>
+            <dd className="mt-1 space-y-1 text-sm">
+              {usageByStage.map((row) => (
+                <div key={row.stage}>
+                  {stageLabel[row.stage] ?? row.stage} 输入{" "}
+                  {formatTokens(row.inputTokens)} 输出{" "}
+                  {formatTokens(row.outputTokens)} 缓存读{" "}
+                  {formatTokens(row.cacheReadTokens)}
+                </div>
+              ))}
+            </dd>
+          </div>
+        ) : null}
         {spec.planningSha ? (
           <div>
             <dt className="text-xs text-muted-foreground">规划提交</dt>

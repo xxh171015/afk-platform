@@ -23,6 +23,7 @@ import {
 } from "@ai-hero/sandcastle";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "./agent.ts";
+import { type CursorRunFacts, factsFromCursorLine } from "./cursor-result.ts";
 import { type ExecResult, exec } from "./exec.ts";
 import {
   type GateSandbox,
@@ -469,6 +470,7 @@ export class SandcastleAgentRunner implements AgentRunner {
     if (options.signal?.aborted) onJobLost();
     options.signal?.addEventListener("abort", onJobLost, { once: true });
     const started = Date.now();
+    let billed: CursorRunFacts = {};
     try {
       const result = await run({
         agent: cursor(options.model ?? config.model, {
@@ -502,6 +504,8 @@ export class SandcastleAgentRunner implements AgentRunner {
               `${event.line}\n`,
             );
             options.onRawLine?.(event.line);
+            const next = factsFromCursorLine(event.line);
+            if (next) billed = next;
           },
         },
       });
@@ -509,6 +513,7 @@ export class SandcastleAgentRunner implements AgentRunner {
         output: result.output as z.infer<Schema>,
         commits: result.commits.map((c) => c.sha),
         durationMs: Date.now() - started,
+        ...billed,
       };
     } catch (error) {
       const failure = classifyAgentError(error);
@@ -517,6 +522,7 @@ export class SandcastleAgentRunner implements AgentRunner {
         error: failure.message,
         errorKind: failure.errorKind,
         durationMs: Date.now() - started,
+        ...billed,
       };
     } finally {
       clearTimeout(timer);

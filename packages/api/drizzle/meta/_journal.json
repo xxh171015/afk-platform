@@ -526,6 +526,34 @@
       "when": 1794590000000,
       "tag": "0074_spec_pause_event_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0075_ticket_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794610000000,
+      "tag": "0076_stage_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794620000000,
+      "tag": "0077_tests_removed",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794630000000,
+      "tag": "0078_recheck",
+      "breakpoints": true
     }
   ]
 }

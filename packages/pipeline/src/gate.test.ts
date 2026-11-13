@@ -10,6 +10,7 @@ import {
   GateSetupError,
   junitCases,
   junitCounts,
+  mergeGateCompare,
   readGateConfig,
   runGate,
 } from "./gate.ts";
@@ -148,14 +149,29 @@ describe("junitCases", () => {
     </testsuite></testsuites>`;
     expect(junitCases(xml)).toEqual([
       { name: "exports a csv", classname: "orders", status: "passed" },
-      { name: "rejects an empty range", classname: "orders", status: "failed" },
-      { name: "blows up", classname: "orders", status: "failed" },
+      {
+        name: "rejects an empty range",
+        classname: "orders",
+        status: "failed",
+        message: "boom\ntrace",
+      },
+      {
+        name: "blows up",
+        classname: "orders",
+        status: "failed",
+        message: "x",
+      },
       { name: "keeps the order", classname: "orders", status: "skipped" },
       { name: "a & b <c>", classname: "", status: "passed" },
     ]);
   });
   it("finds nothing in a file that is not a report", () => {
     expect(junitCases("<html/>")).toEqual([]);
+  });
+  it("keeps only the first few lines of a failure message", () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`);
+    const xml = `<testsuites tests="1"><testsuite name="a" tests="1"><testcase name="x" classname="c"><failure>${lines.join("\n")}</failure></testcase></testsuite></testsuites>`;
+    expect(junitCases(xml)[0]?.message?.split("\n")).toEqual(lines.slice(0, 8));
   });
   it("keeps the file path when the report names one", () => {
     expect(
@@ -332,6 +348,7 @@ describe("a failing gate", () => {
     expect(outcome.steps.map((s) => s.name)).toEqual(["typecheck"]);
     expect(outcome.reasons).toEqual(["typecheck failed (exit 3)"]);
     expect(outcome.counts).toBeUndefined(); // no JUnit, so no comparison
+    expect(outcome.testCases).toBeUndefined();
   });
 
   it("keeps the last 200 lines of the failing command for gate-fix, then the verdict", async () => {
@@ -430,6 +447,193 @@ describe("the test count guard", () => {
   });
 });
 
+describe("the test name guard", () => {
+  const writeNamed = (names: { classname?: string; name: string }[]) =>
+    writeXml(
+      junitWithCases(
+        names.map((n) => ({
+          name: n.name,
+          classname: n.classname ?? "suite",
+        })),
+      ),
+    );
+  const names = (
+    ...list: { classname?: string; name: string }[]
+  ): { classname: string; name: string }[] =>
+    list.map((n) => ({ classname: n.classname ?? "suite", name: n.name }));
+
+  it("fails listing the names that were deleted when another test is added", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "keeps" }, { name: "added" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 2,
+        skipped: 0,
+        names: names({ name: "keeps" }, { name: "gone" }),
+      },
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.reasons).toEqual(["removed tests: suite gone"]);
+    expect(outcome.removedTests).toEqual(names({ name: "gone" }));
+  });
+
+  it("fails when an existing test is renamed", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "renamed" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 1, skipped: 0, names: names({ name: "original" }) },
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.reasons).toEqual(["removed tests: suite original"]);
+  });
+
+  it("does not fail when a sibling added tests this ticket never had", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: writeNamed([{ name: "mine" }, { name: "from-sibling" }]),
+      },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 1, skipped: 0, names: names({ name: "mine" }) },
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+
+  it("fails a merge candidate that dropped a name the other side still has and did not delete", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "shared" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 2, skipped: 0 },
+      mergeNames: {
+        base: names({ name: "shared" }),
+        ours: names({ name: "shared" }, { name: "from-integration" }),
+        theirs: names({ name: "shared" }, { name: "from-ticket" }),
+      },
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.removedTests).toEqual(
+      names({ name: "from-integration" }, { name: "from-ticket" }),
+    );
+  });
+
+  it("does not require a name main deleted relative to the merge-base", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "kept" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 1, skipped: 0 },
+      mergeNames: {
+        base: names({ name: "kept" }, { name: "main-deleted" }),
+        ours: names({ name: "kept" }),
+        theirs: names({ name: "kept" }, { name: "main-deleted" }),
+      },
+    });
+    expect(outcome.pass).toBe(true);
+  });
+
+  it("still compares totals when the report has no names", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(9, 0) }]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 10,
+        skipped: 0,
+        names: names({ name: "a" }),
+      },
+    });
+    expect(outcome.reasons).toEqual(["fewer tests than the baseline: 9 < 10"]);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+
+  it("still compares totals when a merge side has no names in the report", async () => {
+    const configSha = repoWithGate([{ name: "test", run: writeJunit(2, 0) }]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: { tests: 2, skipped: 0, names: names({ name: "kept" }) },
+      mergeNames: {
+        base: names({ name: "kept" }, { name: "main-deleted" }),
+        ours: names({ name: "kept" }),
+        theirs: names({ name: "kept" }, { name: "main-deleted" }),
+      },
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+
+  it("still compares totals when gates.yaml declares count compare", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": `${gatesYaml([{ name: "test", run: writeNamed([{ name: "new" }]) }])}\ntestCompare: counts\n`,
+      "src.txt": "v1\n",
+    });
+    const configSha = gitOut(repo.dir, ["rev-parse", "main"]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 2,
+        skipped: 0,
+        names: names({ name: "old-a" }, { name: "old-b" }),
+      },
+    });
+    expect(outcome.reasons).toEqual(["fewer tests than the baseline: 1 < 2"]);
+  });
+
+  it("strips baseline names for a merge candidate when a side is missing", () => {
+    const baseline = {
+      tests: 2,
+      skipped: 0,
+      names: names({ name: "kept" }, { name: "from-integration" }),
+    };
+    expect(mergeGateCompare(baseline, undefined)).toEqual({
+      baseline: { tests: 2, skipped: 0 },
+    });
+    const mergeNames = {
+      base: names({ name: "kept" }),
+      ours: names({ name: "kept" }),
+      theirs: names({ name: "kept" }),
+    };
+    expect(mergeGateCompare(baseline, mergeNames)).toEqual({
+      baseline,
+      mergeNames,
+    });
+  });
+
+  it("lets an approved name disappear", async () => {
+    const configSha = repoWithGate([
+      { name: "test", run: writeNamed([{ name: "kept" }]) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+      baseline: {
+        tests: 2,
+        skipped: 0,
+        names: names({ name: "kept" }, { name: "gone" }),
+      },
+      approvedRemoved: names({ name: "gone" }),
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.removedTests).toBeUndefined();
+  });
+});
+
 describe("the configuration comes from the trusted commit", () => {
   it("ignores a gates.yaml the branch under test changed", async () => {
     const configSha = repoWithGate([{ name: "test", run: "sh -c 'exit 1'" }]);
@@ -490,6 +694,20 @@ describe("the configuration comes from the trusted commit", () => {
       version: 1,
       commands: [{ name: "test", rerunFiles: ["pnpm", "test"] }],
     });
+  });
+
+  it("keeps extra Recheck config paths", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "recheckConfig: [ci/timeout.yaml]",
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main").recheckConfig).toEqual([
+      "ci/timeout.yaml",
+    ]);
   });
 
   it("keeps declared generated groups", () => {
@@ -688,9 +906,25 @@ describe("retrying a failed test on the same commit", () => {
     expect(outcome.pass).toBe(true);
     expect(outcome.counts).toEqual({ tests: 3, skipped: 0 });
     expect(outcome.testCases).toEqual([
-      { name: "flakes", classname: "orders", status: "passed", flaky: true },
-      { name: "exports", classname: "orders", status: "passed" },
-      { name: "other", classname: "other", status: "passed" },
+      {
+        name: "flakes",
+        classname: "orders",
+        file: "orders.test.ts",
+        status: "passed",
+        flaky: true,
+      },
+      {
+        name: "exports",
+        classname: "orders",
+        file: "orders.test.ts",
+        status: "passed",
+      },
+      {
+        name: "other",
+        classname: "other",
+        file: "other.test.ts",
+        status: "passed",
+      },
     ]);
   });
 
@@ -708,6 +942,47 @@ describe("retrying a failed test on the same commit", () => {
     expect(outcome.pass).toBe(false);
     expect(outcome.reasons).toEqual(["test failed (exit 1)"]);
     expect(outcome.steps.map((s) => s.name)).toEqual(["test"]);
+  });
+
+  it("publishes the cases that still fail after a rerun, with their file and failure message", async () => {
+    const still = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        status: "failed" as const,
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        status: "failed" as const,
+      },
+    ];
+    const configSha = repoWithGate([
+      { name: "test", run: writeXml(junitWithCases(still, 2), 1) },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.testCases).toEqual([
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        status: "failed",
+        message: "boom\ntrace",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        status: "failed",
+        message: "boom\ntrace",
+      },
+    ]);
   });
 
   it("reruns the whole test command when there is no per-file template", async () => {
@@ -814,9 +1089,25 @@ describe("retrying a failed test on the same commit", () => {
     expect(outcome.pass).toBe(true);
     expect(outcome.counts).toEqual({ tests: 10, skipped: 0 });
     expect(outcome.testCases).toEqual([
-      { name: "flakes", classname: "orders", status: "passed", flaky: true },
-      { name: "exports", classname: "orders", status: "passed" },
-      { name: "other", classname: "other", status: "passed" },
+      {
+        name: "flakes",
+        classname: "orders",
+        file: "orders.test.ts",
+        status: "passed",
+        flaky: true,
+      },
+      {
+        name: "exports",
+        classname: "orders",
+        file: "orders.test.ts",
+        status: "passed",
+      },
+      {
+        name: "other",
+        classname: "other",
+        file: "other.test.ts",
+        status: "passed",
+      },
     ]);
   });
 

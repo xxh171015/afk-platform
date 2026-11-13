@@ -4,10 +4,14 @@ import { fileURLToPath } from "node:url";
 import {
   type AGENT_FAILURES,
   type CombinedReview,
+  checkReviewRulings,
+  coerceDecisionsInput,
   combinedReview,
+  DecisionsField,
   type FinalStep,
   REVIEW_AXES,
   type ReviewAxis,
+  RulingSchema,
   type Stage,
 } from "@afk/shared";
 import { z } from "zod";
@@ -21,12 +25,12 @@ export const CANNOT_PROCEED_REASONS = [
   "contract-change-needed",
 ] as const;
 
-export const ImplementOutputSchema = z.discriminatedUnion("status", [
+const ImplementOutputObject = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("done"),
     summary: z.string(),
     acceptance: z.record(z.string(), z.array(z.string())),
-    uncertainties: z.array(z.string()),
+    decisions: DecisionsField,
   }),
   z.object({
     status: z.literal("cannot-proceed"),
@@ -34,10 +38,14 @@ export const ImplementOutputSchema = z.discriminatedUnion("status", [
     detail: z.string().min(1),
     summary: z.string().default(""),
     acceptance: z.record(z.string(), z.array(z.string())).default({}),
-    uncertainties: z.array(z.string()).default([]),
+    decisions: DecisionsField.default([]),
   }),
 ]);
-export type ImplementOutput = z.infer<typeof ImplementOutputSchema>;
+export const ImplementOutputSchema = z.preprocess(
+  coerceDecisionsInput,
+  ImplementOutputObject,
+);
+export type ImplementOutput = z.infer<typeof ImplementOutputObject>;
 
 const ReviewObject = z.object({
   verdict: z.enum(["pass", "fix"]),
@@ -46,12 +54,16 @@ const ReviewObject = z.object({
       file: z.string(),
       line: z.number().int().optional(),
       problem: z.string().min(1),
+      // a must-fix Ruling points at the Decision by this id (R-n#index)
+      id: z.string().min(1).optional(),
     }),
   ),
   suggestions: z.array(z.string()),
   // the Spec axis's (b): behaviour nobody asked for. It goes to the acceptance pack, never to a fix.
   scopeCreep: z.array(z.string()).default([]),
   uncertainties: z.array(z.string()),
+  // Spec axis: a Ruling for each conflict and known-gap. Standards leaves this off.
+  rulings: z.array(RulingSchema).optional(),
   // files this review used as standards sources. Required on the Standards axis.
   sources: z.array(z.string()).optional(),
 });
@@ -146,6 +158,10 @@ export interface AgentRunResult<Output> {
   error?: string;
   errorKind?: "invalid-output" | "timeout" | "other";
   durationMs: number;
+  // From the Cursor result line, as written: stored on the Run. Absent when the stream had no result.
+  tokenUsage?: unknown;
+  durationApiMs?: number;
+  cursorCliVersion?: string;
 }
 
 export interface AgentRunner {
@@ -260,11 +276,26 @@ export function classifyLocateRun(
 
 export function classifyReviewRun(
   result: AgentRunResult<ReviewOutput>,
+  listed?: { id: string; kind: string }[],
 ): Classification<ReviewOutcome> {
   const failure = failureOf(result);
   if (failure) return failure;
   if (!result.output) {
     return { kind: "outcome", outcome: "invalid-output", detail: "no result" };
+  }
+  if (listed) {
+    const check = checkReviewRulings({
+      decisions: listed,
+      rulings: result.output.rulings ?? [],
+      mustFix: result.output.mustFix,
+    });
+    if (!check.ok) {
+      return {
+        kind: "outcome",
+        outcome: "invalid-output",
+        detail: check.reason,
+      };
+    }
   }
   return { kind: "outcome", outcome: result.output.verdict };
 }
@@ -296,14 +327,15 @@ export function reviewFindings(
  * on either axis is a fix. `combined` is what a review-fix reads as review.json: every must-fix with its axis.
  */
 export function combineReviewRuns(
-  runs: Record<ReviewAxis, AgentRunResult<ReviewOutput>>,
+  runs: Partial<Record<ReviewAxis, AgentRunResult<ReviewOutput>>>,
 ): {
   classification: Classification<ReviewOutcome>;
   combined: CombinedReview | undefined;
 } {
-  const verdicts = REVIEW_AXES.map((axis) => ({
+  const present = REVIEW_AXES.filter((axis) => runs[axis] !== undefined);
+  const verdicts = present.map((axis) => ({
     axis,
-    verdict: classifyReviewRun(runs[axis]),
+    verdict: classifyReviewRun(runs[axis] as AgentRunResult<ReviewOutput>),
   }));
   for (const { verdict } of verdicts) {
     if (
@@ -312,10 +344,10 @@ export function combineReviewRuns(
     )
       return { classification: verdict, combined: undefined };
   }
-  const outputs = {
-    standards: runs.standards.output as ReviewOutput,
-    spec: runs.spec.output as ReviewOutput,
-  };
+  const outputs: Partial<Record<ReviewAxis, ReviewOutput>> = {};
+  for (const axis of present) {
+    outputs[axis] = runs[axis]?.output as ReviewOutput;
+  }
   const combined = combinedReview(outputs);
   return {
     classification: {
@@ -349,6 +381,7 @@ export const PROMPTS = {
   finalReviewStandards: join(PROMPT_DIR, "final-review-standards.md"),
   finalReviewSpec: join(PROMPT_DIR, "final-review-spec.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
+  recheck: join(PROMPT_DIR, "recheck.md"),
 } as const;
 
 // The skills version the overlay was written against, from its first line.
@@ -387,6 +420,7 @@ export function promptFor(
     | "update-branch"
     | "final-review"
     | "final-fix"
+    | "recheck"
     | "diagnose"
     | "locate-bug",
   options: { integration?: boolean; axis?: ReviewAxis } = {},
@@ -398,6 +432,8 @@ export function promptFor(
         : PROMPTS.finalReviewStandards;
     case "final-fix":
       return PROMPTS.finalFix;
+    case "recheck":
+      return PROMPTS.recheck;
     case "diagnose":
       return PROMPTS.diagnose;
     case "locate-bug":

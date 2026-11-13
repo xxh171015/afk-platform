@@ -81,6 +81,7 @@ interface Claimed {
     ticketId?: number;
     specId?: number;
     final?: boolean;
+    approvedRemoved?: { classname: string; name: string }[];
   };
 }
 const SUCCESS: Record<string, Record<string, unknown>> = {
@@ -436,6 +437,7 @@ describe("the overall review and the one fix", () => {
       agentBranch: `agent/${id}/S-1-final`,
       repo: { name: "backend" },
       failureLog: null,
+      failedCases: null,
       review: null,
     });
     expect(first.run).not.toBeNull();
@@ -455,6 +457,60 @@ describe("the overall review and the one fix", () => {
     });
     expect((await bundleOf(fix)).review).toMatchObject({ verdict: "fix" }); // the fix is told what to fix
   });
+
+  it("gives wrap-up the whole spec's decisions, including update-branch", async () => {
+    await runningSpec([ticket("a")]);
+    await db.pool.query("UPDATE repos SET default_sha = 'bbb222'");
+    await step("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [{ kind: "choice", text: "named it export" }],
+        },
+      },
+    });
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    await step("review", SUCCESS.review as Record<string, unknown>);
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    const bundleOf = async (job: Claimed) =>
+      (await fetch(
+        `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+      ).then((r) => r.json())) as Json;
+    const named = {
+      id: expect.stringMatching(/^R-\d+#0$/),
+      run: expect.stringMatching(/^R-\d+$/),
+      stage: "implement",
+      kind: "choice",
+      text: "named it export",
+    };
+    const wholeSpec = (log: Json) => {
+      expect(log.ticket).toBeNull();
+      expect(log.doneTickets.map((t: Json) => t.displayId)).toEqual(["T-1"]);
+      expect(log.doneTickets[0]?.decisions).toEqual([named]);
+      expect(log.spec).toMatchObject({ displayId: "S-1", decisions: [] });
+    };
+    const update = (await claim()) as Claimed;
+    expect(update.payload.stage).toBe("update-branch");
+    wholeSpec((await bundleOf(update)).decisionLog);
+    await worker.complete(update.id, update.attempt, {
+      stage: "update-branch",
+      outcome: "merged",
+      headSha: "updated",
+    });
+    const review = (await claim()) as Claimed;
+    expect(review.payload.stage).toBe("final-review");
+    wholeSpec((await bundleOf(review)).decisionLog);
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      ...REVIEW_FIX,
+    });
+    const fix = (await claim()) as Claimed;
+    expect(fix.payload.stage).toBe("final-fix");
+    wholeSpec((await bundleOf(fix)).decisionLog);
+  });
 });
 
 describe("when it goes wrong", () => {
@@ -463,6 +519,41 @@ describe("when it goes wrong", () => {
     await allTicketsDone();
     await step("final-review", REVIEW_FIX);
   }
+
+  it("hands a final-fix the still-failing cases of a failed final-merge", async () => {
+    await toFinalFix();
+    const cases = [
+      {
+        name: "exports",
+        classname: "orders",
+        file: "src/a.test.ts",
+        message: "boom",
+      },
+      {
+        name: "imports",
+        classname: "orders",
+        file: "src/b.test.ts",
+        message: "nope",
+      },
+    ];
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, output)
+       VALUES (1, 1, 'final-merge', 'gate-failed', $1::jsonb)`,
+      [
+        JSON.stringify({
+          failureLog: "# test failed\nboom",
+          failedCases: cases,
+        }),
+      ],
+    );
+    const fix = (await claim()) as Claimed;
+    expect(fix.payload.stage).toBe("final-fix");
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${fix.id}/bundle?workerId=w1&attempt=${fix.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.failureLog).toBe("# test failed\nboom");
+    expect(bundle.failedCases).toEqual(cases);
+  });
 
   it("leaves wrap-up must-fix findings unhandled when final-fix does not finish", async () => {
     await toFinalFix();
@@ -508,6 +599,109 @@ describe("when it goes wrong", () => {
       state: "blocked",
     });
     expect(await claim()).toBeNull();
+  });
+
+  const RECHECK_HIT = {
+    hit: true,
+    paths: ["src/a.test.ts"],
+    fromSha: "aaa111",
+    toSha: "bbb222",
+  };
+
+  it("Rechecks a final-fix that hit existing tests; a fail blocks wrap-up and approve continues the merge", async () => {
+    await toFinalFix();
+    await step("final-fix", {
+      outcome: "done",
+      run: { recheck: RECHECK_HIT },
+    });
+    const rec = (await claim()) as Claimed;
+    expect(rec.payload.stage).toBe("recheck");
+    expect(rec.payload).toMatchObject({
+      fromSha: RECHECK_HIT.fromSha,
+      toSha: RECHECK_HIT.toSha,
+      paths: RECHECK_HIT.paths,
+      final: true,
+    });
+    await worker.complete(rec.id, rec.attempt, {
+      stage: "recheck",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.test.ts", problem: "weakened" }],
+        },
+      },
+    });
+    expect(await fin()).toEqual([
+      {
+        step: "recheck",
+        state: "blocked",
+        blocked_reason: "recheck-failed",
+      },
+    ]);
+    expect(await claim()).toBeNull();
+    const approved = await call("POST", "/specs/1/approve-recheck");
+    expect(approved).toMatchObject({
+      status: 200,
+      body: { sha: RECHECK_HIT.toSha },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-merge", state: "active", blocked_reason: null },
+    ]);
+    expect(((await claim()) as Claimed).payload.stage).toBe("final-merge");
+  });
+
+  it("does not Recheck a source-only final-fix", async () => {
+    await toFinalFix();
+    await step("final-fix", {
+      outcome: "done",
+      run: {
+        recheck: {
+          hit: false,
+          paths: [],
+          fromSha: "aaa111",
+          toSha: "ddd444",
+        },
+      },
+    });
+    expect(((await claim()) as Claimed).payload.stage).toBe("final-merge");
+  });
+
+  it("removed tests on final-merge block without a second fix, and approve continues that merge", async () => {
+    await toFinalFix();
+    await step("final-fix", { outcome: "done" });
+    await step("final-merge", {
+      outcome: "tests-removed",
+      run: {
+        output: { removedTests: [{ classname: "suite", name: "gone" }] },
+      },
+    });
+    expect(await fin()).toEqual([
+      {
+        step: "final-merge",
+        state: "blocked",
+        blocked_reason: "tests-removed",
+      },
+    ]);
+    const approved = await call("POST", "/specs/1/approve-removed-tests");
+    expect(approved).toMatchObject({
+      status: 200,
+      body: { approved: [{ classname: "suite", name: "gone" }] },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-merge", state: "active", blocked_reason: null },
+    ]);
+    const again = await claim();
+    expect(again?.payload.stage).toBe("final-merge");
+    expect(again?.payload.approvedRemoved).toEqual([
+      { classname: "suite", name: "gone" },
+    ]);
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${again?.id}/bundle?workerId=w1&attempt=${again?.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.approvedRemovedTests).toEqual([
+      { classname: "suite", name: "gone" },
+    ]);
   });
 
   it("a conflict or a failed gate when the fix is merged blocks it, and a retry runs the merge again", async () => {
@@ -593,6 +787,225 @@ describe("when it goes wrong", () => {
       state: "blocked",
       blocked_reason: "merge-conflict",
     });
+  });
+
+  it("a known-gap without a ruling on final-review is invalid-output", async () => {
+    await runningSpec([ticket("a")]);
+    await step("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            { kind: "known-gap", text: "reload still skips the note filter" },
+          ],
+        },
+      },
+    });
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    const review = (await claim()) as Claimed;
+    const log = await fetch(
+      `${api.url}/worker/jobs/${review.id}/bundle?workerId=w1&attempt=${review.attempt}`,
+    ).then((r) => r.json());
+    const id = log.decisionLog.ticket.decisions[0].id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          rulings: [{ id, verdict: "accepted" }],
+        },
+      },
+    });
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+        },
+      },
+    });
+    expect(await fin()).toEqual([
+      {
+        step: "final-review",
+        state: "blocked",
+        blocked_reason: "invalid-output",
+      },
+    ]);
+  });
+
+  it("a timeout on final-review is still a timeout when a known-gap has no ruling", async () => {
+    await runningSpec([ticket("a")]);
+    await step("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            { kind: "known-gap", text: "reload still skips the note filter" },
+          ],
+        },
+      },
+    });
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    const review = (await claim()) as Claimed;
+    const log = await fetch(
+      `${api.url}/worker/jobs/${review.id}/bundle?workerId=w1&attempt=${review.attempt}`,
+    ).then((r) => r.json());
+    const id = log.decisionLog.ticket.decisions[0].id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          rulings: [{ id, verdict: "accepted" }],
+        },
+      },
+    });
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    await step("final-review", { outcome: "timeout" });
+    expect(await fin()).toEqual([
+      {
+        step: "final-review",
+        state: "blocked",
+        blocked_reason: "timeout",
+      },
+    ]);
+  });
+
+  it("a spec-level must-fix ruling goes to final-fix", async () => {
+    await runningSpec([ticket("a")]);
+    await step("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            { kind: "known-gap", text: "reload still skips the note filter" },
+          ],
+        },
+      },
+    });
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    const review = (await claim()) as Claimed;
+    const log = await fetch(
+      `${api.url}/worker/jobs/${review.id}/bundle?workerId=w1&attempt=${review.attempt}`,
+    ).then((r) => r.json());
+    const id = log.decisionLog.ticket.decisions[0].id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          rulings: [{ id, verdict: "accepted" }],
+        },
+      },
+    });
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    await step("final-review", {
+      outcome: "fix",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "fix",
+          mustFix: [
+            {
+              file: "src/a.ts",
+              problem: "reload still skips the note filter",
+              id,
+            },
+          ],
+          suggestions: [],
+          rulings: [{ id, verdict: "must-fix" }],
+        },
+      },
+      findings: [
+        {
+          kind: "must-fix",
+          body: "src/a.ts reload still skips the note filter",
+        },
+      ],
+    });
+    expect(await fin()).toEqual([
+      { step: "final-fix", state: "active", blocked_reason: null },
+    ]);
+    expect((await claim())?.payload.stage).toBe("final-fix");
+  });
+
+  it("does not block wrap-up for needs-human or an unfinished deferred", async () => {
+    await runningSpec([ticket("a")]);
+    await step("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            { kind: "known-gap", text: "reload still skips the note filter" },
+            { kind: "deferred", text: "openapi extra field", ref: "new" },
+          ],
+        },
+      },
+    });
+    await step("gate", SUCCESS.gate as Record<string, unknown>);
+    const review = (await claim()) as Claimed;
+    const log = await fetch(
+      `${api.url}/worker/jobs/${review.id}/bundle?workerId=w1&attempt=${review.attempt}`,
+    ).then((r) => r.json());
+    const id = log.decisionLog.ticket.decisions[0].id as string;
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          rulings: [{ id, verdict: "needs-human" }],
+        },
+      },
+    });
+    await step("merge", SUCCESS.merge as Record<string, unknown>);
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          rulings: [{ id, verdict: "needs-human" }],
+        },
+      },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-review", state: "done", blocked_reason: null },
+    ]);
+    expect((await call("GET", "/blocked")).body.finalizations).toEqual([]);
   });
 
   it("a result that is not valid blocks it as invalid-output, and the review is not asked again", async () => {

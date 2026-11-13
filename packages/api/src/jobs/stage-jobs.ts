@@ -111,6 +111,7 @@ export async function enqueueFinalJob(
   client: pg.PoolClient,
   target: { specId: number; repoId: number },
   step: FinalStep,
+  extra: Record<string, unknown> = {},
 ): Promise<Job> {
   const keyParts = { ...target, step };
   const earlier = await client.query<{ n: string }>(
@@ -132,6 +133,7 @@ export async function enqueueFinalJob(
       specId: target.specId,
       repoId: target.repoId,
       final: true,
+      ...extra,
     },
     idempotencyKey: finalJobKey({
       ...keyParts,

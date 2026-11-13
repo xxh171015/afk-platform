@@ -127,6 +127,31 @@ const GAVE_UP = {
 };
 const DONE = { outcome: "done" };
 
+describe("a conflict Decision", () => {
+  it("lets the ticket go on to the gate and stays off the waiting queue", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "did it",
+          acceptance: {},
+          decisions: [
+            {
+              kind: "conflict",
+              text: "ticket said 422; contract omitted the status; used 400",
+            },
+          ],
+        },
+      },
+    });
+    expect((await call("GET", "/blocked")).body.tickets).toEqual([]);
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("gate");
+  });
+});
+
 describe("retry", () => {
   async function blockedAfterFixes() {
     const specId = await runningSpec([ticket("a")]);
@@ -1231,6 +1256,87 @@ describe("approve-protected", () => {
     expect((await call("POST", "/tickets/1/approve-protected")).status).toBe(
       409,
     );
+  });
+});
+
+describe("approve-removed-tests", () => {
+  const gone = { classname: "suite", name: "gone" };
+
+  async function blockedByRemovedTests() {
+    await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", {
+      outcome: "tests-removed",
+      run: { output: { removedTests: [gone] } },
+    });
+    expect(await row(1)).toMatchObject({
+      state: "blocked",
+      blocked_reason: "tests-removed",
+    });
+  }
+
+  it("adds the names the gate found, bumps the content version, and goes on from the gate", async () => {
+    await blockedByRemovedTests();
+    const before = await db.pool.query(
+      "SELECT content_version FROM tickets WHERE id = 1",
+    );
+    const result = await call("POST", "/tickets/1/approve-removed-tests");
+    expect(result).toMatchObject({
+      status: 200,
+      body: { approved: [gone] },
+    });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT source, data->>'action' AS action FROM events WHERE type = 'action' ORDER BY id",
+        )
+      ).rows.at(-1),
+    ).toEqual({ source: "page", action: "approve-removed-tests" });
+    const after = await db.pool.query(
+      "SELECT state, blocked_reason, content_version, allowed_removed_tests FROM tickets WHERE id = 1",
+    );
+    expect(after.rows[0]).toMatchObject({
+      state: "running",
+      blocked_reason: null,
+      content_version: (before.rows[0]?.content_version as number) + 1,
+      allowed_removed_tests: [gone],
+    });
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("gate");
+    const bundle = await fetch(
+      `${api.url}/worker/jobs/${next.id}/bundle?workerId=w1&attempt=${next.attempt}`,
+    ).then((r) => r.json());
+    expect(bundle.approvedRemovedTests).toEqual([gone]);
+  });
+
+  it("resumes a merge that found the names without spending merge-fix", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", { outcome: "passed" });
+    await stage("review", { outcome: "pass" });
+    await stage("merge", {
+      outcome: "tests-removed",
+      run: { output: { removedTests: [gone] } },
+    });
+    expect(await row(1)).toMatchObject({
+      state: "blocked",
+      blocked_reason: "tests-removed",
+      fix_counts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
+    });
+    await call("POST", "/tickets/1/approve-removed-tests");
+    const next = (await worker.claim()).body.job as Claimed;
+    expect(next.payload.stage).toBe("merge");
+  });
+
+  it("is for tests-removed only", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", GAVE_UP);
+    const result = await call("POST", "/tickets/1/approve-removed-tests");
+    expect(result.status).toBe(409);
+    expect(result.body.error).toMatch(/tests-removed/);
+    expect(
+      (await call("POST", "/tickets/99/approve-removed-tests")).status,
+    ).toBe(404);
   });
 });
 
@@ -2398,6 +2504,14 @@ describe("what a person sees", () => {
       outcome: "done",
       run: {
         durationMs: 146000,
+        durationApiMs: 120000,
+        cursorCliVersion: "2026.10.22-27dcf5f",
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 1,
+        },
         prompt: "overlay + implement",
         output: { outcome: "done" },
         commits: ["abc1234"],
@@ -2416,6 +2530,14 @@ describe("what a person sees", () => {
       attempt: 1,
       result: "done",
       durationMs: 146000,
+      durationApiMs: 120000,
+      cursorCliVersion: "2026.10.22-27dcf5f",
+      tokenUsage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 1,
+      },
       prompt: "overlay + implement",
       output: { outcome: "done" },
       commits: ["abc1234"],
@@ -2441,8 +2563,64 @@ describe("what a person sees", () => {
       prompt: null,
       output: null,
       commits: [],
+      tokenUsage: null,
+      durationApiMs: null,
     });
     expect((await call("GET", "/runs/99")).status).toBe(404);
+  });
+
+  it("totals token usage by stage on the spec, and leaves a run without a result line empty", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: {
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 20,
+          cacheWriteTokens: 1,
+        },
+      },
+    });
+    await stage("gate", { outcome: "passed" });
+    await stage("review", {
+      outcome: "pass",
+      run: {
+        axis: "standards",
+        tokenUsage: {
+          inputTokens: 3,
+          outputTokens: 1,
+          cacheReadTokens: 8,
+        },
+      },
+      extraRuns: [
+        {
+          run: {
+            axis: "spec",
+            tokenUsage: {
+              inputTokens: 5,
+              outputTokens: 2,
+              cacheReadTokens: 9,
+            },
+          },
+        },
+      ],
+    });
+    const spec = await call("GET", `/specs/${specId}`);
+    expect(spec.body.usageByStage).toEqual([
+      {
+        stage: "implement",
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 20,
+      },
+      {
+        stage: "review",
+        inputTokens: 8,
+        outputTokens: 3,
+        cacheReadTokens: 17,
+      },
+    ]);
   });
 });
 

@@ -167,6 +167,18 @@ function server(initial: Queue, actions: Record<string, Handler> = {}) {
         withoutTicket(2),
       ),
       act(
+        "POST /tickets/2/approve-removed-tests",
+        () => ({
+          json: { approved: [{ classname: "suite", name: "gone" }] },
+        }),
+        withoutTicket(2),
+      ),
+      act(
+        "POST /tickets/2/approve-recheck",
+        () => ({ json: { sha: "bbb222" } }),
+        withoutTicket(2),
+      ),
+      act(
         "POST /tickets/3/cancel",
         () => ({ json: { cancelled: ["T-3"], blocked: [], skipped: [] } }),
         withoutTicket(3),
@@ -377,6 +389,24 @@ describe("the queue of what waits for a person", () => {
     ).toBeNull();
     expect(
       card("T-2").getByRole("button", { name: "批准这些保护路径" }),
+    ).toBeTruthy();
+  });
+
+  it("offers approve-recheck for a ticket blocked by recheck-failed", async () => {
+    const { fake } = server(queue({ tickets: [ticket(2, "recheck-failed")] }));
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-2");
+    expect(
+      card("T-2").getByRole("button", { name: "批准这次改动" }),
+    ).toBeTruthy();
+  });
+
+  it("offers approve-removed-tests for a ticket blocked by tests-removed", async () => {
+    const { fake } = server(queue({ tickets: [ticket(2, "tests-removed")] }));
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-2");
+    expect(
+      card("T-2").getByRole("button", { name: "批准删掉的测试" }),
     ).toBeTruthy();
   });
 
@@ -630,6 +660,32 @@ describe("approving protected paths", () => {
   });
 });
 
+describe("approving a Recheck", () => {
+  it("asks the API and takes the ticket off the list", async () => {
+    const { fake } = server(queue({ tickets: [ticket(2, "recheck-failed")] }));
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-2");
+    fireEvent.click(card("T-2").getByRole("button", { name: "批准这次改动" }));
+    await waitFor(() => expect(screen.queryByTestId("blocked-T-2")).toBeNull());
+    expect(fake.calls).toContain("POST /tickets/2/approve-recheck");
+    expect(await screen.findByText("没有在等你的事")).toBeTruthy();
+  });
+});
+
+describe("approving removed tests", () => {
+  it("asks the API and takes the ticket off the list", async () => {
+    const { fake } = server(queue({ tickets: [ticket(2, "tests-removed")] }));
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-2");
+    fireEvent.click(
+      card("T-2").getByRole("button", { name: "批准删掉的测试" }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("blocked-T-2")).toBeNull());
+    expect(fake.calls).toContain("POST /tickets/2/approve-removed-tests");
+    expect(await screen.findByText("没有在等你的事")).toBeTruthy();
+  });
+});
+
 describe("cancelling", () => {
   it("needs a second click, and does nothing if you keep the ticket", async () => {
     const { fake } = server(queue({ tickets: [ticket(3, "agent-gave-up")] }));
@@ -742,6 +798,46 @@ describe("paused specs and stopped overall reviews", () => {
     expect(resumed).toEqual({});
   });
 
+  it("offers approve-recheck on a spec paused by recheck-failed", async () => {
+    let current = queue({
+      specs: [{ ...paused, reason: "recheck-failed" }],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/approve-recheck": () => {
+        current = queue();
+        return { json: { sha: "bbb222" } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    expect(spec.getByText("Recheck 不是 pass，等人批准")).toBeTruthy();
+    fireEvent.click(spec.getByRole("button", { name: "批准这次改动" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(fake.calls).toContain("POST /specs/1/approve-recheck");
+  });
+
+  it("offers approve-removed-tests on a spec paused by tests-removed", async () => {
+    let current = queue({
+      specs: [{ ...paused, reason: "tests-removed" }],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/approve-removed-tests": () => {
+        current = queue();
+        return {
+          json: { approved: [{ classname: "suite", name: "gone" }] },
+        };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const spec = within(await screen.findByTestId("paused-S-1"));
+    expect(spec.getByText("删了测试，等人批准")).toBeTruthy();
+    fireEvent.click(spec.getByRole("button", { name: "批准删掉的测试" }));
+    await waitFor(() => expect(screen.queryByTestId("paused-S-1")).toBeNull());
+    expect(fake.calls).toContain("POST /specs/1/approve-removed-tests");
+  });
+
   it("lets a person allow a paused spec through, or cancel it", async () => {
     let current = queue({ specs: [paused] });
     const fake = fakeServer({
@@ -850,6 +946,86 @@ describe("paused specs and stopped overall reviews", () => {
     );
     expect(fake.calls).toContain("POST /specs/1/final/retry");
     expect(posted).toEqual({ note: "take theirs on src/a.ts" });
+  });
+
+  it("offers approve-recheck on a wrap-up blocked by recheck-failed", async () => {
+    let current = queue({
+      finalizations: [
+        {
+          ...stopped,
+          blockedReason: "recheck-failed",
+          step: "recheck",
+          brief: brief({
+            stage: "recheck",
+            result: "fix",
+          }),
+          structuredBrief: structuredBrief({
+            reason: "recheck-failed",
+            specDisplayId: "S-1",
+            wrapUpStep: "recheck",
+            brief: brief({
+              stage: "recheck",
+              result: "fix",
+            }),
+          }),
+        },
+      ],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/approve-recheck": () => {
+        current = queue();
+        return { json: { sha: "bbb222" } };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const item = within(await screen.findByTestId("final-S-1-backend"));
+    fireEvent.click(item.getByRole("button", { name: "批准这次改动" }));
+    await waitFor(() =>
+      expect(screen.queryByTestId("final-S-1-backend")).toBeNull(),
+    );
+    expect(fake.calls).toContain("POST /specs/1/approve-recheck");
+  });
+
+  it("offers approve-removed-tests on a wrap-up blocked by tests-removed", async () => {
+    let current = queue({
+      finalizations: [
+        {
+          ...stopped,
+          blockedReason: "tests-removed",
+          brief: brief({
+            stage: "final-merge",
+            result: "tests-removed",
+            output: { removedTests: [{ classname: "suite", name: "gone" }] },
+          }),
+          structuredBrief: structuredBrief({
+            reason: "tests-removed",
+            specDisplayId: "S-1",
+            wrapUpStep: "final-merge",
+            brief: brief({
+              stage: "final-merge",
+              result: "tests-removed",
+            }),
+          }),
+        },
+      ],
+    });
+    const fake = fakeServer({
+      "GET /blocked": () => ({ json: current }),
+      "POST /specs/1/approve-removed-tests": () => {
+        current = queue();
+        return {
+          json: { approved: [{ classname: "suite", name: "gone" }] },
+        };
+      },
+    });
+    renderWithApp(<BlockedQueue />, fake);
+    const item = within(await screen.findByTestId("final-S-1-backend"));
+    fireEvent.click(item.getByRole("button", { name: "批准删掉的测试" }));
+    await waitFor(() =>
+      expect(screen.queryByTestId("final-S-1-backend")).toBeNull(),
+    );
+    expect(fake.calls).toContain("POST /specs/1/approve-removed-tests");
   });
 
   it("shows the e2e before the pull requests, and lets a person run it again or open the pull requests anyway", async () => {

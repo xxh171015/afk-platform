@@ -69,6 +69,13 @@ export interface paths {
               updateBranchBehindCommits?: number;
               updateBranchBehindHours?: number;
             };
+            /** @enum {string} */
+            ticketReview?: "spec" | "both";
+            stageModels?: {
+              standards?: string;
+              "update-branch"?: string;
+              "merge-fix"?: string;
+            };
           };
         };
       };
@@ -85,7 +92,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported */
+        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -133,6 +140,13 @@ export interface paths {
               name: string;
               defaultAgent: string | null;
               feishuChatId: string | null;
+              /** @enum {string} */
+              ticketReview: "spec" | "both";
+              stageModels: {
+                standards?: string;
+                "update-branch"?: string;
+                "merge-fix"?: string;
+              };
               repos: {
                 name: string;
                 url: string;
@@ -192,6 +206,13 @@ export interface paths {
               updateBranchBehindCommits?: number;
               updateBranchBehindHours?: number;
             };
+            /** @enum {string} */
+            ticketReview?: "spec" | "both";
+            stageModels?: {
+              standards?: string;
+              "update-branch"?: string;
+              "merge-fix"?: string;
+            };
           };
         };
       };
@@ -207,7 +228,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported */
+        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -2036,22 +2057,130 @@ export interface paths {
               }[];
               note: string | null;
               failureLog: string | null;
+              failedCases:
+                | {
+                    name: string;
+                    classname: string;
+                    file?: string;
+                    message?: string;
+                  }[]
+                | null;
               review?: unknown;
               gateBaseline: {
                 tests: number;
                 skipped: number;
+                names?: {
+                  classname: string;
+                  name: string;
+                }[];
               } | null;
               gateBaselines: {
                 sha: string;
                 tests: number;
                 skipped: number;
+                names?: {
+                  classname: string;
+                  name: string;
+                }[];
               }[];
+              ticketGateNames:
+                | {
+                    classname: string;
+                    name: string;
+                  }[]
+                | null;
+              decisionLog: {
+                ticket: {
+                  displayId: string;
+                  decisions: {
+                    id: string;
+                    run: string;
+                    stage: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  rulings: {
+                    id: string;
+                    /** @enum {string} */
+                    verdict: "accepted" | "must-fix" | "needs-human";
+                  }[];
+                } | null;
+                doneTickets: {
+                  displayId: string;
+                  decisions: {
+                    id: string;
+                    run: string;
+                    stage: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  rulings: {
+                    id: string;
+                    /** @enum {string} */
+                    verdict: "accepted" | "must-fix" | "needs-human";
+                  }[];
+                }[];
+                spec: {
+                  displayId: string;
+                  decisions: {
+                    id: string;
+                    run: string;
+                    stage: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  rulings: {
+                    id: string;
+                    /** @enum {string} */
+                    verdict: "accepted" | "must-fix" | "needs-human";
+                  }[];
+                } | null;
+              };
+              approvedRemovedTests:
+                | {
+                    classname: string;
+                    name: string;
+                  }[]
+                | null;
               limits: {
                 runIdleSeconds: number;
                 runWallclockSeconds: number;
                 maxIntegrationEnvironments: number;
               };
               model: string | null;
+              /** @enum {string} */
+              ticketReview: "spec" | "both";
+              stageModels: {
+                standards?: string;
+                "update-branch"?: string;
+                "merge-fix"?: string;
+              };
+              recheck: {
+                fromSha: string;
+                toSha: string;
+                paths: string[];
+              } | null;
               handbackResolve?: boolean;
             };
           };
@@ -2542,6 +2671,8 @@ export interface paths {
                   classname: string;
                   /** @enum {string} */
                   status: "passed" | "failed" | "skipped";
+                  file?: string;
+                  message?: string;
                   flaky?: boolean;
                 }[];
               } | null;
@@ -2602,6 +2733,20 @@ export interface paths {
             workerId: string;
             attempt: number;
             error: string;
+            run?: {
+              tokenUsage?: unknown;
+              durationApiMs?: number;
+              cursorCliVersion?: string;
+              /** @enum {string} */
+              axis?: "standards" | "spec";
+            };
+            extraRuns?: {
+              tokenUsage?: unknown;
+              durationApiMs?: number;
+              cursorCliVersion?: string;
+              /** @enum {string} */
+              axis?: "standards" | "spec";
+            }[];
             orphanRef?: string;
             orphanSha?: string;
           };
@@ -3121,6 +3266,8 @@ export interface paths {
               output?: unknown;
               commits: string[];
               sources: string[] | null;
+              durationApiMs: number | null;
+              tokenUsage?: unknown;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";
@@ -3550,9 +3697,18 @@ export interface paths {
                     run: string;
                     body: string;
                   }[];
-                  uncertainties: {
+                  decisions: {
                     source: string;
+                    run: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
                     text: string;
+                    ref?: string;
                   }[];
                   protectedPathApprovals: {
                     ticket: string;
@@ -3616,6 +3772,15 @@ export interface paths {
                   state: "committed" | "unchanged" | "waived";
                 } | null;
                 agentSeconds: number;
+                /** @default [] */
+                needsDecision: {
+                  /** @enum {string} */
+                  kind: "recheck" | "needs-human" | "deferred";
+                  id: string;
+                  source: string;
+                  text: string;
+                  ref?: string;
+                }[];
               } | null;
               edges: {
                 from: string;
@@ -3689,6 +3854,12 @@ export interface paths {
                 pullRequestNumber: number | null;
                 pullRequestUrl: string | null;
                 pullNumber: number | null;
+              }[];
+              usageByStage: {
+                stage: string;
+                inputTokens: number;
+                outputTokens: number;
+                cacheReadTokens: number;
               }[];
             };
           };
@@ -4765,6 +4936,256 @@ export interface paths {
           };
         };
         /** @description The ticket is not blocked by protected-path-changed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/approve-removed-tests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the ticket goes on from the gate */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              approved: {
+                classname: string;
+                name: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The ticket is not blocked by tests-removed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/approve-removed-tests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the wrap-up or update-branch goes on */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              approved: {
+                classname: string;
+                name: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not blocked or paused by tests-removed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/approve-recheck": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the ticket goes on from the merge */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              sha: string;
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The ticket is not blocked by recheck-failed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{id}/approve-recheck": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Approved; the wrap-up or update-branch goes on */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              sha: string;
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not blocked or paused by recheck-failed */
         409: {
           headers: {
             [name: string]: unknown;

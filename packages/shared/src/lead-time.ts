@@ -95,6 +95,7 @@ const AGENT_RUN_STAGES = new Set([
   "diagnose",
   "final-review",
   "final-fix",
+  "recheck",
 ]);
 
 const GATE_RUN_STAGES = new Set([

@@ -7,8 +7,8 @@ export async function snapshotTicket(
   ticketId: number,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO ticket_versions (ticket_id, version, title, body, acceptance_criteria, modules, allowed_protected_paths)
-     SELECT id, content_version, title, body, acceptance_criteria, modules, allowed_protected_paths
+    `INSERT INTO ticket_versions (ticket_id, version, title, body, acceptance_criteria, modules, allowed_protected_paths, allowed_removed_tests)
+     SELECT id, content_version, title, body, acceptance_criteria, modules, allowed_protected_paths, allowed_removed_tests
      FROM tickets WHERE id = $1`,
     [ticketId],
   );

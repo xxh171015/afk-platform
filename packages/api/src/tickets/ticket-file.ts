@@ -11,8 +11,8 @@ export async function ticketFileOf(
   version?: number,
 ): Promise<string | undefined> {
   const found = await pool.query(
-    `SELECT t.title, t.body, t.modules, t.allowed_protected_paths, t.content_version, t.type, t.refs, t.environment,
-            t.stories, r.name AS repo
+    `SELECT t.title, t.body, t.modules, t.allowed_protected_paths, t.allowed_removed_tests, t.content_version, t.type,
+            t.refs, t.environment, t.stories, r.name AS repo
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
     [ticketId],
   );
@@ -21,7 +21,7 @@ export async function ticketFileOf(
   const current = content.content_version as number;
   if (version !== undefined && version !== current) {
     const old = await pool.query(
-      `SELECT title, body, modules, allowed_protected_paths
+      `SELECT title, body, modules, allowed_protected_paths, allowed_removed_tests
        FROM ticket_versions WHERE ticket_id = $1 AND version = $2`,
       [ticketId, version],
     );
@@ -45,6 +45,9 @@ export async function ticketFileOf(
     stories: content.stories,
     modules: content.modules,
     protectedPathsOk: content.allowed_protected_paths,
+    removedTestsOk: Array.isArray(content.allowed_removed_tests)
+      ? content.allowed_removed_tests
+      : [],
     contract: named("contract"),
     refs: content.refs,
     environment: content.environment,

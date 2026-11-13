@@ -52,10 +52,10 @@ afterEach(() => {
 });
 
 const DONE = {
-  status: "done",
+  status: "done" as const,
   summary: "did it",
   acceptance: { "returns csv": ["csv test"] },
-  uncertainties: [],
+  decisions: [],
 };
 
 describe("the structured outputs", () => {
@@ -84,6 +84,41 @@ describe("the structured outputs", () => {
       ImplementOutputSchema.safeParse({
         status: "cannot-proceed",
         reason: "old style",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts typed decisions on implement, maps a legacy string array to choice, and rejects an unknown kind", () => {
+    const done = {
+      status: "done" as const,
+      summary: "did it",
+      acceptance: { "returns csv": ["csv test"] },
+    };
+    expect(
+      ImplementOutputSchema.parse({
+        ...done,
+        decisions: [
+          { kind: "choice", text: "named it export" },
+          {
+            kind: "conflict",
+            text: "ticket said one file; tdd needed a test file; added the test",
+          },
+          { kind: "known-gap", text: "list reload skips the note filter" },
+          { kind: "deferred", text: "openapi extra field", ref: "new" },
+          { kind: "workaround", text: "skipped drizzle generate" },
+        ],
+      }).decisions,
+    ).toHaveLength(5);
+    expect(
+      ImplementOutputSchema.parse({
+        ...done,
+        uncertainties: ["picked ISO dates"],
+      }).decisions,
+    ).toEqual([{ kind: "choice", text: "picked ISO dates" }]);
+    expect(
+      ImplementOutputSchema.safeParse({
+        ...done,
+        decisions: [{ kind: "question", text: "ask someone" }],
       }).success,
     ).toBe(false);
   });
@@ -163,16 +198,8 @@ const result = <T>(over: Partial<AgentRunResult<T>>): AgentRunResult<T> => ({
 
 describe("classifying an implement or fix run", () => {
   const cases: [string, AgentRunResult<ImplementOutput>, string][] = [
-    [
-      "done with a commit",
-      result({ output: DONE as ImplementOutput, commits: ["c1"] }),
-      "done",
-    ],
-    [
-      "done without a commit",
-      result({ output: DONE as ImplementOutput }),
-      "no-commits",
-    ],
+    ["done with a commit", result({ output: DONE, commits: ["c1"] }), "done"],
+    ["done without a commit", result({ output: DONE }), "no-commits"],
     [
       "cannot-proceed: gave up",
       result({
@@ -182,7 +209,7 @@ describe("classifying an implement or fix run", () => {
           detail: "d",
           summary: "",
           acceptance: {},
-          uncertainties: [],
+          decisions: [],
         },
       }),
       "agent-gave-up",
@@ -196,7 +223,7 @@ describe("classifying an implement or fix run", () => {
           detail: "d",
           summary: "",
           acceptance: {},
-          uncertainties: [],
+          decisions: [],
         },
       }),
       "contract-change-needed",
@@ -221,7 +248,7 @@ describe("classifying an implement or fix run", () => {
         detail: "needs a decision",
         summary: "",
         acceptance: {},
-        uncertainties: [],
+        decisions: [],
       },
     });
     expect(classifyAgentRun(run)).toEqual({
@@ -260,6 +287,25 @@ describe("classifying a review run", () => {
     expect(classifyReviewRun(result({ output: output("fix") }))).toMatchObject({
       outcome: "fix",
     });
+  });
+
+  it("a known-gap without a ruling is invalid-output", () => {
+    expect(
+      classifyReviewRun(result({ output: output("pass") }), [
+        { id: "R-1#0", kind: "known-gap" },
+      ]),
+    ).toMatchObject({ outcome: "invalid-output" });
+    expect(
+      classifyReviewRun(
+        result({
+          output: {
+            ...output("pass"),
+            rulings: [{ id: "R-1#0", verdict: "accepted" }],
+          },
+        }),
+        [{ id: "R-1#0", kind: "known-gap" }],
+      ),
+    ).toMatchObject({ outcome: "pass" });
   });
 
   it("a review needs no commit", () => {
@@ -371,7 +417,7 @@ describe("the two axes of a review", () => {
       combineReviewRuns({
         standards: ran(withSources),
         spec: ran(out("pass")),
-      }).combined?.standards.sources,
+      }).combined?.standards?.sources,
     ).toEqual(["AGENTS.md", "CONTRIBUTING.md"]);
   });
 
@@ -394,6 +440,20 @@ describe("the two axes of a review", () => {
     expect(
       combineReviewRuns({ standards: slow, spec: ran(out("pass")) }).combined,
     ).toBeUndefined();
+  });
+
+  it("combines a spec-only ticket review without a Standards result", () => {
+    const spec = out("fix", {
+      mustFix: [{ file: "t.ts", problem: "missing" }],
+    });
+    const { classification, combined } = combineReviewRuns({ spec: ran(spec) });
+    expect(classification).toEqual({ kind: "outcome", outcome: "fix" });
+    expect(combined).toEqual({
+      verdict: "fix",
+      mustFix: [{ axis: "spec", file: "t.ts", problem: "missing" }],
+      spec,
+    });
+    expect(combined).not.toHaveProperty("standards");
   });
 
   it("points each axis at its own prompt: the ticket and the contract for Spec, with spec.md as background only", () => {
@@ -571,6 +631,7 @@ const STAGES_WITH_PROMPTS = [
   "update-branch",
   "final-review",
   "final-fix",
+  "recheck",
   "diagnose",
   "locate-bug",
 ] as const;
@@ -597,12 +658,18 @@ describe("the prompts", () => {
       expect(prompt).toContain("agent-gave-up");
       expect(prompt).toContain("contract-change-needed");
       expect(prompt).toContain("<result>");
+      expect(prompt).toContain("decisions");
     }
     for (const stage of ["review", "final-review"] as const) {
       expect(whole(stage)).toContain("verdict");
       expect(whole(stage)).toContain("mustFix");
       expect(whole(stage)).toContain("sources");
     }
+    expect(whole("recheck")).toContain("verdict");
+    expect(whole("recheck")).toContain("mustFix");
+    expect(whole("recheck")).toContain("/context/recheck.json");
+    expect(whole("recheck")).toContain("不要求 Ruling");
+    expect(whole("recheck")).toContain("不要用 `git diff <baseSha>...HEAD`");
   });
 
   it("is the overlay and then the stage's own prompt, for every stage", () => {
@@ -641,15 +708,49 @@ describe("the prompts", () => {
       "git diff <baseSha>...HEAD",
       "spec 在哪",
       "uncertainties",
+      "decisions",
       "cannot-proceed",
       "不要 push",
       "保护路径",
       "/context/domain/",
       "/context/note.md",
+      "/context/decisions.json",
+      "推翻",
+      "conflict",
       "不当成改票",
       "单个测试文件怎么跑看仓库的 `AGENTS.md`",
     ])
       expect(overlay).toContain(word);
+  });
+
+  it("gives conflict examples and the three cannot-proceed cases", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const section = overlay.slice(
+      overlay.indexOf("## 没有人回答你"),
+      overlay.indexOf("## /context 就是 tracker"),
+    );
+    expect(section).toContain("conflict");
+    expect(section).toContain("状态码");
+    expect(section).toContain("User Story");
+    expect(section).toContain("tdd");
+    expect(section).toContain("known-gap");
+    expect(section).toContain("cannot-proceed");
+    expect(section).toContain("缺做下去必需的东西");
+    expect(section).toContain("没批准的保护路径");
+    expect(section).toContain("契约非改不可");
+  });
+
+  it("tells the agent to write long gate and full-suite output to a file instead of reading it all", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const bounds = overlay.slice(overlay.indexOf("## 做事的边界"));
+    expect(bounds).toContain("/context/run.json");
+    expect(bounds).toContain("`gate`");
+    expect(bounds).toContain("全量测试");
+    expect(bounds).toContain("写进文件");
+    expect(bounds).toContain("退出码");
+    expect(bounds).toContain("失败的部分");
+    expect(bounds).toContain("最后几十行");
+    expect(bounds).toContain("单个测试文件");
   });
 
   it("has afk-setup write how to run a single test file into AGENTS.md", () => {
@@ -731,6 +832,19 @@ describe("the prompts", () => {
     );
   });
 
+  it("tells the Spec axis to rule on conflict and known-gap", () => {
+    for (const file of [PROMPTS.reviewSpec, PROMPTS.finalReviewSpec]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("/context/decisions.json");
+      expect(prompt).toContain("rulings");
+      expect(prompt).toContain("needs-human");
+    }
+    expect(readFileSync(PROMPTS.finalReviewSpec, "utf8")).toContain("deferred");
+    expect(readFileSync(PROMPTS.finalReviewSpec, "utf8")).toContain(
+      "不要写进 `mustFix`",
+    );
+  });
+
   it("makes the reviews run code-review from the fixed point in run.json", () => {
     for (const stage of ["review", "final-review"] as const) {
       expect(whole(stage)).toContain(
@@ -757,6 +871,14 @@ describe("the prompts", () => {
     );
   });
 
+  it("tells gate-fix, merge-fix and final-fix to run the files in cases.json first when that file exists", () => {
+    for (const file of [PROMPTS.gateFix, PROMPTS.mergeFix, PROMPTS.finalFix]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("/context/failure/cases.json");
+      expect(prompt).toMatch(/先只跑/);
+    }
+  });
+
   it("picks the prompt by stage", () => {
     expect(promptFor("implement")).toBe(PROMPTS.implement);
     expect(promptFor("review")).toBe(PROMPTS.reviewStandards);
@@ -764,6 +886,7 @@ describe("the prompts", () => {
     expect(promptFor("review-fix")).toBe(PROMPTS.reviewFix);
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
     expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
+    expect(promptFor("recheck")).toBe(PROMPTS.recheck);
   });
 
   const CODE_CHANGING_PROMPTS = [
@@ -813,7 +936,8 @@ describe("the prompts", () => {
       "cannot-proceed",
       "<result>",
       "e2e",
-      "uncertainties",
+      "decisions",
+      "known-gap",
       "BACKEND_URL",
       "/context/ticket.md",
     ])
@@ -926,6 +1050,45 @@ describe("a fake agent run, end to end", () => {
       "2",
     );
     git(repo.dir, ["status"]);
+  });
+
+  it("takes usage from a result line on the event stream", async () => {
+    repo = makeRepo();
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 20,
+      cacheWriteTokens: 1,
+    };
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      output: DONE,
+      rawLines: [
+        JSON.stringify({ type: "assistant", message: { content: "hi" } }),
+        JSON.stringify({
+          type: "result",
+          duration_api_ms: 1200,
+          cli_version: "2026.10.22-27dcf5f",
+          usage,
+        }),
+      ],
+    }));
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.tokenUsage).toEqual(usage);
+    expect(run.durationApiMs).toBe(1200);
+    expect(run.cursorCliVersion).toBe("2026.10.22-27dcf5f");
+  });
+
+  it("leaves usage empty when the stream has no result line", async () => {
+    repo = makeRepo();
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      output: DONE,
+    }));
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.tokenUsage).toBeUndefined();
+    expect(run.durationApiMs).toBeUndefined();
+    expect(run.cursorCliVersion).toBeUndefined();
   });
 
   it("a review run is read-only: it commits nothing and returns a verdict", async () => {
