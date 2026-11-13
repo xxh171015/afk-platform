@@ -45,8 +45,8 @@ export async function applyAutoRetry(
       [target.finalizationId, NOTES[outcome]],
     );
   await client.query(
-    `INSERT INTO events (spec_id, ticket_id, repo_id, type, reason, source, data)
-     VALUES ($1, $2, $3, $4, $5, 'scheduler', $6)`,
+    `INSERT INTO events (spec_id, ticket_id, repo_id, type, reason, source, failure_source, data)
+     VALUES ($1, $2, $3, $4, $5, 'scheduler', afk_failure_source($5, NULL), $6)`,
     [
       target.specId,
       target.type === "ticket" ? target.ticketId : null,

@@ -53,7 +53,12 @@ export type WeekMetrics = {
     humanCommitsRate: number | null;
     untouchedRate: number | null;
   };
+  // the agents' pauses that ended this week (agents-pause.ts), in order: they pause the whole instance, so every
+  // project shows them
+  agentsPauses: AgentsPauseRow[];
 };
+
+export type AgentsPauseRow = { pausedMinutes: number; automatic: boolean };
 
 export type MetricsView = {
   since: string | null;
@@ -67,6 +72,9 @@ type FailureRow = {
   reason: string | null;
   failure_source: FailureSource;
   job_id: number | null;
+  // a stage run again on its own (stages/auto-retry.ts) that went on without a person: the first block of its
+  // ticket or finalization after it is not at that stage
+  recovered_by_retry: boolean;
 };
 
 type JobRow = {
@@ -139,9 +147,19 @@ export async function metricsView(
   const failures = specIds.length
     ? (
         await pool.query<FailureRow>(
-          `SELECT spec_id, type, to_state, reason, failure_source, job_id
-           FROM events
-           WHERE spec_id = ANY($1::int[]) AND failure_source IS NOT NULL`,
+          `SELECT e.spec_id, e.type, e.to_state, e.reason, e.failure_source, e.job_id,
+                  COALESCE((e.data->>'autoRetry')::boolean, false)
+                    AND block.stage IS DISTINCT FROM e.data->>'stage' AS recovered_by_retry
+           FROM events e
+           LEFT JOIN LATERAL (
+             SELECT COALESCE(b.data->>'step', j.payload->>'stage') AS stage
+             FROM events b LEFT JOIN jobs j ON j.id = b.job_id
+             WHERE (e.data->>'autoRetry')::boolean AND b.id > e.id AND b.type = e.type
+               AND b.spec_id = e.spec_id AND b.ticket_id IS NOT DISTINCT FROM e.ticket_id
+               AND b.repo_id IS NOT DISTINCT FROM e.repo_id AND b.to_state = 'blocked'
+             ORDER BY b.id LIMIT 1
+           ) block ON true
+           WHERE e.spec_id = ANY($1::int[]) AND e.failure_source IS NOT NULL`,
           [specIds],
         )
       ).rows
@@ -176,6 +194,8 @@ export async function metricsView(
       .map((row) => ({ id: row.id, endedAt: row.ended_at as Date })),
   );
 
+  const pausesByWeek = await agentsPausesByWeek(pool, weekSet);
+
   const out: WeekMetrics[] = [];
   for (const weekStart of weeks) {
     const rows = byWeek.get(weekStart) ?? [];
@@ -193,10 +213,37 @@ export async function metricsView(
         merged.map((row) => row.id),
         touched,
       ),
+      agentsPauses: pausesByWeek.get(weekStart) ?? [],
     });
   }
 
   return { since: since ? ymdInZone(since) : null, weeks: out };
+}
+
+async function agentsPausesByWeek(
+  pool: pg.Pool,
+  weekSet: Set<string>,
+): Promise<Map<string, AgentsPauseRow[]>> {
+  const { rows } = await pool.query<{
+    at: Date;
+    paused_minutes: number;
+    automatic: boolean;
+  }>(
+    `SELECT at, (data->>'pausedMinutes')::int AS paused_minutes,
+            COALESCE((data->>'automatic')::boolean, false) AS automatic
+     FROM events
+     WHERE type = 'system' AND data->>'kind' = 'agents-resumed'
+     ORDER BY id`,
+  );
+  const byWeek = new Map<string, AgentsPauseRow[]>();
+  for (const row of rows) {
+    const week = weekStartYmd(row.at);
+    if (!weekSet.has(week)) continue;
+    const list = byWeek.get(week) ?? [];
+    list.push({ pausedMinutes: row.paused_minutes, automatic: row.automatic });
+    byWeek.set(week, list);
+  }
+  return byWeek;
 }
 
 async function weekLeadTime(
@@ -242,10 +289,11 @@ function weekAttribution(events: FailureRow[]): WeekMetrics["attribution"] {
   );
   const recovered = events.filter(
     (event) =>
-      event.type === "job" &&
-      (event.to_state === "failed" || event.reason === "lease-expired") &&
-      event.reason &&
-      (event.job_id === null || !humanJobs.has(event.job_id)),
+      event.recovered_by_retry ||
+      (event.type === "job" &&
+        (event.to_state === "failed" || event.reason === "lease-expired") &&
+        event.reason &&
+        (event.job_id === null || !humanJobs.has(event.job_id))),
   );
   return { recovered: tally(recovered), needsHuman: tally(needsHuman) };
 }

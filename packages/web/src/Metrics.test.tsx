@@ -32,6 +32,7 @@ const emptyWeek = (weekStart: string) => ({
     humanCommitsRate: null,
     untouchedRate: null,
   },
+  agentsPauses: [] as { pausedMinutes: number; automatic: boolean }[],
 });
 
 const weekStarts = lastWeekStarts(new Date("2026-11-09T12:00:00+08:00"));
@@ -72,6 +73,10 @@ const weeks = weekStarts.map((weekStart, i) =>
           humanCommitsRate: 0.25,
           untouchedRate: 1,
         },
+        agentsPauses: [
+          { pausedMinutes: 15, automatic: true },
+          { pausedMinutes: 125, automatic: false },
+        ],
       },
 );
 
@@ -124,6 +129,16 @@ describe("the metrics page", () => {
     expect(success.textContent).toContain("50.0%");
     expect(success.textContent).toContain("25.0%");
     expect(success.textContent).toContain("100.0%");
+  });
+
+  it("lists the weeks the agents were paused, with each pause's length and how it ended", async () => {
+    renderWithApp(<Metrics />, server());
+    const pauses = await screen.findByTestId("metrics-agents-pauses");
+    expect(pauses.textContent).toContain(weekStarts.at(-1));
+    expect(pauses.textContent).toContain("暂停 2 次，自动恢复 1 次");
+    expect(pauses.textContent).toContain("15m 00s 自动恢复");
+    expect(pauses.textContent).toContain("2h 05m 手动恢复");
+    expect(pauses.textContent).not.toContain(weekStarts[0]);
   });
 
   it("keeps the 3% line in both themes", async () => {

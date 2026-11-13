@@ -66,6 +66,12 @@ const metricsRoute = createRoute({
               humanCommitsRate: z.number().nullable(),
               untouchedRate: z.number().nullable(),
             }),
+            agentsPauses: z.array(
+              z.object({
+                pausedMinutes: z.number().int(),
+                automatic: z.boolean(),
+              }),
+            ),
           }),
         ),
       }),

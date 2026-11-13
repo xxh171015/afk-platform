@@ -4,6 +4,7 @@ import {
   type TestDatabase,
 } from "../db/test-db.ts";
 import {
+  FakeClock,
   FakeWorker,
   listen,
   type RunningApi,
@@ -14,10 +15,14 @@ import { importBody } from "../test/ticket-files.ts";
 let db: TestDatabase;
 let api: RunningApi;
 let worker: FakeWorker;
+let clock: FakeClock;
 
 beforeEach(async () => {
   db = await createMigratedTestDatabase();
-  api = await listen(testApp({ pool: db.pool }));
+  // today, so the weeks line up with the events the database stamps with now()
+  clock = new FakeClock();
+  clock.advanceSeconds((Date.now() - clock.now().getTime()) / 1000);
+  api = await listen(testApp({ pool: db.pool, clock: clock.now }));
   worker = new FakeWorker(api.url, "w1", []);
 });
 afterEach(async () => {
@@ -105,6 +110,22 @@ async function mergeSpec(
 }
 
 const thisWeek = (metrics: Json) => metrics.weeks.at(-1);
+
+type Claimed = { id: number; attempt: number; payload: { stage: string } };
+
+// The next job is claimed and comes back with this outcome.
+async function report(
+  stage: string,
+  outcome: string,
+  extra: Record<string, unknown> = {},
+) {
+  const job = (await worker.claim()).body.job as Claimed;
+  expect(job?.payload.stage).toBe(stage);
+  expect(
+    (await worker.complete(job.id, job.attempt, { stage, outcome, ...extra }))
+      .status,
+  ).toBe(200);
+}
 
 describe("GET /metrics", () => {
   it("returns 12 empty weeks when nothing has ended", async () => {
@@ -226,6 +247,72 @@ describe("GET /metrics", () => {
     expect(week.attribution.needsHuman).toEqual([]);
     expect(week.failureRate.external).toBe(0);
     expect(week.failureRate.platform).toBe(0);
+  });
+
+  it("counts a ticket's stage that ran again on its own and then finished as 自动恢复", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await report("implement", "timeout");
+    await report("implement", "done");
+    await mergeSpec(specId, new Date());
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.attribution.recovered).toEqual([
+      { source: "agent", reason: "timeout", count: 1 },
+    ]);
+    expect(week.attribution.needsHuman).toEqual([]);
+  });
+
+  it("counts a finalization step that ran again on its own and then passed as 自动恢复", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await report("implement", "done");
+    await report("gate", "passed");
+    await report("review", "pass");
+    await report("merge", "merged", { headSha: "h" });
+    await report("final-review", "invalid-output");
+    await report("final-review", "pass");
+    await mergeSpec(specId, new Date());
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.attribution.recovered).toEqual([
+      { source: "agent", reason: "invalid-output", count: 1 },
+    ]);
+    expect(week.attribution.needsHuman).toEqual([]);
+  });
+
+  it("counts a stage that blocked after running again on its own as 要人处理 only", async () => {
+    const { specId } = await runningSpec(["a"]);
+    await report("implement", "timeout");
+    await report("implement", "timeout");
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    await report("implement", "done");
+    await mergeSpec(specId, new Date());
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.attribution.recovered).toEqual([]);
+    expect(week.attribution.needsHuman).toEqual([
+      { source: "agent", reason: "timeout", count: 1 },
+    ]);
+  });
+
+  it("lists the agents' pauses with how long each lasted and whether it ended on its own", async () => {
+    await runningSpec(["a", "b"]);
+    const outOfUsage =
+      "ActionRequiredError: Increase limits for faster responses You're out of usage.";
+    const first = (await worker.claim()).body.job as Claimed;
+    await worker.fail(first.id, first.attempt, outOfUsage);
+    clock.advanceSeconds(15 * 60);
+    const probe = (await worker.claim()).body.job as Claimed;
+    await worker.complete(probe.id, probe.attempt, {
+      stage: "implement",
+      outcome: "done",
+    });
+    const second = (await worker.claim()).body.job as Claimed;
+    await worker.fail(second.id, second.attempt, outOfUsage);
+    clock.advanceSeconds(5 * 60);
+    await call("POST", "/agents/resume");
+
+    const week = thisWeek((await call("GET", "/metrics")).body);
+    expect(week.agentsPauses).toEqual([
+      { pausedMinutes: 15, automatic: true },
+      { pausedMinutes: 5, automatic: false },
+    ]);
   });
 
   it("counts merged and closed pull requests for 合并率", async () => {

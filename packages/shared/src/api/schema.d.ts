@@ -6129,6 +6129,10 @@ export interface paths {
                   humanCommitsRate: number | null;
                   untouchedRate: number | null;
                 };
+                agentsPauses: {
+                  pausedMinutes: number;
+                  automatic: boolean;
+                }[];
               }[];
             };
           };

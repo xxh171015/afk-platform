@@ -12183,6 +12183,21 @@
                               "humanCommitsRate",
                               "untouchedRate"
                             ]
+                          },
+                          "agentsPauses": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "pausedMinutes": {
+                                  "type": "integer"
+                                },
+                                "automatic": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": ["pausedMinutes", "automatic"]
+                            }
                           }
                         },
                         "required": [
@@ -12190,7 +12205,8 @@
                           "leadTime",
                           "attribution",
                           "failureRate",
-                          "success"
+                          "success",
+                          "agentsPauses"
                         ]
                       }
                     }
