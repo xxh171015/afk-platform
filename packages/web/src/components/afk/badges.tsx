@@ -65,6 +65,7 @@ const ticketTone: Record<TicketState, Tone> = {
   done: "done",
   blocked: "blocked",
   cancelled: "cancelled",
+  "taken-over": "paused",
 };
 
 const specTone: Record<SpecState, Tone> = {
@@ -98,6 +99,7 @@ export function ticketBorderClass(state: TicketState): string {
     done: "border-l-state-done",
     blocked: "border-l-state-blocked",
     cancelled: "border-l-state-neutral",
+    "taken-over": "border-l-state-paused",
   };
   return classes[state];
 }

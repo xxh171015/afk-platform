@@ -23,6 +23,7 @@ export const TICKET_STATE_LABELS: Record<TicketState, string> = {
   done: "已完成",
   blocked: "已卡住",
   cancelled: "已取消",
+  "taken-over": "人接手",
 };
 
 export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
@@ -41,6 +42,7 @@ export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
   "integration-environment-failed": "联调环境起不来",
   "upstream-cancelled": "上游已取消",
   "job-failed": "作业失败",
+  "branch-moved": "运行期间票分支被推过了",
   "sandbox-oom": "沙箱内存不足",
 };
 

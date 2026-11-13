@@ -9,7 +9,7 @@ export default defineConfig({
   },
   test: {
     include: ["packages/*/src/**/*.test.{ts,tsx}"],
-    reporters: ["default", "junit"],
+    reporters: ["default", ["junit", { addFileAttribute: true }]],
     outputFile: { junit: "reports/junit.xml" },
     // HTTP + Postgres cases create a database each; under load the 5s default flakes.
     testTimeout: 20_000,

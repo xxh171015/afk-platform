@@ -367,6 +367,72 @@ describe("a host-sync task", () => {
     ]);
   });
 
+  it("reads each idle ticket branch and reports its sha", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1),
+      getBranchSha: async ({ branch }) => `sha-of-${branch}`,
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      {
+        kind: "host-sync",
+        pulls: [],
+        ticketBranches: [
+          {
+            ticketId: 1,
+            repoUrl: "https://github.com/me/a.git",
+            branch: "agent/T-1",
+          },
+        ],
+      } as HostTask,
+      log,
+    );
+    expect(result).toEqual({
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "sha-of-agent/T-1" }],
+    });
+  });
+
+  it("omits a ticket branch it could not read and still reports the others", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1),
+      getBranchSha: async ({ branch }) => {
+        if (branch === "agent/T-1")
+          throw new HostError("GitHub answered 404", 404);
+        return `sha-of-${branch}`;
+      },
+    };
+    const result = (await runHostTask(
+      { adapter, repoRef: ref },
+      {
+        kind: "host-sync",
+        pulls: [],
+        ticketBranches: [
+          {
+            ticketId: 1,
+            repoUrl: "https://github.com/me/a.git",
+            branch: "agent/T-1",
+          },
+          {
+            ticketId: 2,
+            repoUrl: "https://github.com/me/b.git",
+            branch: "agent/T-2",
+          },
+        ],
+      } as HostTask,
+      log,
+    )) as { ticketBranches: Record<string, unknown>[] };
+    expect(result.ticketBranches).toEqual([
+      { ticketId: 2, sha: "sha-of-agent/T-2" },
+    ]);
+  });
+
   it("reports the one it could not read and still the others", async () => {
     const adapter: HostAdapter = {
       ...noCleanup,
@@ -500,6 +566,30 @@ describe("a spec-cleanup task", () => {
     await expect(
       runHostTask({ adapter, repoRef: ref }, cleanup(), log),
     ).resolves.toMatchObject({ closed: [5] });
+  });
+
+  it("deletes local orphan refs of the spec's branches", async () => {
+    const repo = makeRepo();
+    const branch = "agent/T-1";
+    gitOrThrow(repo.dir, ["branch", branch]);
+    const sha = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const orphan = `refs/afk/orphan/${branch}/${sha}`;
+    gitOrThrow(repo.dir, ["update-ref", orphan, sha]);
+    try {
+      await runHostTask(
+        { adapter: recorder(), repoRef: ref, localRepos: [repo.dir] },
+        cleanup({
+          pulls: [],
+          branches: [{ repoUrl: "https://github.com/me/pilot.git", branch }],
+        }),
+        log,
+      );
+      expect(
+        git(repo.dir, ["show-ref", "--verify", "--quiet", orphan]).code,
+      ).not.toBe(0);
+    } finally {
+      repo.cleanup();
+    }
   });
 
   it("deletes the branches of a spec that carries its database's id, and refuses a look-alike", async () => {

@@ -34,7 +34,7 @@ export interface PushRequest {
   source: string; // what to push: a commit or a ref
   target: string; // the full ref on the remote, refs/heads/agent/T-1
   // For --force-with-lease: the sha the remote branch must still have, or "" when it must not exist yet.
-  // Required for integration branches (spec/*): moving one without saying where it was is not allowed.
+  // Required for every push this exit makes. Git's compare-and-swap is not a job lease.
   expectedOld?: string;
 }
 
@@ -45,11 +45,8 @@ export interface PushOptions {
 export type PushResult = { ok: true } | { ok: false; error: string };
 
 // A failed push we will wait out and try again: the remote was unreachable, timed out, or answered 5xx.
-// A refusal (non-fast-forward, a protected branch, no permission) is not this; those fail the job as they do today.
-const NETWORK_PUSH =
-  /could not resolve host|failed to connect|connection refused|connection reset|connection timed out|timed out|etimedout|econnreset|enotfound|eai_again|couldn't connect|tls handshake timeout|the requested url returned error: 5\d\d|\bhttp 5\d\d\b|rpc failed; http 5\d\d/i;
-
-export const isNetworkPushError = (error: string) => NETWORK_PUSH.test(error);
+// A refusal (non-fast-forward, a protected branch, no permission) is classified in @afk/shared.
+export { isNetworkPushError } from "@afk/shared";
 
 export function pushRef(
   request: PushRequest,
@@ -79,10 +76,7 @@ export function pushRef(
       `refusing to push ${request.target}: only refs/heads/agent/* and refs/heads/spec/*`,
     );
   }
-  if (
-    request.target.startsWith("refs/heads/spec/") &&
-    request.expectedOld === undefined
-  ) {
+  if (request.expectedOld === undefined) {
     throw new RangeError(
       `refusing to push ${request.target} without the SHA it is expected to have`,
     );
@@ -90,16 +84,15 @@ export function pushRef(
   const header = options.token
     ? `AUTHORIZATION: ${basicAuth(options.token)}`
     : undefined;
-  const lease =
-    request.expectedOld === undefined
-      ? []
-      : [`--force-with-lease=${request.target}:${request.expectedOld}`];
+  const compare = [
+    `--force-with-lease=${request.target}:${request.expectedOld}`,
+  ];
   const result = exec(
     "git",
     [
       "push",
       "--quiet",
-      ...lease,
+      ...compare,
       request.remote ?? "origin",
       `${request.source}:${request.target}`,
     ],

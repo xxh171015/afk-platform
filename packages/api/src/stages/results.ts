@@ -57,6 +57,9 @@ const RunFacts = z.object({
   envUpMs: z.number().int().min(0).optional(),
   startedAt: z.iso.datetime().optional(),
   finishedAt: z.iso.datetime().optional(),
+  // a local ticket-branch tip kept when origin had moved: not on origin, not a state change
+  orphanRef: z.string().optional(),
+  orphanSha: z.string().optional(),
 });
 
 const GateFacts = z.object({
@@ -75,6 +78,7 @@ const GateFacts = z.object({
         name: z.string(),
         classname: z.string(),
         status: z.enum(["passed", "failed", "skipped"]),
+        flaky: z.boolean().optional(),
       }),
     )
     .max(20_000)
@@ -324,6 +328,55 @@ function sourcesOf(run?: {
   return files.length > 0 ? files : null;
 }
 
+function outputWithOrphan(
+  output: unknown,
+  run: { orphanRef?: string; orphanSha?: string } | undefined,
+): unknown {
+  if (!run?.orphanRef || !run.orphanSha) return output;
+  const base =
+    output !== null && typeof output === "object" && !Array.isArray(output)
+      ? (output as Record<string, unknown>)
+      : { value: output };
+  return { ...base, orphanRef: run.orphanRef, orphanSha: run.orphanSha };
+}
+
+async function recordOrphanEvent(
+  client: pg.PoolClient,
+  owner: RunOwner,
+  job: StageJob,
+  run: { orphanRef?: string; orphanSha?: string } | undefined,
+): Promise<void> {
+  if (!run?.orphanRef || !run.orphanSha) return;
+  const kind = owner.ticket_id != null ? "ticket" : "finalization";
+  const state =
+    owner.ticket_id != null
+      ? (
+          await client.query<{ state: string }>(
+            "SELECT state FROM tickets WHERE id = $1",
+            [owner.ticket_id],
+          )
+        ).rows[0]?.state
+      : (
+          await client.query<{ state: string }>(
+            "SELECT state FROM finalizations WHERE spec_id = $1 AND repo_id = $2",
+            [owner.spec_id, owner.repo_id],
+          )
+        ).rows[0]?.state;
+  if (!state) return;
+  await client.query(
+    `SELECT afk_record_event($1, $2, $3, $4, $5, $6, $6, NULL, NULL, $7::jsonb)`,
+    [
+      kind,
+      owner.spec_id,
+      owner.ticket_id,
+      job.id,
+      owner.repo_id,
+      state,
+      JSON.stringify({ orphanRef: run.orphanRef, orphanSha: run.orphanSha }),
+    ],
+  );
+}
+
 export async function writeFacts(
   client: pg.PoolClient,
   owner: RunOwner,
@@ -353,7 +406,9 @@ export async function writeFacts(
     run?.tokenUsage === undefined ? null : JSON.stringify(run.tokenUsage),
     run?.result ?? result?.outcome ?? "invalid-output",
     // what the agent said; for an unusable result, the raw payload so the problem can be seen
-    JSON.stringify(result ? (run?.output ?? null) : (raw ?? null)),
+    JSON.stringify(
+      result ? outputWithOrphan(run?.output ?? null, run) : (raw ?? null),
+    ),
     run?.startedAt ?? null,
     run?.finishedAt ?? null,
   ];
@@ -387,6 +442,23 @@ export async function writeFacts(
     );
   }
   const runId = inserted.rows[0]?.id as number;
+  await recordOrphanEvent(client, owner, job, run);
+  const TICKET_PUSH_STAGES = [
+    "implement",
+    "gate-fix",
+    "review-fix",
+    "merge-fix",
+  ];
+  if (
+    owner.ticket_id !== null &&
+    run?.headSha &&
+    TICKET_PUSH_STAGES.includes(stage)
+  ) {
+    await client.query(
+      "UPDATE tickets SET last_pushed_sha = $2 WHERE id = $1",
+      [owner.ticket_id, run.headSha],
+    );
+  }
   if (run?.testsTotal !== undefined || run?.envUpMs !== undefined) {
     await client.query(
       "UPDATE runs SET tests_total = $2, tests_failed = $3, env_up_ms = $4 WHERE id = $1",

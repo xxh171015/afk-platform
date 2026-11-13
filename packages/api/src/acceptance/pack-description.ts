@@ -80,6 +80,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     findingsLines(section),
     standardsSourceLines(section),
     gateLines(section),
+    flakyTestLines(section),
     uncertaintyLines(section),
   ].filter(Boolean);
   return blocks.join("\n\n");
@@ -147,6 +148,17 @@ function gateLines(section: AcceptancePack["repos"][number]): string {
   return [
     "### Gate",
     `${section.repo} @ ${gate.commitSha.slice(0, 7)}: ${gate.testsTotal ?? "?"} tests, ${gate.testsSkipped ?? "?"} skipped`,
+  ].join("\n");
+}
+
+function flakyTestLines(section: AcceptancePack["repos"][number]): string {
+  if (section.flakyTests.length === 0) return "";
+  return [
+    "### Unstable tests",
+    "Failed the first run and passed when rerun on the same commit:",
+    ...section.flakyTests.map((c) =>
+      c.classname ? `- ${c.classname} ${c.name}` : `- ${c.name}`,
+    ),
   ].join("\n");
 }
 

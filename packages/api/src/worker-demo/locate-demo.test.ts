@@ -14,9 +14,9 @@ import {
   type ExecutorDeps,
   pushRef,
   RepoStore,
-  runWorker,
   SlotManager,
   SnapshotStore,
+  runWorker as startWorker,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
@@ -26,7 +26,9 @@ import {
   FakeClock,
   listen,
   type RunningApi,
+  teardownTestRuntime,
   testApp,
+  trackedWorkers,
 } from "../test/fake-worker.ts";
 
 // Locate: a real Postgres, the HTTP API, real git, slots and snapshots, and a
@@ -49,6 +51,10 @@ let agentRuns: {
   specMd: string | undefined;
 }[];
 const origins: Record<string, string> = {};
+const workers = trackedWorkers();
+function runWorker(opts: Parameters<typeof startWorker>[0]) {
+  return workers.run((signal) => startWorker({ ...opts, signal }), opts.signal);
+}
 
 const bareOf = (name: string, seed: TestRepo) => {
   const dir = join(home, `${name}.git`);
@@ -76,8 +82,11 @@ beforeEach(async () => {
   agentRuns = [];
 });
 afterEach(async () => {
-  await api.close();
-  await db.drop();
+  await teardownTestRuntime({
+    stopWorker: () => workers.stopAll(),
+    api,
+    db,
+  });
   backendSeed.cleanup();
   frontendSeed.cleanup();
   rmSync(home, { recursive: true, force: true });

@@ -25,6 +25,7 @@ const emptyWaiting = {
 const emptyWorkbench = {
   waiting: emptyWaiting,
   running: [],
+  takenOver: [],
   awaitingAcceptance: [],
   recentlyCompleted: [],
 };

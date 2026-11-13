@@ -8,8 +8,9 @@ import {
 } from "./views.ts";
 
 // The control-tower home: four quadrants a person glances at instead of a spec table
-// (docs/specs/experience-platform.md「工作台与导航」). Waiting is ids, titles and
-// counts for deep links; briefs and ranking stay on GET /blocked.
+// (docs/specs/experience-platform.md「工作台与导航」), plus taken-over tickets that
+// are not in waiting. Waiting is ids, titles and counts for deep links; briefs and
+// ranking stay on GET /blocked.
 
 export interface WorkbenchSpec {
   id: number;
@@ -92,9 +93,19 @@ function slimWaiting(queue: RankedQueue) {
   };
 }
 
+export interface TakenOverTicket {
+  id: number;
+  displayId: string;
+  specId: number;
+  specDisplayId: string;
+  title: string;
+  repo: string;
+}
+
 export interface Workbench {
   waiting: ReturnType<typeof slimWaiting>;
   running: { spec: WorkbenchSpec; tickets: RunningTicket[] }[];
+  takenOver: TakenOverTicket[];
   awaitingAcceptance: {
     spec: WorkbenchSpec;
     pullRequestCount: number;
@@ -278,5 +289,32 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
     return spec ? [{ spec, completedAt: row.completed_at.toISOString() }] : [];
   });
 
-  return { waiting, running, awaitingAcceptance, recentlyCompleted };
+  const takenRows = await pool.query<{
+    id: number;
+    spec_id: number;
+    title: string;
+    repo: string;
+  }>(
+    `SELECT t.id, t.spec_id, t.title, r.name AS repo
+     FROM tickets t
+     JOIN repos r ON r.id = t.repo_id
+     WHERE t.state = 'taken-over'
+     ORDER BY t.id`,
+  );
+  const takenOver: TakenOverTicket[] = takenRows.rows.map((row) => ({
+    id: row.id,
+    displayId: formatDisplayId("ticket", row.id),
+    specId: row.spec_id,
+    specDisplayId: formatDisplayId("spec", row.spec_id),
+    title: row.title,
+    repo: row.repo,
+  }));
+
+  return {
+    waiting,
+    running,
+    takenOver,
+    awaitingAcceptance,
+    recentlyCompleted,
+  };
 }

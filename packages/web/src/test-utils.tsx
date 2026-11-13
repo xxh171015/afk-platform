@@ -48,6 +48,7 @@ export const emptyWaiting = {
 export const emptyWorkbench = {
   waiting: emptyWaiting,
   running: [] as unknown[],
+  takenOver: [] as unknown[],
   awaitingAcceptance: [] as unknown[],
   recentlyCompleted: [] as unknown[],
   status: {

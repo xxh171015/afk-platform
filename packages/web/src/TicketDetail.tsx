@@ -1,3 +1,4 @@
+import { type TicketState, ticketTransition } from "@afk/shared";
 import {
   keepPreviousData,
   useMutation,
@@ -5,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { diffLines } from "diff";
-import { RotateCcw, ShieldCheck } from "lucide-react";
+import { Hand, RotateCcw, ShieldCheck, Undo2 } from "lucide-react";
 import { type MouseEvent, useState } from "react";
 import { describeError, useApi } from "./api.tsx";
 import {
@@ -437,6 +438,7 @@ function TicketContent({
       : undefined;
   return (
     <>
+      <TicketTakeover ticketId={ticket.id} state={ticket.state} />
       {ticket.structuredBrief ? (
         <section className="mb-6 space-y-3 border-l-2 border-destructive bg-destructive/5 p-4">
           {ticket.blockedReason ? (
@@ -461,7 +463,9 @@ function TicketContent({
           blockedReason={ticket.blockedReason}
         />
       ) : null}
-      {ticket.state === "pending" || ticket.state === "blocked" ? (
+      {ticket.state === "pending" ||
+      ticket.state === "blocked" ||
+      ticket.state === "taken-over" ? (
         <div className="mb-6">
           <TicketEdit ticketId={ticket.id} file={ticket.file} />
         </div>
@@ -829,6 +833,85 @@ function VersionHistory({
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+function TicketTakeover({
+  ticketId,
+  state,
+}: {
+  ticketId: number;
+  state: string;
+}) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["ticket", ticketId] }),
+      queryClient.invalidateQueries({ queryKey: ["blocked"] }),
+      queryClient.invalidateQueries({ queryKey: ["workbench"] }),
+      queryClient.invalidateQueries({ queryKey: ["spec"] }),
+    ]);
+  const takeover = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST("/tickets/{id}/takeover", {
+        params: { path: { id: ticketId } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: invalidate,
+  });
+  const handback = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST("/tickets/{id}/handback", {
+        params: { path: { id: ticketId } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: invalidate,
+  });
+  const canTakeover = ticketTransition(state as TicketState, {
+    type: "takeover",
+  }).ok;
+  const canHandback = ticketTransition(state as TicketState, {
+    type: "handback",
+  }).ok;
+  if (!canTakeover && !canHandback) return null;
+  const busy = takeover.isPending || handback.isPending;
+  const actionError = takeover.error ?? handback.error;
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-2">
+      {canTakeover ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => takeover.mutate()}
+        >
+          <Hand />
+          接手
+        </Button>
+      ) : null}
+      {canHandback ? (
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy}
+          onClick={() => handback.mutate()}
+        >
+          <Undo2 />
+          交回
+        </Button>
+      ) : null}
+      {actionError ? (
+        <p className="text-sm text-state-blocked" role="alert">
+          {actionError.message}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

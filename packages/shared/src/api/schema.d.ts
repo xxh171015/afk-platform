@@ -2137,6 +2137,11 @@ export interface paths {
                     repoUrl: string;
                     branch: string;
                   }[];
+                  ticketBranches?: {
+                    ticketId: number;
+                    repoUrl: string;
+                    branch: string;
+                  }[];
                 }
               | {
                   /** @enum {string} */
@@ -2536,6 +2541,7 @@ export interface paths {
                   classname: string;
                   /** @enum {string} */
                   status: "passed" | "failed" | "skipped";
+                  flaky?: boolean;
                 }[];
               } | null;
             };
@@ -2823,7 +2829,8 @@ export interface paths {
                   | "merging"
                   | "done"
                   | "blocked"
-                  | "cancelled";
+                  | "cancelled"
+                  | "taken-over";
                 blockedReason: string | null;
                 repo: string;
                 repoUrl: string;
@@ -2871,7 +2878,8 @@ export interface paths {
                         | "merging"
                         | "done"
                         | "blocked"
-                        | "cancelled";
+                        | "cancelled"
+                        | "taken-over";
                       repo: string;
                     } | null;
                   }[];
@@ -2953,7 +2961,8 @@ export interface paths {
                       | "merging"
                       | "done"
                       | "blocked"
-                      | "cancelled";
+                      | "cancelled"
+                      | "taken-over";
                     repo: string;
                   } | null;
                 }[];
@@ -2974,7 +2983,8 @@ export interface paths {
                   | "merging"
                   | "done"
                   | "blocked"
-                  | "cancelled";
+                  | "cancelled"
+                  | "taken-over";
               }[];
               downstream: {
                 id: number;
@@ -2988,7 +2998,8 @@ export interface paths {
                   | "merging"
                   | "done"
                   | "blocked"
-                  | "cancelled";
+                  | "cancelled"
+                  | "taken-over";
               }[];
               runs: {
                 id: number;
@@ -3251,7 +3262,8 @@ export interface paths {
                   | "merging"
                   | "done"
                   | "blocked"
-                  | "cancelled";
+                  | "cancelled"
+                  | "taken-over";
                 blockedReason: string | null;
                 repo: string;
                 repoUrl: string;
@@ -3299,7 +3311,8 @@ export interface paths {
                         | "merging"
                         | "done"
                         | "blocked"
-                        | "cancelled";
+                        | "cancelled"
+                        | "taken-over";
                       repo: string;
                     } | null;
                   }[];
@@ -3385,7 +3398,8 @@ export interface paths {
                         | "merging"
                         | "done"
                         | "blocked"
-                        | "cancelled";
+                        | "cancelled"
+                        | "taken-over";
                       repo: string;
                     } | null;
                   }[];
@@ -3501,6 +3515,11 @@ export interface paths {
                       ms: number;
                     }[];
                   } | null;
+                  /** @default [] */
+                  flakyTests: {
+                    name: string;
+                    classname: string;
+                  }[];
                   tickets: {
                     displayId: string;
                     title: string;
@@ -3747,7 +3766,8 @@ export interface paths {
                   | "merging"
                   | "done"
                   | "blocked"
-                  | "cancelled";
+                  | "cancelled"
+                  | "taken-over";
                 specId: number;
                 specDisplayId: string;
                 matched: ("id" | "title" | "body")[];
@@ -3803,7 +3823,8 @@ export interface paths {
                   | "merging"
                   | "done"
                   | "blocked"
-                  | "cancelled";
+                  | "cancelled"
+                  | "taken-over";
                 blockedReason: string | null;
                 repo: string;
                 repoUrl: string;
@@ -3851,7 +3872,8 @@ export interface paths {
                         | "merging"
                         | "done"
                         | "blocked"
-                        | "cancelled";
+                        | "cancelled"
+                        | "taken-over";
                       repo: string;
                     } | null;
                   }[];
@@ -3937,7 +3959,8 @@ export interface paths {
                         | "merging"
                         | "done"
                         | "blocked"
-                        | "cancelled";
+                        | "cancelled"
+                        | "taken-over";
                       repo: string;
                     } | null;
                   }[];
@@ -4191,7 +4214,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description The four workbench quadrants plus the status area (disk, workers, last cleanup) */
+        /** @description The four workbench quadrants, taken-over tickets, and the status area (disk, workers, last cleanup) */
         200: {
           headers: {
             [name: string]: unknown;
@@ -4296,7 +4319,8 @@ export interface paths {
                     | "merging"
                     | "done"
                     | "blocked"
-                    | "cancelled";
+                    | "cancelled"
+                    | "taken-over";
                   repo: string;
                   stage: string | null;
                   startedAt: string | null;
@@ -4304,6 +4328,14 @@ export interface paths {
                   meanMs: number | null;
                   slow: boolean;
                 }[];
+              }[];
+              takenOver: {
+                id: number;
+                displayId: string;
+                specId: number;
+                specDisplayId: string;
+                title: string;
+                repo: string;
               }[];
               awaitingAcceptance: {
                 spec: {
@@ -4512,7 +4544,8 @@ export interface paths {
                 | "merging"
                 | "done"
                 | "blocked"
-                | "cancelled";
+                | "cancelled"
+                | "taken-over";
             };
           };
         };
@@ -4528,6 +4561,146 @@ export interface paths {
           };
         };
         /** @description The ticket is not blocked */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/takeover": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The ticket is taken over; its jobs are stopped */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "pending"
+                | "queued"
+                | "running"
+                | "merging"
+                | "done"
+                | "blocked"
+                | "cancelled"
+                | "taken-over";
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Only a pending, queued, running, merging or blocked ticket can be taken over */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tickets/{id}/handback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Back to pending (or already queued again) */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              /** @enum {string} */
+              state:
+                | "pending"
+                | "queued"
+                | "running"
+                | "merging"
+                | "done"
+                | "blocked"
+                | "cancelled"
+                | "taken-over";
+            };
+          };
+        };
+        /** @description No such ticket */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description Only a taken-over ticket can be handed back */
         409: {
           headers: {
             [name: string]: unknown;
@@ -4657,7 +4830,7 @@ export interface paths {
             };
           };
         };
-        /** @description The ticket is not pending or blocked */
+        /** @description The ticket is not pending, blocked or taken-over */
         409: {
           headers: {
             [name: string]: unknown;
@@ -4805,7 +4978,7 @@ export interface paths {
             };
           };
         };
-        /** @description Only a pending or blocked ticket can be cancelled */
+        /** @description Only a pending, blocked or taken-over ticket can be cancelled */
         409: {
           headers: {
             [name: string]: unknown;

@@ -675,6 +675,12 @@ export function acceptancePackText(pack: AcceptancePackView): string {
             : [],
         ),
         ...section(
+          "unstable tests (passed on rerun)",
+          (repo.flakyTests ?? []).map((c) =>
+            c.classname ? `      ${c.classname} ${c.name}` : `      ${c.name}`,
+          ),
+        ),
+        ...section(
           "approved protected paths",
           repo.protectedPathApprovals.map(
             (a) => `      ${a.ticket}: ${a.paths.join(", ")}`,

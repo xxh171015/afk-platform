@@ -196,22 +196,30 @@ export async function processJob(
   if (options.signal?.aborted) stopping();
   options.signal?.addEventListener("abort", stopping, { once: true });
   let failedBeats = 0;
-  const heartbeats = setInterval(async () => {
-    try {
-      if ((await api.heartbeat(job)) === "lost") {
-        log("the lease is gone, stopping");
-        lost.abort();
-      }
-      failedBeats = 0;
-    } catch (error) {
-      // A blip is fine, the lease has two minutes of slack; a run of them means the lease is as good as gone.
-      failedBeats += 1;
-      log(`heartbeat failed (${failedBeats}): ${String(error)}`);
-      if (failedBeats >= MAX_FAILED_HEARTBEATS) {
-        log("the API cannot be reached, stopping");
-        lost.abort();
-      }
-    }
+  let heartbeatChain = Promise.resolve();
+  let stoppedBeats = false;
+  const heartbeats = setInterval(() => {
+    if (stoppedBeats) return;
+    heartbeatChain = heartbeatChain
+      .then(async () => {
+        if (stoppedBeats) return;
+        try {
+          if ((await api.heartbeat(job)) === "lost") {
+            log("the lease is gone, stopping");
+            lost.abort();
+          }
+          failedBeats = 0;
+        } catch (error) {
+          // A blip is fine, the lease has two minutes of slack; a run of them means the lease is as good as gone.
+          failedBeats += 1;
+          log(`heartbeat failed (${failedBeats}): ${String(error)}`);
+          if (failedBeats >= MAX_FAILED_HEARTBEATS) {
+            log("the API cannot be reached, stopping");
+            lost.abort();
+          }
+        }
+      })
+      .catch(() => undefined);
   }, options.heartbeatMs ?? 30_000);
 
   let uploader: LogUploader | undefined;
@@ -282,7 +290,21 @@ export async function processJob(
         log(`${job.type} ok`);
         return "completed";
       }
-      const body = await runHostTask(options.host, task, log);
+      const localRepos =
+        task.kind === "spec-cleanup"
+          ? [
+              ...new Set(
+                task.branches
+                  .map((item) => options.executor.repos.findByUrl(item.repoUrl))
+                  .filter((dir): dir is string => dir !== undefined),
+              ),
+            ]
+          : undefined;
+      const body = await runHostTask(
+        { ...options.host, ...(localRepos ? { localRepos } : {}) },
+        task,
+        log,
+      );
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";
@@ -338,9 +360,11 @@ export async function processJob(
     await api.fail(job, message.slice(0, 1000)).catch(() => undefined);
     return "failed";
   } finally {
+    stoppedBeats = true;
     options.signal?.removeEventListener("abort", stopping);
     clearInterval(heartbeats);
     stopStreaming();
+    await heartbeatChain;
   }
 }
 

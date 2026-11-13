@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { git, gitOrThrow, hasRef } from "@afk/pipeline";
 import { redactSecrets, repoHost, tryParseRepoUrl } from "@afk/shared";
@@ -19,7 +19,9 @@ function cloneDirName(name: string, url?: string): string {
 }
 
 // The worker's main clones, one per repo, kept bare: they hold the branches every slot clone starts from.
-// They follow origin for the default branch and the integration branches; ticket branches only move forward.
+// They follow origin for the default branch and the integration branches. Ticket branches are fetched into
+// refs/afk/origin/agent/* so a diverge on origin is not silently ignored, and local heads/agent/* stay put
+// until the stage aligns them.
 
 export class RepoStore {
   private readonly root: string;
@@ -74,7 +76,7 @@ export class RepoStore {
       ],
       url,
     );
-    // Ticket branches only move forward and can hold work origin has not seen: a refused update is fine.
+    // Origin's ticket branches, without moving the local heads a stage may still need to push.
     git(
       dir,
       [
@@ -82,11 +84,23 @@ export class RepoStore {
         "--quiet",
         "--no-tags",
         "origin",
-        "refs/heads/agent/*:refs/heads/agent/*",
+        "+refs/heads/agent/*:refs/afk/origin/agent/*",
       ],
       this.env(url),
     );
     return dir;
+  }
+
+  // A clone already on disk for this origin, if this worker has one.
+  findByUrl(url: string): string | undefined {
+    if (!existsSync(this.root)) return undefined;
+    for (const name of readdirSync(this.root)) {
+      const dir = join(this.root, name);
+      if (git(dir, ["rev-parse", "--is-bare-repository"]).code !== 0) continue;
+      if (git(dir, ["remote", "get-url", "origin"]).stdout.trim() === url)
+        return dir;
+    }
+    return undefined;
   }
 
   // gitOrThrow with the token scrubbed from the message it throws.

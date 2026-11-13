@@ -3577,6 +3577,24 @@
                             },
                             "required": ["repoUrl", "branch"]
                           }
+                        },
+                        "ticketBranches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "ticketId": {
+                                "type": "integer"
+                              },
+                              "repoUrl": {
+                                "type": "string"
+                              },
+                              "branch": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["ticketId", "repoUrl", "branch"]
+                          }
                         }
                       },
                       "required": ["kind", "pulls"]
@@ -4283,6 +4301,9 @@
                               "status": {
                                 "type": "string",
                                 "enum": ["passed", "failed", "skipped"]
+                              },
+                              "flaky": {
+                                "type": "boolean"
                               }
                             },
                             "required": ["name", "classname", "status"]
@@ -4701,7 +4722,8 @@
                             "merging",
                             "done",
                             "blocked",
-                            "cancelled"
+                            "cancelled",
+                            "taken-over"
                           ]
                         },
                         "blockedReason": {
@@ -4848,7 +4870,8 @@
                                           "merging",
                                           "done",
                                           "blocked",
-                                          "cancelled"
+                                          "cancelled",
+                                          "taken-over"
                                         ]
                                       },
                                       "repo": {
@@ -5146,7 +5169,8 @@
                                       "merging",
                                       "done",
                                       "blocked",
-                                      "cancelled"
+                                      "cancelled",
+                                      "taken-over"
                                     ]
                                   },
                                   "repo": {
@@ -5200,7 +5224,8 @@
                               "merging",
                               "done",
                               "blocked",
-                              "cancelled"
+                              "cancelled",
+                              "taken-over"
                             ]
                           }
                         },
@@ -5230,7 +5255,8 @@
                               "merging",
                               "done",
                               "blocked",
-                              "cancelled"
+                              "cancelled",
+                              "taken-over"
                             ]
                           }
                         },
@@ -5867,7 +5893,8 @@
                               "merging",
                               "done",
                               "blocked",
-                              "cancelled"
+                              "cancelled",
+                              "taken-over"
                             ]
                           },
                           "blockedReason": {
@@ -6014,7 +6041,8 @@
                                             "merging",
                                             "done",
                                             "blocked",
-                                            "cancelled"
+                                            "cancelled",
+                                            "taken-over"
                                           ]
                                         },
                                         "repo": {
@@ -6310,7 +6338,8 @@
                                             "merging",
                                             "done",
                                             "blocked",
-                                            "cancelled"
+                                            "cancelled",
+                                            "taken-over"
                                           ]
                                         },
                                         "repo": {
@@ -6736,6 +6765,22 @@
                                   "durationMs",
                                   "steps"
                                 ]
+                              },
+                              "flakyTests": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "classname": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["name", "classname"]
+                                },
+                                "default": []
                               },
                               "tickets": {
                                 "type": "array",
@@ -7491,7 +7536,8 @@
                               "merging",
                               "done",
                               "blocked",
-                              "cancelled"
+                              "cancelled",
+                              "taken-over"
                             ]
                           },
                           "specId": {
@@ -7570,7 +7616,8 @@
                               "merging",
                               "done",
                               "blocked",
-                              "cancelled"
+                              "cancelled",
+                              "taken-over"
                             ]
                           },
                           "blockedReason": {
@@ -7717,7 +7764,8 @@
                                             "merging",
                                             "done",
                                             "blocked",
-                                            "cancelled"
+                                            "cancelled",
+                                            "taken-over"
                                           ]
                                         },
                                         "repo": {
@@ -8013,7 +8061,8 @@
                                             "merging",
                                             "done",
                                             "blocked",
-                                            "cancelled"
+                                            "cancelled",
+                                            "taken-over"
                                           ]
                                         },
                                         "repo": {
@@ -8753,7 +8802,7 @@
       "get": {
         "responses": {
           "200": {
-            "description": "The four workbench quadrants plus the status area (disk, workers, last cleanup)",
+            "description": "The four workbench quadrants, taken-over tickets, and the status area (disk, workers, last cleanup)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9102,7 +9151,8 @@
                                     "merging",
                                     "done",
                                     "blocked",
-                                    "cancelled"
+                                    "cancelled",
+                                    "taken-over"
                                   ]
                                 },
                                 "repo": {
@@ -9140,6 +9190,40 @@
                           }
                         },
                         "required": ["spec", "tickets"]
+                      }
+                    },
+                    "takenOver": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "specDisplayId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "repo": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "specDisplayId",
+                          "title",
+                          "repo"
+                        ]
                       }
                     },
                     "awaitingAcceptance": {
@@ -9522,6 +9606,7 @@
                   "required": [
                     "waiting",
                     "running",
+                    "takenOver",
                     "awaitingAcceptance",
                     "recentlyCompleted",
                     "status"
@@ -9605,7 +9690,8 @@
                         "merging",
                         "done",
                         "blocked",
-                        "cancelled"
+                        "cancelled",
+                        "taken-over"
                       ]
                     }
                   },
@@ -9632,6 +9718,158 @@
           },
           "409": {
             "description": "The ticket is not blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/takeover": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ticket is taken over; its jobs are stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "queued",
+                        "running",
+                        "merging",
+                        "done",
+                        "blocked",
+                        "cancelled",
+                        "taken-over"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Only a pending, queued, running, merging or blocked ticket can be taken over",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{id}/handback": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Back to pending (or already queued again)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "queued",
+                        "running",
+                        "merging",
+                        "done",
+                        "blocked",
+                        "cancelled",
+                        "taken-over"
+                      ]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Only a taken-over ticket can be handed back",
             "content": {
               "application/json": {
                 "schema": {
@@ -9788,7 +10026,7 @@
             }
           },
           "409": {
-            "description": "The ticket is not pending or blocked",
+            "description": "The ticket is not pending, blocked or taken-over",
             "content": {
               "application/json": {
                 "schema": {
@@ -9989,7 +10227,7 @@
             }
           },
           "409": {
-            "description": "Only a pending or blocked ticket can be cancelled",
+            "description": "Only a pending, blocked or taken-over ticket can be cancelled",
             "content": {
               "application/json": {
                 "schema": {

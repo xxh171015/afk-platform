@@ -14,6 +14,7 @@ export const STATE_COLORS: Record<
   done: { fill: "#d3f9d8", border: "#40c057" },
   blocked: { fill: "#ffe3e3", border: "#fa5252" },
   cancelled: { fill: "#f8f9fa", border: "#ced4da" },
+  "taken-over": { fill: "#fff4e6", border: "#fd7e14" },
 };
 
 export interface GraphTicket {

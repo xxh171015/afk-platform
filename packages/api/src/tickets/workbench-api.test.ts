@@ -111,6 +111,7 @@ describe("GET /workbench", () => {
         locates: [],
       },
       running: [],
+      takenOver: [],
       awaitingAcceptance: [],
       recentlyCompleted: [],
       status: {
@@ -443,5 +444,35 @@ describe("GET /workbench", () => {
       ),
     ];
     expect(ids).not.toContain(1);
+  });
+
+  it("lists taken-over tickets outside the waiting queue", async () => {
+    const projectId = await projectAndRepo();
+    const specId = await confirmedSpec(projectId, "s", "Taken spec", [
+      ticketFile("a"),
+      ticketFile("b", { blocked_by: ["a"] }),
+    ]);
+    const tickets = (await call("GET", `/specs/${specId}`)).body.tickets as {
+      id: number;
+    }[];
+    const takenId = tickets[0].id;
+    await db.pool.query(
+      "UPDATE tickets SET state = 'taken-over', blocked_reason = NULL WHERE id = $1",
+      [takenId],
+    );
+
+    const reply = await call("GET", "/workbench");
+    expect(reply.status).toBe(200);
+    expect(reply.body.waiting.tickets).toEqual([]);
+    expect(reply.body.takenOver).toEqual([
+      {
+        id: takenId,
+        displayId: `T-${takenId}`,
+        specId,
+        specDisplayId: `S-${specId}`,
+        title: "Ticket a",
+        repo: "backend",
+      },
+    ]);
   });
 });

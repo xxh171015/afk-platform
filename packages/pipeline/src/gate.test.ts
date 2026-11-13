@@ -20,25 +20,85 @@ afterEach(() => repo?.cleanup());
 const junit = (tests: number, skipped = 0) =>
   `<testsuites tests="${tests}"><testsuite name="a" tests="${tests}" skipped="${skipped}"/></testsuites>`;
 
+type ReportCase = {
+  name: string;
+  classname?: string;
+  file?: string;
+  status?: "passed" | "failed" | "skipped";
+};
+
+const escapeXml = (text: string) =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+
+const caseXml = (c: ReportCase) => {
+  const attrs = [
+    c.file ? `file="${escapeXml(c.file)}"` : "",
+    `classname="${escapeXml(c.classname ?? "")}"`,
+    `name="${escapeXml(c.name)}"`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (c.status === "failed")
+    return `<testcase ${attrs}><failure message="boom">trace</failure></testcase>`;
+  if (c.status === "skipped") return `<testcase ${attrs}><skipped/></testcase>`;
+  return `<testcase ${attrs}/>`;
+};
+
+const junitWithCases = (cases: ReportCase[], tests = cases.length) =>
+  `<testsuites tests="${tests}"><testsuite name="a" tests="${cases.length}" skipped="${cases.filter((c) => c.status === "skipped").length}">${cases.map(caseXml).join("")}</testsuite></testsuites>`;
+
+const writeXml = (xml: string, exit = 0) =>
+  `sh -c 'mkdir -p reports && echo ${Buffer.from(xml).toString("base64")} | base64 -d > reports/junit.xml; exit ${exit}'`;
+
 // A command that writes a JUnit file with the given counts, as a test runner would. The XML travels as
 // base64 so no quoting can get in its way.
 const writeJunit = (tests: number, skipped = 0) =>
   `sh -c 'mkdir -p reports && echo ${Buffer.from(junit(tests, skipped)).toString("base64")} | base64 -d > reports/junit.xml'`;
 
-const gatesYaml = (commands: { name: string; run: string }[], setup?: string) =>
+// Same commit, same sandbox: the first run fails, the second writes a passing report.
+const failThenPass = (
+  failed: ReportCase[],
+  passed: ReportCase[],
+  tests: number,
+) => {
+  const failXml = Buffer.from(junitWithCases(failed, tests)).toString("base64");
+  const passXml = Buffer.from(junitWithCases(passed, tests)).toString("base64");
+  return `sh -c 'mkdir -p reports; if [ -f .gate-tried ]; then echo ${passXml} | base64 -d > reports/junit.xml; exit 0; else touch .gate-tried; echo ${failXml} | base64 -d > reports/junit.xml; exit 1; fi'`;
+};
+
+type GateCommand = {
+  name: string;
+  run: string;
+  junit?: string | false;
+  rerunFiles?: string[];
+};
+
+const gatesYaml = (commands: GateCommand[], setup?: string) =>
   [
     setup ? `setup: ${JSON.stringify(setup)}` : "",
     "commands:",
-    ...commands.map(
-      (c) =>
-        `  - { name: ${c.name}, run: ${JSON.stringify(c.run)}, timeoutSeconds: 30, junit: reports/junit.xml }`,
-    ),
-  ].join("\n");
+    ...commands.map((c) => {
+      const fields = [
+        `name: ${c.name}`,
+        `run: ${JSON.stringify(c.run)}`,
+        "timeoutSeconds: 30",
+      ];
+      if (c.junit !== false)
+        fields.push(`junit: ${JSON.stringify(c.junit ?? "reports/junit.xml")}`);
+      if (c.rerunFiles)
+        fields.push(`rerunFiles: ${JSON.stringify(c.rerunFiles)}`);
+      return `  - { ${fields.join(", ")} }`;
+    }),
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
 
-function repoWithGate(
-  commands: { name: string; run: string }[],
-  setup?: string,
-) {
+function repoWithGate(commands: GateCommand[], setup?: string) {
   repo = makeRepo({
     ".sandcastle/gates.yaml": gatesYaml(commands, setup),
     "src.txt": "v1\n",
@@ -94,6 +154,20 @@ describe("junitCases", () => {
   });
   it("finds nothing in a file that is not a report", () => {
     expect(junitCases("<html/>")).toEqual([]);
+  });
+  it("keeps the file path when the report names one", () => {
+    expect(
+      junitCases(
+        `<testsuites tests="1"><testsuite name="a" tests="1"><testcase file="src/a b.ts" classname="a" name="works"/></testsuite></testsuites>`,
+      ),
+    ).toEqual([
+      {
+        name: "works",
+        classname: "a",
+        file: "src/a b.ts",
+        status: "passed",
+      },
+    ]);
   });
 });
 
@@ -194,7 +268,10 @@ describe("command lines", () => {
     const configSha = repoWithGate([{ name: "test", run }]);
     const sandbox = new FakeGateSandbox(repo.dir);
     const opened = sandbox.open.bind(sandbox);
-    const seen: { command: string; timeoutSeconds: number }[] = [];
+    const seen: {
+      command: string | readonly string[];
+      timeoutSeconds: number;
+    }[] = [];
     sandbox.open = async (ref) => {
       const session = await opened(ref);
       const exec = session.exec.bind(session);
@@ -383,6 +460,45 @@ describe("the configuration comes from the trusted commit", () => {
     repo = makeRepo({ ".sandcastle/gates.yaml": "commands: []\n" });
     expect(() => readGateConfig(repo.dir, "main")).toThrow();
   });
+
+  it("refuses a field it does not know instead of dropping it", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml":
+        'commands:\n  - { name: test, run: "true", timeoutSeconds: 30, extra: 1 }\n',
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow();
+  });
+
+  it("keeps version and a per-file rerun template", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "version: 1",
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30, junit: reports/junit.xml, rerunFiles: [pnpm, test] }',
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main")).toMatchObject({
+      version: 1,
+      commands: [{ name: "test", rerunFiles: ["pnpm", "test"] }],
+    });
+  });
+
+  it("keeps declared generated groups", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "generated:",
+        "  - paths: [openapi.json, schema.d.ts]",
+        "    run: pnpm gen:api",
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main").generated).toEqual([
+      { paths: ["openapi.json", "schema.d.ts"], run: "pnpm gen:api" },
+    ]);
+  });
 });
 
 // What the platform would answer: the outcomes it was told about, looked up as the API does.
@@ -408,7 +524,12 @@ class MemoryRecords implements GateRecords {
   async findPassed(tree: string, blob: string) {
     const o = this.passing((o) => o.treeSha === tree && o.configBlob === blob);
     return o?.counts
-      ? { commitSha: o.commitSha, steps: o.steps, counts: o.counts }
+      ? {
+          commitSha: o.commitSha,
+          steps: o.steps,
+          counts: o.counts,
+          ...(o.testCases ? { testCases: o.testCases } : {}),
+        }
       : undefined;
   }
 }
@@ -503,5 +624,277 @@ describe("a failing setup", () => {
     await expect(failing).rejects.toThrow(
       /gate setup failed \(exit 1\)\nERR_PNPM_FETCH tls handshake eof/,
     );
+  });
+});
+
+const watchExec = (sandbox: FakeGateSandbox) => {
+  const seen: (string | readonly string[])[] = [];
+  const opened = sandbox.open.bind(sandbox);
+  sandbox.open = async (ref, placement) => {
+    const session = await opened(ref, placement);
+    const exec = session.exec.bind(session);
+    session.exec = async (command, options) => {
+      seen.push(command);
+      return exec(command, options);
+    };
+    return session;
+  };
+  return seen;
+};
+
+describe("retrying a failed test on the same commit", () => {
+  const flake = {
+    name: "flakes",
+    classname: "orders",
+    file: "orders.test.ts",
+    status: "failed" as const,
+  };
+  const stable = {
+    name: "exports",
+    classname: "orders",
+    file: "orders.test.ts",
+    status: "passed" as const,
+  };
+  const other = {
+    name: "other",
+    classname: "other",
+    file: "other.test.ts",
+    status: "passed" as const,
+  };
+
+  it("passes and keeps the case when the first run fails and the rerun passes", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: failThenPass(
+          [flake, stable, other],
+          [{ ...flake, status: "passed" }, stable, other],
+          3,
+        ),
+      },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.counts).toEqual({ tests: 3, skipped: 0 });
+    expect(outcome.testCases).toEqual([
+      { name: "flakes", classname: "orders", status: "passed", flaky: true },
+      { name: "exports", classname: "orders", status: "passed" },
+      { name: "other", classname: "other", status: "passed" },
+    ]);
+  });
+
+  it("fails as a test failure when both runs fail", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: writeXml(junitWithCases([flake, stable], 2), 1),
+      },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.reasons).toEqual(["test failed (exit 1)"]);
+    expect(outcome.steps.map((s) => s.name)).toEqual(["test"]);
+  });
+
+  it("reruns the whole test command when there is no per-file template", async () => {
+    const run = failThenPass(
+      [flake, other],
+      [{ ...flake, status: "passed" }, other],
+      2,
+    );
+    const configSha = repoWithGate([{ name: "test", run }]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const seen = watchExec(sandbox);
+    await gate({ sandbox, configSha });
+    expect(seen).toEqual([run, run]);
+  });
+
+  it("reruns only the failed files as separate arguments when the command has a template", async () => {
+    const passing = junitWithCases([{ ...flake, status: "passed" }, stable], 2);
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": gatesYaml([
+        {
+          name: "test",
+          run: writeXml(junitWithCases([flake, stable, other], 3), 1),
+          rerunFiles: ["sh", "record-args.sh"],
+        },
+      ]),
+      "record-args.sh": [
+        "#!/bin/sh",
+        "printf '%s\\n' \"$@\" > rerun-args.txt",
+        "mkdir -p reports",
+        `echo ${Buffer.from(passing).toString("base64")} | base64 -d > reports/junit.xml`,
+        "",
+      ].join("\n"),
+    });
+    const configSha = gitOut(repo.dir, ["rev-parse", "main"]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const seen = watchExec(sandbox);
+    const outcome = await gate({ sandbox, configSha });
+    expect(outcome.pass).toBe(true);
+    expect(seen[1]).toEqual(["sh", "record-args.sh", "orders.test.ts"]);
+    expect(seen).toHaveLength(2);
+  });
+
+  it("passes a filename with spaces, quotes or a semicolon as one argument", async () => {
+    const names = [`evil; touch pwned`, "a b.ts", `quote'"file.ts`];
+    const failed = names.map((file) => ({
+      name: file,
+      classname: "x",
+      file,
+      status: "failed" as const,
+    }));
+    const passing = junitWithCases(
+      failed.map((c) => ({ ...c, status: "passed" as const })),
+      3,
+    );
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": gatesYaml([
+        {
+          name: "test",
+          run: writeXml(junitWithCases(failed, 3), 1),
+          rerunFiles: ["sh", "record-args.sh"],
+        },
+      ]),
+      "record-args.sh": [
+        "#!/bin/sh",
+        "printf '%s\\n' \"$@\" > rerun-args.txt",
+        "mkdir -p reports",
+        `echo ${Buffer.from(passing).toString("base64")} | base64 -d > reports/junit.xml`,
+        "",
+      ].join("\n"),
+    });
+    const configSha = gitOut(repo.dir, ["rev-parse", "main"]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const seen = watchExec(sandbox);
+    const outcome = await gate({ sandbox, configSha });
+    expect(outcome.pass).toBe(true);
+    expect(seen[1]).toEqual(["sh", "record-args.sh", ...names]);
+  });
+
+  it("keeps the first report's test count after a per-file rerun", async () => {
+    const passingRerun = junitWithCases(
+      [{ ...flake, status: "passed" }, stable],
+      2,
+    );
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": gatesYaml([
+        {
+          name: "test",
+          run: writeXml(junitWithCases([flake, stable, other], 10), 1),
+          rerunFiles: ["sh", "record-args.sh"],
+        },
+      ]),
+      "record-args.sh": [
+        "#!/bin/sh",
+        "mkdir -p reports",
+        `echo ${Buffer.from(passingRerun).toString("base64")} | base64 -d > reports/junit.xml`,
+        "",
+      ].join("\n"),
+    });
+    const configSha = gitOut(repo.dir, ["rev-parse", "main"]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.counts).toEqual({ tests: 10, skipped: 0 });
+    expect(outcome.testCases).toEqual([
+      { name: "flakes", classname: "orders", status: "passed", flaky: true },
+      { name: "exports", classname: "orders", status: "passed" },
+      { name: "other", classname: "other", status: "passed" },
+    ]);
+  });
+
+  it("writes the rerun report beside the first one", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: failThenPass(
+          [flake, other],
+          [{ ...flake, status: "passed" }, other],
+          2,
+        ),
+      },
+      {
+        name: "lint",
+        run: "test -f reports/junit.xml.rerun && test -s reports/junit.xml",
+        junit: false,
+      },
+    ]);
+    const outcome = await gate({
+      sandbox: new FakeGateSandbox(repo.dir),
+      configSha,
+    });
+    expect(outcome.pass).toBe(true);
+    expect(outcome.counts).toEqual({ tests: 2, skipped: 0 });
+  });
+
+  it("runs the commands after the test when the rerun passes, and fails if one of them fails", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: failThenPass(
+          [flake, other],
+          [{ ...flake, status: "passed" }, other],
+          2,
+        ),
+      },
+      { name: "lint", run: "sh -c 'exit 4'", junit: false },
+    ]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const seen = watchExec(sandbox);
+    const outcome = await gate({ sandbox, configSha });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.steps.map((s) => [s.name, s.exitCode])).toEqual([
+      ["test", 0],
+      ["lint", 4],
+    ]);
+    expect(outcome.reasons).toEqual(["lint failed (exit 4)"]);
+    expect(seen).toHaveLength(3); // test, test rerun, lint
+  });
+
+  it("does not rerun setup, typecheck or lint", async () => {
+    const configSha = repoWithGate(
+      [
+        { name: "typecheck", run: "sh -c 'exit 3'", junit: false },
+        { name: "test", run: writeJunit(1) },
+      ],
+      "true",
+    );
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const seen = watchExec(sandbox);
+    const outcome = await gate({ sandbox, configSha });
+    expect(outcome.pass).toBe(false);
+    expect(outcome.steps.map((s) => s.name)).toEqual(["setup", "typecheck"]);
+    expect(seen).toEqual(["true", "sh -c 'exit 3'"]);
+  });
+
+  it("reuses a pass that included a flaky case for the same tree", async () => {
+    const configSha = repoWithGate([
+      {
+        name: "test",
+        run: failThenPass(
+          [flake, other],
+          [{ ...flake, status: "passed" }, other],
+          2,
+        ),
+      },
+    ]);
+    const sandbox = new FakeGateSandbox(repo.dir);
+    const records = new MemoryRecords();
+    const first = await gate({ sandbox, configSha, records });
+    records.remember(first);
+    const second = await gate({ sandbox, configSha, records });
+    expect(sandbox.opened).toHaveLength(1);
+    expect(second.reusedFrom).toBe(first.commitSha);
+    expect(second.testCases).toEqual(first.testCases);
+    expect(second.testCases?.some((c) => c.flaky)).toBe(true);
   });
 });

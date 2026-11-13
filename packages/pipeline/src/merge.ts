@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AUTHOR, git, gitOrThrow } from "./exec.ts";
 
 export type MergeCandidate =
@@ -75,6 +79,70 @@ export function mergeCandidate(
     AUTHOR,
   );
   return { conflict: false, candidate, tree };
+}
+
+// A merge commit that takes the integration branch's blob for each named file (the rest of the merge-tree as-is).
+export function mergeTakingOurs(
+  repoDir: string,
+  integrationRef: string,
+  incomingRef: string,
+  oursFiles: readonly string[],
+  message: string,
+): { candidate: string; tree: string } {
+  const merged = mergeTree(repoDir, integrationRef, incomingRef);
+  if (!merged.conflict) {
+    throw new Error("mergeTakingOurs needs a conflict");
+  }
+  const index = join(tmpdir(), `afk-ours-${randomUUID()}`);
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    gitOrThrow(repoDir, ["read-tree", merged.tree], env);
+    for (const file of oursFiles) {
+      const listed = git(repoDir, [
+        "ls-tree",
+        integrationRef,
+        "--",
+        file,
+      ]).stdout.trim();
+      if (!listed) {
+        gitOrThrow(
+          repoDir,
+          ["update-index", "--force-remove", "--", file],
+          env,
+        );
+        continue;
+      }
+      const [meta] = listed.split("\t");
+      const [mode, , sha] = (meta ?? "").split(" ");
+      gitOrThrow(
+        repoDir,
+        ["update-index", "--cacheinfo", `${mode},${sha},${file}`],
+        env,
+      );
+    }
+    const tree = gitOrThrow(repoDir, ["write-tree"], env);
+    const candidate = gitOrThrow(
+      repoDir,
+      [
+        "commit-tree",
+        tree,
+        "-p",
+        gitOrThrow(repoDir, ["rev-parse", integrationRef]),
+        "-p",
+        gitOrThrow(repoDir, ["rev-parse", incomingRef]),
+        "-m",
+        message,
+      ],
+      AUTHOR,
+    );
+    return { candidate, tree };
+  } finally {
+    try {
+      unlinkSync(index);
+    } catch {
+      // the index is a temp file: missing is fine
+    }
+  }
 }
 
 // True when the agent branch is already part of the integration branch: a merge that was done before the

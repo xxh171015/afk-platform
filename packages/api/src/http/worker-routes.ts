@@ -386,6 +386,15 @@ const HostTask = z.discriminatedUnion("kind", [
     defaults: z
       .array(z.object({ repoUrl: z.string(), branch: z.string() }))
       .optional(),
+    ticketBranches: z
+      .array(
+        z.object({
+          ticketId: z.number().int(),
+          repoUrl: z.string(),
+          branch: z.string(),
+        }),
+      )
+      .optional(),
   }),
   z.object({
     kind: z.literal("pr-ready"),
@@ -642,6 +651,7 @@ const gateResultRoute = holderRoute(
               name: z.string(),
               classname: z.string(),
               status: z.enum(["passed", "failed", "skipped"]),
+              flaky: z.boolean().optional(),
             }),
           )
           .optional(),

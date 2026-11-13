@@ -181,10 +181,14 @@ _Avoid_: 白名单、豁免路径
 _Avoid_: 测试白名单、基准调整
 
 **Blocked reason（blocked 原因码）**：
-票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。
+票进入 blocked 时附带的原因代码，决定人可以采取的处理动作。`branch-moved` 表示运行期间票分支被别人推过了，失败来源是需求本身。
+
+**Takeover（人接手）**：
+人把一张票从平台手里拿过来自己改：票进入 `taken-over`，正在跑或排队的作业停掉、进行中的 Run 记为 cancelled，调度不再派它、也不占并发名额。不进待处理队列。交回（handback）后平台取远端 tip 接着跑（没有票分支从 implement，有未合并提交从门禁，联调票已在集成分支上且没有新提交从 e2e），不改写人的提交。Takeover 不加 Content version。
+_Avoid_: 暂停票、checkout
 
 **Waiting queue（待处理队列）**：
-需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。
+需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。taken-over 的票不在其中。
 _Avoid_: pending 队列、待处理项、待确认的决定
 
 **Notification（通知）**：

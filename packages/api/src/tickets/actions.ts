@@ -43,6 +43,8 @@ interface TicketRow {
   blocked_reason: string | null;
   content_version: number;
   allowed_protected_paths: string[];
+  type: string;
+  resume_stage: "e2e" | "gate" | null;
 }
 
 async function loadLocked(
@@ -56,7 +58,8 @@ async function loadLocked(
   if (!found.rows[0]) return undefined;
   await lockSpec(client, found.rows[0].spec_id);
   const row = await client.query<TicketRow>(
-    `SELECT id, spec_id, repo_id, state, blocked_reason, content_version, allowed_protected_paths
+    `SELECT id, spec_id, repo_id, state, blocked_reason, content_version, allowed_protected_paths,
+            type, resume_stage
      FROM tickets WHERE id = $1`,
     [ticketId],
   );
@@ -81,6 +84,13 @@ export function parkedRetryNote(
   return trimmed === "" ? null : trimmed;
 }
 
+const AGENT_PUSH_STAGES = [
+  "implement",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+] as const;
+
 // Has an agent run of the ticket's current version finished and pushed its branch, with no restart pending since?
 async function finishedBranch(
   client: pg.PoolClient,
@@ -89,9 +99,9 @@ async function finishedBranch(
   const { rows } = await client.query(
     `SELECT 1 FROM tickets t JOIN runs r ON r.ticket_id = t.id AND r.ticket_version = t.content_version
      WHERE t.id = $1 AND NOT t.restart AND r.result = 'done' AND r.head_sha IS NOT NULL
-       AND r.stage IN ('implement', 'gate-fix', 'review-fix', 'merge-fix')
+       AND r.stage = ANY($2)
      LIMIT 1`,
-    [ticketId],
+    [ticketId, AGENT_PUSH_STAGES],
   );
   return rows.length > 0;
 }
@@ -108,6 +118,12 @@ export async function retryTicket(
   return inTransaction(pool, async (client) => {
     const ticket = await loadLocked(client, ticketId);
     if (!ticket) return { status: "no-ticket" };
+    if (ticket.state === "taken-over") {
+      const shown = formatDisplayId("ticket", ticketId);
+      return refused(
+        `${shown} is taken-over; hand it back with plat ticket handback ${shown}`,
+      );
+    }
     const next = ticketTransition(ticket.state, { type: "retry" });
     if (!next.ok) return refused(next.reason);
     if (ticket.blocked_reason === "upstream-cancelled") {
@@ -152,6 +168,130 @@ export async function retryTicket(
       { specId: ticket.spec_id, ticketId },
       { mode, note: parkedRetryNote(note) },
     );
+    await schedulePass(client, ticket.spec_id);
+    const after = await client.query<{ state: TicketState }>(
+      "SELECT state FROM tickets WHERE id = $1",
+      [ticketId],
+    );
+    return { status: "ok", state: after.rows[0]?.state as TicketState };
+  });
+}
+
+// Where a handback starts, from recorded Runs (API has no git): no published ticket branch →
+// implement; a published head → the gate; an integration ticket already merged, with nothing new
+// after that merge → its e2e. The next claimed job aligns to the remote tip.
+async function handbackResumeStage(
+  client: pg.PoolClient,
+  ticket: TicketRow,
+): Promise<"gate" | "e2e" | null> {
+  const merged = await client.query<{ id: number }>(
+    `SELECT id FROM runs
+     WHERE ticket_id = $1 AND stage = 'merge' AND result = 'merged'
+     ORDER BY id DESC LIMIT 1`,
+    [ticket.id],
+  );
+  const lastMergeId = merged.rows[0]?.id;
+  if (ticket.type === "integration") {
+    if (ticket.resume_stage === "e2e") return "e2e";
+    if (lastMergeId !== undefined) {
+      const later = await client.query(
+        `SELECT 1 FROM runs
+         WHERE ticket_id = $1 AND id > $2 AND head_sha IS NOT NULL AND stage = ANY($3)
+         LIMIT 1`,
+        [ticket.id, lastMergeId, AGENT_PUSH_STAGES],
+      );
+      if (!later.rowCount) return "e2e";
+    }
+  }
+  const published = await client.query(
+    "SELECT 1 FROM runs WHERE ticket_id = $1 AND head_sha IS NOT NULL LIMIT 1",
+    [ticket.id],
+  );
+  return published.rowCount ? "gate" : null;
+}
+
+async function stopTicketWork(
+  client: pg.PoolClient,
+  ticketId: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = 'the ticket was taken over',
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE state IN ('queued', 'running') AND (payload->>'ticketId')::int = $1`,
+    [ticketId],
+  );
+  await client.query(
+    `UPDATE runs SET finished_at = now(), result = 'cancelled',
+       duration_ms = LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int,
+       output = jsonb_build_object('error', 'the ticket was taken over')
+     WHERE ticket_id = $1 AND finished_at IS NULL`,
+    [ticketId],
+  );
+}
+
+// Stop the ticket's jobs and hold it as taken-over. Used by a person and by host-sync / a refused push.
+export async function applyTakeover(
+  client: pg.PoolClient,
+  ticketId: number,
+): Promise<ActionResult<{ state: TicketState }>> {
+  const ticket = await loadLocked(client, ticketId);
+  if (!ticket) return { status: "no-ticket" };
+  const next = ticketTransition(ticket.state, { type: "takeover" });
+  if (!next.ok) {
+    return refused(
+      `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a pending, queued, running, merging or blocked ticket can be taken over`,
+    );
+  }
+  await client.query(
+    "UPDATE tickets SET state = 'taken-over', blocked_reason = NULL WHERE id = $1",
+    [ticketId],
+  );
+  await stopTicketWork(client, ticketId);
+  await recordAction(client, "takeover", {
+    specId: ticket.spec_id,
+    ticketId,
+  });
+  await schedulePass(client, ticket.spec_id);
+  return { status: "ok", state: next.state };
+}
+
+// A person takes the ticket: jobs stop, the in-flight Run is cancelled, the ticket is not job-failed.
+export async function takeoverTicket(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<ActionResult<{ state: TicketState }>> {
+  return inTransaction(pool, (client) => applyTakeover(client, ticketId));
+}
+
+// They give it back: the platform takes the remote tip and goes on, without rewriting their commits.
+// last_pushed_sha is cleared so host-sync does not treat their tip as someone else pushing.
+export async function handbackTicket(
+  pool: pg.Pool,
+  ticketId: number,
+): Promise<ActionResult<{ state: TicketState }>> {
+  return inTransaction(pool, async (client) => {
+    const ticket = await loadLocked(client, ticketId);
+    if (!ticket) return { status: "no-ticket" };
+    const next = ticketTransition(ticket.state, { type: "handback" });
+    if (!next.ok) {
+      return refused(
+        `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a taken-over ticket can be handed back`,
+      );
+    }
+    const resume = await handbackResumeStage(client, ticket);
+    await client.query(
+      `UPDATE tickets SET state = 'pending', blocked_reason = NULL, restart = false,
+         reviewed = CASE WHEN $2 = 'gate' THEN false ELSE reviewed END,
+         resume_stage = $2,
+         last_pushed_sha = NULL,
+         job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
+       WHERE id = $1`,
+      [ticketId, resume],
+    );
+    await recordAction(client, "handback", {
+      specId: ticket.spec_id,
+      ticketId,
+    });
     await schedulePass(client, ticket.spec_id);
     const after = await client.query<{ state: TicketState }>(
       "SELECT state FROM tickets WHERE id = $1",
@@ -260,9 +400,10 @@ export type EditResult =
 const sameSet = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length && a.every((x) => b.includes(x));
 
-// A pending or blocked ticket gets new content from a ticket file (what `plat ticket view --md` prints): only the
-// title, body, modules and approved protected paths can change. The acceptance criteria are read out of the new
-// body. The version goes up by one, and the snapshot of the new version is kept, only when something changed.
+// A pending, blocked or taken-over ticket gets new content from a ticket file (what `plat ticket view --md`
+// prints): only the title, body, modules and approved protected paths can change. The acceptance criteria are
+// read out of the new body. The version goes up by one, and the snapshot of the new version is kept, only when
+// something changed.
 export async function editTicket(
   pool: pg.Pool,
   ticketId: number,
@@ -271,9 +412,13 @@ export async function editTicket(
   return inTransaction(pool, async (client) => {
     const ticket = await loadLocked(client, ticketId);
     if (!ticket) return { status: "no-ticket" };
-    if (ticket.state !== "pending" && ticket.state !== "blocked") {
+    if (
+      ticket.state !== "pending" &&
+      ticket.state !== "blocked" &&
+      ticket.state !== "taken-over"
+    ) {
       return refused(
-        `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a pending or blocked ticket can be edited`,
+        `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a pending, blocked or taken-over ticket can be edited`,
       );
     }
     const current = await client.query(
@@ -395,7 +540,7 @@ export async function cancelTicket(
     const cancelled = ticketTransition(ticket.state, { type: "cancel" });
     if (!cancelled.ok)
       return refused(
-        `${cancelled.reason} (only a pending or blocked ticket can be cancelled)`,
+        `${cancelled.reason} (only a pending, blocked or taken-over ticket can be cancelled)`,
       );
 
     const outcome: CancelOutcome = {

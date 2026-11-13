@@ -76,6 +76,10 @@ function actionText(action: string, ticketId: number | null): string | null {
       return "重试规划";
     case "waive-planning":
       return "放行规划";
+    case "takeover":
+      return ticket ? `人接手 ${ticket}` : "人接手";
+    case "handback":
+      return ticket ? `交回 ${ticket}` : "交回";
     default:
       return action;
   }

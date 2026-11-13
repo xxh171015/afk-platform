@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { branchNames, formatDisplayId } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
@@ -818,6 +819,42 @@ describe("the update-branch job", () => {
     ).toBe(true);
   });
 
+  it("pauses on the first non-fast-forward, with branch-moved", async () => {
+    const job = await queuedUpdate();
+    const reply = await agent.fail(
+      job.id,
+      job.attempt,
+      "! [rejected] spec/abc123/export -> spec/abc123/export (non-fast-forward)",
+    );
+    expect(reply.status).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "branch-moved",
+    });
+    expect(await updateJobs()).toMatchObject([{ state: "failed" }]);
+    expect((await agent.claim()).body.job).toBeNull();
+  });
+
+  it("pauses on the first permission refusal as job-failed, not a Cursor key brief", async () => {
+    const job = await queuedUpdate();
+    const reply = await agent.fail(
+      job.id,
+      job.attempt,
+      "remote: error: GH006: Protected branch update failed for refs/heads/spec/abc123/export",
+    );
+    expect(reply.status).toBe(200);
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "job-failed",
+    });
+    expect(await updateJobs()).toMatchObject([{ state: "failed" }]);
+    const run = await db.pool.query(
+      "SELECT output->>'error' AS error FROM runs WHERE stage = 'update-branch'",
+    );
+    expect(run.rows[0].error).toContain("代码托管");
+    expect(run.rows[0].error).not.toContain("CURSOR_API_KEY");
+  });
+
   it("leaves the spec running when the merge lands", async () => {
     const job = await queuedUpdate();
     await agent.complete(job.id, job.attempt, {
@@ -1036,5 +1073,228 @@ describe("update-branch during 收尾 and 验收", () => {
     expect(
       (await updateJobs()).filter((row) => row.state === "queued"),
     ).toMatchObject([{ payload: { specId: specIds[0], mainSha: "aaa111" } }]);
+  });
+});
+
+describe("host-sync watching idle ticket branches", () => {
+  async function nextHostSync() {
+    for (let i = 0; i < 12; i++) {
+      const due = await db.pool.query(
+        `SELECT 1 FROM jobs WHERE type = 'host-sync' AND state = 'queued'
+           AND (not_before IS NULL OR not_before <= $1)`,
+        [clock.now()],
+      );
+      if (!due.rowCount) {
+        clock.advanceSeconds(61);
+        continue;
+      }
+      const job = (await host.claim()).body.job as {
+        id: number;
+        attempt: number;
+        type: string;
+      } | null;
+      expect(job?.type).toBe("host-sync");
+      return job as { id: number; attempt: number };
+    }
+    throw new Error("no host-sync job");
+  }
+
+  async function hostTask() {
+    const job = await nextHostSync();
+    const task = (await fetch(
+      `${api.url}/worker/jobs/${job.id}/host-task?workerId=h1&attempt=${job.attempt}`,
+    ).then((r) => r.json())) as {
+      ticketBranches?: { ticketId: number; repoUrl: string; branch: string }[];
+    };
+    return { job, task };
+  }
+
+  async function parkTicketJobs() {
+    await db.pool.query(
+      `UPDATE jobs SET state = 'failed'
+       WHERE state IN ('queued', 'running') AND type <> 'host-sync'`,
+    );
+  }
+
+  async function ticketBranchName(ticketId = 1) {
+    const ns = (
+      await db.pool.query<{ branch_namespace: string | null }>(
+        `SELECT s.branch_namespace FROM specs s
+         JOIN tickets t ON t.spec_id = s.id WHERE t.id = $1`,
+        [ticketId],
+      )
+    ).rows[0]?.branch_namespace;
+    return branchNames(ns ?? null).ticket(formatDisplayId("ticket", ticketId));
+  }
+
+  const ticketState = async (id = 1) =>
+    (await db.pool.query("SELECT state FROM tickets WHERE id = $1", [id]))
+      .rows[0] as { state: string };
+
+  it("records the last platform push, lists the idle ticket, and takes it over when the remote SHA differs", async () => {
+    const { repoUrl } = await runningSpecs();
+    await db.pool.query(
+      "UPDATE jobs SET state = 'queued' WHERE payload->>'stage' = 'implement'",
+    );
+    await db.pool.query("UPDATE tickets SET state = 'queued' WHERE id = 1");
+    const implement = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    expect(
+      (
+        await agent.complete(implement.id, implement.attempt, {
+          stage: "implement",
+          outcome: "done",
+          run: { headSha: "abc111" },
+        })
+      ).status,
+    ).toBe(200);
+    const busy = await hostTask();
+    expect(busy.task.ticketBranches).toBeUndefined();
+    await host.complete(busy.job.id, busy.job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+    });
+    await parkTicketJobs();
+    const { job, task } = await hostTask();
+    expect(task.ticketBranches).toEqual([
+      { ticketId: 1, repoUrl, branch: await ticketBranchName() },
+    ]);
+    await host.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "zzz999" }],
+    });
+    expect(await ticketState()).toEqual({ state: "taken-over" });
+    expect(
+      (
+        await db.pool.query(
+          `SELECT source, data->>'action' AS action FROM events
+           WHERE type = 'action' AND ticket_id = 1 ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0],
+    ).toEqual({ source: "host-sync", action: "takeover" });
+  });
+
+  it("leaves an idle ticket when the remote SHA still matches the last push", async () => {
+    await runningSpecs();
+    await db.pool.query(
+      "UPDATE tickets SET last_pushed_sha = 'aaa111', state = 'pending' WHERE id = 1",
+    );
+    await parkTicketJobs();
+    const { job, task } = await hostTask();
+    expect(task.ticketBranches?.[0]?.ticketId).toBe(1);
+    await host.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "aaa111" }],
+    });
+    expect(await ticketState()).toEqual({ state: "pending" });
+  });
+
+  it("does not compare a ticket that still has a queued job, even if a look reports a new SHA", async () => {
+    await runningSpecs();
+    await db.pool.query("UPDATE tickets SET last_pushed_sha = 'aaa111'");
+    await db.pool.query(
+      `UPDATE jobs SET state = 'queued', not_before = $1
+       WHERE payload->>'stage' = 'implement'`,
+      [new Date("2099-01-01Z")],
+    );
+    const { job, task } = await hostTask();
+    expect(task.ticketBranches).toBeUndefined();
+    await host.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "zzz999" }],
+    });
+    expect((await ticketState()).state).not.toBe("taken-over");
+  });
+
+  it("does not compare a ticket the platform has never pushed", async () => {
+    await runningSpecs();
+    await parkTicketJobs();
+    const { job, task } = await hostTask();
+    expect(task.ticketBranches).toBeUndefined();
+    await host.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+    });
+    expect((await ticketState()).state).not.toBe("taken-over");
+  });
+
+  it("does not take over a done or cancelled ticket when the remote branch moves", async () => {
+    await runningSpecs();
+    await db.pool.query(
+      "UPDATE tickets SET last_pushed_sha = 'aaa111', state = 'done' WHERE id = 1",
+    );
+    await parkTicketJobs();
+    const listed = await hostTask();
+    expect(listed.task.ticketBranches).toBeUndefined();
+    await host.complete(listed.job.id, listed.job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "zzz999" }],
+    });
+    expect(await ticketState()).toEqual({ state: "done" });
+    await db.pool.query("UPDATE tickets SET state = 'cancelled' WHERE id = 1");
+    const again = await hostTask();
+    await host.complete(again.job.id, again.job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "zzz999" }],
+    });
+    expect(await ticketState()).toEqual({ state: "cancelled" });
+  });
+
+  it("does not list a ticket that is already taken over", async () => {
+    await runningSpecs();
+    await db.pool.query(
+      `UPDATE tickets SET last_pushed_sha = 'aaa111', state = 'taken-over',
+         blocked_reason = NULL WHERE id = 1`,
+    );
+    await parkTicketJobs();
+    const { job, task } = await hostTask();
+    expect(task.ticketBranches).toBeUndefined();
+    await host.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+    });
+    expect(await ticketState()).toEqual({ state: "taken-over" });
+  });
+
+  it("does not compare again after a handback until the platform next pushes", async () => {
+    await runningSpecs();
+    await db.pool.query(
+      "UPDATE tickets SET last_pushed_sha = 'aaa111', state = 'pending' WHERE id = 1",
+    );
+    await parkTicketJobs();
+    const first = await hostTask();
+    await host.complete(first.job.id, first.job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "zzz999" }],
+    });
+    expect(await ticketState()).toEqual({ state: "taken-over" });
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await parkTicketJobs();
+    const again = await hostTask();
+    expect(again.task.ticketBranches).toBeUndefined();
+    await host.complete(again.job.id, again.job.attempt, {
+      stage: "host-sync",
+      pulls: [],
+      defaults: [],
+      ticketBranches: [{ ticketId: 1, sha: "zzz999" }],
+    });
+    expect((await ticketState()).state).not.toBe("taken-over");
   });
 });

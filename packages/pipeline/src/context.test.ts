@@ -263,6 +263,9 @@ describe("renderContext", () => {
         "    run: make test",
         "    timeoutSeconds: 60",
         "    junit: reports/junit.xml",
+        "generated:",
+        "  - paths: [gen.txt]",
+        "    run: make gen",
         "",
       ].join("\n"),
     });
@@ -279,6 +282,7 @@ describe("renderContext", () => {
     expect(json.gate).toEqual({
       setup: "make setup",
       commands: [{ name: "test", run: "make test" }],
+      generated: [{ paths: ["gen.txt"], run: "make gen" }],
     });
     expect(JSON.stringify(json)).not.toMatch(/\bnpm\b/);
   });

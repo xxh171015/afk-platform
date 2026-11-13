@@ -3,36 +3,51 @@ import { z } from "zod";
 import { gitOrThrow } from "./exec.ts";
 
 // The gate: a repo's own checks, run in a fresh sandbox on a commit (docs/design.md「门禁」). The configuration
-// is read from a trusted commit, never from the branch under test; commands run in order and the first
-// failure stops the run; the number of tests may not shrink and the number of skipped tests may not grow.
+// is read from a trusted commit, never from the branch under test; commands run in order; a failed test command
+// is rerun once on the same commit, and only then does a failure stop the run; the number of tests may not shrink
+// and the number of skipped tests may not grow.
 
 export const GATE_CONFIG_PATH = ".sandcastle/gates.yaml";
 export const FAILURE_LOG_LINES = 200;
 const SETUP_TIMEOUT_SECONDS = 600;
 const DEFAULT_JUNIT_PATH = "reports/junit.xml";
 
-const GateConfigSchema = z.object({
-  setup: z.string().min(1).optional(),
-  commands: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        run: z.string().min(1),
-        timeoutSeconds: z.number().int().min(1),
-        junit: z.string().min(1).optional(),
-      }),
-    )
-    .min(1),
-});
+const GateCommandSchema = z
+  .object({
+    name: z.string().min(1),
+    run: z.string().min(1),
+    timeoutSeconds: z.number().int().min(1),
+    junit: z.string().min(1).optional(),
+    // Argv prefix for a per-file rerun: filenames are appended as their own arguments, never interpolated into a shell.
+    rerunFiles: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .strict();
+
+const GeneratedGroupSchema = z
+  .object({
+    paths: z.array(z.string().min(1)).min(1),
+    run: z.string().min(1),
+  })
+  .strict();
+
+const GateConfigSchema = z
+  .object({
+    version: z.number().int().optional(),
+    setup: z.string().min(1).optional(),
+    commands: z.array(GateCommandSchema).min(1),
+    generated: z.array(GeneratedGroupSchema).min(1).optional(),
+  })
+  .strict();
 export type GateConfig = z.infer<typeof GateConfigSchema>;
 
 // A sandbox that is thrown away afterwards. The only module that talks to Sandcastle implements this (#29).
 export interface SandboxSession {
   exec(
-    command: string,
+    command: string | readonly string[],
     options: { timeoutSeconds: number },
   ): Promise<{ exitCode: number; output: string }>;
   readFile(path: string): Promise<string | undefined>;
+  writeFile(path: string, contents: string): Promise<void>;
   close(): Promise<void>;
 }
 // Where a sandbox is put: the compose network of an integration environment, and the addresses of its services.
@@ -97,6 +112,8 @@ export interface TestCase {
   name: string; // as the report names it; `classname` is kept apart so a criterion can name either
   classname: string;
   status: TestCaseStatus;
+  file?: string; // JUnit `file` attribute, used to rerun only the failed files
+  flaky?: boolean; // failed the first run and passed the same-commit rerun
 }
 
 const MAX_TEST_CASES = 20_000;
@@ -131,6 +148,7 @@ export function junitCases(xml: string): TestCase[] {
       name: attributes.name,
       classname: attributes.classname ?? "",
       status,
+      ...(attributes.file ? { file: attributes.file } : {}),
     });
     if (cases.length >= MAX_TEST_CASES) break;
   }
@@ -236,24 +254,38 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
   const outcomes: StepOutcome[] = [];
   const stepLogs: Record<string, string> = {};
   let junit: string | undefined;
+  let flaky: TestCase[] = [];
   try {
     for (const step of steps) {
       if (input.signal?.aborted) break;
       const started = Date.now();
-      const result = await session.exec(step.run, {
+      let result = await session.exec(step.run, {
         timeoutSeconds: step.timeoutSeconds,
       });
       if (step.name === "setup" && config.setup && result.exitCode !== 0)
         throw new GateSetupError(result.exitCode, result.output);
+      if (result.exitCode !== 0 && step.name !== "setup") {
+        const retried = await rerunFailedTests(
+          session,
+          step,
+          result,
+          input.signal,
+        );
+        if (retried) {
+          result = retried.result;
+          junit = retried.junit;
+          flaky = retried.flaky;
+        }
+      }
       outcomes.push({
         name: step.name,
         exitCode: result.exitCode,
         ms: Date.now() - started,
       });
       stepLogs[step.name] = result.output;
-      if (result.exitCode !== 0) break; // the first failure stops the run
+      if (result.exitCode !== 0) break; // the first failure that is not a test rerun stops the run
     }
-    if (outcomes.every((s) => s.exitCode === 0))
+    if (outcomes.every((s) => s.exitCode === 0) && junit === undefined)
       junit = await session.readFile(junitPath);
   } finally {
     await session.close();
@@ -271,17 +303,155 @@ export async function runGate(input: RunGateInput): Promise<GateOutcome> {
     else reasons.push(...countReasons(counts, input.baseline));
   }
 
+  const testCases =
+    counts && junit !== undefined
+      ? publishedCases(junitCases(junit), flaky)
+      : undefined;
+
   return {
     ...about,
     pass: reasons.length === 0,
     reasons,
     ...(counts ? { counts } : {}),
-    ...(counts && junit !== undefined ? { testCases: junitCases(junit) } : {}),
+    ...(testCases ? { testCases } : {}),
     steps: outcomes,
     failureLog:
       reasons.length > 0 ? failureLog(outcomes, stepLogs, reasons) : "",
     stepLogs,
     ...(junit === undefined ? {} : { junit }),
+  };
+}
+
+type ExecResult = { exitCode: number; output: string };
+
+type RunnableStep = {
+  name: string;
+  run: string;
+  timeoutSeconds: number;
+  junit?: string;
+  rerunFiles?: string[];
+};
+
+function caseKey(c: { name: string; classname: string }) {
+  return `${c.classname}\n${c.name}`;
+}
+
+function testFileOf(c: TestCase): string | undefined {
+  if (c.file) return c.file;
+  const name = c.classname;
+  if (name.includes("/") || /\.(?:[cm]?[jt]sx?)$/.test(name)) return name;
+  return undefined;
+}
+
+function publishedCases(cases: TestCase[], flaky: TestCase[]): TestCase[] {
+  const flakyKeys = new Set(flaky.map(caseKey));
+  return cases.map((c) => ({
+    name: c.name,
+    classname: c.classname,
+    status: c.status,
+    ...(flakyKeys.has(caseKey(c)) ? { flaky: true as const } : {}),
+  }));
+}
+
+const escapeXml = (text: string) =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+
+function serializeJunit(counts: TestCounts, cases: TestCase[]): string {
+  const body = cases
+    .map((c) => {
+      const attrs = [
+        c.file ? `file="${escapeXml(c.file)}"` : "",
+        `classname="${escapeXml(c.classname)}"`,
+        `name="${escapeXml(c.name)}"`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (c.status === "failed")
+        return `<testcase ${attrs}><failure/></testcase>`;
+      if (c.status === "skipped")
+        return `<testcase ${attrs}><skipped/></testcase>`;
+      return `<testcase ${attrs}/>`;
+    })
+    .join("");
+  return `<testsuites tests="${counts.tests}"><testsuite name="a" tests="${counts.tests}" skipped="${counts.skipped}">${body}</testsuite></testsuites>`;
+}
+
+function mergeJunit(
+  rerunXml: string,
+  firstCounts: TestCounts,
+  firstCases: TestCase[],
+): { xml: string; cases: TestCase[]; flaky: TestCase[] } {
+  const rerunByKey = new Map(junitCases(rerunXml).map((c) => [caseKey(c), c]));
+  const cases = firstCases.map((c) => {
+    const next = rerunByKey.get(caseKey(c));
+    return next ? { ...c, status: next.status } : c;
+  });
+  const flaky = firstCases.filter(
+    (c) =>
+      c.status === "failed" && rerunByKey.get(caseKey(c))?.status === "passed",
+  );
+  return { xml: serializeJunit(firstCounts, cases), cases, flaky };
+}
+
+async function rerunFailedTests(
+  session: SandboxSession,
+  step: RunnableStep,
+  first: ExecResult,
+  signal?: AbortSignal,
+): Promise<
+  { result: ExecResult; junit: string; flaky: TestCase[] } | undefined
+> {
+  if (signal?.aborted) return undefined;
+  const path = step.junit ?? DEFAULT_JUNIT_PATH;
+  const firstXml = await session.readFile(path);
+  if (firstXml === undefined) return undefined;
+  const firstCounts = junitCounts(firstXml);
+  const firstCases = junitCases(firstXml);
+  const failed = firstCases.filter((c) => c.status === "failed");
+  if (!firstCounts || failed.length === 0) return undefined;
+
+  const files = [
+    ...new Set(
+      failed
+        .map(testFileOf)
+        .filter((file): file is string => file !== undefined),
+    ),
+  ];
+  const command: string | readonly string[] = step.rerunFiles
+    ? [...step.rerunFiles, ...files]
+    : step.run;
+  const second = await session.exec(command, {
+    timeoutSeconds: step.timeoutSeconds,
+  });
+  const rerunXml = await session.readFile(path);
+  const output = `${first.output}\n\n# rerun of failed tests\n${second.output}`;
+  if (rerunXml === undefined) {
+    return {
+      result: {
+        exitCode: second.exitCode === 0 ? 1 : second.exitCode,
+        output,
+      },
+      junit: firstXml,
+      flaky: [],
+    };
+  }
+  const rerunPath = `${path}.rerun`;
+  await session.writeFile(rerunPath, rerunXml);
+  const merged = mergeJunit(rerunXml, firstCounts, firstCases);
+  await session.writeFile(path, merged.xml);
+  const stillFailed = merged.cases.some((c) => c.status === "failed");
+  return {
+    result: {
+      exitCode: second.exitCode !== 0 || stillFailed ? second.exitCode || 1 : 0,
+      output,
+    },
+    junit: merged.xml,
+    flaky: merged.flaky,
   };
 }
 

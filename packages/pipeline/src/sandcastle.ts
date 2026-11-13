@@ -3,8 +3,14 @@
 // GateSandbox interfaces, and tests use fakes.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
@@ -549,18 +555,25 @@ export class SandcastleGateSandbox implements GateSandbox {
     return {
       // sandbox.exec has no timeout of its own: wrap with GNU timeout inside the image.
       exec: async (command, options) => {
-        const result = await sandbox.exec(
-          `timeout ${options.timeoutSeconds} sh -c ${shellQuote(command)}`,
-        );
+        const timed =
+          typeof command === "string"
+            ? `timeout ${options.timeoutSeconds} sh -c ${shellQuote(command)}`
+            : `timeout ${options.timeoutSeconds} ${command.map(shellQuote).join(" ")}`;
+        const result = await sandbox.exec(timed);
         return {
           exitCode: result.exitCode,
           output: result.stdout + result.stderr,
         };
       },
-      // Read from the worktree on the host: no shell quoting involved.
+      // Read and write from the worktree on the host: no shell quoting involved.
       readFile: async (path) => {
         const full = join(sandbox.worktreePath, path);
         return existsSync(full) ? readFileSync(full, "utf8") : undefined;
+      },
+      writeFile: async (path, contents) => {
+        const full = join(sandbox.worktreePath, path);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, contents);
       },
       close: async () => {
         const closed = await sandbox.close();

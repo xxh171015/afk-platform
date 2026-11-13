@@ -282,6 +282,31 @@ needs a new field on Order
     });
   });
 
+  it("puts the remote tip and this round's start in the branch-moved brief", () => {
+    expect(
+      structuredBrief({
+        reason: "branch-moved",
+        ...ids,
+        brief: source("implement", {
+          error:
+            "运行期间票分支被推过了\n远端 tip: aaa111\n本轮起点: bbb222\n! [rejected] (non-fast-forward)",
+        }),
+      }),
+    ).toMatchObject({
+      summary: "运行期间票分支被推过了",
+      evidence: {
+        lastLogLines:
+          "运行期间票分支被推过了\n远端 tip: aaa111\n本轮起点: bbb222\n! [rejected] (non-fast-forward)",
+      },
+      commands: [
+        {
+          label: "从远端继续",
+          command: "plat ticket retry T-12 --mode continue",
+        },
+      ],
+    });
+  });
+
   it("tells a person to raise the sandbox memory for sandbox-oom", () => {
     expect(
       structuredBrief({

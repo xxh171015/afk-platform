@@ -766,4 +766,64 @@ describe("the ticket page", () => {
       screen.queryByRole("button", { name: "重试，保留已有工作" }),
     ).toBeNull();
   });
+
+  it.each(["pending", "queued", "running", "merging", "blocked"] as const)(
+    "offers 接手 on a %s ticket and posts takeover",
+    async (state) => {
+      const ticket = {
+        ...view().ticket,
+        state,
+        blockedReason: state === "blocked" ? "gate-failed" : null,
+      };
+      const server = fakeServer({
+        "GET /tickets/4": () => ({ json: view({ ticket }) }),
+        "POST /tickets/4/takeover": () => ({ json: { state: "taken-over" } }),
+      });
+      renderWithApp(<TicketDetail ticketId={4} />, server);
+      fireEvent.click(await screen.findByRole("button", { name: "接手" }));
+      expect(screen.queryByRole("button", { name: "交回" })).toBeNull();
+      await waitFor(() =>
+        expect(server.calls).toContain("POST /tickets/4/takeover"),
+      );
+    },
+  );
+
+  it("hands a taken-over ticket back and does not offer restart", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          ticket: { ...view().ticket, state: "taken-over" },
+        }),
+      }),
+      "POST /tickets/4/handback": () => ({ json: { state: "pending" } }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    expect(await screen.findByRole("button", { name: "交回" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "接手" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "从头重试" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "重试，保留已有工作" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "交回" }));
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /tickets/4/handback"),
+    );
+  });
+
+  it.each(["done", "cancelled"] as const)(
+    "does not offer 接手 or 交回 on a %s ticket",
+    async (state) => {
+      renderWithApp(
+        <TicketDetail ticketId={4} />,
+        fakeServer({
+          "GET /tickets/4": () => ({
+            json: view({ ticket: { ...view().ticket, state } }),
+          }),
+        }),
+      );
+      await screen.findByText(/Export orders as CSV/);
+      expect(screen.queryByRole("button", { name: "接手" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "交回" })).toBeNull();
+    },
+  );
 });

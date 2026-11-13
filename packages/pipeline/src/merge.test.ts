@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ImplementOutputSchema, PROMPTS } from "./agent.ts";
 import { git, gitOut } from "./exec.ts";
-import { hasRef, isAncestor, mergeCandidate, trialMerge } from "./merge.ts";
+import {
+  hasRef,
+  isAncestor,
+  mergeCandidate,
+  mergeTakingOurs,
+  trialMerge,
+} from "./merge.ts";
 import { FakeAgentRunner } from "./testing/fakes.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
@@ -160,6 +166,35 @@ describe("mergeCandidate", () => {
       gitOut(repo.dir, ["log", "-1", "--format=%B", result.candidate]).trim(),
     ).toBe("Merge agent/S-1-update into spec/s\n\nSpec: S-1\nRun: R-5");
     expect(isAncestor(repo.dir, "main", result.candidate)).toBe(true);
+  });
+
+  it("takes the integration branch's version of named files and still merges the rest", () => {
+    diverged(
+      { "gen.txt": "agent\n", "agent.txt": "a\n" },
+      { "gen.txt": "integration\n", "other.txt": "o\n" },
+    );
+    const result = mergeTakingOurs(
+      repo.dir,
+      "spec/s",
+      "agent/T-1",
+      ["gen.txt"],
+      "Merge agent/T-1 into spec/s\n\nSpec: S-1\nTicket: T-1\nRun: R-1",
+    );
+    expect(gitOut(repo.dir, ["show", `${result.candidate}:gen.txt`])).toBe(
+      "integration",
+    );
+    expect(gitOut(repo.dir, ["show", `${result.candidate}:agent.txt`])).toBe(
+      "a",
+    );
+    expect(gitOut(repo.dir, ["show", `${result.candidate}:other.txt`])).toBe(
+      "o",
+    );
+    expect(
+      gitOut(repo.dir, ["log", "-1", "--format=%an %B", result.candidate]),
+    ).toContain("afk-worker");
+    expect(
+      gitOut(repo.dir, ["log", "-1", "--format=%B", result.candidate]),
+    ).toContain("Ticket: T-1");
   });
 
   it("tells a conflict from a clean merge and names the conflicting files", () => {

@@ -85,6 +85,35 @@ function mapped(
   };
 }
 
+async function takenOverNotice(
+  pool: pg.Pool,
+  event: EventRow,
+): Promise<MappedNotice | undefined> {
+  if (event.specId == null || event.ticketId == null) return undefined;
+  if (event.source !== "host-sync" && event.source !== "worker")
+    return undefined;
+  const spec = await specContext(pool, event.specId);
+  if (!spec) return undefined;
+  const ticket = await pool.query<{ title: string }>(
+    "SELECT title FROM tickets WHERE id = $1",
+    [event.ticketId],
+  );
+  const title = ticket.rows[0]?.title;
+  if (!title) return undefined;
+  return mapped(
+    {
+      kind: "waiting-other",
+      displayId: formatDisplayId("ticket", event.ticketId),
+      title,
+      reason: "票分支已被人改过",
+      path: `/tickets/${event.ticketId}`,
+    },
+    spec.hostKind,
+    spec.projectId,
+    event.specId,
+  );
+}
+
 export async function noticeFromEvent(
   pool: pg.Pool,
   event: EventRow,
@@ -132,6 +161,7 @@ export async function noticeFromEvent(
   }
 
   if (event.type === "ticket") {
+    if (event.toState === "taken-over") return takenOverNotice(pool, event);
     if (event.toState !== "blocked" || event.fromState === "blocked")
       return undefined;
     if (event.specId == null || event.ticketId == null) return undefined;

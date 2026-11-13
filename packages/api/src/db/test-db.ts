@@ -34,12 +34,13 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   return {
     pool,
     async drop() {
+      // End the pool first so returned clients leave cleanly; FORCE still cuts a
+      // query that was left checked out (test-db.test.ts), so afterEach cannot hang.
+      const ending = pool.end();
       try {
-        // FORCE first: pool.end() waits for checked-out clients, and a stuck query
-        // held afterEach past hookTimeout.
         await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
       } finally {
-        await Promise.allSettled([pool.end(), admin.end()]);
+        await Promise.allSettled([ending, admin.end()]);
       }
     },
   };

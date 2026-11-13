@@ -6,6 +6,7 @@ export const TICKET_STATES = [
   "done",
   "blocked",
   "cancelled",
+  "taken-over",
 ] as const;
 export type TicketState = (typeof TICKET_STATES)[number];
 
@@ -29,6 +30,8 @@ export const BLOCKED_REASONS = [
   "upstream-cancelled",
   // the worker could not carry out a stage, three times over: its environment is at fault, not the ticket
   "job-failed",
+  // someone else pushed the ticket branch while this run was going; stop at once
+  "branch-moved",
   // the kernel killed the sandbox for using too much memory; stop at once, do not retry the same limit
   "sandbox-oom",
 ] as const;
@@ -50,7 +53,11 @@ export type TicketEvent =
   | { type: "approve-protected" }
   | { type: "cancel" }
   // The whole spec is cancelled: every ticket that has not finished goes with it, even one under way.
-  | { type: "spec-cancelled" };
+  | { type: "spec-cancelled" }
+  // A person takes the ticket's branch: jobs stop, the scheduler leaves it alone.
+  | { type: "takeover" }
+  // They give it back: the platform takes the remote tip and goes on, without rewriting their commits.
+  | { type: "handback" };
 
 type PlainState = Exclude<TicketState, "blocked">;
 
@@ -66,23 +73,36 @@ const TRANSITIONS: Partial<
     enqueue: "queued",
     cancel: "cancelled",
     "spec-cancelled": "cancelled",
+    takeover: "taken-over",
   },
   queued: {
     claim: "running",
     "resume-e2e": "merging",
     "spec-cancelled": "cancelled",
+    takeover: "taken-over",
   },
-  running: { "checks-passed": "merging", "spec-cancelled": "cancelled" },
+  running: {
+    "checks-passed": "merging",
+    "spec-cancelled": "cancelled",
+    takeover: "taken-over",
+  },
   blocked: {
     retry: "pending",
     "approve-protected": "running",
     cancel: "cancelled",
     "spec-cancelled": "cancelled",
+    takeover: "taken-over",
   },
   merging: {
     "merge-succeeded": "done",
     "merge-fix-needed": "running",
     "await-fix": "pending",
+    "spec-cancelled": "cancelled",
+    takeover: "taken-over",
+  },
+  "taken-over": {
+    handback: "pending",
+    cancel: "cancelled",
     "spec-cancelled": "cancelled",
   },
 };
@@ -108,6 +128,7 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
   "integration-environment-failed": [...FROM_RUNNING, ...FROM_MERGING],
   "upstream-cancelled": ["pending"],
   "job-failed": [...FROM_RUNNING, ...FROM_MERGING],
+  "branch-moved": [...FROM_RUNNING, ...FROM_MERGING],
   "sandbox-oom": [...FROM_RUNNING, ...FROM_MERGING],
 };
 

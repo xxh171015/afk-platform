@@ -156,6 +156,14 @@ export {
   splicePackSection,
   wrapPackSection,
 } from "./pr-description.ts";
+export type { PushErrorKind, PushFailureTips } from "./push-error.ts";
+export {
+  BRANCH_MOVED_BRIEF,
+  classifyPushError,
+  formatPushFailure,
+  HOST_PERMISSION_BRIEF,
+  isNetworkPushError,
+} from "./push-error.ts";
 export { redactSecrets } from "./redact.ts";
 export type { RepoRef } from "./repo-url.ts";
 export {

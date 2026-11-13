@@ -36,6 +36,8 @@ export const PAUSE_REASONS = [
   "budget-exhausted",
   "update-branch-conflict",
   "update-branch-gate-failed",
+  "branch-moved",
+  "job-failed",
 ] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
 
@@ -43,6 +45,8 @@ export const PAUSE_REASON_LABELS: Record<PauseReason, string> = {
   "budget-exhausted": "agent 时间用完",
   "update-branch-conflict": "合 main 有冲突",
   "update-branch-gate-failed": "合 main 后门禁失败",
+  "branch-moved": "运行期间分支被推过了",
+  "job-failed": "作业失败",
 };
 
 export function pauseReasonLabel(reason: string | null | undefined): string {
@@ -53,7 +57,9 @@ export function pauseReasonLabel(reason: string | null | undefined): string {
 export const REASON_CODES = [
   ...BLOCKED_REASONS,
   FINAL_E2E_FAILED,
-  ...PAUSE_REASONS,
+  ...PAUSE_REASONS.filter(
+    (reason) => !(BLOCKED_REASONS as readonly string[]).includes(reason),
+  ),
   // the planning docs patch did not apply to the planning repo's default branch
   "planning-conflict",
   // a worker's lease on a job ran out and the job went back to the queue (the worker died or hung)
@@ -110,6 +116,7 @@ export const FAILURE_SOURCE_OF_REASON: Record<
   "update-branch-gate-failed": "spec",
   "planning-conflict": "spec",
   "bug-unlocated": "spec",
+  "branch-moved": "spec",
   "job-failed": "platform",
   "sandbox-oom": "platform",
   "lease-expired": "platform",
@@ -210,5 +217,7 @@ export const HUMAN_ACTIONS = [
   "retry-planning",
   "waive-planning",
   "retry-locate",
+  "takeover",
+  "handback",
 ] as const;
 export type HumanAction = (typeof HUMAN_ACTIONS)[number];

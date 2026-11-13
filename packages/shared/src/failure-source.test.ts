@@ -18,6 +18,7 @@ describe("failure source of a reason code", () => {
     expect(failureSourceOf("update-branch-gate-failed")).toBe("spec");
     expect(failureSourceOf("planning-conflict")).toBe("spec");
     expect(failureSourceOf("bug-unlocated")).toBe("spec");
+    expect(failureSourceOf("branch-moved")).toBe("spec");
     expect(failureSourceOf("lease-expired")).toBe("platform");
     expect(failureSourceOf("sandbox-oom")).toBe("platform");
     expect(failureSourceOf("sync-error")).toBe("external");
@@ -61,6 +62,8 @@ describe("pause reason labels", () => {
       "agent 时间用完",
       "合 main 有冲突",
       "合 main 后门禁失败",
+      "运行期间分支被推过了",
+      "作业失败",
     ]);
   });
 });

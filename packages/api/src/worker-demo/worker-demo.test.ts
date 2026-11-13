@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAppTokenSource, createGitHubAdapter } from "@afk/host";
 import { FakeGitHub } from "@afk/host/testing";
-import { composePrompt, git, gitOut, promptFor } from "@afk/pipeline";
+import {
+  composePrompt,
+  git,
+  gitOrThrow,
+  gitOut,
+  promptFor,
+} from "@afk/pipeline";
 import {
   type FakeAgentContext,
   FakeAgentRunner,
@@ -19,8 +25,8 @@ import {
   processJob,
   pushRef,
   RepoStore,
-  runWorker,
   SlotManager,
+  runWorker as startWorker,
 } from "@afk/worker";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate.ts";
@@ -29,7 +35,9 @@ import {
   FakeClock,
   listen,
   type RunningApi,
+  teardownTestRuntime,
   testApp,
+  trackedWorkers,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
 
@@ -46,9 +54,19 @@ let logDir: string;
 let home: string;
 let origin: string; // bare repo standing in for GitHub
 let seed: TestRepo;
+const workers = trackedWorkers();
+function runWorker(opts: Parameters<typeof startWorker>[0]) {
+  return workers.run((signal) => startWorker({ ...opts, signal }), opts.signal);
+}
 
 // The test command counts tests from a file in the repo (3 unless the work says otherwise) and fails on BROKEN.
+const FLAKY_FAIL = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"><failure message="boom"/></testcase></testsuite></testsuites>`;
+const FLAKY_PASS = `<testsuites tests="1"><testsuite name="a" tests="1" skipped="0"><testcase classname="flaky" name="flakes"/></testsuite></testsuites>`;
 const COUNT_TESTS =
+  "if [ -f FLAKY ]; then mkdir -p reports; if [ -f .gate-tried ]; then " +
+  `echo ${Buffer.from(FLAKY_PASS).toString("base64")} | base64 -d > reports/junit.xml; exit 0; ` +
+  "else touch .gate-tried; " +
+  `echo ${Buffer.from(FLAKY_FAIL).toString("base64")} | base64 -d > reports/junit.xml; exit 1; fi; fi; ` +
   "test ! -f BROKEN && mkdir -p reports && n=$(cat tests.count 2>/dev/null || echo 3) && " +
   `printf '<testsuites tests="%s"><testsuite name="a" tests="%s" skipped="0"/></testsuites>' "$n" "$n" > reports/junit.xml`;
 const GATES = [
@@ -57,6 +75,15 @@ const GATES = [
   `    run: ${JSON.stringify(COUNT_TESTS)}`,
   "    timeoutSeconds: 30",
   "    junit: reports/junit.xml",
+  "generated:",
+  "  - paths: [gen.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo regenerated > gen.txt'")}`,
+  "  - paths: [gen-a.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo A > gen-a.txt'")}`,
+  "  - paths: [gen-b.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo B > gen-b.txt'")}`,
+  "  - paths: [gen-fail.txt]",
+  `    run: ${JSON.stringify("sh -c 'echo boom; exit 1'")}`,
   "",
 ].join("\n");
 
@@ -78,8 +105,11 @@ afterEach(async () => {
   const seedDir = seed;
   const logs = logDir;
   const homeDir = home;
-  await closing.close();
-  await dropping.drop();
+  await teardownTestRuntime({
+    stopWorker: () => workers.stopAll(),
+    api: closing,
+    db: dropping,
+  });
   seedDir.cleanup();
   rmSync(logs, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });
@@ -591,6 +621,46 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     }
   });
 
+  it("does not send gate-fix when a test fails once and passes on the same commit", async () => {
+    await confirmedSpec([ticket("a")]);
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { FLAKY: "1\n", "src/a.ts": "a\n" }, output: DONE };
+        if (ctx.stage === "gate-fix")
+          throw new Error("gate-fix must not run for a flaky test");
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    const stages = await db.pool.query(
+      "SELECT stage, result FROM runs ORDER BY id",
+    );
+    expect(stages.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
+      "implement:done",
+      "gate:passed",
+      "review:pass",
+      "review:pass",
+      "merge:merged",
+      "final-review:pass",
+      "final-review:pass",
+    ]);
+    const cases = await db.pool.query<{ test_cases: { flaky?: boolean }[] }>(
+      "SELECT test_cases FROM gate_results WHERE kind = 'gate' ORDER BY id",
+    );
+    expect(
+      cases.rows.some((row) =>
+        (row.test_cases ?? []).some((c) => c.flaky === true),
+      ),
+    ).toBe(true);
+  });
+
   it("fixes a failing gate once and goes on to done", async () => {
     await confirmedSpec([ticket("a")]);
     const executor = deps({
@@ -718,6 +788,210 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     expect(gitOut(origin, ["show", `spec/${ID}/order-export:shared.txt`])).toBe(
       "settled",
     );
+  });
+
+  it("regenerates declared files on a generated-only conflict instead of merge-fix", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const sandboxCommands: string[] = [];
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { "gen.txt": `${ctx.branch}\n` }, output: DONE };
+        if (ctx.stage === "merge-fix")
+          throw new Error(
+            "merge-fix must not run for generated-only conflicts",
+          );
+        return undefined;
+      },
+    });
+    const inner = executor.makeGateSandbox;
+    executor.makeGateSandbox = (dir, runId) => {
+      const sandbox = inner(dir, runId);
+      const opened = sandbox.open.bind(sandbox);
+      sandbox.open = async (ref, placement) => {
+        const session = await opened(ref, placement);
+        const exec = session.exec.bind(session);
+        session.exec = async (command, options) => {
+          sandboxCommands.push(
+            typeof command === "string" ? command : command.join("\0"),
+          );
+          return exec(command, options);
+        };
+        return session;
+      };
+      return sandbox;
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:gen.txt`])).toBe(
+      "regenerated",
+    );
+    expect(
+      sandboxCommands.some((command) => command.includes("echo regenerated")),
+    ).toBe(true);
+    const regen = gitOut(origin, [
+      "log",
+      "-1",
+      "--format=%an%x00%ae%x00%B",
+      `spec/${ID}/order-export`,
+    ]).split("\0");
+    expect(regen[0]).toBe("afk-worker");
+    expect(regen[2]).toContain("Spec: S-1");
+    expect(regen[2]).toContain("Ticket: T-");
+    expect(regen[2]).toContain("Run: R-");
+    const merges = await db.pool.query<{
+      output: { generatedOnlyConflict?: boolean };
+    }>(
+      "SELECT output FROM runs WHERE stage = 'merge' AND output ? 'generatedOnlyConflict'",
+    );
+    expect(
+      merges.rows.some((row) => row.output.generatedOnlyConflict === true),
+    ).toBe(true);
+  });
+
+  it("runs declared generate groups in declaration order", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const sandboxCommands: string[] = [];
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return {
+            files: {
+              "gen-a.txt": `${ctx.branch}-a\n`,
+              "gen-b.txt": `${ctx.branch}-b\n`,
+            },
+            output: DONE,
+          };
+        if (ctx.stage === "merge-fix")
+          throw new Error(
+            "merge-fix must not run for generated-only conflicts",
+          );
+        return undefined;
+      },
+    });
+    const inner = executor.makeGateSandbox;
+    executor.makeGateSandbox = (dir, runId) => {
+      const sandbox = inner(dir, runId);
+      const opened = sandbox.open.bind(sandbox);
+      sandbox.open = async (ref, placement) => {
+        const session = await opened(ref, placement);
+        const exec = session.exec.bind(session);
+        session.exec = async (command, options) => {
+          sandboxCommands.push(
+            typeof command === "string" ? command : command.join("\0"),
+          );
+          return exec(command, options);
+        };
+        return session;
+      };
+      return sandbox;
+    };
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:gen-a.txt`])).toBe(
+      "A",
+    );
+    expect(gitOut(origin, ["show", `spec/${ID}/order-export:gen-b.txt`])).toBe(
+      "B",
+    );
+    const generate = sandboxCommands.filter(
+      (command) => command.includes("echo A") || command.includes("echo B"),
+    );
+    expect(generate[0]).toContain("echo A");
+    expect(generate[1]).toContain("echo B");
+  });
+
+  it("sends a failed generate to merge-fix once, with the command output in the log", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return { files: { "gen-fail.txt": `${ctx.branch}\n` }, output: DONE };
+        if (ctx.stage === "merge-fix") {
+          expect(ctx.context("failure/gate.log")).toContain("boom");
+          git(ctx.dir, [
+            "fetch",
+            "--quiet",
+            ".",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
+          ]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
+          return { files: { "gen-fail.txt": "settled\n" }, output: DONE };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
+    const stages = await db.pool.query(
+      "SELECT stage, result FROM runs WHERE ticket_id = 2 AND stage IN ('merge', 'merge-fix') ORDER BY id",
+    );
+    expect(stages.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
+      "merge:conflict",
+      "merge-fix:done",
+      "merge:merged",
+    ]);
+  });
+
+  it("sends mixed source and generated conflicts to merge-fix with the generate commands in the log", async () => {
+    await confirmedSpec([ticket("a"), ticket("b")], {
+      limits: { projectConcurrency: 2, repoConcurrency: 2 },
+    });
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement")
+          return {
+            files: {
+              "shared.txt": `${ctx.branch}\n`,
+              "gen.txt": `${ctx.branch}\n`,
+            },
+            output: DONE,
+          };
+        if (ctx.stage === "merge-fix") {
+          expect(ctx.context("failure/gate.log")).toContain("echo regenerated");
+          git(ctx.dir, [
+            "fetch",
+            "--quiet",
+            ".",
+            `refs/heads/spec/${ID}/order-export:refs/heads/spec/${ID}/order-export`,
+          ]);
+          git(ctx.dir, ["merge", "--no-edit", `spec/${ID}/order-export`]);
+          return {
+            files: { "shared.txt": "settled\n", "gen.txt": "settled\n" },
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 50,
+    });
+    expect(await stateOf()).toEqual(["1:done", "2:done"]);
   });
 });
 
@@ -1796,6 +2070,82 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
     return () => attempts;
   }
 
+  it("finishes the job after the remote fails to connect twice, without running the agent again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    const agentPushes = withAgentRemote(executor, (attempt) =>
+      attempt <= 2 ? { ok: false, error: CONNECTION } : "push",
+    );
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(implementRuns).toBe(1);
+    expect(agentPushes()).toBe(3);
+  });
+
+  it("retries a disconnected final-fix push in the same job, without running the agent again", async () => {
+    await confirmedSpec([ticket("a")]);
+    let finalFixRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "final-review")
+          return {
+            output: {
+              verdict: "fix",
+              mustFix: [
+                {
+                  file: "src/a.ts",
+                  line: 1,
+                  problem: "a and b name the same thing differently",
+                },
+              ],
+              suggestions: [],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        if (ctx.stage === "final-fix") {
+          finalFixRuns += 1;
+          return {
+            files: { "src/shared-name.ts": "export const name = 1;\n" },
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    const real = executor.push;
+    let finalPushes = 0;
+    executor.push = (request, token) => {
+      if (!request.target.includes("S-1-final")) return real(request, token);
+      finalPushes += 1;
+      if (finalPushes <= 2) return { ok: false, error: CONNECTION };
+      return real(request, token);
+    };
+    executor.sleep = async () => {};
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(finalFixRuns).toBe(1);
+    expect(finalPushes).toBe(3);
+    expect(
+      (await db.pool.query("SELECT step, state FROM finalizations")).rows[0],
+    ).toEqual({ step: "final-merge", state: "done" });
+  });
+
   it("finishes the job after the remote fails to connect three times, without running the agent again", async () => {
     await confirmedSpec([ticket("a")]);
     let implementRuns = 0;
@@ -1847,6 +2197,83 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
       await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
     ).toBe("failed");
     expect(agentPushes()).toBe(1);
+  });
+
+  it("takes the ticket over as branch-moved on the first non-fast-forward, with the remote tip in the run output", async () => {
+    await confirmedSpec([ticket("a")]);
+    const remoteTip = gitOut(origin, ["rev-parse", "HEAD"]);
+    git(origin, ["update-ref", `refs/heads/agent/${ID}/T-1`, remoteTip]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    const agentPushes = withAgentRemote(executor, () => ({
+      ok: false,
+      error: `! [rejected] agent/${ID}/T-1 -> agent/${ID}/T-1 (non-fast-forward)`,
+    }));
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(agentPushes()).toBe(1);
+    expect(await stateOf()).toEqual(["1:taken-over"]);
+    const jobs = await db.pool.query(
+      "SELECT state FROM jobs WHERE payload->>'stage' = 'implement' ORDER BY id",
+    );
+    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
+    const waiting = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as { tickets: unknown[] };
+    expect(waiting.tickets).toEqual([]);
+    const detail = (await fetch(`${api.url}/tickets/1`).then((r) =>
+      r.json(),
+    )) as { runs: { id: number }[] };
+    const last = detail.runs.at(-1);
+    const run = (await fetch(`${api.url}/runs/${last?.id}`).then((r) =>
+      r.json(),
+    )) as { output: { error?: string } };
+    expect(run.output.error).toContain("运行期间票分支被推过了");
+    expect(run.output.error).toContain(`远端 tip: ${remoteTip}`);
+    expect(run.output.error).toContain("本轮起点:");
+  });
+
+  it("blocks as job-failed on the first permission refusal, with a host brief", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "implement") implementRuns += 1;
+        return undefined;
+      },
+    });
+    withAgentRemote(executor, () => ({
+      ok: false,
+      error:
+        "remote: Permission to shop/backend.git denied to afk-platform[bot]",
+    }));
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
+    const jobs = await db.pool.query(
+      "SELECT state FROM jobs WHERE payload->>'stage' = 'implement' ORDER BY id",
+    );
+    expect(jobs.rows.map((row) => row.state)).toEqual(["failed"]);
+    const queue = (await fetch(`${api.url}/blocked`).then((r) => r.json())) as {
+      tickets: Array<{ brief: { output: { error: string } } }>;
+    };
+    expect(queue.tickets[0].brief.output.error).toContain("代码托管");
+    expect(queue.tickets[0].brief.output.error).not.toContain("CURSOR_API_KEY");
   });
 
   it("does not push again when the lease is gone before a retry", async () => {
@@ -2349,6 +2776,209 @@ describe("trouble reaching the API, or no room to work", {
       job,
     );
     expect(seenWhileRunning).toContain("implement: running the agent");
+  });
+});
+
+describe("the ticket branch follows origin", { timeout: 60_000 }, () => {
+  function plantOnOrigin(branch: string, file: string, message: string) {
+    const wd = join(home, `plant-${file}`);
+    git(home, ["clone", "--quiet", origin, wd]);
+    const has = git(wd, [
+      "ls-remote",
+      "--heads",
+      "origin",
+      `refs/heads/${branch}`,
+    ]).stdout.trim();
+    if (has) git(wd, ["checkout", "--quiet", "-B", branch, `origin/${branch}`]);
+    else git(wd, ["checkout", "--quiet", "-b", branch]);
+    writeFileSync(join(wd, file), `${message}\n`);
+    git(wd, ["add", file]);
+    git(wd, [
+      "-c",
+      "user.name=other",
+      "-c",
+      "user.email=o@x",
+      "commit",
+      "--quiet",
+      "-m",
+      message,
+    ]);
+    git(wd, ["push", "--quiet", "origin", branch]);
+    return gitOut(wd, ["rev-parse", "HEAD"]);
+  }
+
+  it("stops after one implement run when the ticket branch is pushed while the agent is working", async () => {
+    await confirmedSpec([ticket("a")]);
+    let implementRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage !== "implement") return undefined;
+        implementRuns += 1;
+        plantOnOrigin(`agent/${ID}/T-1`, "intruder.ts", "intruder");
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(implementRuns).toBe(1);
+    expect(await stateOf()).toEqual(["1:taken-over"]);
+    expect(gitOut(origin, ["show", `agent/${ID}/T-1:intruder.ts`])).toBe(
+      "intruder",
+    );
+  });
+
+  it("stops after one final-fix run when that branch is pushed while the agent is working", async () => {
+    await confirmedSpec([ticket("a")]);
+    let finalFixRuns = 0;
+    const executor = deps({
+      script: (ctx) => {
+        if (ctx.stage === "final-review")
+          return {
+            output: {
+              verdict: "fix",
+              mustFix: [
+                {
+                  file: "src/a.ts",
+                  line: 1,
+                  problem: "a and b name the same thing differently",
+                },
+              ],
+              suggestions: [],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        if (ctx.stage === "final-fix") {
+          finalFixRuns += 1;
+          plantOnOrigin(`agent/${ID}/S-1-final`, "intruder.ts", "intruder");
+          return {
+            files: { "src/shared-name.ts": "export const name = 1;\n" },
+            output: DONE,
+          };
+        }
+        return undefined;
+      },
+    });
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(finalFixRuns).toBe(1);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT step, state, blocked_reason FROM finalizations",
+        )
+      ).rows[0],
+    ).toEqual({
+      step: "final-fix",
+      state: "blocked",
+      blocked_reason: "branch-moved",
+    });
+  });
+
+  it("gates the remote tip when origin has moved past the main clone", async () => {
+    await confirmedSpec([ticket("a")]);
+    const api2 = workerFor();
+    const job = (await api2.claim([])) as NonNullable<
+      Awaited<ReturnType<typeof api2.claim>>
+    >;
+    await processJob({ api: api2, executor: deps(), heartbeatMs: 20 }, job);
+    const extra = plantOnOrigin(`agent/${ID}/T-1`, "extra.ts", "on origin");
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    const gated = await db.pool.query<{ commit_sha: string }>(
+      "SELECT commit_sha FROM gate_results WHERE kind = 'gate' ORDER BY id LIMIT 1",
+    );
+    expect(gated.rows[0]?.commit_sha).toBe(extra);
+  });
+
+  it("starts from origin when the main clone has diverged, keeps the local tip as an orphan, and records it", async () => {
+    await confirmedSpec([ticket("a")]);
+    const wd = join(home, "salvaged");
+    git(home, ["clone", "--quiet", origin, wd]);
+    git(wd, ["checkout", "--quiet", "-b", `agent/${ID}/T-1`]);
+    writeFileSync(join(wd, "salvaged.ts"), "export const s = 1;\n");
+    git(wd, ["add", "."]);
+    git(wd, [
+      "-c",
+      "user.name=agent",
+      "-c",
+      "user.email=agent@example.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "local line",
+    ]);
+    const localTip = gitOut(wd, ["rev-parse", "HEAD"]);
+    const mainClone = new RepoStore(join(home, "repos")).ensure(
+      "backend",
+      origin,
+      "main",
+    );
+    git(wd, ["push", "--quiet", mainClone, `agent/${ID}/T-1`]);
+    const remoteTip = plantOnOrigin(
+      `agent/${ID}/T-1`,
+      "other.ts",
+      "origin line",
+    );
+    await runWorker({
+      api: workerFor(),
+      executor: deps(),
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:done"]);
+    expect(git(origin, ["cat-file", "-e", `${remoteTip}:other.ts`]).code).toBe(
+      0,
+    );
+    expect(
+      git(origin, ["cat-file", "-e", `agent/${ID}/T-1:salvaged.ts`]).code,
+    ).not.toBe(0);
+    const run = (
+      await db.pool.query<{
+        output: { orphanRef?: string; orphanSha?: string };
+      }>(
+        "SELECT output FROM runs WHERE stage = 'implement' ORDER BY id LIMIT 1",
+      )
+    ).rows[0];
+    expect(run.output.orphanSha).toBe(localTip);
+    expect(run.output.orphanRef).toBe(
+      `refs/afk/orphan/agent/${ID}/T-1/${localTip}`,
+    );
+    expect(
+      gitOrThrow(mainClone, ["rev-parse", run.output.orphanRef as string]),
+    ).toBe(localTip);
+    const events = await db.pool.query<{
+      type: string;
+      from_state: string;
+      to_state: string;
+    }>(
+      `SELECT type, from_state, to_state FROM events
+       WHERE data->>'orphanSha' = $1`,
+      [localTip],
+    );
+    expect(events.rows[0]).toMatchObject({
+      type: "ticket",
+      from_state: events.rows[0]?.to_state,
+    });
+    expect(events.rows[0]?.from_state).not.toBe("blocked");
+    const waiting = (await fetch(`${api.url}/blocked`).then((r) =>
+      r.json(),
+    )) as {
+      tickets: unknown[];
+    };
+    expect(waiting.tickets).toEqual([]);
   });
 });
 

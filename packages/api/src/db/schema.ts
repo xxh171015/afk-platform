@@ -290,6 +290,8 @@ export const tickets = pgTable(
     retryNote: text("retry_note"),
     // Where a pending ticket starts: null is the beginning (implement); "e2e" for a ticket that is merged already.
     resumeStage: text("resume_stage"),
+    // Tip of the ticket branch the platform last pushed. host-sync compares the remote SHA to this; null means do not compare.
+    lastPushedSha: text("last_pushed_sha"),
     // A fix ticket the platform made for a failed e2e: the integration ticket it is for, and the round of it. One
     // fix ticket per round, so a diagnosis that is handed in twice makes no second one.
     fixForTicketId: integer("fix_for_ticket_id").references(

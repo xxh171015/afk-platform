@@ -5,6 +5,7 @@ import {
   type HostKind,
   LEAD_TIME_LABELS,
   type LeadTimeSegment,
+  TICKET_STATES,
   type TicketState,
 } from "@afk/shared";
 import {
@@ -244,27 +245,51 @@ function DependencyGraph({
   return (
     <figure
       className={cn(
-        "afk-graph graph h-[420px] rounded-md border bg-surface",
+        "afk-graph graph flex h-[420px] flex-col rounded-md border bg-surface",
         className,
       )}
     >
-      <ReactFlow
-        nodes={nodes}
-        edges={flowEdges}
-        nodeTypes={nodeTypes}
-        fitView
-        nodesDraggable={false}
-        nodesConnectable={false}
-        onNodeClick={
-          onOpen
-            ? (event, node) =>
-                peekTicketClick(event, (node.data as TicketNodeData).id, onOpen)
-            : undefined
-        }
+      <div className="min-h-0 flex-1">
+        <ReactFlow
+          nodes={nodes}
+          edges={flowEdges}
+          nodeTypes={nodeTypes}
+          fitView
+          nodesDraggable={false}
+          nodesConnectable={false}
+          onNodeClick={
+            onOpen
+              ? (event, node) =>
+                  peekTicketClick(
+                    event,
+                    (node.data as TicketNodeData).id,
+                    onOpen,
+                  )
+              : undefined
+          }
+        >
+          <Background />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </div>
+      <ul
+        aria-label="票状态图例"
+        className="flex flex-wrap gap-x-3 gap-y-1 border-t px-3 py-2 text-[11px] text-muted-foreground"
       >
-        <Background />
-        <Controls showInteractive={false} />
-      </ReactFlow>
+        {TICKET_STATES.map((state) => (
+          <li key={state} className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="size-2.5 rounded-sm border"
+              style={{
+                background: STATE_COLORS[state].fill,
+                borderColor: STATE_COLORS[state].border,
+              }}
+            />
+            {ticketStateLabel(state)}
+          </li>
+        ))}
+      </ul>
     </figure>
   );
 }
@@ -387,6 +412,18 @@ function PackRepoSection({
             .join(", ")}
           )
         </p>
+      ) : null}
+      {list(repo.flakyTests).length > 0 ? (
+        <>
+          <p className="note">重跑通过的不稳定测试：</p>
+          <ul className="flaky-tests">
+            {list(repo.flakyTests).map((c) => (
+              <li key={`${c.classname}-${c.name}`}>
+                {c.classname ? `${c.classname} ${c.name}` : c.name}
+              </li>
+            ))}
+          </ul>
+        </>
       ) : null}
       {list(repo.protectedPathApprovals).length > 0 ? (
         <ul className="approvals">
@@ -1355,17 +1392,7 @@ function TicketsPage({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
-            {(
-              [
-                "pending",
-                "queued",
-                "running",
-                "merging",
-                "done",
-                "blocked",
-                "cancelled",
-              ] as const
-            ).map((value) => (
+            {TICKET_STATES.map((value) => (
               <SelectItem key={value} value={value}>
                 {ticketStateLabel(value)}
               </SelectItem>

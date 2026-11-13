@@ -1,3 +1,10 @@
+export type { TicketAlign } from "./align-ticket-branch.ts";
+export {
+  alignTicketBranch,
+  deleteOrphanRefs,
+  originSha,
+  orphanRefFor,
+} from "./align-ticket-branch.ts";
 export type { ClaimedJob, Holding, WorkerApi } from "./api.ts";
 export { createWorkerApi } from "./api.ts";
 export type { ConfigSources, WorkerConfig } from "./config.ts";
