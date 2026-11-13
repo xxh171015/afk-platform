@@ -24,7 +24,7 @@ function store(): RepoStore {
 }
 
 describe("fetchContracts", () => {
-  it("clones the repo that provides each contract when the worker has no clone of it yet, and reads the file at the SHA", () => {
+  it("clones the repo that provides each contract when the worker has no clone of it yet, and reads the file at the SHA", async () => {
     const backend = origin({ "openapi/openapi.yaml": "version: 1\n" });
     const sha = backend.commit(
       { "openapi/openapi.yaml": "version: 2\n" },
@@ -35,7 +35,7 @@ describe("fetchContracts", () => {
     const paymentsSha = payments.commit({ "pay.yaml": "pay: 2\n" }, "contract");
     const repos = store();
 
-    const contracts = fetchContracts(repos, [
+    const contracts = await fetchContracts(repos, [
       {
         repo: "backend",
         url: backend.dir,
@@ -62,7 +62,7 @@ describe("fetchContracts", () => {
     ]);
   });
 
-  it("gives nothing for a ticket without contract upstreams", () => {
-    expect(fetchContracts(store(), [])).toEqual([]);
+  it("gives nothing for a ticket without contract upstreams", async () => {
+    expect(await fetchContracts(store(), [])).toEqual([]);
   });
 });

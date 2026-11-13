@@ -8,17 +8,17 @@ export const SETUP_COMMIT_MESSAGE = `Set up for the AFK platform (${SETUP_BRANCH
 // default branch, is where a spec's integration branch starts, so that the setup reaches the default branch with
 // the spec's pull request and the worker gates and reads it before then. When origin has no afk/setup, or the
 // default branch has its changes already, the head of the default branch is the start.
-export function setupBase(
+export async function setupBase(
   repos: Pick<RepoStore, "fetchBranch">,
   dir: string,
   repo: { name: string; url: string; defaultBranch: string },
   log: (line: string) => void,
-): string {
+): Promise<string> {
   const main = gitOrThrow(dir, [
     "rev-parse",
     `refs/heads/${repo.defaultBranch}`,
   ]);
-  if (!repos.fetchBranch(dir, repo.url, SETUP_BRANCH)) return main;
+  if (!(await repos.fetchBranch(dir, repo.url, SETUP_BRANCH))) return main;
   const setup = gitOrThrow(dir, ["rev-parse", `refs/heads/${SETUP_BRANCH}`]);
 
   const merged = git(dir, [

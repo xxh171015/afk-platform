@@ -52,8 +52,8 @@ export async function runReadinessGate(
       steps: [],
     };
   };
-  const dir = deps.repos.ensure(repo.name, repo.url, repo.defaultBranch);
-  if (!deps.repos.fetchBranch(dir, repo.url, branch))
+  const dir = await deps.repos.ensure(repo.name, repo.url, repo.defaultBranch);
+  if (!(await deps.repos.fetchBranch(dir, repo.url, branch)))
     return refused(`${branch} is not on the repo's origin: push it first`);
   const sha = gitOrThrow(dir, ["rev-parse", `refs/heads/${branch}`]);
   if (git(dir, ["cat-file", "-e", `${sha}:${GATE_CONFIG_PATH}`]).code !== 0)

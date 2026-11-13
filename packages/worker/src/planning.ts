@@ -14,16 +14,16 @@ export type { PlanningTask };
 // when there is no setup to merge) and pushed as the spec's integration branch there, so that the docs and the
 // setup reach the default branch with the spec's pull request. Without a patch it is the setup commit, pushed as
 // that branch, or the default branch's head and no branch is made. Built from refs in the bare clone, no checkout.
-export function runPlanningCommit(
+export async function runPlanningCommit(
   deps: {
     repos: Pick<RepoStore, "ensure" | "has" | "fetchBranch">;
     push: PushFn;
   },
   task: PlanningTask,
   log: (line: string) => void,
-): PlanningCommitResult {
+): Promise<PlanningCommitResult> {
   const { repo, integrationBranch: branch } = task;
-  const dir = deps.repos.ensure(repo.name, repo.url, repo.defaultBranch);
+  const dir = await deps.repos.ensure(repo.name, repo.url, repo.defaultBranch);
   const main = gitOrThrow(dir, [
     "rev-parse",
     `refs/heads/${repo.defaultBranch}`,
@@ -42,14 +42,14 @@ export function runPlanningCommit(
     throw new Error(`${branch} already exists in ${repo.name}`);
   }
 
-  const base = setupBase(deps.repos, dir, repo, log);
+  const base = await setupBase(deps.repos, dir, repo, log);
   // The planning commit is the default branch's head: nothing to push, the integration branch is cut later.
   const unchanged = (why: string): PlanningCommitResult => {
     log(`${why}: the planning commit is ${repo.defaultBranch} at ${main}`);
     return { stage: "planning-commit", outcome: "unchanged", sha: main };
   };
-  const publish = (sha: string): PlanningCommitResult => {
-    const pushed = deps.push({
+  const publish = async (sha: string): Promise<PlanningCommitResult> => {
+    const pushed = await deps.push({
       repoDir: dir,
       source: sha,
       target: `refs/heads/${branch}`,
@@ -97,7 +97,7 @@ export function runPlanningCommit(
     if (tree === gitOrThrow(dir, ["rev-parse", `${base}^{tree}`])) {
       return base === main
         ? unchanged(`the planning docs are on ${repo.defaultBranch} already`)
-        : publish(base);
+        : await publish(base);
     }
     const commit = git(
       dir,
@@ -107,7 +107,7 @@ export function runPlanningCommit(
     );
     if (commit.code !== 0)
       throw new Error(`commit-tree failed: ${commit.out.slice(0, 400)}`);
-    return publish(commit.stdout.trim());
+    return await publish(commit.stdout.trim());
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

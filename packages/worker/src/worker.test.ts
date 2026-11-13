@@ -1,9 +1,13 @@
 import { GIB } from "@afk/shared";
 import { describe, expect, it } from "vitest";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
+import { RepoStore } from "./repos.ts";
 import { processJob, runWorker, type WorkerOptions } from "./worker.ts";
 
-const executor = {} as WorkerOptions["executor"];
+const executor = {
+  repos: new RepoStore("/nonexistent"),
+  push: async () => ({ ok: true }),
+} as unknown as WorkerOptions["executor"];
 
 function stubApi(onClaim: () => void): WorkerApi {
   return {

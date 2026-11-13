@@ -242,13 +242,19 @@ export async function executeStage(
     throw new InfrastructureError(
       "the spec has no integration branch for this repo",
     );
-  const mainDir = deps.repos.ensure(
+  const mainDir = await deps.repos.ensure(
     bundle.repo.name,
     bundle.repo.url,
     bundle.repo.defaultBranch,
   );
   try {
-    cutIntegrationBranch(deps.repos, deps.push, mainDir, bundle, context.log);
+    await cutIntegrationBranch(
+      deps.repos,
+      deps.push,
+      mainDir,
+      bundle,
+      context.log,
+    );
   } catch (error) {
     throw new InfrastructureError(
       error instanceof Error ? error.message : String(error),
@@ -325,13 +331,14 @@ function attachOrphan(error: unknown, align: TicketAlign): void {
   error.orphanSha = align.orphan.orphanSha;
 }
 
-function assertRemoteUnchanged(
+async function assertRemoteUnchanged(
   repoDir: string,
   branch: string,
   expectedOld: string,
+  signal: AbortSignal,
   run?: ReturnType<typeof billedFacts>,
-): void {
-  const now = originSha(repoDir, branch) ?? "";
+): Promise<void> {
+  const now = (await originSha(repoDir, branch, { signal })) ?? "";
   if (now !== expectedOld) {
     throwPushFailure(
       "stale info",
@@ -353,7 +360,7 @@ async function publishLocalAhead(
   const local = hasRef(mainDir, `refs/heads/${agent}`)
     ? tip(mainDir, agent)
     : undefined;
-  const remote = originSha(mainDir, agent);
+  const remote = await originSha(mainDir, agent, { signal: context.signal });
   if (
     !local ||
     !remote ||
@@ -367,7 +374,7 @@ async function publishLocalAhead(
   ) {
     throw new JobLostError("the lease was lost before the push");
   }
-  const pushed = deps.push({
+  const pushed = await deps.push({
     repoDir: mainDir,
     source: `refs/heads/${agent}`,
     target: `refs/heads/${agent}`,
@@ -375,18 +382,28 @@ async function publishLocalAhead(
   });
   if (!pushed.ok) {
     throwPushFailure(pushed.error, {
-      remoteTip: originSha(mainDir, agent) ?? "",
+      remoteTip:
+        (await tipAfterFailedPush(mainDir, agent, context.signal)) ?? "",
       startedFrom: remote,
     });
   }
 }
 
-function assertPublishedTip(mainDir: string, agent: string): void {
-  publishedTip(mainDir, agent);
-}
+// Where origin's branch is after a push failed, for the failure's facts; origin out of reach leaves it unknown
+// rather than hiding the push's own error.
+const tipAfterFailedPush = (
+  mainDir: string,
+  branch: string,
+  signal: AbortSignal,
+): Promise<string | undefined> =>
+  originSha(mainDir, branch, { signal }).catch(() => undefined);
 
-function publishedTip(mainDir: string, agent: string): string {
-  const remote = originSha(mainDir, agent);
+async function publishedTip(
+  mainDir: string,
+  agent: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const remote = await originSha(mainDir, agent, { signal });
   const local = hasRef(mainDir, `refs/heads/${agent}`)
     ? tip(mainDir, agent)
     : undefined;
@@ -414,7 +431,10 @@ async function runStage(
     bundle.job.stage === "implement" && bundle.ticket?.restart === true;
   const align = SKIP_TICKET_ALIGN.has(bundle.job.stage)
     ? { expectedOld: "" }
-    : alignTicketBranch(mainDir, bundle.agentBranch, { restart });
+    : await alignTicketBranch(mainDir, bundle.agentBranch, {
+        restart,
+        signal: context.signal,
+      });
   if (restart)
     context.log(
       `restart: dropped ${bundle.agentBranch}${align.remoteTip ? ` (origin was ${align.remoteTip})` : ""}`,
@@ -432,13 +452,18 @@ async function runStage(
       bundle.job.stage === "implement" &&
       bundle.ticket
     ) {
-      const resume = handbackResumeStage(
+      const resume = await handbackResumeStage(
         mainDir,
         bundle.agentBranch,
         integration,
         bundle.ticket.type,
+        { signal: context.signal },
       );
-      const remote = align.remoteTip ?? originSha(mainDir, bundle.agentBranch);
+      const remote =
+        align.remoteTip ??
+        (await originSha(mainDir, bundle.agentBranch, {
+          signal: context.signal,
+        }));
       context.log(
         `handback: resume from ${resume} (origin ${remote ?? "none"})`,
       );
@@ -531,7 +556,7 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     );
   });
 
-function renderFor(
+async function renderFor(
   deps: ExecutorDeps,
   context: StageContext,
   baseSha: string,
@@ -540,7 +565,14 @@ function renderFor(
 ) {
   const { bundle } = context;
   const dir = join(ctxRoot, "context");
-  const domainFiles = fetchDomain(deps.repos, bundle.domain, bundle.repo.name);
+  const domainFiles = await fetchDomain(
+    deps.repos,
+    bundle.domain,
+    bundle.repo.name,
+  );
+  const contracts = bundle.contracts.length
+    ? await fetchContracts(deps.repos, bundle.contracts)
+    : [];
   const integration = bundle.integrationBranch;
   renderContext({
     dir,
@@ -553,9 +585,7 @@ function renderFor(
     ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
     ...(bundle.failedCases?.length ? { failedCases: bundle.failedCases } : {}),
     ...(bundle.review ? { review: bundle.review } : {}),
-    ...(bundle.contracts.length
-      ? { contracts: fetchContracts(deps.repos, bundle.contracts) }
-      : {}),
+    ...(bundle.contracts.length ? { contracts } : {}),
     ...(domainFiles ? { domain: domainFiles } : {}),
     ...(integration
       ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
@@ -596,7 +626,7 @@ function recheckArgs(
 // Snapshots of repos at the SHA the bundle names (the head of the default branch when it names none): the ones
 // the ticket refs, to be mounted read-only at /refs/<name>, or the ones an integration environment is built from.
 // The SHAs go on the Run.
-function snapshotRefs(
+async function snapshotRefs(
   deps: ExecutorDeps,
   bundle: Bundle,
   from: Bundle["refs"] = bundle.refs,
@@ -604,7 +634,7 @@ function snapshotRefs(
   const refs: { name: string; dir: string }[] = [];
   const refShas: Record<string, string> = {};
   for (const ref of from) {
-    const clone = deps.repos.ensure(ref.name, ref.url, ref.defaultBranch);
+    const clone = await deps.repos.ensure(ref.name, ref.url, ref.defaultBranch);
     const sha = ref.sha ?? tip(clone, ref.defaultBranch);
     refs.push({
       name: ref.name,
@@ -653,17 +683,22 @@ async function agentChange(
       : before);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
+    const ctxDir = await renderFor(deps, context, baseSha, tmp, mainDir);
     const inEnvironment =
       bundle.ticket?.type === "integration" && bundle.environment.length > 0;
     const given = writePrompt(
       tmp,
       promptFor(stage, { integration: inEnvironment }),
     );
-    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const { refs, refShas } = await snapshotRefs(deps, bundle);
     log(`${stage}: running the agent on ${agent}`);
     const options = runOptions(deps, context);
-    assertRemoteUnchanged(mainDir, agent, align.expectedOld);
+    await assertRemoteUnchanged(
+      mainDir,
+      agent,
+      align.expectedOld,
+      context.signal,
+    );
     // An integration ticket's agent works in its integration environment: it writes the e2e against real services,
     // and a fix reproduces the failure there. The environment is gone again when the run is over.
     const runAgent = (placement?: SandboxPlacement) =>
@@ -752,7 +787,7 @@ async function agentChange(
     // Each attempt re-checks the job lease first: a worker that lost it must not publish anything.
     const waitSeconds = [10, 30, 90, 180];
     const wait = deps.sleep ?? sleep;
-    let pushed: ReturnType<PushFn> = { ok: false, error: "" };
+    let pushed: Awaited<ReturnType<PushFn>> = { ok: false, error: "" };
     for (let i = 0; i < waitSeconds.length; i++) {
       if (
         context.signal.aborted ||
@@ -760,8 +795,14 @@ async function agentChange(
       ) {
         throw new JobLostError("the lease was lost before the push");
       }
-      assertRemoteUnchanged(mainDir, agent, align.expectedOld, billed);
-      pushed = deps.push(request);
+      await assertRemoteUnchanged(
+        mainDir,
+        agent,
+        align.expectedOld,
+        context.signal,
+        billed,
+      );
+      pushed = await deps.push(request);
       if (pushed.ok) break;
       if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
         break;
@@ -771,7 +812,11 @@ async function agentChange(
       throwPushFailure(
         pushed.error,
         {
-          remoteTip: originSha(mainDir, request.target),
+          remoteTip: await tipAfterFailedPush(
+            mainDir,
+            request.target,
+            context.signal,
+          ),
           startedFrom: align.expectedOld,
         },
         billed,
@@ -837,7 +882,7 @@ async function review(
   const reviewed =
     stage === "final-review"
       ? tip(mainDir, bundle.integrationBranch as string)
-      : publishedTip(mainDir, agent);
+      : await publishedTip(mainDir, agent, context.signal);
   const axes = reviewAxesFor(stage, bundle.ticketReview);
   const branches = new Map(
     axes.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
@@ -846,8 +891,8 @@ async function review(
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
   try {
     bringBranches(slot, mainDir, [...branches.values()]);
-    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
-    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const ctxDir = await renderFor(deps, context, baseSha, tmp, mainDir);
+    const { refs, refShas } = await snapshotRefs(deps, bundle);
     const runs = await Promise.all(
       axes.map(async (axis) => {
         const given = writePrompt(join(tmp, axis), promptFor(stage, { axis }));
@@ -953,19 +998,19 @@ async function recheck(
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   const reviewed = hasRef(mainDir, `refs/heads/${agent}`)
     ? tip(mainDir, agent)
-    : publishedTip(mainDir, agent);
+    : await publishedTip(mainDir, agent, context.signal);
   const branch = `recheck/${subjectLabel(bundle)}`;
   gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
   try {
     bringBranches(slot, mainDir, [branch]);
-    const ctxDir = renderFor(deps, context, baseSha, tmp, mainDir);
+    const ctxDir = await renderFor(deps, context, baseSha, tmp, mainDir);
     if (hit) {
       writeFileSync(
         join(ctxDir, "recheck.json"),
         `${JSON.stringify(hit, null, 2)}\n`,
       );
     }
-    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const { refs, refShas } = await snapshotRefs(deps, bundle);
     const given = writePrompt(tmp, promptFor("recheck"));
     const options = runOptions(deps, context, "spec");
     const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
@@ -1118,7 +1163,7 @@ async function gate(
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   await publishLocalAhead(deps, context, mainDir, agent);
-  const commitSha = publishedTip(mainDir, agent);
+  const commitSha = await publishedTip(mainDir, agent, context.signal);
   if (!exists(mainDir, agent))
     throw new InfrastructureError(`${agent} is not there to gate`);
   const baseSha = branchBase(mainDir, integration, agent);
@@ -1153,7 +1198,7 @@ async function gate(
           repo: bundle.repo.name,
           ref: agent,
           base: baseSha,
-          contracts: fetchContracts(deps.repos, bundle.contracts),
+          contracts: await fetchContracts(deps.repos, bundle.contracts),
         });
   if (copies.length > 0) {
     const detail = copies.map((c) => c.detail).join("\n");
@@ -1241,12 +1286,14 @@ async function merge(
     context.log(
       `${bundle.job.stage}: the integration branch moved, fetching and trying again (${outcome.integrationMoved})`,
     );
-    deps.repos.ensure(
+    await deps.repos.ensure(
       bundle.repo.name,
       bundle.repo.url,
       bundle.repo.defaultBranch,
     );
-    ticketAlign = alignTicketBranch(mainDir, bundle.agentBranch);
+    ticketAlign = await alignTicketBranch(mainDir, bundle.agentBranch, {
+      signal: context.signal,
+    });
     context.align = ticketAlign;
   }
 }
@@ -1470,10 +1517,11 @@ async function mergeOnce(
   const integration = bundle.integrationBranch as string;
   const integrationRef = `refs/heads/${integration}`;
   const stage = bundle.job.stage;
-  if (exists(mainDir, agent) || originSha(mainDir, agent)) {
+  const onOrigin = () => originSha(mainDir, agent, { signal: context.signal });
+  if (exists(mainDir, agent) || (await onOrigin())) {
     await publishLocalAhead(deps, context, mainDir, agent);
-    if (exists(mainDir, agent) || originSha(mainDir, agent))
-      assertPublishedTip(mainDir, agent);
+    if (exists(mainDir, agent) || (await onOrigin()))
+      await publishedTip(mainDir, agent, context.signal);
   }
   // A first update-branch has no temp branch yet: merge the default branch. After the merge agent, the temp exists
   // and is what gets merge-treed into the integration branch.
@@ -1627,7 +1675,7 @@ async function mergeOnce(
   // Still the holder? This check renews the lease as well.
   if ((await deps.api.prePush(job)) === "lost")
     throw new JobLostError("the lease was lost before the push");
-  const pushed = deps.push({
+  const pushed = await deps.push({
     repoDir: mainDir,
     source: candidateSha,
     target: integrationRef,
@@ -1636,7 +1684,11 @@ async function mergeOnce(
   if (!pushed.ok) {
     if (classifyPushError(pushed.error) === "host-permission") {
       throwPushFailure(pushed.error, {
-        remoteTip: originSha(mainDir, integrationRef),
+        remoteTip: await tipAfterFailedPush(
+          mainDir,
+          integrationRef,
+          context.signal,
+        ),
         startedFrom: oldTip,
       });
     }
@@ -1681,7 +1733,11 @@ async function withEnvironment<T>(
     throw new InfrastructureError(
       "this worker has no integration environments",
     );
-  const { refs, refShas } = snapshotRefs(deps, bundle, bundle.environment);
+  const { refs, refShas } = await snapshotRefs(
+    deps,
+    bundle,
+    bundle.environment,
+  );
   const repos: EnvironmentRepo[] = refs.map((ref) => ({
     name: ref.name,
     dir: ref.dir,
@@ -1821,9 +1877,9 @@ async function diagnose(
   const head = tip(mainDir, integration);
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, head, tmp, mainDir);
+    const ctxDir = await renderFor(deps, context, head, tmp, mainDir);
     const given = writePrompt(tmp, promptFor("diagnose"));
-    const { refs } = snapshotRefs(deps, bundle);
+    const { refs } = await snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     // on a branch of its own that is gone again afterwards, like the e2e's
     const branch = `diagnose/${subjectLabel(bundle)}`;
@@ -1907,7 +1963,7 @@ async function locateBug(
     ...(bundle.domain ? [bundle.domain.url] : []),
   ]);
   const defaultBranch = bundle.repo.defaultBranch;
-  const mainDir = deps.repos.ensure(
+  const mainDir = await deps.repos.ensure(
     bundle.repo.name,
     bundle.repo.url,
     defaultBranch,
@@ -1925,9 +1981,9 @@ async function locateBug(
   let body: StageOutcomeBody | undefined;
   const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
   try {
-    const ctxDir = renderFor(deps, context, head, tmp, mainDir);
+    const ctxDir = await renderFor(deps, context, head, tmp, mainDir);
     const given = writePrompt(tmp, promptFor("locate-bug"));
-    const { refs, refShas } = snapshotRefs(deps, bundle);
+    const { refs, refShas } = await snapshotRefs(deps, bundle);
     const options = runOptions(deps, context);
     const branch = bundle.agentBranch;
     gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, head]);
@@ -1964,7 +2020,7 @@ async function locateBug(
             files: output.files,
             evidence: output.evidence,
             reproduction: output.reproduction,
-            commits: blamedLocateCommits(deps, bundle, output),
+            commits: await blamedLocateCommits(deps, bundle, output),
           }
         : undefined;
       body = {
@@ -1990,7 +2046,7 @@ async function locateBug(
   }
 }
 
-function blamedLocateCommits(
+async function blamedLocateCommits(
   deps: ExecutorDeps,
   bundle: Bundle,
   output: LocateOutput,
@@ -2001,6 +2057,10 @@ function blamedLocateCommits(
       ? bundle.repo
       : bundle.refs.find((ref) => ref.name === output.repo);
   if (!named) return [];
-  const clone = deps.repos.ensure(named.name, named.url, named.defaultBranch);
+  const clone = await deps.repos.ensure(
+    named.name,
+    named.url,
+    named.defaultBranch,
+  );
   return blameLocateFiles(clone, output.files, named.defaultBranch);
 }

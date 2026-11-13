@@ -18,12 +18,12 @@ export type TrialMergeResult = {
   }[];
 };
 
-export function runTrialMerge(
+export async function runTrialMerge(
   deps: { repos: Pick<RepoStore, "ensure" | "has"> },
   task: TrialMergeTask,
   log: (line: string) => void,
-): TrialMergeResult {
-  const dir = deps.repos.ensure(
+): Promise<TrialMergeResult> {
+  const dir = await deps.repos.ensure(
     task.repo.name,
     task.repo.url,
     task.repo.defaultBranch,

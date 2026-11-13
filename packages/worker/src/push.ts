@@ -1,4 +1,4 @@
-import { exec } from "@afk/pipeline";
+import { remoteGit } from "./remote-git.ts";
 
 // Every `git push` the worker makes goes through this function, and it only lets two kinds of branch through:
 // ticket branches (agent/*) and integration branches (spec/*). The platform never pushes main and has no code
@@ -36,18 +36,20 @@ export interface PushRequest {
   // For --force-with-lease: the sha the remote branch must still have, or "" when it must not exist yet.
   // Required for every push this exit makes. Git's compare-and-swap is not a job lease.
   expectedOld?: string;
+  signal?: AbortSignal; // the job's: a push still running when the job is given up is killed
 }
 
 export interface PushOptions {
   token?: GitToken; // sent as an extra header; never written to .git/config or put in a URL, and scrubbed from output
+  timeoutMs?: number; // REMOTE_GIT_TIMEOUT_MS unless a test shortens it
 }
 
 export type PushResult = { ok: true } | { ok: false; error: string };
 
-export function pushRef(
+export async function pushRef(
   request: PushRequest,
   options: PushOptions = {},
-): PushResult {
+): Promise<PushResult> {
   // An empty source would delete the remote branch: this exit never deletes.
   if (
     !request.source ||
@@ -83,8 +85,8 @@ export function pushRef(
   const compare = [
     `--force-with-lease=${request.target}:${request.expectedOld}`,
   ];
-  const result = exec(
-    "git",
+  const result = await remoteGit(
+    request.repoDir,
     [
       "push",
       "--quiet",
@@ -93,7 +95,6 @@ export function pushRef(
       `${request.source}:${request.target}`,
     ],
     {
-      cwd: request.repoDir,
       // in git's environment, not its arguments: argv shows in `ps`
       env: header
         ? {
@@ -103,6 +104,8 @@ export function pushRef(
           }
         : {},
       redact: options.token ? secretsOf(options.token) : [],
+      ...(request.signal ? { signal: request.signal } : {}),
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
     },
   );
   return result.code === 0
@@ -111,7 +114,10 @@ export function pushRef(
 }
 
 // The token is the one the stage holds at the moment of the push; a PushFn that has none of its own uses it.
-export type PushFn = (request: PushRequest, token?: GitToken) => PushResult;
+export type PushFn = (
+  request: PushRequest,
+  token?: GitToken,
+) => Promise<PushResult>;
 
 export const pushWithToken: PushFn = (request, token) =>
   pushRef(request, token ? { token } : {});

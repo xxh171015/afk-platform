@@ -34,7 +34,7 @@ afterEach(() => {
 
 function deps(over: Partial<ExecutorDeps> = {}) {
   const pushed: (GitToken | undefined)[] = [];
-  const push: PushFn = (_request, token) => {
+  const push: PushFn = async (_request, token) => {
     pushed.push(token);
     return { ok: true };
   };
@@ -179,9 +179,9 @@ describe("a clone reached with a token", () => {
     );
   });
 
-  it("does not write the token into the clone's config", () => {
+  it("does not write the token into the clone's config", async () => {
     const store = new RepoStore(root, () => "secret-token");
-    const dir = store.ensure("backend", seed.dir, "main");
+    const dir = await store.ensure("backend", seed.dir, "main");
     const config = readFileSync(join(dir, "config"), "utf8");
     expect(config).not.toContain("secret-token");
     expect(config).not.toContain(

@@ -1,9 +1,22 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
-import { git, gitOrThrow, hasRef } from "@afk/pipeline";
-import { redactSecrets, repoHost, tryParseRepoUrl } from "@afk/shared";
+import { git, hasRef } from "@afk/pipeline";
+import { repoHost, tryParseRepoUrl } from "@afk/shared";
 import { basicAuth, type GitToken, secretsOf } from "./push.ts";
+import {
+  CLONE_TIMEOUT_MS,
+  oneAtATime,
+  type RemoteGitOptions,
+  remoteGit,
+  remoteGitOrThrow,
+} from "./remote-git.ts";
 
 // Two projects can both name a repo `backend` on different hosts; a directory of just the name would fetch the
 // first origin for both. Host+owner when the URL names a code host, otherwise a hash of the URL (local test paths).
@@ -23,21 +36,39 @@ function cloneDirName(name: string, url?: string): string {
 // refs/afk/origin/agent/* so a diverge on origin is not silently ignored, and local heads/agent/* stay put
 // until the stage aligns them.
 
+// How a store reaches origin: the job whose calls end with it, and how long one call may take (tests shorten it).
+export interface RemoteCalls {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  cloneTimeoutMs?: number;
+}
+
 export class RepoStore {
   private readonly root: string;
   // The token for the repo at a URL: each repo has its own, since the code host gives a token to one repo at a time.
   private readonly tokenOf:
     | ((url?: string) => GitToken | undefined)
     | undefined;
+  private readonly calls: RemoteCalls;
 
-  constructor(root: string, tokenOf?: (url?: string) => GitToken | undefined) {
+  constructor(
+    root: string,
+    tokenOf?: (url?: string) => GitToken | undefined,
+    calls: RemoteCalls = {},
+  ) {
     this.root = root;
     this.tokenOf = tokenOf;
+    this.calls = calls;
   }
 
   // The same clones, reached with a token. It is read at each use, because a stage can outlive one token.
   withToken(tokenOf: (url?: string) => GitToken | undefined): RepoStore {
-    return new RepoStore(this.root, tokenOf);
+    return new RepoStore(this.root, tokenOf, this.calls);
+  }
+
+  // The same clones, for one job: a git call to origin still running when the job is given up is killed.
+  during(signal: AbortSignal): RepoStore {
+    return new RepoStore(this.root, this.tokenOf, { ...this.calls, signal });
   }
 
   // The token goes to git in its environment as an extra header: not in the URL, not in .git/config, not in argv.
@@ -56,15 +87,32 @@ export class RepoStore {
   }
 
   // Clones on first use, then brings the branches the pipeline cares about up to date.
-  ensure(name: string, url: string, defaultBranch: string): string {
+  ensure(name: string, url: string, defaultBranch: string): Promise<string> {
     const dir = this.dirFor(name, url);
+    return oneAtATime(dir, () => this.follow(dir, url, defaultBranch));
+  }
+
+  private async follow(
+    dir: string,
+    url: string,
+    defaultBranch: string,
+  ): Promise<string> {
     if (!existsSync(dir)) {
       mkdirSync(dirname(dir), { recursive: true });
-      this.run(this.root, ["clone", "--quiet", "--bare", url, dir], url);
+      // a clone killed half way leaves a directory behind: it only takes the clone's name once it is whole
+      const partial = `${dir}.partial`;
+      rmSync(partial, { recursive: true, force: true });
+      await this.run(
+        this.root,
+        ["clone", "--quiet", "--bare", url, partial],
+        url,
+        { timeoutMs: this.calls.cloneTimeoutMs ?? CLONE_TIMEOUT_MS },
+      );
+      renameSync(partial, dir);
     }
     // '+' for the branches origin owns; a failure here means the default branch or the integration branch is
     // stale, so it is an error, not something to carry on with.
-    this.run(
+    await this.run(
       dir,
       [
         "fetch",
@@ -77,7 +125,7 @@ export class RepoStore {
       url,
     );
     // Origin's ticket branches, without moving the local heads a stage may still need to push.
-    git(
+    await remoteGit(
       dir,
       [
         "fetch",
@@ -86,7 +134,7 @@ export class RepoStore {
         "origin",
         "+refs/heads/agent/*:refs/afk/origin/agent/*",
       ],
-      this.env(url),
+      this.options(url),
     );
     return dir;
   }
@@ -95,6 +143,7 @@ export class RepoStore {
   findByUrl(url: string): string | undefined {
     if (!existsSync(this.root)) return undefined;
     for (const name of readdirSync(this.root)) {
+      if (name.endsWith(".partial")) continue; // a clone that never finished
       const dir = join(this.root, name);
       if (git(dir, ["rev-parse", "--is-bare-repository"]).code !== 0) continue;
       if (git(dir, ["remote", "get-url", "origin"]).stdout.trim() === url)
@@ -103,35 +152,51 @@ export class RepoStore {
     return undefined;
   }
 
-  // gitOrThrow with the token scrubbed from the message it throws.
-  private run(cwd: string, args: string[], url?: string): string {
-    try {
-      return gitOrThrow(cwd, args, this.env(url));
-    } catch (error) {
-      const token = this.tokenOf?.(url);
-      if (!token || !(error instanceof Error)) throw error;
-      throw new Error(redactSecrets(error.message, secretsOf(token)));
-    }
+  // A git call to origin with the token, which is scrubbed from what it says, under this store's limits.
+  private options(url?: string, over: RemoteGitOptions = {}): RemoteGitOptions {
+    const token = this.tokenOf?.(url);
+    return {
+      env: this.env(url),
+      redact: token ? secretsOf(token) : [],
+      ...(this.calls.signal ? { signal: this.calls.signal } : {}),
+      ...(this.calls.timeoutMs ? { timeoutMs: this.calls.timeoutMs } : {}),
+      ...over,
+    };
+  }
+
+  private run(
+    cwd: string,
+    args: string[],
+    url?: string,
+    over: RemoteGitOptions = {},
+  ): Promise<string> {
+    return remoteGitOrThrow(cwd, args, this.options(url, over));
   }
 
   // One branch that ensure() does not follow (afk/setup, for `plat repo check`); false when origin has no such branch.
-  fetchBranch(dir: string, url: string, branch: string): boolean {
-    const found = this.run(
+  async fetchBranch(
+    dir: string,
+    url: string,
+    branch: string,
+  ): Promise<boolean> {
+    const found = await this.run(
       dir,
       ["ls-remote", "--heads", "origin", `refs/heads/${branch}`],
       url,
     );
     if (found.trim() === "") return false;
-    this.run(
-      dir,
-      [
-        "fetch",
-        "--quiet",
-        "--no-tags",
-        "origin",
-        `+refs/heads/${branch}:refs/heads/${branch}`,
-      ],
-      url,
+    await oneAtATime(dir, () =>
+      this.run(
+        dir,
+        [
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "origin",
+          `+refs/heads/${branch}:refs/heads/${branch}`,
+        ],
+        url,
+      ),
     );
     return true;
   }
@@ -145,27 +210,26 @@ export class RepoStore {
   }
 
   // A planning commit may live only on plan/*, which ensure() does not fetch.
-  fetchObject(dir: string, url: string, sha: string): void {
+  async fetchObject(dir: string, url: string, sha: string): Promise<void> {
     if (this.hasObject(dir, sha)) return;
-    try {
-      this.run(dir, ["fetch", "--quiet", "--no-tags", "origin", sha], url);
-    } catch {}
-    if (this.hasObject(dir, sha)) return;
-    try {
-      this.run(
-        dir,
-        [
-          "fetch",
-          "--quiet",
-          "--no-tags",
-          "origin",
-          "+refs/heads/plan/*:refs/heads/plan/*",
-        ],
-        url,
-      );
-    } catch {}
-    if (!this.hasObject(dir, sha)) {
-      throw new Error(`planning commit ${sha} is not on origin`);
+    // origin may just not have it under that name; a fetch that timed out says so instead
+    let failure = "";
+    for (const refspec of [sha, "+refs/heads/plan/*:refs/heads/plan/*"]) {
+      try {
+        await oneAtATime(dir, () =>
+          this.run(
+            dir,
+            ["fetch", "--quiet", "--no-tags", "origin", refspec],
+            url,
+          ),
+        );
+      } catch (error) {
+        failure = error instanceof Error ? error.message : String(error);
+      }
+      if (this.hasObject(dir, sha)) return;
     }
+    throw new Error(
+      `planning commit ${sha} is not on origin${/timed out/.test(failure) ? ` (${failure})` : ""}`,
+    );
   }
 }

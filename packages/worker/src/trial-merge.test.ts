@@ -43,10 +43,10 @@ const task = (
 });
 
 describe("trial-merge", () => {
-  it("reports conflicting files against a peer, and skips a peer whose branch is gone", () => {
+  it("reports conflicting files against a peer, and skips a peer whose branch is gone", async () => {
     const repo = origin();
     const repos = new RepoStore(tmp("afk-trial-merge-"));
-    const result = runTrialMerge(
+    const result = await runTrialMerge(
       { repos },
       task(repo, [
         { specId: 2, branch: "spec/b" },

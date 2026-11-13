@@ -195,6 +195,13 @@ export async function processJob(
   const stopping = () => lost.abort();
   if (options.signal?.aborted) stopping();
   options.signal?.addEventListener("abort", stopping, { once: true });
+  // Every git call to origin the job makes is killed when the job is given up, so none is left running.
+  const executor: WorkerOptions["executor"] = {
+    ...options.executor,
+    repos: options.executor.repos.during(lost.signal),
+    push: (request, token) =>
+      options.executor.push({ ...request, signal: lost.signal }, token),
+  };
   let failedBeats = 0;
   let heartbeatChain = Promise.resolve();
   let stoppedBeats = false;
@@ -228,11 +235,8 @@ export async function processJob(
     if (job.type === TRIAL_MERGE_JOB) {
       const task = await api.trialMergeTask(job);
       if (task === "lost") return "abandoned";
-      const deps = await withCredentials(
-        { ...options.executor, api },
-        task.repo.url,
-      );
-      const body = runTrialMerge(deps, task, log);
+      const deps = await withCredentials({ ...executor, api }, task.repo.url);
+      const body = await runTrialMerge(deps, task, log);
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";
@@ -243,11 +247,8 @@ export async function processJob(
       const task = await api.planningTask(job);
       if (task === "lost") return "abandoned";
       // pushes the planning repo's integration branch, with that repo's token
-      const deps = await withCredentials(
-        { ...options.executor, api },
-        task.repo.url,
-      );
-      const body = runPlanningCommit(deps, task, log);
+      const deps = await withCredentials({ ...executor, api }, task.repo.url);
+      const body = await runPlanningCommit(deps, task, log);
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";
@@ -258,10 +259,7 @@ export async function processJob(
       const task = await api.readinessTask(job);
       if (task === "lost") return "abandoned";
       // fetches the branch with that repo's token
-      const deps = await withCredentials(
-        { ...options.executor, api },
-        task.repo.url,
-      );
+      const deps = await withCredentials({ ...executor, api }, task.repo.url);
       const body = await runReadinessGate(deps, task, log, lost.signal);
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
@@ -274,11 +272,8 @@ export async function processJob(
       const task = await api.hostTask(job);
       if (task === "lost") return "abandoned";
       if (task.kind === "index-pr-links") {
-        const deps = await withCredentials(
-          { ...options.executor, api },
-          task.repoUrl,
-        );
-        const repoDir = deps.repos.ensure(
+        const deps = await withCredentials({ ...executor, api }, task.repoUrl);
+        const repoDir = await deps.repos.ensure(
           task.repoName,
           task.repoUrl,
           task.defaultBranch,
@@ -329,7 +324,7 @@ export async function processJob(
     };
 
     const body = await executeStage(
-      { ...options.executor, api },
+      { ...executor, api },
       {
         job,
         bundle,
