@@ -163,6 +163,7 @@ export {
   formatPushFailure,
   HOST_PERMISSION_BRIEF,
   isNetworkPushError,
+  reportedPushError,
 } from "./push-error.ts";
 export { redactSecrets } from "./redact.ts";
 export type { RepoRef } from "./repo-url.ts";

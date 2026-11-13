@@ -336,6 +336,7 @@ const Bundle = z.object({
     maxIntegrationEnvironments: z.number().int(),
   }),
   model: z.string().nullable(),
+  handbackResolve: z.boolean().optional(),
 });
 
 const bundleRoute = createRoute({

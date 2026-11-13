@@ -27,14 +27,24 @@ const BRANCH_MOVED =
 const HOST_PERMISSION =
   /GH006|protected branch|permission to .+ denied|not allowed to push|insufficient permission/i;
 
-export function classifyPushError(error: string): PushErrorKind {
+// Push errors the worker already classified (API and finalize paths must not re-infer from raw git text).
+export function reportedPushError(error: string): PushErrorKind | null {
   // Merge already retried a racing integration branch; that leftover git text is not a ticket-branch move.
   if (!/it kept moving/.test(error)) {
-    if (error.includes(BRANCH_MOVED_BRIEF) || BRANCH_MOVED.test(error))
-      return "branch-moved";
+    if (error.includes(BRANCH_MOVED_BRIEF)) return "branch-moved";
   }
-  if (error.includes(HOST_PERMISSION_BRIEF) || HOST_PERMISSION.test(error))
-    return "host-permission";
+  if (error.includes(HOST_PERMISSION_BRIEF)) return "host-permission";
+  return null;
+}
+
+export function classifyPushError(error: string): PushErrorKind {
+  const reported = reportedPushError(error);
+  if (reported) return reported;
+  // Merge already retried a racing integration branch; that leftover git text is not a ticket-branch move.
+  if (!/it kept moving/.test(error)) {
+    if (BRANCH_MOVED.test(error)) return "branch-moved";
+  }
+  if (HOST_PERMISSION.test(error)) return "host-permission";
   if (NETWORK.test(error)) return "network";
   return "other";
 }

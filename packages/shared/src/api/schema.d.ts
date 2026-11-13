@@ -2052,6 +2052,7 @@ export interface paths {
                 maxIntegrationEnvironments: number;
               };
               model: string | null;
+              handbackResolve?: boolean;
             };
           };
         };

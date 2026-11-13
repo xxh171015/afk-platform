@@ -1,8 +1,9 @@
+import { GATE_CONFIG_BRIEF } from "@afk/pipeline";
 import {
   type BlockedReason,
-  classifyPushError,
   formatPushFailure,
   isSandboxOomError,
+  reportedPushError,
   type TicketState,
   ticketTransition,
   unrecoverableJobError,
@@ -74,9 +75,10 @@ function storedJobError(error: string): string {
 }
 
 function immediateBlockReason(error: string): BlockedReason | undefined {
+  if (error.includes(GATE_CONFIG_BRIEF)) return JOB_FAILED;
   if (isSandboxOomError(error)) return "sandbox-oom";
   if (unrecoverableJobError(error)) return JOB_FAILED;
-  const push = classifyPushError(error);
+  const push = reportedPushError(error);
   if (push === "branch-moved") return "branch-moved";
   if (push === "host-permission") return JOB_FAILED;
   return undefined;

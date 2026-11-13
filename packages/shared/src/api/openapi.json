@@ -3398,6 +3398,9 @@
                     },
                     "model": {
                       "type": ["string", "null"]
+                    },
+                    "handbackResolve": {
+                      "type": "boolean"
                     }
                   },
                   "required": [

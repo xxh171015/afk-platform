@@ -110,7 +110,12 @@ export const commonFields = {
 export const StageResultSchema = z.discriminatedUnion("stage", [
   z.object({
     stage: z.enum(AGENT_STAGES),
-    outcome: z.enum(["done", ...AGENT_FAILURES]),
+    outcome: z.enum(["done", ...AGENT_FAILURES, "handback-resolved"]),
+    handback: z
+      .object({
+        resumeStage: z.enum(["implement", "gate", "e2e"]),
+      })
+      .optional(),
     ...commonFields,
   }),
   z.object({
@@ -257,6 +262,51 @@ export async function recordStageResult(
   const parsed = StageResultSchema.safeParse(result);
   const valid =
     parsed.success && parsed.data.stage === stage ? parsed.data : undefined;
+
+  if (
+    valid?.stage === "implement" &&
+    valid.outcome === "handback-resolved" &&
+    valid.handback
+  ) {
+    const resume = valid.handback.resumeStage;
+    const nextResume =
+      resume === "implement" ? null : (resume as "gate" | "e2e");
+    await writeFacts(
+      client,
+      {
+        spec_id: ticket.spec_id,
+        repo_id: ticket.repo_id,
+        ticket_id: ticket.id,
+        content_version: ticket.content_version,
+      },
+      job,
+      stage,
+      valid,
+      result,
+    );
+    await client.query(
+      `UPDATE tickets SET handback_pending = false, resume_stage = $2,
+         reviewed = CASE WHEN $3 THEN false ELSE reviewed END,
+         last_pushed_sha = COALESCE($4, last_pushed_sha),
+         restart = false, state = 'pending'
+       WHERE id = $1`,
+      [ticket.id, nextResume, resume === "gate", valid.run?.headSha ?? null],
+    );
+    await schedulePass(client, ticket.spec_id);
+    return {
+      status: "applied",
+      decision: {
+        type: "enqueue",
+        stage: resume,
+        progress: {
+          fixCounts: ticket.fix_counts,
+          reviewed: resume === "gate" ? false : ticket.reviewed,
+          integrationRounds: ticket.integration_rounds,
+        },
+      },
+    };
+  }
+
   await writeFacts(
     client,
     {
@@ -443,17 +493,7 @@ export async function writeFacts(
   }
   const runId = inserted.rows[0]?.id as number;
   await recordOrphanEvent(client, owner, job, run);
-  const TICKET_PUSH_STAGES = [
-    "implement",
-    "gate-fix",
-    "review-fix",
-    "merge-fix",
-  ];
-  if (
-    owner.ticket_id !== null &&
-    run?.headSha &&
-    TICKET_PUSH_STAGES.includes(stage)
-  ) {
+  if (owner.ticket_id !== null && run?.headSha) {
     await client.query(
       "UPDATE tickets SET last_pushed_sha = $2 WHERE id = $1",
       [owner.ticket_id, run.headSha],

@@ -312,6 +312,7 @@ interface TicketRow {
   content_version: number;
   contract_sha: string | null;
   resume_stage: "e2e" | "gate" | null;
+  handback_pending: boolean;
 }
 
 // Whatever transaction it runs in, what a pass changes is the scheduler's doing.
@@ -435,7 +436,10 @@ async function schedulingPass(
       },
       // a ticket that is merged already (its e2e failed, and the fix is done) starts again from its e2e; one retried
       // without a note, whose agent had finished its branch, starts again from the gate
-      ticket.resume_stage ?? "implement",
+      ticket.handback_pending
+        ? "implement"
+        : (ticket.resume_stage ?? "implement"),
+      ticket.handback_pending ? { handbackResolve: true } : {},
     );
     // the e2e stays the ticket's starting point; the gate is a retry's, used once
     if (ticket.resume_stage === "gate")
@@ -467,7 +471,7 @@ async function startableTickets(
   specId: number,
 ): Promise<(TicketRow & { edges: IncomingEdge[] })[]> {
   const tickets = await client.query<TicketRow>(
-    "SELECT id, repo_id, state, content_version, contract_sha, resume_stage FROM tickets WHERE spec_id = $1 ORDER BY id",
+    "SELECT id, repo_id, state, content_version, contract_sha, resume_stage, handback_pending FROM tickets WHERE spec_id = $1 ORDER BY id",
     [specId],
   );
   const byId = new Map(tickets.rows.map((ticket) => [ticket.id, ticket]));

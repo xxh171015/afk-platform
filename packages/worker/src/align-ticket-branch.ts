@@ -101,3 +101,34 @@ export function deleteOrphanRefs(
   }
   return deleted;
 }
+
+export type HandbackResumeStage = "implement" | "gate" | "e2e";
+
+function branchTip(repoDir: string, branch: string): string {
+  const ref = branch.startsWith("refs/") ? branch : `refs/heads/${branch}`;
+  return gitOrThrow(repoDir, ["rev-parse", ref]);
+}
+
+// Where to resume after handback (docs/design.md「人接手」).
+export function handbackResumeStage(
+  repoDir: string,
+  ticketBranch: string,
+  integrationBranch: string,
+  ticketType: string,
+): HandbackResumeStage {
+  const remote = originSha(repoDir, ticketBranch);
+  if (!remote) return "implement";
+
+  const integrationTip = branchTip(repoDir, integrationBranch);
+
+  if (
+    ticketType === "integration" &&
+    isAncestor(repoDir, remote, integrationTip)
+  ) {
+    return "e2e";
+  }
+
+  if (!isAncestor(repoDir, integrationTip, remote)) return "gate";
+  if (remote !== integrationTip) return "gate";
+  return "implement";
+}

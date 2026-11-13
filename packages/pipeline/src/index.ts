@@ -77,7 +77,9 @@ export type {
   TestCounts,
 } from "./gate.ts";
 export {
+  GATE_CONFIG_BRIEF,
   GATE_CONFIG_PATH,
+  GateConfigError,
   GateSetupError,
   junitCases,
   junitCounts,

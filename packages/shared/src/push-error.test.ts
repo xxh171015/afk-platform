@@ -5,11 +5,24 @@ import {
   formatPushFailure,
   HOST_PERMISSION_BRIEF,
   isNetworkPushError,
+  reportedPushError,
 } from "./push-error.ts";
 import {
   CURSOR_AUTH_BRIEF,
   QUOTA_EXHAUSTED_BRIEF,
 } from "./unrecoverable-job-error.ts";
+
+describe("reportedPushError", () => {
+  it("only trusts worker briefs, not raw git text", () => {
+    expect(reportedPushError(BRANCH_MOVED_BRIEF)).toBe("branch-moved");
+    expect(reportedPushError(HOST_PERMISSION_BRIEF)).toBe("host-permission");
+    expect(
+      reportedPushError(
+        "! [rejected] agent/T-1 -> agent/T-1 (non-fast-forward)",
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("classifyPushError", () => {
   it.each([

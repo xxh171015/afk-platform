@@ -19,6 +19,7 @@ import {
   EnvironmentError,
   type EnvironmentRepo,
   type GateConfig,
+  GateConfigError,
   type GateOutcome,
   type GateRecords,
   type GateSandbox,
@@ -67,6 +68,7 @@ import {
 } from "@afk/shared";
 import {
   alignTicketBranch,
+  handbackResumeStage,
   originSha,
   type TicketAlign,
 } from "./align-ticket-branch.ts";
@@ -343,6 +345,30 @@ async function runStage(
       `align: ${bundle.agentBranch} follows origin ${align.remoteTip}; kept ${align.orphan.sha} at ${align.orphan.ref}`,
     );
   bringBranches(slot, mainDir, [integration, bundle.agentBranch]);
+  if (
+    bundle.handbackResolve &&
+    bundle.job.stage === "implement" &&
+    bundle.ticket
+  ) {
+    const resume = handbackResumeStage(
+      mainDir,
+      bundle.agentBranch,
+      integration,
+      bundle.ticket.type,
+    );
+    const remote = align.remoteTip ?? originSha(mainDir, bundle.agentBranch);
+    context.log(`handback: resume from ${resume} (origin ${remote ?? "none"})`);
+    return {
+      stage: "implement",
+      outcome: "handback-resolved",
+      handback: { resumeStage: resume },
+      run: {
+        branch: bundle.agentBranch,
+        ...(remote ? { headSha: remote } : {}),
+        ...orphanRunFields(align),
+      },
+    };
+  }
   switch (bundle.job.stage) {
     case "implement":
     case "gate-fix":
@@ -780,6 +806,8 @@ async function runGateStep(input: RunGateInput): Promise<GateOutcome> {
     return await runGate(input);
   } catch (error) {
     if (error instanceof GateSetupError)
+      throw new InfrastructureError(error.message);
+    if (error instanceof GateConfigError)
       throw new InfrastructureError(error.message);
     throw error;
   }

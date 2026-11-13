@@ -297,6 +297,9 @@ export async function buildBundle(
     ]),
     gateBaseline: await gateBaselineFor(pool, row.spec_id, row.repo_id),
     gateBaselines: await gateBaselinesFor(pool, row.spec_id, row.repo_id),
+    ...(job.payload.handbackResolve === true
+      ? { handbackResolve: true as const }
+      : {}),
     ...runSettings(row.limits, row.default_model),
   };
 }

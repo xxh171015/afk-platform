@@ -1286,6 +1286,16 @@ describe("host-sync watching idle ticket branches", () => {
     });
     expect(await ticketState()).toEqual({ state: "taken-over" });
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    const resolve = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(resolve.id, resolve.attempt, {
+      stage: "implement",
+      outcome: "handback-resolved",
+      handback: { resumeStage: "implement" },
+      run: { headSha: "zzz999" },
+    });
     await parkTicketJobs();
     const again = await hostTask();
     expect(again.task.ticketBranches).toBeUndefined();
