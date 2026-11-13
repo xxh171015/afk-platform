@@ -100,7 +100,7 @@ describe("failure source of a failed job", () => {
     "commit-tree failed: fatal: not a valid object name",
     "sandbox exited with code 137",
     "GitHub answered 404 reading pull request 512",
-    "gate setup failed (exit 1)\nERROR: relation \"users\" does not exist",
+    'gate setup failed (exit 1)\nERROR: relation "users" does not exist',
     "",
   ];
 
