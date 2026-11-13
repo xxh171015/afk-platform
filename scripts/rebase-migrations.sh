@@ -18,14 +18,36 @@ if [[ ! -f "$AFK_REBASE_DRIZZLE/meta/_journal.json" ]]; then
   exit 0
 fi
 
-# commit parent1 parent2 → three words when HEAD is a merge
-# shellcheck disable=SC2046
-set -- $(git rev-list --parents -n 1 HEAD)
-if [[ $# -lt 3 ]]; then
-  exit 0
+# Upstream (unchanged) side: ticket merge → integration branch; update-branch → default branch.
+# When the platform runs this in the gate sandbox it sets AFK_GENERATED_UPSTREAM_SHA; otherwise parent1/parent2.
+if [[ -n "${AFK_GENERATED_UPSTREAM_SHA:-}" ]]; then
+  export AFK_REBASE_INTEGRATION="$AFK_GENERATED_UPSTREAM_SHA"
+  # shellcheck disable=SC2046
+  set -- $(git rev-list --parents -n 1 HEAD)
+  if [[ $# -lt 3 ]]; then
+    exit 0
+  fi
+  p1="$(git rev-parse "$2")"
+  p2="$(git rev-parse "$3")"
+  up="$(git rev-parse "$AFK_GENERATED_UPSTREAM_SHA")"
+  if [[ "$p1" == "$up" ]]; then
+    export AFK_REBASE_INCOMING="$p2"
+  elif [[ "$p2" == "$up" ]]; then
+    export AFK_REBASE_INCOMING="$p1"
+  else
+    echo "rebase-migrations: AFK_GENERATED_UPSTREAM_SHA is not a parent of HEAD" >&2
+    exit 1
+  fi
+else
+  # commit parent1 parent2 → three words when HEAD is a merge
+  # shellcheck disable=SC2046
+  set -- $(git rev-list --parents -n 1 HEAD)
+  if [[ $# -lt 3 ]]; then
+    exit 0
+  fi
+  export AFK_REBASE_INTEGRATION="$2"
+  export AFK_REBASE_INCOMING="$3"
 fi
-export AFK_REBASE_INTEGRATION="$2"
-export AFK_REBASE_INCOMING="$3"
 
 exec node --input-type=module <<'NODE'
 import { execFileSync } from "node:child_process";

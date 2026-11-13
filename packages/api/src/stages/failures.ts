@@ -1,10 +1,13 @@
+import { GATE_CONFIG_BRIEF } from "@afk/pipeline";
 import {
   type BlockedReason,
-  classifyPushError,
+  blockedReasonForReportedPush,
   formatPushFailure,
   isSandboxOomError,
+  reportedPushError,
   type TicketState,
   ticketTransition,
+  tipsFromPushFailure,
   unrecoverableJobError,
 } from "@afk/shared";
 import type pg from "pg";
@@ -42,7 +45,12 @@ import {
 } from "../planning/planning-commit.ts";
 import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
-import { EXPECTED_STATE, type StageJob, startsQueued } from "./results.ts";
+import {
+  EXPECTED_STATE,
+  recordOrphanEvent,
+  type StageJob,
+  startsQueued,
+} from "./results.ts";
 
 // A worker that cannot carry out a stage reports the job as failed (its sandbox would not start, a push was
 // refused, ...). A network blip is retried; a non-fast-forward takes the ticket over at once, and a host
@@ -74,12 +82,10 @@ function storedJobError(error: string): string {
 }
 
 function immediateBlockReason(error: string): BlockedReason | undefined {
+  if (error.includes(GATE_CONFIG_BRIEF)) return JOB_FAILED;
   if (isSandboxOomError(error)) return "sandbox-oom";
   if (unrecoverableJobError(error)) return JOB_FAILED;
-  const push = classifyPushError(error);
-  if (push === "branch-moved") return "branch-moved";
-  if (push === "host-permission") return JOB_FAILED;
-  return undefined;
+  return blockedReasonForReportedPush(error);
 }
 
 export type FailureOutcome =
@@ -88,13 +94,84 @@ export type FailureOutcome =
   | { status: "requeued"; failures: number }
   | { status: "blocked"; failures: number };
 
+export type FailedRunFacts = {
+  orphanRef?: string;
+  orphanSha?: string;
+};
+
 // The Run the job started is over, whatever else happens.
-async function finishRun(client: pg.PoolClient, jobId: number, error: string) {
+async function finishRun(
+  client: pg.PoolClient,
+  job: StageJob,
+  error: string,
+  run?: FailedRunFacts,
+): Promise<void> {
+  const output: Record<string, unknown> = { error };
+  if (run?.orphanRef && run.orphanSha) {
+    output.orphanRef = run.orphanRef;
+    output.orphanSha = run.orphanSha;
+  }
   await client.query(
     `UPDATE runs SET finished_at = COALESCE(finished_at, now()), result = 'job-failed',
        duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
-       output = jsonb_build_object('error', $2::text) WHERE job_id = $1`,
-    [jobId, error],
+       output = $2::jsonb WHERE job_id = $1`,
+    [job.id, JSON.stringify(output)],
+  );
+  const specId =
+    typeof job.payload.specId === "number" ? job.payload.specId : undefined;
+  const ticketId =
+    typeof job.payload.ticketId === "number" ? job.payload.ticketId : null;
+  const repoId =
+    typeof job.payload.repoId === "number" ? job.payload.repoId : 0;
+  if (specId !== undefined) {
+    await recordOrphanEvent(
+      client,
+      {
+        spec_id: specId,
+        repo_id: repoId,
+        ticket_id: ticketId,
+        content_version: null,
+      },
+      job,
+      run,
+    );
+  }
+}
+
+async function annotatePushFailure(
+  client: pg.PoolClient,
+  jobId: number,
+  error: string,
+): Promise<void> {
+  const kind = reportedPushError(error);
+  if (!kind || kind === "network") return;
+  const event = (
+    await client.query<{
+      spec_id: number | null;
+      ticket_id: number | null;
+      repo_id: number | null;
+      from_state: string | null;
+      to_state: string | null;
+    }>(
+      `SELECT spec_id, ticket_id, repo_id, from_state, to_state FROM events
+       WHERE job_id = $1 AND type = 'job' AND to_state = 'failed'
+       ORDER BY id DESC LIMIT 1`,
+      [jobId],
+    )
+  ).rows[0];
+  if (event?.spec_id == null) return;
+  await client.query(
+    `SELECT afk_record_event($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8::jsonb)`,
+    [
+      "job",
+      event.spec_id,
+      event.ticket_id,
+      jobId,
+      event.repo_id,
+      event.from_state,
+      event.to_state,
+      JSON.stringify({ pushError: kind }),
+    ],
   );
 }
 
@@ -118,8 +195,10 @@ export async function recordJobFailure(
   job: StageJob,
   error: string,
   now: Date,
+  run?: FailedRunFacts,
 ): Promise<FailureOutcome> {
-  await finishRun(client, job.id, storedJobError(error));
+  await finishRun(client, job, storedJobError(error), run);
+  await annotatePushFailure(client, job.id, storedJobError(error));
 
   const planning = readPlanningPayload(job);
   if (planning) {
@@ -213,7 +292,12 @@ async function ticketStageFailed(
     return { status: "requeued", failures };
   }
   if (immediate === "branch-moved") {
-    const taken = await applyTakeover(client, read.ticketId);
+    const tips = tipsFromPushFailure(error);
+    const taken = await applyTakeover(client, read.ticketId, {
+      reason: "branch-moved",
+      remoteTip: tips.remoteTip,
+      startedFrom: tips.startedFrom,
+    });
     if (taken.status === "no-ticket") throw new Error("no-ticket");
     return { status: "blocked", failures };
   }

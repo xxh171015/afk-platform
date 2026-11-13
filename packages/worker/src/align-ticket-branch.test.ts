@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   alignTicketBranch,
   deleteOrphanRefs,
+  handbackResumeStage,
   orphanRefFor,
 } from "./align-ticket-branch.ts";
 
@@ -28,6 +29,7 @@ afterEach(() => {
 
 const BRANCH = "agent/T-1";
 const HEADS = `refs/heads/${BRANCH}`;
+const INTEGRATION = "spec/s-1";
 const shaOf = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
 
 function commit(dir: string, file: string, message: string): string {
@@ -95,7 +97,7 @@ describe("alignTicketBranch", () => {
     expect(aligned).toEqual({
       expectedOld: remoteTip,
       remoteTip,
-      orphan: { ref: orphan, sha: localTip },
+      orphan: { orphanRef: orphan, orphanSha: localTip },
     });
     expect(shaOf(local.dir, HEADS)).toBe(remoteTip);
     expect(shaOf(local.dir, orphan)).toBe(localTip);
@@ -115,6 +117,41 @@ describe("alignTicketBranch", () => {
     expect(
       git(local.dir, ["show-ref", "--verify", "--quiet", HEADS]).code,
     ).not.toBe(0);
+  });
+
+  it("picks handback resume from the remote tip", () => {
+    gitOrThrow(local.dir, ["checkout", "--quiet", "-b", INTEGRATION]);
+    const integrationTip = commit(local.dir, "spec/base.txt", "integration");
+    gitOrThrow(local.dir, ["branch", BRANCH]);
+    const ticketTip = commit(local.dir, "ticket.txt", "ticket work");
+    gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
+    expect(handbackResumeStage(local.dir, BRANCH, INTEGRATION, "feature")).toBe(
+      "gate",
+    );
+    gitOrThrow(local.dir, [
+      "push",
+      "--quiet",
+      "origin",
+      `:refs/heads/${BRANCH}`,
+    ]);
+    gitOrThrow(local.dir, ["update-ref", "-d", HEADS]);
+    expect(handbackResumeStage(local.dir, BRANCH, INTEGRATION, "feature")).toBe(
+      "implement",
+    );
+    gitOrThrow(local.dir, ["update-ref", HEADS, ticketTip]);
+    gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
+    gitOrThrow(local.dir, ["checkout", "--quiet", INTEGRATION]);
+    gitOrThrow(local.dir, ["merge", "--quiet", "--ff-only", BRANCH]);
+    expect(
+      handbackResumeStage(local.dir, BRANCH, INTEGRATION, "integration"),
+    ).toBe("e2e");
+    gitOrThrow(local.dir, ["checkout", "--quiet", BRANCH]);
+    commit(local.dir, "more.txt", "more work");
+    gitOrThrow(local.dir, ["push", "--quiet", "origin", `${HEADS}:${HEADS}`]);
+    expect(
+      handbackResumeStage(local.dir, BRANCH, INTEGRATION, "integration"),
+    ).toBe("gate");
+    void integrationTip;
   });
 
   it("deletes orphan refs of the given branches", () => {

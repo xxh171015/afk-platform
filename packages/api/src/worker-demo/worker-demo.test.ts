@@ -230,6 +230,23 @@ function deps(
   return base;
 }
 
+function withAgentRemote(
+  executor: ReturnType<typeof deps>,
+  respond: (attempt: number) => { ok: false; error: string } | "push",
+) {
+  const real = executor.push;
+  let attempts = 0;
+  executor.push = (request, token) => {
+    if (!request.target.startsWith("refs/heads/agent/"))
+      return real(request, token);
+    attempts += 1;
+    const next = respond(attempts);
+    return next === "push" ? real(request, token) : next;
+  };
+  executor.sleep = async () => {};
+  return () => attempts;
+}
+
 const workerFor = (id = "w1") => createWorkerApi(api.url, id);
 const stateOf = async () =>
   (
@@ -2053,23 +2070,6 @@ describe("a push after the agent is done", { timeout: 60_000 }, () => {
   const CONNECTION =
     "fatal: unable to access 'https://github.com/shop/backend.git/': Could not resolve host: github.com";
 
-  function withAgentRemote(
-    executor: ReturnType<typeof deps>,
-    respond: (attempt: number) => { ok: false; error: string } | "push",
-  ) {
-    const real = executor.push;
-    let attempts = 0;
-    executor.push = (request, token) => {
-      if (!request.target.startsWith("refs/heads/agent/"))
-        return real(request, token);
-      attempts += 1;
-      const next = respond(attempts);
-      return next === "push" ? real(request, token) : next;
-    };
-    executor.sleep = async () => {};
-    return () => attempts;
-  }
-
   it("finishes the job after the remote fails to connect twice, without running the agent again", async () => {
     await confirmedSpec([ticket("a")]);
     let implementRuns = 0;
@@ -2979,6 +2979,66 @@ describe("the ticket branch follows origin", { timeout: 60_000 }, () => {
       tickets: unknown[];
     };
     expect(waiting.tickets).toEqual([]);
+  });
+
+  it("records the orphan when the clone has diverged and the job then fails to push", async () => {
+    await confirmedSpec([ticket("a")]);
+    const wd = join(home, "salvaged-fail");
+    git(home, ["clone", "--quiet", origin, wd]);
+    git(wd, ["checkout", "--quiet", "-b", `agent/${ID}/T-1`]);
+    writeFileSync(join(wd, "salvaged.ts"), "export const s = 1;\n");
+    git(wd, ["add", "."]);
+    git(wd, [
+      "-c",
+      "user.name=agent",
+      "-c",
+      "user.email=agent@example.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "local line",
+    ]);
+    const localTip = gitOut(wd, ["rev-parse", "HEAD"]);
+    const mainClone = new RepoStore(join(home, "repos")).ensure(
+      "backend",
+      origin,
+      "main",
+    );
+    git(wd, ["push", "--quiet", mainClone, `agent/${ID}/T-1`]);
+    plantOnOrigin(`agent/${ID}/T-1`, "other.ts", "origin line");
+    const executor = deps();
+    withAgentRemote(executor, () => ({
+      ok: false,
+      error: `! [rejected] agent/${ID}/T-1 -> agent/${ID}/T-1 (non-fast-forward)`,
+    }));
+    await runWorker({
+      api: workerFor(),
+      executor,
+      stopWhenIdle: true,
+      heartbeatMs: 20,
+    });
+    expect(await stateOf()).toEqual(["1:taken-over"]);
+    const run = (
+      await db.pool.query<{
+        output: { orphanRef?: string; orphanSha?: string };
+      }>(
+        "SELECT output FROM runs WHERE stage = 'implement' ORDER BY id DESC LIMIT 1",
+      )
+    ).rows[0];
+    expect(run.output.orphanSha).toBe(localTip);
+    expect(run.output.orphanRef).toBe(
+      `refs/afk/orphan/agent/${ID}/T-1/${localTip}`,
+    );
+    const events = await db.pool.query<{
+      type: string;
+      data: { orphanSha?: string };
+    }>(`SELECT type, data FROM events WHERE data->>'orphanSha' = $1`, [
+      localTip,
+    ]);
+    expect(events.rows[0]).toMatchObject({
+      type: "ticket",
+      data: { orphanSha: localTip },
+    });
   });
 });
 

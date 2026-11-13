@@ -48,7 +48,11 @@ const FINAL_STAGES = new Set([
   "final-e2e",
 ]);
 
-function actionText(action: string, ticketId: number | null): string | null {
+function actionText(
+  action: string,
+  ticketId: number | null,
+  data: Record<string, unknown> = {},
+): string | null {
   if (action === "confirm") return null;
   const ticket = ticketId ? formatDisplayId("ticket", ticketId) : null;
   switch (action as HumanAction) {
@@ -77,6 +81,10 @@ function actionText(action: string, ticketId: number | null): string | null {
     case "waive-planning":
       return "放行规划";
     case "takeover":
+      if (typeof data.reason === "string")
+        return ticket
+          ? `平台接手 ${ticket}：票分支被推过`
+          : "平台接手：票分支被推过";
       return ticket ? `人接手 ${ticket}` : "人接手";
     case "handback":
       return ticket ? `交回 ${ticket}` : "交回";
@@ -356,7 +364,7 @@ export async function specTimeline(
     const actions = await pool.query<{
       at: Date;
       ticket_id: number | null;
-      data: { action?: string };
+      data: { action?: string; reason?: string } & Record<string, unknown>;
     }>(
       `SELECT at, ticket_id, data FROM events
        WHERE spec_id = $1 AND type = 'action'
@@ -366,7 +374,7 @@ export async function specTimeline(
     for (const row of actions.rows) {
       const action = row.data?.action;
       if (!action) continue;
-      const text = actionText(action, row.ticket_id);
+      const text = actionText(action, row.ticket_id, row.data);
       if (!text) continue;
       items.push({
         kind: "action",

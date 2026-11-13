@@ -177,39 +177,6 @@ export async function retryTicket(
   });
 }
 
-// Where a handback starts, from recorded Runs (API has no git): no published ticket branch →
-// implement; a published head → the gate; an integration ticket already merged, with nothing new
-// after that merge → its e2e. The next claimed job aligns to the remote tip.
-async function handbackResumeStage(
-  client: pg.PoolClient,
-  ticket: TicketRow,
-): Promise<"gate" | "e2e" | null> {
-  const merged = await client.query<{ id: number }>(
-    `SELECT id FROM runs
-     WHERE ticket_id = $1 AND stage = 'merge' AND result = 'merged'
-     ORDER BY id DESC LIMIT 1`,
-    [ticket.id],
-  );
-  const lastMergeId = merged.rows[0]?.id;
-  if (ticket.type === "integration") {
-    if (ticket.resume_stage === "e2e") return "e2e";
-    if (lastMergeId !== undefined) {
-      const later = await client.query(
-        `SELECT 1 FROM runs
-         WHERE ticket_id = $1 AND id > $2 AND head_sha IS NOT NULL AND stage = ANY($3)
-         LIMIT 1`,
-        [ticket.id, lastMergeId, AGENT_PUSH_STAGES],
-      );
-      if (!later.rowCount) return "e2e";
-    }
-  }
-  const published = await client.query(
-    "SELECT 1 FROM runs WHERE ticket_id = $1 AND head_sha IS NOT NULL LIMIT 1",
-    [ticket.id],
-  );
-  return published.rowCount ? "gate" : null;
-}
-
 async function stopTicketWork(
   client: pg.PoolClient,
   ticketId: number,
@@ -229,10 +196,19 @@ async function stopTicketWork(
   );
 }
 
+export type TakeoverDetails = {
+  reason?: "branch-moved" | "remote-moved";
+  remoteTip?: string;
+  startedFrom?: string;
+  remoteSha?: string;
+  lastPushedSha?: string;
+};
+
 // Stop the ticket's jobs and hold it as taken-over. Used by a person and by host-sync / a refused push.
 export async function applyTakeover(
   client: pg.PoolClient,
   ticketId: number,
+  details: TakeoverDetails = {},
 ): Promise<ActionResult<{ state: TicketState }>> {
   const ticket = await loadLocked(client, ticketId);
   if (!ticket) return { status: "no-ticket" };
@@ -247,10 +223,12 @@ export async function applyTakeover(
     [ticketId],
   );
   await stopTicketWork(client, ticketId);
-  await recordAction(client, "takeover", {
-    specId: ticket.spec_id,
-    ticketId,
-  });
+  await recordAction(
+    client,
+    "takeover",
+    { specId: ticket.spec_id, ticketId },
+    details,
+  );
   await schedulePass(client, ticket.spec_id);
   return { status: "ok", state: next.state };
 }
@@ -264,7 +242,7 @@ export async function takeoverTicket(
 }
 
 // They give it back: the platform takes the remote tip and goes on, without rewriting their commits.
-// last_pushed_sha is cleared so host-sync does not treat their tip as someone else pushing.
+// The resume stage is chosen on the worker from the remote tip (handback_pending).
 export async function handbackTicket(
   pool: pg.Pool,
   ticketId: number,
@@ -278,15 +256,12 @@ export async function handbackTicket(
         `${formatDisplayId("ticket", ticketId)} is ${ticket.state}; only a taken-over ticket can be handed back`,
       );
     }
-    const resume = await handbackResumeStage(client, ticket);
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, restart = false,
-         reviewed = CASE WHEN $2 = 'gate' THEN false ELSE reviewed END,
-         resume_stage = $2,
-         last_pushed_sha = NULL,
+         resume_stage = NULL, handback_pending = true,
          job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
        WHERE id = $1`,
-      [ticketId, resume],
+      [ticketId],
     );
     await recordAction(client, "handback", {
       specId: ticket.spec_id,

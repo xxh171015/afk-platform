@@ -2052,6 +2052,7 @@ export interface paths {
                 maxIntegrationEnvironments: number;
               };
               model: string | null;
+              handbackResolve?: boolean;
             };
           };
         };
@@ -2601,6 +2602,8 @@ export interface paths {
             workerId: string;
             attempt: number;
             error: string;
+            orphanRef?: string;
+            orphanSha?: string;
           };
         };
       };

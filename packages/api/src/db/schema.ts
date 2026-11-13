@@ -292,6 +292,8 @@ export const tickets = pgTable(
     resumeStage: text("resume_stage"),
     // Tip of the ticket branch the platform last pushed. host-sync compares the remote SHA to this; null means do not compare.
     lastPushedSha: text("last_pushed_sha"),
+    // After handback the next job resolves the resume stage from the remote tip before normal work continues.
+    handbackPending: boolean("handback_pending").notNull().default(false),
     // A fix ticket the platform made for a failed e2e: the integration ticket it is for, and the round of it. One
     // fix ticket per round, so a diagnosis that is handed in twice makes no second one.
     fixForTicketId: integer("fix_for_ticket_id").references(

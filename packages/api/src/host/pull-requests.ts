@@ -27,6 +27,7 @@ import {
   SYNC_INTERVAL_SECONDS,
   syncDelaySeconds,
 } from "./host-jobs.ts";
+import { IDLE_TICKET_SQL } from "./idle-tickets.ts";
 import { mergeOrderOf } from "./merge-order.ts";
 import { dropPotentialConflicts } from "./trial-merge.ts";
 import {
@@ -339,13 +340,7 @@ async function idleTicketBranches(
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.id = t.repo_id
      WHERE r.project_id = $1
-       AND t.state NOT IN ('done', 'cancelled', 'taken-over')
-       AND t.last_pushed_sha IS NOT NULL
-       AND NOT EXISTS (
-         SELECT 1 FROM jobs j
-         WHERE j.state IN ('queued', 'running')
-           AND (j.payload->>'ticketId')::int = t.id
-       )
+       AND ${IDLE_TICKET_SQL}
      ORDER BY t.id`,
     [projectId],
   );
@@ -756,23 +751,24 @@ async function takeOverDivergedTicketBranches(
   reported: { ticketId: number; sha: string }[],
 ): Promise<void> {
   for (const item of reported) {
-    const found = await client.query(
-      `SELECT t.id
+    const found = await client.query<{
+      id: number;
+      last_pushed_sha: string;
+    }>(
+      `SELECT t.id, t.last_pushed_sha
        FROM tickets t
        JOIN repos r ON r.id = t.repo_id
        WHERE t.id = $1 AND r.project_id = $2
-         AND t.state NOT IN ('done', 'cancelled', 'taken-over')
-         AND t.last_pushed_sha IS NOT NULL
-         AND t.last_pushed_sha <> $3
-         AND NOT EXISTS (
-           SELECT 1 FROM jobs j
-           WHERE j.state IN ('queued', 'running')
-             AND (j.payload->>'ticketId')::int = t.id
-         )`,
+         AND ${IDLE_TICKET_SQL}
+         AND t.last_pushed_sha <> $3`,
       [item.ticketId, projectId, item.sha],
     );
     if (!found.rows[0]) continue;
-    await applyTakeover(client, item.ticketId);
+    await applyTakeover(client, item.ticketId, {
+      reason: "remote-moved",
+      remoteSha: item.sha,
+      lastPushedSha: found.rows[0].last_pushed_sha,
+    });
   }
 }
 

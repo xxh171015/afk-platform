@@ -228,11 +228,13 @@ export class FakeWorker {
     jobId: number,
     attempt: number,
     error = "boom",
+    facts?: { orphanRef?: string; orphanSha?: string },
   ): Promise<Reply<{ ok?: boolean; error?: string }>> {
     return this.post(`/worker/jobs/${jobId}/fail`, {
       workerId: this.id,
       attempt,
       error,
+      ...facts,
     });
   }
 
