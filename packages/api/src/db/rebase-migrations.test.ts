@@ -67,10 +67,14 @@ function read(repo: TestRepo, path: string): string {
   return readFileSync(join(repo.dir, path), "utf8");
 }
 
-function rebase(repo: TestRepo): string {
+function rebase(repo: TestRepo, upstreamSha?: string): string {
   return execFileSync("bash", [SCRIPT], {
     cwd: repo.dir,
     encoding: "utf8",
+    env: {
+      ...process.env,
+      ...(upstreamSha ? { AFK_GENERATED_UPSTREAM_SHA: upstreamSha } : {}),
+    },
   });
 }
 
@@ -235,5 +239,88 @@ describe("scripts/rebase-migrations.sh", () => {
     expect(read(repo, "packages/api/drizzle/meta/0001_snapshot.json")).toBe(
       snapshot,
     );
+  });
+
+  it("update-branch: leaves main migrations unchanged and renumbers the integration branch side when upstream is main", () => {
+    repo = makeRepo(baseFiles());
+    git(repo.dir, ["checkout", "--quiet", "-b", "main"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit(
+      {
+        "packages/api/drizzle/0002_alpha.sql": sql.alpha,
+        "packages/api/drizzle/meta/_journal.json": journalWith({
+          tag: "0002_alpha",
+          when: 3000,
+        }),
+      },
+      "integration adds a migration",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    repo.commit(
+      {
+        "packages/api/drizzle/0002_main.sql": sql.beta,
+        "packages/api/drizzle/meta/_journal.json": journalWith({
+          tag: "0002_main",
+          when: 3000,
+        }),
+      },
+      "main adds a migration",
+    );
+    const mainTip = gitOut(repo.dir, ["rev-parse", "HEAD"]);
+    git(repo.dir, ["checkout", "--quiet", "spec/s"]);
+    const merged = mergeTakingOurs(
+      repo.dir,
+      "spec/s",
+      "main",
+      [
+        "packages/api/drizzle/meta/_journal.json",
+        "packages/api/drizzle/0002_alpha.sql",
+      ],
+      "update-branch ours",
+    );
+    expect(
+      gitOut(repo.dir, [
+        "ls-tree",
+        "-r",
+        merged.tree,
+        "--name-only",
+        "packages/api/drizzle/",
+      ]),
+    ).toContain("packages/api/drizzle/0002_main.sql");
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "--detach", merged.candidate]);
+    const mainSql = () =>
+      gitOut(repo.dir, ["show", `HEAD:packages/api/drizzle/0002_main.sql`]);
+    expect(mainSql()).toBe(sql.beta.trimEnd());
+    rebase(repo, mainTip);
+    expect(mainSql()).toBe(sql.beta.trimEnd());
+    expect(read(repo, "packages/api/drizzle/0003_alpha.sql")).toBe(sql.alpha);
+    expect(() => read(repo, "packages/api/drizzle/0002_alpha.sql")).toThrow();
+    expect(
+      gitOut(repo.dir, [
+        "show",
+        `${mainTip}:packages/api/drizzle/0002_main.sql`,
+      ]).trimEnd(),
+    ).toBe(sql.beta.trimEnd());
+    const entries = entriesOf(repo);
+    expect(entries.map((e) => e.tag)).toEqual([
+      "0000_init",
+      "0001_triggers",
+      "0002_main",
+      "0003_alpha",
+    ]);
+    expect(entries[3]?.when).toBeGreaterThan(entries[2]?.when ?? 0);
+  });
+
+  it("with platform upstream set to the integration parent, renumbers like the legacy parent1/parent2 rule", () => {
+    repo = twoTicketRepo("distinct");
+    const upstream = gitOut(repo.dir, ["rev-parse", "HEAD^1"]);
+    rebase(repo, upstream);
+    expect(read(repo, "packages/api/drizzle/0003_beta.sql")).toBe(sql.beta);
+    expect(entriesOf(repo).map((e) => e.tag)).toEqual([
+      "0000_init",
+      "0001_triggers",
+      "0002_alpha",
+      "0003_beta",
+    ]);
   });
 });

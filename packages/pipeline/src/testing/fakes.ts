@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -67,7 +68,8 @@ export class FakeAgentRunner implements AgentRunner {
     ) {
       gitOrThrow(this.repoDir, ["branch", options.branch, options.baseBranch]);
     }
-    const dir = mkdtempSync(join(tmpdir(), "afk-fake-agent-"));
+    // git worktree paths are real paths; on macOS tmpdir() is /var → /private/var.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "afk-fake-agent-")));
     const worktree = join(dir, "wt");
     gitOrThrow(this.repoDir, [
       "worktree",
@@ -104,11 +106,15 @@ export class FakeAgentRunner implements AgentRunner {
         (step.remove?.length ?? 0) > 0
       ) {
         gitOrThrow(worktree, ["add", "-A"]);
-        git(worktree, [
+        // A failed commit is infrastructure, not "the agent said done". Swallowing it
+        // classified the run as no-commits and blocked the ticket.
+        gitOrThrow(worktree, [
           "-c",
           "user.name=Fake Agent",
           "-c",
           "user.email=agent@example.com",
+          "-c",
+          "commit.gpgsign=false",
           "commit",
           "--quiet",
           "-m",
@@ -177,7 +183,7 @@ export class FakeGateSandbox implements GateSandbox {
   ): Promise<SandboxSession> {
     this.opened.push(ref);
     this.placements.push(placement);
-    const dir = mkdtempSync(join(tmpdir(), "afk-fake-gate-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "afk-fake-gate-")));
     const worktree = join(dir, "wt");
     gitOrThrow(this.repoDir, [
       "worktree",

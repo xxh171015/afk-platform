@@ -15,7 +15,10 @@ describe("a throwaway test database", () => {
     timeout: 3_000,
   }, async () => {
     const query = db.pool.query("SELECT pg_sleep(60)");
+    // Attach before DROP: the query rejects during drop(), and a late
+    // expect().rejects leaves that as an unhandled 3D000.
+    const rejected = expect(query).rejects.toThrow();
     await db.drop();
-    await expect(query).rejects.toThrow();
+    await rejected;
   });
 });

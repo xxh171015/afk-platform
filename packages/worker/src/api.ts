@@ -44,6 +44,8 @@ export interface WorkerApi {
       durationApiMs?: number;
       cursorCliVersion?: string;
       axis?: "standards" | "spec";
+      orphanRef?: string;
+      orphanSha?: string;
     },
     extraRuns?: Array<{
       tokenUsage?: unknown;
@@ -182,6 +184,25 @@ export function createWorkerApi(
     },
     async fail(job, error, run, extraRuns) {
       const { params, body } = call(job);
+      const billed =
+        run &&
+        (run.tokenUsage !== undefined ||
+          run.durationApiMs !== undefined ||
+          run.cursorCliVersion !== undefined ||
+          run.axis !== undefined)
+          ? {
+              ...(run.tokenUsage !== undefined
+                ? { tokenUsage: run.tokenUsage }
+                : {}),
+              ...(run.durationApiMs !== undefined
+                ? { durationApiMs: run.durationApiMs }
+                : {}),
+              ...(run.cursorCliVersion !== undefined
+                ? { cursorCliVersion: run.cursorCliVersion }
+                : {}),
+              ...(run.axis !== undefined ? { axis: run.axis } : {}),
+            }
+          : undefined;
       return holding(
         (
           await client.POST("/worker/jobs/{id}/fail", {
@@ -189,8 +210,14 @@ export function createWorkerApi(
             body: {
               ...body,
               error,
-              ...(run ? { run } : {}),
+              ...(billed ? { run: billed } : {}),
               ...(extraRuns && extraRuns.length > 0 ? { extraRuns } : {}),
+              ...(run?.orphanRef && run.orphanSha
+                ? {
+                    orphanRef: run.orphanRef,
+                    orphanSha: run.orphanSha,
+                  }
+                : {}),
             },
           })
         ).response.status,

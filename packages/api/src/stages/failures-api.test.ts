@@ -1,6 +1,8 @@
+import { formatPushFailure, HOST_PERMISSION_BRIEF } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { specEventMetrics } from "../events/metrics.ts";
 import {
   FakeClock,
   FakeWorker,
@@ -316,10 +318,12 @@ describe("a job the worker could not carry out", () => {
   });
 
   it("takes the ticket over at once as branch-moved on a non-fast-forward, without a second job", async () => {
-    await runningSpec([ticket("a")]);
-    await failNext(
+    const specId = await runningSpec([ticket("a")]);
+    const error = formatPushFailure(
       "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
+      { remoteTip: "aaa111", startedFrom: "bbb222" },
     );
+    await failNext(error);
     expect(await state()).toEqual({
       state: "taken-over",
       blocked_reason: null,
@@ -335,7 +339,13 @@ describe("a job the worker could not carry out", () => {
       type: string;
       to_state: string | null;
       source: string | null;
-      data: { action?: string };
+      data: {
+        action?: string;
+        reason?: string;
+        remoteTip?: string;
+        startedFrom?: string;
+        pushError?: string;
+      };
     }>(
       `SELECT type, to_state, source, data FROM events
        WHERE ticket_id = 1 AND type IN ('ticket', 'action', 'job')
@@ -347,6 +357,7 @@ describe("a job the worker could not carry out", () => {
           type: "job",
           to_state: "failed",
           source: "worker",
+          data: expect.objectContaining({ pushError: "branch-moved" }),
         }),
         expect.objectContaining({
           type: "ticket",
@@ -356,17 +367,34 @@ describe("a job the worker could not carry out", () => {
         expect.objectContaining({
           type: "action",
           source: "worker",
-          data: expect.objectContaining({ action: "takeover" }),
+          data: expect.objectContaining({
+            action: "takeover",
+            reason: "branch-moved",
+            remoteTip: "aaa111",
+            startedFrom: "bbb222",
+          }),
         }),
       ]),
     );
+    const timeline = (await call("GET", `/specs/${specId}`)).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(
+      timeline
+        .filter((event) => event.kind === "action")
+        .map((event) => event.text),
+    ).toContain("平台接手 T-1：票分支被推过");
+    expect(await specEventMetrics(db.pool, specId)).toMatchObject({
+      branchMoved: 1,
+      platformTakeover: 1,
+      manualTakeover: 0,
+    });
   });
 
   it("blocks at once as job-failed on a protected branch or missing permission, with a host brief", async () => {
-    await runningSpec([ticket("a")]);
-    await failNext(
-      "remote: Permission to shop/backend.git denied to afk-platform[bot]",
-    );
+    const specId = await runningSpec([ticket("a")]);
+    await failNext(HOST_PERMISSION_BRIEF);
     expect(await state()).toEqual({
       state: "blocked",
       blocked_reason: "job-failed",
@@ -382,6 +410,35 @@ describe("a job the worker could not carry out", () => {
     expect(queue.body.tickets[0].brief.output.error).not.toContain(
       "CURSOR_API_KEY",
     );
+    expect(await specEventMetrics(db.pool, specId)).toMatchObject({
+      hostPermission: 1,
+      branchMoved: 0,
+    });
+  });
+
+  it("records an orphan from a failed job on the Run and as an event", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    const job = (await claim()) as Claimed;
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "docker daemon not running", {
+          orphanRef: "refs/afk/orphan/agent/T-1/abc",
+          orphanSha: "abc111",
+        })
+      ).status,
+    ).toBe(200);
+    const run = (
+      await db.pool.query<{
+        output: { orphanRef?: string; orphanSha?: string };
+      }>("SELECT output FROM runs WHERE job_id = $1", [job.id])
+    ).rows[0];
+    expect(run.output).toMatchObject({
+      orphanRef: "refs/afk/orphan/agent/T-1/abc",
+      orphanSha: "abc111",
+    });
+    expect(await specEventMetrics(db.pool, specId)).toMatchObject({
+      orphans: 1,
+    });
   });
 
   it("blocks the ticket at once with sandbox-oom when the container was OOMKilled, as a platform problem", async () => {
@@ -638,7 +695,7 @@ describe("a lease that ran out", () => {
 
 describe("a step of the overall review that could not be carried out", () => {
   async function toFinalReview() {
-    await runningSpec([ticket("a")]);
+    const specId = await runningSpec([ticket("a")]);
     for (const [stage, outcome] of [
       ["implement", "done"],
       ["gate", "passed"],
@@ -652,6 +709,7 @@ describe("a step of the overall review that could not be carried out", () => {
         ...(stage === "merge" ? { headSha: "h" } : {}),
       });
     }
+    return specId;
   }
 
   it("does not block the finalization on a Cursor auth error: agent jobs pause, and the step waits in the queue", async () => {
@@ -674,7 +732,7 @@ describe("a step of the overall review that could not be carried out", () => {
   });
 
   it("blocks the wrap-up at once as branch-moved when final-fix cannot push", async () => {
-    await toFinalReview();
+    const specId = await toFinalReview();
     const review = (await claim()) as Claimed;
     await worker.complete(review.id, review.attempt, {
       stage: "final-review",
@@ -689,7 +747,10 @@ describe("a step of the overall review that could not be carried out", () => {
       findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
     });
     await failNext(
-      "! [rejected] agent/abc123/S-1-final -> agent/abc123/S-1-final (non-fast-forward)",
+      formatPushFailure(
+        "! [rejected] agent/abc123/S-1-final -> agent/abc123/S-1-final (non-fast-forward)",
+        { remoteTip: "aaa111", startedFrom: "bbb222" },
+      ),
     );
     expect(
       (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
@@ -704,6 +765,35 @@ describe("a step of the overall review that could not be carried out", () => {
       blockedReason: "branch-moved",
       failureSource: "spec",
       structuredBrief: { summary: "运行期间票分支被推过了" },
+    });
+    expect(await specEventMetrics(db.pool, specId)).toMatchObject({
+      branchMoved: 1,
+      hostPermission: 0,
+    });
+  });
+
+  it("records an orphan from a failed wrap-up job on the Run and as an event", async () => {
+    const specId = await toFinalReview();
+    const job = (await claim()) as Claimed;
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "docker daemon not running", {
+          orphanRef: "refs/afk/orphan/agent/S-1-final/abc",
+          orphanSha: "def222",
+        })
+      ).status,
+    ).toBe(200);
+    const run = (
+      await db.pool.query<{
+        output: { orphanRef?: string; orphanSha?: string };
+      }>("SELECT output FROM runs WHERE job_id = $1", [job.id])
+    ).rows[0];
+    expect(run.output).toMatchObject({
+      orphanRef: "refs/afk/orphan/agent/S-1-final/abc",
+      orphanSha: "def222",
+    });
+    expect(await specEventMetrics(db.pool, specId)).toMatchObject({
+      orphans: 1,
     });
   });
 

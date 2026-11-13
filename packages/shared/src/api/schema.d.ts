@@ -2181,6 +2181,7 @@ export interface paths {
                 toSha: string;
                 paths: string[];
               } | null;
+              handbackResolve?: boolean;
             };
           };
         };
@@ -2746,6 +2747,8 @@ export interface paths {
               /** @enum {string} */
               axis?: "standards" | "spec";
             }[];
+            orphanRef?: string;
+            orphanSha?: string;
           };
         };
       };

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { relative, resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { committedShasFromBlame, parseTrailers } from "@afk/shared";
 
 // Local git half of `plat context --files`: blame in the person's checkout, skip
@@ -41,9 +42,21 @@ function git(
   };
 }
 
+// git --show-toplevel is the real path; cwd and --files may still be through a
+// symlink (macOS /var → /private/var). relative() is string-based, so those look
+// like they sit outside the repo and every file is skipped.
+function canonical(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return join(canonical(parent), basename(path));
+  }
+}
+
 function gitPath(top: string, cwd: string, given: string): string {
-  const abs = resolve(cwd, given);
-  const rel = relative(top, abs);
+  const rel = relative(canonical(top), canonical(resolve(cwd, given)));
   return rel.split("\\").join("/");
 }
 

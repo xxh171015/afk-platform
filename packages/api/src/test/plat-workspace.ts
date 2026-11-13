@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Io, run } from "@afk/cli";
@@ -69,7 +69,8 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
       ],
     }),
   });
-  const root = await mkdtemp(join(tmpdir(), "afk-work-"));
+  // git --show-toplevel is the real path; on macOS tmpdir() is /var → /private/var.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "afk-work-")));
   const afkHome = join(root, ".afk");
   const cleanups: (() => void)[] = [];
 

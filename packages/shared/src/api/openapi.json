@@ -3805,6 +3805,9 @@
                         }
                       },
                       "required": ["fromSha", "toSha", "paths"]
+                    },
+                    "handbackResolve": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -4843,6 +4846,14 @@
                       }
                     },
                     "maxItems": 8
+                  },
+                  "orphanRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "orphanSha": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": ["workerId", "attempt", "error"]

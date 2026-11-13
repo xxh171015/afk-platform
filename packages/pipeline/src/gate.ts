@@ -109,12 +109,62 @@ export interface GateOutcome {
 export const shellQuote = (text: string) =>
   `'${text.replaceAll("'", `'\\''`)}'`;
 
+export const GATE_CONFIG_BRIEF = "门禁配置无效";
+
+const GATE_FIELD_LABELS: Record<string, string> = {
+  version: "version",
+  setup: "setup",
+  commands: "commands",
+  generated: "generated",
+  name: "name",
+  run: "run",
+  timeoutSeconds: "timeoutSeconds",
+  junit: "junit",
+  rerunFiles: "rerunFiles",
+  paths: "paths",
+};
+
+function describeGateConfigIssue(error: z.ZodError): string {
+  const pieces: string[] = [];
+  for (const issue of error.issues) {
+    const path = issue.path.map(String).join(".");
+    if (issue.code === "unrecognized_keys") {
+      const keys = issue.keys.join("、");
+      pieces.push(
+        `文件 ${GATE_CONFIG_PATH} 中有不认识的字段：${keys}。允许的顶层字段：version、setup、commands、generated；命令里允许：name、run、timeoutSeconds、junit、rerunFiles；generated 里允许：paths、run`,
+      );
+      continue;
+    }
+    const label = GATE_FIELD_LABELS[path] ?? path;
+    if (issue.code === "invalid_type" && issue.expected === "array") {
+      pieces.push(`缺少必填字段 ${label}`);
+      continue;
+    }
+    pieces.push(`${label}: ${issue.message}`);
+  }
+  return pieces.join("；") || error.message;
+}
+
+export class GateConfigError extends Error {
+  constructor(detail: string) {
+    super(`${GATE_CONFIG_BRIEF}: ${detail}`);
+    this.name = "GateConfigError";
+  }
+}
+
 export function readGateConfig(repoDir: string, configSha: string): GateConfig {
   const text = gitOrThrow(repoDir, [
     "show",
     `${configSha}:${GATE_CONFIG_PATH}`,
   ]);
-  return GateConfigSchema.parse(parseYaml(text));
+  try {
+    return GateConfigSchema.parse(parseYaml(text));
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new GateConfigError(describeGateConfigIssue(error));
+    }
+    throw error;
+  }
 }
 
 export function junitCounts(xml: string): TestCounts | undefined {

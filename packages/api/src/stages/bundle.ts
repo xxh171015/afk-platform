@@ -151,6 +151,8 @@ export interface Bundle {
   stageModels: StageModels;
   // Recheck: the commits and paths this Spec-axis look is about. Null on other stages.
   recheck: { fromSha: string; toSha: string; paths: string[] } | null;
+  // After handback, the next implement job resolves the resume stage from the remote tip.
+  handbackResolve?: boolean;
 }
 
 // Defaults where the project sets nothing; only the limits a worker acts on travel, the rest is the API's business.
@@ -506,6 +508,9 @@ export async function buildBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    ...(job.payload.handbackResolve === true
+      ? { handbackResolve: true as const }
+      : {}),
   };
 }
 

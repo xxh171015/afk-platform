@@ -357,6 +357,19 @@ describe("takeover and handback", () => {
          WHERE state IN ('queued', 'running') AND payload ? 'ticketId' ORDER BY id`,
       )
     ).rows.map((r) => r.stage);
+  async function resolveHandback(
+    resumeStage: "implement" | "gate" | "e2e",
+    headSha?: string,
+  ) {
+    const job = (await worker.claim()).body.job as Claimed;
+    expect(job.payload.stage).toBe("implement");
+    await worker.complete(job.id, job.attempt, {
+      stage: "implement",
+      outcome: "handback-resolved",
+      handback: { resumeStage },
+      ...(headSha ? { run: { headSha } } : {}),
+    });
+  }
 
   it.each(["pending", "queued", "running", "merging", "blocked"] as const)(
     "takes a %s ticket over",
@@ -556,11 +569,20 @@ describe("takeover and handback", () => {
     expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
     const result = await call("POST", "/tickets/1/handback");
     expect(result).toMatchObject({ status: 200, body: { state: "queued" } });
+    await resolveHandback("implement");
     expect(await queuedStage()).toEqual(["implement"]);
     expect(await ticketMeta(1)).toMatchObject({
       resume_stage: null,
       restart: false,
     });
+  });
+
+  it("hands back to the gate when the remote has a branch but the platform never pushed", async () => {
+    await runningSpec([ticket("a")]);
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await resolveHandback("gate", "person-only");
+    expect(await queuedStage()).toEqual(["gate"]);
   });
 
   it("hands back to the gate, keeps the person's commits and fix counts, and clears the review", async () => {
@@ -582,6 +604,7 @@ describe("takeover and handback", () => {
     await db.pool.query("UPDATE tickets SET reviewed = true WHERE id = 1");
     expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await resolveHandback("gate", "person-2");
     expect(await queuedStage()).toEqual(["gate"]);
     expect(await ticketMeta(1)).toMatchObject({
       state: "queued",
@@ -593,7 +616,11 @@ describe("takeover and handback", () => {
     const shas = await db.pool.query<{ head_sha: string }>(
       "SELECT head_sha FROM runs WHERE ticket_id = 1 AND head_sha IS NOT NULL ORDER BY id",
     );
-    expect(shas.rows.map((r) => r.head_sha)).toEqual(["person-1", "person-2"]);
+    expect(shas.rows.map((r) => r.head_sha)).toEqual([
+      "person-1",
+      "person-2",
+      "person-2",
+    ]);
   });
 
   it("hands an already-merged integration ticket back to e2e when there are no new commits", async () => {
@@ -641,7 +668,53 @@ describe("takeover and handback", () => {
     );
     expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await resolveHandback("e2e", "m1");
     expect(await queuedStage()).toEqual(["e2e"]);
+  });
+
+  it("hands a merged integration ticket back to the gate when someone pushed a new commit during takeover", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:frontend",
+      name: "frontend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "e2e",
+      title: "E2e",
+    });
+    expect(
+      (
+        await call(
+          "POST",
+          `/specs/${spec.body.id}/tickets/import`,
+          importBody(spec.body.id, {
+            tickets: [
+              {
+                key: "e2e",
+                repo: "frontend",
+                type: "integration",
+                title: "E2e",
+                modules: ["e2e/**"],
+                acceptance: ["it works"],
+              },
+            ],
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect((await call("POST", `/specs/${spec.body.id}/confirm`)).status).toBe(
+      200,
+    );
+    await stage("implement", { outcome: "done", run: { headSha: "h1" } });
+    await stage("gate", { outcome: "passed" });
+    await stage("review", { outcome: "pass" });
+    await stage("merge", { outcome: "merged", headSha: "m1" });
+    expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
+    expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await resolveHandback("gate", "h-new");
+    expect(await queuedStage()).toEqual(["gate"]);
   });
 
   it("does not block on the first job failure after a handback that followed two earlier ones", async () => {
@@ -655,17 +728,28 @@ describe("takeover and handback", () => {
     expect(await row(1)).toMatchObject({ state: "running" });
     expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await resolveHandback("implement");
     await failOnce();
     expect(await row(1)).toMatchObject({ state: "running" });
   });
 
   it("records a human action for takeover and for handback, and takeover does not bump the content version", async () => {
-    await runningSpec([ticket("a")]);
+    const specId = await runningSpec([ticket("a")]);
     const before = await ticketMeta(1);
     expect((await call("POST", "/tickets/1/takeover")).status).toBe(200);
     expect((await ticketMeta(1)).content_version).toBe(before.content_version);
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    await resolveHandback("implement");
     expect(await actions()).toEqual(["takeover", "handback"]);
+    const timeline = (await call("GET", `/specs/${specId}`)).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(
+      timeline
+        .filter((event) => event.kind === "action")
+        .map((event) => event.text),
+    ).toEqual(["人接手 T-1", "交回 T-1"]);
   });
 });
 

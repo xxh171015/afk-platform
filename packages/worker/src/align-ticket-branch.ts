@@ -19,7 +19,7 @@ export type TicketAlign = {
   // What --force-with-lease must still see on origin at push time, or "" if the branch must not exist yet.
   expectedOld: string;
   remoteTip?: string;
-  orphan?: { ref: string; sha: string };
+  orphan?: { orphanRef: string; orphanSha: string };
 };
 
 // Make the main clone's ticket branch follow origin, except a restart which drops it so the stage starts from
@@ -79,7 +79,7 @@ export function alignTicketBranch(
   return {
     expectedOld: remote,
     remoteTip: remote,
-    orphan: { ref, sha: local },
+    orphan: { orphanRef: ref, orphanSha: local },
   };
 }
 
@@ -100,4 +100,35 @@ export function deleteOrphanRefs(
     }
   }
   return deleted;
+}
+
+export type HandbackResumeStage = "implement" | "gate" | "e2e";
+
+function branchTip(repoDir: string, branch: string): string {
+  const ref = branch.startsWith("refs/") ? branch : `refs/heads/${branch}`;
+  return gitOrThrow(repoDir, ["rev-parse", ref]);
+}
+
+// Where to resume after handback (docs/design.md「人接手」).
+export function handbackResumeStage(
+  repoDir: string,
+  ticketBranch: string,
+  integrationBranch: string,
+  ticketType: string,
+): HandbackResumeStage {
+  const remote = originSha(repoDir, ticketBranch);
+  if (!remote) return "implement";
+
+  const integrationTip = branchTip(repoDir, integrationBranch);
+
+  if (
+    ticketType === "integration" &&
+    isAncestor(repoDir, remote, integrationTip)
+  ) {
+    return "e2e";
+  }
+
+  if (!isAncestor(repoDir, integrationTip, remote)) return "gate";
+  if (remote !== integrationTip) return "gate";
+  return "implement";
 }

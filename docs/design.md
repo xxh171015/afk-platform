@@ -850,6 +850,7 @@ gitGraph
 - **0 个 commit**：implement 和 fix 运行结束时没有新 commit，判失败。
 - **结果存档和复用**：每次门禁按 commit SHA 存一条 GateResult，同时记下代码树 SHA 和 `gates.yaml` 的 blob SHA，后续的基线比较和验收包都用它。门禁结果只取决于代码树和门禁配置，所以同一仓库里树和配置都相同、命令全部通过并有 JUnit 的旧结果直接复用，不再开沙箱，只按这一次的基准重新比较测试数，并为新提交照常记一条 GateResult。典型情况是集成分支没动过时的合并候选（和票分支是同一棵树），以及 worker 重启或重试后同一提交再过门禁。
 - **setup 失败不是改动的问题**：`setup`（装依赖、起数据库）失败时整次门禁当作作业失败，按作业失败重试（共三次），之后票以 `job-failed` 等人处理；不派 gate-fix，也不存 GateResult。worker 配置了 `AFK_NPM_REGISTRIES` 时，它作为环境变量进入每个沙箱，仓库的 setup 脚本按顺序换源安装（本仓库是 `scripts/install-deps.sh`）。
+- **生成文件与再生成**：`gates.yaml` 可声明 `generated: [{ paths, run }]`。合并冲突只落在这些路径上时，worker 在门禁沙箱里取上游一侧的版本，先跑 `setup`，再按声明顺序跑各组的 `run`，由平台提交后照常跑合并后门禁，不派 merge-fix。跑 `run` 时沙箱带环境变量 `AFK_GENERATED_UPSTREAM_SHA`，值为**上游、不改号那一侧**的提交：票的 merge 阶段是集成分支，需求收尾的 update-branch 是仓库默认分支（main）；再生成脚本用它分辨哪边不动、哪边要改，而不是依赖 merge 提交的父提交顺序。
 
 ## 跨仓库需求
 

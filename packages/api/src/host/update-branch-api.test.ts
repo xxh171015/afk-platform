@@ -1,9 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { branchNames, formatDisplayId } from "@afk/shared";
+import {
+  branchNames,
+  formatDisplayId,
+  formatPushFailure,
+  HOST_PERMISSION_BRIEF,
+} from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../db/migrate.ts";
 import { createTestDatabase, type TestDatabase } from "../db/test-db.ts";
+import { specEventMetrics } from "../events/metrics.ts";
 import {
   FakeClock,
   FakeWorker,
@@ -957,7 +963,10 @@ describe("the update-branch job", () => {
     const reply = await agent.fail(
       job.id,
       job.attempt,
-      "! [rejected] spec/abc123/export -> spec/abc123/export (non-fast-forward)",
+      formatPushFailure(
+        "! [rejected] spec/abc123/export -> spec/abc123/export (non-fast-forward)",
+        { remoteTip: "aaa111", startedFrom: "bbb222" },
+      ),
     );
     expect(reply.status).toBe(200);
     expect(await specRow()).toEqual({
@@ -966,15 +975,30 @@ describe("the update-branch job", () => {
     });
     expect(await updateJobs()).toMatchObject([{ state: "failed" }]);
     expect((await agent.claim()).body.job).toBeNull();
+    expect(
+      (
+        await db.pool.query<{ reason: string | null }>(
+          `SELECT reason FROM events
+           WHERE type = 'spec' AND to_state = 'paused' ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0]?.reason,
+    ).toBe("branch-moved");
+    const timeline = (await call("GET", "/specs/1")).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(timeline.find((event) => event.kind === "pause")?.text).toBe(
+      "暂停：运行期间分支被推过了",
+    );
+    expect(await specEventMetrics(db.pool, 1)).toMatchObject({
+      branchMoved: 1,
+      hostPermission: 0,
+    });
   });
 
   it("pauses on the first permission refusal as job-failed, not a Cursor key brief", async () => {
     const job = await queuedUpdate();
-    const reply = await agent.fail(
-      job.id,
-      job.attempt,
-      "remote: error: GH006: Protected branch update failed for refs/heads/spec/abc123/export",
-    );
+    const reply = await agent.fail(job.id, job.attempt, HOST_PERMISSION_BRIEF);
     expect(reply.status).toBe(200);
     expect(await specRow()).toEqual({
       state: "paused",
@@ -986,6 +1010,32 @@ describe("the update-branch job", () => {
     );
     expect(run.rows[0].error).toContain("代码托管");
     expect(run.rows[0].error).not.toContain("CURSOR_API_KEY");
+    expect(await specEventMetrics(db.pool, 1)).toMatchObject({
+      hostPermission: 1,
+      branchMoved: 0,
+    });
+  });
+
+  it("records an orphan from a failed update-branch job on the Run and as an event", async () => {
+    const job = await queuedUpdate();
+    expect(
+      (
+        await agent.fail(job.id, job.attempt, "docker daemon not running", {
+          orphanRef: "refs/afk/orphan/agent/S-1-update/abc",
+          orphanSha: "abc111",
+        })
+      ).status,
+    ).toBe(200);
+    const run = (
+      await db.pool.query<{
+        output: { orphanRef?: string; orphanSha?: string };
+      }>("SELECT output FROM runs WHERE job_id = $1", [job.id])
+    ).rows[0];
+    expect(run.output).toMatchObject({
+      orphanRef: "refs/afk/orphan/agent/S-1-update/abc",
+      orphanSha: "abc111",
+    });
+    expect(await specEventMetrics(db.pool, 1)).toMatchObject({ orphans: 1 });
   });
 
   it("leaves the spec running when the merge lands", async () => {
@@ -1305,11 +1355,32 @@ describe("host-sync watching idle ticket branches", () => {
     expect(
       (
         await db.pool.query(
-          `SELECT source, data->>'action' AS action FROM events
+          `SELECT source, data FROM events
            WHERE type = 'action' AND ticket_id = 1 ORDER BY id DESC LIMIT 1`,
         )
       ).rows[0],
-    ).toEqual({ source: "host-sync", action: "takeover" });
+    ).toEqual({
+      source: "host-sync",
+      data: expect.objectContaining({
+        action: "takeover",
+        reason: "remote-moved",
+        remoteSha: "zzz999",
+        lastPushedSha: "abc111",
+      }),
+    });
+    const timeline = (await call("GET", "/specs/1")).body.timeline as {
+      kind: string;
+      text: string;
+    }[];
+    expect(
+      timeline
+        .filter((event) => event.kind === "action")
+        .map((event) => event.text),
+    ).toContain("平台接手 T-1：票分支被推过");
+    expect(await specEventMetrics(db.pool, 1)).toMatchObject({
+      platformTakeover: 1,
+      manualTakeover: 0,
+    });
   });
 
   it("leaves an idle ticket when the remote SHA still matches the last push", async () => {
@@ -1419,6 +1490,16 @@ describe("host-sync watching idle ticket branches", () => {
     });
     expect(await ticketState()).toEqual({ state: "taken-over" });
     expect((await call("POST", "/tickets/1/handback")).status).toBe(200);
+    const resolve = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(resolve.id, resolve.attempt, {
+      stage: "implement",
+      outcome: "handback-resolved",
+      handback: { resumeStage: "implement" },
+      run: { headSha: "zzz999" },
+    });
     await parkTicketJobs();
     const again = await hostTask();
     expect(again.task.ticketBranches).toBeUndefined();

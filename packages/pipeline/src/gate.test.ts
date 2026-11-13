@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, gitOut } from "./exec.ts";
 import {
+  GATE_CONFIG_BRIEF,
+  GateConfigError,
   type GateRecords,
   GateSetupError,
   junitCases,
@@ -670,7 +672,13 @@ describe("the configuration comes from the trusted commit", () => {
       ".sandcastle/gates.yaml":
         'commands:\n  - { name: test, run: "true", timeoutSeconds: 30, extra: 1 }\n',
     });
-    expect(() => readGateConfig(repo.dir, "main")).toThrow();
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    try {
+      readGateConfig(repo.dir, "main");
+    } catch (error) {
+      expect((error as Error).message).toContain(GATE_CONFIG_BRIEF);
+      expect((error as Error).message).toContain("extra");
+    }
   });
 
   it("keeps version and a per-file rerun template", () => {

@@ -84,7 +84,9 @@ export type {
 } from "./gate.ts";
 export {
   failedCasesOf,
+  GATE_CONFIG_BRIEF,
   GATE_CONFIG_PATH,
+  GateConfigError,
   GateSetupError,
   junitCases,
   junitCounts,
@@ -95,10 +97,12 @@ export {
 } from "./gate.ts";
 export type { GeneratedGroup } from "./generated.ts";
 export {
+  GENERATED_UPSTREAM_ENV,
   generatedCommandsNote,
   generatedConflictShare,
   generatedGroupsFor,
   generatedOnlyConflicts,
+  generatedRunCommand,
 } from "./generated.ts";
 export type {
   DockerCli,
