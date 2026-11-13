@@ -370,18 +370,16 @@ describe("retrying a failed locate", () => {
 });
 
 describe("locate notifications", () => {
+  // The dispatcher takes the event in on its own time and only then schedules its 30 s window on the clock, so a
+  // single advance can come before the window exists: advance until the notice is sent (as feishu-api.test.ts does).
   async function flushWindow() {
     const deadline = Date.now() + 2_000;
     while (Date.now() < deadline) {
-      const { rows } = await db.pool.query(
-        "SELECT 1 FROM events WHERE type = 'locate' LIMIT 1",
-      );
-      if (rows[0]) break;
+      clock.advanceSeconds(30);
+      await clock.flush();
+      if (notices.length > 0) return;
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    clock.advanceSeconds(30);
-    await clock.flush();
   }
 
   it("sends locate-succeeded when the original spec is filled", async () => {
