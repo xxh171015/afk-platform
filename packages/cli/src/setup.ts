@@ -10,6 +10,8 @@ import { SETUP_BRANCH } from "@afk/shared";
 
 const GATES = ".sandcastle/gates.yaml";
 const AGENTS_MD = "AGENTS.md";
+// What the agent that implements tickets reads; a repo with a CLAUDE.md and no AGENTS.md keeps it.
+const AGENTS_FILES = [AGENTS_MD, "CLAUDE.md"];
 // The section the agent that implements tickets needs to know nobody answers during a run.
 const UNATTENDED = /^#+\s*(running unattended|无人值守)/im;
 
@@ -39,8 +41,8 @@ export function git(cwd: string, args: string[]): GitResult {
 }
 
 /** The folder that holds the setup worktrees of a project, named after its planning repo. */
-export const setupsDir = (afkHome: string, planningDir: string) =>
-  join(afkHome, "setup", basename(planningDir));
+export const setupsDir = (afkHome: string, planningRepo: string) =>
+  join(afkHome, "setup", planningRepo);
 
 const hasRef = (dir: string, ref: string) =>
   git(dir, ["rev-parse", "--verify", "--quiet", ref]).ok;
@@ -63,7 +65,9 @@ export function remoteSetup(
   );
   return {
     gates: refs.some((ref) => hasFile(dir, ref, GATES)),
-    agentsMd: refs.some((ref) => hasFile(dir, ref, AGENTS_MD)),
+    agentsMd: refs.some((ref) =>
+      AGENTS_FILES.some((file) => hasFile(dir, ref, file)),
+    ),
   };
 }
 
@@ -86,9 +90,9 @@ export interface Readiness {
 }
 
 export function readinessIn(worktree: string): Readiness {
-  const agents = [AGENTS_MD, "CLAUDE.md"]
-    .map((file) => join(worktree, file))
-    .find((file) => existsSync(file));
+  const agents = AGENTS_FILES.map((file) => join(worktree, file)).find((file) =>
+    existsSync(file),
+  );
   return {
     gates: existsSync(join(worktree, GATES)),
     agentsMd: agents ? "present" : "missing",
@@ -98,14 +102,22 @@ export function readinessIn(worktree: string): Readiness {
   };
 }
 
-/** Whether a worktree holds work origin does not have: uncommitted changes, or commits afk/setup lacks. */
+/**
+ * Whether a worktree holds work origin does not have: uncommitted changes, a merge in progress, or commits that are on
+ * neither afk/setup nor the default branch. The merge of the default branch an earlier run made is not such work.
+ */
 export function hasOwnWork(worktree: string, defaultBranch: string): boolean {
   if (git(worktree, ["status", "--porcelain"]).out !== "") return true;
+  if (hasRef(worktree, "MERGE_HEAD")) return true;
   return (
     git(worktree, [
       "log",
       "--oneline",
-      `${setupBase(worktree, defaultBranch)}..HEAD`,
+      "--no-merges",
+      "HEAD",
+      "--not",
+      setupBase(worktree, defaultBranch),
+      `origin/${defaultBranch}`,
     ]).out !== ""
   );
 }
@@ -156,12 +168,17 @@ export function prepareWorktree(
       "--no-edit",
       `origin/${defaultBranch}`,
     ]);
-    if (!merged.ok)
+    if (!merged.ok) {
+      const conflicted =
+        git(worktree, ["diff", "--name-only", "--diff-filter=U"]).out !== "";
       return {
         worktree,
         resumed,
-        problem: `origin/${defaultBranch} does not merge into ${SETUP_BRANCH} cleanly; resolve the conflicts in ${worktree} and commit`,
+        problem: conflicted
+          ? `origin/${defaultBranch} does not merge into ${SETUP_BRANCH} cleanly; resolve the conflicts in ${worktree} and commit`
+          : `could not merge origin/${defaultBranch} into ${SETUP_BRANCH} in ${worktree}: ${merged.err || merged.out}`,
       };
+    }
   }
   return { worktree, resumed };
 }
@@ -179,14 +196,17 @@ export function removeLegacySetup(checkout: string): string | undefined {
   if (!hasWorktree && !hasBranch) return undefined;
   if (hasWorktree && git(old, ["status", "--porcelain"]).out !== "")
     return `${name} kept: it has uncommitted changes`;
-  if (
-    hasBranch &&
-    git(checkout, ["log", "--oneline", SETUP_BRANCH, "--not", "--remotes"])
-      .out !== ""
-  )
+  const unpushed = (cwd: string, ref: string) =>
+    git(cwd, ["log", "--oneline", ref, "--not", "--remotes"]).out !== "";
+  if (hasWorktree && unpushed(old, "HEAD"))
+    return `${name} kept: it has commits origin does not`;
+  if (hasBranch && unpushed(checkout, SETUP_BRANCH))
     return `${name} kept: local ${SETUP_BRANCH} has commits origin does not`;
-  if (hasWorktree) git(checkout, ["worktree", "remove", "--force", old]);
-  if (hasBranch) git(checkout, ["branch", "-D", SETUP_BRANCH]);
+  // plain remove: it refuses a worktree with ignored or untracked files the check above cannot see
+  if (hasWorktree && !git(checkout, ["worktree", "remove", old]).ok)
+    return `${name} kept: git would not remove it (files git ignores are in it)`;
+  if (hasBranch && !git(checkout, ["branch", "-D", SETUP_BRANCH]).ok)
+    return `local ${SETUP_BRANCH} kept: git would not delete it`;
   git(checkout, ["worktree", "prune"]);
   return `removed what an older afk-setup left: ${[
     ...(hasWorktree ? [name] : []),
@@ -249,21 +269,29 @@ export function prepareRepo(repo: SetupRepo, setups: string): RepoSetupState {
   return state;
 }
 
+/**
+ * What a worktree lacks that plat can tell: the gate, AGENTS.md, or its "Running unattended" section. How to run the
+ * tests, a single test file and the standards documents are for the agent to check in AGENTS.md.
+ */
+export function missingIn(readiness: Readiness | null): string[] {
+  if (!readiness) return [];
+  return [
+    ...(readiness.gates ? [] : [GATES]),
+    ...(readiness.agentsMd === "missing"
+      ? [AGENTS_MD]
+      : readiness.runningUnattended
+        ? []
+        : [`${AGENTS_MD}#Running unattended`]),
+  ];
+}
+
 /** What one repo still needs, in a line: for the person and for the agent that writes the files. */
 export function stateLine(state: RepoSetupState): string {
   const head = `${state.name}${state.planning ? " (planning repo)" : ""}`;
   if (state.problem) return `${head}: ${state.problem}`;
   if (!state.worktree || !state.readiness)
     return `${head}: set up on origin, nothing to do`;
-  const r = state.readiness;
-  const needs = [
-    ...(r.gates ? [] : [GATES]),
-    ...(r.agentsMd === "missing"
-      ? [AGENTS_MD]
-      : r.runningUnattended
-        ? []
-        : [`the "Running unattended" section of ${AGENTS_MD}`]),
-  ];
+  const needs = missingIn(state.readiness);
   return `${head}: ${state.resumed ? "carrying on in" : "worktree"} ${state.worktree}; ${
     needs.length > 0
       ? `write ${needs.join(", ")}`

@@ -72,6 +72,7 @@ const setupJson = async (checkout: Checkout, args: string[] = []) => {
       name: string;
       worktree: string | null;
       resumed: boolean;
+      missing: string[];
       gates: boolean | null;
       agentsMd: string | null;
       runningUnattended: boolean | null;
@@ -172,6 +173,7 @@ describe("plat setup makes a worktree for each repo origin lacks the setup for",
       gates: false,
       agentsMd: "missing",
       runningUnattended: false,
+      missing: [".sandcastle/gates.yaml", "AGENTS.md"],
     });
     for (const name of ["backend", "frontend"]) {
       const worktree = worktreeOf(name);
@@ -221,7 +223,11 @@ describe("plat setup makes a worktree for each repo origin lacks the setup for",
     const out = await setupJson(backend);
 
     const worktree = worktreeOf("backend");
-    expect(out.repos[0]).toMatchObject({ gates: true, agentsMd: "missing" });
+    expect(out.repos[0]).toMatchObject({
+      gates: true,
+      agentsMd: "missing",
+      missing: ["AGENTS.md"],
+    });
     expect(existsSync(join(worktree, "src/new.ts"))).toBe(true);
     expect(
       gitOrThrow(worktree, [
@@ -231,6 +237,13 @@ describe("plat setup makes a worktree for each repo origin lacks the setup for",
         "HEAD",
       ]),
     ).toBe("");
+
+    // the merge is not work of its own: a second run makes the worktree again, the same way
+    const again = await setupJson(backend);
+    expect(again.repos[0]).toMatchObject({
+      resumed: false,
+      missing: ["AGENTS.md"],
+    });
   });
 
   it("carries on in a worktree with work of its own, and makes one without it again", async () => {
@@ -259,6 +272,7 @@ describe("plat setup makes a worktree for each repo origin lacks the setup for",
     expect(out.repos[0]).toMatchObject({
       agentsMd: "present",
       runningUnattended: false,
+      missing: [".sandcastle/gates.yaml", "AGENTS.md#Running unattended"],
     });
   });
 
@@ -294,6 +308,34 @@ describe("plat setup makes a worktree for each repo origin lacks the setup for",
     expect(existsSync(`${backend.dir}-afk-setup`)).toBe(false);
     expect(gitOrThrow(backend.dir, ["branch", "--list", "afk/setup"])).toBe("");
     expect(existsSync(join(`${frontend.dir}-afk-setup`, "wip.txt"))).toBe(true);
+  });
+});
+
+describe("plat setup and an older afk-setup's worktree with commits origin lacks", () => {
+  it("keeps a detached one whose commits are not pushed", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    const old = `${backend.dir}-afk-setup`;
+    gitOrThrow(backend.dir, [
+      "worktree",
+      "add",
+      "-q",
+      "--detach",
+      old,
+      "origin/main",
+    ]);
+    writeFileSync(join(old, "AGENTS.md"), "# mine\n");
+    gitOrThrow(old, ["add", "-A"]);
+    gitOrThrow(old, ["commit", "-q", "-m", "Mine"]);
+
+    const result = await setup(backend);
+
+    expect(result.stdout).toContain(
+      "backend: backend-afk-setup kept: it has commits origin does not",
+    );
+    expect(readFileSync(join(old, "AGENTS.md"), "utf8")).toBe("# mine\n");
   });
 });
 
@@ -362,9 +404,10 @@ describe("plat setup on a project set up already", () => {
 
     const result = await setup(backend);
 
-    expect(result.stdout).toContain(
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain(
       "origin/main does not merge into afk/setup cleanly",
     );
-    expect(result.stdout).not.toContain("本机已就绪");
+    expect(result.stderr).not.toContain("本机已就绪");
   });
 });

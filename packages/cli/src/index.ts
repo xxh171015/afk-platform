@@ -92,7 +92,7 @@ import {
   rerunPlat,
   UPDATED_FROM,
 } from "./self-update.ts";
-import { prepareRepo, setupsDir, stateLine } from "./setup.ts";
+import { missingIn, prepareRepo, setupsDir, stateLine } from "./setup.ts";
 import { installSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
@@ -983,7 +983,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
       const known = hosts.data.hosts;
       const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
-      const others = (options.with as string[]).map((value) => {
+      const others = options.with.map((value) => {
         const { path, name } = parseWith(value);
         return {
           checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
@@ -1229,9 +1229,22 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         `Node ${process.version} is too old: install Node 20 or newer (brew install node, or nodejs.org)`,
       );
     const env = { ...process.env, ...io.env };
-    if (spawnSync("git", ["--version"], { env }).status !== 0)
+    const gitVersion = spawnSync("git", ["--version"], {
+      env,
+      encoding: "utf8",
+    });
+    const [gitMajor = 0, gitMinor = 0] = (
+      /(\d+)\.(\d+)/.exec(gitVersion.stdout ?? "") ?? []
+    )
+      .slice(1)
+      .map(Number);
+    if (gitVersion.status !== 0)
       problems.push(
         "git is missing: install it (xcode-select --install, or git-scm.com)",
+      );
+    else if (gitMajor < 2 || (gitMajor === 2 && gitMinor < 38))
+      problems.push(
+        `git ${gitMajor}.${gitMinor} is too old: install git 2.38 or newer (brew install git)`,
       );
     if ((await platformVersionAt(apiUrl())) === undefined)
       problems.push(
@@ -1281,10 +1294,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const plan = init.plan;
       if (!plan || init.projectId === undefined) throw new Failure(init.text);
       const planning = plan.repos.find((r) => r.planning);
-      const setups = setupsDir(
-        afkHome(io.env),
-        (planning?.name ?? "planning") as string,
-      );
+      const setups = setupsDir(afkHome(io.env), planning?.name ?? "planning");
       const repos = plan.repos.map((repo) => ({
         ...prepareRepo(
           {
@@ -1316,28 +1326,30 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             ? "next: write what each worktree lacks, then plat setup --finish"
             : "next: plat setup --finish",
       ];
-      print(
-        {
-          project: init.projectId,
-          planningRepo: planning?.name,
-          ready,
-          repos: repos.map((r) => ({
-            name: r.name,
-            dir: r.dir,
-            planning: r.planning,
-            worktree: r.worktree,
-            resumed: r.resumed,
-            gates: r.readiness?.gates ?? null,
-            agentsMd: r.readiness?.agentsMd ?? null,
-            runningUnattended: r.readiness?.runningUnattended ?? null,
-            hosting: r.hosting?.line ?? null,
-            hostingOk: r.hosting?.ok ?? null,
-            leftover: r.leftover ?? null,
-            problem: r.problem ?? null,
-          })),
-        },
-        lines.join("\n"),
-      );
+      const report = {
+        project: init.projectId,
+        planningRepo: planning?.name,
+        ready,
+        repos: repos.map((r) => ({
+          name: r.name,
+          dir: r.dir,
+          planning: r.planning,
+          worktree: r.worktree,
+          resumed: r.resumed,
+          missing: missingIn(r.readiness),
+          gates: r.readiness?.gates ?? null,
+          agentsMd: r.readiness?.agentsMd ?? null,
+          runningUnattended: r.readiness?.runningUnattended ?? null,
+          hosting: r.hosting?.line ?? null,
+          hostingOk: r.hosting?.ok ?? null,
+          leftover: r.leftover ?? null,
+          problem: r.problem ?? null,
+        })),
+      };
+      // a repo that could not be prepared fails the command, after saying what was done
+      if (repos.some((r) => r.problem))
+        throw new Failure(lines.join("\n"), report);
+      print(report, lines.join("\n"));
     });
 
   program
