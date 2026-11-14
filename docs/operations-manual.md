@@ -35,38 +35,62 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 - 启动后：API `http://127.0.0.1:3000`，页面 `http://127.0.0.1:5173`。终端里 Ctrl-C 停全部（worker 会先中止手头的 run，最多等 60 秒；再按一次立即全停）。
 - 这个终端要一直开着。平台停了，spec 不会前进，但已有数据都在 Postgres 里，重启后接着做。
 
-### 1.2 接入一个项目（`/afk-setup`，每个项目一次）
+### 1.2 接入一个项目（每个项目一次）
 
-接入只有两步：
+人只做两步，不用选、也不用回答问题：
 
-1. 在规划仓库里运行控制塔首页给出的命令（锁定到平台的提交，和下面这条一样，只是多了 `#<提交>`）：
+1. 在规划仓库里运行控制塔首页给出的命令（地址已经写在里面）：
 
    ```bash
-   npx skills@latest add xxh171015/afk-platform
+   curl -fsSL http://<平台地址>/setup.sh | sh
    ```
 
-   skill 全选；agent 选你用的。装在项目里（默认推荐，只在这台机器上生效，不进仓库）还是全局，由你选。安装时显示的风险表是 skills CLI 对所有包都会做的通用扫描。
+   它先一次查全本机缺什么：当前目录是不是 git 仓库、有没有 git、Node 20+。缺的全部列出来，什么都不改。不缺就做三件事：
+   - 把平台的 plat 装进 PATH 里已有的、你能写的、在 home 下的目录（优先 `~/.local/bin`，其次 `~/bin`）。实在没有时，才建 `~/.local/bin`，并往你的 shell 配置里加一行，告诉你加在哪个文件。
+   - 运行 `plat connect <地址>`，让 plat 记住平台地址（存在 `$AFK_HOME/plat.json`，默认是 `~/.afk/plat.json`）。
+   - 运行 `plat sync`，把 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets 写进这个仓库。
 
-2. 在 Cursor 里打开项目的仓库，输入 `/afk-setup`。
+   全程只连平台，不连 GitHub，不跑 npx。重复运行是安全的。
 
-这一个包里有 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets（按平台固定的提交从 mattpocock/skills 原样复制，见仓库 `skills/`），**不用另装 Matt 的 skill**。afk-setup 会用 `plat update` 把缺的、不是平台版本的规划 skill 补成平台的版本：只有你自己选了全局才动全局，从不覆盖你在全局已有的同名 skill（那时规划 skill 装进规划仓库）。装在仓库里的 skill 和 `skills-lock.json` 由 plat 写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。以后平台升级了，**规划机器自己跟上，不用人操作**：
+2. 在 Cursor 或 Claude Code 里打开这个仓库（多仓库项目把各仓库都加进工作区），输入 `/afk-setup`。
 
-- plat 每条命令开始前问平台 `GET /version` 的 `platFingerprint`（平台发出的 plat 文件的 sha256）。和自己不同时，下载平台的 plat 替换自己，用新 plat 重跑同一条命令。新 plat 先把本机带上来，再执行命令：重装规划 skill（规则同 `plat update`：按原来的级别装平台对应提交上的版本；全局有平台装的规划 skill 时不改全局，改装进规划仓库），重新生成规划仓库里 plat 写的文件（tracker 文档、`CLAUDE.local.md`、Cursor 规则；仓库跟踪的文件也改，并说明要提交）。然后在 stderr 用几行说明改了什么，规划 agent 用一句话转告人。
-- 平台不收旧 plat 发布的东西：`plat spec create`、`plat tickets import`、`plat spec confirm` 带着的指纹和平台的不一致时，API 在存任何东西之前回 409 `plat-outdated`，plat 收到后同样替换自己、重跑命令。0.3.0 之前的 plat 不带指纹，会被拒绝并提示运行 `plat update`。从平台仓库 checkout 跑的 plat（`pnpm plat`）带 `dev`，不检查。
-- 规划约定（`CLAUDE.local.md` 的「Planning on this machine」）让规划 agent 在 grill、to-spec、to-tickets 开始前跑一次 `plat sync`，skill 在被读进会话之前就是新的。`plat sync` 也可以手动跑；`plat update` 仍然可用。
+**skill 只在规划仓库里，只在这台机器上。**
+- plat 自己带着平台的 skill 包（仓库的 `skills/`），写成和 `npx skills add -a cursor -a claude-code` 相同的布局：文件放在 `.agents/skills/<名字>`，`.claude/skills/<名字>` 是指向它的链接。
+- 这些路径写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。
+- 平台从不往全局装 skill，也不改你全局已有的 skill。以前平台往全局装过的副本，plat 会用一行提示怎么删，不替你删。
+- 规划仓库已经提交了同名 skill 的，plat 不覆盖，`plat doctor` 标红，由你决定怎么处理。
 
-这个包里只放平台用到的 skill。Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
+**以后平台升级了，规划机器自己跟上，不用人操作：**
+- plat 每条命令开始前，会问平台 `GET /version` 的 `platFingerprint`（平台发出的 plat 文件的 sha256）。和自己不同时，下载平台的 plat 替换自己，再用新 plat 重跑同一条命令。
+- 新 plat 先把本机带上来：在已经装着 skill 的仓库里重写 skill，重新生成规划仓库里 plat 写的文件（tracker 文档、`CLAUDE.local.md`、Cursor 规则）。然后在 stderr 用几行说明改了什么。
+- 平台不收旧 plat 发布的东西：`plat spec create`、`plat tickets import`、`plat spec confirm` 带的指纹和平台的不一致时，API 回 409 `plat-outdated`，plat 收到后同样替换自己、重跑命令。从平台仓库 checkout 跑的 plat（`pnpm plat`）带 `dev`，不检查。
+- 规划约定（`CLAUDE.local.md` 的「Planning on this machine」）让规划 agent 在开始前跑一次 `plat sync`。`plat sync` 和 `plat update` 也都可以手动跑。
 
-在 Cursor 里打开装着项目各个仓库的工作区，输入 `/afk-setup`。它自己一步步做完，不问确认类的问题：只有平台地址连不上、或要接入的仓库不在工作区里时才会问。它不开 PR，接入改动推到每个仓库的 `afk/setup` 分支，随第一个需求的 PR 进默认分支，你在那时一起审（ADR 0006）：
+Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx skills@latest add mattpocock/skills` 选着装。这一步要能访问 GitHub，平台不固定它们的版本。不要装 `setup-matt-pocock-skills` 来跑：它会把 tracker 文档和 `## Agent skills` 改回指向 GitHub Issues，规划就不再发到平台（改错了重跑 `/afk-setup` 能恢复）。
 
-1. **工具**：缺 Node 20+、git 时，每样用一行告诉你要运行的命令，不替你装。`gh` 只在 origin 是 GitHub 时才要登录（GitLab 项目用 `glab`，见 skill）。平台地址先试 `http://127.0.0.1:3000`，连不上才问你一次；确认连得上后用 `plat connect <地址>` 让 plat 记住（存在 `$AFK_HOME/plat.json`，默认 `~/.afk/plat.json`；不带地址运行 `plat connect` 会显示当前用的地址），之后不用配 `AFK_API_URL`。临时连别的平台时，`--api-url` 和 `$AFK_API_URL` 仍然优先。`plat` 从平台下载（`GET /cli/plat.mjs`，和平台同一版本），装到 PATH 里已有的、你能写的目录；实在没有时才往你的 shell 配置里加一行，并告诉你加在哪个文件。在规划仓库里运行 `plat update`，把 skill 补齐、升级成平台的版本（规则见上）。收尾前跑 `plat doctor`：本机缺什么、怎么修，它会写进控制塔接入入口的「本机」列。
-2. **仓库**：工作区里的 git 仓库就是项目的仓库。**规划仓库**（跑 grill / to-spec / to-tickets 的那个）依次这样定：skill 以项目级装在哪个仓库就是哪个；已经有平台写的 tracker 文档的那个；只有一个仓库就是它；只有一个带 openapi 文件的就是它；否则是工作区里第一个仓库。报告里会写明选了哪个。
-3. **登记**：在你自己的规划仓库 checkout 里（哪个分支都行）跑 `plat init --yes --with …`。`plat init` 会登记项目和仓库，并写好规划要读的文件：tracker 文档 `docs/agents/issue-tracker.md`、原本由 `setup-matt-pocock-skills` 写的 `docs/agents/domain.md` 和 `docs/agents/triage-labels.md`，以及两个本机规则文件 `CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。`CLAUDE.local.md` 含 `## Agent skills` 与规划约定；仓库已跟踪 `AGENTS.md` 时，Cursor 规则只指向 `AGENTS.md` 与 `docs/agents/`，不重复技能路由。这些文件都登记在这个仓库的 `.git/info/exclude` 里，只在这台机器上，`git status` 里看不到，也不会被提交；`AGENTS.md` 不改（ADR 0007）。**不用再跑 setup-matt-pocock-skills**。仓库里早先已经提交了 tracker 文档或 `## Agent skills` 的，保持原样，`plat init` 照旧更新那个被跟踪的文件，这处改动随 `afk/setup` 提交。它还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
-4. **补齐接入条件**：每个仓库在你的 checkout 之外建一个临时 worktree（`~/.afk/setup/<规划仓库名>/<仓库名>`，基于远端的 `afk/setup`，没有就基于默认分支；detached HEAD，不建本地分支），不动你自己的分支和文件。在那里按 1.3 补 `.sandcastle/gates.yaml`、`AGENTS.md`（联调环境不在这里配，见 1.3 最后一行），用 `git push origin HEAD:afk/setup` 推上去，再用 `plat repo check <仓库名> --branch afk/setup` 让平台在真实沙箱里跑一遍门禁，不过就改到过为止。通过后删掉这个 worktree，所有仓库都通过后删掉 `~/.afk/setup/<规划仓库名>`，你的机器上不留东西。某个仓库没做完时只留下它的 worktree，报告会写明位置和卡在哪；重跑 `/afk-setup` 会接着用它（里面没有未提交的改动、也没有未推送的提交时，才按远端重建）。旧版 afk-setup 留下的 `<仓库>-afk-setup` worktree 和本地 `afk/setup` 分支：没有未提交的改动、提交也都推了的会被删掉，否则保留，报告里各用一行说明。
-5. **不开 PR，不用先合**：提交说明里写明替换了哪些已有文件（比如原来指向别的 tracker 的 `issue-tracker.md`）。平台切每个需求的集成分支时，先把 `afk/setup` 合到默认分支最新提交上（**设置提交**），票按它的 `gates.yaml` 过门禁，接入改动跟代码在同一个 PR 里进默认分支；默认分支已经包含 `afk/setup` 后就不再叠。`plat spec confirm` 只在某个仓库的默认分支和 `afk/setup` 上都没有 `gates.yaml` 时拒绝开工。
-6. **在自己的 checkout 里规划**：第 2 节的 grill / to-spec / to-tickets / confirm 都在你自己的规划仓库 checkout 里做，哪个分支都行，不用等设置合入，也没有要换过去的工作树。规划要读的文件只在这台机器上：换一台机器规划，在那台机器上也跑一次 `/afk-setup`。项目已经接入时，它只做本机这部分（工具、skill、本机的规划文件），不推送、不重跑门禁检查，报告只有一行「本机已就绪」。
+`/afk-setup` 自己做完，只在接入的仓库不在工作区里时才会问。它不开 PR：接入改动推到每个仓库的 `afk/setup` 分支，随第一个需求的 PR 进默认分支，你在那时一起审（ADR 0006）。固定步骤都由 `plat setup` 做，agent 只写要读代码才能写的东西：
 
-以后多了仓库不用再跑：把它加进工作区，规划时票用到它，`plat tickets import` 说它不属于项目，规划的 agent 就自己用 afk-setup 接入它（在本机重写 tracker 文档，不经过 `afk/setup`），再接着导入，你只会看到一行「已接入 X，门禁检查：…」，不用合并什么。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。已有的都保留，只补缺的、更新过期的。逐条登记和改设置的命令见附录 D（`plat init` 也可以自己在终端跑）。
+1. **准备**（`plat setup --with <其他仓库>`，在规划仓库里运行，规划仓库就是运行它的那个仓库）：
+   - **一次查全**：Node 20+、git 2.38+、平台能否连上、每个路径是不是带 origin 的 git checkout，以及有仓库在 GitHub 时 `gh` 是否已登录。只在 GitLab 上的项目不需要 `gh`，也不需要 `glab`。缺的全部列出来，每样一行修复命令，什么都不改。
+   - **登记**：走 `plat init` 的逻辑，登记项目和仓库，写好规划要读的文件（见下文「登记」），报出每个仓库的托管情况。
+   - **建 worktree**：origin 的默认分支和 `afk/setup` 上都缺门禁或 `AGENTS.md`、`afk/setup` 合不进默认分支、或者上次的 worktree 还在时，才在你的 checkout 之外给这个仓库建一个临时 worktree：`~/.afk/setup/<规划仓库名>/<仓库名>`，基于远端的 `afk/setup`（没有就基于默认分支）并合入默认分支，detached HEAD，不建本地分支。
+   - **清理旧版残留**：旧版 afk-setup 留下的 `<仓库>-afk-setup` worktree 和本地 `afk/setup` 分支，没有未提交改动、提交也都推了的才删，否则保留，各用一行说明。
+2. **补齐**：agent 在每个 worktree 里按 1.3 写缺的 `.sandcastle/gates.yaml`、`AGENTS.md`。联调环境不在这里配，见 1.3 最后一行。
+3. **收尾**（`plat setup --finish`）：
+   - 每个仓库：提交（提交说明列出加了哪些文件、替换了哪些已有文件），`push origin HEAD:afk/setup`，让平台在真实沙箱里跑一遍门禁。
+   - 门禁通过的删掉 worktree，全部通过后 `~/.afk/setup/<规划仓库名>` 也删掉，你的机器上不留东西。没通过的保留 worktree，报告写明位置和卡在哪条命令；agent 修好后再跑 `--finish`，只处理没通过的仓库。沙箱缺工具链时，要由运行平台的人往镜像里加。
+   - 最后跑 `plat doctor`：本机缺什么、怎么修，写进控制塔接入入口的「本机」列。
+
+**登记写了哪些文件**：
+- tracker 文档 `docs/agents/issue-tracker.md`。
+- `docs/agents/domain.md`、`docs/agents/triage-labels.md`（原本由 `setup-matt-pocock-skills` 写，**不用再跑它**）。
+- 两个本机规则文件：`CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。`CLAUDE.local.md` 含 `## Agent skills` 和规划约定；仓库已跟踪 `AGENTS.md` 时，Cursor 规则只指向 `AGENTS.md` 和 `docs/agents/`，不重复技能路由。
+
+这些文件都登记在 `.git/info/exclude` 里，`AGENTS.md` 不改（ADR 0007）。仓库里早先已经提交了 tracker 文档或 `## Agent skills` 的，保持原样：`plat init` 照旧更新那个被跟踪的文件，这处改动随 `afk/setup` 提交。登记还会让 worker 检查每个仓库上的 GitHub App（见 1.3）。
+
+接入完就**在自己的 checkout 里规划**：第 2 节的 grill / to-spec / to-tickets / confirm 都在你自己的规划仓库 checkout 里做，哪个分支都行，不用等设置合入。规划要读的文件只在这台机器上：换一台机器规划，在那台机器上也做一遍这两步。项目已经接入时，`plat setup` 只写本机的规划文件，不推送、不跑门禁检查，报告只有一行「本机已就绪」。
+
+**以后多了仓库不用再跑**：把它加进工作区，规划时票用到它，`plat tickets import` 会说它不属于项目。这时规划的 agent 自己用 afk-setup（`plat setup --with <新仓库>`）接入它，在本机重写 tracker 文档，再接着导入。你只会看到一行「已接入 X，门禁检查：…」，不用合并什么。平台升级或 `plat` 提示「run the afk-setup skill」时，agent 同样会自己跑。逐条登记和改设置的命令见附录 D（`plat init`、`plat repo check` 也可以自己在终端跑）。
 
 ### 1.3 每个仓库要满足的条件
 
@@ -96,7 +120,7 @@ scripts/verify-sandbox-image.sh         # 逐步确认的同一套检查
 grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `docs/agents/issue-tracker.md` 让它们改成写平台。它只在每台规划机器上的那份 checkout 里，不提交，执行票时用不到；`plat init`（由 `/afk-setup` 调用）生成它（单独生成用 `plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md`，只打印、不写文件）。
 
 - 文档第一行是版本标记（平台版本、skills SHA、项目和仓库）；平台版本只写在仓库根 `package.json` 的 `version`，改了平台、想让规划过的人知道时手动加一，文档是否过期则看整份比对；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
-- 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及 to-spec、to-tickets、afk-setup 是否是平台用的版本（先看规划仓库里的 `.agents/skills` 等项目级目录，没有再看 `~/.claude/skills`、`~/.cursor/skills`、`~/.agents/skills`）。告警里会写出按那一级更新的命令。
+- 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及规划仓库里的 afk-setup 和各个规划 skill 是否是平台的版本（只看规划仓库里的 `.agents/skills`、`.claude/skills`、`.cursor/skills`，用户级的不算）。告警里会写出更新命令 `plat sync`。
 
 ## 2. 场景 A：只有后端
 
@@ -279,7 +303,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 | 位置                               | 内容                                                            | 谁用                                                                            |
 | ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `skills/`                          | grill-with-docs、grilling、domain-modeling、to-spec、to-tickets | 规划机器，和 afk-setup 一起用 `npx skills@latest add xxh171015/afk-platform` 装 |
+| `skills/`                          | grill-with-docs、grilling、domain-modeling、to-spec、to-tickets | 规划机器：plat 自带，`plat sync` 和 afk-setup 一起写进规划仓库 |
 | `packages/pipeline/skills/`        | implement、tdd、code-review、codebase-design                    | worker 只读挂进沙箱                                                             |
 | `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板                             | `plat init`、`plat tracker-doc`                                                 |
 

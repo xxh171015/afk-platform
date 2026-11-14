@@ -11,38 +11,31 @@ const section = (skill: string, heading: string, next: string): string => {
   return skill.slice(start, end);
 };
 
-const firstNumberedItem = (text: string): string => {
-  const match = text.match(/1\. \*\*[^*]+\*\*:[\s\S]*?(?=\n2\. |\nDone )/);
-  if (!match) throw new Error("no first numbered item");
-  return match[0];
-};
-
 describe("the afk-setup skill", () => {
   it("does not stop at the first step when gh is missing on a GitLab-only project", () => {
-    const tools = section(
-      readAfkSetupSkill(),
-      "## 1. Tools on this machine",
-      "## 2. The repos",
-    );
-    const prerequisites = firstNumberedItem(tools);
-    expect(prerequisites).toContain("node --version");
-    expect(prerequisites).toContain("git --version");
-    expect(prerequisites).not.toMatch(/\bgh\b/);
+    // the machine check is plat setup's, which asks for gh only when a repo is on GitHub (plat-setup.test.ts)
+    const prepare = section(readAfkSetupSkill(), "## 1. Prepare", "## 2.");
+    expect(prepare).toContain("plat setup --json");
+    expect(prepare).not.toMatch(/\bgh\b/);
   });
 
   it("stops a GitHub project that is not logged into gh, and names the login command", () => {
-    const skill = readAfkSetupSkill();
-    expect(skill).toMatch(/GitHub[\s\S]*?`gh auth status`/);
-    expect(skill).toContain("`gh auth login`");
+    // plat setup names `gh auth login` among its problems; the skill passes each on and stops
+    const prepare = section(readAfkSetupSkill(), "## 1. Prepare", "## 2.");
+    expect(prepare).toMatch(
+      /"error": "not-ready"[\s\S]*?each line of `problems`[\s\S]*?stop/,
+    );
+    expect(prepare).toContain("Do not install anything or log in for them");
   });
 
   it("runs plat doctor before the report", () => {
+    // plat setup --finish ends with plat doctor
     const skill = readAfkSetupSkill();
-    const report = skill.slice(skill.indexOf("## 6. Report"));
-    expect(report).toMatch(/plat doctor/);
-    const table = report.search(/short table/);
-    expect(table).toBeGreaterThan(0);
-    expect(report.indexOf("plat doctor")).toBeLessThan(table);
+    const finish = skill.indexOf("plat setup --finish --json");
+    const report = skill.indexOf("## 4. Report");
+    expect(finish).toBeGreaterThan(0);
+    expect(finish).toBeLessThan(report);
+    expect(skill.slice(report)).toMatch(/plat doctor/);
   });
 
   it("tells planning skills to run /afk-setup when there is no tracker, not /setup-matt-pocock-skills", () => {

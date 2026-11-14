@@ -64,7 +64,13 @@ describe("the platform's source", () => {
     const pushes = code
       .filter(({ text }) => /["'`]push["'`]/.test(text))
       .map(({ file }) => file);
-    expect(pushes).toEqual(["worker/src/push.ts"]);
+    // besides the worker's exit: plat setup --finish, on the person's machine with their credentials, pushing a
+    // repo's setup to afk/setup and nothing else (approved by the person, #323)
+    expect(pushes).toEqual(["cli/src/setup.ts", "worker/src/push.ts"]);
+    const setup = code.find(({ file }) => file === "cli/src/setup.ts");
+    expect(setup?.text.match(/["'`]push["'`][^\]]*\]/g)).toEqual([
+      expect.stringContaining("`HEAD:refs/heads/${SETUP_BRANCH}`"),
+    ]);
   });
 
   it("has no other way to publish commits: no send-pack, no pushing alias, no push in package scripts", () => {
