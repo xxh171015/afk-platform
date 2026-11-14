@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -48,7 +48,7 @@ function toolbox(names: string[]): string {
   for (const name of names) symlinkSync(which(name), join(dir, name));
   return dir;
 }
-const BASICS = ["curl", "mkdir", "chmod", "mv", "rm", "grep"];
+const BASICS = ["curl", "mkdir", "chmod", "mv", "rm", "grep", "mktemp"];
 const ALL = [...BASICS, "git", "node"];
 
 async function runSetup(
@@ -82,6 +82,64 @@ const repo = (): Checkout =>
   ws.checkout("backend", "https://github.com/acme/backend.git");
 
 describe("GET /setup.sh", () => {
+  it("runs whole when piped into sh, as curl | sh does, and reads nothing more from stdin", async () => {
+    const backend = repo();
+    const local = join(home, ".local/bin");
+    mkdirSync(local, { recursive: true });
+    const script = await (await fetch(`${ws.api.url}/setup.sh`)).text();
+
+    const piped = await new Promise<{ code: number | null; stdout: string }>(
+      (done) => {
+        const child = spawn("/bin/sh", [], {
+          cwd: backend.dir,
+          env: {
+            HOME: home,
+            PATH: [local, toolbox(ALL)].join(":"),
+            AFK_HOME: join(home, ".afk"),
+          },
+        });
+        let stdout = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.on("close", (code) => done({ code, stdout }));
+        child.stdin.end(script);
+      },
+    );
+
+    expect(piped.code).toBe(0);
+    expect(piped.stdout).toContain("Next: open this repo");
+  }, 60_000);
+
+  it("runs nothing when the download stopped halfway", async () => {
+    const backend = repo();
+    const script = await (await fetch(`${ws.api.url}/setup.sh`)).text();
+    const cut = script.slice(0, script.lastIndexOf("main"));
+
+    const result = await promisify(execFile)("/bin/sh", ["-c", cut], {
+      cwd: backend.dir,
+      env: { HOME: home, PATH: toolbox(ALL) },
+    });
+
+    expect(result.stdout).toBe("");
+    expect(readdirSync(home)).toEqual([]);
+  });
+
+  it("leaves the machine as it was when plat cannot be downloaded", async () => {
+    const backend = repo();
+    const script = (
+      await (await fetch(`${ws.api.url}/setup.sh`)).text()
+    ).replace(`platform='${ws.api.url}'`, "platform='http://127.0.0.1:9'");
+
+    const result = await promisify(execFile)("/bin/sh", ["-c", script], {
+      cwd: backend.dir,
+      env: { HOME: home, PATH: toolbox(ALL), SHELL: "/bin/zsh" },
+    }).catch((failed) => failed as { stderr: string; code: number });
+
+    expect(result.stderr).toContain("nothing was changed");
+    expect(readdirSync(home)).toEqual([]);
+  });
+
   it("is a script for the address it was fetched from", async () => {
     const response = await fetch(`${ws.api.url}/setup.sh`);
     expect(response.headers.get("content-type")).toContain(
@@ -117,8 +175,11 @@ describe("GET /setup.sh", () => {
     const local = join(home, ".local/bin");
     mkdirSync(local, { recursive: true });
 
-    const result = await runSetup(backend.dir, [local, toolbox(ALL)]);
+    const path = [local, toolbox(ALL)];
+    const result = await runSetup(backend.dir, path);
+    const again = await runSetup(backend.dir, path);
 
+    expect(again.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(`plat: installed in ${local}`);
