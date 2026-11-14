@@ -340,7 +340,7 @@ done
 
 echo "up: API $AFK_API_URL, page http://127.0.0.1:5173 (Postgres stays up when you stop; docker compose stop postgres to stop it)"
 echo "log: $up_log"
-echo "next: in Cursor, with the project's repos in the workspace, run /afk-setup (install it once: npx skills@latest add xxh171015/afk-platform)"
+echo "next: in the planning repo, run the command on the page's 接入 card (curl -fsSL $AFK_API_URL/setup.sh | sh), then /afk-setup in Cursor or Claude Code"
 
 # leave as soon as any process dies, then stop the rest (macOS bash 3.2 has no `wait -n`)
 while :; do
