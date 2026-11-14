@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitOrThrow } from "@afk/pipeline";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FakeWorker } from "../test/fake-worker.ts";
 import {
   type Checkout,
   type PlatWorkspace,
@@ -409,5 +410,161 @@ describe("plat setup on a project set up already", () => {
       "origin/main does not merge into afk/setup cleanly",
     );
     expect(result.stderr).not.toContain("本机已就绪");
+  });
+});
+
+describe("plat setup --finish", () => {
+  const PASS = {
+    pass: true,
+    reasons: [],
+    steps: ["setup", "test"],
+    tests: 3,
+    skipped: 0,
+  };
+  const FAIL = {
+    pass: false,
+    reasons: ["test failed (exit 127)"],
+    steps: ["setup", "test"],
+    failedStep: "test",
+    log: "sh: 1: cargo: command not found",
+  };
+
+  // The worker's side: answer `count` readiness-gate jobs, each with the result for its repo.
+  async function answerGates(
+    results: Record<string, Record<string, unknown>>,
+    count: number,
+  ) {
+    const worker = new FakeWorker(ws.api.url, "w1");
+    for (let answered = 0, i = 0; answered < count && i < 500; i++) {
+      const { body } = await worker.claim();
+      if (!body.job) {
+        await new Promise((done) => setTimeout(done, 20));
+        continue;
+      }
+      expect(body.job.type).toBe("readiness-gate");
+      const task = await (
+        await fetch(
+          `${ws.api.url}/worker/jobs/${body.job.id}/readiness-task?workerId=w1&attempt=${body.job.attempt}`,
+        )
+      ).json();
+      await worker.complete(body.job.id, body.job.attempt, {
+        stage: "readiness-gate",
+        ...results[task.repo.name],
+      });
+      answered++;
+    }
+  }
+
+  const finish = (checkout: Checkout) =>
+    ws.plat(checkout.dir, ["setup", "--finish"], undefined, {
+      env: { PATH: PATH() },
+    });
+
+  it("commits what was written, pushes afk/setup, removes the worktree once the gate passes, and runs plat doctor", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+      { "README.md": "r\n", "AGENTS.md": "# old\n" },
+    );
+    await setup(backend);
+    const worktree = worktreeOf("backend");
+    mkdirSync(join(worktree, ".sandcastle"), { recursive: true });
+    writeFileSync(join(worktree, ".sandcastle/gates.yaml"), "setup: true\n");
+    writeFileSync(
+      join(worktree, "AGENTS.md"),
+      "# Backend\n\n## Running unattended\n\nNobody answers.\n",
+    );
+
+    const [result] = await Promise.all([
+      finish(backend),
+      answerGates({ backend: PASS }, 1),
+    ]);
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const message = gitOrThrow(backend.origin.dir, [
+      "log",
+      "-1",
+      "--format=%B",
+      "afk/setup",
+    ]);
+    expect(message).toContain("Set the repo up for the AFK platform");
+    expect(message).toContain("Added: .sandcastle/gates.yaml");
+    expect(message).toContain("Replaced: AGENTS.md");
+    expect(result.stdout).toMatch(
+      /backend \(planning repo\): afk\/setup pushed \([0-9a-f]+\); gate passed/,
+    );
+    expect(result.stdout).toContain("next: plan with /grill-with-docs");
+    expect(existsSync(join(ws.afkHome, "setup"))).toBe(true);
+    expect(existsSync(join(ws.afkHome, "setup/backend"))).toBe(false);
+    expect(
+      gitOrThrow(backend.dir, ["worktree", "list"]).split("\n"),
+    ).toHaveLength(1);
+    const stored = await (
+      await fetch(`${ws.api.url}/projects/1/doctor-report`)
+    ).json();
+    expect(stored.report.items.map((i: { id: string }) => i.id)).toContain(
+      "skills",
+    );
+  });
+
+  it("keeps the worktree of a repo whose gate fails, says the sandbox lacks a tool, and finishes the others", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    const frontend = ws.checkout(
+      "frontend",
+      "https://github.com/acme/frontend.git",
+    );
+    await setup(backend, ["--with", frontend.dir]);
+    for (const name of ["backend", "frontend"]) {
+      mkdirSync(join(worktreeOf(name), ".sandcastle"), { recursive: true });
+      writeFileSync(join(worktreeOf(name), ".sandcastle/gates.yaml"), "x\n");
+      writeFileSync(join(worktreeOf(name), "AGENTS.md"), "# a\n");
+    }
+
+    const [result] = await Promise.all([
+      finish(backend),
+      answerGates({ backend: PASS, frontend: FAIL }, 2),
+    ]);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("frontend: afk/setup pushed");
+    expect(result.stderr).toContain(
+      `worktree kept at ${worktreeOf("frontend")}`,
+    );
+    expect(result.stderr).toContain(
+      "frontend: the platform's sandbox lacks a tool this repo needs",
+    );
+    expect(result.stderr).toContain("cargo: command not found");
+    expect(existsSync(worktreeOf("backend"))).toBe(false);
+    expect(existsSync(worktreeOf("frontend"))).toBe(true);
+
+    // fixed (here: the platform's image got the tool): only frontend again, nothing new to commit
+    const before = gitOrThrow(frontend.origin.dir, ["rev-parse", "afk/setup"]);
+    const [again] = await Promise.all([
+      finish(backend),
+      answerGates({ frontend: PASS }, 1),
+    ]);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain(
+      "frontend: afk/setup up to date; gate passed",
+    );
+    expect(again.stdout).toContain("backend (planning repo): set up on origin");
+    expect(gitOrThrow(frontend.origin.dir, ["rev-parse", "afk/setup"])).toBe(
+      before,
+    );
+    expect(existsSync(join(ws.afkHome, "setup/backend"))).toBe(false);
+  });
+
+  it("says to run plat setup first in a checkout with no tracker doc", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    const result = await finish(backend);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("run plat setup first");
   });
 });

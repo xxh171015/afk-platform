@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { SETUP_BRANCH } from "@afk/shared";
 
 // `plat setup`: the fixed steps of setting a project's repos up for the platform, which the afk-setup skill used to
@@ -298,3 +298,119 @@ export function stateLine(state: RepoSetupState): string {
       : "has the gate and AGENTS.md: check them, then plat setup --finish"
   }`;
 }
+
+/** The setup worktrees an earlier `plat setup` left under `setups`, with the person's checkout each belongs to. */
+export function setupWorktrees(
+  setups: string,
+): { name: string; worktree: string; checkout: string }[] {
+  if (!existsSync(setups)) return [];
+  return readdirSync(setups, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const worktree = join(setups, entry.name);
+      const common = git(worktree, [
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ]);
+      return common.ok
+        ? [{ name: entry.name, worktree, checkout: dirname(common.out) }]
+        : [];
+    });
+}
+
+/**
+ * The commit message of a repo's setup: what was added and what was replaced, so the reviewer of the spec's pull
+ * request that carries it sees which files of theirs it changes.
+ */
+export function setupCommitMessage(changes: string[]): string {
+  const list = (status: string) =>
+    changes
+      .filter((line) => line.startsWith(status))
+      .map((line) => line.slice(1).trim());
+  const parts = [
+    ["Added", list("A")],
+    ["Replaced", list("M")],
+    ["Removed", list("D")],
+  ].filter(([, files]) => files.length > 0) as [string, string[]][];
+  return [
+    "Set the repo up for the AFK platform",
+    "",
+    ...parts.map(([what, files]) => `${what}: ${files.join(", ")}`),
+    "",
+    "Made by plat setup --finish. It reaches the default branch with the first spec's pull request (ADR 0006).",
+    "",
+  ].join("\n");
+}
+
+export interface Pushed {
+  commit?: string; // the setup commit plat made, when there were changes
+  pushed: boolean; // origin's afk/setup was moved
+  problem?: string;
+}
+
+/** Commits what the agent wrote in a setup worktree and pushes it to origin's afk/setup. */
+export function commitAndPush(worktree: string): Pushed {
+  if (git(worktree, ["diff", "--name-only", "--diff-filter=U"]).out !== "")
+    return {
+      pushed: false,
+      problem: `a merge in ${worktree} has conflicts: resolve them, then plat setup --finish again`,
+    };
+  git(worktree, ["add", "-A"]);
+  const changes = git(worktree, ["diff", "--cached", "--name-status"])
+    .out.split("\n")
+    .filter(Boolean);
+  let commit: string | undefined;
+  if (changes.length > 0 || hasRef(worktree, "MERGE_HEAD")) {
+    const committed = git(worktree, [
+      "commit",
+      "-q",
+      "-m",
+      setupCommitMessage(changes),
+    ]);
+    if (!committed.ok)
+      return {
+        pushed: false,
+        problem: `could not commit in ${worktree}: ${committed.err || committed.out}`,
+      };
+    commit = git(worktree, ["rev-parse", "--short", "HEAD"]).out;
+  }
+  const head = git(worktree, ["rev-parse", "HEAD"]).out;
+  const remote = git(worktree, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `origin/${SETUP_BRANCH}`,
+  ]);
+  if (remote.ok && remote.out === head) return { commit, pushed: false };
+  const pushed = git(worktree, [
+    "push",
+    "--quiet",
+    "origin",
+    `HEAD:refs/heads/${SETUP_BRANCH}`,
+  ]);
+  if (!pushed.ok)
+    return {
+      commit,
+      pushed: false,
+      problem: `could not push to origin's ${SETUP_BRANCH}: ${pushed.err}`,
+    };
+  git(worktree, ["fetch", "--quiet", "origin", SETUP_BRANCH]);
+  return { commit, pushed: true };
+}
+
+/** Removes a setup worktree whose setup passed, and the folder of all of them once it is empty. */
+export function removeSetupWorktree(
+  checkout: string,
+  worktree: string,
+  setups: string,
+): void {
+  git(checkout, ["worktree", "remove", "--force", worktree]);
+  git(checkout, ["worktree", "prune"]);
+  if (existsSync(setups) && readdirSync(setups).length === 0)
+    rmSync(setups, { recursive: true, force: true });
+}
+
+/** Whether a failed gate's output says the sandbox lacks a tool, which only whoever runs the platform can add. */
+export const sandboxLacksTool = (output: string): boolean =>
+  /command not found|: not found\b/i.test(output);

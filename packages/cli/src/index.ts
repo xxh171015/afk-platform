@@ -92,7 +92,16 @@ import {
   rerunPlat,
   UPDATED_FROM,
 } from "./self-update.ts";
-import { missingIn, prepareRepo, setupsDir, stateLine } from "./setup.ts";
+import {
+  commitAndPush,
+  missingIn,
+  prepareRepo,
+  removeSetupWorktree,
+  sandboxLacksTool,
+  setupsDir,
+  setupWorktrees,
+  stateLine,
+} from "./setup.ts";
 import { installSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
@@ -669,62 +678,71 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         throw new Failure(
           "which project? run this in the planning repo (its tracker doc names the project), or give --project",
         );
-      const client = api();
-      const queued = await client.POST(
-        "/projects/{projectId}/repos/{name}/gate-check",
-        {
-          params: { path: { projectId, name } },
-          body: { branch: options.branch },
-        },
-      );
-      if (!queued.data) throw failureFrom(queued.response, queued.error);
-      const pollMs = Number(io.env.AFK_POLL_SECONDS ?? 3) * 1000;
-      const deadline = Date.now() + 60 * 60 * 1000;
-      for (;;) {
-        const { data, response, error } = await client.GET(
-          "/projects/{projectId}/repos/{name}/gate-checks/{id}",
-          { params: { path: { projectId, name, id: queued.data.id } } },
-        );
-        if (!data) throw failureFrom(response, error);
-        const label = `${name} ${data.branch}`;
-        if (data.state === "failed")
-          throw new Failure(
-            `${label}: the check could not run: ${data.error ?? "unknown error"}`,
-          );
-        if (data.state === "done") {
-          const result = data.result;
-          if (!result)
-            throw new Failure(
-              `${label}: the worker's answer was not understood`,
-            );
-          if (result.pass) {
-            print(
-              data,
-              `${label}: the gate passed in the platform's sandbox (${result.steps.join(", ")}${result.tests === undefined ? "" : `; ${result.tests} tests`})`,
-            );
-            return;
-          }
-          print(
-            data,
-            [
-              `${label}: the gate failed: ${result.reasons.join("; ")}`,
-              ...(result.log
-                ? [
-                    `--- the end of ${result.failedStep ?? "its"} output ---`,
-                    result.log,
-                  ]
-                : []),
-            ].join("\n"),
-          );
-          throw new Failure("the gate failed");
-        }
-        if (Date.now() > deadline)
-          throw new Failure(
-            `${label}: no answer after an hour (is a worker running?)`,
-          );
-        await new Promise((done) => setTimeout(done, pollMs));
-      }
+      const check = await runGateCheck(projectId, name, options.branch);
+      print(check.value, check.text);
+      if (!check.pass) throw new Failure("the gate failed");
     });
+
+  // The platform runs a repo's gate on a pushed branch in its own sandbox (`plat repo check`, `plat setup --finish`):
+  // what came back. Throws when the check could not run at all.
+  const runGateCheck = async (
+    projectId: number,
+    name: string,
+    branch: string,
+  ): Promise<{ pass: boolean; text: string; value: unknown }> => {
+    const client = api();
+    const queued = await client.POST(
+      "/projects/{projectId}/repos/{name}/gate-check",
+      {
+        params: { path: { projectId, name } },
+        body: { branch },
+      },
+    );
+    if (!queued.data) throw failureFrom(queued.response, queued.error);
+    const pollMs = Number(io.env.AFK_POLL_SECONDS ?? 3) * 1000;
+    const deadline = Date.now() + 60 * 60 * 1000;
+    for (;;) {
+      const { data, response, error } = await client.GET(
+        "/projects/{projectId}/repos/{name}/gate-checks/{id}",
+        { params: { path: { projectId, name, id: queued.data.id } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      const label = `${name} ${data.branch}`;
+      if (data.state === "failed")
+        throw new Failure(
+          `${label}: the check could not run: ${data.error ?? "unknown error"}`,
+        );
+      if (data.state === "done") {
+        const result = data.result;
+        if (!result)
+          throw new Failure(`${label}: the worker's answer was not understood`);
+        if (result.pass)
+          return {
+            pass: true,
+            value: data,
+            text: `${label}: the gate passed in the platform's sandbox (${result.steps.join(", ")}${result.tests === undefined ? "" : `; ${result.tests} tests`})`,
+          };
+        return {
+          pass: false,
+          value: data,
+          text: [
+            `${label}: the gate failed: ${result.reasons.join("; ")}`,
+            ...(result.log
+              ? [
+                  `--- the end of ${result.failedStep ?? "its"} output ---`,
+                  result.log,
+                ]
+              : []),
+          ].join("\n"),
+        };
+      }
+      if (Date.now() > deadline)
+        throw new Failure(
+          `${label}: no answer after an hour (is a worker running?)`,
+        );
+      await new Promise((done) => setTimeout(done, pollMs));
+    }
+  };
 
   // The warnings `spec create` and `tickets import` print about this planning machine; they never change the exit code.
   const warnAboutPlanningMachine = async (project?: number) => {
@@ -837,6 +855,52 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       );
     });
 
+  // `plat doctor` (also the end of `plat setup --finish`): checks this planning machine and stores the result on the
+  // project for the control tower.
+  const runDoctor = async (project?: number) => {
+    const cwd = io.cwd ?? process.cwd();
+    const client = api();
+    const report = await collectDoctorReport({
+      cwd,
+      readFile: io.readFile,
+      loadVersion: async () => {
+        const { data } = await client.GET("/version");
+        return data ?? undefined;
+      },
+      loadProject: async (id) => {
+        const { data } = await client.GET("/projects/{projectId}", {
+          params: { path: { projectId: id } },
+        });
+        if (!data) throw new Error("no such project");
+        return data;
+      },
+      projectId: project,
+    });
+    let stored = {
+      machine: report.machine,
+      checkedAt: report.checkedAt,
+      items: report.items,
+      projectId: report.projectId,
+    };
+    if (report.projectId !== undefined) {
+      const { data, response, error } = await client.PUT(
+        "/projects/{projectId}/doctor-report",
+        {
+          params: { path: { projectId: report.projectId } },
+          body: { machine: report.machine, items: report.items },
+        },
+      );
+      if (data) {
+        stored = { ...data, projectId: report.projectId };
+      } else {
+        io.stderr(
+          `warning: could not store the report: ${failureFrom(response, error).message}\n`,
+        );
+      }
+    }
+    return stored;
+  };
+
   program
     .command("doctor")
     .description(
@@ -844,46 +908,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     )
     .option("--project <id>", "project to store the report on", toInt)
     .action(async (options: { project?: number }) => {
-      const cwd = io.cwd ?? process.cwd();
-      const client = api();
-      const report = await collectDoctorReport({
-        cwd,
-        readFile: io.readFile,
-        loadVersion: async () => {
-          const { data } = await client.GET("/version");
-          return data ?? undefined;
-        },
-        loadProject: async (id) => {
-          const { data } = await client.GET("/projects/{projectId}", {
-            params: { path: { projectId: id } },
-          });
-          if (!data) throw new Error("no such project");
-          return data;
-        },
-        projectId: options.project,
-      });
-      let stored = {
-        machine: report.machine,
-        checkedAt: report.checkedAt,
-        items: report.items,
-        projectId: report.projectId,
-      };
-      if (report.projectId !== undefined) {
-        const { data, response, error } = await client.PUT(
-          "/projects/{projectId}/doctor-report",
-          {
-            params: { path: { projectId: report.projectId } },
-            body: { machine: report.machine, items: report.items },
-          },
-        );
-        if (data) {
-          stored = { ...data, projectId: report.projectId };
-        } else {
-          io.stderr(
-            `warning: could not store the report: ${failureFrom(response, error).message}\n`,
-          );
-        }
-      }
+      const stored = await runDoctor(options.project);
       print(stored, formatDoctorText(stored));
     });
 
@@ -1272,10 +1297,125 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     return problems;
   };
 
+  // `plat setup --finish`: each setup worktree is committed and pushed to origin's afk/setup, and the platform runs
+  // its gate there (ADR 0006: it reaches the default branch with the first spec's pull request). A repo whose gate
+  // passes loses its worktree; one that fails keeps it and says why. plat doctor ends it.
+  const finishSetup = async () => {
+    const doc = await io
+      .readFile(TRACKER_DOC_PATH)
+      .then(trackerDocTarget)
+      .catch(() => null);
+    if (!doc)
+      throw new Failure(
+        "run plat setup first, in the planning repo: this checkout has no tracker doc naming its project",
+      );
+    const projectId = doc.project;
+    const setups = setupsDir(afkHome(io.env), doc.repo);
+    const project = await api().GET("/projects/{projectId}", {
+      params: { path: { projectId } },
+    });
+    if (!project.data) throw failureFrom(project.response, project.error);
+    const worktrees = setupWorktrees(setups);
+    const results: {
+      name: string;
+      worktree: string | null;
+      commit: string | null;
+      pushed: boolean;
+      gate: "passed" | "failed" | null;
+      gateOutput: string | null;
+      sandboxLacksTool: boolean;
+      problem: string | null;
+    }[] = [];
+    for (const { name, worktree, checkout } of worktrees) {
+      const pushed = commitAndPush(worktree);
+      const result = {
+        name,
+        worktree: worktree as string | null,
+        commit: pushed.commit ?? null,
+        pushed: pushed.pushed,
+        gate: null as "passed" | "failed" | null,
+        gateOutput: null as string | null,
+        sandboxLacksTool: false,
+        problem: pushed.problem ?? null,
+      };
+      results.push(result);
+      if (pushed.problem) continue;
+      try {
+        const check = await runGateCheck(projectId, name, SETUP_BRANCH);
+        result.gate = check.pass ? "passed" : "failed";
+        result.gateOutput = check.text;
+        if (check.pass) {
+          removeSetupWorktree(checkout, worktree, setups);
+          result.worktree = null;
+        } else result.sandboxLacksTool = sandboxLacksTool(check.text);
+      } catch (error) {
+        result.problem = (error as Error).message;
+      }
+    }
+
+    const hosting = await Promise.all(
+      project.data.repos.map(async (repo) => {
+        const { data } = await api().GET(
+          "/projects/{projectId}/repos/{name}/access",
+          { params: { path: { projectId, name: repo.name } } },
+        );
+        return {
+          name: repo.name,
+          line: accessLine(repo.name, data),
+          ok: data?.state === "ok",
+        };
+      }),
+    );
+    const doctor = await runDoctor(projectId);
+    const failed = results.filter((r) => r.gate !== "passed");
+    const rows = project.data.repos.map((repo) => {
+      const r = results.find((x) => x.name === repo.name);
+      const setup = !r
+        ? "set up on origin"
+        : r.problem
+          ? r.problem
+          : `afk/setup ${r.pushed ? `pushed${r.commit ? ` (${r.commit})` : ""}` : "up to date"}; gate ${r.gate}`;
+      const kept = r?.worktree ? `; worktree kept at ${r.worktree}` : "";
+      return `${repo.name}${repo.name === doc.repo ? " (planning repo)" : ""}: ${setup}${kept}`;
+    });
+    const lines = [
+      ...(worktrees.length === 0
+        ? ["no setup worktrees: nothing to push (run plat setup first)"]
+        : []),
+      ...rows,
+      ...hosting.filter((h) => !h.ok).map((h) => h.line),
+      ...failed.flatMap((r) =>
+        r.gate === "failed"
+          ? [
+              ...(r.sandboxLacksTool
+                ? [
+                    `${r.name}: the platform's sandbox lacks a tool this repo needs; whoever runs the platform has to add it to the sandbox image`,
+                  ]
+                : []),
+              r.gateOutput ?? "",
+            ]
+          : [],
+      ),
+      formatDoctorText(doctor),
+      failed.length > 0
+        ? "next: fix what failed in the kept worktrees, then plat setup --finish again"
+        : `next: plan with /grill-with-docs in ${io.cwd ?? process.cwd()}, on any branch`,
+    ];
+    const report = {
+      project: projectId,
+      planningRepo: doc.repo,
+      repos: results,
+      hosting,
+      doctor,
+    };
+    if (failed.length > 0) throw new Failure(lines.join("\n"), report);
+    print(report, lines.join("\n"));
+  };
+
   program
     .command("setup")
     .description(
-      "run in the planning repo: check this machine, register the project and its repos (this one and each --with), write the planning files here, and make a setup worktree for each repo origin lacks a gate or AGENTS.md for; prints what each worktree lacks. Running it again only fills the gaps",
+      "run in the planning repo: check this machine, register the project and its repos (this one and each --with), write the planning files here, and make a setup worktree for each repo origin lacks a gate or AGENTS.md for; prints what each worktree lacks. With --finish: commit and push each worktree to afk/setup, have the platform run its gate, remove the worktrees that pass, and run plat doctor. Running either again only fills the gaps",
     )
     .option(
       "--with <path[=name]>",
@@ -1283,7 +1423,15 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       collect,
       [],
     )
-    .action(async (options: { with: string[] }) => {
+    .option(
+      "--finish",
+      "after the files are written in the worktrees: commit, push to afk/setup, check the gate, clean up, report",
+    )
+    .action(async (options: { with: string[]; finish?: boolean }) => {
+      if (options.finish) {
+        await finishSetup();
+        return;
+      }
       const problems = await setupProblems(options.with);
       if (problems.length > 0)
         throw new Failure(
