@@ -42,7 +42,7 @@ const skillsFail = {
   title: "skills",
   status: "fail" as const,
   detail: "the to-spec skill was not found",
-  command: "npx skills@latest add xxh171015/afk-platform",
+  command: "plat sync",
 };
 
 describe("PUT/GET /projects/{id}/doctor-report", () => {
