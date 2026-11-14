@@ -1,13 +1,19 @@
+import { execFile, spawnSync } from "node:child_process";
 import {
+  existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { gitOrThrow } from "@afk/pipeline";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -16,68 +22,71 @@ import {
   platWorkspace,
 } from "../test/plat-workspace.ts";
 
-// `plat update` installs afk-setup and the planning skills again at the platform's commit, at the levels afk-setup
-// is at, and never replaces planning skills the person has for themselves. The skills CLI is replaced by a stand-in
-// that writes what it would: SKILL.md under .agents/skills, a link for Claude Code, and skills-lock.json.
+// `plat update` and `plat sync` write afk-setup and the planning skills into the planning repo from the copy plat
+// carries: no skills CLI, nothing from GitHub, nothing for the user. They stay on this machine (.git/info/exclude).
 
 let ws: PlatWorkspace;
 let home: string;
-let calls: { args: string[]; cwd: string }[];
-let platformCommit: string;
 
 beforeEach(async () => {
   ws = await platWorkspace();
   home = mkdtempSync(join(tmpdir(), "afk-user-"));
-  calls = [];
-  platformCommit = (await (await fetch(`${ws.api.url}/version`)).json())
-    .platformCommit;
 });
 afterEach(async () => {
   await ws.close();
   rmSync(home, { recursive: true, force: true });
 });
 
-const PLANNING = [
+// The platform's skills package: every file under skills/<name>/, by its path under skills/.
+const packageRoot = fileURLToPath(
+  new URL("../../../../skills", import.meta.url),
+);
+function packageFiles(): Record<string, string> {
+  const files: Record<string, string> = {};
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else {
+        const path = relative(packageRoot, full);
+        if (path.includes("/")) files[path] = readFileSync(full, "utf8");
+      }
+    }
+  };
+  walk(packageRoot);
+  return files;
+}
+const ALL = [
+  "afk-setup",
+  "domain-modeling",
   "grill-with-docs",
   "grilling",
-  "domain-modeling",
   "to-spec",
   "to-tickets",
 ];
-const ALL = ["afk-setup", ...PLANNING];
 
 function skill(root: string, name: string, text = `${name} as installed\n`) {
   mkdirSync(join(root, ".agents/skills", name), { recursive: true });
   writeFileSync(join(root, ".agents/skills", name, "SKILL.md"), text);
 }
 
-const skillsCli = (command: string, args: string[], cwd: string) => {
-  calls.push({ args: [command, ...args], cwd });
-  const named = args.flatMap((a, i) => (args[i - 1] === "--skill" ? [a] : []));
-  const skills = named.includes("*") ? ALL : named;
-  const user = args.includes("-g");
-  const root = user ? home : cwd;
-  for (const name of skills) {
-    skill(root, name);
-    if (!user) {
-      mkdirSync(join(root, ".claude/skills"), { recursive: true });
-      rmSync(join(root, ".claude/skills", name), { force: true });
-      symlinkSync(
-        `../../.agents/skills/${name}`,
-        join(root, ".claude/skills", name),
-      );
-    }
+// What plat wrote must be the package byte for byte, laid out as the skills CLI lays it out.
+function expectThePackageIn(dir: string) {
+  for (const [path, text] of Object.entries(packageFiles()))
+    expect(readFileSync(join(dir, ".agents/skills", path), "utf8")).toBe(text);
+  for (const name of ALL) {
+    const link = join(dir, ".claude/skills", name);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(link)).toBe(`../../.agents/skills/${name}`);
   }
-  if (!user) writeFileSync(join(root, "skills-lock.json"), "{}\n");
-  return { code: 0 };
-};
+}
 
-const update = (checkout: Checkout) =>
-  ws.plat(checkout.dir, ["update"], undefined, {
-    env: { HOME: home },
-    run: skillsCli,
+const platIn = (dir: string, args: string[], env = {}) =>
+  ws.plat(dir, args, undefined, {
+    env: { HOME: home, ...env },
     platPath: "",
   });
+const update = (checkout: Checkout) => platIn(checkout.dir, ["update"]);
 
 const exclude = (checkout: Checkout) =>
   readFileSync(join(checkout.dir, ".git/info/exclude"), "utf8");
@@ -88,33 +97,21 @@ describe("plat update at project level", () => {
       "backend",
       "https://github.com/acme/backend.git",
     );
-    skill(backend.dir, "afk-setup");
 
     const updated = await update(backend);
 
     expect(updated.code).toBe(0);
-    expect(calls).toEqual([
-      {
-        args: [
-          "npx",
-          "-y",
-          "skills@latest",
-          "add",
-          `xxh171015/afk-platform#${platformCommit}`,
-          "--skill",
-          "*",
-          "-y",
-        ],
-        cwd: backend.dir,
-      },
-    ]);
+    expectThePackageIn(backend.dir);
+    expect(existsSync(join(backend.dir, "skills-lock.json"))).toBe(false);
     expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
     const lines = exclude(backend).split("\n");
     expect(lines).toContain("/.agents/skills/afk-setup");
     expect(lines).toContain("/.claude/skills/to-spec");
-    expect(lines).toContain("/skills-lock.json");
 
-    await update(backend);
+    const again = await update(backend);
+    expect(again.stdout).toContain(
+      "skills: the platform's, up to date in this repo",
+    );
     expect(exclude(backend)).toBe(lines.join("\n"));
   });
 
@@ -132,97 +129,149 @@ describe("plat update at project level", () => {
     const updated = await update(backend);
 
     expect(exclude(backend)).not.toContain("skills-lock.json");
-    expect(updated.stdout).toContain(
-      "replaced in this repo, as they were not the platform's: afk-setup, to-spec",
+    expect(readFileSync(join(backend.dir, "skills-lock.json"), "utf8")).toBe(
+      "{}\n",
     );
+    expect(updated.stdout).toContain(
+      "replaced in this repo with the platform's: afk-setup, to-spec",
+    );
+    expectThePackageIn(backend.dir);
   });
 });
 
-describe("plat update at user level", () => {
-  it("installs the whole package for the user when the user has no planning skills of their own", async () => {
+describe("plat sync puts the platform's skills in the planning repo", () => {
+  it("writes them from the plat the platform hands out, with no skills CLI and nothing but the platform to reach", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
     );
-    skill(home, "afk-setup");
-
-    await update(backend);
-
-    expect(calls.map((c) => c.args.slice(4))).toEqual([
-      [`xxh171015/afk-platform#${platformCommit}`, "--skill", "*", "-g", "-y"],
-    ]);
-  });
-
-  it("installs afk-setup for the user and the planning skills in this repo when the user has planning skills of their own", async () => {
-    const backend = ws.checkout(
-      "backend",
-      "https://github.com/acme/backend.git",
-    );
-    skill(home, "afk-setup");
-    skill(home, "grilling");
+    // the bundle runs from a folder of its own, far from the platform's skills/ folder
+    const bin = mkdtempSync(join(tmpdir(), "afk-bin-"));
+    const plat = join(bin, "plat");
     writeFileSync(
-      join(home, ".agents/.skill-lock.json"),
-      JSON.stringify({ skills: { grilling: { source: "mattpocock/skills" } } }),
+      plat,
+      await (await fetch(`${ws.api.url}/cli/plat.mjs`)).text(),
     );
 
-    const updated = await update(backend);
+    // async: the API answering plat runs in this process
+    const synced = await promisify(execFile)(process.execPath, [plat, "sync"], {
+      cwd: backend.dir,
+      encoding: "utf8",
+      // no npx on PATH: only node and git
+      env: {
+        HOME: home,
+        PATH: [process.execPath, spawnSync("which", ["git"]).stdout.toString()]
+          .map((file) => file.trim().replace(/\/[^/]+$/, ""))
+          .join(":"),
+        AFK_API_URL: ws.api.url,
+        AFK_HOME: ws.afkHome,
+      },
+    });
+    rmSync(bin, { recursive: true, force: true });
 
-    expect(updated.code).toBe(0);
-    expect(
-      calls.map((c) => [
-        c.cwd,
-        ...c.args.slice(5).filter((a) => a !== "--skill"),
-      ]),
-    ).toEqual([
-      [home, "afk-setup", "-g", "-y"],
-      [backend.dir, ...PLANNING, "-y"],
-    ]);
+    expect(synced.stderr).toBe("");
+    expect(synced.stdout).toContain(
+      "skills: afk-setup and the planning skills written in this repo, on this machine only (in .git/info/exclude)",
+    );
+    expectThePackageIn(backend.dir);
     expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
+  }, 60_000);
+
+  it("does not write over a skill git tracks in this repo, and plat doctor says why the skills fail", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+      { ".claude/skills/to-spec/SKILL.md": "the repo's own to-spec\n" },
+    );
+
+    const synced = await platIn(backend.dir, ["sync"]);
+
+    expect(synced.code).toBe(0);
+    expect(synced.stdout).toContain(
+      "skills: git tracks to-spec in this repo, so plat left them as they are",
+    );
+    expect(
+      readFileSync(
+        join(backend.dir, ".claude/skills/to-spec/SKILL.md"),
+        "utf8",
+      ),
+    ).toBe("the repo's own to-spec\n");
+    expect(existsSync(join(backend.dir, ".agents/skills/to-spec"))).toBe(false);
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
+
+    const doctor = await platIn(backend.dir, ["doctor", "--json"]);
+    const skills = JSON.parse(doctor.stdout).items.find(
+      (item: { id: string }) => item.id === "skills",
+    );
+    expect(skills.status).toBe("fail");
+    expect(skills.detail).toContain(
+      "to-spec in this repo not the version this platform uses",
+    );
+    expect(skills.command).toBe("plat sync");
   });
 
-  it("changes nothing for the user when the user's planning skills are the platform's, and says how to go back to Matt's", async () => {
+  it("leaves the user's own skills alone, and names the platform's copies an older install put there", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
     );
-    skill(home, "afk-setup");
-    skill(home, "to-spec");
+    skill(home, "to-spec", "Matt's to-spec\n");
+    skill(home, "afk-setup", "an older afk-setup\n");
     writeFileSync(
       join(home, ".agents/.skill-lock.json"),
       JSON.stringify({
-        skills: { "to-spec": { source: "xxh171015/afk-platform" } },
+        skills: {
+          "to-spec": { source: "mattpocock/skills" },
+          "afk-setup": { source: "xxh171015/afk-platform" },
+        },
       }),
     );
 
-    const updated = await update(backend);
+    const synced = await platIn(backend.dir, ["sync"]);
 
-    expect(updated.code).toBe(0);
-    expect(calls.filter((c) => c.args.includes("-g"))).toEqual([]);
-    expect(calls.map((c) => c.cwd)).toEqual([backend.dir]);
-    expect(updated.stdout).toContain(
-      "to-spec for you come from the platform, so every project of yours plans with them",
+    expect(synced.stdout).toContain(
+      "you still have the platform's afk-setup for you from an older install",
     );
-    expect(updated.stdout).toContain(
-      "npx skills@latest add mattpocock/skills --skill to-spec -g -y",
-    );
+    expect(synced.stdout).toContain("npx skills@latest remove -g -y afk-setup");
+    expect(
+      readFileSync(join(home, ".agents/skills/to-spec/SKILL.md"), "utf8"),
+    ).toBe("Matt's to-spec\n");
+    expect(
+      readFileSync(join(home, ".agents/skills/afk-setup/SKILL.md"), "utf8"),
+    ).toBe("an older afk-setup\n");
+    expect(readdirSync(join(home, ".agents/skills")).sort()).toEqual([
+      "afk-setup",
+      "to-spec",
+    ]);
+    expectThePackageIn(backend.dir);
   });
 
-  it("brings both up when the skills are in this repo and for the user", async () => {
+  it("says to run it in the planning repo when it is not in a git checkout, and writes nothing", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "afk-not-a-repo-"));
+
+    const synced = await platIn(folder, ["sync"]);
+
+    expect(synced.stdout).toContain(
+      "skills: this is not a git checkout; run plat sync in the planning repo",
+    );
+    expect(readdirSync(folder)).toEqual([]);
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it("brings up after a self-update only a repo that has the skills already", async () => {
     const backend = ws.checkout(
       "backend",
       "https://github.com/acme/backend.git",
     );
-    skill(home, "afk-setup");
-    skill(backend.dir, "to-spec", "Matt's to-spec\n");
+    const other = ws.checkout("other", "https://github.com/acme/other.git");
+    skill(backend.dir, "afk-setup", "an older afk-setup\n");
+    const updated = { AFK_PLAT_UPDATED_FROM: "0.2.0" };
 
-    const updated = await update(backend);
+    await platIn(backend.dir, ["blocked"], updated);
+    await platIn(other.dir, ["blocked"], updated);
 
-    expect(calls.map((c) => [c.cwd, c.args.includes("-g")])).toEqual([
-      [backend.dir, false],
-      [home, true],
-    ]);
-    expect(updated.stdout).toContain(
-      "replaced in this repo, as they were not the platform's: to-spec",
-    );
+    expectThePackageIn(backend.dir);
+    expect(existsSync(join(other.dir, ".agents"))).toBe(false);
+    expect(existsSync(join(other.dir, ".claude"))).toBe(false);
   });
 });

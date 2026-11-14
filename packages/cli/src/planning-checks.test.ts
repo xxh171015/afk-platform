@@ -1,7 +1,5 @@
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
-import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
 import { describe, expect, it } from "vitest";
-import { readAfkSetupSkill } from "./afk-setup-text.ts";
 import {
   integrationWarnings,
   skillsWarnings,
@@ -9,6 +7,7 @@ import {
   unreadyRepos,
   versionWarnings,
 } from "./planning-checks.ts";
+import { packageSkillFiles, packageSkills } from "./skills-install.ts";
 import { renderTrackerDoc } from "./tracker-doc.ts";
 
 const project = {
@@ -84,102 +83,106 @@ describe("trackerDocWarnings", () => {
 });
 
 describe("skillsWarnings", () => {
-  const snapshot = (name: "to-spec" | "to-tickets") =>
-    readSkillSnapshot(`${name}/SKILL.md`);
+  // The platform's skills, as plat sync writes them into the planning repo.
+  const repo = "/work/plan";
   const home = "/home/dev";
-  const installed = (dir: string, over: Record<string, string> = {}) =>
-    files({
-      [`${home}/${dir}/to-spec/SKILL.md`]: snapshot("to-spec"),
-      [`${home}/${dir}/to-tickets/SKILL.md`]: snapshot("to-tickets"),
-      [`${home}/${dir}/afk-setup/SKILL.md`]: readAfkSetupSkill(),
-      ...over,
-    });
-
-  it("is quiet when to-spec and to-tickets are what the snapshot holds", async () => {
-    expect(await skillsWarnings(installed(".claude/skills"), home)).toEqual([]);
-    expect(await skillsWarnings(installed(".cursor/skills"), home)).toEqual([]);
+  const platformsIn = (dir: string, over: Record<string, string> = {}) => ({
+    ...Object.fromEntries(
+      packageSkills().map((skill) => [
+        `${repo}/${dir}/${skill}/SKILL.md`,
+        packageSkillFiles(skill)["SKILL.md"] as string,
+      ]),
+    ),
+    ...over,
   });
 
-  it("warns about the one that differs, with the command that updates the package for the user", async () => {
+  it("is quiet when to-spec and to-tickets are what the snapshot holds", async () => {
+    expect(
+      await skillsWarnings(files(platformsIn(".agents/skills")), repo),
+    ).toEqual([]);
+    expect(
+      await skillsWarnings(files(platformsIn(".claude/skills")), repo),
+    ).toEqual([]);
+  });
+
+  it("warns about the one that differs, with the command that brings the repo's skills up", async () => {
     const warnings = await skillsWarnings(
-      installed(".claude/skills", {
-        [`${home}/.claude/skills/to-tickets/SKILL.md`]: "older",
-      }),
-      home,
+      files(
+        platformsIn(".agents/skills", {
+          [`${repo}/.agents/skills/to-tickets/SKILL.md`]: "older",
+        }),
+      ),
+      repo,
     );
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("to-tickets");
-    expect(warnings[0]).toContain("update them: plat update");
+    expect(warnings).toEqual([
+      "warning: to-tickets in this repo not the version this platform uses: bring them up with plat sync (in the planning repo) (a copy git tracks is left as it is: take it out of git first)",
+    ]);
   });
 
   it("is quiet when one directory has a stale copy but another has the pinned one", async () => {
-    const both = files({
-      [`${home}/.claude/skills/to-spec/SKILL.md`]: "older",
-      [`${home}/.claude/skills/to-tickets/SKILL.md`]: snapshot("to-tickets"),
-      [`${home}/.cursor/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
-      [`${home}/.agents/skills/afk-setup/SKILL.md`]: readAfkSetupSkill(),
-    });
-    expect(await skillsWarnings(both, home)).toEqual([]);
+    const both = files(
+      platformsIn(".agents/skills", {
+        [`${repo}/.claude/skills/to-spec/SKILL.md`]: "older",
+      }),
+    );
+    expect(await skillsWarnings(both, repo)).toEqual([]);
   });
 
   it("warns about each when none is installed, with the command that installs afk-setup", async () => {
-    const warnings = await skillsWarnings(files({}), home);
-    expect(warnings).toHaveLength(3);
-    expect(warnings.join("\n")).toContain("not found");
-    expect(warnings[2]).toContain(
-      "install them: npx skills@latest add xxh171015/afk-platform",
-    );
-  });
-
-  it("warns, with the command that updates it globally, when the user-level afk-setup is not this platform's", async () => {
-    const warnings = await skillsWarnings(
-      installed(".agents/skills", {
-        [`${home}/.agents/skills/afk-setup/SKILL.md`]: "older",
-      }),
-      home,
-    );
+    const warnings = await skillsWarnings(files({}), repo);
     expect(warnings).toEqual([
-      expect.stringContaining("update them: plat update"),
+      "warning: afk-setup, domain-modeling, grill-with-docs, grilling, to-spec, to-tickets not found in this repo: put the platform's skills here with plat sync (in the planning repo)",
     ]);
   });
 
   describe("installed in the planning repo (project level)", () => {
-    const repo = "/work/plan";
-    const inRepo = (over: Record<string, string> = {}) => ({
-      [`${repo}/.agents/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
-      [`${repo}/.agents/skills/to-tickets/SKILL.md`]: snapshot("to-tickets"),
-      [`${repo}/.agents/skills/afk-setup/SKILL.md`]: readAfkSetupSkill(),
-      ...over,
-    });
-
     it("is quiet with nothing installed for the user", async () => {
-      expect(await skillsWarnings(files(inRepo()), home, repo)).toEqual([]);
+      expect(
+        await skillsWarnings(files(platformsIn(".agents/skills")), repo),
+      ).toEqual([]);
     });
 
     it("judges the repo's copy over the user's: the agent uses the repo's", async () => {
       const warnings = await skillsWarnings(
-        files({
-          ...inRepo({ [`${repo}/.agents/skills/to-spec/SKILL.md`]: "older" }),
-          [`${home}/.agents/skills/to-spec/SKILL.md`]: snapshot("to-spec"),
-        }),
-        home,
+        files(
+          platformsIn(".agents/skills", {
+            [`${repo}/.agents/skills/to-spec/SKILL.md`]: "older",
+            [`${home}/.agents/skills/to-spec/SKILL.md`]: packageSkillFiles(
+              "to-spec",
+            )["SKILL.md"] as string,
+          }),
+        ),
         repo,
       );
       expect(warnings).toEqual([
-        expect.stringContaining("the to-spec skill in this repo"),
+        expect.stringContaining("to-spec in this repo not the version"),
       ]);
     });
 
     it("updates a stale afk-setup in the repo, not for the user", async () => {
       const warnings = await skillsWarnings(
         files(
-          inRepo({ [`${repo}/.agents/skills/afk-setup/SKILL.md`]: "older" }),
+          platformsIn(".agents/skills", {
+            [`${repo}/.agents/skills/afk-setup/SKILL.md`]: "older",
+          }),
         ),
-        home,
         repo,
       );
       expect(warnings).toEqual([
-        expect.stringContaining("update them: plat update (in this repo)"),
+        expect.stringContaining("afk-setup in this repo not the version"),
+      ]);
+    });
+
+    it("does not count skills only the user has: the platform's go in the planning repo", async () => {
+      const userOnly = Object.fromEntries(
+        Object.entries(platformsIn(".agents/skills")).map(([path, text]) => [
+          path.replace(repo, home),
+          text,
+        ]),
+      );
+      const warnings = await skillsWarnings(files(userOnly), repo);
+      expect(warnings).toEqual([
+        expect.stringContaining("not found in this repo"),
       ]);
     });
   });

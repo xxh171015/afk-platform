@@ -93,8 +93,9 @@ describe("plat doctor", () => {
     const code = await run(["--api-url", url, "doctor"], machine);
     expect(code).toBe(0);
     const text = machine.out.join("");
-    expect(text).toMatch(/skills\s+fail\s+.*to-spec skill was not found/s);
-    expect(text).toContain("npx skills@latest add xxh171015/afk-platform");
+    expect(text).toMatch(/skills\s+fail\s+.*to-spec, to-tickets not found/s);
+    expect(text).toContain("plat sync");
+    expect(text).not.toContain("npx skills");
     expect(text).toMatch(
       /Tracker doc\s+fail\s+.*docs\/agents\/issue-tracker.md/s,
     );

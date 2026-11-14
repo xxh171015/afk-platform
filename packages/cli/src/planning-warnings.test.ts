@@ -64,7 +64,7 @@ describe("plat spec create on a machine that is not set up for planning", () => 
     expect(warnings).toContain(
       "this repo is not set up for the platform (no docs/agents/issue-tracker.md): run the afk-setup skill",
     );
-    expect(warnings).toContain("the to-spec skill");
-    expect(warnings).toContain("the to-tickets skill");
+    expect(warnings).toMatch(/to-spec, to-tickets not found in this repo/);
+    expect(warnings).toContain("plat sync");
   });
 });

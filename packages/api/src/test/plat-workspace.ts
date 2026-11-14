@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { type Io, run } from "@afk/cli";
 import { gitOrThrow } from "@afk/pipeline";
 import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
@@ -120,7 +120,8 @@ export async function platWorkspace(): Promise<PlatWorkspace> {
           AFK_POLL_SECONDS: "0.05",
           ...extra.env,
         },
-        readFile: async (path) => readFileSync(join(cwd, path), "utf8"),
+        readFile: async (path) =>
+          readFileSync(isAbsolute(path) ? path : join(cwd, path), "utf8"),
         readDirectory: async (path) =>
           readdirSync(join(cwd, path), { withFileTypes: true })
             .filter((e) => e.isFile() && !e.name.startsWith("."))

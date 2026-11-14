@@ -7,7 +7,6 @@ import {
   type DoctorReport,
   hostKindOfUrl,
   SETUP_BRANCH,
-  SKILLS_PACKAGE,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { CLAUDE_RULES_PATH, CURSOR_RULES_PATH } from "./agent-docs.ts";
@@ -22,12 +21,11 @@ import { type TrackerDocProject, trackerDocTarget } from "./tracker-doc.ts";
 const GATES_PATH = ".sandcastle/gates.yaml";
 const AGENTS_MD = "AGENTS.md";
 const SETUP = "run the afk-setup skill";
-const SKILLS_INSTALL = `npx skills@latest add ${SKILLS_PACKAGE}`;
+const SKILLS_FIX = "plat sync";
 const NODE_MAJOR_MIN = 20;
 
 export interface DoctorInput {
   cwd: string;
-  home: string | undefined;
   readFile: (path: string) => Promise<string>;
   loadVersion: () => Promise<{ platformVersion: string } | undefined>;
   loadProject: (id: number) => Promise<TrackerDocProject>;
@@ -162,14 +160,7 @@ export async function collectDoctorReport(
   }
 
   items.push(
-    item(
-      "skills",
-      "skills",
-      input.home
-        ? await skillsWarnings(read, input.home, cwd)
-        : ["warning: HOME is not set; cannot look for skills"],
-      SKILLS_INSTALL,
-    ),
+    item("skills", "skills", await skillsWarnings(read, "."), SKILLS_FIX),
   );
 
   const tracker =

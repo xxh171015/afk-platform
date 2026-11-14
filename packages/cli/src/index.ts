@@ -67,7 +67,6 @@ import {
 import {
   integrationWarnings,
   skillsWarnings,
-  staleSkills,
   trackerDocWarnings,
   unreadyRepos,
   versionWarnings,
@@ -91,7 +90,7 @@ import {
   rerunPlat,
   UPDATED_FROM,
 } from "./self-update.ts";
-import { type RunCommand, runCommand, updateSkills } from "./skills-install.ts";
+import { installSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -115,8 +114,6 @@ export interface Io {
   cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
   // Asks the person a yes/no question (`plat init`); absent when nobody can answer, e.g. stdin is not a terminal.
   confirm?: (question: string) => Promise<boolean>;
-  // Runs a command such as the skills CLI (`plat update`); runCommand (skills-install.ts) when omitted.
-  run?: RunCommand;
   // The file plat runs from, which `plat update` and the self-update replace; when omitted, process.argv[1] if it is
   // the platform's bundle, else none (""). See self-update.ts.
   platPath?: string;
@@ -333,10 +330,12 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     }
   });
 
-  // Brings this planning machine up to the platform's (`plat sync`, and after a self-update): the planning skills
-  // when they are not the platform's (always after a self-update: plat carries only some of their text), and the
-  // planning files plat writes in this repo. The lines say what changed; nothing here fails the command.
-  const syncMachine = async (afterUpdate: boolean): Promise<string[]> => {
+  // Brings this planning machine up to the platform's (`plat sync`, and after a self-update): afk-setup and the
+  // planning skills in this repo, written from the copy plat carries, and the planning files plat writes here. The
+  // lines say what changed; nothing here fails the command.
+  const syncMachine = async (
+    onlyWhereInstalled: boolean,
+  ): Promise<string[]> => {
     const lines: string[] = [];
     const cwd = io.cwd ?? process.cwd();
     const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
@@ -346,35 +345,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     const repo = top.status === 0 ? top.stdout.trim() : undefined;
     const home = io.env.HOME ?? homedir();
     const client = api();
-    const version = await client
-      .GET("/version")
-      .then((r) => r.data)
-      .catch(() => undefined);
 
-    // absolute paths: the home directory and the repo's top, wherever plat runs
+    // An explicit `plat sync` puts the skills in this repo; after plat replaced itself, whatever the command, only the
+    // skills already here are brought up.
+    lines.push(...installSkills({ home, repo, onlyWhereInstalled }));
+
+    // absolute paths: the repo's top, wherever plat runs
     const readAbsolute = async (path: string) => readFileSync(path, "utf8");
-    const stale =
-      afterUpdate ||
-      (await staleSkills(readAbsolute, home, repo ?? cwd)).length > 0;
-    if (stale) {
-      try {
-        lines.push(
-          ...updateSkills({
-            home,
-            repo,
-            commit: version?.platformCommit ?? null,
-            run: io.run ?? runCommand,
-          }),
-        );
-      } catch (error) {
-        lines.push(
-          `skills: could not update them: ${(error as Error).message}; run plat update`,
-        );
-      }
-    } else {
-      lines.push("skills: nothing to update");
-    }
-
     const doc = repo
       ? await readAbsolute(join(repo, TRACKER_DOC_PATH)).catch(() => null)
       : null;
@@ -742,9 +719,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           },
           project,
         )),
-        ...(io.env.HOME
-          ? await skillsWarnings(io.readFile, io.env.HOME, ".")
-          : []),
+        ...(await skillsWarnings(io.readFile, ".")),
       ];
       for (const warning of warnings) io.stderr(`${warning}\n`);
     } catch {
@@ -851,7 +826,6 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const client = api();
       const report = await collectDoctorReport({
         cwd,
-        home: io.env.HOME,
         readFile: io.readFile,
         loadVersion: async () => {
           const { data } = await client.GET("/version");
@@ -894,7 +868,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   program
     .command("update")
     .description(
-      "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
+      "replace this plat with the platform's, and write the platform's afk-setup and planning skills into this repo (on this machine only)",
     )
     .action(async () => {
       const base = apiUrl();
@@ -919,27 +893,25 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         }
       }
 
-      // The skills: installed again at the platform's commit, at the levels afk-setup is at.
+      // The skills: the new plat carries the platform's, so it is the one that writes them (`plat sync`).
+      if (self && lines[0]?.startsWith("plat: replaced")) {
+        io.stdout(json() ? "" : `${lines.join("\n")}\n`);
+        const code = (io.rerun ?? rerunPlat)(self, ["sync"], {
+          [UPDATED_FROM]: PLATFORM_VERSION,
+        });
+        if (code !== 0) throw new Failure("plat sync failed after the update");
+        return;
+      }
       const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
         cwd: io.cwd ?? process.cwd(),
         encoding: "utf8",
       });
-      const platform = await createApiClient(base, undefined, cliHeaders(plat))
-        .GET("/version")
-        .then((r) => r.data)
-        .catch(() => undefined);
-      try {
-        lines.push(
-          ...updateSkills({
-            home: io.env.HOME ?? homedir(),
-            repo: top.status === 0 ? top.stdout.trim() : undefined,
-            commit: platform?.platformCommit ?? null,
-            run: io.run ?? runCommand,
-          }),
-        );
-      } catch (error) {
-        throw new Failure(`${lines.join("\n")}\n${(error as Error).message}`);
-      }
+      lines.push(
+        ...installSkills({
+          home: io.env.HOME ?? homedir(),
+          repo: top.status === 0 ? top.stdout.trim() : undefined,
+        }),
+      );
       print({ lines }, lines.join("\n"));
     });
 
@@ -949,7 +921,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "bring this planning machine up to the platform's: plat itself, the planning skills and the planning files plat writes in this repo. plat does it by itself when the platform hands out a newer plat; the planning conventions say to run it before planning",
     )
     .action(async () => {
-      const lines = await syncMachine(Boolean(updatedFrom));
+      const lines = await syncMachine(false);
       if (updatedFrom)
         lines.unshift(
           `plat: updated itself to the platform's (${updatedFrom} -> ${PLATFORM_VERSION})`,

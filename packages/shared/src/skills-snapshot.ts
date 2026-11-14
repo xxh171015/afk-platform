@@ -3,7 +3,7 @@ import { readRepoText } from "./skills-snapshot-text.ts";
 // What the platform takes from mattpocock/skills at SKILLS_SHA, copied unchanged into this repo by
 // scripts/refresh-skills-snapshot.ts, so that a change upstream shows up as a diff when SKILLS_SHA is bumped. Each
 // copy's folder has a VENDORED.md naming the SHA. Three places, by who reads them:
-//   skills/                  the planning skills, installed beside afk-setup with `npx skills add xxh171015/afk-platform`
+//   skills/                  afk-setup and the planning skills, carried inside plat and written into the planning repo
 //   packages/pipeline/skills the skills the agents run in the sandbox, mounted read-only there by the worker
 //   packages/shared/skills-snapshot  the seed templates plat init and plat tracker-doc write
 export const VENDORED_DIRS = [
