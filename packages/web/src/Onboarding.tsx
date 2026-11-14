@@ -1,4 +1,3 @@
-import { skillsPackageAt } from "@afk/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Plug } from "lucide-react";
 import type { ReactNode } from "react";
@@ -10,15 +9,12 @@ import { ErrorState } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { formatAbsoluteTime } from "./time.ts";
 
-// Getting a project onto the platform from the control tower (#181 / #186): the skills install
-// command pinned to the platform's commit, then /afk-setup. Project settings live elsewhere.
+// Getting a project onto the platform from the control tower (#181 / #186 / #322): one command, run in the planning
+// repo, that gets the machine ready (plat, the platform's address, the skills), then /afk-setup. Project settings
+// live elsewhere.
 
-export const installCommand = (commit: string) =>
-  `npx skills@latest add ${skillsPackageAt(commit)}`;
-
-const TRACKER_DOC_COMMAND =
-  "plat tracker-doc --project <项目 id> --repo <仓库名> > docs/agents/issue-tracker.md";
-const AGENTS_MD_COMMAND = "test -f AGENTS.md";
+export const setupCommand = (address: string) =>
+  `curl -fsSL ${address.replace(/\/+$/, "")}/setup.sh | sh`;
 
 const isLocal = (address: string) => {
   try {
@@ -72,27 +68,16 @@ function usePlatformVersion() {
 }
 
 function Steps({ address }: { address: string }) {
-  const version = usePlatformVersion();
-  const commit = version.data?.platformCommit ?? null;
   return (
     <ol className="space-y-3 text-sm">
       <li className="space-y-1.5">
         <p>在项目的规划仓库里运行：</p>
-        {commit ? (
-          <CopyCommand command={installCommand(commit)} />
-        ) : version.isPending ? (
-          <p className="text-muted-foreground">正在读取平台的版本…</p>
-        ) : (
-          <p className="text-muted-foreground">
-            平台说不出它对应的提交，没法给出锁定版本的安装命令；请让运行平台的人检查平台的
-            checkout。
-          </p>
-        )}
+        <CopyCommand command={setupCommand(address)} />
       </li>
       <li className="space-y-1.5">
         <p>
-          然后在 Cursor 里打开这个规划仓库，输入 <code>/afk-setup</code>
-          ；它问平台地址时填 <code className="font-mono">{address}</code>
+          然后在 Cursor 或 Claude Code 里打开这个仓库，输入{" "}
+          <code>/afk-setup</code>
         </p>
       </li>
       {isLocal(address) ? (
@@ -156,16 +141,17 @@ function useDoctorReport(projectId: number | undefined) {
   });
 }
 
+// What `plat doctor` last found on a planning machine. Shown only once there is a report: before that, the two steps
+// above are all there is to do.
 function LocalChecklist({
   address,
-  commit,
   projectId,
 }: {
   address: string;
-  commit: string | null;
   projectId: number | undefined;
 }) {
   const report = useDoctorReport(projectId);
+  if (!report.data) return null;
   const item = (id: string) =>
     report.data?.items.find((entry) => entry.id === id);
   const skills = item("skills");
@@ -174,30 +160,32 @@ function LocalChecklist({
   return (
     <section aria-label="本机" className="space-y-2">
       <h3 className="text-sm font-medium">本机</h3>
-      {report.data ? (
-        <p className="text-xs text-muted-foreground">
-          {report.data.machine} 已检查 ·{" "}
-          {formatAbsoluteTime(report.data.checkedAt)}
-        </p>
-      ) : null}
+      <p className="text-xs text-muted-foreground">
+        {report.data.machine} 已检查 ·{" "}
+        {formatAbsoluteTime(report.data.checkedAt)}
+      </p>
       <div className="space-y-3 text-sm">
         <CheckRow
           title="skills"
           status={doctorStatus(skills?.status)}
           note={skills?.detail}
-          command={skills?.command ?? (commit ? installCommand(commit) : null)}
+          command={
+            skills?.status === "fail"
+              ? (skills.command ?? setupCommand(address))
+              : null
+          }
         />
         <CheckRow
           title="plat"
           status={doctorStatus(plat?.status)}
           note={plat?.detail}
-          command={plat?.command ?? `plat connect ${address}`}
+          command={plat?.status === "fail" ? plat.command : null}
         />
         <CheckRow
           title="Tracker doc"
           status={doctorStatus(tracker?.status)}
           note={tracker?.detail}
-          command={tracker?.command ?? TRACKER_DOC_COMMAND}
+          command={tracker?.status === "fail" ? tracker.command : null}
         />
       </div>
     </section>
@@ -232,11 +220,6 @@ function PlatformChecklist() {
           }
         />
         <CheckRow title="已登记的项目和仓库" status="还没有项目" />
-        <CheckRow
-          title="AGENTS.md"
-          status="尚未检查"
-          command={AGENTS_MD_COMMAND}
-        />
       </div>
     </section>
   );
@@ -249,15 +232,10 @@ function OnboardingFlow({
   address: string;
   projectId: number | undefined;
 }) {
-  const version = usePlatformVersion();
   return (
     <div className="space-y-4">
       <Steps address={address} />
-      <LocalChecklist
-        address={address}
-        commit={version.data?.platformCommit ?? null}
-        projectId={projectId}
-      />
+      <LocalChecklist address={address} projectId={projectId} />
       {projectId === undefined ? <PlatformChecklist /> : null}
     </div>
   );

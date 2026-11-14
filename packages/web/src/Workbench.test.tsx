@@ -467,11 +467,7 @@ describe("the workbench", () => {
     );
     const block = await screen.findByRole("region", { name: "接入第一个项目" });
     expect(
-      (
-        await within(block).findAllByText(
-          "npx skills@latest add xxh171015/afk-platform#abc",
-        )
-      ).length,
+      (await within(block).findAllByText(/\/setup\.sh \| sh$/)).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("平台在自己跑")).toBeNull();
     expect(screen.getByText("没有在等你的事。先接入一个项目。")).toBeTruthy();

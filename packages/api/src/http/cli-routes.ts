@@ -3,8 +3,9 @@ import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { SKILLS_SHA } from "@afk/shared/skills-sha";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import { cliBundle, platFingerprint } from "../cli/cli-bundle.ts";
+import { setupScript } from "../cli/setup-sh.ts";
 
-// What a planning machine fetches from the platform: plat itself, and which version the platform is.
+// What a planning machine fetches from the platform: the setup script, plat itself, and which version the platform is.
 
 // The commit of the platform's repo that `plat update` and the control tower's install command pin the skills
 // package to (xxh171015/afk-platform#<commit>): the newest commit this platform's checkout runs that a remote has,
@@ -69,6 +70,14 @@ export function registerCliRoutes(app: OpenAPIHono) {
       },
       200,
     ),
+  );
+  // what a person runs in the planning repo (the control tower's first step), for the address they fetched it from;
+  // not in the OpenAPI document either
+  app.get("/setup.sh", (c) =>
+    c.body(setupScript(new URL(c.req.url).origin), 200, {
+      "content-type": "text/x-shellscript; charset=utf-8",
+      "cache-control": "no-store",
+    }),
   );
   // plat as one JavaScript file for node; not in the OpenAPI document, it is not JSON
   app.get("/cli/plat.mjs", async (c) => {
