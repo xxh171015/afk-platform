@@ -16,12 +16,12 @@ import {
   trackerDocWarnings,
   versionWarnings,
 } from "./planning-checks.ts";
+import { SKILLS_FIX } from "./skills-install.ts";
 import { type TrackerDocProject, trackerDocTarget } from "./tracker-doc.ts";
 
 const GATES_PATH = ".sandcastle/gates.yaml";
 const AGENTS_MD = "AGENTS.md";
 const SETUP = "run the afk-setup skill";
-const SKILLS_FIX = "plat sync";
 const NODE_MAJOR_MIN = 20;
 
 export interface DoctorInput {

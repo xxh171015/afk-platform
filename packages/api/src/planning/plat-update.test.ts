@@ -8,6 +8,7 @@ import {
   readFileSync,
   readlinkSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -243,6 +244,49 @@ describe("plat sync puts the platform's skills in the planning repo", () => {
       "afk-setup",
       "to-spec",
     ]);
+    expectThePackageIn(backend.dir);
+  });
+
+  it("writes no link over the files when the repo's .claude/skills is itself a link to .agents/skills", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    mkdirSync(join(backend.dir, ".agents/skills"), { recursive: true });
+    mkdirSync(join(backend.dir, ".claude"), { recursive: true });
+    symlinkSync("../.agents/skills", join(backend.dir, ".claude/skills"));
+
+    await platIn(backend.dir, ["sync"]);
+    const again = await platIn(backend.dir, ["sync"]);
+
+    for (const [path, text] of Object.entries(packageFiles()))
+      expect(
+        readFileSync(join(backend.dir, ".agents/skills", path), "utf8"),
+      ).toBe(text);
+    expect(
+      lstatSync(join(backend.dir, ".agents/skills/to-spec")).isDirectory(),
+    ).toBe(true);
+    expect(again.stdout).toContain(
+      "skills: the platform's, up to date in this repo",
+    );
+  });
+
+  it("names a copy as replaced when only a file beside its SKILL.md differs", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    await platIn(backend.dir, ["sync"]);
+    writeFileSync(
+      join(backend.dir, ".agents/skills/afk-setup/gates.md"),
+      "mine\n",
+    );
+
+    const synced = await platIn(backend.dir, ["sync"]);
+
+    expect(synced.stdout).toContain(
+      "skills: replaced in this repo with the platform's: afk-setup",
+    );
     expectThePackageIn(backend.dir);
   });
 

@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -23,11 +24,21 @@ import { readSkillsPackage } from "./skills-package-text.ts";
 
 const FILES_DIR = ".agents/skills";
 const LINK_DIRS = [".claude/skills", ".cursor/skills"];
+/** The skills directories an agent reads in the planning repo (an older install may have put copies under .cursor). */
+export const SKILLS_DIRS = [FILES_DIR, ...LINK_DIRS];
+/** What brings the planning repo's skills to the platform's. */
+export const SKILLS_FIX = "plat sync";
+
+let carried: Record<string, string> | undefined;
+const skillsPackage = () => {
+  carried ??= readSkillsPackage();
+  return carried;
+};
 
 /** The skills of the package plat carries, afk-setup first. */
 export function packageSkills(): string[] {
   const names = new Set(
-    Object.keys(readSkillsPackage()).map((path) => path.split("/")[0] ?? ""),
+    Object.keys(skillsPackage()).map((path) => path.split("/")[0] ?? ""),
   );
   names.delete("afk-setup");
   return ["afk-setup", ...[...names].sort()];
@@ -36,7 +47,7 @@ export function packageSkills(): string[] {
 /** The files of one skill as the platform has it, by path inside the skill's folder. */
 export function packageSkillFiles(skill: string): Record<string, string> {
   const files: Record<string, string> = {};
-  for (const [path, text] of Object.entries(readSkillsPackage()))
+  for (const [path, text] of Object.entries(skillsPackage()))
     if (path.startsWith(`${skill}/`))
       files[path.slice(skill.length + 1)] = text;
   return files;
@@ -82,15 +93,31 @@ const sameFiles = (
 
 const linkTarget = (skill: string) => `../../${FILES_DIR}/${skill}`;
 
-// The SKILL.md of a copy of `skill` in this repo, wherever an agent finds one.
-function skillText(repo: string, skill: string): string | undefined {
-  for (const dir of [FILES_DIR, ...LINK_DIRS]) {
-    const file = join(repo, dir, skill, "SKILL.md");
+// The files of a copy of `skill` in this repo, wherever an agent finds one (through links too).
+function copyIn(
+  repo: string,
+  skill: string,
+): Record<string, string> | undefined {
+  for (const dir of SKILLS_DIRS) {
+    const at = join(repo, dir, skill);
+    if (!existsSync(at)) continue;
     try {
-      return readFileSync(file, "utf8");
+      return filesIn(realpathSync(at));
     } catch {}
   }
   return undefined;
+}
+
+// Whether `dir` is .agents/skills itself, through a link (a hand-made `.claude/skills -> ../.agents/skills`): a link
+// written there would point at itself.
+function isFilesDir(repo: string, dir: string): boolean {
+  try {
+    return (
+      realpathSync(join(repo, dir)) === realpathSync(join(repo, FILES_DIR))
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Writes one skill: its files under .agents/skills, a link from .claude/skills, and from .cursor/skills when an
@@ -111,6 +138,7 @@ function writeSkill(repo: string, skill: string): boolean {
   for (const dir of LINK_DIRS) {
     const link = join(repo, dir, skill);
     if (dir !== ".claude/skills" && !isThere(link)) continue;
+    if (isFilesDir(repo, dir)) continue;
     if (isLink(link) && readlinkSync(link) === linkTarget(skill)) continue;
     rmSync(link, { recursive: true, force: true });
     mkdirSync(dirname(link), { recursive: true });
@@ -186,30 +214,24 @@ export function installSkills({
     );
   } else if (
     onlyWhereInstalled &&
-    !skills.some((skill) => skillText(repo, skill) !== undefined)
+    !skills.some((skill) => copyIn(repo, skill) !== undefined)
   ) {
     lines.push("skills: none in this repo");
   } else {
-    // A copy git tracks is the repo's own: plat does not write over it.
-    const tracked = skills.filter(
-      (skill) =>
-        git(repo, [
-          "ls-files",
-          "--",
-          ...[FILES_DIR, ...LINK_DIRS].map((dir) => `${dir}/${skill}`),
-        ]).out.trim() !== "",
-    );
+    // A copy git tracks, in any agent's skills directory, is the repo's own: plat does not write over it.
+    const trackedFiles = git(repo, ["ls-files", "-z"]).out.split("\0");
+    const tracked = skills.filter((skill) => {
+      const inSkills = new RegExp(`^(?:\\.[^/]+/)+skills/${skill}(?:/|$)`);
+      return trackedFiles.some((file) => inSkills.test(file));
+    });
     const replaced: string[] = [];
     let changed = false;
     for (const skill of skills) {
       if (tracked.includes(skill)) continue;
-      const before = skillText(repo, skill);
+      const before = copyIn(repo, skill);
       if (!writeSkill(repo, skill)) continue;
       changed = true;
-      if (
-        before !== undefined &&
-        before !== packageSkillFiles(skill)["SKILL.md"]
-      )
+      if (before !== undefined && !sameFiles(before, packageSkillFiles(skill)))
         replaced.push(skill);
     }
     excludeProjectSkills(repo);

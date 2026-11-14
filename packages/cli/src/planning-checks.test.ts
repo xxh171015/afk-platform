@@ -115,7 +115,7 @@ describe("skillsWarnings", () => {
       repo,
     );
     expect(warnings).toEqual([
-      "warning: to-tickets in this repo not the version this platform uses: bring them up with plat sync (in the planning repo) (a copy git tracks is left as it is: take it out of git first)",
+      "warning: to-tickets in this repo not the version this platform uses: bring them up with plat sync (in the planning repo; a copy git tracks is left as it is: take it out of git first)",
     ]);
   });
 

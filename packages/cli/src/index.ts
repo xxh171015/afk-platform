@@ -895,7 +895,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
 
       // The skills: the new plat carries the platform's, so it is the one that writes them (`plat sync`).
       if (self && lines[0]?.startsWith("plat: replaced")) {
-        io.stdout(json() ? "" : `${lines.join("\n")}\n`);
+        // the new plat says it updated itself, and what it wrote
         const code = (io.rerun ?? rerunPlat)(self, ["sync"], {
           [UPDATED_FROM]: PLATFORM_VERSION,
         });

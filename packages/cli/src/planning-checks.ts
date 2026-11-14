@@ -1,6 +1,11 @@
 import { SETUP_BRANCH } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
-import { packageSkillFiles, packageSkills } from "./skills-install.ts";
+import {
+  packageSkillFiles,
+  packageSkills,
+  SKILLS_DIRS,
+  SKILLS_FIX,
+} from "./skills-install.ts";
 import {
   renderTrackerDoc,
   type TrackerDocProject,
@@ -14,19 +19,9 @@ type ReadFile = (path: string) => Promise<string>;
 
 const DOC_PATH = "docs/agents/issue-tracker.md";
 
-// The skills directories an agent reads in the planning repo. plat writes the files under .agents/skills and links
-// .claude/skills to them (skills-install.ts); an older install may have put copies under .cursor/skills.
-export const SKILLS_DIRS = [
-  ".agents/skills",
-  ".claude/skills",
-  ".cursor/skills",
-];
-
 // Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup). The
 // planning agent reads these warnings and runs it itself: the person types nothing.
 const SETUP = "run the afk-setup skill";
-// What brings the planning repo's skills to the platform's.
-const SKILLS_FIX = "plat sync (in the planning repo)";
 
 /**
  * Warnings about the planning repo's tracker doc: it is compared whole with what `plat tracker-doc` prints now, so a
@@ -81,6 +76,7 @@ export async function skillsWarnings(
   const stale: string[] = [];
   for (const skill of packageSkills()) {
     const expected = packageSkillFiles(skill)["SKILL.md"];
+    if (expected === undefined) continue;
     const copies: string[] = [];
     for (const dir of SKILLS_DIRS) {
       try {
@@ -88,16 +84,16 @@ export async function skillsWarnings(
       } catch {}
     }
     if (copies.length === 0) missing.push(skill);
-    else if (!copies.includes(expected as string)) stale.push(skill);
+    else if (!copies.includes(expected)) stale.push(skill);
   }
   const warnings: string[] = [];
   if (missing.length > 0)
     warnings.push(
-      `warning: ${missing.join(", ")} not found in this repo: put the platform's skills here with ${SKILLS_FIX}`,
+      `warning: ${missing.join(", ")} not found in this repo: put the platform's skills here with ${SKILLS_FIX} (in the planning repo)`,
     );
   if (stale.length > 0)
     warnings.push(
-      `warning: ${stale.join(", ")} in this repo not the version this platform uses: bring them up with ${SKILLS_FIX} (a copy git tracks is left as it is: take it out of git first)`,
+      `warning: ${stale.join(", ")} in this repo not the version this platform uses: bring them up with ${SKILLS_FIX} (in the planning repo; a copy git tracks is left as it is: take it out of git first)`,
     );
   return warnings;
 }
