@@ -69,7 +69,9 @@ describe("the platform's source", () => {
     expect(pushes).toEqual(["cli/src/setup.ts", "worker/src/push.ts"]);
     const setup = code.find(({ file }) => file === "cli/src/setup.ts");
     expect(setup?.text.match(/["'`]push["'`][^\]]*\]/g)).toEqual([
-      expect.stringContaining("`HEAD:refs/heads/${SETUP_BRANCH}`"),
+      expect.stringContaining(
+        ["`HEAD:refs/heads/$", "{SETUP_BRANCH}`"].join(""),
+      ),
     ]);
   });
 
