@@ -15,7 +15,8 @@ Speak the person's language in chat. Show plat's output when it carries a proble
 
 - **It exits non-zero with `"error": "not-ready"`**: tell the person each line of `problems` (each names the command they run) and stop. Do not install anything or log in for them.
 - **`ready` is true**: the project is set up already (on another machine, or by an earlier run). Report one line, 本机已就绪 (or the same in the person's language), and stop.
-- **A repo has a `problem`** (a fetch that failed, a merge with conflicts in its worktree): tell the person, fix what you can in that worktree (resolve the conflicts and commit), and run `plat setup --json` again with the same `--with`s.
+- **A repo has a `problem`**: with a `worktree` (a merge with conflicts there), resolve the conflicts in that worktree, commit, and run `plat setup --json` again with the same `--with`s. Without one (origin could not be fetched), tell the person the problem and leave that repo for now.
+- **It exits non-zero with any other `error`**: tell the person the error and stop.
 - **`hostingOk` is false for a repo**: pass on its `hosting` line (who to ask for the GitHub App or GitLab membership), and carry on.
 
 **Called mid-planning** (plat said a ticket's repo does not belong to the project): run `plat setup --json --with <that repo's checkout>`. Ask for its local path only when it is not among the workspace folders. Then carry on as below, and go back to the planning where it stopped and import again.
@@ -36,8 +37,11 @@ End-to-end tests against other repos are not set up here: a spec that needs them
 
 `plat setup --finish --json`. It runs each repo's gate in the platform's sandbox, exactly as tickets will be gated, and waits for the answers.
 
-- **A repo's `gate` is `failed`**: read `gateOutput`, fix the cause in that repo's `worktree`, and run `plat setup --finish --json` again; it only handles the repos that have not passed.
-- **`sandboxLacksTool` is true** (`command not found` for a toolchain the repo needs): stop for that repo and tell the person: the platform's sandbox image lacks it, and whoever runs the platform has to add it.
+For each repo that did not pass, in this order:
+
+- **`sandboxLacksTool` is true** (`command not found` for a toolchain the repo needs): do not try to fix it in the repo. Stop for that repo and tell the person: the platform's sandbox image lacks it, and whoever runs the platform has to add it.
+- **`gate` is `failed`**: read `gateOutput`, fix the cause in that repo's `worktree`, and run `plat setup --finish --json` again; it only handles the repos that have not passed.
+- **`problem` is set** (a commit or push refused, a merge with conflicts, a gate check that could not run): fix what is in the worktree (resolve conflicts) and run `--finish` again; when the cause is outside the repo (push refused, no worker answering), tell the person and stop for that repo.
 
 ## 4. Report
 

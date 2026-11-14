@@ -14,13 +14,27 @@ const section = (skill: string, heading: string, next: string): string => {
 describe("the afk-setup skill", () => {
   it("does not stop at the first step when gh is missing on a GitLab-only project", () => {
     // the machine check is plat setup's, which asks for gh only when a repo is on GitHub (plat-setup.test.ts)
+    const plat = readFileSync(
+      fileURLToPath(new URL("./index.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(plat).toMatch(
+      /hostKindOfUrl\(url\) === "github"\)\)[\s\S]{0,80}"gh", \["auth", "status"\]/,
+    );
     const prepare = section(readAfkSetupSkill(), "## 1. Prepare", "## 2.");
     expect(prepare).toContain("plat setup --json");
     expect(prepare).not.toMatch(/\bgh\b/);
   });
 
   it("stops a GitHub project that is not logged into gh, and names the login command", () => {
-    // plat setup names `gh auth login` among its problems; the skill passes each on and stops
+    // plat setup's machine check names `gh auth login` for a repo on GitHub; the skill passes each problem on and stops
+    const plat = readFileSync(
+      fileURLToPath(new URL("./index.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(plat).toContain(
+      "gh is not logged in, and a repo is on GitHub: gh auth login",
+    );
     const prepare = section(readAfkSetupSkill(), "## 1. Prepare", "## 2.");
     expect(prepare).toMatch(
       /"error": "not-ready"[\s\S]*?each line of `problems`[\s\S]*?stop/,

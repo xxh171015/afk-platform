@@ -47,7 +47,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 
    它先一次查全本机缺什么：当前目录是不是 git 仓库、有没有 git、Node 20+。缺的全部列出来，什么都不改。不缺就做三件事：
    - 把平台的 plat 装进 PATH 里已有的、你能写的、在 home 下的目录（优先 `~/.local/bin`，其次 `~/bin`）。实在没有时，才建 `~/.local/bin`，并往你的 shell 配置里加一行，告诉你加在哪个文件。
-   - 运行 `plat connect <地址>`，让 plat 记住平台地址（存在 `$AFK_HOME/plat.json`，默认是 `~/.afk/plat.json`）。
+   - 运行 `plat connect <地址>`，让 plat 记住平台地址（存在 `$AFK_HOME/plat.json`，默认是 `~/.afk/plat.json`）。plat 找平台地址的顺序是：`--api-url`、`$AFK_API_URL`、记住的地址、默认的 `http://127.0.0.1:3000`。临时连别的平台时用前两个；不带地址运行 `plat connect` 会显示当前用的地址。
    - 运行 `plat sync`，把 afk-setup 和规划用的 grill-with-docs、grilling、domain-modeling、to-spec、to-tickets 写进这个仓库。
 
    全程只连平台，不连 GitHub，不跑 npx。重复运行是安全的。
@@ -73,8 +73,8 @@ Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx
 1. **准备**（`plat setup --with <其他仓库>`，在规划仓库里运行，规划仓库就是运行它的那个仓库）：
    - **一次查全**：Node 20+、git 2.38+、平台能否连上、每个路径是不是带 origin 的 git checkout，以及有仓库在 GitHub 时 `gh` 是否已登录。只在 GitLab 上的项目不需要 `gh`，也不需要 `glab`。缺的全部列出来，每样一行修复命令，什么都不改。
    - **登记**：走 `plat init` 的逻辑，登记项目和仓库，写好规划要读的文件（见下文「登记」），报出每个仓库的托管情况。
-   - **建 worktree**：origin 的默认分支和 `afk/setup` 上都缺门禁或 `AGENTS.md`、`afk/setup` 合不进默认分支、或者上次的 worktree 还在时，才在你的 checkout 之外给这个仓库建一个临时 worktree：`~/.afk/setup/<规划仓库名>/<仓库名>`，基于远端的 `afk/setup`（没有就基于默认分支）并合入默认分支，detached HEAD，不建本地分支。
    - **清理旧版残留**：旧版 afk-setup 留下的 `<仓库>-afk-setup` worktree 和本地 `afk/setup` 分支，没有未提交改动、提交也都推了的才删，否则保留，各用一行说明。
+   - **建 worktree**：origin 的默认分支和 `afk/setup` 上都缺门禁或 `AGENTS.md`、`afk/setup` 合不进默认分支、或者上次的 worktree 还在时，才在你的 checkout 之外给这个仓库建一个临时 worktree：`~/.afk/setup/<规划仓库名>/<仓库名>`，基于远端的 `afk/setup`（没有就基于默认分支）并合入默认分支，detached HEAD，不建本地分支。
 2. **补齐**：agent 在每个 worktree 里按 1.3 写缺的 `.sandcastle/gates.yaml`、`AGENTS.md`。联调环境不在这里配，见 1.3 最后一行。
 3. **收尾**（`plat setup --finish`）：
    - 每个仓库：提交（提交说明列出加了哪些文件、替换了哪些已有文件），`push origin HEAD:afk/setup`，让平台在真实沙箱里跑一遍门禁。
