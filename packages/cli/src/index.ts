@@ -11,6 +11,7 @@ import {
   formatDisplayId,
   HOST_HEADER,
   HOST_KINDS,
+  hostKindOfUrl,
   MAX_PLANNING_PATCH_BYTES,
   PLAT_HEADER,
   PLAT_OUTDATED,
@@ -49,6 +50,7 @@ import {
   codeHostProblems,
   hasRegistrations,
   InitError,
+  type InitPlan,
   inspectCheckout,
   parseWith,
   planInit,
@@ -90,6 +92,7 @@ import {
   rerunPlat,
   UPDATED_FROM,
 } from "./self-update.ts";
+import { prepareRepo, setupsDir, stateLine } from "./setup.ts";
 import { installSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
@@ -119,6 +122,25 @@ export interface Io {
   platPath?: string;
   // Runs plat again after it replaced itself (self-update.ts); rerunPlat when omitted.
   rerun?: Rerun;
+}
+
+// What `plat init` was asked to do.
+interface InitOptions {
+  with: string[];
+  project?: number;
+  projectName?: string;
+  contractPath?: string;
+  yes?: boolean;
+  dryRun?: boolean;
+}
+
+// What `plat init` did: the plan it followed (none when it stopped before one), the project, and each repo's answer
+// about the code host.
+interface InitOutcome {
+  projectId: number | undefined;
+  plan: InitPlan | undefined;
+  access: { name: string; line: string; ok: boolean }[];
+  text: string;
 }
 
 // How long plat init waits for a worker to say whether the GitHub App or GitLab PAT can work on the repos.
@@ -929,6 +951,241 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print({ lines }, lines.join("\n"));
     });
 
+  // `plat init`, which `plat setup` runs too: registers the project and its repos, writes the planning files on this
+  // machine, and asks the workers whether the code host lets the platform work on each repo.
+  const runInit = async (
+    options: InitOptions,
+    quiet = false,
+  ): Promise<InitOutcome> => {
+    const client = api();
+    await warnAboutVersion();
+    const loadProject = async (projectId: number) => {
+      const { data, response, error } = await client.GET(
+        "/projects/{projectId}",
+        { params: { path: { projectId } } },
+      );
+      return { data, response, error };
+    };
+    let plan: ReturnType<typeof planInit> | undefined;
+    let checked: InitOutcome["access"] = [];
+    // `quiet` (plat setup) prints nothing: the caller says what happened
+    const done = (
+      value: Record<string, unknown>,
+      text: string,
+      projectId?: number,
+    ): InitOutcome => {
+      if (!quiet) print(value, text);
+      return { projectId, plan, access: checked, text };
+    };
+    try {
+      const cwd = io.cwd ?? process.cwd();
+      const hosts = await client.GET("/hosts");
+      if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
+      const known = hosts.data.hosts;
+      const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
+      const others = (options.with as string[]).map((value) => {
+        const { path, name } = parseWith(value);
+        return {
+          checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
+          name,
+        };
+      });
+      const docPath = join(planning.dir, TRACKER_DOC_PATH);
+      const before = existsSync(docPath) ? readFileSync(docPath, "utf8") : null;
+
+      // The project: --project, else the one the tracker doc names, else the one this repo is registered in.
+      let found: Awaited<ReturnType<typeof loadProject>>["data"];
+      if (options.project !== undefined) {
+        const loaded = await loadProject(options.project);
+        if (!loaded.data) throw failureFrom(loaded.response, loaded.error);
+        found = loaded.data;
+      } else {
+        const named = before ? trackerDocTarget(before) : null;
+        if (named) found = (await loadProject(named.project)).data;
+        if (!found) {
+          const { data, response, error } = await client.GET("/projects", {
+            params: { query: { repoUrl: planning.url } },
+          });
+          if (!data) throw failureFrom(response, error);
+          if (data.projects.length > 1) {
+            throw new Failure(
+              `${planning.url} is in several projects (${data.projects.map((p) => `${p.id} ${p.name}`).join(", ")}); pick one with --project`,
+            );
+          }
+          const only = data.projects[0];
+          if (only) found = (await loadProject(only.id)).data;
+        }
+      }
+
+      plan = planInit({
+        project: found ?? {
+          newName: options.projectName ?? planning.repoName,
+        },
+        planning,
+        others,
+        contractPath: options.contractPath,
+      });
+      // nothing is registered on a host the platform cannot work on, nor a project on two kinds of host
+      const problems = codeHostProblems(plan, known);
+      if (problems.length > 0) throw new Failure(problems.join("\n"));
+      if (!json() && !quiet) io.stdout(`${planText(plan)}\n`);
+
+      const registering = hasRegistrations(plan);
+      if (options.dryRun) {
+        return done(
+          { dryRun: true, plan: planText(plan) },
+          "dry run: nothing registered or written",
+        );
+      }
+      // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
+      const accessLines = async (projectId: number, names: string[]) => {
+        checked = (await checkRepos(projectId, names)).map(
+          ({ name, access }) => ({
+            name,
+            line: accessLine(name, access),
+            ok: access?.state === "ok",
+          }),
+        );
+        return checked.map((c) => c.line);
+      };
+      const agentDocs = planAgentDocs(planning.dir, afkHome(io.env));
+      // what the repo does not track stays on this machine (ADR 0007)
+      const trackerDocTracked = isTracked(planning.dir, TRACKER_DOC_PATH);
+      const localPaths = [
+        ...(trackerDocTracked ? [] : [TRACKER_DOC_PATH]),
+        ...agentDocs.filter((d) => !d.tracked).map((d) => d.path),
+      ];
+      const agentDocsChange =
+        agentDocs.some((d) => d.before !== d.after) ||
+        missingExcludes(planning.dir, localPaths).length > 0;
+      if (!registering && found && !agentDocsChange) {
+        const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
+        if (doc === before) {
+          const access = await accessLines(
+            found.id,
+            plan.repos.map((r) => r.name),
+          );
+          return done(
+            {
+              project: found.id,
+              registered: [],
+              trackerDoc: "unchanged",
+              access,
+            },
+            [
+              "nothing to register and the agent docs are up to date",
+              ...access,
+            ].join("\n"),
+            found.id,
+          );
+        }
+      }
+      if (!options.yes) {
+        if (!io.confirm) {
+          throw new Failure(
+            "plat init asks before it registers: run it in a terminal, or pass --yes",
+          );
+        }
+        const question = registering
+          ? "Register and write the agent docs?"
+          : "Write the agent docs?";
+        if (!(await io.confirm(question))) {
+          return done({ cancelled: true }, "nothing done");
+        }
+      }
+
+      let projectId: number;
+      if (plan.project.kind === "new") {
+        const { data, response, error } = await client.POST("/projects", {
+          body: {
+            name: plan.project.name,
+            protectedPaths: plan.project.protectedPaths,
+          },
+        });
+        if (!data) throw failureFrom(response, error);
+        projectId = data.id;
+      } else {
+        projectId = plan.project.id;
+      }
+      const registered: string[] = [];
+      for (const repo of plan.repos) {
+        if (repo.registered) continue;
+        const added = await client.POST("/projects/{projectId}/repos", {
+          params: { path: { projectId } },
+          body: {
+            url: repo.checkout.url,
+            name: repo.name,
+            defaultBranch: repo.checkout.defaultBranch,
+            hostKind: repo.checkout.hostKind,
+          },
+        });
+        if (!added.data) throw failureFrom(added.response, added.error);
+        if (repo.contractPath) {
+          const edited = await client.PATCH(
+            "/projects/{projectId}/repos/{name}",
+            {
+              params: { path: { projectId, name: repo.name } },
+              body: { contractPath: repo.contractPath },
+            },
+          );
+          if (!edited.data) {
+            throw failureFrom(edited.response, edited.error);
+          }
+        }
+        registered.push(repo.name);
+      }
+
+      const after = await loadProject(projectId);
+      if (!after.data) throw failureFrom(after.response, after.error);
+      const {
+        trackerDoc: state,
+        docs: docStates,
+        tracked: written,
+      } = writePlanningFiles(
+        planning.dir,
+        afkHome(io.env),
+        after.data,
+        plan.repos[0]?.name as string,
+      );
+      const lines = [
+        `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
+        ...(registered.length > 0
+          ? [`registered: ${registered.join(", ")}`]
+          : []),
+        `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
+        ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
+        ...(localPaths.length === 0
+          ? []
+          : [
+              `on this machine only (in .git/info/exclude, never committed): ${localPaths.join(", ")}`,
+            ]),
+        ...(written.length === 0
+          ? []
+          : [
+              `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
+            ]),
+      ];
+      const access = await accessLines(
+        projectId,
+        plan.repos.map((r) => r.name),
+      );
+      return done(
+        {
+          project: projectId,
+          registered,
+          trackerDoc: state,
+          agentDocs: docStates,
+          access,
+        },
+        [...lines, ...access].join("\n"),
+        projectId,
+      );
+    } catch (e) {
+      if (e instanceof InitError) throw new Failure(e.message);
+      throw e;
+    }
+  };
+
   program
     .command("init")
     .description(
@@ -958,221 +1215,129 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--dry-run",
       "only show the plan and what each repo lacks; register and write nothing",
     )
-    .action(async (options) => {
-      const client = api();
-      await warnAboutVersion();
-      const loadProject = async (projectId: number) => {
-        const { data, response, error } = await client.GET(
-          "/projects/{projectId}",
-          { params: { path: { projectId } } },
-        );
-        return { data, response, error };
-      };
-      let plan: ReturnType<typeof planInit>;
+    .action(async (options: InitOptions) => {
+      await runInit(options);
+    });
+
+  // What stops `plat setup` before it changes anything, all of it at once: each line says what to run.
+  const setupProblems = async (paths: string[]): Promise<string[]> => {
+    const cwd = io.cwd ?? process.cwd();
+    const problems: string[] = [];
+    const major = Number(process.version.slice(1).split(".")[0]);
+    if (major < 20)
+      problems.push(
+        `Node ${process.version} is too old: install Node 20 or newer (brew install node, or nodejs.org)`,
+      );
+    const env = { ...process.env, ...io.env };
+    if (spawnSync("git", ["--version"], { env }).status !== 0)
+      problems.push(
+        "git is missing: install it (xcode-select --install, or git-scm.com)",
+      );
+    if ((await platformVersionAt(apiUrl())) === undefined)
+      problems.push(
+        `no platform answers at ${apiUrl()}: run plat connect <the platform's address>`,
+      );
+    const origins: string[] = [];
+    for (const path of [".", ...paths.map((p) => parseWith(p).path)]) {
       try {
-        const cwd = io.cwd ?? process.cwd();
-        const hosts = await client.GET("/hosts");
-        if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
-        const known = hosts.data.hosts;
-        const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
-        const others = (options.with as string[]).map((value) => {
-          const { path, name } = parseWith(value);
-          return {
-            checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
-            name,
-          };
-        });
-        const docPath = join(planning.dir, TRACKER_DOC_PATH);
-        const before = existsSync(docPath)
-          ? readFileSync(docPath, "utf8")
-          : null;
-
-        // The project: --project, else the one the tracker doc names, else the one this repo is registered in.
-        let found: Awaited<ReturnType<typeof loadProject>>["data"];
-        if (options.project !== undefined) {
-          const loaded = await loadProject(options.project);
-          if (!loaded.data) throw failureFrom(loaded.response, loaded.error);
-          found = loaded.data;
-        } else {
-          const named = before ? trackerDocTarget(before) : null;
-          if (named) found = (await loadProject(named.project)).data;
-          if (!found) {
-            const { data, response, error } = await client.GET("/projects", {
-              params: { query: { repoUrl: planning.url } },
-            });
-            if (!data) throw failureFrom(response, error);
-            if (data.projects.length > 1) {
-              throw new Failure(
-                `${planning.url} is in several projects (${data.projects.map((p) => `${p.id} ${p.name}`).join(", ")}); pick one with --project`,
-              );
-            }
-            const only = data.projects[0];
-            if (only) found = (await loadProject(only.id)).data;
-          }
-        }
-
-        plan = planInit({
-          project: found ?? {
-            newName: options.projectName ?? planning.repoName,
-          },
-          planning,
-          others,
-          contractPath: options.contractPath,
-        });
-        // nothing is registered on a host the platform cannot work on, nor a project on two kinds of host
-        const problems = codeHostProblems(plan, known);
-        if (problems.length > 0) throw new Failure(problems.join("\n"));
-        if (!json()) io.stdout(`${planText(plan)}\n`);
-
-        const registering = hasRegistrations(plan);
-        if (options.dryRun) {
-          print(
-            { dryRun: true, plan: planText(plan) },
-            "dry run: nothing registered or written",
-          );
-          return;
-        }
-        // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
-        const accessLines = async (projectId: number, names: string[]) =>
-          (await checkRepos(projectId, names)).map(({ name, access }) =>
-            accessLine(name, access),
-          );
-        const agentDocs = planAgentDocs(planning.dir, afkHome(io.env));
-        // what the repo does not track stays on this machine (ADR 0007)
-        const trackerDocTracked = isTracked(planning.dir, TRACKER_DOC_PATH);
-        const localPaths = [
-          ...(trackerDocTracked ? [] : [TRACKER_DOC_PATH]),
-          ...agentDocs.filter((d) => !d.tracked).map((d) => d.path),
-        ];
-        const agentDocsChange =
-          agentDocs.some((d) => d.before !== d.after) ||
-          missingExcludes(planning.dir, localPaths).length > 0;
-        if (!registering && found && !agentDocsChange) {
-          const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
-          if (doc === before) {
-            const access = await accessLines(
-              found.id,
-              plan.repos.map((r) => r.name),
-            );
-            print(
-              {
-                project: found.id,
-                registered: [],
-                trackerDoc: "unchanged",
-                access,
-              },
-              [
-                "nothing to register and the agent docs are up to date",
-                ...access,
-              ].join("\n"),
-            );
-            return;
-          }
-        }
-        if (!options.yes) {
-          if (!io.confirm) {
-            throw new Failure(
-              "plat init asks before it registers: run it in a terminal, or pass --yes",
-            );
-          }
-          const question = registering
-            ? "Register and write the agent docs?"
-            : "Write the agent docs?";
-          if (!(await io.confirm(question))) {
-            print({ cancelled: true }, "nothing done");
-            return;
-          }
-        }
-
-        let projectId: number;
-        if (plan.project.kind === "new") {
-          const { data, response, error } = await client.POST("/projects", {
-            body: {
-              name: plan.project.name,
-              protectedPaths: plan.project.protectedPaths,
-            },
-          });
-          if (!data) throw failureFrom(response, error);
-          projectId = data.id;
-        } else {
-          projectId = plan.project.id;
-        }
-        const registered: string[] = [];
-        for (const repo of plan.repos) {
-          if (repo.registered) continue;
-          const added = await client.POST("/projects/{projectId}/repos", {
-            params: { path: { projectId } },
-            body: {
-              url: repo.checkout.url,
-              name: repo.name,
-              defaultBranch: repo.checkout.defaultBranch,
-              hostKind: repo.checkout.hostKind,
-            },
-          });
-          if (!added.data) throw failureFrom(added.response, added.error);
-          if (repo.contractPath) {
-            const edited = await client.PATCH(
-              "/projects/{projectId}/repos/{name}",
-              {
-                params: { path: { projectId, name: repo.name } },
-                body: { contractPath: repo.contractPath },
-              },
-            );
-            if (!edited.data) {
-              throw failureFrom(edited.response, edited.error);
-            }
-          }
-          registered.push(repo.name);
-        }
-
-        const after = await loadProject(projectId);
-        if (!after.data) throw failureFrom(after.response, after.error);
-        const {
-          trackerDoc: state,
-          docs: docStates,
-          tracked: written,
-        } = writePlanningFiles(
-          planning.dir,
-          afkHome(io.env),
-          after.data,
-          plan.repos[0]?.name as string,
-        );
-        const lines = [
-          `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
-          ...(registered.length > 0
-            ? [`registered: ${registered.join(", ")}`]
-            : []),
-          `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
-          ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
-          ...(localPaths.length === 0
-            ? []
-            : [
-                `on this machine only (in .git/info/exclude, never committed): ${localPaths.join(", ")}`,
-              ]),
-          ...(written.length === 0
-            ? []
-            : [
-                `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
-              ]),
-        ];
-        const access = await accessLines(
-          projectId,
-          plan.repos.map((r) => r.name),
-        );
-        print(
-          {
-            project: projectId,
-            registered,
-            trackerDoc: state,
-            agentDocs: docStates,
-            access,
-          },
-          [...lines, ...access].join("\n"),
-        );
-      } catch (e) {
-        if (e instanceof InitError) throw new Failure(e.message);
-        throw e;
+        origins.push(inspectCheckout(path, cwd).url);
+      } catch (error) {
+        problems.push((error as Error).message);
       }
+    }
+    if (origins.some((url) => hostKindOfUrl(url) === "github")) {
+      const gh = spawnSync("gh", ["auth", "status"], { env });
+      if (gh.error)
+        problems.push(
+          "gh is missing, and a repo is on GitHub: install it (brew install gh), then gh auth login",
+        );
+      else if (gh.status !== 0)
+        problems.push(
+          "gh is not logged in, and a repo is on GitHub: gh auth login",
+        );
+    }
+    return problems;
+  };
+
+  program
+    .command("setup")
+    .description(
+      "run in the planning repo: check this machine, register the project and its repos (this one and each --with), write the planning files here, and make a setup worktree for each repo origin lacks a gate or AGENTS.md for; prints what each worktree lacks. Running it again only fills the gaps",
+    )
+    .option(
+      "--with <path[=name]>",
+      "another repo's local checkout, optionally with the name tickets use for it (repeatable)",
+      collect,
+      [],
+    )
+    .action(async (options: { with: string[] }) => {
+      const problems = await setupProblems(options.with);
+      if (problems.length > 0)
+        throw new Failure(
+          `this machine is not ready; nothing was changed:\n${problems.map((p) => `- ${p}`).join("\n")}`,
+          { error: "not-ready", problems },
+        );
+      const init = await runInit({ with: options.with, yes: true }, true);
+      const plan = init.plan;
+      if (!plan || init.projectId === undefined) throw new Failure(init.text);
+      const planning = plan.repos.find((r) => r.planning);
+      const setups = setupsDir(
+        afkHome(io.env),
+        (planning?.name ?? "planning") as string,
+      );
+      const repos = plan.repos.map((repo) => ({
+        ...prepareRepo(
+          {
+            name: repo.name,
+            dir: repo.checkout.dir,
+            defaultBranch: repo.checkout.defaultBranch,
+            planning: repo.planning,
+          },
+          setups,
+        ),
+        hosting: init.access.find((a) => a.name === repo.name),
+      }));
+      const newlyRegistered = plan.repos.some((r) => !r.registered);
+      const ready =
+        !newlyRegistered &&
+        repos.every((r) => r.worktree === null && !r.problem);
+      const lines = [
+        `project ${init.projectId}; planning repo ${planning?.name} (where plat setup runs: ${planning?.checkout.dir})`,
+        ...repos.map(stateLine),
+        ...repos.flatMap((r) =>
+          r.leftover ? [`${r.name}: ${r.leftover}`] : [],
+        ),
+        ...repos.flatMap((r) =>
+          r.hosting && !r.hosting.ok ? [r.hosting.line] : [],
+        ),
+        ready
+          ? "本机已就绪"
+          : repos.some((r) => r.worktree !== null)
+            ? "next: write what each worktree lacks, then plat setup --finish"
+            : "next: plat setup --finish",
+      ];
+      print(
+        {
+          project: init.projectId,
+          planningRepo: planning?.name,
+          ready,
+          repos: repos.map((r) => ({
+            name: r.name,
+            dir: r.dir,
+            planning: r.planning,
+            worktree: r.worktree,
+            resumed: r.resumed,
+            gates: r.readiness?.gates ?? null,
+            agentsMd: r.readiness?.agentsMd ?? null,
+            runningUnattended: r.readiness?.runningUnattended ?? null,
+            hosting: r.hosting?.line ?? null,
+            hostingOk: r.hosting?.ok ?? null,
+            leftover: r.leftover ?? null,
+            problem: r.problem ?? null,
+          })),
+        },
+        lines.join("\n"),
+      );
     });
 
   program
