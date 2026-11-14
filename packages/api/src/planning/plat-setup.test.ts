@@ -495,11 +495,13 @@ describe("plat setup --finish", () => {
       /backend \(planning repo\): afk\/setup pushed \([0-9a-f]+\); gate passed/,
     );
     expect(result.stdout).toContain("next: plan with /grill-with-docs");
+    expect(result.stdout).toContain("托管: the GitHub App is not checked yet");
     expect(existsSync(join(ws.afkHome, "setup"))).toBe(true);
     expect(existsSync(join(ws.afkHome, "setup/backend"))).toBe(false);
     expect(
       gitOrThrow(backend.dir, ["worktree", "list"]).split("\n"),
     ).toHaveLength(1);
+    expect(gitOrThrow(backend.dir, ["branch", "--list", "afk/setup"])).toBe("");
     const stored = await (
       await fetch(`${ws.api.url}/projects/1/doctor-report`)
     ).json();

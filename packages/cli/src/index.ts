@@ -1345,20 +1345,26 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         result.gate = check.pass ? "passed" : "failed";
         result.gateOutput = check.text;
         if (check.pass) {
-          removeSetupWorktree(checkout, worktree, setups);
-          result.worktree = null;
-        } else result.sandboxLacksTool = sandboxLacksTool(check.text);
+          const kept = removeSetupWorktree(checkout, worktree, setups);
+          if (kept) result.problem = kept;
+          else result.worktree = null;
+        } else
+          result.sandboxLacksTool = sandboxLacksTool(
+            (check.value as { result?: { log?: string } }).result?.log ?? "",
+          );
       } catch (error) {
         result.problem = (error as Error).message;
       }
     }
 
+    // what the platform last heard about each repo's code host; a look that fails is not worth losing the report
     const hosting = await Promise.all(
       project.data.repos.map(async (repo) => {
-        const { data } = await api().GET(
-          "/projects/{projectId}/repos/{name}/access",
-          { params: { path: { projectId, name: repo.name } } },
-        );
+        const { data } = await api()
+          .GET("/projects/{projectId}/repos/{name}/access", {
+            params: { path: { projectId, name: repo.name } },
+          })
+          .catch(() => ({ data: undefined }));
         return {
           name: repo.name,
           line: accessLine(repo.name, data),
@@ -1366,8 +1372,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         };
       }),
     );
-    const doctor = await runDoctor(projectId);
-    const failed = results.filter((r) => r.gate !== "passed");
+    const doctor = await runDoctor(projectId).catch(() => null);
+    const failed = results.filter(
+      (r) => r.gate !== "passed" || r.problem !== null,
+    );
     const rows = project.data.repos.map((repo) => {
       const r = results.find((x) => x.name === repo.name);
       const setup = !r
@@ -1376,14 +1384,17 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           ? r.problem
           : `afk/setup ${r.pushed ? `pushed${r.commit ? ` (${r.commit})` : ""}` : "up to date"}; gate ${r.gate}`;
       const kept = r?.worktree ? `; worktree kept at ${r.worktree}` : "";
-      return `${repo.name}${repo.name === doc.repo ? " (planning repo)" : ""}: ${setup}${kept}`;
+      const host = hosting.find((h) => h.name === repo.name);
+      const hostingText = host
+        ? `; 托管: ${host.line.slice(repo.name.length + 2)}`
+        : "";
+      return `${repo.name}${repo.name === doc.repo ? " (planning repo)" : ""}: ${setup}${kept}${hostingText}`;
     });
     const lines = [
       ...(worktrees.length === 0
         ? ["no setup worktrees: nothing to push (run plat setup first)"]
         : []),
       ...rows,
-      ...hosting.filter((h) => !h.ok).map((h) => h.line),
       ...failed.flatMap((r) =>
         r.gate === "failed"
           ? [
@@ -1396,7 +1407,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             ]
           : [],
       ),
-      formatDoctorText(doctor),
+      doctor ? formatDoctorText(doctor) : "plat doctor could not run",
       failed.length > 0
         ? "next: fix what failed in the kept worktrees, then plat setup --finish again"
         : `next: plan with /grill-with-docs in ${io.cwd ?? process.cwd()}, on any branch`,
@@ -1404,7 +1415,20 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     const report = {
       project: projectId,
       planningRepo: doc.repo,
-      repos: results,
+      // every repo of the project: the ones set up on origin already have no worktree and no gate run
+      repos: project.data.repos.map(
+        (repo) =>
+          results.find((r) => r.name === repo.name) ?? {
+            name: repo.name,
+            worktree: null,
+            commit: null,
+            pushed: false,
+            gate: null,
+            gateOutput: null,
+            sandboxLacksTool: false,
+            problem: null,
+          },
+      ),
       hosting,
       doctor,
     };

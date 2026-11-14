@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import { SETUP_BRANCH } from "@afk/shared";
 
 // `plat setup`: the fixed steps of setting a project's repos up for the platform, which the afk-setup skill used to
@@ -308,14 +308,11 @@ export function setupWorktrees(
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const worktree = join(setups, entry.name);
-      const common = git(worktree, [
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-      ]);
-      return common.ok
-        ? [{ name: entry.name, worktree, checkout: dirname(common.out) }]
-        : [];
+      // the first worktree git lists is the checkout the others were added from
+      const main = /^worktree (.+)$/m.exec(
+        git(worktree, ["worktree", "list", "--porcelain"]).out,
+      )?.[1];
+      return main ? [{ name: entry.name, worktree, checkout: main }] : [];
     });
 }
 
@@ -324,9 +321,10 @@ export function setupWorktrees(
  * request that carries it sees which files of theirs it changes.
  */
 export function setupCommitMessage(changes: string[]): string {
+  // `git diff --name-status --no-renames`: A, M, D, and T (a file's type changed) counted as replaced
   const list = (status: string) =>
     changes
-      .filter((line) => line.startsWith(status))
+      .filter((line) => line.replace(/^T/, "M").startsWith(status))
       .map((line) => line.slice(1).trim());
   const parts = [
     ["Added", list("A")],
@@ -357,7 +355,12 @@ export function commitAndPush(worktree: string): Pushed {
       problem: `a merge in ${worktree} has conflicts: resolve them, then plat setup --finish again`,
     };
   git(worktree, ["add", "-A"]);
-  const changes = git(worktree, ["diff", "--cached", "--name-status"])
+  const changes = git(worktree, [
+    "diff",
+    "--cached",
+    "--name-status",
+    "--no-renames",
+  ])
     .out.split("\n")
     .filter(Boolean);
   let commit: string | undefined;
@@ -376,6 +379,8 @@ export function commitAndPush(worktree: string): Pushed {
     commit = git(worktree, ["rev-parse", "--short", "HEAD"]).out;
   }
   const head = git(worktree, ["rev-parse", "HEAD"]).out;
+  // what origin has now, not what the last fetch saw
+  git(worktree, ["fetch", "--quiet", "origin"]);
   const remote = git(worktree, [
     "rev-parse",
     "--verify",
@@ -399,18 +404,23 @@ export function commitAndPush(worktree: string): Pushed {
   return { commit, pushed: true };
 }
 
-/** Removes a setup worktree whose setup passed, and the folder of all of them once it is empty. */
+/**
+ * Removes a setup worktree whose setup passed (everything in it is pushed), and the folder of all of them once it is
+ * empty; the reason when git would not remove it.
+ */
 export function removeSetupWorktree(
   checkout: string,
   worktree: string,
   setups: string,
-): void {
-  git(checkout, ["worktree", "remove", "--force", worktree]);
+): string | undefined {
+  const removed = git(checkout, ["worktree", "remove", "--force", worktree]);
   git(checkout, ["worktree", "prune"]);
+  if (!removed.ok) return `could not remove ${worktree}: ${removed.err}`;
   if (existsSync(setups) && readdirSync(setups).length === 0)
     rmSync(setups, { recursive: true, force: true });
+  return undefined;
 }
 
-/** Whether a failed gate's output says the sandbox lacks a tool, which only whoever runs the platform can add. */
-export const sandboxLacksTool = (output: string): boolean =>
-  /command not found|: not found\b/i.test(output);
+/** Whether the output of a failed gate command says the sandbox lacks a tool, which only whoever runs the platform can add. */
+export const sandboxLacksTool = (log: string): boolean =>
+  /command not found|executable file not found in \$PATH/i.test(log);
