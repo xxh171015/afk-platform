@@ -37,7 +37,8 @@ describe("getting a project onto the platform from the control tower", () => {
     renderWithApp(<Onboarding address="https://afk.example.com" />, server([]));
 
     const block = await screen.findByRole("region", { name: "接入第一个项目" });
-    const command = `npx skills@latest add xxh171015/afk-platform#${COMMIT}`;
+    // one command, the platform's address in it: nothing to choose, nothing to be asked
+    const command = "curl -fsSL https://afk.example.com/setup.sh | sh";
     expect((await within(block).findAllByText(command)).length).toBeGreaterThan(
       0,
     );
@@ -45,8 +46,10 @@ describe("getting a project onto the platform from the control tower", () => {
       within(block).getAllByRole("button", { name: `复制命令 ${command}` })
         .length,
     ).toBeGreaterThan(0);
+    expect(block.textContent).toContain("Cursor 或 Claude Code");
     expect(block.textContent).toContain("/afk-setup");
-    expect(within(block).getByText("https://afk.example.com")).toBeTruthy();
+    expect(block.textContent).not.toContain("平台地址时填");
+    expect(block.textContent).not.toContain("npx skills");
     expect(block.textContent).not.toContain("只能在平台所在的机器上用");
   });
 
@@ -70,7 +73,7 @@ describe("getting a project onto the platform from the control tower", () => {
     expect(
       (
         await within(details).findAllByText(
-          `npx skills@latest add xxh171015/afk-platform#${COMMIT}`,
+          "curl -fsSL http://localhost:3000/setup.sh | sh",
         )
       ).length,
     ).toBeGreaterThan(0);
@@ -84,9 +87,28 @@ describe("getting a project onto the platform from the control tower", () => {
 
     const block = await screen.findByRole("region", { name: "接入第一个项目" });
     expect(
-      await within(block).findByText(/平台说不出它对应的提交/),
+      await within(block).findByText(
+        "curl -fsSL http://127.0.0.1:3000/setup.sh | sh",
+      ),
     ).toBeTruthy();
     expect(block.textContent).not.toContain("npx skills");
+  });
+
+  it("shows no checks to run by hand before plat doctor has stored a report", async () => {
+    renderWithApp(
+      <Onboarding address="http://127.0.0.1:3000" />,
+      server([{ id: 1, name: "shop" }]),
+    );
+
+    const entry = await screen.findByText("接入新项目");
+    const details = entry.closest("details") as HTMLDetailsElement;
+    await within(details).findByText(
+      "curl -fsSL http://127.0.0.1:3000/setup.sh | sh",
+    );
+    expect(within(details).queryByRole("region", { name: "本机" })).toBeNull();
+    expect(details.textContent).not.toContain("plat connect");
+    expect(details.textContent).not.toContain("plat tracker-doc");
+    expect(details.textContent).not.toContain("test -f AGENTS.md");
   });
 
   it("shows an error and retry when the projects cannot be listed", async () => {
@@ -237,22 +259,6 @@ describe("getting a project onto the platform from the control tower", () => {
     });
     expect(within(connected).getByText("已配飞书群")).toBeTruthy();
     expect(within(connected).queryByText("未配飞书群")).toBeNull();
-  });
-
-  it("splits the checklist into 本机 and 接入条件, all local items 尚未检查", async () => {
-    renderWithApp(<Onboarding address="http://127.0.0.1:3000" />, server([]));
-
-    const block = await screen.findByRole("region", { name: "接入第一个项目" });
-    expect(within(block).getByRole("region", { name: "本机" })).toBeTruthy();
-    expect(
-      within(block).getByRole("region", { name: "接入条件" }),
-    ).toBeTruthy();
-    expect(block.textContent).toContain("尚未检查");
-    expect(block.textContent).toContain("plat connect http://127.0.0.1:3000");
-    expect(block.textContent).toContain("plat tracker-doc");
-    expect(block.textContent).toContain("test -f AGENTS.md");
-    expect(block.textContent).not.toContain("就绪检查");
-    expect(block.textContent).not.toContain("gate-check");
   });
 
   it("lets a person retry when the platform cannot be reached", async () => {

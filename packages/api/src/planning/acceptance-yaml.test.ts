@@ -26,6 +26,8 @@ afterEach(async () => {
   await db.drop();
 });
 
+const SKILLS = fileURLToPath(new URL("../../../../skills", import.meta.url));
+
 // The tracker doc a developer who ran `plat tracker-doc` for the project's first repo would have committed, so that
 // these tests see no tracker doc warning on stderr.
 async function committedTrackerDoc(apiUrl: string): Promise<string> {
@@ -58,10 +60,13 @@ async function plat(...args: string[]) {
       stderr += text;
     },
     env: { AFK_API_URL: api.url },
-    readFile: async (path) =>
-      path === "docs/agents/issue-tracker.md"
-        ? await committedTrackerDoc(api.url)
-        : readFileSync(path, "utf8"),
+    readFile: async (path) => {
+      if (path === "docs/agents/issue-tracker.md")
+        return await committedTrackerDoc(api.url);
+      // the platform's skills, as plat sync puts them in the planning repo
+      const skill = /^\.\/\.agents\/skills\/(.+)$/.exec(path);
+      return readFileSync(skill?.[1] ? join(SKILLS, skill[1]) : path, "utf8");
+    },
     readDirectory: async (path) =>
       readdirSync(path).map((name) => ({
         name,

@@ -11,6 +11,7 @@ import {
   formatDisplayId,
   HOST_HEADER,
   HOST_KINDS,
+  hostKindOfUrl,
   MAX_PLANNING_PATCH_BYTES,
   PLAT_HEADER,
   PLAT_OUTDATED,
@@ -49,6 +50,7 @@ import {
   codeHostProblems,
   hasRegistrations,
   InitError,
+  type InitPlan,
   inspectCheckout,
   parseWith,
   planInit,
@@ -67,7 +69,6 @@ import {
 import {
   integrationWarnings,
   skillsWarnings,
-  staleSkills,
   trackerDocWarnings,
   unreadyRepos,
   versionWarnings,
@@ -91,7 +92,17 @@ import {
   rerunPlat,
   UPDATED_FROM,
 } from "./self-update.ts";
-import { type RunCommand, runCommand, updateSkills } from "./skills-install.ts";
+import {
+  commitAndPush,
+  missingIn,
+  prepareRepo,
+  removeSetupWorktree,
+  sandboxLacksTool,
+  setupsDir,
+  setupWorktrees,
+  stateLine,
+} from "./setup.ts";
+import { installSkills } from "./skills-install.ts";
 import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
@@ -115,13 +126,30 @@ export interface Io {
   cwd?: string; // git inspect for `plat spec confirm`; process.cwd() when omitted
   // Asks the person a yes/no question (`plat init`); absent when nobody can answer, e.g. stdin is not a terminal.
   confirm?: (question: string) => Promise<boolean>;
-  // Runs a command such as the skills CLI (`plat update`); runCommand (skills-install.ts) when omitted.
-  run?: RunCommand;
   // The file plat runs from, which `plat update` and the self-update replace; when omitted, process.argv[1] if it is
   // the platform's bundle, else none (""). See self-update.ts.
   platPath?: string;
   // Runs plat again after it replaced itself (self-update.ts); rerunPlat when omitted.
   rerun?: Rerun;
+}
+
+// What `plat init` was asked to do.
+interface InitOptions {
+  with: string[];
+  project?: number;
+  projectName?: string;
+  contractPath?: string;
+  yes?: boolean;
+  dryRun?: boolean;
+}
+
+// What `plat init` did: the plan it followed (none when it stopped before one), the project, and each repo's answer
+// about the code host.
+interface InitOutcome {
+  projectId: number | undefined;
+  plan: InitPlan | undefined;
+  access: { name: string; line: string; ok: boolean }[];
+  text: string;
 }
 
 // How long plat init waits for a worker to say whether the GitHub App or GitLab PAT can work on the repos.
@@ -333,10 +361,12 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     }
   });
 
-  // Brings this planning machine up to the platform's (`plat sync`, and after a self-update): the planning skills
-  // when they are not the platform's (always after a self-update: plat carries only some of their text), and the
-  // planning files plat writes in this repo. The lines say what changed; nothing here fails the command.
-  const syncMachine = async (afterUpdate: boolean): Promise<string[]> => {
+  // Brings this planning machine up to the platform's (`plat sync`, and after a self-update): afk-setup and the
+  // planning skills in this repo, written from the copy plat carries, and the planning files plat writes here. The
+  // lines say what changed; nothing here fails the command.
+  const syncMachine = async (
+    onlyWhereInstalled: boolean,
+  ): Promise<string[]> => {
     const lines: string[] = [];
     const cwd = io.cwd ?? process.cwd();
     const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
@@ -346,35 +376,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     const repo = top.status === 0 ? top.stdout.trim() : undefined;
     const home = io.env.HOME ?? homedir();
     const client = api();
-    const version = await client
-      .GET("/version")
-      .then((r) => r.data)
-      .catch(() => undefined);
 
-    // absolute paths: the home directory and the repo's top, wherever plat runs
+    // An explicit `plat sync` puts the skills in this repo; after plat replaced itself, whatever the command, only the
+    // skills already here are brought up.
+    lines.push(...installSkills({ home, repo, onlyWhereInstalled }));
+
+    // absolute paths: the repo's top, wherever plat runs
     const readAbsolute = async (path: string) => readFileSync(path, "utf8");
-    const stale =
-      afterUpdate ||
-      (await staleSkills(readAbsolute, home, repo ?? cwd)).length > 0;
-    if (stale) {
-      try {
-        lines.push(
-          ...updateSkills({
-            home,
-            repo,
-            commit: version?.platformCommit ?? null,
-            run: io.run ?? runCommand,
-          }),
-        );
-      } catch (error) {
-        lines.push(
-          `skills: could not update them: ${(error as Error).message}; run plat update`,
-        );
-      }
-    } else {
-      lines.push("skills: nothing to update");
-    }
-
     const doc = repo
       ? await readAbsolute(join(repo, TRACKER_DOC_PATH)).catch(() => null)
       : null;
@@ -670,62 +678,71 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         throw new Failure(
           "which project? run this in the planning repo (its tracker doc names the project), or give --project",
         );
-      const client = api();
-      const queued = await client.POST(
-        "/projects/{projectId}/repos/{name}/gate-check",
-        {
-          params: { path: { projectId, name } },
-          body: { branch: options.branch },
-        },
-      );
-      if (!queued.data) throw failureFrom(queued.response, queued.error);
-      const pollMs = Number(io.env.AFK_POLL_SECONDS ?? 3) * 1000;
-      const deadline = Date.now() + 60 * 60 * 1000;
-      for (;;) {
-        const { data, response, error } = await client.GET(
-          "/projects/{projectId}/repos/{name}/gate-checks/{id}",
-          { params: { path: { projectId, name, id: queued.data.id } } },
-        );
-        if (!data) throw failureFrom(response, error);
-        const label = `${name} ${data.branch}`;
-        if (data.state === "failed")
-          throw new Failure(
-            `${label}: the check could not run: ${data.error ?? "unknown error"}`,
-          );
-        if (data.state === "done") {
-          const result = data.result;
-          if (!result)
-            throw new Failure(
-              `${label}: the worker's answer was not understood`,
-            );
-          if (result.pass) {
-            print(
-              data,
-              `${label}: the gate passed in the platform's sandbox (${result.steps.join(", ")}${result.tests === undefined ? "" : `; ${result.tests} tests`})`,
-            );
-            return;
-          }
-          print(
-            data,
-            [
-              `${label}: the gate failed: ${result.reasons.join("; ")}`,
-              ...(result.log
-                ? [
-                    `--- the end of ${result.failedStep ?? "its"} output ---`,
-                    result.log,
-                  ]
-                : []),
-            ].join("\n"),
-          );
-          throw new Failure("the gate failed");
-        }
-        if (Date.now() > deadline)
-          throw new Failure(
-            `${label}: no answer after an hour (is a worker running?)`,
-          );
-        await new Promise((done) => setTimeout(done, pollMs));
-      }
+      const check = await runGateCheck(projectId, name, options.branch);
+      print(check.value, check.text);
+      if (!check.pass) throw new Failure("the gate failed");
     });
+
+  // The platform runs a repo's gate on a pushed branch in its own sandbox (`plat repo check`, `plat setup --finish`):
+  // what came back. Throws when the check could not run at all.
+  const runGateCheck = async (
+    projectId: number,
+    name: string,
+    branch: string,
+  ): Promise<{ pass: boolean; text: string; value: unknown }> => {
+    const client = api();
+    const queued = await client.POST(
+      "/projects/{projectId}/repos/{name}/gate-check",
+      {
+        params: { path: { projectId, name } },
+        body: { branch },
+      },
+    );
+    if (!queued.data) throw failureFrom(queued.response, queued.error);
+    const pollMs = Number(io.env.AFK_POLL_SECONDS ?? 3) * 1000;
+    const deadline = Date.now() + 60 * 60 * 1000;
+    for (;;) {
+      const { data, response, error } = await client.GET(
+        "/projects/{projectId}/repos/{name}/gate-checks/{id}",
+        { params: { path: { projectId, name, id: queued.data.id } } },
+      );
+      if (!data) throw failureFrom(response, error);
+      const label = `${name} ${data.branch}`;
+      if (data.state === "failed")
+        throw new Failure(
+          `${label}: the check could not run: ${data.error ?? "unknown error"}`,
+        );
+      if (data.state === "done") {
+        const result = data.result;
+        if (!result)
+          throw new Failure(`${label}: the worker's answer was not understood`);
+        if (result.pass)
+          return {
+            pass: true,
+            value: data,
+            text: `${label}: the gate passed in the platform's sandbox (${result.steps.join(", ")}${result.tests === undefined ? "" : `; ${result.tests} tests`})`,
+          };
+        return {
+          pass: false,
+          value: data,
+          text: [
+            `${label}: the gate failed: ${result.reasons.join("; ")}`,
+            ...(result.log
+              ? [
+                  `--- the end of ${result.failedStep ?? "its"} output ---`,
+                  result.log,
+                ]
+              : []),
+          ].join("\n"),
+        };
+      }
+      if (Date.now() > deadline)
+        throw new Failure(
+          `${label}: no answer after an hour (is a worker running?)`,
+        );
+      await new Promise((done) => setTimeout(done, pollMs));
+    }
+  };
 
   // The warnings `spec create` and `tickets import` print about this planning machine; they never change the exit code.
   const warnAboutPlanningMachine = async (project?: number) => {
@@ -742,9 +759,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           },
           project,
         )),
-        ...(io.env.HOME
-          ? await skillsWarnings(io.readFile, io.env.HOME, ".")
-          : []),
+        ...(await skillsWarnings(io.readFile, ".")),
       ];
       for (const warning of warnings) io.stderr(`${warning}\n`);
     } catch {
@@ -840,6 +855,52 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       );
     });
 
+  // `plat doctor` (also the end of `plat setup --finish`): checks this planning machine and stores the result on the
+  // project for the control tower.
+  const runDoctor = async (project?: number) => {
+    const cwd = io.cwd ?? process.cwd();
+    const client = api();
+    const report = await collectDoctorReport({
+      cwd,
+      readFile: io.readFile,
+      loadVersion: async () => {
+        const { data } = await client.GET("/version");
+        return data ?? undefined;
+      },
+      loadProject: async (id) => {
+        const { data } = await client.GET("/projects/{projectId}", {
+          params: { path: { projectId: id } },
+        });
+        if (!data) throw new Error("no such project");
+        return data;
+      },
+      projectId: project,
+    });
+    let stored = {
+      machine: report.machine,
+      checkedAt: report.checkedAt,
+      items: report.items,
+      projectId: report.projectId,
+    };
+    if (report.projectId !== undefined) {
+      const { data, response, error } = await client.PUT(
+        "/projects/{projectId}/doctor-report",
+        {
+          params: { path: { projectId: report.projectId } },
+          body: { machine: report.machine, items: report.items },
+        },
+      );
+      if (data) {
+        stored = { ...data, projectId: report.projectId };
+      } else {
+        io.stderr(
+          `warning: could not store the report: ${failureFrom(response, error).message}\n`,
+        );
+      }
+    }
+    return stored;
+  };
+
   program
     .command("doctor")
     .description(
@@ -847,54 +908,14 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     )
     .option("--project <id>", "project to store the report on", toInt)
     .action(async (options: { project?: number }) => {
-      const cwd = io.cwd ?? process.cwd();
-      const client = api();
-      const report = await collectDoctorReport({
-        cwd,
-        home: io.env.HOME,
-        readFile: io.readFile,
-        loadVersion: async () => {
-          const { data } = await client.GET("/version");
-          return data ?? undefined;
-        },
-        loadProject: async (id) => {
-          const { data } = await client.GET("/projects/{projectId}", {
-            params: { path: { projectId: id } },
-          });
-          if (!data) throw new Error("no such project");
-          return data;
-        },
-        projectId: options.project,
-      });
-      let stored = {
-        machine: report.machine,
-        checkedAt: report.checkedAt,
-        items: report.items,
-        projectId: report.projectId,
-      };
-      if (report.projectId !== undefined) {
-        const { data, response, error } = await client.PUT(
-          "/projects/{projectId}/doctor-report",
-          {
-            params: { path: { projectId: report.projectId } },
-            body: { machine: report.machine, items: report.items },
-          },
-        );
-        if (data) {
-          stored = { ...data, projectId: report.projectId };
-        } else {
-          io.stderr(
-            `warning: could not store the report: ${failureFrom(response, error).message}\n`,
-          );
-        }
-      }
+      const stored = await runDoctor(options.project);
       print(stored, formatDoctorText(stored));
     });
 
   program
     .command("update")
     .description(
-      "replace this plat with the platform's, and install the afk-setup and planning skills again where they are (in this repo, or yours)",
+      "replace this plat with the platform's, and write the platform's afk-setup and planning skills into this repo (on this machine only)",
     )
     .action(async () => {
       const base = apiUrl();
@@ -919,27 +940,25 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         }
       }
 
-      // The skills: installed again at the platform's commit, at the levels afk-setup is at.
+      // The skills: the new plat carries the platform's, so it is the one that writes them (`plat sync`).
+      if (self && lines[0]?.startsWith("plat: replaced")) {
+        // the new plat says it updated itself, and what it wrote
+        const code = (io.rerun ?? rerunPlat)(self, ["sync"], {
+          [UPDATED_FROM]: PLATFORM_VERSION,
+        });
+        if (code !== 0) throw new Failure("plat sync failed after the update");
+        return;
+      }
       const top = spawnSync("git", ["rev-parse", "--show-toplevel"], {
         cwd: io.cwd ?? process.cwd(),
         encoding: "utf8",
       });
-      const platform = await createApiClient(base, undefined, cliHeaders(plat))
-        .GET("/version")
-        .then((r) => r.data)
-        .catch(() => undefined);
-      try {
-        lines.push(
-          ...updateSkills({
-            home: io.env.HOME ?? homedir(),
-            repo: top.status === 0 ? top.stdout.trim() : undefined,
-            commit: platform?.platformCommit ?? null,
-            run: io.run ?? runCommand,
-          }),
-        );
-      } catch (error) {
-        throw new Failure(`${lines.join("\n")}\n${(error as Error).message}`);
-      }
+      lines.push(
+        ...installSkills({
+          home: io.env.HOME ?? homedir(),
+          repo: top.status === 0 ? top.stdout.trim() : undefined,
+        }),
+      );
       print({ lines }, lines.join("\n"));
     });
 
@@ -949,13 +968,248 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "bring this planning machine up to the platform's: plat itself, the planning skills and the planning files plat writes in this repo. plat does it by itself when the platform hands out a newer plat; the planning conventions say to run it before planning",
     )
     .action(async () => {
-      const lines = await syncMachine(Boolean(updatedFrom));
+      const lines = await syncMachine(false);
       if (updatedFrom)
         lines.unshift(
           `plat: updated itself to the platform's (${updatedFrom} -> ${PLATFORM_VERSION})`,
         );
       print({ lines }, lines.join("\n"));
     });
+
+  // `plat init`, which `plat setup` runs too: registers the project and its repos, writes the planning files on this
+  // machine, and asks the workers whether the code host lets the platform work on each repo.
+  const runInit = async (
+    options: InitOptions,
+    quiet = false,
+  ): Promise<InitOutcome> => {
+    const client = api();
+    await warnAboutVersion();
+    const loadProject = async (projectId: number) => {
+      const { data, response, error } = await client.GET(
+        "/projects/{projectId}",
+        { params: { path: { projectId } } },
+      );
+      return { data, response, error };
+    };
+    let plan: ReturnType<typeof planInit> | undefined;
+    let checked: InitOutcome["access"] = [];
+    // `quiet` (plat setup) prints nothing: the caller says what happened
+    const done = (
+      value: Record<string, unknown>,
+      text: string,
+      projectId?: number,
+    ): InitOutcome => {
+      if (!quiet) print(value, text);
+      return { projectId, plan, access: checked, text };
+    };
+    try {
+      const cwd = io.cwd ?? process.cwd();
+      const hosts = await client.GET("/hosts");
+      if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
+      const known = hosts.data.hosts;
+      const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
+      const others = options.with.map((value) => {
+        const { path, name } = parseWith(value);
+        return {
+          checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
+          name,
+        };
+      });
+      const docPath = join(planning.dir, TRACKER_DOC_PATH);
+      const before = existsSync(docPath) ? readFileSync(docPath, "utf8") : null;
+
+      // The project: --project, else the one the tracker doc names, else the one this repo is registered in.
+      let found: Awaited<ReturnType<typeof loadProject>>["data"];
+      if (options.project !== undefined) {
+        const loaded = await loadProject(options.project);
+        if (!loaded.data) throw failureFrom(loaded.response, loaded.error);
+        found = loaded.data;
+      } else {
+        const named = before ? trackerDocTarget(before) : null;
+        if (named) found = (await loadProject(named.project)).data;
+        if (!found) {
+          const { data, response, error } = await client.GET("/projects", {
+            params: { query: { repoUrl: planning.url } },
+          });
+          if (!data) throw failureFrom(response, error);
+          if (data.projects.length > 1) {
+            throw new Failure(
+              `${planning.url} is in several projects (${data.projects.map((p) => `${p.id} ${p.name}`).join(", ")}); pick one with --project`,
+            );
+          }
+          const only = data.projects[0];
+          if (only) found = (await loadProject(only.id)).data;
+        }
+      }
+
+      plan = planInit({
+        project: found ?? {
+          newName: options.projectName ?? planning.repoName,
+        },
+        planning,
+        others,
+        contractPath: options.contractPath,
+      });
+      // nothing is registered on a host the platform cannot work on, nor a project on two kinds of host
+      const problems = codeHostProblems(plan, known);
+      if (problems.length > 0) throw new Failure(problems.join("\n"));
+      if (!json() && !quiet) io.stdout(`${planText(plan)}\n`);
+
+      const registering = hasRegistrations(plan);
+      if (options.dryRun) {
+        return done(
+          { dryRun: true, plan: planText(plan) },
+          "dry run: nothing registered or written",
+        );
+      }
+      // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
+      const accessLines = async (projectId: number, names: string[]) => {
+        checked = (await checkRepos(projectId, names)).map(
+          ({ name, access }) => ({
+            name,
+            line: accessLine(name, access),
+            ok: access?.state === "ok",
+          }),
+        );
+        return checked.map((c) => c.line);
+      };
+      const agentDocs = planAgentDocs(planning.dir, afkHome(io.env));
+      // what the repo does not track stays on this machine (ADR 0007)
+      const trackerDocTracked = isTracked(planning.dir, TRACKER_DOC_PATH);
+      const localPaths = [
+        ...(trackerDocTracked ? [] : [TRACKER_DOC_PATH]),
+        ...agentDocs.filter((d) => !d.tracked).map((d) => d.path),
+      ];
+      const agentDocsChange =
+        agentDocs.some((d) => d.before !== d.after) ||
+        missingExcludes(planning.dir, localPaths).length > 0;
+      if (!registering && found && !agentDocsChange) {
+        const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
+        if (doc === before) {
+          const access = await accessLines(
+            found.id,
+            plan.repos.map((r) => r.name),
+          );
+          return done(
+            {
+              project: found.id,
+              registered: [],
+              trackerDoc: "unchanged",
+              access,
+            },
+            [
+              "nothing to register and the agent docs are up to date",
+              ...access,
+            ].join("\n"),
+            found.id,
+          );
+        }
+      }
+      if (!options.yes) {
+        if (!io.confirm) {
+          throw new Failure(
+            "plat init asks before it registers: run it in a terminal, or pass --yes",
+          );
+        }
+        const question = registering
+          ? "Register and write the agent docs?"
+          : "Write the agent docs?";
+        if (!(await io.confirm(question))) {
+          return done({ cancelled: true }, "nothing done");
+        }
+      }
+
+      let projectId: number;
+      if (plan.project.kind === "new") {
+        const { data, response, error } = await client.POST("/projects", {
+          body: {
+            name: plan.project.name,
+            protectedPaths: plan.project.protectedPaths,
+          },
+        });
+        if (!data) throw failureFrom(response, error);
+        projectId = data.id;
+      } else {
+        projectId = plan.project.id;
+      }
+      const registered: string[] = [];
+      for (const repo of plan.repos) {
+        if (repo.registered) continue;
+        const added = await client.POST("/projects/{projectId}/repos", {
+          params: { path: { projectId } },
+          body: {
+            url: repo.checkout.url,
+            name: repo.name,
+            defaultBranch: repo.checkout.defaultBranch,
+            hostKind: repo.checkout.hostKind,
+          },
+        });
+        if (!added.data) throw failureFrom(added.response, added.error);
+        if (repo.contractPath) {
+          const edited = await client.PATCH(
+            "/projects/{projectId}/repos/{name}",
+            {
+              params: { path: { projectId, name: repo.name } },
+              body: { contractPath: repo.contractPath },
+            },
+          );
+          if (!edited.data) {
+            throw failureFrom(edited.response, edited.error);
+          }
+        }
+        registered.push(repo.name);
+      }
+
+      const after = await loadProject(projectId);
+      if (!after.data) throw failureFrom(after.response, after.error);
+      const {
+        trackerDoc: state,
+        docs: docStates,
+        tracked: written,
+      } = writePlanningFiles(
+        planning.dir,
+        afkHome(io.env),
+        after.data,
+        plan.repos[0]?.name as string,
+      );
+      const lines = [
+        `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
+        ...(registered.length > 0
+          ? [`registered: ${registered.join(", ")}`]
+          : []),
+        `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
+        ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
+        ...(localPaths.length === 0
+          ? []
+          : [
+              `on this machine only (in .git/info/exclude, never committed): ${localPaths.join(", ")}`,
+            ]),
+        ...(written.length === 0
+          ? []
+          : [
+              `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
+            ]),
+      ];
+      const access = await accessLines(
+        projectId,
+        plan.repos.map((r) => r.name),
+      );
+      return done(
+        {
+          project: projectId,
+          registered,
+          trackerDoc: state,
+          agentDocs: docStates,
+          access,
+        },
+        [...lines, ...access].join("\n"),
+        projectId,
+      );
+    } catch (e) {
+      if (e instanceof InitError) throw new Failure(e.message);
+      throw e;
+    }
+  };
 
   program
     .command("init")
@@ -986,221 +1240,288 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--dry-run",
       "only show the plan and what each repo lacks; register and write nothing",
     )
-    .action(async (options) => {
-      const client = api();
-      await warnAboutVersion();
-      const loadProject = async (projectId: number) => {
-        const { data, response, error } = await client.GET(
-          "/projects/{projectId}",
-          { params: { path: { projectId } } },
-        );
-        return { data, response, error };
-      };
-      let plan: ReturnType<typeof planInit>;
+    .action(async (options: InitOptions) => {
+      await runInit(options);
+    });
+
+  // What stops `plat setup` before it changes anything, all of it at once: each line says what to run.
+  const setupProblems = async (paths: string[]): Promise<string[]> => {
+    const cwd = io.cwd ?? process.cwd();
+    const problems: string[] = [];
+    const major = Number(process.version.slice(1).split(".")[0]);
+    if (major < 20)
+      problems.push(
+        `Node ${process.version} is too old: install Node 20 or newer (brew install node, or nodejs.org)`,
+      );
+    const env = { ...process.env, ...io.env };
+    const gitVersion = spawnSync("git", ["--version"], {
+      env,
+      encoding: "utf8",
+    });
+    const [gitMajor = 0, gitMinor = 0] = (
+      /(\d+)\.(\d+)/.exec(gitVersion.stdout ?? "") ?? []
+    )
+      .slice(1)
+      .map(Number);
+    if (gitVersion.status !== 0)
+      problems.push(
+        "git is missing: install it (xcode-select --install, or git-scm.com)",
+      );
+    else if (gitMajor < 2 || (gitMajor === 2 && gitMinor < 38))
+      problems.push(
+        `git ${gitMajor}.${gitMinor} is too old: install git 2.38 or newer (brew install git)`,
+      );
+    if ((await platformVersionAt(apiUrl())) === undefined)
+      problems.push(
+        `no platform answers at ${apiUrl()}: run plat connect <the platform's address>`,
+      );
+    const origins: string[] = [];
+    for (const path of [".", ...paths.map((p) => parseWith(p).path)]) {
       try {
-        const cwd = io.cwd ?? process.cwd();
-        const hosts = await client.GET("/hosts");
-        if (!hosts.data) throw failureFrom(hosts.response, hosts.error);
-        const known = hosts.data.hosts;
-        const planning = withKnownHostKind(inspectCheckout(".", cwd), known);
-        const others = (options.with as string[]).map((value) => {
-          const { path, name } = parseWith(value);
-          return {
-            checkout: withKnownHostKind(inspectCheckout(path, cwd), known),
-            name,
-          };
-        });
-        const docPath = join(planning.dir, TRACKER_DOC_PATH);
-        const before = existsSync(docPath)
-          ? readFileSync(docPath, "utf8")
-          : null;
-
-        // The project: --project, else the one the tracker doc names, else the one this repo is registered in.
-        let found: Awaited<ReturnType<typeof loadProject>>["data"];
-        if (options.project !== undefined) {
-          const loaded = await loadProject(options.project);
-          if (!loaded.data) throw failureFrom(loaded.response, loaded.error);
-          found = loaded.data;
-        } else {
-          const named = before ? trackerDocTarget(before) : null;
-          if (named) found = (await loadProject(named.project)).data;
-          if (!found) {
-            const { data, response, error } = await client.GET("/projects", {
-              params: { query: { repoUrl: planning.url } },
-            });
-            if (!data) throw failureFrom(response, error);
-            if (data.projects.length > 1) {
-              throw new Failure(
-                `${planning.url} is in several projects (${data.projects.map((p) => `${p.id} ${p.name}`).join(", ")}); pick one with --project`,
-              );
-            }
-            const only = data.projects[0];
-            if (only) found = (await loadProject(only.id)).data;
-          }
-        }
-
-        plan = planInit({
-          project: found ?? {
-            newName: options.projectName ?? planning.repoName,
-          },
-          planning,
-          others,
-          contractPath: options.contractPath,
-        });
-        // nothing is registered on a host the platform cannot work on, nor a project on two kinds of host
-        const problems = codeHostProblems(plan, known);
-        if (problems.length > 0) throw new Failure(problems.join("\n"));
-        if (!json()) io.stdout(`${planText(plan)}\n`);
-
-        const registering = hasRegistrations(plan);
-        if (options.dryRun) {
-          print(
-            { dryRun: true, plan: planText(plan) },
-            "dry run: nothing registered or written",
-          );
-          return;
-        }
-        // Every plat init asks the workers again whether the GitHub App can work on each registered repo.
-        const accessLines = async (projectId: number, names: string[]) =>
-          (await checkRepos(projectId, names)).map(({ name, access }) =>
-            accessLine(name, access),
-          );
-        const agentDocs = planAgentDocs(planning.dir, afkHome(io.env));
-        // what the repo does not track stays on this machine (ADR 0007)
-        const trackerDocTracked = isTracked(planning.dir, TRACKER_DOC_PATH);
-        const localPaths = [
-          ...(trackerDocTracked ? [] : [TRACKER_DOC_PATH]),
-          ...agentDocs.filter((d) => !d.tracked).map((d) => d.path),
-        ];
-        const agentDocsChange =
-          agentDocs.some((d) => d.before !== d.after) ||
-          missingExcludes(planning.dir, localPaths).length > 0;
-        if (!registering && found && !agentDocsChange) {
-          const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
-          if (doc === before) {
-            const access = await accessLines(
-              found.id,
-              plan.repos.map((r) => r.name),
-            );
-            print(
-              {
-                project: found.id,
-                registered: [],
-                trackerDoc: "unchanged",
-                access,
-              },
-              [
-                "nothing to register and the agent docs are up to date",
-                ...access,
-              ].join("\n"),
-            );
-            return;
-          }
-        }
-        if (!options.yes) {
-          if (!io.confirm) {
-            throw new Failure(
-              "plat init asks before it registers: run it in a terminal, or pass --yes",
-            );
-          }
-          const question = registering
-            ? "Register and write the agent docs?"
-            : "Write the agent docs?";
-          if (!(await io.confirm(question))) {
-            print({ cancelled: true }, "nothing done");
-            return;
-          }
-        }
-
-        let projectId: number;
-        if (plan.project.kind === "new") {
-          const { data, response, error } = await client.POST("/projects", {
-            body: {
-              name: plan.project.name,
-              protectedPaths: plan.project.protectedPaths,
-            },
-          });
-          if (!data) throw failureFrom(response, error);
-          projectId = data.id;
-        } else {
-          projectId = plan.project.id;
-        }
-        const registered: string[] = [];
-        for (const repo of plan.repos) {
-          if (repo.registered) continue;
-          const added = await client.POST("/projects/{projectId}/repos", {
-            params: { path: { projectId } },
-            body: {
-              url: repo.checkout.url,
-              name: repo.name,
-              defaultBranch: repo.checkout.defaultBranch,
-              hostKind: repo.checkout.hostKind,
-            },
-          });
-          if (!added.data) throw failureFrom(added.response, added.error);
-          if (repo.contractPath) {
-            const edited = await client.PATCH(
-              "/projects/{projectId}/repos/{name}",
-              {
-                params: { path: { projectId, name: repo.name } },
-                body: { contractPath: repo.contractPath },
-              },
-            );
-            if (!edited.data) {
-              throw failureFrom(edited.response, edited.error);
-            }
-          }
-          registered.push(repo.name);
-        }
-
-        const after = await loadProject(projectId);
-        if (!after.data) throw failureFrom(after.response, after.error);
-        const {
-          trackerDoc: state,
-          docs: docStates,
-          tracked: written,
-        } = writePlanningFiles(
-          planning.dir,
-          afkHome(io.env),
-          after.data,
-          plan.repos[0]?.name as string,
-        );
-        const lines = [
-          `project ${projectId} ${after.data.name}${plan.project.kind === "new" ? " (new)" : ""}`,
-          ...(registered.length > 0
-            ? [`registered: ${registered.join(", ")}`]
-            : []),
-          `tracker doc ${TRACKER_DOC_PATH}: ${state}`,
-          ...Object.entries(docStates).map(([path, s]) => `${path}: ${s}`),
-          ...(localPaths.length === 0
-            ? []
-            : [
-                `on this machine only (in .git/info/exclude, never committed): ${localPaths.join(", ")}`,
-              ]),
-          ...(written.length === 0
-            ? []
-            : [
-                `next, in ${planning.dir}: git add ${written.join(" ")} && git commit -m "Set the repo up for the AFK platform" && git push`,
-              ]),
-        ];
-        const access = await accessLines(
-          projectId,
-          plan.repos.map((r) => r.name),
-        );
-        print(
-          {
-            project: projectId,
-            registered,
-            trackerDoc: state,
-            agentDocs: docStates,
-            access,
-          },
-          [...lines, ...access].join("\n"),
-        );
-      } catch (e) {
-        if (e instanceof InitError) throw new Failure(e.message);
-        throw e;
+        origins.push(inspectCheckout(path, cwd).url);
+      } catch (error) {
+        problems.push((error as Error).message);
       }
+    }
+    if (origins.some((url) => hostKindOfUrl(url) === "github")) {
+      const gh = spawnSync("gh", ["auth", "status"], { env });
+      if (gh.error)
+        problems.push(
+          "gh is missing, and a repo is on GitHub: install it (brew install gh), then gh auth login",
+        );
+      else if (gh.status !== 0)
+        problems.push(
+          "gh is not logged in, and a repo is on GitHub: gh auth login",
+        );
+    }
+    return problems;
+  };
+
+  // `plat setup --finish`: each setup worktree is committed and pushed to origin's afk/setup, and the platform runs
+  // its gate there (ADR 0006: it reaches the default branch with the first spec's pull request). A repo whose gate
+  // passes loses its worktree; one that fails keeps it and says why. plat doctor ends it.
+  const finishSetup = async () => {
+    const doc = await io
+      .readFile(TRACKER_DOC_PATH)
+      .then(trackerDocTarget)
+      .catch(() => null);
+    if (!doc)
+      throw new Failure(
+        "run plat setup first, in the planning repo: this checkout has no tracker doc naming its project",
+      );
+    const projectId = doc.project;
+    const setups = setupsDir(afkHome(io.env), doc.repo);
+    const project = await api().GET("/projects/{projectId}", {
+      params: { path: { projectId } },
+    });
+    if (!project.data) throw failureFrom(project.response, project.error);
+    const worktrees = setupWorktrees(setups);
+    const results: {
+      name: string;
+      worktree: string | null;
+      commit: string | null;
+      pushed: boolean;
+      gate: "passed" | "failed" | null;
+      gateOutput: string | null;
+      sandboxLacksTool: boolean;
+      problem: string | null;
+    }[] = [];
+    for (const { name, worktree, checkout } of worktrees) {
+      const pushed = commitAndPush(worktree);
+      const result = {
+        name,
+        worktree: worktree as string | null,
+        commit: pushed.commit ?? null,
+        pushed: pushed.pushed,
+        gate: null as "passed" | "failed" | null,
+        gateOutput: null as string | null,
+        sandboxLacksTool: false,
+        problem: pushed.problem ?? null,
+      };
+      results.push(result);
+      if (pushed.problem) continue;
+      try {
+        const check = await runGateCheck(projectId, name, SETUP_BRANCH);
+        result.gate = check.pass ? "passed" : "failed";
+        result.gateOutput = check.text;
+        if (check.pass) {
+          const kept = removeSetupWorktree(checkout, worktree, setups);
+          if (kept) result.problem = kept;
+          else result.worktree = null;
+        } else
+          result.sandboxLacksTool = sandboxLacksTool(
+            (check.value as { result?: { log?: string } }).result?.log ?? "",
+          );
+      } catch (error) {
+        result.problem = (error as Error).message;
+      }
+    }
+
+    // what the platform last heard about each repo's code host; a look that fails is not worth losing the report
+    const hosting = await Promise.all(
+      project.data.repos.map(async (repo) => {
+        const { data } = await api()
+          .GET("/projects/{projectId}/repos/{name}/access", {
+            params: { path: { projectId, name: repo.name } },
+          })
+          .catch(() => ({ data: undefined }));
+        return {
+          name: repo.name,
+          line: accessLine(repo.name, data),
+          ok: data?.state === "ok",
+        };
+      }),
+    );
+    const doctor = await runDoctor(projectId).catch(() => null);
+    const failed = results.filter(
+      (r) => r.gate !== "passed" || r.problem !== null,
+    );
+    const rows = project.data.repos.map((repo) => {
+      const r = results.find((x) => x.name === repo.name);
+      const setup = !r
+        ? "set up on origin"
+        : r.problem
+          ? r.problem
+          : `afk/setup ${r.pushed ? `pushed${r.commit ? ` (${r.commit})` : ""}` : "up to date"}; gate ${r.gate}`;
+      const kept = r?.worktree ? `; worktree kept at ${r.worktree}` : "";
+      const host = hosting.find((h) => h.name === repo.name);
+      const hostingText = host
+        ? `; 托管: ${host.line.slice(repo.name.length + 2)}`
+        : "";
+      return `${repo.name}${repo.name === doc.repo ? " (planning repo)" : ""}: ${setup}${kept}${hostingText}`;
+    });
+    const lines = [
+      ...(worktrees.length === 0
+        ? ["no setup worktrees: nothing to push (run plat setup first)"]
+        : []),
+      ...rows,
+      ...failed.flatMap((r) =>
+        r.gate === "failed"
+          ? [
+              ...(r.sandboxLacksTool
+                ? [
+                    `${r.name}: the platform's sandbox lacks a tool this repo needs; whoever runs the platform has to add it to the sandbox image`,
+                  ]
+                : []),
+              r.gateOutput ?? "",
+            ]
+          : [],
+      ),
+      doctor ? formatDoctorText(doctor) : "plat doctor could not run",
+      failed.length > 0
+        ? "next: fix what failed in the kept worktrees, then plat setup --finish again"
+        : `next: plan with /grill-with-docs in ${io.cwd ?? process.cwd()}, on any branch`,
+    ];
+    const report = {
+      project: projectId,
+      planningRepo: doc.repo,
+      // every repo of the project: the ones set up on origin already have no worktree and no gate run
+      repos: project.data.repos.map(
+        (repo) =>
+          results.find((r) => r.name === repo.name) ?? {
+            name: repo.name,
+            worktree: null,
+            commit: null,
+            pushed: false,
+            gate: null,
+            gateOutput: null,
+            sandboxLacksTool: false,
+            problem: null,
+          },
+      ),
+      hosting,
+      doctor,
+    };
+    if (failed.length > 0) throw new Failure(lines.join("\n"), report);
+    print(report, lines.join("\n"));
+  };
+
+  program
+    .command("setup")
+    .description(
+      "run in the planning repo: check this machine, register the project and its repos (this one and each --with), write the planning files here, and make a setup worktree for each repo origin lacks a gate or AGENTS.md for; prints what each worktree lacks. With --finish: commit and push each worktree to afk/setup, have the platform run its gate, remove the worktrees that pass, and run plat doctor. Running either again only fills the gaps",
+    )
+    .option(
+      "--with <path[=name]>",
+      "another repo's local checkout, optionally with the name tickets use for it (repeatable)",
+      collect,
+      [],
+    )
+    .option(
+      "--finish",
+      "after the files are written in the worktrees: commit, push to afk/setup, check the gate, clean up, report",
+    )
+    .action(async (options: { with: string[]; finish?: boolean }) => {
+      if (options.finish) {
+        await finishSetup();
+        return;
+      }
+      const problems = await setupProblems(options.with);
+      if (problems.length > 0)
+        throw new Failure(
+          `this machine is not ready; nothing was changed:\n${problems.map((p) => `- ${p}`).join("\n")}`,
+          { error: "not-ready", problems },
+        );
+      const init = await runInit({ with: options.with, yes: true }, true);
+      const plan = init.plan;
+      if (!plan || init.projectId === undefined) throw new Failure(init.text);
+      const planning = plan.repos.find((r) => r.planning);
+      const setups = setupsDir(afkHome(io.env), planning?.name ?? "planning");
+      const repos = plan.repos.map((repo) => ({
+        ...prepareRepo(
+          {
+            name: repo.name,
+            dir: repo.checkout.dir,
+            defaultBranch: repo.checkout.defaultBranch,
+            planning: repo.planning,
+          },
+          setups,
+        ),
+        hosting: init.access.find((a) => a.name === repo.name),
+      }));
+      const newlyRegistered = plan.repos.some((r) => !r.registered);
+      const ready =
+        !newlyRegistered &&
+        repos.every((r) => r.worktree === null && !r.problem);
+      const lines = [
+        `project ${init.projectId}; planning repo ${planning?.name} (where plat setup runs: ${planning?.checkout.dir})`,
+        ...repos.map(stateLine),
+        ...repos.flatMap((r) =>
+          r.leftover ? [`${r.name}: ${r.leftover}`] : [],
+        ),
+        ...repos.flatMap((r) =>
+          r.hosting && !r.hosting.ok ? [r.hosting.line] : [],
+        ),
+        ready
+          ? "本机已就绪"
+          : repos.some((r) => r.worktree !== null)
+            ? "next: write what each worktree lacks, then plat setup --finish"
+            : "next: plat setup --finish",
+      ];
+      const report = {
+        project: init.projectId,
+        planningRepo: planning?.name,
+        ready,
+        repos: repos.map((r) => ({
+          name: r.name,
+          dir: r.dir,
+          planning: r.planning,
+          worktree: r.worktree,
+          resumed: r.resumed,
+          missing: missingIn(r.readiness),
+          gates: r.readiness?.gates ?? null,
+          agentsMd: r.readiness?.agentsMd ?? null,
+          runningUnattended: r.readiness?.runningUnattended ?? null,
+          hosting: r.hosting?.line ?? null,
+          hostingOk: r.hosting?.ok ?? null,
+          leftover: r.leftover ?? null,
+          problem: r.problem ?? null,
+        })),
+      };
+      // a repo that could not be prepared fails the command, after saying what was done
+      if (repos.some((r) => r.problem))
+        throw new Failure(lines.join("\n"), report);
+      print(report, lines.join("\n"));
     });
 
   program

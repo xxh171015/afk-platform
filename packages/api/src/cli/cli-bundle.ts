@@ -6,7 +6,7 @@ import { SNAPSHOT_FILES, snapshotPath } from "@afk/shared/skills-snapshot";
 import { build, type Plugin } from "esbuild";
 
 // plat as one file that runs with node alone (GET /cli/plat.mjs): /afk-setup puts it on a planning machine that has
-// no checkout of the platform. The three modules that read files from the disk get the files written into them.
+// no checkout of the platform. The modules that read files from the disk get the files written into them.
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const at = (path: string) => join(root, path);
@@ -55,12 +55,15 @@ const inlineFiles: Plugin = {
           filesUnder(at("packages/cli/templates")),
           'file + ".md"',
         ),
-      [at("packages/cli/src/afk-setup-text.ts")]: () =>
-        reader(
-          "readAfkSetupSkill",
-          { "SKILL.md": readFileSync(at("skills/afk-setup/SKILL.md"), "utf8") },
-          '"SKILL.md"',
-        ),
+      [at("packages/cli/src/skills-package-text.ts")]: () =>
+        `export const readSkillsPackage = () => (${JSON.stringify(
+          Object.fromEntries(
+            Object.entries(filesUnder(at("skills"))).filter(([path]) =>
+              path.includes("/"),
+            ),
+          ),
+        )});
+`,
     };
     builder.onLoad({ filter: /-text\.ts$/ }, (args) => {
       const contents = replaced[args.path];

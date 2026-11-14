@@ -1,7 +1,11 @@
-import { SETUP_BRANCH, SKILLS_PACKAGE } from "@afk/shared";
+import { SETUP_BRANCH } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
-import { readSkillSnapshot } from "@afk/shared/skills-snapshot";
-import { readAfkSetupSkill } from "./afk-setup-text.ts";
+import {
+  packageSkillFiles,
+  packageSkills,
+  SKILLS_DIRS,
+  SKILLS_FIX,
+} from "./skills-install.ts";
 import {
   renderTrackerDoc,
   type TrackerDocProject,
@@ -14,33 +18,6 @@ import {
 type ReadFile = (path: string) => Promise<string>;
 
 const DOC_PATH = "docs/agents/issue-tracker.md";
-
-// The skills directories of the agents that run the planning skills, in the planning repo (project level) and in the
-// home directory (user level). `npx skills` installs into .agents/skills and links the others.
-export const SKILLS_DIRS = [
-  ".claude/skills",
-  ".cursor/skills",
-  ".agents/skills",
-];
-// The planning skills plat carries a copy of, to tell whether an installed one is the platform's.
-const CHECKED_SKILLS = ["to-spec", "to-tickets"] as const;
-// One package holds afk-setup and the planning skills at the pinned SHA (skills/). The first install is like
-// `npx skills@latest add mattpocock/skills`: it asks which skills, which agents, project or global. `plat update`
-// installs it again at the platform's commit, at the levels it is at (skills-install.ts).
-const SKILLS_INSTALL = `npx skills@latest add ${SKILLS_PACKAGE}`;
-export type SkillsLevel = "project" | "user";
-const skillsFix = (level: SkillsLevel | undefined) =>
-  level === undefined
-    ? `install them: ${SKILLS_INSTALL}`
-    : `update them: plat update${level === "project" ? " (in this repo)" : ""}`;
-
-/** A skill's SKILL.md as this platform has it, for the skills plat carries a copy of; undefined for the others. */
-export function expectedSkillText(skill: string): string | undefined {
-  if (skill === "afk-setup") return readAfkSetupSkill();
-  return (CHECKED_SKILLS as readonly string[]).includes(skill)
-    ? readSkillSnapshot(`${skill as (typeof CHECKED_SKILLS)[number]}/SKILL.md`)
-    : undefined;
-}
 
 // Setting a repo up, and bringing its tracker doc up to date, is the afk-setup skill's job (skills/afk-setup). The
 // planning agent reads these warnings and runs it itself: the person types nothing.
@@ -86,77 +63,39 @@ export async function trackerDocWarnings(
       ];
 }
 
-// Per skill this platform has the text of: whether it is installed, and at which level, and whether it is the
-// platform's. A skill installed in the planning repo (`repo`, project level) is the one the agent uses, so it is
-// judged alone; otherwise the user's.
-async function skillVerdicts(
-  readFile: ReadFile,
-  home: string,
-  repo: string,
-): Promise<
-  { skill: string; verdict: { level: SkillsLevel; ok: boolean } | undefined }[]
-> {
-  const wanted = [
-    ...CHECKED_SKILLS.map((skill) => ({
-      skill,
-      expected: readSkillSnapshot(`${skill}/SKILL.md`),
-    })),
-    { skill: "afk-setup", expected: readAfkSetupSkill() },
-  ];
-  const levels: [SkillsLevel, string][] = [
-    ["project", repo],
-    ["user", home],
-  ];
-  const verdicts = [];
-  for (const { skill, expected } of wanted) {
-    let verdict: { level: SkillsLevel; ok: boolean } | undefined;
-    for (const [level, root] of levels) {
-      // Any of the level's directories holding the expected text is enough.
-      const copies: string[] = [];
-      for (const dir of SKILLS_DIRS) {
-        try {
-          copies.push(await readFile(`${root}/${dir}/${skill}/SKILL.md`));
-        } catch {}
-      }
-      if (copies.length > 0) {
-        verdict = { level, ok: copies.includes(expected) };
-        break;
-      }
-    }
-    verdicts.push({ skill, verdict });
-  }
-  return verdicts;
-}
-
 /**
- * Warnings about the planning machine's skills: to-spec and to-tickets must be the snapshot's text byte for byte (the
- * pinned SHA), and afk-setup the one this platform carries.
+ * Warnings about the planning repo's skills: afk-setup and each planning skill must be in this repo, with the SKILL.md
+ * plat carries byte for byte. Skills only the user has do not count: the platform's go in the planning repo. Two lines
+ * at most: the ones missing and the ones that differ.
  */
 export async function skillsWarnings(
   readFile: ReadFile,
-  home: string,
   repo = ".",
 ): Promise<string[]> {
-  const where = (level: SkillsLevel) =>
-    level === "project" ? "in this repo" : "on this machine";
-  return (await skillVerdicts(readFile, home, repo))
-    .filter(({ verdict }) => !verdict?.ok)
-    .map(({ skill, verdict }) =>
-      verdict
-        ? `warning: the ${skill} skill ${where(verdict.level)} is not the version this platform uses: ${skillsFix(verdict.level)}`
-        : `warning: the ${skill} skill was not found in this repo or under ${SKILLS_DIRS.map((d) => `~/${d}`).join(", ")}: ${skillsFix(undefined)}`,
+  const missing: string[] = [];
+  const stale: string[] = [];
+  for (const skill of packageSkills()) {
+    const expected = packageSkillFiles(skill)["SKILL.md"];
+    if (expected === undefined) continue;
+    const copies: string[] = [];
+    for (const dir of SKILLS_DIRS) {
+      try {
+        copies.push(await readFile(`${repo}/${dir}/${skill}/SKILL.md`));
+      } catch {}
+    }
+    if (copies.length === 0) missing.push(skill);
+    else if (!copies.includes(expected)) stale.push(skill);
+  }
+  const warnings: string[] = [];
+  if (missing.length > 0)
+    warnings.push(
+      `warning: ${missing.join(", ")} not found in this repo: put the platform's skills here with ${SKILLS_FIX} (in the planning repo)`,
     );
-}
-
-/** The skills installed on this machine that are not the platform's version (`plat sync` installs them again). */
-export async function staleSkills(
-  readFile: ReadFile,
-  home: string,
-  repo = ".",
-): Promise<string[]> {
-  return (await skillVerdicts(readFile, home, repo))
-    .filter(({ verdict }) => verdict && !verdict.ok)
-    .map(({ skill }) => skill);
+  if (stale.length > 0)
+    warnings.push(
+      `warning: ${stale.join(", ")} in this repo not the version this platform uses: bring them up with ${SKILLS_FIX} (in the planning repo; a copy git tracks is left as it is: take it out of git first)`,
+    );
+  return warnings;
 }
 
 /** A warning when this plat is older or newer than the platform it talks to. */

@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readSkillsPackage } from "./skills-package-text.ts";
 
-// The afk-setup skill as this version of the platform has it (skills/afk-setup/SKILL.md). A module of its own so
-// that the plat the platform hands out (packages/api/src/cli-bundle.ts) carries it inside.
-export const readAfkSetupSkill = (): string =>
-  readFileSync(
-    new URL("../../../skills/afk-setup/SKILL.md", import.meta.url),
-    "utf8",
-  );
+// The afk-setup skill as this version of the platform has it (skills/afk-setup/SKILL.md), from the skills package plat
+// carries.
+export const readAfkSetupSkill = (): string => {
+  const text = readSkillsPackage()["afk-setup/SKILL.md"];
+  if (text === undefined) throw new Error("plat does not carry afk-setup");
+  return text;
+};

@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -26,14 +27,12 @@ let home: string;
 let backend: Checkout;
 let bundle: string;
 let reruns: { file: string; args: string[]; env: Record<string, string> }[];
-let installs: string[][];
 
 beforeEach(async () => {
   ws = await platWorkspace();
   dir = mkdtempSync(join(tmpdir(), "afk-plat-self-"));
   home = mkdtempSync(join(tmpdir(), "afk-user-"));
   reruns = [];
-  installs = [];
   backend = ws.checkout("backend", "https://github.com/acme/backend.git");
   // set up as afk-setup does, by a plat run from this checkout (it never replaces itself)
   await ws.plat(backend.dir, ["init", "--yes"]);
@@ -44,6 +43,8 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
 });
+
+const SKILLS = fileURLToPath(new URL("../../../../skills", import.meta.url));
 
 const sha256 = (text: string) =>
   createHash("sha256").update(text).digest("hex");
@@ -66,10 +67,6 @@ const platFrom = (
     rerun: (f, a, e) => {
       reruns.push({ file: f, args: a, env: e });
       return 7;
-    },
-    run: (command, args) => {
-      installs.push([command, ...args]);
-      return { code: 0 };
     },
   });
 
@@ -199,9 +196,16 @@ describe("the plat that just replaced an older one", () => {
     expect(result.stderr).toContain(
       "planning files: docs/agents/issue-tracker.md updated, CLAUDE.local.md updated",
     );
-    // the skills are installed again at the platform's commit, in this repo where they are
-    expect(installs).toHaveLength(1);
-    expect(installs[0]).toContain("skills@latest");
+    // the skills in this repo are written again from the new plat
+    expect(
+      readFileSync(
+        join(backend.dir, ".agents/skills/afk-setup/SKILL.md"),
+        "utf8",
+      ),
+    ).toBe(readFileSync(join(SKILLS, "afk-setup/SKILL.md"), "utf8"));
+    expect(result.stderr).toContain(
+      "skills: replaced in this repo with the platform's: afk-setup",
+    );
     expect(reruns).toEqual([]);
   });
 });
@@ -209,22 +213,23 @@ describe("the plat that just replaced an older one", () => {
 describe("plat sync", () => {
   it("rewrites planning files that are not the platform's and leaves skills that are alone", async () => {
     const rules = join(backend.dir, "CLAUDE.local.md");
+    const sync = () =>
+      ws.plat(backend.dir, ["sync"], undefined, {
+        env: { HOME: home },
+        platPath: "",
+      });
+    // the platform's skills are here already
+    await sync();
     writeFileSync(rules, "## Planning on this machine\n\n- older rules\n");
 
-    const synced = await ws.plat(backend.dir, ["sync"], undefined, {
-      env: { HOME: home },
-      platPath: "",
-      run: (command, args) => {
-        installs.push([command, ...args]);
-        return { code: 0 };
-      },
-    });
+    const synced = await sync();
 
     expect(synced.code).toBe(0);
-    expect(synced.stdout).toContain("skills: nothing to update");
+    expect(synced.stdout).toContain(
+      "skills: the platform's, up to date in this repo",
+    );
     expect(synced.stdout).toContain("planning files: CLAUDE.local.md updated");
     expect(readFileSync(rules, "utf8")).toContain("run `plat sync`");
-    expect(installs).toEqual([]);
 
     const again = await ws.plat(backend.dir, ["sync"], undefined, {
       env: { HOME: home },

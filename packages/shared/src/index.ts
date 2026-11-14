@@ -247,7 +247,7 @@ export {
   TICKET_TYPES,
   TicketSchema,
 } from "./schemas.ts";
-export { SKILLS_PACKAGE, skillsPackageAt } from "./skills-package.ts";
+export { SKILLS_PACKAGE } from "./skills-package.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
 export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";

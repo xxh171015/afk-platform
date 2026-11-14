@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +46,8 @@ afterEach(async () => {
   await rm(logDir, { recursive: true, force: true });
 });
 
+const SKILLS = fileURLToPath(new URL("../../../../skills", import.meta.url));
+
 // The tracker doc a developer who ran `plat tracker-doc` for the project's first repo would have committed, so that
 // these tests see no tracker doc warning on stderr.
 async function committedTrackerDoc(apiUrl: string): Promise<string> {
@@ -80,6 +83,9 @@ async function plat(...args: string[]) {
     readFile: async (path) => {
       if (path === "docs/agents/issue-tracker.md")
         return await committedTrackerDoc(api.url);
+      // the platform's skills, as plat sync puts them in the planning repo
+      const skill = /^\.\/\.agents\/skills\/(.+)$/.exec(path);
+      if (skill?.[1]) return readFileSync(join(SKILLS, skill[1]), "utf8");
       const content = files[path];
       if (content === undefined) throw new Error(`ENOENT ${path}`);
       return content;

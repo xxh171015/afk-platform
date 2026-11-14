@@ -1,94 +1,157 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { SKILLS_PACKAGE, skillsPackageAt } from "@afk/shared";
-import { PLANNING_SKILLS } from "@afk/shared/skills-snapshot";
-import { excludeLocally } from "./git-exclude.ts";
 import {
-  expectedSkillText,
-  SKILLS_DIRS,
-  type SkillsLevel,
-} from "./planning-checks.ts";
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { SKILLS_PACKAGE } from "@afk/shared";
+import { excludeLocally } from "./git-exclude.ts";
+import { readSkillsPackage } from "./skills-package-text.ts";
 
-// Where `plat update` (and afk-setup through it) installs afk-setup and the planning skills, at the platform's
-// commit of the skills package. Only the person picks the user level: the skills follow afk-setup, and plat never
-// changes what the person has for the user when planning skills of the same names are there (other projects use
-// them); the planning skills then go into the planning repo. At project level the skills stay on this machine: their
-// files and skills-lock.json go to the repo's .git/info/exclude.
+// Where `plat sync` and `plat update` (and afk-setup through them) put afk-setup and the planning skills: in the
+// planning repo only, on this machine only, written from the copy plat carries (skills-package-text.ts). Nothing is
+// fetched from GitHub and nothing goes to the user's own skills directories. The layout is the one
+// `npx skills add -a cursor -a claude-code` makes: the files under .agents/skills/<name> (Cursor reads it), and
+// .claude/skills/<name> a link to it (Claude Code). The paths go to the repo's .git/info/exclude.
 
-export const PLANNING_SKILL_NAMES = Object.keys(PLANNING_SKILLS);
-const ALL_SKILLS = ["afk-setup", ...PLANNING_SKILL_NAMES];
-const LOCK = "skills-lock.json";
+const FILES_DIR = ".agents/skills";
+const LINK_DIRS = [".claude/skills", ".cursor/skills"];
+/** The skills directories an agent reads in the planning repo (an older install may have put copies under .cursor). */
+export const SKILLS_DIRS = [FILES_DIR, ...LINK_DIRS];
+/** What brings the planning repo's skills to the platform's. */
+export const SKILLS_FIX = "plat sync";
 
-// Runs a command in `cwd`, its output on stderr; the exit code, or the reason it did not run.
-export type RunCommand = (
-  command: string,
-  args: string[],
-  cwd: string,
-) => { code: number; error?: string };
-
-export const runCommand: RunCommand = (command, args, cwd) => {
-  const result = spawnSync(command, args, {
-    cwd,
-    stdio: ["ignore", "ignore", "inherit"],
-  });
-  return { code: result.status ?? -1, error: result.error?.message };
+let carried: Record<string, string> | undefined;
+const skillsPackage = () => {
+  carried ??= readSkillsPackage();
+  return carried;
 };
 
-/** The skills CLI command that installs `skills` ("*" for the whole package) at `commit`, at `level`. */
-export const skillsInstallCommand = (
-  commit: string,
-  skills: "*" | string[],
-  level: SkillsLevel,
-): string[] => [
-  "npx",
-  "-y",
-  "skills@latest",
-  "add",
-  skillsPackageAt(commit),
-  ...(skills === "*"
-    ? ["--skill", "*"]
-    : skills.flatMap((s) => ["--skill", s])),
-  ...(level === "user" ? ["-g"] : []),
-  "-y",
-];
-
-const skillAt = (root: string, skill: string): string | undefined => {
-  for (const dir of SKILLS_DIRS) {
-    const file = join(root, dir, skill, "SKILL.md");
-    if (existsSync(file)) return readFileSync(file, "utf8");
-  }
-  return undefined;
-};
-
-// Where the skills CLI's lock says a skill came from: the user's ~/.agents/.skill-lock.json, a repo's
-// skills-lock.json; an entry's `source` is the package, e.g. mattpocock/skills (seen on a real machine, #171).
-function lockSource(file: string, skill: string): string | undefined {
-  let lock: unknown;
-  try {
-    lock = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return undefined;
-  }
-  const skills = (lock as { skills?: unknown })?.skills ?? lock;
-  const entry = (skills as Record<string, unknown> | null)?.[skill];
-  const source = (entry as { source?: unknown } | null)?.source;
-  return typeof source === "string" ? source : undefined;
+/** The skills of the package plat carries, afk-setup first. */
+export function packageSkills(): string[] {
+  const names = new Set(
+    Object.keys(skillsPackage()).map((path) => path.split("/")[0] ?? ""),
+  );
+  names.delete("afk-setup");
+  return ["afk-setup", ...[...names].sort()];
 }
 
-const fromPackage = (source: string | undefined) =>
-  source?.split("#")[0] === SKILLS_PACKAGE;
+/** The files of one skill as the platform has it, by path inside the skill's folder. */
+export function packageSkillFiles(skill: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const [path, text] of Object.entries(skillsPackage()))
+    if (path.startsWith(`${skill}/`))
+      files[path.slice(skill.length + 1)] = text;
+  return files;
+}
 
 function git(cwd: string, args: string[]): { code: number; out: string } {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
   return { code: result.status ?? -1, out: result.stdout ?? "" };
 }
 
-// The skills of the package installed in this repo's agent directories (.agents/skills, .claude/skills, …) and not
-// tracked, with skills-lock.json when it is not tracked, added to .git/info/exclude where missing. Returns the lines
-// added.
+const isLink = (path: string) => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+const isThere = (path: string) => isLink(path) || existsSync(path);
+
+// The regular files under `dir`, by path inside it; undefined when `dir` is not a real directory.
+function filesIn(dir: string): Record<string, string> | undefined {
+  if (isLink(dir) || !existsSync(dir)) return undefined;
+  const files: Record<string, string> = {};
+  const walk = (at: string) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const full = join(at, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile())
+        files[relative(dir, full)] = readFileSync(full, "utf8");
+    }
+  };
+  walk(dir);
+  return files;
+}
+
+const sameFiles = (
+  a: Record<string, string> | undefined,
+  b: Record<string, string>,
+) =>
+  a !== undefined &&
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.entries(b).every(([path, text]) => a[path] === text);
+
+const linkTarget = (skill: string) => `../../${FILES_DIR}/${skill}`;
+
+// The files of a copy of `skill` in this repo, wherever an agent finds one (through links too).
+function copyIn(
+  repo: string,
+  skill: string,
+): Record<string, string> | undefined {
+  for (const dir of SKILLS_DIRS) {
+    const at = join(repo, dir, skill);
+    if (!existsSync(at)) continue;
+    try {
+      return filesIn(realpathSync(at));
+    } catch {}
+  }
+  return undefined;
+}
+
+// Whether `dir` is .agents/skills itself, through a link (a hand-made `.claude/skills -> ../.agents/skills`): a link
+// written there would point at itself.
+function isFilesDir(repo: string, dir: string): boolean {
+  try {
+    return (
+      realpathSync(join(repo, dir)) === realpathSync(join(repo, FILES_DIR))
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Writes one skill: its files under .agents/skills, a link from .claude/skills, and from .cursor/skills when an
+// earlier install made one there. True when anything changed.
+function writeSkill(repo: string, skill: string): boolean {
+  const wanted = packageSkillFiles(skill);
+  const filesDir = join(repo, FILES_DIR, skill);
+  let changed = false;
+  if (!sameFiles(filesIn(filesDir), wanted)) {
+    rmSync(filesDir, { recursive: true, force: true });
+    for (const [path, text] of Object.entries(wanted)) {
+      const file = join(filesDir, path);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, text);
+    }
+    changed = true;
+  }
+  for (const dir of LINK_DIRS) {
+    const link = join(repo, dir, skill);
+    if (dir !== ".claude/skills" && !isThere(link)) continue;
+    if (isFilesDir(repo, dir)) continue;
+    if (isLink(link) && readlinkSync(link) === linkTarget(skill)) continue;
+    rmSync(link, { recursive: true, force: true });
+    mkdirSync(dirname(link), { recursive: true });
+    symlinkSync(linkTarget(skill), link);
+    changed = true;
+  }
+  return changed;
+}
+
+// Skills of the package's names in this repo's agent directories (.agents/skills, .claude/skills, .windsurf/skills,
+// …) that git does not track, added to .git/info/exclude where missing; returns the lines added.
 export function excludeProjectSkills(repo: string): string[] {
-  const names = ALL_SKILLS.join("|");
+  const names = packageSkills().join("|");
   const skill = new RegExp(`^((?:\\.[^/]+/)+skills/(?:${names}))(?:/|$)`);
   const paths = new Set<string>();
   for (const file of git(repo, [
@@ -101,107 +164,100 @@ export function excludeProjectSkills(repo: string): string[] {
     .filter(Boolean)) {
     const match = skill.exec(file);
     if (match?.[1]) paths.add(match[1]);
-    if (file === LOCK) paths.add(LOCK);
   }
   // sorted, so the lines come in the same order every time
   return excludeLocally(repo, [...paths].sort());
 }
 
-export interface SkillsUpdate {
-  home: string;
-  repo: string | undefined; // the git checkout plat runs in, if any
-  commit: string | null; // the platform's commit; nothing is installed without it
-  run: RunCommand;
+// Where the user's skills CLI lock says each skill came from: ~/.agents/.skill-lock.json, whose entries carry a
+// `source` such as mattpocock/skills (seen on a real machine, #171).
+function userLockSources(home: string): Record<string, string> {
+  let lock: unknown;
+  try {
+    lock = JSON.parse(
+      readFileSync(join(home, ".agents/.skill-lock.json"), "utf8"),
+    );
+  } catch {
+    return {};
+  }
+  const skills = ((lock as { skills?: unknown })?.skills ?? lock) as Record<
+    string,
+    unknown
+  > | null;
+  const sources: Record<string, string> = {};
+  for (const [name, entry] of Object.entries(skills ?? {})) {
+    const source = (entry as { source?: unknown } | null)?.source;
+    if (typeof source === "string") sources[name] = source;
+  }
+  return sources;
 }
 
-/** Installs the skills again at the levels afk-setup is at; the lines that say what it did. Throws on a failed install. */
-export function updateSkills({
+export interface SkillsInstall {
+  home: string;
+  repo: string | undefined; // the git checkout plat runs in, if any
+  // Only bring up skills that are in this repo already (after plat replaced itself, whatever the command and the
+  // repo); otherwise write them all (`plat sync`, `plat update`).
+  onlyWhereInstalled?: boolean;
+}
+
+/** Writes afk-setup and the planning skills into the planning repo; the lines that say what it did. */
+export function installSkills({
   home,
   repo,
-  commit,
-  run,
-}: SkillsUpdate): string[] {
-  // this repo has skills of the package's names: they are what the agent here reads, so they are brought up too
-  const here =
-    repo !== undefined &&
-    ALL_SKILLS.some((skill) => skillAt(repo, skill) !== undefined);
-  const forUser = skillAt(home, "afk-setup") !== undefined;
-  const install = (skills: string[]) =>
-    `npx skills@latest add ${commit ? skillsPackageAt(commit) : SKILLS_PACKAGE} ${skills.map((s) => `--skill ${s}`).join(" ")}`;
-  if (!here && !forUser)
-    return [
-      `skills: afk-setup is not installed here or for you; install them once with: npx skills@latest add ${commit ? skillsPackageAt(commit) : SKILLS_PACKAGE}`,
-    ];
-  if (!commit)
-    return [
-      "skills: the platform does not say which commit of the skills it runs, so none were installed; update the platform, then run plat update again",
-    ];
+  onlyWhereInstalled = false,
+}: SkillsInstall): string[] {
+  const skills = packageSkills();
   const lines: string[] = [];
-  const runInstall = (
-    skills: "*" | string[],
-    level: SkillsLevel,
-    cwd: string,
-  ) => {
-    const [command, ...args] = skillsInstallCommand(commit, skills, level);
-    const done = run(command as string, args, cwd);
-    if (done.code !== 0)
-      throw new Error(
-        `skills: ${[command, ...args].join(" ")} failed${done.error ? ` (${done.error})` : ""}`,
-      );
-  };
-  // In this repo, over the copies that are not the platform's, which are named.
-  const installHere = (skills: "*" | string[]) => {
-    const root = repo as string;
-    const named = skills === "*" ? ALL_SKILLS : skills;
-    const replaced = named.filter((skill) => {
-      const text = skillAt(root, skill);
-      if (text === undefined) return false;
-      const expected = expectedSkillText(skill);
-      return expected !== undefined
-        ? text !== expected
-        : !fromPackage(lockSource(join(root, LOCK), skill));
-    });
-    runInstall(skills, "project", root);
-    excludeProjectSkills(root);
+  if (repo === undefined) {
     lines.push(
-      `skills: ${skills === "*" ? "afk-setup and the planning skills" : "the planning skills"} installed in this repo, on this machine only (in .git/info/exclude)`,
+      "skills: this is not a git checkout; run plat sync in the planning repo to put the skills there",
     );
-    if (replaced.length > 0)
-      lines.push(
-        `skills: replaced in this repo, as they were not the platform's: ${replaced.join(", ")}`,
-      );
-  };
-
-  if (here) installHere("*");
-  if (!forUser) return lines;
-  const userLock = join(home, ".agents/.skill-lock.json");
-  const sameNames = PLANNING_SKILL_NAMES.filter(
-    (skill) => skillAt(home, skill) !== undefined,
-  );
-  const fromPlatform = sameNames.filter((skill) =>
-    fromPackage(lockSource(userLock, skill)),
-  );
-  if (sameNames.length === 0) {
-    runInstall("*", "user", home);
-    lines.push("skills: afk-setup and the planning skills installed for you");
-    return lines;
-  }
-  if (fromPlatform.length > 0) {
-    // the platform's skills for the user: plat changes nothing for the user
-    lines.push(
-      `skills: ${fromPlatform.join(", ")} for you come from the platform, so every project of yours plans with them; plat leaves what you have for you. To go back to Matt's: npx skills@latest add mattpocock/skills ${fromPlatform.map((s) => `--skill ${s}`).join(" ")} -g -y`,
-      `skills: afk-setup for you is left as it is; to update it yourself: ${install(["afk-setup"])} -g -y`,
-    );
+  } else if (
+    onlyWhereInstalled &&
+    !skills.some((skill) => copyIn(repo, skill) !== undefined)
+  ) {
+    lines.push("skills: none in this repo");
   } else {
-    runInstall(["afk-setup"], "user", home);
-    lines.push("skills: afk-setup installed for you");
+    // A copy git tracks, in any agent's skills directory, is the repo's own: plat does not write over it.
+    const trackedFiles = git(repo, ["ls-files", "-z"]).out.split("\0");
+    const tracked = skills.filter((skill) => {
+      const inSkills = new RegExp(`^(?:\\.[^/]+/)+skills/${skill}(?:/|$)`);
+      return trackedFiles.some((file) => inSkills.test(file));
+    });
+    const replaced: string[] = [];
+    let changed = false;
+    for (const skill of skills) {
+      if (tracked.includes(skill)) continue;
+      const before = copyIn(repo, skill);
+      if (!writeSkill(repo, skill)) continue;
+      changed = true;
+      if (before !== undefined && !sameFiles(before, packageSkillFiles(skill)))
+        replaced.push(skill);
+    }
+    excludeProjectSkills(repo);
+    if (!changed) lines.push("skills: the platform's, up to date in this repo");
+    else if (replaced.length === 0)
+      lines.push(
+        "skills: afk-setup and the planning skills written in this repo, on this machine only (in .git/info/exclude)",
+      );
+    else
+      lines.push(
+        `skills: replaced in this repo with the platform's: ${replaced.join(", ")}`,
+      );
+    if (tracked.length > 0)
+      lines.push(
+        `skills: git tracks ${tracked.join(", ")} in this repo, so plat left them as they are and the platform's are not there: take them out of git, then run plat sync`,
+      );
   }
-  // planning skills of the same names for the user stay theirs: the platform's go into this repo
-  if (here) return lines;
-  if (repo !== undefined) installHere(PLANNING_SKILL_NAMES);
-  else
+
+  // The platform's copies an older plat installed for the user: this repo's come first, so they are only named.
+  const sources = userLockSources(home);
+  const forUser = skills.filter(
+    (skill) => sources[skill]?.split("#")[0] === SKILLS_PACKAGE,
+  );
+  if (forUser.length > 0)
     lines.push(
-      "skills: you have planning skills of your own, so the platform's go into the planning repo: run plat update there",
+      `skills: you still have the platform's ${forUser.join(", ")} for you from an older install; the planning repo's copies come first there. To remove them: npx skills@latest remove -g -y ${forUser.join(" ")}`,
     );
   return lines;
 }
