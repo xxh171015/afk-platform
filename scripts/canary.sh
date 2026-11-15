@@ -212,8 +212,9 @@ while true; do
     for ticket in $tickets_now; do
       wanted="${wanted}refs/heads/${prefix}${ticket}"$'\n'
     done
-    refs=$(git ls-remote --heads "$repo_url" | awk -v wanted="$wanted" '
-      BEGIN { n = split(wanted, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") w[a[i]] = 1 }
+    # The list goes through the environment: BSD awk (macOS) rejects a newline in an -v value.
+    refs=$(git ls-remote --heads "$repo_url" | CANARY_WANTED="$wanted" awk '
+      BEGIN { n = split(ENVIRON["CANARY_WANTED"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") w[a[i]] = 1 }
       $2 in w { print $2 }
     ') || true
   fi
