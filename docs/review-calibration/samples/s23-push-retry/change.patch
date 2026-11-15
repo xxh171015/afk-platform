@@ -1,0 +1,207 @@
+diff --git a/packages/api/src/worker-demo/worker-demo.test.ts b/packages/api/src/worker-demo/worker-demo.test.ts
+index 2b7a3a5..f98e9d7 100644
+--- a/packages/api/src/worker-demo/worker-demo.test.ts
++++ b/packages/api/src/worker-demo/worker-demo.test.ts
+@@ -1512,6 +1512,104 @@ describe("a flood of raw event lines", { timeout: 60_000 }, () => {
+   });
+ });
+ 
++describe("a push after the agent is done", { timeout: 60_000 }, () => {
++  const CONNECTION =
++    "fatal: unable to access 'https://github.com/shop/backend.git/': Could not resolve host: github.com";
++
++  function withAgentRemote(
++    executor: ReturnType<typeof deps>,
++    respond: (attempt: number) => { ok: false; error: string } | "push",
++  ) {
++    const real = executor.push;
++    let attempts = 0;
++    executor.push = (request, token) => {
++      if (!request.target.startsWith("refs/heads/agent/"))
++        return real(request, token);
++      attempts += 1;
++      const next = respond(attempts);
++      return next === "push" ? real(request, token) : next;
++    };
++    executor.sleep = async () => {};
++    return () => attempts;
++  }
++
++  it("finishes the job after the remote fails to connect three times, without running the agent again", async () => {
++    await confirmedSpec([ticket("a")]);
++    let implementRuns = 0;
++    const executor = deps({
++      script: (ctx) => {
++        if (ctx.stage === "implement") implementRuns += 1;
++        return undefined;
++      },
++    });
++    const agentPushes = withAgentRemote(executor, (attempt) =>
++      attempt <= 3 ? { ok: false, error: CONNECTION } : "push",
++    );
++    await runWorker({
++      api: workerFor(),
++      executor,
++      stopWhenIdle: true,
++      heartbeatMs: 20,
++    });
++    expect(await stateOf()).toEqual(["1:done"]);
++    expect(implementRuns).toBe(1);
++    expect(agentPushes()).toBe(4);
++  });
++
++  it.each([
++    [
++      "non-fast-forward",
++      "! [rejected] agent/abc123/T-1 -> agent/abc123/T-1 (non-fast-forward)",
++    ],
++    [
++      "a protected branch",
++      "remote: error: GH006: Protected branch update failed for refs/heads/agent/abc123/T-1",
++    ],
++    [
++      "no permission",
++      "remote: Permission to shop/backend.git denied to afk-platform[bot]",
++    ],
++  ])("does not retry a push that was rejected (%s)", async (_kind, error) => {
++    await confirmedSpec([ticket("a")]);
++    const api2 = workerFor();
++    const job = (await api2.claim([])) as NonNullable<
++      Awaited<ReturnType<typeof api2.claim>>
++    >;
++    const executor = deps();
++    const agentPushes = withAgentRemote(executor, () => ({
++      ok: false,
++      error,
++    }));
++    expect(
++      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
++    ).toBe("failed");
++    expect(agentPushes()).toBe(1);
++  });
++
++  it("fails the job as infrastructure when every retry still cannot connect", async () => {
++    await confirmedSpec([ticket("a")]);
++    const api2 = workerFor();
++    const job = (await api2.claim([])) as NonNullable<
++      Awaited<ReturnType<typeof api2.claim>>
++    >;
++    const executor = deps();
++    const agentPushes = withAgentRemote(executor, (attempt) =>
++      attempt <= 4 ? { ok: false, error: CONNECTION } : "push",
++    );
++    expect(
++      await processJob({ api: api2, executor, heartbeatMs: 50 }, job),
++    ).toBe("failed");
++    expect(agentPushes()).toBe(4);
++    const stored = await db.pool.query(
++      "SELECT state, error FROM jobs WHERE id = $1",
++      [job.id],
++    );
++    expect(stored.rows[0].state).toBe("failed");
++    expect(stored.rows[0].error).toContain("push failed");
++    expect(await stateOf()).toEqual(["1:running"]);
++  });
++});
++
+ describe("the merge stage", { timeout: 60_000 }, () => {
+   it("recognises a merge it already did when the result never reached the API", async () => {
+     await confirmedSpec([ticket("a")]);
+diff --git a/packages/worker/src/executor.ts b/packages/worker/src/executor.ts
+index ee84df9..7654c04 100644
+--- a/packages/worker/src/executor.ts
++++ b/packages/worker/src/executor.ts
+@@ -46,7 +46,7 @@ import { fetchContracts } from "./contracts.ts";
+ import { type Credentials, withCredentials } from "./credentials.ts";
+ import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
+ import type { EnvironmentLimiter } from "./environments.ts";
+-import type { PushFn } from "./push.ts";
++import { isNetworkPushError, type PushFn } from "./push";
+ import { sanitizeRawLine } from "./raw-log.ts";
+ import type { RepoStore } from "./repos.ts";
+ import { retrieveResult, type Slot, type SlotManager } from "./slots.ts";
+@@ -72,6 +72,8 @@ export interface ExecutorDeps {
+   model?: string; // the worker's own model: what a project that sets none gets
+   skillsSha?: string; // the skills version the worker checked at start-up; recorded on every agent Run
+   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
++  // A push that hit the network waits this long before retrying; tests replace it so they do not wait out 10–180 s.
++  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+ }
+ 
+ export interface StageContext {
+@@ -260,6 +262,19 @@ async function runStage(
+ const tip = (dir: string, ref: string) => gitOrThrow(dir, ["rev-parse", ref]);
+ const exists = hasRef;
+ 
++const sleep = (ms: number, signal?: AbortSignal) =>
++  new Promise<void>((resolve) => {
++    const timer = setTimeout(resolve, ms);
++    signal?.addEventListener(
++      "abort",
++      () => {
++        clearTimeout(timer);
++        resolve();
++      },
++      { once: true },
++    );
++  });
++
+ function renderFor(
+   deps: ExecutorDeps,
+   context: StageContext,
+@@ -434,19 +449,30 @@ async function agentChange(
+     });
+     if (stamped.error)
+       throw new InfrastructureError(`stamping failed: ${stamped.error}`);
+-    // Still the holder? (This also renews the lease.) A worker that lost its lease must not publish anything.
++    const request = {
++      repoDir: mainDir,
++      source: `refs/heads/${agent}`,
++      target: `refs/heads/${agent}`,
++      ...(replaced ? { expectedOld: replaced } : {}),
++    };
++    // Network blips: wait 10, 30, 90, 180 s and push again from this run, so a flake does not re-run the agent.
++    // The lease is checked before the first attempt: a worker that lost it must not publish anything.
++    const waitSeconds = [10, 30, 90, 180];
++    const wait = deps.sleep ?? sleep;
++    let pushed: ReturnType<PushFn> = { ok: false, error: "" };
+     if (
+       context.signal.aborted ||
+       (await deps.api.prePush(context.job)) === "lost"
+     ) {
+       throw new JobLostError("the lease was lost before the push");
+     }
+-    const pushed = deps.push({
+-      repoDir: mainDir,
+-      source: `refs/heads/${agent}`,
+-      target: `refs/heads/${agent}`,
+-      ...(replaced ? { expectedOld: replaced } : {}),
+-    });
++    for (let i = 0; i < waitSeconds.length; i++) {
++      pushed = deps.push(request);
++      if (pushed.ok) break;
++      if (!isNetworkPushError(pushed.error) || i === waitSeconds.length - 1)
++        break;
++      await wait(waitSeconds[i] * 1000, context.signal);
++    }
+     if (!pushed.ok)
+       throw new InfrastructureError(`push failed: ${pushed.error}`);
+     facts.headSha = tip(mainDir, agent);
+diff --git a/packages/worker/src/push.ts b/packages/worker/src/push.ts
+index 9e3af58..a3c02d6 100644
+--- a/packages/worker/src/push.ts
++++ b/packages/worker/src/push.ts
+@@ -44,6 +44,13 @@ export interface PushOptions {
+ 
+ export type PushResult = { ok: true } | { ok: false; error: string };
+ 
++// A failed push we will wait out and try again: the remote was unreachable, timed out, or answered 5xx.
++// A refusal (non-fast-forward, a protected branch, no permission) is not this; those fail the job as they do today.
++const NETWORK_PUSH =
++  /could not resolve host|failed to connect|connection refused|connection reset|connection timed out|timed out|etimedout|econnreset|enotfound|eai_again|couldn't connect|tls handshake timeout|the requested url returned error: 5\d\d|\bhttp 5\d\d\b|rpc failed; http 5\d\d/i;
++
++export const isNetworkPushError = (error: string) => NETWORK_PUSH.test(error);
++
+ export function pushRef(
+   request: PushRequest,
+   options: PushOptions = {},

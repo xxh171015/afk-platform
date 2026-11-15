@@ -1,0 +1,729 @@
+diff --git a/packages/api/drizzle/0062_sandbox_oom.sql b/packages/api/drizzle/0062_sandbox_oom.sql
+new file mode 100644
+index 0000000..dc742a9
+--- /dev/null
++++ b/packages/api/drizzle/0062_sandbox_oom.sql
+@@ -0,0 +1,35 @@
++-- OOM of a hardened sandbox is sandbox-oom (platform), on the ticket, wrap-up, and
++-- final e2e reason tables. Fail at once; do not retry the same memory limit three times.
++ALTER TABLE "tickets" DROP CONSTRAINT "tickets_blocked_reason_check";--> statement-breakpoint
++ALTER TABLE "tickets" ADD CONSTRAINT "tickets_blocked_reason_check" CHECK (("tickets"."state" = 'blocked') = ("tickets"."blocked_reason" is not null) and ("tickets"."blocked_reason" is null or "tickets"."blocked_reason" in ('gate-failed', 'post-merge-gate-failed', 'merge-conflict', 'protected-path-changed', 'contract-copy-mismatch', 'no-commits', 'agent-gave-up', 'contract-change-needed', 'invalid-output', 'timeout', 'integration-loop-exceeded', 'integration-unknown-side', 'integration-environment-failed', 'upstream-cancelled', 'job-failed', 'sandbox-oom')));--> statement-breakpoint
++ALTER TABLE "finalizations" DROP CONSTRAINT "finalizations_blocked_reason_code_check";--> statement-breakpoint
++ALTER TABLE "finalizations" ADD CONSTRAINT "finalizations_blocked_reason_code_check" CHECK ("blocked_reason" is null or "blocked_reason" in ('gate-failed', 'post-merge-gate-failed', 'merge-conflict', 'protected-path-changed', 'contract-copy-mismatch', 'no-commits', 'agent-gave-up', 'contract-change-needed', 'invalid-output', 'timeout', 'integration-loop-exceeded', 'integration-unknown-side', 'integration-environment-failed', 'upstream-cancelled', 'job-failed', 'sandbox-oom'));--> statement-breakpoint
++ALTER TABLE "final_e2e" DROP CONSTRAINT "final_e2e_blocked_reason_code_check";--> statement-breakpoint
++ALTER TABLE "final_e2e" ADD CONSTRAINT "final_e2e_blocked_reason_code_check" CHECK ("blocked_reason" is null or "blocked_reason" in ('final-e2e-failed', 'integration-environment-failed', 'job-failed', 'sandbox-oom'));--> statement-breakpoint
++CREATE OR REPLACE FUNCTION afk_failure_source(reason text, error text) RETURNS text
++LANGUAGE sql IMMUTABLE AS $$
++  SELECT CASE
++    WHEN reason IS NULL OR reason = 'upstream-cancelled' THEN NULL
++    WHEN reason IN ('invalid-output', 'no-commits', 'agent-gave-up', 'timeout', 'gate-failed', 'post-merge-gate-failed',
++                    'integration-loop-exceeded', 'integration-unknown-side', 'final-e2e-failed', 'budget-exhausted') THEN 'agent'
++    WHEN reason IN ('merge-conflict', 'protected-path-changed', 'contract-copy-mismatch', 'contract-change-needed',
++                    'integration-environment-failed', 'update-branch-conflict', 'update-branch-gate-failed',
++                    'planning-conflict') THEN 'spec'
++    WHEN reason = 'sync-error' THEN 'external'
++    WHEN reason = 'sandbox-oom' THEN 'platform'
++    WHEN reason = 'job-failed' AND error IS NOT NULL AND (
++         error ~* '(github|gitlab).*(answered |http |[(])(401|403|5[0-9][0-9])([^0-9]|$)'
++      OR error ~* 'authentication required|not authenticated|cursor-agent login|unauthorized|invalid username or token'
++      OR error ~* 'rate.?limit|too many requests|usage limit|out of usage|increase limits|http 429'
++      OR error ~* 'enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake'
++      OR error ~* 'err_pnpm_meta_fetch_fail|registry\.npmjs\.org|registry\.npmmirror\.com'
++      OR error ~* 'invalid model|unknown model|model not found|model does not exist|no such model'
++      OR error ~* 'quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted'
++      OR error ~* 'docker build of .+ failed'
++      OR error = 'Cursor 密钥失效或没有权限，更新 `~/.afk/env` 里的 `CURSOR_API_KEY` 后重试'
++      OR error = '模型名无效，检查项目的默认模型或 AFK_MODEL'
++      OR error = 'Cursor 额度用完，充值或换模型后再试'
++      OR error = '联调镜像构建失败，修好 Dockerfile 或基础镜像后再试') THEN 'external'
++    ELSE 'platform'
++  END
++$$;
+diff --git a/packages/api/drizzle/meta/_journal.json b/packages/api/drizzle/meta/_journal.json
+index 802f57d..dab27fa 100644
+--- a/packages/api/drizzle/meta/_journal.json
++++ b/packages/api/drizzle/meta/_journal.json
+@@ -435,6 +435,13 @@
+       "when": 1794460000000,
+       "tag": "0061_events_notify",
+       "breakpoints": true
++    },
++    {
++      "idx": 62,
++      "version": "7",
++      "when": 1794470000000,
++      "tag": "0062_sandbox_oom",
++      "breakpoints": true
+     }
+   ]
+ }
+diff --git a/packages/api/src/db/constraints.test.ts b/packages/api/src/db/constraints.test.ts
+index bafa54a..d5fd778 100644
+--- a/packages/api/src/db/constraints.test.ts
++++ b/packages/api/src/db/constraints.test.ts
+@@ -197,6 +197,9 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
+     expect(
+       await ticketWith("state, blocked_reason", "'blocked', 'gate-failed'"),
+     ).toBe("ok");
++    expect(
++      await ticketWith("state, blocked_reason", "'blocked', 'sandbox-oom'"),
++    ).toBe("ok");
+     expect(await ticketWith("state", "'blocked'")).toBe(CHECK_VIOLATION);
+     expect(await ticketWith("state, blocked_reason", "'blocked', 'oops'")).toBe(
+       CHECK_VIOLATION,
+@@ -219,6 +222,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
+       );
+     expect(await block("the review went wrong")).toBe(CHECK_VIOLATION);
+     expect(await block("merge-conflict")).toBe("ok");
++    expect(await block("sandbox-oom")).toBe("ok");
+ 
+     const e2e = await insert("INSERT INTO final_e2e (spec_id) VALUES ($1)", [
+       specId,
+@@ -231,6 +235,7 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
+     expect(await blockE2e("gate-failed")).toBe(CHECK_VIOLATION);
+     expect(await blockE2e("final-e2e-failed")).toBe("ok");
+     expect(await blockE2e("job-failed")).toBe("ok");
++    expect(await blockE2e("sandbox-oom")).toBe("ok");
+   });
+ 
+   it("a paused spec must carry a known pause reason, and only a paused spec may", async () => {
+diff --git a/packages/api/src/events/event-log-api.test.ts b/packages/api/src/events/event-log-api.test.ts
+index 41ba429..660b7b8 100644
+--- a/packages/api/src/events/event-log-api.test.ts
++++ b/packages/api/src/events/event-log-api.test.ts
+@@ -269,6 +269,7 @@ describe("the failure source the database works out", () => {
+     "getaddrinfo ENOTFOUND registry.npmmirror.com",
+     "net/http: TLS handshake timeout",
+     "sandbox exited with code 137",
++    "sandbox-oom: container OOMKilled",
+     "ActionRequiredError: Unauthorized request",
+     "Error: unknown model 'claude-code'",
+     "docker build of backend (backend) failed (exit 1)",
+diff --git a/packages/api/src/finalize/final-e2e-api.test.ts b/packages/api/src/finalize/final-e2e-api.test.ts
+index d77dbe6..a5a4fbd 100644
+--- a/packages/api/src/finalize/final-e2e-api.test.ts
++++ b/packages/api/src/finalize/final-e2e-api.test.ts
+@@ -478,6 +478,30 @@ describe("a failed e2e before the pull requests", () => {
+     expect(await queuedOf("open-pr")).toHaveLength(0);
+   });
+ 
++  it("blocks at once with sandbox-oom when the container was OOMKilled, as a platform problem", async () => {
++    await runningSpec();
++    const job = await completeUntilFinalE2e();
++    const failedReply = await worker.fail(
++      job.id,
++      job.attempt,
++      "sandbox-oom: container OOMKilled",
++    );
++    expect(failedReply.status).toBe(200);
++    expect(await finalE2e()).toMatchObject({
++      state: "blocked",
++      blocked_reason: "sandbox-oom",
++    });
++    expect(await claimSkippingHostSync()).toBeNull();
++    const blocked = (await call("GET", "/blocked")).body;
++    const entry = blocked.finalizations.find(
++      (f: Json) => f.step === "final-e2e",
++    );
++    expect(entry).toMatchObject({
++      blockedReason: "sandbox-oom",
++      failureSource: "platform",
++    });
++  });
++
+   it("blocks once on an image that would not build, as an outside service, and does not requeue", async () => {
+     await runningSpec();
+     const job = await completeUntilFinalE2e();
+diff --git a/packages/api/src/finalize/final-e2e.ts b/packages/api/src/finalize/final-e2e.ts
+index 5a5d42b..742065a 100644
+--- a/packages/api/src/finalize/final-e2e.ts
++++ b/packages/api/src/finalize/final-e2e.ts
+@@ -1,6 +1,7 @@
+ import {
+   FINAL_E2E_FAILED,
+   formatDisplayId,
++  isSandboxOomError,
+   type SpecState,
+   unrecoverableJobError,
+ } from "@afk/shared";
+@@ -294,14 +295,18 @@ export async function finalE2eJobFailed(
+       )
+     ).rows[0]?.n,
+   );
++  const oom = isSandboxOomError(error);
+   const unrecoverable = Boolean(unrecoverableJobError(error));
+-  if (!unrecoverable && failures < MAX_JOB_FAILURES) {
++  if (!oom && !unrecoverable && failures < MAX_JOB_FAILURES) {
+     await enqueueFor(client, read.specId, ticket, read.stage, read.round);
+     return { status: "requeued", failures };
+   }
+   await client.query(
+     "UPDATE final_e2e SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+-    [round.id, unrecoverable ? JOB_FAILED : ENVIRONMENT_FAILED],
++    [
++      round.id,
++      oom ? "sandbox-oom" : unrecoverable ? JOB_FAILED : ENVIRONMENT_FAILED,
++    ],
+   );
+   return { status: "blocked", failures };
+ }
+diff --git a/packages/api/src/stages/failures-api.test.ts b/packages/api/src/stages/failures-api.test.ts
+index f18f667..dd1544c 100644
+--- a/packages/api/src/stages/failures-api.test.ts
++++ b/packages/api/src/stages/failures-api.test.ts
+@@ -223,6 +223,22 @@ describe("a job the worker could not carry out", () => {
+     },
+   );
+ 
++  it("blocks the ticket at once with sandbox-oom when the container was OOMKilled, as a platform problem", async () => {
++    await runningSpec([ticket("a")]);
++    await failNext("sandbox-oom: container OOMKilled");
++    expect(await state()).toEqual({
++      state: "blocked",
++      blocked_reason: "sandbox-oom",
++    });
++    expect((await keys()).map((k) => k.state)).toEqual(["failed"]);
++    expect(await claim()).toBeNull();
++    const queue = await call("GET", "/blocked");
++    expect(queue.body.tickets[0]).toMatchObject({
++      blockedReason: "sandbox-oom",
++      failureSource: "platform",
++    });
++  });
++
+   it("blocks the ticket with job-failed after the third failure, with the error in its brief", async () => {
+     await runningSpec([ticket("a")]);
+     await failNext("one");
+diff --git a/packages/api/src/stages/failures.ts b/packages/api/src/stages/failures.ts
+index 4e30e8a..535f242 100644
+--- a/packages/api/src/stages/failures.ts
++++ b/packages/api/src/stages/failures.ts
+@@ -1,5 +1,6 @@
+ import {
+   type BlockedReason,
++  isSandboxOomError,
+   type TicketState,
+   ticketTransition,
+   unrecoverableJobError,
+@@ -162,8 +163,9 @@ async function ticketStageFailed(
+     }),
+     row.job_floor,
+   );
++  const oom = isSandboxOomError(error);
+   const unrecoverable = Boolean(unrecoverableJobError(error));
+-  if (!unrecoverable && failures < MAX_JOB_FAILURES) {
++  if (!oom && !unrecoverable && failures < MAX_JOB_FAILURES) {
+     await enqueueStageJob(
+       client,
+       {
+@@ -178,9 +180,11 @@ async function ticketStageFailed(
+   }
+   // A ticket that never got to start counts as running now, so that the state machine can block it.
+   const from: TicketState = row.state === "queued" ? "running" : row.state;
+-  const reason = unrecoverable
+-    ? JOB_FAILED
+-    : reasonOfFailed(read.stage, row.type);
++  const reason: BlockedReason = oom
++    ? "sandbox-oom"
++    : unrecoverable
++      ? JOB_FAILED
++      : reasonOfFailed(read.stage, row.type);
+   const blocked = ticketTransition(from, { type: "block", reason });
+   if (!blocked.ok) throw new Error(blocked.reason);
+   await client.query(
+diff --git a/packages/pipeline/src/index.ts b/packages/pipeline/src/index.ts
+index 56d5ec2..98dda22 100644
+--- a/packages/pipeline/src/index.ts
++++ b/packages/pipeline/src/index.ts
+@@ -115,8 +115,10 @@ export {
+   classifyAgentError,
+   DEFAULT_SANDBOX_LIMITS,
+   SANDBOX_KIND_LABEL,
++  SANDBOX_OOM_ERROR,
+   SANDBOX_RUN_LABEL,
+   SANDBOX_SKILLS_DIR,
++  SandboxOomError,
+   SandcastleAgentRunner,
+   SandcastleGateSandbox,
+   SKILLS_SANDBOX_PATH,
+diff --git a/packages/pipeline/src/sandcastle.test.ts b/packages/pipeline/src/sandcastle.test.ts
+index 860d224..b71350c 100644
+--- a/packages/pipeline/src/sandcastle.test.ts
++++ b/packages/pipeline/src/sandcastle.test.ts
+@@ -112,17 +112,42 @@ const defaultCreate = {
+   env: {},
+ };
+ 
++type CreatedSandbox = {
++  exec(
++    command: string,
++    options?: {
++      cwd?: string;
++      stdin?: string;
++      onLine?: (line: string) => void;
++      sudo?: boolean;
++    },
++  ): Promise<{ stdout: string; stderr: string; exitCode: number }>;
++  close(): Promise<void>;
++};
++
+ // Sandcastle keeps provider.create off the public type; the runtime object still has it.
+ function startProvider(
+   options: Parameters<typeof sandboxProvider>[0],
+   create = defaultCreate,
+ ) {
+   const provider = sandboxProvider(options) as unknown as {
+-    create: (opts: typeof defaultCreate) => Promise<{ close(): Promise<void> }>;
++    create: (opts: typeof defaultCreate) => Promise<CreatedSandbox>;
+   };
+   return provider.create(create);
+ }
+ 
++function oomDocker(opts: { execCode: number; oomKilled: boolean }) {
++  const calls: string[][] = [];
++  const docker: SandboxDocker = (args) => {
++    calls.push(args);
++    if (args[0] === "exec") return { code: opts.execCode, stdout: "killed\n" };
++    if (args[0] === "inspect")
++      return { code: 0, stdout: opts.oomKilled ? "true\n" : "false\n" };
++    return { code: 0, stdout: "ok\n" };
++  };
++  return { docker, calls };
++}
++
+ function expectHardened(args: string[], kind: "agent" | "gate", runId = "R-9") {
+   expect(args).toEqual(expect.arrayContaining(["--cap-drop", "ALL"]));
+   expect(args).toEqual(
+@@ -326,6 +351,52 @@ describe("the hardened sandbox", () => {
+   });
+ });
+ 
++describe("a sandbox that ran out of memory", () => {
++  it("maps inspect OOMKilled after a failed exec to sandbox-oom", async () => {
++    const fake = oomDocker({ execCode: 137, oomKilled: true });
++    const sandbox = await startProvider({
++      image: "sandcastle:afk-platform",
++      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
++      kind: "gate",
++      runId: "R-9",
++      docker: fake.docker,
++    });
++    await expect(sandbox.exec("hog")).rejects.toThrow(/sandbox-oom/);
++    expect(fake.calls.some((call) => call[0] === "inspect")).toBe(true);
++    expect(
++      fake.calls.some((call) => call.includes("{{.State.OOMKilled}}")),
++    ).toBe(true);
++  });
++
++  it("maps inspect OOMKilled before close to sandbox-oom", async () => {
++    const fake = oomDocker({ execCode: 0, oomKilled: true });
++    const sandbox = await startProvider({
++      image: "sandcastle:afk-platform",
++      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
++      kind: "gate",
++      runId: "R-9",
++      docker: fake.docker,
++    });
++    await expect(sandbox.close()).rejects.toThrow(/sandbox-oom/);
++    const inspectAt = fake.calls.findIndex((call) => call[0] === "inspect");
++    const stopAt = fake.calls.findIndex((call) => call[0] === "stop");
++    expect(inspectAt).toBeGreaterThanOrEqual(0);
++    expect(stopAt).toBeGreaterThan(inspectAt);
++  });
++
++  it("a failed exec that was not OOMKilled is still a failed command", async () => {
++    const fake = oomDocker({ execCode: 1, oomKilled: false });
++    const sandbox = await startProvider({
++      image: "sandcastle:afk-platform",
++      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
++      kind: "gate",
++      runId: "R-9",
++      docker: fake.docker,
++    });
++    expect(await sandbox.exec("false")).toMatchObject({ exitCode: 1 });
++  });
++});
++
+ describe("reading Sandcastle's errors", () => {
+   it("unusable structured output is invalid-output, and keeps the commits the run made", () => {
+     const error = new StructuredOutputError("bad result", {
+diff --git a/packages/pipeline/src/sandcastle.ts b/packages/pipeline/src/sandcastle.ts
+index d4cdc37..e36b3c1 100644
+--- a/packages/pipeline/src/sandcastle.ts
++++ b/packages/pipeline/src/sandcastle.ts
+@@ -106,6 +106,21 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxLimits = {
+ export const SANDBOX_RUN_LABEL = "afk.run";
+ export const SANDBOX_KIND_LABEL = "afk.kind";
+ 
++// The kernel killed the container for using too much memory (docker inspect State.OOMKilled).
++export const SANDBOX_OOM_ERROR = "sandbox-oom: container OOMKilled";
++
++export enum SandboxFailure {
++  Oom = "sandbox-oom",
++}
++
++export class SandboxOomError extends Error {
++  readonly reason = SandboxFailure.Oom;
++  constructor() {
++    super(SANDBOX_OOM_ERROR);
++    this.name = "SandboxOomError";
++  }
++}
++
+ // Same shape leftover sandbox cleanup uses: argv in, code and stdout out.
+ export type SandboxDocker = (
+   args: string[],
+@@ -219,6 +234,19 @@ function dockerExec(
+   });
+ }
+ 
++function inspectOomKilled(
++  docker: SandboxDocker,
++  containerName: string,
++): boolean {
++  const inspected = docker([
++    "inspect",
++    "--format",
++    "{{.State.OOMKilled}}",
++    containerName,
++  ]);
++  return inspected.code === 0 && /^\s*true\s*$/i.test(inspected.stdout);
++}
++
+ // Bind-mount docker provider used by every Sandcastle sandbox. Hardening flags live here, not in the image.
+ export function sandboxProvider(options: SandboxProviderOptions) {
+   const limits = options.limits ?? DEFAULT_SANDBOX_LIMITS;
+@@ -291,18 +319,25 @@ export function sandboxProvider(options: SandboxProviderOptions) {
+       }
+       return {
+         worktreePath,
+-        exec: (command, execOptions) => {
++        exec: async (command, execOptions) => {
+           const effective = execOptions?.sudo ? `sudo ${command}` : command;
+           const execArgs = ["exec"];
+           if (execOptions?.stdin !== undefined) execArgs.push("-i");
+           if (execOptions?.cwd) execArgs.push("-w", execOptions.cwd);
+           execArgs.push(containerName, "sh", "-c", effective);
+-          return dockerExec(docker, execArgs, {
++          const result = await dockerExec(docker, execArgs, {
+             ...(execOptions?.onLine ? { onLine: execOptions.onLine } : {}),
+             ...(execOptions?.stdin !== undefined
+               ? { stdin: execOptions.stdin }
+               : {}),
+           });
++          if (
++            result.exitCode !== 0 &&
++            inspectOomKilled(docker, containerName)
++          ) {
++            throw new SandboxOomError();
++          }
++          return result;
+         },
+         copyFileIn: async (hostPath, sandboxPath) => {
+           const copied = docker([
+@@ -325,8 +360,10 @@ export function sandboxProvider(options: SandboxProviderOptions) {
+           }
+         },
+         close: async () => {
++          const oom = inspectOomKilled(docker, containerName);
+           docker(["stop", containerName]);
+           docker(["rm", containerName]);
++          if (oom) throw new SandboxOomError();
+         },
+       };
+     },
+diff --git a/packages/shared/src/failure-source.test.ts b/packages/shared/src/failure-source.test.ts
+index e9e2bb9..b1bae2e 100644
+--- a/packages/shared/src/failure-source.test.ts
++++ b/packages/shared/src/failure-source.test.ts
+@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
+ import {
+   FAILURE_SOURCE_OF_REASON,
+   failureSourceOf,
++  isSandboxOomError,
+   PAUSE_REASONS,
+   pauseReasonLabel,
+   REASON_CODES,
+@@ -17,6 +18,7 @@ describe("failure source of a reason code", () => {
+     expect(failureSourceOf("update-branch-gate-failed")).toBe("spec");
+     expect(failureSourceOf("planning-conflict")).toBe("spec");
+     expect(failureSourceOf("lease-expired")).toBe("platform");
++    expect(failureSourceOf("sandbox-oom")).toBe("platform");
+     expect(failureSourceOf("sync-error")).toBe("external");
+   });
+ 
+@@ -37,6 +39,12 @@ describe("failure source of a reason code", () => {
+   it("treats an unknown code as the platform's", () => {
+     expect(failureSourceOf("something-new")).toBe("platform");
+   });
++
++  it("recognises a sandbox OOMKilled error as sandbox-oom", () => {
++    expect(isSandboxOomError("sandbox-oom: container OOMKilled")).toBe(true);
++    expect(isSandboxOomError("OOMKilled")).toBe(true);
++    expect(isSandboxOomError("docker daemon not running")).toBe(false);
++  });
+ });
+ 
+ describe("pause reason labels", () => {
+diff --git a/packages/shared/src/failure-source.ts b/packages/shared/src/failure-source.ts
+index d099ec8..6cbd928 100644
+--- a/packages/shared/src/failure-source.ts
++++ b/packages/shared/src/failure-source.ts
+@@ -28,6 +28,7 @@ export const FINAL_E2E_BLOCKED_REASONS = [
+   FINAL_E2E_FAILED,
+   "integration-environment-failed",
+   "job-failed",
++  "sandbox-oom",
+ ] as const;
+ 
+ // Why the platform paused a spec.
+@@ -87,6 +88,7 @@ export const FAILURE_SOURCE_OF_REASON: Record<
+   "update-branch-gate-failed": "spec",
+   "planning-conflict": "spec",
+   "job-failed": "platform",
++  "sandbox-oom": "platform",
+   "lease-expired": "platform",
+   "sync-error": "external",
+   "upstream-cancelled": null,
+@@ -110,6 +112,10 @@ const EXTERNAL = EXTERNAL_ERROR_PATTERNS.map(
+   (pattern) => new RegExp(pattern, "i"),
+ );
+ 
++export function isSandboxOomError(error: string): boolean {
++  return /\bOOMKilled\b|\bsandbox-oom\b/.test(error);
++}
++
+ export function failureSourceOf(
+   reason: string,
+   error?: string | null,
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index aee1bbf..fd69077 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -76,6 +76,7 @@ export {
+   failureSourceOf,
+   HUMAN_ACTIONS,
+   isPlatformProblem,
++  isSandboxOomError,
+   PAUSE_REASON_LABELS,
+   PAUSE_REASONS,
+   pauseReasonLabel,
+diff --git a/packages/shared/src/structured-brief.test.ts b/packages/shared/src/structured-brief.test.ts
+index af7266a..6c7e922 100644
+--- a/packages/shared/src/structured-brief.test.ts
++++ b/packages/shared/src/structured-brief.test.ts
+@@ -282,6 +282,27 @@ needs a new field on Order
+     });
+   });
+ 
++  it("tells a person to raise the sandbox memory for sandbox-oom", () => {
++    expect(
++      structuredBrief({
++        reason: "sandbox-oom",
++        ...ids,
++        brief: source("implement", {
++          error: "sandbox-oom: container OOMKilled",
++        }),
++      }),
++    ).toMatchObject({
++      summary: "沙箱内存不足",
++      recommendedAction: "把沙箱内存调大后再试",
++      commands: [
++        {
++          label: "调大内存后重试",
++          command: "plat ticket retry T-12 --mode continue",
++        },
++      ],
++    });
++  });
++
+   it("gives a wrap-up step retry-final named with the spec", () => {
+     expect(
+       structuredBrief({
+diff --git a/packages/shared/src/structured-brief.ts b/packages/shared/src/structured-brief.ts
+index 657e292..343dccb 100644
+--- a/packages/shared/src/structured-brief.ts
++++ b/packages/shared/src/structured-brief.ts
+@@ -65,6 +65,7 @@ const SUMMARY: Record<BlockedReason, string> = {
+   "integration-environment-failed": "联调环境起不来",
+   "upstream-cancelled": "上游已取消",
+   "job-failed": "作业失败",
++  "sandbox-oom": "沙箱内存不足",
+ };
+ 
+ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
+@@ -83,6 +84,7 @@ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
+   "integration-environment-failed": "先修好环境再重试",
+   "upstream-cancelled": "取消这张票，或导入替代票",
+   "job-failed": "看作业失败原因，环境或额度恢复后直接重试",
++  "sandbox-oom": "把沙箱内存调大后再试",
+ };
+ 
+ export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
+@@ -188,6 +190,14 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
+       },
+     ];
+   }
++  if (input.reason === "sandbox-oom") {
++    return [
++      {
++        label: "调大内存后重试",
++        command: `plat ticket retry ${ticket} --mode continue`,
++      },
++    ];
++  }
+   if (input.reason === "integration-environment-failed") {
+     return [
+       {
+diff --git a/packages/shared/src/ticket-state.test.ts b/packages/shared/src/ticket-state.test.ts
+index 71ce95b..ee1efc4 100644
+--- a/packages/shared/src/ticket-state.test.ts
++++ b/packages/shared/src/ticket-state.test.ts
+@@ -46,6 +46,8 @@ describe("ticketTransition: blocked, retry, cancel", () => {
+     ["merging", "timeout"],
+     ["running", "job-failed"],
+     ["merging", "job-failed"],
++    ["running", "sandbox-oom"],
++    ["merging", "sandbox-oom"],
+     ["merging", "merge-conflict"],
+     ["merging", "post-merge-gate-failed"],
+     ["pending", "upstream-cancelled"],
+diff --git a/packages/shared/src/ticket-state.ts b/packages/shared/src/ticket-state.ts
+index 172e224..fb6118d 100644
+--- a/packages/shared/src/ticket-state.ts
++++ b/packages/shared/src/ticket-state.ts
+@@ -29,6 +29,8 @@ export const BLOCKED_REASONS = [
+   "upstream-cancelled",
+   // the worker could not carry out a stage, three times over: its environment is at fault, not the ticket
+   "job-failed",
++  // the kernel killed the sandbox for using too much memory; stop at once, do not retry the same limit
++  "sandbox-oom",
+ ] as const;
+ export type BlockedReason = (typeof BLOCKED_REASONS)[number];
+ 
+@@ -106,6 +108,7 @@ const BLOCK_SOURCES: Record<BlockedReason, TicketState[]> = {
+   "integration-environment-failed": [...FROM_RUNNING, ...FROM_MERGING],
+   "upstream-cancelled": ["pending"],
+   "job-failed": [...FROM_RUNNING, ...FROM_MERGING],
++  "sandbox-oom": [...FROM_RUNNING, ...FROM_MERGING],
+ };
+ 
+ export function ticketTransition(
+diff --git a/packages/web/src/BlockedQueue.test.tsx b/packages/web/src/BlockedQueue.test.tsx
+index 9d85497..2cffffb 100644
+--- a/packages/web/src/BlockedQueue.test.tsx
++++ b/packages/web/src/BlockedQueue.test.tsx
+@@ -285,6 +285,16 @@ describe("the queue of what waits for a person", () => {
+     expect(fake.calls.filter((call) => call.startsWith("POST"))).toEqual([]);
+   });
+ 
++  it("tells a person to raise the sandbox memory when the ticket is sandbox-oom", async () => {
++    const { fake } = server(queue({ tickets: [ticket(1, "sandbox-oom")] }));
++    renderWithApp(<BlockedQueue />, fake);
++    await screen.findByTestId("blocked-T-1");
++    expect(card("T-1").getByTitle("sandbox-oom").textContent).toBe(
++      "沙箱内存不足",
++    );
++    expect(card("T-1").getByText("把沙箱内存调大后再试")).toBeTruthy();
++  });
++
+   it("lists the platform's and outside services' problems after the specs', under a heading of their own", async () => {
+     const { fake } = server(
+       queue({
+diff --git a/packages/web/src/BlockedQueue.tsx b/packages/web/src/BlockedQueue.tsx
+index 63b1089..be08e4e 100644
+--- a/packages/web/src/BlockedQueue.tsx
++++ b/packages/web/src/BlockedQueue.tsx
+@@ -65,6 +65,7 @@ import {
+   rankOf,
+   type WaitingRef,
+   waitingCount,
++  waitingReasonHint,
+ } from "./waiting.ts";
+ 
+ export const BLOCKED_KEY = ["blocked"] as const;
+@@ -259,7 +260,10 @@ function TicketCard({ ticket }: { ticket: Queue["tickets"][number] }) {
+             {ticket.title}
+           </a>
+           {ticket.blockedReason ? (
+-            <ReasonBadge reason={ticket.blockedReason} />
++            <ReasonBadge
++              reason={ticket.blockedReason}
++              detail={waitingReasonHint(ticket.blockedReason) ?? undefined}
++            />
+           ) : null}
+         </>
+       }
+@@ -603,7 +607,10 @@ function BlockedFinalization({
+               : `${item.repo} 的总览审查`}
+           </span>
+           {item.blockedReason ? (
+-            <ReasonBadge reason={item.blockedReason} />
++            <ReasonBadge
++              reason={item.blockedReason}
++              detail={waitingReasonHint(item.blockedReason) ?? undefined}
++            />
+           ) : null}
+         </>
+       }
+diff --git a/packages/web/src/status.test.ts b/packages/web/src/status.test.ts
+index 68b5ac7..b02b7f7 100644
+--- a/packages/web/src/status.test.ts
++++ b/packages/web/src/status.test.ts
+@@ -13,6 +13,7 @@ describe("status labels", () => {
+     expect(specStateLabel("awaiting-review")).toBe("待验收");
+     expect(ticketStateLabel("blocked")).toBe("已卡住");
+     expect(blockedReasonLabel("agent-gave-up")).toBe("模型放弃");
++    expect(blockedReasonLabel("sandbox-oom")).toBe("沙箱内存不足");
+     expect(prStateLabel("closed")).toBe("关闭未合并");
+   });
+ 
+diff --git a/packages/web/src/status.ts b/packages/web/src/status.ts
+index e173746..795b1d7 100644
+--- a/packages/web/src/status.ts
++++ b/packages/web/src/status.ts
+@@ -41,6 +41,7 @@ export const BLOCKED_REASON_LABELS: Record<BlockedReason, string> = {
+   "integration-environment-failed": "联调环境起不来",
+   "upstream-cancelled": "上游已取消",
+   "job-failed": "作业失败",
++  "sandbox-oom": "沙箱内存不足",
+ };
+ 
+ export const PR_STATE_LABELS: Record<string, string> = {
+diff --git a/packages/web/src/waiting.test.ts b/packages/web/src/waiting.test.ts
+new file mode 100644
+index 0000000..20c7240
+--- /dev/null
++++ b/packages/web/src/waiting.test.ts
+@@ -0,0 +1,13 @@
++import { describe, expect, it } from "vitest";
++import { waitingReasonHint } from "./waiting.ts";
++
++describe("waiting copy for a blocked reason", () => {
++  it("tells a person to raise the sandbox memory for sandbox-oom", () => {
++    expect(waitingReasonHint("sandbox-oom")).toBe("把沙箱内存调大后再试");
++  });
++
++  it("has no extra hint for other reasons", () => {
++    expect(waitingReasonHint("job-failed")).toBeNull();
++    expect(waitingReasonHint(null)).toBeNull();
++  });
++});
+diff --git a/packages/web/src/waiting.ts b/packages/web/src/waiting.ts
+index c0031a3..5707b4b 100644
+--- a/packages/web/src/waiting.ts
++++ b/packages/web/src/waiting.ts
+@@ -3,6 +3,13 @@ import { formatShanghaiTime } from "./time.ts";
+ 
+ export { FAILURE_SOURCE_LABELS };
+ 
++export function waitingReasonHint(
++  reason: string | null | undefined,
++): string | null {
++  if (reason === "sandbox-oom") return "把沙箱内存调大后再试";
++  return null;
++}
++
+ // How many items sit in the waiting queue: the nav badge and the workbench 等你处理 quadrant share this.
+ 
+ export function waitingCount(queue: {

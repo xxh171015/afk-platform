@@ -1,0 +1,467 @@
+diff --git a/GLOSSARY.md b/GLOSSARY.md
+new file mode 100644
+index 0000000..e546c41
+--- /dev/null
++++ b/GLOSSARY.md
+@@ -0,0 +1,25 @@
++# 订单
++
++记录客户的一笔购买处于哪种状态。
++
++## Language
++
++**订单 (Order)**:
++客户的一笔购买。
++_Avoid_: 交易, 单据
++
++**已支付 (paid)**:
++订单已经付款、可以发货的状态。
++_Avoid_: 待发货, 已付款
++
++**已发货 (shipped)**:
++订单发货之后的状态，到此为止。
++_Avoid_: 已出库, 运输中, 已完成
++
++**发货**:
++订单从已支付变为已发货的那一次状态变更。
++_Avoid_: 出库, 物流, 运单
++
++**批量发货**:
++同一次操作中的多笔发货。每一笔单独成立，或单独不成立。
++_Avoid_: 合并发货, 整批发货
+diff --git a/docs/adr/0001-batch-ship-per-order.md b/docs/adr/0001-batch-ship-per-order.md
+new file mode 100644
+index 0000000..839b2b2
+--- /dev/null
++++ b/docs/adr/0001-batch-ship-per-order.md
+@@ -0,0 +1,16 @@
++---
++status: accepted
++---
++
++# 批量发货逐单成立
++
++批量发货一次提交多张订单。每一张按自己能不能发货单独成立或失败，已经发成的不因为其他张失败而撤回。调用方要的是每张的结果；整批一起撤回会让一张不合格的订单挡住其余已支付的订单。
++
++## Considered Options
++
++- **整批一起撤回**：有一张不能发货，这一次就一张都不改。这和单张发货失败即拒绝更像，但列表上只要混进一张不能发的，其余已支付的也发不出去。
++- **逐单成立**（采用）：能发的发掉，每一张在结果里单独说明。
++
++## Consequences
++
++- 请求合法时，哪怕一张都没发成，返回的也是逐单结果。调用方要读每一张的结果，不能只看这次调用成功了没有。
+diff --git a/openapi/openapi.yaml b/openapi/openapi.yaml
+index 371b4c3..7d03d22 100644
+--- a/openapi/openapi.yaml
++++ b/openapi/openapi.yaml
+@@ -76,6 +76,52 @@ paths:
+                   lastUpdatedAt:
+                     type: [string, "null"]
+                     format: date-time
++  /orders/batch-ship:
++    post:
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              type: object
++              required: [ids]
++              description: 额外字段可忽略；每个 id 为字符串且不去首尾空白
++              properties:
++                ids:
++                  type: array
++                  minItems: 1
++                  maxItems: 100
++                  uniqueItems: true
++                  items: { type: string, minLength: 1 }
++                  description: 合法值为 1–100 个互不相同的非空字符串
++      responses:
++        "200":
++          description: 合法请求一律 HTTP 200。results 与 ids 同序等长。成功项含 id、ok 为 true、order 为发货后的 Order；失败项含 id、ok 为 false、error 字符串
++          content:
++            application/json:
++              schema:
++                type: object
++                required: [results]
++                properties:
++                  results:
++                    type: array
++                    items:
++                      oneOf:
++                        - type: object
++                          required: [id, ok, order]
++                          properties:
++                            id: { type: string }
++                            ok: { const: true }
++                            order: { $ref: "#/components/schemas/Order" }
++                        - type: object
++                          required: [id, ok, error]
++                          properties:
++                            id: { type: string }
++                            ok: { const: false }
++                            error: { type: string }
++        "400":
++          description: 非法 ids 的 error 为 ids must be 1 to 100 distinct non-empty strings；JSON 解析失败的 error 为 invalid JSON；body 非对象的 error 为 body must be a JSON object
++          $ref: "#/components/responses/Error"
+   /orders/{id}:
+     get:
+       parameters: [{ $ref: "#/components/parameters/OrderId" }]
+diff --git a/src/orders/model.ts b/src/orders/model.ts
+index ae3f61e..e3a0242 100644
+--- a/src/orders/model.ts
++++ b/src/orders/model.ts
+@@ -141,6 +141,25 @@ export function validateNewOrder(input: unknown): Result<NewOrder> {
+   return { ok: true, value };
+ }
+ 
++const INVALID_BATCH_SHIP_IDS = "ids must be 1 to 100 distinct non-empty strings";
++
++/** 解析 POST /orders/batch-ship 的 { ids }；不去首尾空白；额外字段忽略 */
++export function validateBatchShipIds(input: unknown): Result<string[]> {
++  if (typeof input !== "object" || input === null || Array.isArray(input)) {
++    return { ok: false, error: "body must be a JSON object" };
++  }
++  const { ids } = input as any;
++  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100) {
++    return { ok: false, error: INVALID_BATCH_SHIP_IDS };
++  }
++  for (const id of ids) {
++    if (typeof id !== "string" || id === "") {
++      return { ok: false, error: INVALID_BATCH_SHIP_IDS };
++    }
++  }
++  return { ok: true, value: ids };
++}
++
+ /** 解析 PATCH /orders/:id 的 { note } 请求体；空字符串表示清除备注 */
+ export function validatePatchNote(input: unknown): Result<string | undefined> {
+   if (typeof input !== "object" || input === null) {
+diff --git a/src/orders/routes.ts b/src/orders/routes.ts
+index a6a76f1..f419ef1 100644
+--- a/src/orders/routes.ts
++++ b/src/orders/routes.ts
+@@ -8,6 +8,7 @@ import {
+   parseSort,
+   parseStatusFilter,
+   parseStatusUpdate,
++  validateBatchShipIds,
+   validateNewOrder,
+   validatePatchNote,
+ } from "./model.ts";
+@@ -106,6 +107,29 @@ export function orderRoutes(store: OrderStore) {
+       return true;
+     }
+ 
++    // POST /orders/batch-ship  { "ids": ["O-1", ...] }
++    if (parts.length === 2 && parts[1] === "batch-ship" && req.method === "POST") {
++      let body: unknown;
++      try {
++        body = await readJson(req);
++      } catch {
++        sendError(res, 400, "invalid JSON");
++        return true;
++      }
++      const parsed = validateBatchShipIds(body);
++      if (!parsed.ok) {
++        sendError(res, 400, parsed.error);
++        return true;
++      }
++      const results = parsed.value.map((id) => {
++        const result = store.updateStatus(id, "shipped");
++        if (result.ok) return { id, ok: true as const, order: result.value };
++        return { id, ok: false as const, error: result.error };
++      });
++      sendJson(res, 200, { results });
++      return true;
++    }
++
+     // GET /orders/stats
+     if (parts.length === 2 && parts[1] === "stats" && req.method === "GET") {
+       const all = store.list();
+diff --git a/test/contract.test.ts b/test/contract.test.ts
+index 161a7d0..87ffaca 100644
+--- a/test/contract.test.ts
++++ b/test/contract.test.ts
+@@ -105,4 +105,26 @@ describe("the service conforms to its contract", () => {
+       { status: "cancelled", at: "2026-01-01T00:00:00.000Z", reason: "不想要了" },
+     ]);
+   });
++
++  it("POST /orders/batch-ship success and typical errors", async () => {
++    const app = await startApp();
++    const { id } = (await (await app.post("/orders", { customer: "张三", amount: 12.5 })).json()) as {
++      id: string;
++    };
++    await app.post(`/orders/${id}/status`, { status: "paid" });
++    const shipped = (await expectConforms(
++      "post",
++      "/orders/batch-ship",
++      await app.post("/orders/batch-ship", { ids: [id] }),
++    )) as { results: { id: string; ok: boolean }[] };
++    expect(shipped.results).toEqual([{ id, ok: true, order: expect.objectContaining({ status: "shipped" }) }]);
++    await expectConforms("post", "/orders/batch-ship", await app.post("/orders/batch-ship", { ids: [] }));
++    await expectConforms("post", "/orders/batch-ship", await app.post("/orders/batch-ship", "{not json"));
++    await expectConforms("post", "/orders/batch-ship", await app.post("/orders/batch-ship", []));
++    await expectConforms(
++      "post",
++      "/orders/batch-ship",
++      await app.post("/orders/batch-ship", { ids: ["O-missing"] }),
++    );
++  });
+ });
+diff --git a/test/openapi.test.ts b/test/openapi.test.ts
+index 59cb5ba..6eae5f5 100644
+--- a/test/openapi.test.ts
++++ b/test/openapi.test.ts
+@@ -261,6 +261,56 @@ describe("OpenAPI GET /orders/{id}", () => {
+   });
+ });
+ 
++describe("OpenAPI POST /orders/batch-ship", () => {
++  it("requires a JSON object body with ids as a string array, ignores extra fields, and does not trim ids", () => {
++    const post = pathMethod("/orders/batch-ship", "post");
++    expect(post).toMatch(/requestBody:/);
++    expect(post).toMatch(/required: true/);
++    expect(post).toMatch(/application\/json/);
++    expect(post).toMatch(/type: object/);
++    expect(post).toMatch(/required: \[ids\]/);
++    expect(post).toMatch(/type: array/);
++    expect(flowProperty(post, "items")).toMatchObject({ type: "string" });
++    expect(post).toMatch(/额外字段可忽略/);
++    expect(post).toMatch(/不去首尾空白/);
++  });
++
++  it("says valid ids are 1 to 100 distinct non-empty strings and otherwise returns 400 with that error body", () => {
++    const post = pathMethod("/orders/batch-ship", "post");
++    expect(post).toMatch(/minItems: 1/);
++    expect(post).toMatch(/maxItems: 100/);
++    expect(post).toMatch(/uniqueItems: true/);
++    expect(flowProperty(post, "items")).toEqual({ type: "string", minLength: 1 });
++    expect(responseStatuses(post)).toContain("400");
++    expect(post).toContain('$ref: "#/components/responses/Error"');
++    expect(responseDescription("/orders/batch-ship", "post", "400")).toContain(
++      "ids must be 1 to 100 distinct non-empty strings",
++    );
++  });
++
++  it("says JSON parse failure and a non-object body return 400 with the existing error bodies", () => {
++    const description = responseDescription("/orders/batch-ship", "post", "400");
++    expect(description).toContain("invalid JSON");
++    expect(description).toContain("body must be a JSON object");
++  });
++
++  it("returns 200 with results in the same order and length as ids, with ok true order or ok false error items", () => {
++    const post = pathMethod("/orders/batch-ship", "post");
++    expect(responseStatuses(post)).toContain("200");
++    expect(post).toMatch(/required: \[results\]/);
++    expect(post).toMatch(/required: \[id, ok, order\]/);
++    expect(post).toMatch(/ok: \{ const: true \}/);
++    expect(post).toContain('$ref: "#/components/schemas/Order"');
++    expect(post).toMatch(/required: \[id, ok, error\]/);
++    expect(post).toMatch(/ok: \{ const: false \}/);
++    expect(flowProperty(post, "error")).toEqual({ type: "string" });
++    const description = responseDescription("/orders/batch-ship", "post", "200");
++    expect(description).toMatch(/一律 HTTP 200/);
++    expect(description).toMatch(/同序等长/);
++    expect(description).toMatch(/发货后的 Order/);
++  });
++});
++
+ describe("OpenAPI existing operations", () => {
+   it("keeps existing response descriptions unchanged", () => {
+     expect(responseDescription("/health", "get", "200")).toBe("服务正常");
+diff --git a/test/orders.test.ts b/test/orders.test.ts
+index 62c6dca..7c32cd5 100644
+--- a/test/orders.test.ts
++++ b/test/orders.test.ts
+@@ -981,3 +981,188 @@ describe("GET /orders/:id/history", () => {
+     expect(await res.json()).toEqual({ error: "not found" });
+   });
+ });
++
++describe("POST /orders/batch-ship", () => {
++  it("returns 200 with results in ids order and ships each paid order with a shipped history entry", async () => {
++    const app = await startApp();
++    await app.post("/orders", { customer: "alice", amount: 1 });
++    await app.post("/orders", { customer: "bob", amount: 2 });
++    await app.post("/orders/O-1/status", { status: "paid" });
++    await app.post("/orders/O-2/status", { status: "paid" });
++
++    const res = await app.post("/orders/batch-ship", { ids: ["O-2", "O-1"] });
++    expect(res.status).toBe(200);
++    expect(await res.json()).toEqual({
++      results: [
++        {
++          id: "O-2",
++          ok: true,
++          order: {
++            id: "O-2",
++            customer: "bob",
++            amount: 2,
++            status: "shipped",
++            createdAt: "2026-01-01T00:00:00.000Z",
++            updatedAt: "2026-01-01T00:00:00.000Z",
++          },
++        },
++        {
++          id: "O-1",
++          ok: true,
++          order: {
++            id: "O-1",
++            customer: "alice",
++            amount: 1,
++            status: "shipped",
++            createdAt: "2026-01-01T00:00:00.000Z",
++            updatedAt: "2026-01-01T00:00:00.000Z",
++          },
++        },
++      ],
++    });
++
++    expect(((await (await app.get("/orders/O-2")).json()) as { status: string }).status).toBe("shipped");
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("shipped");
++    expect(await (await app.get("/orders/O-2/history")).json()).toEqual({
++      history: [
++        { status: "pending", at: "2026-01-01T00:00:00.000Z" },
++        { status: "paid", at: "2026-01-01T00:00:00.000Z" },
++        { status: "shipped", at: "2026-01-01T00:00:00.000Z" },
++      ],
++    });
++    expect(await (await app.get("/orders/O-1/history")).json()).toEqual({
++      history: [
++        { status: "pending", at: "2026-01-01T00:00:00.000Z" },
++        { status: "paid", at: "2026-01-01T00:00:00.000Z" },
++        { status: "shipped", at: "2026-01-01T00:00:00.000Z" },
++      ],
++    });
++  });
++
++  it("ships paid orders and reports the same errors as POST /orders/{id}/status for the rest", async () => {
++    const app = await startApp();
++    await app.post("/orders", { customer: "alice", amount: 1 });
++    await app.post("/orders", { customer: "bob", amount: 2 });
++    await app.post("/orders", { customer: "carol", amount: 3 });
++    await app.post("/orders", { customer: "dave", amount: 4 });
++    await app.post("/orders/O-1/status", { status: "paid" });
++    await app.post("/orders/O-3/status", { status: "paid" });
++    await app.post("/orders/O-3/status", { status: "shipped" });
++    await app.post("/orders/O-4/status", { status: "cancelled", reason: "changed mind" });
++
++    const pending = await app.post("/orders/O-2/status", { status: "shipped" });
++    expect(pending.status).toBe(409);
++    expect(await pending.json()).toEqual({ error: "cannot move from pending to shipped" });
++    const alreadyShipped = await app.post("/orders/O-3/status", { status: "shipped" });
++    expect(alreadyShipped.status).toBe(409);
++    expect(await alreadyShipped.json()).toEqual({ error: "cannot move from shipped to shipped" });
++    const cancelled = await app.post("/orders/O-4/status", { status: "shipped" });
++    expect(cancelled.status).toBe(409);
++    expect(await cancelled.json()).toEqual({ error: "cannot move from cancelled to shipped" });
++    const missing = await app.post("/orders/O-9/status", { status: "shipped" });
++    expect(missing.status).toBe(404);
++    expect(await missing.json()).toEqual({ error: "not found" });
++
++    const res = await app.post("/orders/batch-ship", {
++      ids: ["O-1", "O-2", "O-3", "O-4", "O-9"],
++    });
++    expect(res.status).toBe(200);
++    const body = (await res.json()) as {
++      results: { id: string; ok: boolean; error?: string; order?: { status: string } }[];
++    };
++    expect(body.results.map((item) => item.id)).toEqual(["O-1", "O-2", "O-3", "O-4", "O-9"]);
++    expect(body.results[0]).toMatchObject({ id: "O-1", ok: true, order: { status: "shipped" } });
++    expect(body.results[1]).toEqual({ id: "O-2", ok: false, error: "cannot move from pending to shipped" });
++    expect(body.results[2]).toEqual({ id: "O-3", ok: false, error: "cannot move from shipped to shipped" });
++    expect(body.results[3]).toEqual({ id: "O-4", ok: false, error: "cannot move from cancelled to shipped" });
++    expect(body.results[4]).toEqual({ id: "O-9", ok: false, error: "not found" });
++
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("shipped");
++    expect(((await (await app.get("/orders/O-2")).json()) as { status: string }).status).toBe("pending");
++    expect(((await (await app.get("/orders/O-3")).json()) as { status: string }).status).toBe("shipped");
++    expect(((await (await app.get("/orders/O-4")).json()) as { status: string }).status).toBe("cancelled");
++  });
++
++  it.each([
++    [{ ids: [] }, "empty array"],
++    [{ ids: Array.from({ length: 101 }, (_, i) => `id-${i}`) }, "more than 100 ids"],
++    [{}, "missing ids"],
++    [{ ids: [""] }, "empty string id"],
++    [{ ids: ["O-1", ""] }, "empty string among ids"],
++    [{ ids: "O-1" }, "ids is not an array"],
++    [{ ids: [1] }, "non-string id"],
++    [{ ids: null }, "ids is null"],
++  ])("returns 400 and does not ship when ids are invalid: %s (%s)", async (body, _label) => {
++    const app = await startApp();
++    await app.post("/orders", { customer: "alice", amount: 1 });
++    await app.post("/orders/O-1/status", { status: "paid" });
++
++    const res = await app.post("/orders/batch-ship", body);
++    expect(res.status).toBe(400);
++    expect(await res.json()).toEqual({
++      error: "ids must be 1 to 100 distinct non-empty strings",
++    });
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("paid");
++  });
++
++  it("returns 400 invalid JSON when the body is malformed", async () => {
++    const app = await startApp();
++    await app.post("/orders", { customer: "alice", amount: 1 });
++    await app.post("/orders/O-1/status", { status: "paid" });
++
++    const res = await app.post("/orders/batch-ship", "{not json");
++    expect(res.status).toBe(400);
++    expect(await res.json()).toEqual({ error: "invalid JSON" });
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("paid");
++  });
++
++  it.each([[[]], [null], [1], [true], ['"hello"']])(
++    "returns 400 when the body is not a JSON object: %j",
++    async (body) => {
++      const app = await startApp();
++      await app.post("/orders", { customer: "alice", amount: 1 });
++      await app.post("/orders/O-1/status", { status: "paid" });
++
++      const res = await app.post("/orders/batch-ship", body);
++      expect(res.status).toBe(400);
++      expect(await res.json()).toEqual({ error: "body must be a JSON object" });
++      expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("paid");
++    },
++  );
++
++  it("returns 200 with a result for every id when none of the orders can be shipped", async () => {
++    const app = await startApp();
++    await app.post("/orders", { customer: "alice", amount: 1 });
++    await app.post("/orders", { customer: "bob", amount: 2 });
++
++    const res = await app.post("/orders/batch-ship", { ids: ["O-1", "O-2", "O-9"] });
++    expect(res.status).toBe(200);
++    expect(await res.json()).toEqual({
++      results: [
++        { id: "O-1", ok: false, error: "cannot move from pending to shipped" },
++        { id: "O-2", ok: false, error: "cannot move from pending to shipped" },
++        { id: "O-9", ok: false, error: "not found" },
++      ],
++    });
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("pending");
++    expect(((await (await app.get("/orders/O-2")).json()) as { status: string }).status).toBe("pending");
++  });
++
++  it("ignores extra body fields and does not trim ids", async () => {
++    const app = await startApp();
++    await app.post("/orders", { customer: "alice", amount: 1 });
++    await app.post("/orders/O-1/status", { status: "paid" });
++
++    const padded = await app.post("/orders/batch-ship", { ids: ["  O-1  "] });
++    expect(padded.status).toBe(200);
++    expect(await padded.json()).toEqual({
++      results: [{ id: "  O-1  ", ok: false, error: "not found" }],
++    });
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("paid");
++
++    const extra = await app.post("/orders/batch-ship", { ids: ["O-1"], extra: true });
++    expect(extra.status).toBe(200);
++    expect(((await extra.json()) as { results: { ok: boolean }[] }).results[0]?.ok).toBe(true);
++    expect(((await (await app.get("/orders/O-1")).json()) as { status: string }).status).toBe("shipped");
++  });
++});
