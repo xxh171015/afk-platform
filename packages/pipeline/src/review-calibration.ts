@@ -17,7 +17,7 @@ import {
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { AgentRunner, ReviewOutput } from "./agent.ts";
-import { AUTHOR, exec, git, gitOrThrow } from "./exec.ts";
+import { AUTHOR, git, gitOrThrow } from "./exec.ts";
 import { bundleFor } from "./fixtures.ts";
 import { runReview } from "./review.ts";
 
@@ -69,6 +69,7 @@ type AxisOutput = {
 type SampleRun = {
   sample: CalibrationSample;
   axes: AxisOutput[];
+  error?: string;
 };
 
 export function loadSamples(root: string): CalibrationSample[] {
@@ -240,14 +241,26 @@ function bundleForSample(
 }
 
 function prepareClone(sample: CalibrationSample, dest: string): string {
-  const cloned = exec("git", ["clone", "--quiet", sample.repo, dest]);
-  if (cloned.code !== 0) {
+  const inited = git(dest, ["init", "--quiet"]);
+  if (inited.code !== 0) {
     throw new Error(
-      `git clone ${sample.repo} failed: ${cloned.out.slice(0, 400)}`,
+      `git init ${sample.name} failed: ${inited.out.slice(0, 400)}`,
     );
   }
-  const defaultBranch = gitOrThrow(dest, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  gitOrThrow(dest, ["checkout", "--quiet", sample.base]);
+  const fetched = git(dest, [
+    "fetch",
+    "--depth",
+    "1",
+    "--no-tags",
+    sample.repo,
+    sample.base,
+  ]);
+  if (fetched.code !== 0) {
+    throw new Error(
+      `git fetch ${sample.repo} ${sample.base} failed: ${fetched.out.slice(0, 400)}`,
+    );
+  }
+  gitOrThrow(dest, ["checkout", "--quiet", "-B", "main", "FETCH_HEAD"]);
   const agentBranch = `calibration/${sample.name}`;
   gitOrThrow(dest, ["checkout", "--quiet", "-b", agentBranch]);
   const patchFile = join(dest, ".change.patch");
@@ -265,7 +278,7 @@ function prepareClone(sample: CalibrationSample, dest: string): string {
     ["commit", "--quiet", "-m", `calibration: apply ${sample.name}`],
     AUTHOR,
   );
-  return defaultBranch === "HEAD" ? "main" : defaultBranch;
+  return "main";
 }
 
 async function reviewSample(
@@ -331,12 +344,28 @@ export function formatCalibrationTable(
   ];
   for (const answer of answers) {
     const run = runs.find((row) => row.sample.name === answer.sample);
+    if (run?.error) continue;
     const spec = run?.axes.find((row) => row.axis === "spec");
     const standards = run?.axes.find((row) => row.axis === "standards");
     hits.push(
       `| ${answer.sample}/${answer.id} | ${answer.type} | ${scoreDefect(answer, spec?.output)} | ${scoreDefect(answer, standards?.output)} |`,
     );
   }
+  const failed = runs.filter((row) => row.error);
+  const failures =
+    failed.length === 0
+      ? []
+      : [
+          "",
+          "## Failures",
+          "",
+          "| sample | status | detail |",
+          "| --- | --- | --- |",
+          ...failed.map(
+            (row) =>
+              `| ${row.sample.name} | 失败 | ${(row.error ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|")} |`,
+          ),
+        ];
   const usage = [
     "",
     "## Token usage",
@@ -353,7 +382,7 @@ export function formatCalibrationTable(
       );
     }
   }
-  return `${[...hits, ...usage].join("\n")}\n`;
+  return `${[...hits, ...failures, ...usage].join("\n")}\n`;
 }
 
 export async function runReviewCalibration(
@@ -362,7 +391,15 @@ export async function runReviewCalibration(
   const samples = loadSamples(input.root);
   const runs: SampleRun[] = [];
   for (const sample of samples) {
-    runs.push(await reviewSample(sample, input));
+    try {
+      runs.push(await reviewSample(sample, input));
+    } catch (error) {
+      runs.push({
+        sample,
+        axes: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   const answers = loadAnswers(join(input.root, "answers.yaml"));
   return formatCalibrationTable(runs, answers, input.models);

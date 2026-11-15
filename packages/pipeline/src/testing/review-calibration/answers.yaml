@@ -1,0 +1,19 @@
+# Tiny fixture answers. Real-run answers stay in docs/review-calibration/answers.yaml.
+- sample: tiny
+  id: us-1
+  type: user-story
+  file: src/app.ts
+  lines: "6-7"
+  description: skipped the negative check the story asked for
+- sample: tiny
+  id: st-1
+  type: standards
+  file: src/app.ts
+  lines: "10-10"
+  description: skipped test leftover
+- sample: tiny
+  id: miss-1
+  type: user-story
+  file: src/app.ts
+  lines: "2-2"
+  description: unused greet path

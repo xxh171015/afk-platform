@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { gitOrThrow } from "./exec.ts";
+import { git, gitOrThrow } from "./exec.ts";
 import {
   loadAnswers,
   loadSamples,
@@ -29,7 +29,11 @@ afterEach(() => {
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const docsRoot = join(repoRoot, "docs/review-calibration");
-const tinyDocs = join(docsRoot, "samples/tiny");
+const fixtureRoot = join(
+  repoRoot,
+  "packages/pipeline/src/testing/review-calibration",
+);
+const tinyDocs = join(fixtureRoot, "samples/tiny");
 
 const BASE_APP = [
   "export function greet(name: string): string {",
@@ -53,16 +57,40 @@ function usageLine(inputTokens: number, outputTokens: number): string {
 
 describe("the committed tiny sample", () => {
   it("has ticket kind, a spec, a ticket, a patch, and three answers", () => {
-    const samples = loadSamples(docsRoot);
+    const samples = loadSamples(fixtureRoot);
     const tiny = samples.find((sample) => sample.name === "tiny");
     expect(tiny?.kind).toBe("ticket");
     expect(tiny?.specMd).toContain("add() to reject negatives");
     expect(tiny?.ticketMd).toContain("Reject negatives");
     expect(tiny?.patch).toContain("skipped the negative check");
-    const answers = loadAnswers(join(docsRoot, "answers.yaml"));
+    const answers = loadAnswers(join(fixtureRoot, "answers.yaml"));
     expect(
       answers.filter((row) => row.sample === "tiny").map((row) => row.id),
     ).toEqual(["us-1", "st-1", "miss-1"]);
+  });
+});
+
+describe("the committed real samples", () => {
+  it("keeps only five real samples and ten human answers under docs", () => {
+    const samples = loadSamples(docsRoot);
+    expect(samples.map((sample) => sample.name)).toEqual([
+      "s14-backend-batch-ship",
+      "s15-backend-note-search",
+      "s15-frontend-note-search",
+      "s23-push-retry",
+      "s28-sandbox-oom",
+    ]);
+    const answers = loadAnswers(join(docsRoot, "answers.yaml"));
+    expect(answers).toHaveLength(10);
+    expect(answers.map((row) => row.sample)).not.toContain("tiny");
+  });
+
+  it("says fixtures live next to the tests and real samples live under docs", () => {
+    const readme = readFileSync(join(docsRoot, "README.md"), "utf8");
+    expect(readme).toContain(
+      "packages/pipeline/src/testing/review-calibration",
+    );
+    expect(readme).toContain("docs/review-calibration/samples");
   });
 });
 
@@ -86,7 +114,7 @@ describe("runReviewCalibration", () => {
     }
     writeFileSync(
       join(root, "answers.yaml"),
-      `${readFileSync(join(docsRoot, "answers.yaml"), "utf8").trimEnd()}\n# ${SECRET}\n`,
+      `${readFileSync(join(fixtureRoot, "answers.yaml"), "utf8").trimEnd()}\n# ${SECRET}\n`,
     );
 
     const seenSecrets: string[] = [];
@@ -167,7 +195,7 @@ describe("runReviewCalibration", () => {
     );
     writeFileSync(
       join(root, "answers.yaml"),
-      readFileSync(join(docsRoot, "answers.yaml")),
+      readFileSync(join(fixtureRoot, "answers.yaml")),
     );
     const stages: string[] = [];
     await runReviewCalibration({
@@ -188,5 +216,142 @@ describe("runReviewCalibration", () => {
     });
     expect(new Set(stages)).toEqual(new Set(["final-review"]));
     expect(stages).toHaveLength(2);
+  });
+
+  it("clones only the base commit so origin/main cannot show the answers file", async () => {
+    origin = makeRepo({
+      "src/app.ts": BASE_APP,
+      "AGENTS.md": "Do not skip tests.\n",
+    });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    origin.commit(
+      { "docs/review-calibration/answers.yaml": `${SECRET}\n` },
+      "answers on main",
+    );
+    const later = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-clone-"));
+    dirs.push(root);
+    const sampleDir = join(root, "samples", "tiny");
+    mkdirSync(sampleDir, { recursive: true });
+    writeFileSync(
+      join(sampleDir, "sample.yaml"),
+      [`repo: ${origin.dir}`, `base: ${base}`, "kind: ticket", ""].join("\n"),
+    );
+    for (const name of ["change.patch", "spec.md", "ticket.md"] as const) {
+      writeFileSync(join(sampleDir, name), readFileSync(join(tinyDocs, name)));
+    }
+    writeFileSync(
+      join(root, "answers.yaml"),
+      readFileSync(join(fixtureRoot, "answers.yaml")),
+    );
+
+    const inspections: {
+      branches: string;
+      shownCode: number;
+      shownOut: string;
+      laterCode: number;
+    }[] = [];
+    await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) => {
+        const shown = git(repoDir, [
+          "show",
+          "origin/main:docs/review-calibration/answers.yaml",
+        ]);
+        inspections.push({
+          branches: git(repoDir, ["branch", "-a"]).stdout,
+          shownCode: shown.code,
+          shownOut: shown.out,
+          laterCode: git(repoDir, ["cat-file", "-t", later]).code,
+        });
+        return new FakeAgentRunner(repoDir, () => ({
+          output: {
+            verdict: "pass",
+            mustFix: [],
+            suggestions: [],
+            uncertainties: [],
+            sources: ["AGENTS.md"],
+          },
+        }));
+      },
+    });
+
+    expect(inspections).toHaveLength(1);
+    const clone = inspections[0];
+    expect(clone?.branches).not.toMatch(/origin\//);
+    expect(clone?.shownCode).not.toBe(0);
+    expect(clone?.shownOut).not.toContain(SECRET);
+    expect(clone?.laterCode).not.toBe(0);
+  });
+
+  it("marks a sample as failed when its clone fails and still scores the others", async () => {
+    origin = makeRepo({
+      "src/app.ts": BASE_APP,
+      "AGENTS.md": "Do not skip tests.\n",
+    });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-fail-"));
+    dirs.push(root);
+    for (const [name, repo] of [
+      ["tiny", origin.dir],
+      ["broken", "/no/such/calibration-origin"],
+    ] as const) {
+      const sampleDir = join(root, "samples", name);
+      mkdirSync(sampleDir, { recursive: true });
+      writeFileSync(
+        join(sampleDir, "sample.yaml"),
+        [`repo: ${repo}`, `base: ${base}`, "kind: ticket", ""].join("\n"),
+      );
+      for (const file of ["change.patch", "spec.md", "ticket.md"] as const) {
+        writeFileSync(
+          join(sampleDir, file),
+          readFileSync(join(tinyDocs, file)),
+        );
+      }
+    }
+    writeFileSync(
+      join(root, "answers.yaml"),
+      readFileSync(join(fixtureRoot, "answers.yaml")),
+    );
+
+    const table = await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) =>
+        new FakeAgentRunner(repoDir, (ctx) => {
+          const spec = ctx.prompt.includes("阶段：review，Spec 轴");
+          if (spec) {
+            return {
+              output: {
+                verdict: "fix",
+                mustFix: [
+                  {
+                    file: "src/app.ts",
+                    line: 6,
+                    problem: "add() does not reject negatives",
+                  },
+                ],
+                suggestions: [],
+                uncertainties: [],
+              },
+            };
+          }
+          return {
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [
+                "src/app.ts:10 skip leftover should be a running test",
+              ],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        }),
+    });
+
+    expect(table).toMatch(/\| broken \| 失败 \|/);
+    expect(table).toMatch(/tiny\/us-1/);
+    expect(table).toContain("must-fix");
+    expect(table).toContain("suggestion");
   });
 });
