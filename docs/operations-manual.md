@@ -143,7 +143,7 @@ scripts/canary.sh --project <id>
 | `decisions` | implement 的结构化输出里有 `decisions` 数组（可以为空，但字段必须在） |
 | `test names` | 门禁结果里有用例名（`gateResults.testCases`） |
 
-票 `blocked` 或需求 `paused` 时打印原因码，取消需求，以非零退出。取消后轮询清理，再用 `git ls-remote` 确认没有这个需求的 `spec/*`、`agent/*` 分支，也没有开着的 PR；有残留就打印 `leftover:` 并以非零退出。
+票 `blocked` 或需求 `paused` 时打印原因码，取消需求，以非零退出。取消后按需求的清理作业状态等待（默认最多 10 分钟，`CANARY_CLEANUP_SECONDS`），完成后再用 `git ls-remote` 确认没有这个需求自己的需求分支和票分支，也没有开着的 PR；别的需求的 `spec/*`、`agent/*` 分支不算残留。超过上限仍有残留就打印 `leftover:` 并以非零退出。
 
 ## 2. 场景 A：只有后端
 
