@@ -110,6 +110,7 @@ describe("GET /workbench", () => {
         planning: [],
         specs: [],
         locates: [],
+        stale: [],
       },
       running: [],
       takenOver: [],
@@ -473,6 +474,125 @@ describe("GET /workbench", () => {
         specDisplayId: `S-${specId}`,
         title: "Ticket a",
         repo: "backend",
+      },
+    ]);
+  });
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  async function draftSpec(projectId: number, slug: string, title: string) {
+    const spec = await call("POST", "/specs", {
+      projectId,
+      type: "feature",
+      slug,
+      title,
+    });
+    return spec.body.id as number;
+  }
+
+  async function ageCreated(specId: number, msAgo: number) {
+    const at = new Date(clock.now().getTime() - msAgo);
+    await db.pool.query("UPDATE specs SET created_at = $2 WHERE id = $1", [
+      specId,
+      at,
+    ]);
+  }
+
+  async function ageState(specId: number, state: string, msAgo: number) {
+    const at = new Date(clock.now().getTime() - msAgo);
+    await db.pool.query(
+      `UPDATE events SET at = $2
+       WHERE spec_id = $1 AND type = 'spec' AND to_state = $3`,
+      [specId, at, state],
+    );
+  }
+
+  it("puts draft, awaiting-review and empty cancelled specs that sat too long in 放了很久, with a copyable command", async () => {
+    const projectId = await projectAndRepo();
+    const oldDraft = await draftSpec(projectId, "old-draft", "Old draft");
+    const freshDraft = await draftSpec(projectId, "fresh-draft", "Fresh draft");
+    await ageCreated(oldDraft, 8 * DAY_MS);
+    await ageCreated(freshDraft, 6 * DAY_MS);
+
+    const oldReview = await confirmedSpec(
+      projectId,
+      "old-review",
+      "Old review",
+      [ticketFile("rev")],
+    );
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [oldReview],
+    );
+    await ageState(oldReview, "awaiting-review", 4 * DAY_MS);
+    const freshReview = await confirmedSpec(
+      projectId,
+      "fresh-review",
+      "Fresh review",
+      [ticketFile("rev2")],
+    );
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [freshReview],
+    );
+    await ageState(freshReview, "awaiting-review", 2 * DAY_MS);
+
+    const emptyCancelled = await draftSpec(
+      projectId,
+      "empty-cancelled",
+      "Empty cancelled",
+    );
+    expect((await call("POST", `/specs/${emptyCancelled}/cancel`)).status).toBe(
+      200,
+    );
+    await ageState(emptyCancelled, "cancelled", 2 * DAY_MS);
+    const freshEmpty = await draftSpec(
+      projectId,
+      "fresh-empty",
+      "Fresh empty cancelled",
+    );
+    expect((await call("POST", `/specs/${freshEmpty}/cancel`)).status).toBe(
+      200,
+    );
+    await ageState(freshEmpty, "cancelled", 12 * 60 * 60 * 1000);
+
+    const withTickets = await confirmedSpec(
+      projectId,
+      "cancelled-tickets",
+      "Cancelled with tickets",
+      [ticketFile("gone")],
+    );
+    expect((await call("POST", `/specs/${withTickets}/cancel`)).status).toBe(
+      200,
+    );
+    await ageState(withTickets, "cancelled", 2 * DAY_MS);
+
+    const reply = await call("GET", "/workbench");
+    expect(reply.status).toBe(200);
+    expect(reply.body.waiting.stale).toEqual([
+      {
+        id: oldDraft,
+        displayId: `S-${oldDraft}`,
+        title: "Old draft",
+        state: "draft",
+        command: `plat spec cancel S-${oldDraft}`,
+        note: null,
+      },
+      {
+        id: oldReview,
+        displayId: `S-${oldReview}`,
+        title: "Old review",
+        state: "awaiting-review",
+        command: `plat spec cancel S-${oldReview}`,
+        note: null,
+      },
+      {
+        id: emptyCancelled,
+        displayId: `S-${emptyCancelled}`,
+        title: "Empty cancelled",
+        state: "cancelled",
+        command: null,
+        note: "已默认不在需求列表里",
       },
     ]);
   });

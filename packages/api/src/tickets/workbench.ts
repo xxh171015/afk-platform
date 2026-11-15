@@ -102,8 +102,17 @@ export interface TakenOverTicket {
   repo: string;
 }
 
+export interface StaleSpec {
+  id: number;
+  displayId: string;
+  title: string;
+  state: SpecState;
+  command: string | null;
+  note: string | null;
+}
+
 export interface Workbench {
-  waiting: ReturnType<typeof slimWaiting>;
+  waiting: ReturnType<typeof slimWaiting> & { stale: StaleSpec[] };
   running: { spec: WorkbenchSpec; tickets: RunningTicket[] }[];
   takenOver: TakenOverTicket[];
   awaitingAcceptance: {
@@ -148,10 +157,69 @@ async function specIdsIn(
   return rows.map((row) => row.id);
 }
 
-export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
-  const waiting = slimWaiting(
-    await blockedQueue(pool, { brief: false, rank: false }),
+const STALE_EMPTY_NOTE = "已默认不在需求列表里";
+
+function staleOf(spec: {
+  id: number;
+  displayId: string;
+  title: string;
+  state: SpecState;
+}): StaleSpec {
+  if (spec.state === "cancelled") {
+    return {
+      id: spec.id,
+      displayId: spec.displayId,
+      title: spec.title,
+      state: spec.state,
+      command: null,
+      note: STALE_EMPTY_NOTE,
+    };
+  }
+  return {
+    id: spec.id,
+    displayId: spec.displayId,
+    title: spec.title,
+    state: spec.state,
+    command: `plat spec cancel ${spec.displayId}`,
+    note: null,
+  };
+}
+
+async function staleSpecs(pool: pg.Pool, now: Date): Promise<StaleSpec[]> {
+  const ids = await specIdsIn(
+    pool,
+    `SELECT id FROM (
+       SELECT s.id FROM specs s
+       WHERE s.state = 'draft' AND s.created_at < $1::timestamptz - interval '7 days'
+       UNION ALL
+       SELECT s.id FROM specs s
+       WHERE s.state = 'awaiting-review'
+         AND (
+           SELECT e.at FROM events e
+           WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'awaiting-review'
+           ORDER BY e.id DESC LIMIT 1
+         ) < $1::timestamptz - interval '3 days'
+       UNION ALL
+       SELECT s.id FROM specs s
+       WHERE s.state = 'cancelled'
+         AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.spec_id = s.id)
+         AND (
+           SELECT e.at FROM events e
+           WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'cancelled'
+           ORDER BY e.id DESC LIMIT 1
+         ) < $1::timestamptz - interval '1 day'
+     ) stale ORDER BY id`,
+    [now],
   );
+  const items = await specListItems(pool, ids);
+  return items.map((spec) => staleOf(spec));
+}
+
+export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
+  const waiting = {
+    ...slimWaiting(await blockedQueue(pool, { brief: false, rank: false })),
+    stale: await staleSpecs(pool, now),
+  };
 
   const means = await pool.query<{
     project_id: number;

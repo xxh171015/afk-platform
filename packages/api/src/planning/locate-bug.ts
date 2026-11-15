@@ -15,6 +15,7 @@ import {
   type StageJob,
   writeFacts,
 } from "../stages/results.ts";
+import { cancelSpec } from "../tickets/actions.ts";
 import { createSpec } from "./planning.ts";
 
 // Locate: a read-only agent run that maps a bug report onto a repo, files, and the
@@ -171,6 +172,26 @@ export async function submitBug(
     return created;
   }
   return { status: "invalid", message: "could not pick a unique slug" };
+}
+
+const BUG_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+
+// plat bug drafts that nobody confirmed: the periodic scheduling pass cancels them after a day
+// so trial reports do not sit in the spec list.
+export async function expireUnconfirmedBugDrafts(
+  pool: pg.Pool,
+  now: Date,
+): Promise<void> {
+  const cutoff = new Date(now.getTime() - BUG_DRAFT_TTL_MS);
+  const { rows } = await pool.query<{ id: number }>(
+    `SELECT id FROM specs
+     WHERE type = 'bug' AND state = 'draft' AND created_at <= $1
+     ORDER BY id`,
+    [cutoff],
+  );
+  for (const { id } of rows) {
+    await cancelSpec(pool, id, now);
+  }
 }
 
 const LocateCommit = z.object({

@@ -1000,6 +1000,7 @@ export interface SpecListQuery {
   sort?: "startedAt" | "state" | "progress";
   dir?: "asc" | "desc";
   ids?: number[];
+  includeEmptyCancelled?: boolean;
 }
 
 const SPEC_LIST_DEFAULT_LIMIT = 50;
@@ -1133,6 +1134,12 @@ export async function specList(
   if (query.states && query.states.length > 0) {
     params.push(query.states);
     where.push(`s.state = ANY($${params.length})`);
+  }
+  if (query.ids === undefined && query.includeEmptyCancelled !== true) {
+    where.push(`NOT (
+      s.state = 'cancelled'
+      AND NOT EXISTS (SELECT 1 FROM tickets cancelled_tickets WHERE cancelled_tickets.spec_id = s.id)
+    )`);
   }
   if (query.repo) {
     const { rows: repoRows } = await pool.query<{
