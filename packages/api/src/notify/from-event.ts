@@ -495,5 +495,17 @@ function systemNotice(data: Record<string, unknown>): MappedNotice | undefined {
       hostKind: "github",
     };
   }
+  if (kind === "daily-digest") {
+    const projectId = Number(data.projectId);
+    const body = typeof data.body === "string" ? data.body : "";
+    return {
+      notice: {
+        title: "待合并需求",
+        body: `${body}\n${pageUrl("/")}`,
+      },
+      hostKind: "github",
+      projectId: Number.isFinite(projectId) ? projectId : undefined,
+    };
+  }
   return undefined;
 }

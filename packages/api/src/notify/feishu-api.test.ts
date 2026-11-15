@@ -22,6 +22,7 @@ import {
   testApp,
 } from "../test/fake-worker.ts";
 import { importBody } from "../test/ticket-files.ts";
+import { maybeSendDailyDigest } from "./daily-digest.ts";
 import type { FeishuHttp, FeishuHttpRequest } from "./feishu.ts";
 
 class FakeFeishu {
@@ -353,6 +354,303 @@ describe("Feishu test send", () => {
     );
     expect(posted.status).toBe(409);
     expect(posted.body).toEqual({ error: "feishu channel is closed" });
+    expect(fake.requests).toEqual([]);
+  });
+});
+
+const BEIJING_8AM = new Date("2026-01-01T00:00:00Z");
+const BEIJING_9AM = new Date("2026-01-01T01:00:00Z");
+const OPENED_MS = 12 * 3600 * 1000;
+const PR_URL = "https://github.com/me/shop/pull/7";
+
+async function waitForFeishu(count: number, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (fake.messages.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  expect(fake.messages).toHaveLength(count);
+}
+
+async function pendingSpec(
+  projectId: number,
+  options: {
+    title: string;
+    slug: string;
+    prUrl?: string;
+    conflicts?: boolean;
+    needsHuman?: number;
+    deferred?: number;
+    state?: "awaiting-review" | "partially-merged";
+  },
+) {
+  const repo = await db.pool.query<{ id: number }>(
+    "SELECT id FROM repos WHERE project_id = $1",
+    [projectId],
+  );
+  const spec = await db.pool.query<{ id: number }>(
+    `INSERT INTO specs (project_id, type, slug, title, state)
+     VALUES ($1, 'feature', $2, $3, $4)
+     RETURNING id`,
+    [
+      projectId,
+      options.slug,
+      options.title,
+      options.state ?? "awaiting-review",
+    ],
+  );
+  const specId = spec.rows[0].id;
+  await db.pool.query(
+    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha, conflicts_with_default, synced_at)
+     VALUES ($1, $2, 7, $3, 'open', 'abc', $4, $5)`,
+    [
+      specId,
+      repo.rows[0].id,
+      options.prUrl ?? PR_URL,
+      options.conflicts === true,
+      BEIJING_9AM,
+    ],
+  );
+  const needsHuman = options.needsHuman ?? 0;
+  const deferred = options.deferred ?? 0;
+  const needsDecision = [
+    ...Array.from({ length: needsHuman }, (_, i) => ({
+      kind: "needs-human",
+      id: `R-1#${i}`,
+      source: "T-1 implement",
+      text: `ask ${i}`,
+    })),
+    ...Array.from({ length: deferred }, (_, i) => ({
+      kind: "deferred",
+      id: `R-1#d${i}`,
+      source: "T-1 implement",
+      text: `later ${i}`,
+      ref: "new",
+    })),
+  ];
+  await db.pool.query(
+    `INSERT INTO acceptance_packs (spec_id, content) VALUES ($1, $2::jsonb)`,
+    [
+      specId,
+      JSON.stringify({
+        generatedAt: BEIJING_9AM.toISOString(),
+        mergeOrder: { ordered: [], after: {}, unordered: [] },
+        orderBroken: [],
+        repos: [],
+        cancelledTickets: [],
+        agentSeconds: 0,
+        needsDecision,
+      }),
+    ],
+  );
+  await db.pool.query(
+    `UPDATE events SET at = $2
+     WHERE spec_id = $1 AND type = 'spec' AND to_state = 'awaiting-review'`,
+    [specId, new Date(BEIJING_9AM.getTime() - OPENED_MS)],
+  );
+  return specId;
+}
+
+async function digestEvents() {
+  return db.pool.query<{
+    kind: string;
+    project_id: string | null;
+    body: string | null;
+  }>(
+    `SELECT data->>'kind' AS kind, data->>'projectId' AS project_id, data->>'body' AS body
+     FROM events WHERE type = 'system' AND data->>'kind' = 'daily-digest'
+     ORDER BY id`,
+  );
+}
+
+describe("daily digest of awaiting-review specs", () => {
+  it("records and sends one digest per project with pending specs at Beijing 09:00, matching the spec page, and skips empty projects and hours before 09:00", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    expect(
+      (await call("PATCH", `/projects/${shopId}`, { feishuChatId: "oc_shop" }))
+        .status,
+    ).toBe(200);
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const specId = await pendingSpec(shopId, {
+      title: "导出订单",
+      slug: "export",
+      conflicts: true,
+      needsHuman: 2,
+      deferred: 1,
+    });
+    const empty = await call("POST", "/projects", { name: "empty" });
+    await call("POST", `/projects/${empty.body.id as number}/repos`, {
+      url: "git@x:empty",
+      role: "backend",
+    });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_8AM);
+    expect((await digestEvents()).rows).toEqual([]);
+    expect(fake.messages).toEqual([]);
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const events = await digestEvents();
+    expect(events.rows).toEqual([
+      {
+        kind: "daily-digest",
+        project_id: String(shopId),
+        body: expect.stringContaining("S-1") as string,
+      },
+    ]);
+
+    const view = await call("GET", `/specs/${specId}`);
+    expect(view.status).toBe(200);
+    const spec = view.body.spec as { displayId: string; title: string };
+    const pulls = view.body.pullRequests as { url: string }[];
+    const pack = view.body.acceptancePack as {
+      needsDecision: { kind: string }[];
+    };
+    expect(spec).toMatchObject({ displayId: "S-1", title: "导出订单" });
+    expect(pulls.map((row) => row.url)).toEqual([PR_URL]);
+    expect(
+      pack.needsDecision.filter((item) => item.kind === "needs-human"),
+    ).toHaveLength(2);
+    expect(
+      pack.needsDecision.filter((item) => item.kind === "deferred"),
+    ).toHaveLength(1);
+
+    await waitForFeishu(1);
+    expect(fake.messages[0]?.chatId).toBe("oc_shop");
+    const card = JSON.stringify(fake.messages[0]?.content);
+    expect(card).toContain(spec.displayId);
+    expect(card).toContain(spec.title);
+    expect(card).toContain(PR_URL);
+    expect(card).toContain("开出 12 小时");
+    expect(card).toContain("needs-human 2");
+    expect(card).toContain("deferred 1");
+    expect(card).toContain("与默认分支冲突");
+    expect(events.rows[0]?.body).toContain(spec.displayId);
+    expect(events.rows[0]?.body).toContain(spec.title);
+    expect(events.rows[0]?.body).toContain(PR_URL);
+  });
+
+  it("does not resend on a second check the same day or after an API restart, and sends again the next Beijing morning", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    await pendingSpec(shopId, { title: "导出订单", slug: "export" });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    await waitForFeishu(1);
+    expect((await digestEvents()).rows).toHaveLength(1);
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    expect((await digestEvents()).rows).toHaveLength(1);
+
+    await api.close();
+    fake.messages.length = 0;
+    await start({ defaultChatId: "oc_default" });
+    await maybeSendDailyDigest(db.pool, new Date("2026-01-01T04:00:00Z"));
+    expect((await digestEvents()).rows).toHaveLength(1);
+    expect(fake.messages).toEqual([]);
+
+    await maybeSendDailyDigest(db.pool, new Date("2026-01-02T01:00:00Z"));
+    expect((await digestEvents()).rows).toHaveLength(2);
+    await waitForFeishu(1);
+  });
+
+  it("puts each awaiting-review and partially-merged spec of a project on its own line", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    await pendingSpec(shopId, { title: "导出订单", slug: "export" });
+    await pendingSpec(shopId, {
+      title: "入库单",
+      slug: "inbound",
+      state: "partially-merged",
+      prUrl: "https://github.com/me/shop/pull/8",
+    });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const events = await digestEvents();
+    expect(events.rows).toHaveLength(1);
+    expect(events.rows[0]?.body?.split("\n")).toEqual([
+      expect.stringContaining("导出订单"),
+      expect.stringContaining("入库单"),
+    ]);
+    await waitForFeishu(1);
+    const card = JSON.stringify(fake.messages[0]?.content);
+    expect(card).toContain("导出订单");
+    expect(card).toContain("入库单");
+    expect(card).toContain("https://github.com/me/shop/pull/8");
+  });
+
+  it("sends to the project's Feishu group when set and to the default group otherwise", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    expect(
+      (await call("PATCH", `/projects/${shopId}`, { feishuChatId: "oc_shop" }))
+        .status,
+    ).toBe(200);
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:shop",
+      role: "backend",
+    });
+    await pendingSpec(shopId, { title: "导出订单", slug: "export" });
+    const warehouse = await call("POST", "/projects", { name: "warehouse" });
+    const warehouseId = warehouse.body.id as number;
+    await call("POST", `/projects/${warehouseId}/repos`, {
+      url: "git@x:warehouse",
+      role: "backend",
+    });
+    await pendingSpec(warehouseId, {
+      title: "入库单",
+      slug: "inbound",
+      prUrl: "https://github.com/me/warehouse/pull/3",
+    });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    await waitForFeishu(2);
+    expect(fake.messages.map((row) => row.chatId).sort()).toEqual([
+      "oc_default",
+      "oc_shop",
+    ]);
+    const shopCard = fake.messages.find((row) => row.chatId === "oc_shop");
+    const defaultCard = fake.messages.find(
+      (row) => row.chatId === "oc_default",
+    );
+    expect(JSON.stringify(shopCard?.content)).toContain("导出订单");
+    expect(JSON.stringify(defaultCard?.content)).toContain("入库单");
+  });
+
+  it("still notifies macOS when Feishu is closed", async () => {
+    await start({ secrets: false });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    await pendingSpec(shopId, { title: "导出订单", slug: "export" });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    expect((await digestEvents()).rows).toHaveLength(1);
+    const deadline = Date.now() + 2_000;
+    while (macos.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+    expect(macos.length).toBeGreaterThan(0);
+    expect(macos.some((args) => args.join(" ").includes("待合并需求"))).toBe(
+      true,
+    );
     expect(fake.requests).toEqual([]);
   });
 });

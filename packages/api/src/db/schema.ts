@@ -143,11 +143,18 @@ export const instance = pgTable(
     lastNotifiedEventId: bigint("last_notified_event_id", { mode: "number" })
       .notNull()
       .default(0),
+    // Beijing calendar date (YYYY-MM-DD) of the last daily digest. A conditional update claims the day
+    // so a pass and a restart send at most once (docs/optimization-plan.md 8.6).
+    digestSentOn: text("digest_sent_on"),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
     check("instance_id_check", sql`${t.id} ~ '^[0-9a-f]{6}$'`),
     check("instance_disk_noticed_check", oneOf(t.diskNoticed, DISK_NOTICED)),
+    check(
+      "instance_digest_sent_on_check",
+      sql`${t.digestSentOn} is null or ${t.digestSentOn} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
   ],
 );
 
