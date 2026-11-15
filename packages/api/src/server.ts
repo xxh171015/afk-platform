@@ -5,6 +5,10 @@ import { assertMigrated } from "./db/migrate.ts";
 import { eventsHubOf } from "./events/hub.ts";
 import { defaultLogDir, LogStore } from "./logs/log-store.ts";
 import { retainLogs } from "./logs/retention.ts";
+import {
+  DIGEST_EVERY_MS,
+  maybeSendDailyDigest,
+} from "./notify/daily-digest.ts";
 import { dispatcherOf } from "./notify/dispatch.ts";
 import { feishuSecretsPath } from "./notify/feishu.ts";
 import { scheduleRunningSpecs } from "./scheduling/scheduler.ts";
@@ -28,6 +32,9 @@ export async function startServer(options: {
   scheduleEveryMs?: number;
   // How often expired run logs are deleted (0 turns the timer off; a pass still runs at start).
   retentionEveryMs?: number;
+  // How often the Beijing-09:00 digest is checked (0 turns the timer off; a pass still runs at start).
+  digestEveryMs?: number;
+  clock?: () => Date;
 }): Promise<RunningServer> {
   await assertMigrated(options.pool);
   const { rows } = await options.pool.query<{ id: string }>(
@@ -45,6 +52,7 @@ export async function startServer(options: {
   });
   await eventsHubOf(app)?.whenReady();
   await dispatcherOf(app)?.start();
+  const clock = options.clock ?? (() => new Date());
   const sweep = periodicScheduling(
     options.pool,
     options.scheduleEveryMs ?? 60_000,
@@ -55,11 +63,17 @@ export async function startServer(options: {
     orphanRoot: options.orphanRoot,
     everyMs: options.retentionEveryMs ?? 24 * 60 * 60 * 1000,
   });
+  const digest = periodicDailyDigest({
+    pool: options.pool,
+    clock,
+    everyMs: options.digestEveryMs ?? DIGEST_EVERY_MS,
+  });
   return new Promise((resolve, reject) => {
     const server = serve(
       { fetch: app.fetch, port: options.port ?? 3000, hostname: HOST },
       (info) => {
         retention.start();
+        digest.start();
         resolve({
           url: `http://${HOST}:${info.port}`,
           close: async () => {
@@ -67,6 +81,7 @@ export async function startServer(options: {
             await eventsHubOf(app)?.stop();
             await sweep.stop();
             await retention.stop();
+            await digest.stop();
             await new Promise<void>((done) => server.close(() => done()));
           },
         });
@@ -75,6 +90,7 @@ export async function startServer(options: {
     server.once("error", () => {
       void sweep.stop();
       void retention.stop();
+      void digest.stop();
     });
     // a port that is taken, or not allowed: say so instead of hanging
     server.once("error", reject);
@@ -135,6 +151,38 @@ function periodicLogRetention(options: {
       pass(true);
       if (options.everyMs > 0 && timer === undefined) {
         timer = setInterval(() => pass(false), options.everyMs);
+        timer.unref();
+      }
+    },
+    stop: async () => {
+      clearInterval(timer);
+      await running;
+    },
+  };
+}
+
+function periodicDailyDigest(options: {
+  pool: pg.Pool;
+  clock: () => Date;
+  everyMs: number;
+}) {
+  let running: Promise<unknown> = Promise.resolve();
+  let busy = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const pass = () => {
+    if (busy) return;
+    busy = true;
+    running = maybeSendDailyDigest(options.pool, options.clock())
+      .catch((error) => console.error("daily digest failed:", error))
+      .finally(() => {
+        busy = false;
+      });
+  };
+  return {
+    start: () => {
+      pass();
+      if (options.everyMs > 0 && timer === undefined) {
+        timer = setInterval(pass, options.everyMs);
         timer.unref();
       }
     },
