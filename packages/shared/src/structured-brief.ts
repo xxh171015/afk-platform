@@ -24,6 +24,7 @@ export type StructuredBrief = {
   recommendedAction: string;
   commands: StructuredBriefCommand[];
   ticketDraft?: string;
+  sameReasonRepeatMinutes?: number;
 };
 
 export type StructuredBriefSource = {
@@ -39,6 +40,11 @@ export type StructuredBriefSource = {
   }>;
 };
 
+export type RecentBlocked = {
+  reason: string | null;
+  at: Date | string;
+};
+
 export type StructuredBriefInput = {
   reason: string;
   specDisplayId: string;
@@ -48,6 +54,8 @@ export type StructuredBriefInput = {
   wrapUpStep?: string;
   // the stage that blocked was already run again once on its own after a timeout or a missing result
   autoRetried?: boolean;
+  // last two entries into blocked, newest first; when their reason codes match, sameReasonRepeatMinutes is set
+  recentBlocked?: readonly RecentBlocked[];
   brief: StructuredBriefSource | null;
 };
 
@@ -95,8 +103,14 @@ const RECOMMENDED_ACTION: Record<BlockedReason, string> = {
   "recheck-failed": "确认这次改动可以留下，批准后从合并接着跑",
 };
 
+export function sameReasonRepeatLine(minutes: number): string {
+  return `上次重试后同一原因再次发生（间隔 ${minutes} 分钟）`;
+}
+
 export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
   const reason = input.reason as BlockedReason;
+  const sameReasonRepeatMinutes = sameReasonRepeatMinutesOf(input);
+  const repeating = sameReasonRepeatMinutes !== undefined;
   const result: StructuredBrief = {
     reason: input.reason,
     step: input.brief?.stage ?? "",
@@ -104,12 +118,78 @@ export function structuredBrief(input: StructuredBriefInput): StructuredBrief {
       input.autoRetried ? "（已自动重试过一次）" : ""
     }`,
     evidence: evidenceOf(input.reason, input.brief),
-    recommendedAction: RECOMMENDED_ACTION[reason] ?? "看这次 Run 后决定下一步",
-    commands: commandsOf(input),
+    recommendedAction: repeating
+      ? recommendedActionWhenRepeating(input)
+      : (RECOMMENDED_ACTION[reason] ?? "看这次 Run 后决定下一步"),
+    commands: repeating ? commandsWhenRepeating(input) : commandsOf(input),
   };
   const ticketDraft = ticketDraftOf(input, result.summary);
   if (ticketDraft) result.ticketDraft = ticketDraft;
+  if (sameReasonRepeatMinutes !== undefined) {
+    result.sameReasonRepeatMinutes = sameReasonRepeatMinutes;
+  }
   return result;
+}
+
+function sameReasonRepeatMinutesOf(
+  input: StructuredBriefInput,
+): number | undefined {
+  const latest = input.recentBlocked?.[0];
+  const previous = input.recentBlocked?.[1];
+  if (!latest || !previous) return undefined;
+  if (
+    latest.reason === null ||
+    latest.reason !== previous.reason ||
+    latest.reason !== input.reason
+  ) {
+    return undefined;
+  }
+  const later = timeOf(latest.at);
+  const earlier = timeOf(previous.at);
+  if (!Number.isFinite(later) || !Number.isFinite(earlier) || later < earlier) {
+    return undefined;
+  }
+  return Math.round((later - earlier) / 60_000);
+}
+
+function timeOf(at: Date | string): number {
+  return at instanceof Date ? at.getTime() : Date.parse(at);
+}
+
+function recommendedActionWhenRepeating(input: StructuredBriefInput): string {
+  if (input.ticketDisplayId) return "接手自己改，或改票后再试";
+  if (input.wrapUpStep === "final-e2e") return "放行联调或取消需求";
+  return "取消需求";
+}
+
+function commandsWhenRepeating(
+  input: StructuredBriefInput,
+): StructuredBriefCommand[] {
+  const ticket = input.ticketDisplayId;
+  if (ticket) {
+    return [
+      { label: "接手", command: `plat ticket takeover ${ticket}` },
+      { label: "改票", command: `plat ticket edit ${ticket} --file …` },
+    ];
+  }
+  if (input.wrapUpStep === "final-e2e") {
+    return [
+      {
+        label: "跳过联调仍然开 PR",
+        command: `plat spec waive-final ${input.specDisplayId}`,
+      },
+      {
+        label: "取消需求",
+        command: `plat spec cancel ${input.specDisplayId}`,
+      },
+    ];
+  }
+  return [
+    {
+      label: "取消需求",
+      command: `plat spec cancel ${input.specDisplayId}`,
+    },
+  ];
 }
 
 const CONTINUE_WITH_NOTE = new Set<string>([

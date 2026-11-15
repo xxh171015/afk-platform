@@ -5416,6 +5416,9 @@
                             },
                             "ticketDraft": {
                               "type": "string"
+                            },
+                            "sameReasonRepeatMinutes": {
+                              "type": "integer"
                             }
                           },
                           "required": [
@@ -6610,6 +6613,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -6907,6 +6913,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -8403,6 +8412,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -8700,6 +8712,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [

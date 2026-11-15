@@ -192,6 +192,96 @@ export interface RankableQueue {
   }[];
 }
 
+export type RecentBlockedEvent = {
+  reason: string | null;
+  at: Date;
+};
+
+async function recentBlockedEvents(
+  pool: pg.Pool,
+  sql: string,
+  ids: number[],
+  keyOf: (row: { key: number; reason: string | null; at: Date }) => number,
+): Promise<Map<number, RecentBlockedEvent[]>> {
+  const map = new Map<number, RecentBlockedEvent[]>();
+  if (ids.length === 0) return map;
+  const { rows } = await pool.query<{
+    key: number;
+    reason: string | null;
+    at: Date;
+  }>(sql, [ids]);
+  for (const row of rows) {
+    const key = keyOf(row);
+    const list = map.get(key) ?? [];
+    list.push({ reason: row.reason, at: row.at });
+    map.set(key, list);
+  }
+  return map;
+}
+
+export async function recentTicketBlockedEvents(
+  pool: pg.Pool,
+  ticketIds: number[],
+): Promise<Map<number, RecentBlockedEvent[]>> {
+  return recentBlockedEvents(
+    pool,
+    `SELECT ticket_id AS key, reason, at FROM (
+       SELECT ticket_id, reason, at,
+              ROW_NUMBER() OVER (PARTITION BY ticket_id ORDER BY id DESC) AS n
+       FROM events
+       WHERE type = 'ticket' AND to_state = 'blocked' AND ticket_id = ANY($1)
+     ) s WHERE n <= 2 ORDER BY key, n`,
+    ticketIds,
+    (row) => row.key,
+  );
+}
+
+export async function recentFinalizationBlockedEvents(
+  pool: pg.Pool,
+  specIds: number[],
+): Promise<Map<string, RecentBlockedEvent[]>> {
+  const map = new Map<string, RecentBlockedEvent[]>();
+  if (specIds.length === 0) return map;
+  const { rows } = await pool.query<{
+    spec_id: number;
+    repo_id: number;
+    reason: string | null;
+    at: Date;
+  }>(
+    `SELECT spec_id, repo_id, reason, at FROM (
+       SELECT spec_id, repo_id, reason, at,
+              ROW_NUMBER() OVER (PARTITION BY spec_id, repo_id ORDER BY id DESC) AS n
+       FROM events
+       WHERE type = 'finalization' AND to_state = 'blocked' AND spec_id = ANY($1)
+     ) s WHERE n <= 2 ORDER BY spec_id, repo_id, n`,
+    [specIds],
+  );
+  for (const row of rows) {
+    const key = `${row.spec_id}:${row.repo_id}`;
+    const list = map.get(key) ?? [];
+    list.push({ reason: row.reason, at: row.at });
+    map.set(key, list);
+  }
+  return map;
+}
+
+export async function recentE2eBlockedEvents(
+  pool: pg.Pool,
+  specIds: number[],
+): Promise<Map<number, RecentBlockedEvent[]>> {
+  return recentBlockedEvents(
+    pool,
+    `SELECT spec_id AS key, reason, at FROM (
+       SELECT spec_id, reason, at,
+              ROW_NUMBER() OVER (PARTITION BY spec_id ORDER BY id DESC) AS n
+       FROM events
+       WHERE type = 'final-e2e' AND to_state = 'blocked' AND spec_id = ANY($1)
+     ) s WHERE n <= 2 ORDER BY key, n`,
+    specIds,
+    (row) => row.key,
+  );
+}
+
 export async function rankWaitingQueue<Q extends RankableQueue>(
   pool: pg.Pool,
   queue: Q,

@@ -3050,6 +3050,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -3490,6 +3491,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -3577,6 +3579,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 /** @enum {string} */
                 hostKind?: "github" | "gitlab";
@@ -4076,6 +4079,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -4163,6 +4167,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 /** @enum {string} */
                 hostKind?: "github" | "gitlab";

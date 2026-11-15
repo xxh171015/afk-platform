@@ -171,6 +171,31 @@ describe("plat blocked of a stuck ticket", () => {
     expect(text).toContain('plat ticket retry T-12 --mode continue --note "…"');
   });
 
+  it("prints the same-reason repeat line and takeover instead of retry", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [
+        stuckTicket({
+          structuredBrief: {
+            reason: "gate-failed",
+            step: "gate",
+            summary: "门禁失败",
+            evidence: { lastLogLines: "still boom" },
+            recommendedAction: "接手自己改，或改票后再试",
+            sameReasonRepeatMinutes: 15,
+            commands: [
+              { label: "接手", command: "plat ticket takeover T-12" },
+              { label: "改票", command: "plat ticket edit T-12 --file …" },
+            ],
+          },
+        }),
+      ],
+    } as never);
+    expect(text).toContain("上次重试后同一原因再次发生（间隔 15 分钟）");
+    expect(text).toContain("plat ticket takeover T-12");
+    expect(text).not.toContain("plat ticket retry T-12");
+  });
+
   it("prints approve-protected and the following retry for protected-path-changed", () => {
     const text = blockedText({
       ...emptyQueue,

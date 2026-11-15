@@ -121,6 +121,7 @@ const StructuredBrief = z
       }),
     ),
     ticketDraft: z.string().optional(),
+    sameReasonRepeatMinutes: z.number().int().optional(),
   })
   .nullable();
 

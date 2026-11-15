@@ -8,6 +8,7 @@ import {
   pullPhrase,
   type StageModels,
   type StructuredBrief,
+  sameReasonRepeatLine,
   type TicketReviewMode,
 } from "@afk/shared";
 
@@ -343,6 +344,9 @@ function structuredBriefLines(
   if (!brief) return [];
   return [
     `${indent}${brief.summary}`,
+    ...(brief.sameReasonRepeatMinutes !== undefined
+      ? [`${indent}${sameReasonRepeatLine(brief.sameReasonRepeatMinutes)}`]
+      : []),
     `${indent}${brief.recommendedAction}`,
     ...brief.commands.map((item) => `${indent}${item.label}: ${item.command}`),
     ...(brief.ticketDraft
