@@ -1006,6 +1006,7 @@ export interface paths {
           repo?: string;
           sort?: "startedAt" | "state" | "progress";
           dir?: "asc" | "desc";
+          includeEmptyCancelled?: "true" | "false";
         };
         header?: never;
         path?: never;
@@ -4453,6 +4454,25 @@ export interface paths {
                   specDisplayId: string;
                   title: string;
                   reason: string;
+                }[];
+                stale: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  command: string | null;
+                  note: string | null;
                 }[];
               };
               running: {

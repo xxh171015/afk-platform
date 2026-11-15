@@ -5,6 +5,7 @@ import {
   type TestDatabase,
 } from "../db/test-db.ts";
 import type { Notice } from "../notify/notices.ts";
+import { scheduleRunningSpecs } from "../scheduling/scheduler.ts";
 import {
   FakeClock,
   FakeWorker,
@@ -12,6 +13,7 @@ import {
   type RunningApi,
   testApp,
 } from "../test/fake-worker.ts";
+import { importBody } from "../test/ticket-files.ts";
 
 // `plat bug` builds a bug draft and locates the original spec: not a ticket stage, not a
 // diagnosis, and it does not import tickets or confirm (docs/specs S-28 Locate).
@@ -366,6 +368,86 @@ describe("retrying a failed locate", () => {
     ).toHaveLength(2);
     expect(jobs.some((row) => row.payload.stage === "implement")).toBe(false);
     expect(view.body.spec.state).not.toBe("planned");
+  });
+});
+
+describe("unconfirmed bug drafts", () => {
+  const DAY = 24 * 60 * 60;
+
+  async function setCreatedAt(specId: number, at: Date) {
+    await db.pool.query("UPDATE specs SET created_at = $2 WHERE id = $1", [
+      specId,
+      at,
+    ]);
+  }
+
+  async function specState(specId: number) {
+    return (await call("GET", `/specs/${specId}`)).body.spec.state as string;
+  }
+
+  it("cancels a plat bug draft once 24 hours have passed without confirm, and records an event", async () => {
+    const projectId = await shop();
+    const expired = await submitBug(projectId);
+    const expiredId = expired.body.id as number;
+    await setCreatedAt(expiredId, clock.now());
+
+    const featureDraft = await call("POST", "/specs", {
+      projectId,
+      type: "feature",
+      slug: "old-feature",
+      title: "Old feature draft",
+    });
+    const featureId = featureDraft.body.id as number;
+    await setCreatedAt(featureId, clock.now());
+
+    const toConfirm = await submitBug(projectId, "a confirmed bug");
+    const confirmedId = toConfirm.body.id as number;
+    expect(
+      (
+        await call(
+          "POST",
+          `/specs/${confirmedId}/tickets/import`,
+          importBody(confirmedId, {
+            tickets: [
+              {
+                key: "fix",
+                repo: "backend",
+                type: "implementation",
+                title: "Fix it",
+                modules: ["src/**"],
+                acceptance: ["it works"],
+              },
+            ],
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect((await call("POST", `/specs/${confirmedId}/confirm`)).status).toBe(
+      200,
+    );
+    await setCreatedAt(confirmedId, clock.now());
+
+    clock.advanceSeconds(DAY);
+    const fresh = await submitBug(projectId, "a fresh report");
+    const freshId = fresh.body.id as number;
+    await setCreatedAt(freshId, clock.now());
+
+    await scheduleRunningSpecs(db.pool, clock.now());
+
+    expect(await specState(expiredId)).toBe("cancelled");
+    expect(await specState(freshId)).toBe("draft");
+    expect(await specState(confirmedId)).toBe("running");
+    expect(await specState(featureId)).toBe("draft");
+
+    const events = await db.pool.query<{
+      type: string;
+      to_state: string | null;
+    }>(
+      `SELECT type, to_state FROM events
+       WHERE spec_id = $1 AND type = 'spec' AND to_state = 'cancelled'`,
+      [expiredId],
+    );
+    expect(events.rows).toHaveLength(1);
   });
 });
 

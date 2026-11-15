@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyWorkbench, fakeServer, renderWithApp } from "./test-utils.tsx";
 import {
   EMPTY_COMPLETED,
@@ -448,6 +448,71 @@ describe("the workbench", () => {
     const link = within(status).getByRole("link");
     expect(link.textContent).toMatch(/飞书渠道已关闭：密钥文件不存在/);
     expect(link.getAttribute("href")).toContain("/projects/1");
+  });
+
+  it("shows 放了很久 in 等你处理 with a copyable cancel command, and a note for empty cancelled specs", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            ...empty,
+            waiting: {
+              ...emptyWaiting,
+              stale: [
+                {
+                  id: 9,
+                  displayId: "S-9",
+                  title: "Old draft",
+                  state: "draft",
+                  command: "plat spec cancel S-9",
+                  note: null,
+                },
+                {
+                  id: 11,
+                  displayId: "S-11",
+                  title: "Old review",
+                  state: "awaiting-review",
+                  command: "plat spec cancel S-11",
+                  note: null,
+                },
+                {
+                  id: 20,
+                  displayId: "S-20",
+                  title: "Empty cancelled",
+                  state: "cancelled",
+                  command: null,
+                  note: "已默认不在需求列表里",
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+    expect(await screen.findByText("放了很久")).toBeTruthy();
+    const waiting = within(screen.getByTestId("quadrant-等你处理"));
+    expect(waiting.getByText("Old draft")).toBeTruthy();
+    expect(waiting.getByText("S-9").closest("a")?.getAttribute("href")).toBe(
+      "/specs/9",
+    );
+    expect(
+      waiting.getByRole("button", { name: "复制命令 plat spec cancel S-9" }),
+    ).toBeTruthy();
+    expect(
+      waiting.getByRole("button", { name: "复制命令 plat spec cancel S-11" }),
+    ).toBeTruthy();
+    expect(waiting.getByText("已默认不在需求列表里")).toBeTruthy();
+    expect(
+      waiting.queryByRole("button", { name: /plat spec cancel S-20/ }),
+    ).toBeNull();
+    fireEvent.click(
+      waiting.getByRole("button", { name: "复制命令 plat spec cancel S-9" }),
+    );
+    expect(writeText).toHaveBeenCalledWith("plat spec cancel S-9");
   });
 
   it("puts getting the first project on the platform at the top while there is none", async () => {

@@ -295,7 +295,12 @@ export async function scheduleProject(
 // The periodic pass the API makes over every project with a running spec.
 export async function scheduleRunningSpecs(
   pool: pg.Pool,
+  now: Date = new Date(),
 ): Promise<ScheduleResult> {
+  const { expireUnconfirmedBugDrafts } = await import(
+    "../planning/locate-bug.ts"
+  );
+  await expireUnconfirmedBugDrafts(pool, now);
   const projects = await pool.query<{ project_id: number }>(
     "SELECT DISTINCT project_id FROM specs WHERE state = 'running' ORDER BY project_id",
   );

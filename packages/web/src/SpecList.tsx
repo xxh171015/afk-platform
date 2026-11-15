@@ -19,6 +19,7 @@ import {
   StaleNotice,
 } from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
+import { Checkbox } from "./components/ui/checkbox.tsx";
 import { Input } from "./components/ui/input.tsx";
 import {
   Select,
@@ -112,12 +113,16 @@ export function SpecList() {
   const [project, setProject] = useState("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const [includeEmptyCancelled, setIncludeEmptyCancelled] = useState(false);
   const filters = {
     q: q.trim() || undefined,
     state: states.size > 0 ? [...states] : undefined,
     repo: project === "all" ? undefined : project,
     sort: sort.key,
     dir: sort.dir,
+    includeEmptyCancelled: includeEmptyCancelled
+      ? ("true" as const)
+      : undefined,
   };
   const specs = useInfiniteQuery({
     queryKey: ["specs", filters],
@@ -132,6 +137,7 @@ export function SpecList() {
             repo: filters.repo,
             sort: filters.sort,
             dir: filters.dir,
+            includeEmptyCancelled: filters.includeEmptyCancelled,
           },
         },
       });
@@ -185,11 +191,16 @@ export function SpecList() {
   }, [all, project, projectViews]);
   const filtered = all;
 
-  const filtering = states.size > 0 || project !== "all" || q.trim() !== "";
+  const filtering =
+    states.size > 0 ||
+    project !== "all" ||
+    q.trim() !== "" ||
+    includeEmptyCancelled;
   const clearFilters = () => {
     setStates(new Set());
     setProject("all");
     setQ("");
+    setIncludeEmptyCancelled(false);
   };
 
   return (
@@ -285,6 +296,19 @@ export function SpecList() {
                 );
               })}
             </fieldset>
+            <label
+              htmlFor="include-empty-cancelled"
+              className="inline-flex items-center gap-2 text-[12px] text-muted-foreground"
+            >
+              <Checkbox
+                id="include-empty-cancelled"
+                checked={includeEmptyCancelled}
+                onCheckedChange={(value) =>
+                  setIncludeEmptyCancelled(value === true)
+                }
+              />
+              包括 0 票的取消需求
+            </label>
             {filtering ? (
               <Button
                 size="sm"

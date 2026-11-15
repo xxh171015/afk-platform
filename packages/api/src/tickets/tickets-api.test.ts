@@ -2129,6 +2129,49 @@ describe("the spec list", () => {
     ).toEqual(["S-3:1/1"]);
     expect(second.body.nextCursor).toBeNull();
   });
+
+  it("omits cancelled specs with no tickets unless includeEmptyCancelled is true, and still lists cancelled specs that have tickets", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    const projectId = created.body.id as number;
+    await call("POST", `/projects/${projectId}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    const empty = await call("POST", "/specs", {
+      projectId,
+      type: "feature",
+      slug: "empty-cancelled",
+      title: "Empty cancelled",
+    });
+    const emptyId = empty.body.id as number;
+    expect((await call("POST", `/specs/${emptyId}/cancel`)).status).toBe(200);
+
+    const withTickets = await runningSpec([ticket("a")]);
+    expect((await call("POST", `/specs/${withTickets}/cancel`)).status).toBe(
+      200,
+    );
+
+    const draft = await call("POST", "/specs", {
+      projectId,
+      type: "bug",
+      slug: "still-draft",
+      title: "Still draft",
+    });
+
+    const hidden = await call("GET", "/specs");
+    expect(
+      hidden.body.specs.map((s: Json) => `${s.displayId}:${s.state}`),
+    ).toEqual([`${draft.body.displayId}:draft`, `S-${withTickets}:cancelled`]);
+
+    const shown = await call("GET", "/specs?includeEmptyCancelled=true");
+    expect(
+      shown.body.specs.map((s: Json) => `${s.displayId}:${s.state}`),
+    ).toEqual([
+      `${draft.body.displayId}:draft`,
+      `S-${withTickets}:cancelled`,
+      `S-${emptyId}:cancelled`,
+    ]);
+  });
 });
 
 describe("what a person sees", () => {
