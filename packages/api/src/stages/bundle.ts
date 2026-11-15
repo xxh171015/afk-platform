@@ -23,6 +23,7 @@ import {
 } from "../planning/locate-bug.ts";
 import { ticketFileOf } from "../tickets/ticket-file.ts";
 import { contractsOf } from "./contracts.ts";
+import { recallGateTestCases } from "./gate-records.ts";
 import { environmentOf, refsOf } from "./refs.ts";
 import { reviewJsonOf } from "./review-json.ts";
 
@@ -253,9 +254,9 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   const { rows } = await pool.query<{
     tests_total: number;
     tests_skipped: number | null;
-    test_cases: unknown;
+    test_cases_hash: string | null;
   }>(
-    `SELECT g.tests_total, g.tests_skipped, g.test_cases FROM runs r
+    `SELECT g.tests_total, g.tests_skipped, g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
@@ -263,12 +264,11 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
     [specId, repoId],
   );
   const row = rows[0];
-  return row
-    ? withNames(
-        { tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
-        row.test_cases,
-      )
-    : null;
+  if (!row) return null;
+  return withNames(
+    { tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
+    await recallGateTestCases(pool, row.test_cases_hash),
+  );
 }
 
 async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
@@ -276,19 +276,21 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
     sha: string;
     tests_total: number;
     tests_skipped: number | null;
-    test_cases: unknown;
+    test_cases_hash: string | null;
   }>(
-    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped, g.test_cases FROM runs r
+    `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped, g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 50`,
     [specId, repoId],
   );
-  const listed = rows.map((r) =>
-    withNames(
-      { sha: r.sha, tests: r.tests_total, skipped: r.tests_skipped ?? 0 },
-      r.test_cases,
+  const listed = await Promise.all(
+    rows.map(async (r) =>
+      withNames(
+        { sha: r.sha, tests: r.tests_total, skipped: r.tests_skipped ?? 0 },
+        await recallGateTestCases(pool, r.test_cases_hash),
+      ),
     ),
   );
   const repo = await pool.query<{ default_sha: string | null }>(
@@ -300,9 +302,9 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
   const extra = await pool.query<{
     tests_total: number;
     tests_skipped: number | null;
-    test_cases: unknown;
+    test_cases_hash: string | null;
   }>(
-    `SELECT tests_total, tests_skipped, test_cases FROM gate_results
+    `SELECT tests_total, tests_skipped, test_cases_hash FROM gate_results
      WHERE repo_id = $1 AND commit_sha = $2 AND kind = 'gate' AND tests_total IS NOT NULL`,
     [repoId, sha],
   );
@@ -312,7 +314,7 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
     ...listed,
     withNames(
       { sha, tests: row.tests_total, skipped: row.tests_skipped ?? 0 },
-      row.test_cases,
+      await recallGateTestCases(pool, row.test_cases_hash),
     ),
   ];
 }
@@ -321,14 +323,16 @@ async function ticketGateNamesFor(
   pool: pg.Pool,
   ticketId: number,
 ): Promise<Bundle["ticketGateNames"]> {
-  const { rows } = await pool.query<{ test_cases: unknown }>(
-    `SELECT g.test_cases FROM runs r
+  const { rows } = await pool.query<{ test_cases_hash: string | null }>(
+    `SELECT g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.ticket_id = $1 AND r.stage = 'gate' AND r.result = 'passed'
      ORDER BY r.id DESC LIMIT 1`,
     [ticketId],
   );
-  const names = testNamesFrom(rows[0]?.test_cases);
+  const names = testNamesFrom(
+    await recallGateTestCases(pool, rows[0]?.test_cases_hash),
+  );
   return names.length > 0 ? names : null;
 }
 

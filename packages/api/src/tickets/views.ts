@@ -17,6 +17,7 @@ import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 import { potentialConflictsOf } from "../host/trial-merge.ts";
 import { linksBySpec } from "../links/view.ts";
+import { recallGateTestCases } from "../stages/gate-records.ts";
 import {
   type IntegrationAttempt,
   integrationAttempts,
@@ -456,12 +457,33 @@ export async function ticketView(
   );
   const shas = runs.rows.map((r) => r.head_sha).filter(Boolean);
   const gates = shas.length
-    ? await pool.query(
-        `SELECT kind, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases FROM gate_results
+    ? await pool.query<{
+        kind: "gate" | "e2e";
+        commit_sha: string;
+        config_sha: string;
+        command_results: unknown;
+        tests_total: number | null;
+        tests_skipped: number | null;
+        test_cases_hash: string | null;
+      }>(
+        `SELECT kind, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases_hash FROM gate_results
          WHERE repo_id = (SELECT repo_id FROM tickets WHERE id = $1) AND commit_sha = ANY($2) ORDER BY id`,
         [ticketId, shas],
       )
     : { rows: [] };
+  const gateResults = [];
+  for (const g of gates.rows) {
+    const testCases = await recallGateTestCases(pool, g.test_cases_hash);
+    gateResults.push({
+      kind: g.kind,
+      commitSha: g.commit_sha,
+      configSha: g.config_sha,
+      commandResults: g.command_results as unknown[],
+      testsTotal: g.tests_total ?? null,
+      testsSkipped: g.tests_skipped ?? null,
+      ...(testCases ? { testCases } : {}),
+    });
+  }
   return {
     // an integration ticket's e2e tries, with their diagnoses and fix tickets; null for any other ticket
     integration:
@@ -508,23 +530,7 @@ export async function ticketView(
       resolution: f.resolution as string,
       axis: (f.axis as ReviewAxis | null) ?? null,
     })),
-    gateResults: gates.rows.map((g) => ({
-      kind: g.kind as "gate" | "e2e",
-      commitSha: g.commit_sha as string,
-      configSha: g.config_sha as string,
-      commandResults: g.command_results as unknown[],
-      testsTotal: (g.tests_total as number | null) ?? null,
-      testsSkipped: (g.tests_skipped as number | null) ?? null,
-      ...(g.test_cases
-        ? {
-            testCases: g.test_cases as {
-              name: string;
-              classname: string;
-              status?: string;
-            }[],
-          }
-        : {}),
-    })),
+    gateResults,
   };
 }
 

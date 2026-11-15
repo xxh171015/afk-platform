@@ -695,6 +695,12 @@ export const findings = pgTable(
   ],
 );
 
+// JUnit case lists addressed by content hash, so gate_results does not store the same names on every run.
+export const gateTestCases = pgTable("gate_test_cases", {
+  hash: text("hash").primaryKey(),
+  cases: jsonb("cases").notNull(),
+});
+
 export const gateResults = pgTable(
   "gate_results",
   {
@@ -713,8 +719,8 @@ export const gateResults = pgTable(
     commandResults: jsonb("command_results").notNull().default([]),
     testsTotal: integer("tests_total"),
     testsSkipped: integer("tests_skipped"),
-    // Every case of the JUnit report ({ name, classname, status }); the acceptance pack checks criteria against it.
-    testCases: jsonb("test_cases"),
+    // SHA-256 of the JUnit list stored in gate_test_cases.
+    testCasesHash: text("test_cases_hash").references(() => gateTestCases.hash),
     createdAt: createdAt(),
   },
   (t) => [
