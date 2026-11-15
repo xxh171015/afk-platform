@@ -145,12 +145,14 @@ function StaleGroup({
     note: string | null;
   }[];
 }) {
+  const live = items.filter((item) => item.state !== "cancelled");
+  if (live.length === 0) return null;
   return (
     <div className="border-b">
       <h3 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
         放了很久
       </h3>
-      {items.map((item) => (
+      {live.map((item) => (
         <div key={`stale-${item.id}`} className="px-2 py-3">
           <a
             href={paths.spec(item.id)}

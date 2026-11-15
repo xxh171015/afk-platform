@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { waitingReasonHint } from "./waiting.ts";
+import { waitingCount, waitingReasonHint } from "./waiting.ts";
 
 describe("waiting copy for a blocked reason", () => {
   it("tells a person to raise the sandbox memory for sandbox-oom", () => {
@@ -9,5 +9,25 @@ describe("waiting copy for a blocked reason", () => {
   it("has no extra hint for other reasons", () => {
     expect(waitingReasonHint("job-failed")).toBeNull();
     expect(waitingReasonHint(null)).toBeNull();
+  });
+});
+
+describe("waitingCount", () => {
+  it("does not count cancelled stale specs toward 等你处理", () => {
+    expect(
+      waitingCount({
+        tickets: [{}],
+        finalizations: [],
+        pullRequests: [],
+        cleanups: [],
+        readyFailures: [],
+        specs: [],
+        stale: [
+          { state: "draft" },
+          { state: "awaiting-review" },
+          { state: "cancelled" },
+        ],
+      }),
+    ).toBe(3);
   });
 });

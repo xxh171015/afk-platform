@@ -586,13 +586,54 @@ describe("GET /workbench", () => {
         command: `plat spec cancel S-${oldReview}`,
         note: null,
       },
+    ]);
+  });
+
+  it("does not list empty cancelled specs in 放了很久, and still lists old draft and awaiting-review", async () => {
+    const projectId = await projectAndRepo();
+    const oldDraft = await draftSpec(projectId, "old-draft", "Old draft");
+    await ageCreated(oldDraft, 8 * DAY_MS);
+
+    const oldReview = await confirmedSpec(
+      projectId,
+      "old-review",
+      "Old review",
+      [ticketFile("rev")],
+    );
+    await db.pool.query(
+      "UPDATE specs SET state = 'awaiting-review' WHERE id = $1",
+      [oldReview],
+    );
+    await ageState(oldReview, "awaiting-review", 4 * DAY_MS);
+
+    const emptyCancelled = await draftSpec(
+      projectId,
+      "empty-cancelled",
+      "Empty cancelled",
+    );
+    expect((await call("POST", `/specs/${emptyCancelled}/cancel`)).status).toBe(
+      200,
+    );
+    await ageState(emptyCancelled, "cancelled", 2 * DAY_MS);
+
+    const reply = await call("GET", "/workbench");
+    expect(reply.status).toBe(200);
+    expect(reply.body.waiting.stale).toEqual([
       {
-        id: emptyCancelled,
-        displayId: `S-${emptyCancelled}`,
-        title: "Empty cancelled",
-        state: "cancelled",
-        command: null,
-        note: "已默认不在需求列表里",
+        id: oldDraft,
+        displayId: `S-${oldDraft}`,
+        title: "Old draft",
+        state: "draft",
+        command: `plat spec cancel S-${oldDraft}`,
+        note: null,
+      },
+      {
+        id: oldReview,
+        displayId: `S-${oldReview}`,
+        title: "Old review",
+        state: "awaiting-review",
+        command: `plat spec cancel S-${oldReview}`,
+        note: null,
       },
     ]);
   });

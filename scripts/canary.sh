@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # After upgrading the platform: create a fixed improvement spec, wait until its
 # ticket is done (or awaiting-review with --through-final), check token usage,
-# implement decisions and gate test names, then cancel and confirm no leftover
-# spec/* / agent/* branches or open pull requests.
+# implement decisions and gate test names, then cancel, wait for that spec's
+# cleanup job, and confirm no leftover of its own spec/ticket branches or open
+# pull requests.
 #
 # Usage: scripts/canary.sh --project <id> [--api-url <url>] [--through-final]
 # Project id is required. API address comes from --api-url, else plat's config
@@ -55,7 +56,7 @@ stamp="${CANARY_STAMP:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 slug="canary-$(printf '%s' "$stamp" | tr -d '-' | tr -d ':' | sed 's/T/-/;s/Z$//')"
 poll_seconds="${CANARY_POLL_SECONDS:-5}"
 timeout_seconds="${CANARY_TIMEOUT_SECONDS:-7200}"
-cleanup_seconds="${CANARY_CLEANUP_SECONDS:-120}"
+cleanup_seconds="${CANARY_CLEANUP_SECONDS:-600}"
 
 json() {
   node -e '
@@ -195,27 +196,44 @@ cleanup_start=$(date +%s)
 leftover=""
 while true; do
   show=$(plat_json spec show "$spec")
+  cleanup_state=$(printf '%s' "$show" | json 'd.cleanup && d.cleanup.state')
   prs=$(printf '%s' "$show" | json '(d.pullRequests || []).filter(p => p.state === "open").map(p => (p.repo || "") + " #" + p.number + (p.url ? " " + p.url : "")).join("\n")')
+  tickets_now=$(printf '%s' "$show" | json '(d.tickets || []).map(t => t.displayId).join(" ")')
   refs=""
   if [ -n "$repo_url" ]; then
-    if [ -n "$scope" ]; then
-      refs=$(git ls-remote --heads "$repo_url" | awk -v s="$scope" '
-        $2 ~ ("refs/heads/spec/" s "/") { print $2 }
-        $2 ~ ("refs/heads/agent/" s "/") { print $2 }
-      ') || true
-    else
-      refs=$(git ls-remote --heads "$repo_url" "refs/heads/spec/*" "refs/heads/agent/*" | awk '{ print $2 }') || true
+    wanted=""
+    if [ -n "$branch" ]; then
+      wanted="${wanted}refs/heads/${branch}"$'\n'
     fi
+    prefix="agent/"
+    if [ -n "$scope" ]; then
+      prefix="agent/${scope}/"
+    fi
+    for ticket in $tickets_now; do
+      wanted="${wanted}refs/heads/${prefix}${ticket}"$'\n'
+    done
+    refs=$(git ls-remote --heads "$repo_url" | awk -v wanted="$wanted" '
+      BEGIN { n = split(wanted, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") w[a[i]] = 1 }
+      $2 in w { print $2 }
+    ') || true
   fi
   leftover=""
   if [ -n "$prs" ]; then leftover="${leftover}${prs}"$'\n'; fi
   if [ -n "$refs" ]; then leftover="${leftover}${refs}"$'\n'; fi
   leftover=$(printf '%s' "$leftover" | sed '/^$/d')
-  if [ -z "$leftover" ]; then
-    break
+  cleanup_done=0
+  if [ "$cleanup_state" = "done" ] || [ "$cleanup_state" = "failed" ]; then
+    cleanup_done=1
   fi
   now=$(date +%s)
+  timed_out=0
   if [ $((now - cleanup_start)) -ge "$cleanup_seconds" ]; then
+    timed_out=1
+  fi
+  if [ "$cleanup_done" = 1 ] || [ "$timed_out" = 1 ]; then
+    if [ -z "$leftover" ]; then
+      break
+    fi
     printf '%s\n' "$leftover" | sed 's/^/leftover: /' >&2
     exit_code=1
     break

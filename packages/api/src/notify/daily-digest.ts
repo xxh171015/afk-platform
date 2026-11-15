@@ -1,4 +1,10 @@
-import { formatDisplayId, METRICS_TIME_ZONE, ymdInZone } from "@afk/shared";
+import {
+  formatDisplayId,
+  type HostKind,
+  METRICS_TIME_ZONE,
+  pullAbbrev,
+  ymdInZone,
+} from "@afk/shared";
 import type pg from "pg";
 import { recordSystemEvent } from "../events/system.ts";
 
@@ -34,6 +40,7 @@ interface PendingSpec {
   opened_at: Date | null;
   pulls: { url: string; conflicts: boolean }[] | null;
   pack: { needsDecision?: { kind?: string }[] } | null;
+  host_kind: string | null;
 }
 
 export async function maybeSendDailyDigest(
@@ -57,7 +64,9 @@ export async function maybeSendDailyDigest(
             ) AS opened_at,
             (SELECT json_agg(json_build_object('url', p.url, 'conflicts', p.conflicts_with_default) ORDER BY p.id)
                FROM pull_requests p WHERE p.spec_id = s.id) AS pulls,
-            ap.content AS pack
+            ap.content AS pack,
+            (SELECT r.host_kind FROM repos r
+              WHERE r.project_id = s.project_id ORDER BY r.id LIMIT 1) AS host_kind
      FROM specs s
      LEFT JOIN acceptance_packs ap ON ap.spec_id = s.id
      WHERE s.state IN ('awaiting-review', 'partially-merged')
@@ -71,6 +80,9 @@ export async function maybeSendDailyDigest(
   }
 
   for (const [projectId, specs] of byProject) {
+    const hostKind: HostKind =
+      specs[0]?.host_kind === "gitlab" ? "gitlab" : "github";
+    const pr = pullAbbrev(hostKind);
     const lines = specs.map((spec) => {
       const pulls = spec.pulls ?? [];
       const items = spec.pack?.needsDecision ?? [];
@@ -87,7 +99,7 @@ export async function maybeSendDailyDigest(
         formatDisplayId("spec", spec.id),
         spec.title,
         ...urls,
-        `开出 ${opened}`,
+        `${pr} 开出 ${opened}`,
         `needs-human ${needsHuman}`,
         `deferred ${deferred}`,
         ...(conflicts ? ["与默认分支冲突"] : []),
@@ -96,6 +108,7 @@ export async function maybeSendDailyDigest(
     await recordSystemEvent(pool, {
       kind: "daily-digest",
       projectId,
+      hostKind,
       body: lines.join("\n"),
     });
   }

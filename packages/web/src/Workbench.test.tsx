@@ -505,7 +505,8 @@ describe("the workbench", () => {
     expect(
       waiting.getByRole("button", { name: "复制命令 plat spec cancel S-11" }),
     ).toBeTruthy();
-    expect(waiting.getByText("已默认不在需求列表里")).toBeTruthy();
+    expect(waiting.queryByText("Empty cancelled")).toBeNull();
+    expect(waiting.queryByText("已默认不在需求列表里")).toBeNull();
     expect(
       waiting.queryByRole("button", { name: /plat spec cancel S-20/ }),
     ).toBeNull();
@@ -513,6 +514,46 @@ describe("the workbench", () => {
       waiting.getByRole("button", { name: "复制命令 plat spec cancel S-9" }),
     );
     expect(writeText).toHaveBeenCalledWith("plat spec cancel S-9");
+  });
+
+  it("does not show empty cancelled specs in 放了很久", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            ...empty,
+            waiting: {
+              ...emptyWaiting,
+              stale: [
+                {
+                  id: 9,
+                  displayId: "S-9",
+                  title: "Old draft",
+                  state: "draft",
+                  command: "plat spec cancel S-9",
+                  note: null,
+                },
+                {
+                  id: 20,
+                  displayId: "S-20",
+                  title: "Empty cancelled",
+                  state: "cancelled",
+                  command: null,
+                  note: "已默认不在需求列表里",
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+    expect(await screen.findByText("放了很久")).toBeTruthy();
+    const waiting = within(screen.getByTestId("quadrant-等你处理"));
+    expect(waiting.getByText("Old draft")).toBeTruthy();
+    expect(waiting.queryByText("Empty cancelled")).toBeNull();
+    expect(waiting.queryByText("已默认不在需求列表里")).toBeNull();
   });
 
   it("puts getting the first project on the platform at the top while there is none", async () => {

@@ -174,6 +174,7 @@ function specShow(
     pullRequests?: unknown[];
     integrationBranches?: unknown[];
     finalizations?: unknown[];
+    cleanup?: { state: string } | null;
   } = {},
 ) {
   return {
@@ -211,6 +212,7 @@ function specShow(
     ],
     pullRequests: overrides.pullRequests ?? [],
     finalizations: overrides.finalizations ?? [],
+    cleanup: overrides.cleanup ?? null,
   };
 }
 
@@ -583,6 +585,108 @@ describe("scripts/canary.sh with a fake plat", () => {
     expect(text).toMatch(/leftover:.*spec\/abc123\/canary-stamp/);
     expect(text).toMatch(/leftover:.*agent\/abc123\/T-1/);
   });
+
+  it("waits until the spec's cleanup job is done before treating leftover as gone", async () => {
+    const doneTickets = [
+      {
+        displayId: "T-1",
+        state: "done",
+        blockedReason: null,
+        repo: "afk-platform",
+      },
+    ];
+    const cfg = successCfg();
+    cfg.shows = [
+      specShow(),
+      specShow({
+        state: "finalizing",
+        tickets: doneTickets,
+      }),
+      specShow({
+        state: "cancelled",
+        tickets: doneTickets,
+        cleanup: { state: "queued" },
+      }),
+      specShow({
+        state: "cancelled",
+        tickets: doneTickets,
+        cleanup: { state: "done" },
+      }),
+    ];
+    const { fake, bin } = stubBins(cfg);
+    const result = await runCanary(["--project", "1"], {
+      PATH: `${bin}:${process.env.PATH}`,
+      CANARY_FAKE: fake,
+      CANARY_STAMP: "2026-01-01T00:00:00Z",
+      CANARY_CLEANUP_SECONDS: "2",
+      HOME: tempDir("afk-canary-home-"),
+    });
+    const text = `${result.stdout}${result.stderr}`;
+    expect(result.status, text).toBe(0);
+    expect(text).not.toMatch(/leftover:/);
+    const afterCancel = platLog(fake).split("spec cancel")[1] ?? "";
+    expect(
+      afterCancel.match(/spec show S-1/g)?.length ?? 0,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reports leftover after the wait limit while the cleanup job is still queued", async () => {
+    const cfg = successCfg();
+    cfg.shows = [
+      specShow({
+        state: "finalizing",
+        tickets: [
+          {
+            displayId: "T-1",
+            state: "done",
+            blockedReason: null,
+            repo: "afk-platform",
+          },
+        ],
+        pullRequests: [
+          {
+            repo: "afk-platform",
+            number: 9,
+            url: "https://github.com/example/afk-platform/pull/9",
+            state: "open",
+          },
+        ],
+        cleanup: { state: "queued" },
+      }),
+    ];
+    const { fake, bin } = stubBins(cfg);
+    const result = await runCanary(["--project", "1"], {
+      PATH: `${bin}:${process.env.PATH}`,
+      CANARY_FAKE: fake,
+      CANARY_STAMP: "2026-01-01T00:00:00Z",
+      HOME: tempDir("afk-canary-home-"),
+    });
+    const text = `${result.stdout}${result.stderr}`;
+    expect(result.status, text).not.toBe(0);
+    expect(text).toMatch(/leftover:.*#9/);
+  });
+
+  it("does not treat other specs' spec or agent branches as leftover", async () => {
+    const { fake, bin } = stubBins(
+      successCfg(),
+      `${[
+        "00aaaa refs/heads/spec/abc123/other-slug",
+        "00bbbb refs/heads/agent/abc123/T-99",
+        "00cccc refs/heads/spec/def456/elsewhere",
+        "00dddd refs/heads/agent/def456/T-1",
+        "00eeee refs/heads/agent/abc123/S-38-update",
+      ].join("\n")}\n`,
+    );
+    const result = await runCanary(["--project", "1"], {
+      PATH: `${bin}:${process.env.PATH}`,
+      CANARY_FAKE: fake,
+      CANARY_STAMP: "2026-01-01T00:00:00Z",
+      HOME: tempDir("afk-canary-home-"),
+    });
+    const text = `${result.stdout}${result.stderr}`;
+    expect(result.status, text).toBe(0);
+    expect(text).not.toMatch(/leftover:/);
+  });
 });
 
 describe("scripts/up.sh canary hint", () => {
@@ -615,5 +719,8 @@ describe("the operations manual canary section", () => {
     expect(text).toMatch(/token/);
     expect(text).toMatch(/decisions/i);
     expect(text).toMatch(/用例名/);
+    expect(text).toMatch(/10 分钟/);
+    expect(text).toMatch(/清理作业/);
+    expect(text).toMatch(/别的需求/);
   });
 });

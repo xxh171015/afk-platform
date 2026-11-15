@@ -354,7 +354,8 @@ async function idleTicketBranches(
 }
 
 // A spec's pull requests that were last seen open, and the branches it made in every repo it touched: the
-// integration branch, one per ticket, and the one an overall fix is made on. Nothing else is ever named here.
+// integration branch, one per ticket, the one an overall fix is made on, and the one that follows the default
+// branch. Nothing else is ever named here.
 async function specCleanupTask(
   pool: pg.Pool,
   { specId }: SpecCleanupPayload,
@@ -397,6 +398,10 @@ async function specCleanupTask(
     {
       repoUrl: repo.url,
       branch: names.final(formatDisplayId("spec", specId)),
+    },
+    {
+      repoUrl: repo.url,
+      branch: names.update(formatDisplayId("spec", specId)),
     },
   ]);
   return {

@@ -1,6 +1,7 @@
 import {
   FAILURE_SOURCES,
   HOST_KINDS,
+  JOB_STATES,
   PLANNING_STATES,
   REVIEW_AXES,
   SPEC_STATES,
@@ -459,6 +460,11 @@ const specRoute = createRoute({
             cacheReadTokens: z.number().int(),
           }),
         ),
+        cleanup: z
+          .object({
+            state: z.enum(JOB_STATES),
+          })
+          .nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),

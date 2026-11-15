@@ -2228,6 +2228,26 @@ describe("cleaning up after a cancelled or merged spec", () => {
   const BACKEND = "https://github.com/me/shop-backend.git";
   const FRONTEND = "https://github.com/me/shop-frontend.git";
 
+  it("says the cleanup job's state on spec show", async () => {
+    await awaitingReview();
+    expect((await call("GET", "/specs/1")).body.cleanup).toBeNull();
+    await call("POST", "/specs/1/cancel");
+    expect((await call("GET", "/specs/1")).body.cleanup).toEqual({
+      state: "queued",
+    });
+    const job = await claimCleanup();
+    expect((await call("GET", "/specs/1")).body.cleanup).toEqual({
+      state: "running",
+    });
+    await worker.complete(job.id, job.attempt, {
+      stage: "spec-cleanup",
+      closed: [1],
+    });
+    expect((await call("GET", "/specs/1")).body.cleanup).toEqual({
+      state: "done",
+    });
+  });
+
   it("queues one cleanup job for the code host when a spec is cancelled, and not again when it is cancelled twice", async () => {
     await awaitingReview();
     await call("POST", "/specs/1/cancel");
@@ -2237,6 +2257,32 @@ describe("cleaning up after a cancelled or merged spec", () => {
     expect(await jobsOf("spec-cleanup")).toMatchObject([
       { state: "queued", payload: { specId: 1 }, lock_key: null },
     ]);
+  });
+
+  it("deletes the spec's update branch and does not name another spec's branches", async () => {
+    await awaitingReview();
+    const id = await instanceId();
+    await call("POST", "/specs", {
+      projectId: 1,
+      type: "feature",
+      slug: "other",
+      title: "Other",
+    });
+    await call("POST", "/specs/1/cancel");
+    const branches = (await taskOf(await claimCleanup())).body.branches as {
+      repoUrl: string;
+      branch: string;
+    }[];
+    expect(branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: `agent/${id}/S-1-update`,
+    });
+    expect(branches.map((item) => item.branch)).not.toContain(
+      `spec/${id}/other`,
+    );
+    expect(branches.map((item) => item.branch)).not.toContain(
+      `agent/${id}/S-2-update`,
+    );
   });
 
   it("tells the worker which open pull requests to close and which branches to delete, in every repo of the spec", async () => {
@@ -2254,9 +2300,11 @@ describe("cleaning up after a cancelled or merged spec", () => {
         { repoUrl: BACKEND, branch: `spec/${id}/export` },
         { repoUrl: BACKEND, branch: `agent/${id}/T-1` },
         { repoUrl: BACKEND, branch: `agent/${id}/S-1-final` },
+        { repoUrl: BACKEND, branch: `agent/${id}/S-1-update` },
         { repoUrl: FRONTEND, branch: `spec/${id}/export` },
         { repoUrl: FRONTEND, branch: `agent/${id}/T-2` },
         { repoUrl: FRONTEND, branch: `agent/${id}/S-1-final` },
+        { repoUrl: FRONTEND, branch: `agent/${id}/S-1-update` },
       ],
     });
   });
@@ -2270,6 +2318,7 @@ describe("cleaning up after a cancelled or merged spec", () => {
       { repoUrl: BACKEND, branch: "spec/export" },
       { repoUrl: BACKEND, branch: "agent/T-1" },
       { repoUrl: BACKEND, branch: "agent/S-1-final" },
+      { repoUrl: BACKEND, branch: "agent/S-1-update" },
     ]);
   });
 
@@ -2309,6 +2358,10 @@ describe("cleaning up after a cancelled or merged spec", () => {
     expect(task.branches).toContainEqual({
       repoUrl: BACKEND,
       branch: `spec/${await instanceId()}/export`,
+    });
+    expect(task.branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: `agent/${await instanceId()}/S-1-update`,
     });
   });
 

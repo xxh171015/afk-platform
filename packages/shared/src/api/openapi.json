@@ -7980,6 +7980,16 @@
                           "cacheReadTokens"
                         ]
                       }
+                    },
+                    "cleanup": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": ["queued", "running", "done", "failed"]
+                        }
+                      },
+                      "required": ["state"]
                     }
                   },
                   "required": [
@@ -7997,7 +8007,8 @@
                     "potentialConflicts",
                     "leadTime",
                     "links",
-                    "usageByStage"
+                    "usageByStage",
+                    "cleanup"
                   ]
                 }
               }
