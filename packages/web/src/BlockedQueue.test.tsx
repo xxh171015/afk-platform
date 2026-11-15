@@ -308,7 +308,7 @@ describe("the queue of what waits for a person", () => {
     await screen.findByTestId("blocked-T-2");
     expect(
       card("T-2").getByRole("button", {
-        name: "复制命令 plat ticket approve-protected T-2",
+        name: "复制命令 plat ticket approve T-2 --protected",
       }),
     ).toBeTruthy();
     expect(

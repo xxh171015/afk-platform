@@ -1153,7 +1153,8 @@ describe("plat", () => {
       code: 0,
       stdout:
         "approved for T-1: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json; retry it with: plat ticket retry T-1 --mode continue|restart\n",
-      stderr: "",
+      stderr:
+        "use plat ticket approve T-1 --path .github/CODEOWNERS tsconfig.json\n",
     });
     const viewed = await plat("ticket", "view", "T-1");
     expect(viewed.stdout).toContain(
@@ -1166,6 +1167,230 @@ describe("plat", () => {
     expect((await plat("ticket", "allow-path", "T-99", "x")).stderr).toMatch(
       /no such ticket/,
     );
+  });
+
+  it("approves a protected-path-changed ticket with ticket approve --protected", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const implement = (await worker.claim()).body.job;
+    await worker.complete(
+      implement?.id as number,
+      implement?.attempt as number,
+      {
+        stage: "implement",
+        outcome: "done",
+      },
+    );
+    const gate = (await worker.claim()).body.job;
+    await worker.complete(gate?.id as number, gate?.attempt as number, {
+      stage: "gate",
+      outcome: "protected-path-changed",
+      run: {
+        output: { unapproved: [".github/workflows/ci.yml", "tsconfig.json"] },
+      },
+    });
+    const approved = await plat("ticket", "approve", "T-1", "--protected");
+    expect(approved).toEqual({
+      code: 0,
+      stdout:
+        "approved: .github/workflows/ci.yml, tsconfig.json; T-1 goes on from the gate\n",
+      stderr: "",
+    });
+    expect((await plat("ticket", "view", "T-1")).stdout).toMatch(
+      /^T-1 {2}running /,
+    );
+    expect((await plat("ticket", "view", "T-1")).stdout).toContain(
+      "approved protected paths: openapi/openapi.yaml, .github/workflows/ci.yml, tsconfig.json",
+    );
+  });
+
+  it("approves removed tests with ticket approve --removed-tests", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const implement = (await worker.claim()).body.job;
+    await worker.complete(
+      implement?.id as number,
+      implement?.attempt as number,
+      {
+        stage: "implement",
+        outcome: "done",
+      },
+    );
+    const gate = (await worker.claim()).body.job;
+    await worker.complete(gate?.id as number, gate?.attempt as number, {
+      stage: "gate",
+      outcome: "tests-removed",
+      run: {
+        output: { removedTests: [{ classname: "suite", name: "gone" }] },
+      },
+    });
+    const approved = await plat("ticket", "approve", "T-1", "--removed-tests");
+    expect(approved).toEqual({
+      code: 0,
+      stdout: "approved: suite gone; T-1 goes on from the gate\n",
+      stderr: "",
+    });
+    expect((await plat("ticket", "view", "T-1")).stdout).toMatch(
+      /^T-1 {2}running /,
+    );
+  });
+
+  it("approves a Recheck with ticket approve --recheck", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const hit = {
+      hit: true,
+      paths: ["src/a.test.ts"],
+      fromSha: "aaa111",
+      toSha: "bbb222",
+    };
+    for (const [stage, result] of [
+      ["implement", { outcome: "done" }],
+      ["gate", { outcome: "passed" }],
+      ["review", { outcome: "pass" }],
+      ["merge", { outcome: "conflict" }],
+      ["merge-fix", { outcome: "done", run: { recheck: hit } }],
+      ["gate", { outcome: "passed" }],
+      [
+        "recheck",
+        {
+          outcome: "fix",
+          run: {
+            output: {
+              verdict: "fix",
+              mustFix: [
+                {
+                  file: "src/a.test.ts",
+                  line: 1,
+                  problem: "weakened the assertion",
+                },
+              ],
+              suggestions: [],
+              scopeCreep: [],
+              uncertainties: [],
+            },
+          },
+        },
+      ],
+    ] as const) {
+      const job = (await worker.claim()).body.job;
+      const payload = job?.payload as { stage?: string } | undefined;
+      expect(payload?.stage).toBe(stage);
+      await worker.complete(job?.id as number, job?.attempt as number, {
+        stage,
+        ...result,
+      });
+    }
+    const approved = await plat("ticket", "approve", "T-1", "--recheck");
+    expect(approved).toEqual({
+      code: 0,
+      stdout: "approved bbb222; T-1 goes on from the merge\n",
+      stderr: "",
+    });
+  });
+
+  it("approves extra protected paths with ticket approve --path", async () => {
+    await blockedContract();
+    const allowed = await plat(
+      "ticket",
+      "approve",
+      "T-1",
+      "--path",
+      ".github/CODEOWNERS",
+      "tsconfig.json",
+    );
+    expect(allowed).toEqual({
+      code: 0,
+      stdout:
+        "approved for T-1: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json; retry it with: plat ticket retry T-1 --mode continue|restart\n",
+      stderr: "",
+    });
+    expect((await plat("ticket", "view", "T-1")).stdout).toContain(
+      "approved protected paths: openapi/openapi.yaml, .github/CODEOWNERS, tsconfig.json",
+    );
+  });
+
+  it("refuses ticket approve with no option or two options and prints usage", async () => {
+    const none = await plat("ticket", "approve", "T-1");
+    expect(none.code).toBe(1);
+    expect(none.stderr).toMatch(/Usage: plat ticket approve/);
+    expect(none.stderr).toMatch(/--protected/);
+    expect(none.stderr).toMatch(/--removed-tests/);
+    expect(none.stderr).toMatch(/--recheck/);
+    expect(none.stderr).toMatch(/--path/);
+    const both = await plat(
+      "ticket",
+      "approve",
+      "T-1",
+      "--protected",
+      "--recheck",
+    );
+    expect(both.code).toBe(1);
+    expect(both.stderr).toMatch(/Usage: plat ticket approve/);
+  });
+
+  it("prints the new ticket approve command in the blocked brief", async () => {
+    await register();
+    putTickets("tickets", TICKETS);
+    await plat("tickets", "import", "S-1", "tickets");
+    await plat("spec", "confirm", "S-1");
+    const worker = new FakeWorker(api.url, "w1", []);
+    const implement = (await worker.claim()).body.job;
+    await worker.complete(
+      implement?.id as number,
+      implement?.attempt as number,
+      {
+        stage: "implement",
+        outcome: "done",
+      },
+    );
+    const gate = (await worker.claim()).body.job;
+    await worker.complete(gate?.id as number, gate?.attempt as number, {
+      stage: "gate",
+      outcome: "protected-path-changed",
+      run: {
+        output: { unapproved: [".github/workflows/ci.yml"] },
+      },
+    });
+    const blocked = await plat("blocked");
+    expect(blocked.code).toBe(0);
+    expect(blocked.stdout).toContain("plat ticket approve T-1 --protected");
+    expect(blocked.stdout).not.toContain("plat ticket approve-protected");
+  });
+
+  it("keeps the old approve commands and prints the new syntax on stderr", async () => {
+    await blockedContract();
+    const allowed = await plat(
+      "ticket",
+      "allow-path",
+      "T-1",
+      ".github/CODEOWNERS",
+      "tsconfig.json",
+    );
+    expect(allowed.code).toBe(0);
+    expect(allowed.stdout).toContain("approved for T-1:");
+    expect(allowed.stderr).toMatch(
+      /plat ticket approve T-1 --path \.github\/CODEOWNERS tsconfig\.json/,
+    );
+    const protectedPath = await plat("ticket", "approve-protected", "T-1");
+    expect(protectedPath.code).toBe(1);
+    expect(protectedPath.stderr).toMatch(/plat ticket approve T-1 --protected/);
+    expect(protectedPath.stderr).toMatch(/protected-path-changed/);
+    const removed = await plat("ticket", "approve-removed-tests", "T-1");
+    expect(removed.code).toBe(1);
+    expect(removed.stderr).toMatch(/plat ticket approve T-1 --removed-tests/);
+    const recheck = await plat("ticket", "approve-recheck", "T-1");
+    expect(recheck.code).toBe(1);
+    expect(recheck.stderr).toMatch(/plat ticket approve T-1 --recheck/);
   });
 
   it("cancels a spec: its tickets go with it, spec show says cancelled, and a second cancel is refused", async () => {

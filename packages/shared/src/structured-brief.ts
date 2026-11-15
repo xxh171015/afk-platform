@@ -256,7 +256,7 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
     return [
       {
         label: "批准保护路径",
-        command: `plat ticket approve-protected ${ticket}`,
+        command: `plat ticket approve ${ticket} --protected`,
       },
       {
         label: "再重试",
@@ -268,7 +268,7 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
     return [
       {
         label: "批准删掉的测试",
-        command: `plat ticket approve-removed-tests ${ticket}`,
+        command: `plat ticket approve ${ticket} --removed-tests`,
       },
     ];
   }
@@ -276,7 +276,7 @@ function commandsOf(input: StructuredBriefInput): StructuredBriefCommand[] {
     return [
       {
         label: "批准这次改动",
-        command: `plat ticket approve-recheck ${ticket}`,
+        command: `plat ticket approve ${ticket} --recheck`,
       },
     ];
   }
