@@ -490,8 +490,65 @@ needs a new field on Order
     });
     expect(brief.sameReasonRepeatMinutes).toBe(20);
     expect(brief.summary).toBe("作业失败");
-    expect(brief.recommendedAction).toBe("取消需求");
+    expect(brief.recommendedAction).toBe("先看原因，带说明重试收尾这一步");
     expect(brief.commands).toEqual([
+      {
+        label: "带说明重试收尾",
+        command: 'plat spec retry-final S-19 --note "…"',
+      },
+      { label: "取消需求", command: "plat spec cancel S-19" },
+    ]);
+  });
+
+  it("suggests a noted retry-final then cancel when wrap-up repeats the same reason", () => {
+    const brief = structuredBrief({
+      reason: "job-failed",
+      specDisplayId: "S-19",
+      wrapUpStep: "final-review",
+      recentBlocked: [
+        { reason: "job-failed", at: "2026-01-01T00:20:00.000Z" },
+        { reason: "job-failed", at: "2026-01-01T00:00:00.000Z" },
+      ],
+      brief: source("final-review", { error: "three" }),
+    });
+    expect(brief.sameReasonRepeatMinutes).toBe(20);
+    expect(brief.recommendedAction).toBe("先看原因，带说明重试收尾这一步");
+    expect(brief.commands).toEqual([
+      {
+        label: "带说明重试收尾",
+        command: 'plat spec retry-final S-19 --note "…"',
+      },
+      { label: "取消需求", command: "plat spec cancel S-19" },
+    ]);
+  });
+
+  it("adds waive-final before cancel when a repeating wrap-up step can be skipped", () => {
+    const brief = structuredBrief({
+      reason: "integration-loop-exceeded",
+      specDisplayId: "S-19",
+      wrapUpStep: "final-e2e",
+      recentBlocked: [
+        {
+          reason: "integration-loop-exceeded",
+          at: "2026-01-01T00:20:00.000Z",
+        },
+        {
+          reason: "integration-loop-exceeded",
+          at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      brief: source("e2e", null),
+    });
+    expect(brief.recommendedAction).toBe("先看原因，带说明重试收尾这一步");
+    expect(brief.commands).toEqual([
+      {
+        label: "带说明重试收尾",
+        command: 'plat spec retry-final S-19 --note "…"',
+      },
+      {
+        label: "跳过联调仍然开 PR",
+        command: "plat spec waive-final S-19",
+      },
       { label: "取消需求", command: "plat spec cancel S-19" },
     ]);
   });
