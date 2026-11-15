@@ -3188,6 +3188,11 @@ export interface paths {
                 commandResults: unknown[];
                 testsTotal: number | null;
                 testsSkipped: number | null;
+                testCases?: {
+                  name: string;
+                  classname: string;
+                  status?: string;
+                }[];
               }[];
             };
           };

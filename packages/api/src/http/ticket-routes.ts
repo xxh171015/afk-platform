@@ -299,6 +299,16 @@ const ticketRoute = createRoute({
             commandResults: z.array(z.unknown()),
             testsTotal: Id.nullable(),
             testsSkipped: Id.nullable(),
+            // names from the gate JUnit report; omitted when the row stored none
+            testCases: z
+              .array(
+                z.object({
+                  name: z.string(),
+                  classname: z.string(),
+                  status: z.string().optional(),
+                }),
+              )
+              .optional(),
           }),
         ),
       }),

@@ -457,7 +457,7 @@ export async function ticketView(
   const shas = runs.rows.map((r) => r.head_sha).filter(Boolean);
   const gates = shas.length
     ? await pool.query(
-        `SELECT kind, commit_sha, config_sha, command_results, tests_total, tests_skipped FROM gate_results
+        `SELECT kind, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases FROM gate_results
          WHERE repo_id = (SELECT repo_id FROM tickets WHERE id = $1) AND commit_sha = ANY($2) ORDER BY id`,
         [ticketId, shas],
       )
@@ -515,6 +515,15 @@ export async function ticketView(
       commandResults: g.command_results as unknown[],
       testsTotal: (g.tests_total as number | null) ?? null,
       testsSkipped: (g.tests_skipped as number | null) ?? null,
+      ...(g.test_cases
+        ? {
+            testCases: g.test_cases as {
+              name: string;
+              classname: string;
+              status?: string;
+            }[],
+          }
+        : {}),
     })),
   };
 }
