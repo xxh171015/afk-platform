@@ -7,6 +7,8 @@ import type { LogStore } from "./log-store.ts";
 // Run logs of a spec that has been merged or cancelled this many days are deleted; the Run rows stay.
 // $AFK_LOG_RETENTION_DAYS overrides the default (docs/specs/m3-platform.md「日志、保留与磁盘」).
 export const DEFAULT_LOG_RETENTION_DAYS = 90;
+// Done and failed jobs older than this lose `result`; Run summaries stay (docs/optimization-plan.md 8.11).
+export const JOB_RESULT_RETENTION_DAYS = 7;
 
 export function logRetentionDays(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.AFK_LOG_RETENTION_DAYS;
@@ -93,6 +95,13 @@ export async function retainLogs(options: {
       [spec.id, options.now],
     );
   }
+
+  await options.pool.query(
+    `UPDATE jobs SET result = NULL
+     WHERE state IN ('done', 'failed')
+       AND created_at + make_interval(days => $2::int) <= $1::timestamptz`,
+    [options.now, JOB_RESULT_RETENTION_DAYS],
+  );
 
   await options.pool.query(
     `UPDATE instance SET logs_purged_at = $1, logs_purged_runs = $2, logs_purged_orphans = $3`,

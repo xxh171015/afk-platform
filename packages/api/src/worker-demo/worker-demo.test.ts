@@ -33,6 +33,7 @@ import {
   createMigratedTestDatabase,
   type TestDatabase,
 } from "../db/test-db.ts";
+import { recallGateTestCases } from "../stages/gate-records.ts";
 import {
   FakeClock,
   listen,
@@ -795,13 +796,16 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "final-review:pass",
       "final-review:pass",
     ]);
-    const cases = await db.pool.query<{ test_cases: { flaky?: boolean }[] }>(
-      "SELECT test_cases FROM gate_results WHERE kind = 'gate' ORDER BY id",
+    const hashes = await db.pool.query<{ test_cases_hash: string | null }>(
+      "SELECT test_cases_hash FROM gate_results WHERE kind = 'gate' ORDER BY id",
+    );
+    const cases = await Promise.all(
+      hashes.rows.map((row) =>
+        recallGateTestCases(db.pool, row.test_cases_hash),
+      ),
     );
     expect(
-      cases.rows.some((row) =>
-        (row.test_cases ?? []).some((c) => c.flaky === true),
-      ),
+      cases.some((list) => (list ?? []).some((c) => c.flaky === true)),
     ).toBe(true);
   });
 

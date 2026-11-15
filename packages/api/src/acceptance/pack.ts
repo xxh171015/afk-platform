@@ -16,6 +16,7 @@ import { z } from "@hono/zod-openapi";
 import type pg from "pg";
 import { enqueuePackDescriptions } from "../host/host-jobs.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
+import { recallGateTestCases } from "../stages/gate-records.ts";
 import { integrationAttempts } from "../tickets/integration-attempts.ts";
 
 // The acceptance pack: what a person needs to decide whether to merge a spec's pull requests
@@ -338,25 +339,28 @@ export async function buildAcceptancePack(
     tests_total: number | null;
     tests_skipped: number | null;
     command_results: unknown;
-    test_cases: TestCaseRow[] | null;
+    test_cases_hash: string | null;
   }>(
     `SELECT DISTINCT ON (r.repo_id) r.repo_id, g.commit_sha, g.tests_total, g.tests_skipped,
-            g.command_results, g.test_cases
+            g.command_results, g.test_cases_hash
      FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
      WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
      ORDER BY r.repo_id, r.id DESC`,
     [specId],
   );
-  const casesOf = new Map(gateRows.rows.map((g) => [g.repo_id, g.test_cases]));
-  const flakyOf = new Map(
-    gateRows.rows.map((g) => [
+  const casesOf = new Map<number, TestCaseRow[] | undefined>();
+  const flakyOf = new Map<number, { name: string; classname: string }[]>();
+  for (const g of gateRows.rows) {
+    const testCases = await recallGateTestCases(client, g.test_cases_hash);
+    casesOf.set(g.repo_id, testCases);
+    flakyOf.set(
       g.repo_id,
-      (g.test_cases ?? [])
+      (testCases ?? [])
         .filter((c) => c.flaky)
         .map((c) => ({ name: c.name, classname: c.classname })),
-    ]),
-  );
+    );
+  }
 
   const tickets = await client.query<{
     id: number;
@@ -767,14 +771,15 @@ async function integrationSection(
         [ticket.id],
       )
     ).rows[0];
-    const gate = last?.head_sha
+    const gateHash = last?.head_sha
       ? (
-          await client.query<{ test_cases: TestCaseRow[] | null }>(
-            "SELECT test_cases FROM gate_results WHERE repo_id = $1 AND commit_sha = $2 AND kind = 'e2e'",
+          await client.query<{ test_cases_hash: string | null }>(
+            "SELECT test_cases_hash FROM gate_results WHERE repo_id = $1 AND commit_sha = $2 AND kind = 'e2e'",
             [ticket.repo_id, last.head_sha],
           )
-        ).rows[0]
+        ).rows[0]?.test_cases_hash
       : undefined;
+    const gateCases = await recallGateTestCases(client, gateHash);
     tickets.push({
       displayId: display,
       title: ticket.title,
@@ -793,10 +798,7 @@ async function integrationSection(
         return {
           text,
           tests,
-          ...checkCriterion(
-            tests,
-            gate ? (gate.test_cases ?? undefined) : undefined,
-          ),
+          ...checkCriterion(tests, gateCases),
         };
       }),
     });
