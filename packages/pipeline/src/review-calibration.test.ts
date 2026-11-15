@@ -60,7 +60,9 @@ describe("the committed tiny sample", () => {
     expect(tiny?.ticketMd).toContain("Reject negatives");
     expect(tiny?.patch).toContain("skipped the negative check");
     const answers = loadAnswers(join(docsRoot, "answers.yaml"));
-    expect(answers.map((row) => row.id)).toEqual(["us-1", "st-1", "miss-1"]);
+    expect(
+      answers.filter((row) => row.sample === "tiny").map((row) => row.id),
+    ).toEqual(["us-1", "st-1", "miss-1"]);
   });
 });
 

@@ -1,0 +1,322 @@
+diff --git a/contract/openapi.yaml b/contract/openapi.yaml
+index 7d03d22..0a7684e 100644
+--- a/contract/openapi.yaml
++++ b/contract/openapi.yaml
+@@ -35,6 +35,10 @@ paths:
+           in: query
+           required: false
+           schema: { type: integer, minimum: 0 }
++        - name: note
++          in: query
++          required: false
++          schema: { type: string, minLength: 1, maxLength: 200 }
+       responses:
+         "200":
+           description: 全部订单，按创建顺序
+diff --git a/src/api/schema.d.ts b/src/api/schema.d.ts
+index fea028f..2dfadaf 100644
+--- a/src/api/schema.d.ts
++++ b/src/api/schema.d.ts
+@@ -57,6 +57,7 @@ export interface paths {
+                     sort?: "createdAt" | "-createdAt" | "amount" | "-amount";
+                     limit?: number;
+                     offset?: number;
++                    note?: string;
+                 };
+                 header?: never;
+                 path?: never;
+diff --git a/src/api/schema.test.ts b/src/api/schema.test.ts
+index bdd72a6..509fbe0 100644
+--- a/src/api/schema.test.ts
++++ b/src/api/schema.test.ts
+@@ -22,4 +22,11 @@ describe("generated contract types", () => {
+     expect(contract).toContain("/orders/batch-ship");
+     expect(schema).toContain("/orders/batch-ship");
+   });
++
++  it("includes optional note query on GET /orders in the contract copy and generated types", () => {
++    expect(contract).toContain(
++      "        - name: note\n          in: query\n          required: false\n          schema: { type: string, minLength: 1, maxLength: 200 }",
++    );
++    expect(schema).toMatch(/offset\?: number;\s*note\?: string;/);
++  });
+ });
+diff --git a/src/orders/OrderList.test.tsx b/src/orders/OrderList.test.tsx
+index c7e93d6..dfb5151 100644
+--- a/src/orders/OrderList.test.tsx
++++ b/src/orders/OrderList.test.tsx
+@@ -110,7 +110,7 @@ describe("OrderList", () => {
+     fireEvent.click(within(rowFor("O-1")).getByRole("checkbox"));
+     expect(within(rowFor("O-101")).getByRole("checkbox")).toHaveProperty("disabled", false);
+     expect(screen.queryByText("一次最多发货 100 张")).toBeNull();
+-  });
++  }, 20_000); // 100 clicks over 101 rows take about 5s in the platform's sandbox
+ 
+   it("does not send a batch-ship request when nothing is selected", async () => {
+     stubOrders([anOrder({ status: "paid" })]);
+@@ -359,4 +359,155 @@ describe("OrderList", () => {
+     expect(gets).toBe(2);
+     expect((await screen.findByRole("alert")).textContent).toBe("发货失败");
+   });
++
++  it("keeps the 备注 filter when reloading the list after ship", async () => {
++    const matching = anOrder({ id: "O-1", status: "paid", note: "请加急发货" });
++    const other = anOrder({ id: "O-2", customer: "李四", status: "paid" });
++    let shipped = false;
++    server.use(
++      http.get("/orders", ({ query, response }) => {
++        const currentMatching = shipped
++          ? anOrder({ id: "O-1", status: "shipped", note: "请加急发货" })
++          : matching;
++        const orders = query.get("note") === null ? [currentMatching, other] : [currentMatching];
++        return response(200).json({ orders, count: orders.length });
++      }),
++      http.post("/orders/batch-ship", ({ response }) => {
++        shipped = true;
++        return response(200).json({
++          results: [{ id: "O-1", ok: true, order: anOrder({ id: "O-1", status: "shipped", note: "请加急发货" }) }],
++        });
++      }),
++    );
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByText("李四");
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "加急" } });
++    await waitFor(() => {
++      expect(screen.queryByText("李四")).toBeNull();
++    });
++    fireEvent.click(within(rowFor("O-1")).getByRole("checkbox"));
++    fireEvent.click(screen.getByRole("button", { name: "发货" }));
++    await waitFor(() => {
++      expect(within(rowFor("O-1")).getByText("已发货")).toBeTruthy();
++    });
++    expect(screen.queryByText("李四")).toBeNull();
++  });
++
++  it("debounces 备注 search and GET /orders with the trimmed note", async () => {
++    const notes: Array<string | null> = [];
++    server.use(
++      http.get("/orders", ({ query, response }) => {
++        notes.push(query.get("note"));
++        return response(200).json({
++          orders: [anOrder({ id: "O-1", note: "请加急发货" }), anOrder({ id: "O-2", customer: "李四" })],
++          count: 2,
++        });
++      }),
++    );
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByText("李四");
++    const search = screen.getByLabelText("备注");
++    fireEvent.change(search, { target: { value: "加" } });
++    fireEvent.change(search, { target: { value: "加急" } });
++    await waitFor(() => {
++      expect(notes).toEqual([null, "加急"]);
++    });
++  });
++
++  it("omits note and shows every order again when 备注 search is empty after trim", async () => {
++    const notes: Array<string | null> = [];
++    const all = [anOrder({ id: "O-1", note: "请加急发货" }), anOrder({ id: "O-2", customer: "李四" })];
++    server.use(
++      http.get("/orders", ({ query, response }) => {
++        const note = query.get("note");
++        notes.push(note);
++        const orders = note === null ? all : all.slice(0, 1);
++        return response(200).json({ orders, count: orders.length });
++      }),
++    );
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByText("李四");
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "加急" } });
++    await waitFor(() => {
++      expect(screen.queryByText("李四")).toBeNull();
++    });
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "" } });
++    await waitFor(() => {
++      expect(screen.getByText("李四")).toBeTruthy();
++    });
++    expect(notes.at(-1)).toBeNull();
++    expect(notes.filter((note) => note !== null)).toEqual(["加急"]);
++  });
++
++  it("keeps 备注 search when no orders match so clearing shows every order again", async () => {
++    const all = [anOrder({ id: "O-1", note: "请加急发货" }), anOrder({ id: "O-2", customer: "李四" })];
++    server.use(
++      http.get("/orders", ({ query, response }) => {
++        const note = query.get("note");
++        const orders = note === null ? all : [];
++        return response(200).json({ orders, count: orders.length });
++      }),
++    );
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByText("李四");
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "无此备注" } });
++    expect(await screen.findByText("还没有订单")).toBeTruthy();
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "" } });
++    expect(await screen.findByText("李四")).toBeTruthy();
++  });
++
++  it("shows a 备注 column with the note text or an empty cell", async () => {
++    stubOrders([
++      anOrder({ id: "O-1", note: "请加急发货" }),
++      anOrder({ id: "O-2", customer: "李四" }),
++    ]);
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByRole("button", { name: "O-1" });
++    expect(screen.getByRole("columnheader", { name: "备注" })).toBeTruthy();
++    const noteCells = screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell").at(-1));
++    expect(noteCells[0]?.textContent).toBe("请加急发货");
++    expect(noteCells[1]?.textContent).toBe("");
++  });
++
++  it("truncates a 备注 longer than 30 characters and exposes the full text via title", async () => {
++    const note = "请务必加急处理此订单并在工作日上午送到指定地点后联系收件人签收";
++    stubOrders([anOrder({ note })]);
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByRole("button", { name: "O-1" });
++    const cell = within(rowFor("O-1")).getAllByRole("cell").at(-1);
++    expect(cell?.textContent).toBe("请务必加急处理此订单并在工作日上午送到指定地点后联系收件人签…");
++    expect(cell?.querySelector("[title]")?.getAttribute("title") ?? cell?.getAttribute("title")).toBe(note);
++  });
++
++  it("shows the backend error when 备注 search GET /orders returns 400", async () => {
++    server.use(
++      http.get("/orders", ({ query, response }) => {
++        if (query.get("note") !== null) {
++          return response(400).json({ error: "note must be at most 200 characters" });
++        }
++        return response(200).json({ orders: [anOrder()], count: 1 });
++      }),
++    );
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByRole("button", { name: "O-1" });
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "x".repeat(201) } });
++    expect((await screen.findByRole("alert")).textContent).toBe("note must be at most 200 characters");
++  });
++
++  it("keeps 备注 search when GET /orders returns 400 so clearing shows every order again", async () => {
++    server.use(
++      http.get("/orders", ({ query, response }) => {
++        if (query.get("note") !== null) {
++          return response(400).json({ error: "note must be at most 200 characters" });
++        }
++        return response(200).json({ orders: [anOrder()], count: 1 });
++      }),
++    );
++    render(<OrderList onOpen={() => {}} />);
++    await screen.findByRole("button", { name: "O-1" });
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "x".repeat(201) } });
++    expect((await screen.findByRole("alert")).textContent).toBe("note must be at most 200 characters");
++    fireEvent.change(screen.getByLabelText("备注"), { target: { value: "" } });
++    expect(await screen.findByRole("button", { name: "O-1" })).toBeTruthy();
++  });
+ });
+diff --git a/src/orders/OrderList.tsx b/src/orders/OrderList.tsx
+index ce2ab14..aa569d0 100644
+--- a/src/orders/OrderList.tsx
++++ b/src/orders/OrderList.tsx
+@@ -4,16 +4,33 @@ import { formatAmount, statusLabel } from "./format.ts";
+ 
+ type State = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; orders: Order[] };
+ 
++const NOTE_SEARCH_DEBOUNCE_MS = 300;
++
+ export function OrderList({ onOpen }: { onOpen: (id: string) => void }) {
+   const [state, setState] = useState<State>({ kind: "loading" });
++  const [noteInput, setNoteInput] = useState("");
++  const [noteQuery, setNoteQuery] = useState<string | undefined>(undefined);
+   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+   const [shipping, setShipping] = useState(false);
+   const [results, setResults] = useState<BatchShipResult[] | null>(null);
+   const [alert, setAlert] = useState<string | null>(null);
+ 
++  useEffect(() => {
++    const handle = window.setTimeout(() => {
++      setNoteQuery(noteInput === "" ? undefined : noteInput);
++    }, NOTE_SEARCH_DEBOUNCE_MS);
++    return () => {
++      window.clearTimeout(handle);
++    };
++  }, [noteInput]);
++
+   useEffect(() => {
+     let live = true;
+-    api.GET("/orders").then(({ data, error }) => {
++    const request =
++      noteQuery === undefined
++        ? api.GET("/orders")
++        : api.GET("/orders", { params: { query: { note: noteQuery } } });
++    request.then(({ data, error }) => {
+       if (!live) return;
+       if (data) setState({ kind: "ready", orders: data.orders ?? [] });
+       else setState({ kind: "error", message: error?.error ?? "加载失败" });
+@@ -21,11 +38,29 @@ export function OrderList({ onOpen }: { onOpen: (id: string) => void }) {
+     return () => {
+       live = false;
+     };
+-  }, []);
++  }, [noteQuery]);
+ 
+   if (state.kind === "loading") return <p>加载中…</p>;
+-  if (state.kind === "error") return <p role="alert">{state.message}</p>;
+-  if (state.orders.length === 0) return <p>还没有订单</p>;
++  const noteSearch = (
++    <label>
++      备注
++      <input type="search" value={noteInput} onChange={(event) => setNoteInput(event.target.value)} />
++    </label>
++  );
++  if (state.kind === "error")
++    return (
++      <>
++        {noteSearch}
++        <p role="alert">{state.message}</p>
++      </>
++    );
++  if (state.orders.length === 0)
++    return (
++      <>
++        {noteSearch}
++        <p>还没有订单</p>
++      </>
++    );
+   const paidOrders = state.orders.filter((order) => order.status === "paid");
+   const paidCount = paidOrders.length;
+   const atLimit = selected.size >= 100;
+@@ -50,7 +85,8 @@ export function OrderList({ onOpen }: { onOpen: (id: string) => void }) {
+       setAlert("发货失败");
+     }
+     try {
+-      const list = await api.GET("/orders");
++      const response = await fetch(noteQuery === undefined ? "/orders" : `/orders?note=${encodeURIComponent(noteQuery)}`);
++      const list = response.ok ? { data: (await response.json()) as { orders?: Order[] } } : {};
+       if (list.data) {
+         const next = list.data.orders ?? [];
+         setState({ kind: "ready", orders: next });
+@@ -66,6 +102,7 @@ export function OrderList({ onOpen }: { onOpen: (id: string) => void }) {
+   };
+   return (
+     <>
++      {noteSearch}
+       <button
+         type="button"
+         disabled={paidCount === 0 || paidCount > 100}
+@@ -100,6 +137,7 @@ export function OrderList({ onOpen }: { onOpen: (id: string) => void }) {
+             <th>客户</th>
+             <th>金额</th>
+             <th>状态</th>
++            <th>备注</th>
+           </tr>
+         </thead>
+         <tbody>
+@@ -130,6 +168,11 @@ export function OrderList({ onOpen }: { onOpen: (id: string) => void }) {
+               <td>{order.customer}</td>
+               <td>{formatAmount(order.amount)}</td>
+               <td>{statusLabel(order.status)}</td>
++              {order.note !== undefined && order.note.length > 30 ? (
++                <td title={order.note}>{`${order.note.slice(0, 30)}…`}</td>
++              ) : (
++                <td>{order.note ?? ""}</td>
++              )}
+             </tr>
+           ))}
+         </tbody>

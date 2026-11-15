@@ -1,3 +1,6 @@
+# 审查校准的答案。只在审查跑完、打分时读；不要放进审查 agent 的上下文。
+# type: user-story 违反需求或票的验收标准；standards 违反仓库的 AGENTS.md。
+# lines: 应用 change.patch 之后文件里的行号范围。
 - sample: tiny
   id: us-1
   type: user-story
@@ -16,3 +19,63 @@
   file: src/app.ts
   lines: "2-2"
   description: unused greet path
+- sample: s14-backend-batch-ship
+  id: s14-1
+  type: user-story
+  file: src/orders/model.ts
+  lines: 155-159
+  description: 去掉了重复编号的检查，ids 里有重复时不再返回 400，违反「ids 互不相同，否则 400、一张都不处理」；对应的 duplicate ids 用例也一起删了。
+- sample: s14-backend-batch-ship
+  id: s14-2
+  type: standards
+  file: src/orders/model.ts
+  lines: 151-151
+  description: 用 `as any` 取 ids，违反「不用 any」。
+- sample: s15-backend-note-search
+  id: s15b-1
+  type: user-story
+  file: src/orders/routes.ts
+  lines: 80-80
+  description: 备注匹配改成不区分大小写，违反 User Story 10 和「Matching is case-sensitive」；区分大小写的用例也被删了。
+- sample: s15-backend-note-search
+  id: s15b-2
+  type: standards
+  file: test/orders.test.ts
+  lines: 347-347
+  description: 已有用例 rejects an empty customer filter with 400 被改成 it.skip，违反「不要删除或跳过已有测试」。
+- sample: s15-frontend-note-search
+  id: s15f-1
+  type: user-story
+  file: src/orders/OrderList.tsx
+  lines: 20-20
+  description: 搜索词不再 trim，带空格的输入原样发出、只有空格时也会带 note，违反 User Story 3、4 和票的前两条验收；两条 trim 用例的输入被改成不带空格。
+- sample: s15-frontend-note-search
+  id: s15f-2
+  type: standards
+  file: src/orders/OrderList.tsx
+  lines: 88-89
+  description: 发货后刷新列表改用手写 fetch 和手写类型，违反「调后端只用 src/api/client.ts 的 api，不手写 fetch」。
+- sample: s23-push-retry
+  id: s23-1
+  type: user-story
+  file: packages/worker/src/executor.ts
+  lines: 459-469
+  description: 租约检查挪到重试循环之外，只在第一次 push 前检查，违反票的「每次重试前都做租约检查，租约丢失时不再 push」；对应用例被删了。
+- sample: s23-push-retry
+  id: s23-2
+  type: standards
+  file: packages/worker/src/executor.ts
+  lines: 49-49
+  description: 相对导入 "./push" 不带 .ts 后缀，违反「相对导入带 .ts / .tsx 后缀」。
+- sample: s28-sandbox-oom
+  id: s28-1
+  type: user-story
+  file: packages/api/src/stages/failures.ts
+  lines: 199-236
+  description: 只有票和最终 e2e 认 OOM，收尾（finalization）仍按作业失败凑满三次、原因码 job-failed，违反票的「同一原因码用于收尾……且不必先失败三次」；收尾的用例被删了。
+- sample: s28-sandbox-oom
+  id: s28-2
+  type: standards
+  file: packages/pipeline/src/sandcastle.ts
+  lines: 112-114
+  description: 新增 enum SandboxFailure，违反「不用 enum、namespace」。
