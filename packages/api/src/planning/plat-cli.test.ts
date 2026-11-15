@@ -356,6 +356,43 @@ describe("plat", () => {
     );
   });
 
+  it("prints a critical-path import warning in spec show", async () => {
+    await register();
+    putTickets("tickets", [
+      {
+        key: "a",
+        repo: "backend",
+        type: "implementation",
+        title: "A",
+        modules: ["src/a/**"],
+        acceptance: ["a"],
+      },
+      {
+        key: "b",
+        repo: "backend",
+        type: "implementation",
+        title: "B",
+        modules: ["src/b/**"],
+        blocked_by: ["a"],
+        acceptance: ["b"],
+      },
+      {
+        key: "c",
+        repo: "backend",
+        type: "implementation",
+        title: "C",
+        modules: ["src/c/**"],
+        blocked_by: ["b"],
+        acceptance: ["c"],
+      },
+    ]);
+    const imported = await plat("tickets", "import", "S-1", "tickets");
+    expect(imported.code).toBe(0);
+    expect(imported.stdout).toContain("3 张票里 3 张串成一条线，并发 2 用不上");
+    const shown = await plat("spec", "show", "S-1");
+    expect(shown.stdout).toContain("3 张票里 3 张串成一条线，并发 2 用不上");
+  });
+
   it("walks project create, repo add, spec create and tickets import", async () => {
     const spec = await register();
     expect(spec).toEqual({ code: 0, stdout: "S-1\n", stderr: "" });

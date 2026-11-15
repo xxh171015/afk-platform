@@ -1201,8 +1201,9 @@ export interface paths {
                 type:
                   | "module-overlap"
                   | "old-contract-pending"
-                  | "old-contract-started";
-                tickets: [string, string];
+                  | "old-contract-started"
+                  | "critical-path";
+                tickets: string[];
                 repoId: number;
                 message: string;
               }[];

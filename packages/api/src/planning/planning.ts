@@ -10,6 +10,7 @@ import {
   parseDisplayId,
   parseStageModels,
   planImport,
+  resolveLimits,
   type SPEC_TYPES,
   type StageModels,
   type TicketReviewMode,
@@ -362,6 +363,15 @@ export async function importTickets(
       "SELECT name, id, contract_path FROM repos WHERE project_id = $1",
       [specRow.project_id],
     );
+    const project = await client.query(
+      "SELECT limits, max_concurrency FROM projects WHERE id = $1",
+      [specRow.project_id],
+    );
+    const { limits: stored, max_concurrency: maxConcurrency } = project.rows[0];
+    const limits = resolveLimits({
+      ...(maxConcurrency ? { projectConcurrency: maxConcurrency } : {}),
+      ...stored,
+    });
     const read = readTicketFiles(files, specId);
     const plan =
       !read.ok && read.parsed.tickets.length === 0
@@ -380,6 +390,7 @@ export async function importTickets(
             specId,
             append ? await existingGraph(client, specId) : undefined,
             specRow.body as string,
+            limits.projectConcurrency,
           );
     if (!read.ok) {
       // The files that could be read are checked as a graph too, so every problem comes back at once. What only
@@ -452,7 +463,7 @@ export async function importTickets(
         : key;
     const warnings: ImportWarning[] = plan.warnings.map((w) => ({
       type: w.type,
-      tickets: [shown(w.tickets[0]), shown(w.tickets[1])],
+      tickets: w.tickets.map(shown),
       repoId: w.repoId,
       message: w.describe(shown),
     }));

@@ -327,6 +327,70 @@ describe("tickets import", () => {
     expect(await count("tickets")).toBe(2);
   });
 
+  it("warns when the critical path is over two thirds of the tickets, using the project's concurrency", async () => {
+    const project = await post("/projects", {
+      name: "long-chain",
+      maxConcurrency: 4,
+    });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    const spec = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "long-chain",
+      title: "Long chain",
+    });
+    const specId = spec.body.id as number;
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [
+          ticket("a"),
+          ticket("b", { blocked_by: ["a"] }),
+          ticket("c", { blocked_by: ["b"] }),
+          ticket("d"),
+        ],
+      }),
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.warnings).toEqual([
+      expect.objectContaining({
+        type: "critical-path",
+        tickets: ["a", "b", "c"],
+        message: "4 张票里 3 张串成一条线，并发 4 用不上",
+      }),
+    ]);
+    const stored = await db.pool.query(
+      "SELECT import_warnings FROM specs WHERE id = $1",
+      [specId],
+    );
+    expect(stored.rows[0].import_warnings).toEqual(result.body.warnings);
+    const view = await (await fetch(`${api.url}/specs/${specId}`)).json();
+    expect(view.spec.warnings).toEqual(result.body.warnings);
+  });
+
+  it("does not emit a critical-path warning when the longest chain is at most two thirds", async () => {
+    const { specId } = await setup();
+    const result = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [
+          ticket("a"),
+          ticket("b", { blocked_by: ["a"] }),
+          ticket("c"),
+          ticket("d"),
+        ],
+      }),
+    );
+    expect(result.status).toBe(200);
+    expect(
+      result.body.warnings.filter((w) => w.type === "critical-path"),
+    ).toEqual([]);
+  });
+
   const rejected: [string, (specId: number) => unknown, RegExp][] = [
     [
       "a dependency cycle",

@@ -351,6 +351,61 @@ describe("scheduling along the dependency chain", () => {
     });
     expect(await jobPayloads()).toEqual([]);
   });
+
+  it("starts the head of a 4-ticket chain before independent tickets and finishes in 4 rounds, not 5", async () => {
+    // Two independents first in file order (lower ids), then a chain of four. Concurrency 2.
+    // Picking by id would start the independents and take 5 rounds; longest-chain first takes 4.
+    const { specId } = await draftSpec(
+      [
+        ticket("free-a"),
+        ticket("free-b"),
+        ticket("c1"),
+        ticket("c2", { blocked_by: ["c1"] }),
+        ticket("c3", { blocked_by: ["c2"] }),
+        ticket("c4", { blocked_by: ["c3"] }),
+      ],
+      { projectConcurrency: 2 },
+    );
+    const confirmed = await post(`/specs/${specId}/confirm`);
+    expect(confirmed.body.enqueued.map((t) => t.ticketId)).toEqual([3, 1]);
+
+    const queuedIds = async () =>
+      (
+        await db.pool.query<{ id: number }>(
+          "SELECT id FROM tickets WHERE state IN ('queued', 'running') ORDER BY id",
+        )
+      ).rows.map((row) => row.id);
+
+    let rounds = 0;
+    let batch = confirmed.body.enqueued.map((t) => t.ticketId);
+    while (batch.length > 0) {
+      rounds += 1;
+      await db.pool.query(
+        "UPDATE tickets SET state = 'done' WHERE id = ANY($1::int[])",
+        [batch],
+      );
+      await scheduleSpec(db.pool, specId);
+      batch = await queuedIds();
+    }
+    expect(rounds).toBe(4);
+  });
+
+  it("picks the lower ticket id when two startable tickets have the same downstream length", async () => {
+    // T-1 is independent (length 1); T-2→T-3 and T-4→T-5 are both length 2. Concurrency 2
+    // takes the two length-2 heads in id order, not the independent ticket.
+    const { specId } = await draftSpec(
+      [
+        ticket("free"),
+        ticket("a1"),
+        ticket("a2", { blocked_by: ["a1"] }),
+        ticket("b1"),
+        ticket("b2", { blocked_by: ["b1"] }),
+      ],
+      { projectConcurrency: 2 },
+    );
+    const confirmed = await post(`/specs/${specId}/confirm`);
+    expect(confirmed.body.enqueued.map((t) => t.ticketId)).toEqual([2, 4]);
+  });
 });
 
 describe("concurrency limits", () => {
