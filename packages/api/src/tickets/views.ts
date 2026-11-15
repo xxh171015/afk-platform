@@ -1,6 +1,7 @@
 import {
   formatDisplayId,
   type HostKind,
+  type JobState,
   type PlanningDocsAtImport,
   type PlanningState,
   type ReviewAxis,
@@ -946,6 +947,7 @@ export async function specView(
     leadTime: await specLeadTime(pool, specId, now),
     usageByStage: await usageByStageOf(pool, specId),
     links: (await linksBySpec(pool, specId)) ?? [],
+    cleanup: await cleanupJobOf(pool, specId),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
@@ -1327,6 +1329,19 @@ async function pullRequestProblems(
     syncError: (row.sync_error as string | null) ?? null,
     hostKind: row.host_kind as HostKind,
   }));
+}
+
+async function cleanupJobOf(
+  pool: pg.Pool,
+  specId: number,
+): Promise<{ state: JobState } | null> {
+  const { rows } = await pool.query<{ state: JobState }>(
+    `SELECT state FROM jobs
+     WHERE type = 'spec-cleanup' AND (payload->>'specId')::int = $1
+     ORDER BY id DESC LIMIT 1`,
+    [specId],
+  );
+  return rows[0] ? { state: rows[0].state } : null;
 }
 
 // A cancelled or merged spec whose cleanup failed every time it was tried: branches or pull requests may be left on

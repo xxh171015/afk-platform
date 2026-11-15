@@ -1,6 +1,13 @@
+import { generateKeyPairSync } from "node:crypto";
 import type { HostAdapter, PullRequestInfo } from "@afk/host";
-import { createGitLabAdapter, HostError, hostRepoRef } from "@afk/host";
-import { FakeGitLab } from "@afk/host/testing";
+import {
+  createAppTokenSource,
+  createGitHubAdapter,
+  createGitLabAdapter,
+  HostError,
+  hostRepoRef,
+} from "@afk/host";
+import { FakeGitHub, FakeGitLab } from "@afk/host/testing";
 import { git, gitOrThrow } from "@afk/pipeline";
 import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
 import type { HostTask } from "@afk/shared";
@@ -643,6 +650,57 @@ describe("a spec-cleanup task", () => {
     expect(lines.filter((l) => /not a branch of a spec/.test(l))).toHaveLength(
       3,
     );
+  });
+
+  it("deletes this spec's update branch on the host and leaves another spec's branches", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    const github = new FakeGitHub({
+      appId: "1",
+      installationId: "2",
+      publicKey,
+      owner: "me",
+      repo: "pilot",
+    });
+    await github.start();
+    try {
+      github.addBranch("spec/a1b2c3/export");
+      github.addBranch("agent/a1b2c3/T-1");
+      github.addBranch("agent/a1b2c3/S-1-final");
+      github.addBranch("agent/a1b2c3/S-1-update");
+      github.addBranch("spec/a1b2c3/other");
+      github.addBranch("agent/a1b2c3/T-99");
+      const adapter = createGitHubAdapter({
+        apiUrl: github.url,
+        tokens: createAppTokenSource({
+          credentials: { appId: "1", installationId: "2", privateKey },
+          apiUrl: github.url,
+        }),
+      });
+      const repoUrl = "https://github.com/me/pilot.git";
+      await runHostTask(
+        { adapter, repoRef: ref },
+        cleanup({
+          pulls: [],
+          branches: [
+            { repoUrl, branch: "spec/a1b2c3/export" },
+            { repoUrl, branch: "agent/a1b2c3/T-1" },
+            { repoUrl, branch: "agent/a1b2c3/S-1-final" },
+            { repoUrl, branch: "agent/a1b2c3/S-1-update" },
+          ],
+        }),
+        log,
+      );
+      expect(github.branches()).toEqual([
+        "agent/a1b2c3/T-99",
+        "spec/a1b2c3/other",
+      ]);
+    } finally {
+      await github.stop();
+    }
   });
 
   it("does the rest when one step fails, then fails as an infrastructure problem so the job is tried again", async () => {

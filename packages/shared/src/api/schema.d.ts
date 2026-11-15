@@ -3872,6 +3872,10 @@ export interface paths {
                 outputTokens: number;
                 cacheReadTokens: number;
               }[];
+              cleanup: {
+                /** @enum {string} */
+                state: "queued" | "running" | "done" | "failed";
+              } | null;
             };
           };
         };
