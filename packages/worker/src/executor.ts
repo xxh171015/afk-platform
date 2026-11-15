@@ -11,7 +11,6 @@ import {
   classifyDiagnoseRun,
   classifyLocateRun,
   classifyReviewRun,
-  combineReviewRuns,
   type DiagnoseOutput,
   DiagnoseOutputSchema,
   type DockerCli,
@@ -53,6 +52,7 @@ import {
   reviewSources,
   runE2e,
   runGate,
+  runReview,
   type SandboxPlacement,
   type SandboxSession,
   stampTrailers,
@@ -70,7 +70,6 @@ import {
   modelFor,
   type PushFailureTips,
   type ReviewAxis,
-  reviewAxesFor,
   unrecoverableJobError,
 } from "@afk/shared";
 import {
@@ -875,99 +874,121 @@ async function review(
           bundle.integrationBranch as string,
         ])
       : branchBase(mainDir, bundle.integrationBranch as string, agent);
-  const tmp = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "afk-ctx-"));
-  // Ticket-level review is Spec-only by default; final-review (and ticketReview: both) still run both axes.
-  // A branch can be checked out in one sandbox only, so each axis gets a branch of its own at the same commit,
-  // which is gone again afterwards. A review only reads.
   const reviewed =
     stage === "final-review"
       ? tip(mainDir, bundle.integrationBranch as string)
       : await publishedTip(mainDir, agent, context.signal);
-  const axes = reviewAxesFor(stage, bundle.ticketReview);
-  const branches = new Map(
-    axes.map((axis) => [axis, `review-${axis}/${subjectLabel(bundle)}`]),
-  );
-  for (const branch of branches.values())
-    gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
+  // The slot needs the reviewed commit before runReview can point each axis's branch at it.
+  const carrier = `review-sha/${subjectLabel(bundle)}`;
+  gitOrThrow(mainDir, ["update-ref", `refs/heads/${carrier}`, reviewed]);
   try {
-    bringBranches(slot, mainDir, [...branches.values()]);
-    const ctxDir = await renderFor(deps, context, baseSha, tmp, mainDir);
-    const { refs, refShas } = await snapshotRefs(deps, bundle);
-    const runs = await Promise.all(
-      axes.map(async (axis) => {
-        const given = writePrompt(join(tmp, axis), promptFor(stage, { axis }));
-        const options = runOptions(deps, context, axis);
-        const run = await deps.makeAgentRunner(slot.dir, runIdOf(bundle)).run({
-          stage,
-          branch: branches.get(axis) as string,
-          baseBranch: bundle.integrationBranch as string,
-          promptFile: given.promptFile,
-          ctxDir,
-          refs,
-          schema: reviewOutputSchemaFor(axis),
-          ...options,
-          signal: context.signal,
-        });
-        return { axis, given, run, options };
-      }),
+    bringBranches(slot, mainDir, [carrier]);
+    const domainFiles = await fetchDomain(
+      deps.repos,
+      bundle.domain,
+      bundle.repo.name,
     );
-    if (context.signal.aborted)
-      throw new JobLostError("the lease was lost during the review");
-    const byAxis = Object.fromEntries(
-      runs.map((r) => [r.axis, r.run]),
-    ) as Partial<Record<ReviewAxis, (typeof runs)[number]["run"]>>;
-    let { classification: verdict } = combineReviewRuns(byAxis);
-    if (
-      verdict.kind === "outcome" &&
-      (verdict.outcome === "pass" || verdict.outcome === "fix") &&
-      byAxis.spec
-    ) {
-      const listed = listedDecisionsForReview(
+    const contracts = bundle.contracts.length
+      ? await fetchContracts(deps.repos, bundle.contracts)
+      : [];
+    const { refs, refShas } = await snapshotRefs(deps, bundle);
+    const integration = bundle.integrationBranch;
+    const specModel = modelFor({
+      stage,
+      axis: "spec",
+      stageModels: bundle.stageModels,
+      defaultModel: bundle.model,
+      workerModel: deps.model,
+    });
+    const standardsModel = modelFor({
+      stage,
+      axis: "standards",
+      stageModels: bundle.stageModels,
+      defaultModel: bundle.model,
+      workerModel: deps.model,
+    });
+    const assembled = await runReview({
+      stage,
+      ticketReview: bundle.ticketReview,
+      repoDir: slot.dir,
+      reviewedSha: reviewed,
+      baseBranch: bundle.integrationBranch as string,
+      subjectLabel: subjectLabel(bundle),
+      context: {
+        bundle,
+        run: { runId: runIdOf(bundle), baseSha, branch: agent },
+        ...(bundle.failureLog ? { failureLog: bundle.failureLog } : {}),
+        ...(bundle.failedCases?.length
+          ? { failedCases: bundle.failedCases }
+          : {}),
+        ...(bundle.review ? { review: bundle.review } : {}),
+        ...(bundle.contracts.length ? { contracts } : {}),
+        ...(domainFiles ? { domain: domainFiles } : {}),
+        ...(integration
+          ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
+          : {}),
+      },
+      runner: deps.makeAgentRunner(slot.dir, runIdOf(bundle)),
+      idleSeconds: bundle.limits.runIdleSeconds,
+      wallClockMs: bundle.limits.runWallclockSeconds * 1000,
+      models: {
+        ...(specModel ? { spec: specModel } : {}),
+        ...(standardsModel ? { standards: standardsModel } : {}),
+      },
+      ...(refs.length ? { refs } : {}),
+      listedDecisions: listedDecisionsForReview(
         bundle.decisionLog,
         stage === "final-review" ? "spec" : "ticket",
-      );
-      const rulings = classifyReviewRun(byAxis.spec, listed);
-      if (rulings.kind === "outcome" && rulings.outcome === "invalid-output") {
-        verdict = rulings;
-      }
-    }
-    if (verdict.kind === "infrastructure-failure") {
-      const [first, ...others] = runs;
+      ),
+      signal: context.signal,
+      onRawLine: (line) =>
+        context.logRaw(sanitizeRawLine(line, deps.secrets ?? [])),
+      ...(deps.tmpRoot ? { tmpRoot: deps.tmpRoot } : {}),
+    });
+    if (context.signal.aborted)
+      throw new JobLostError("the lease was lost during the review");
+    if (assembled.classification.kind === "infrastructure-failure") {
+      const [first, ...others] = assembled.axes;
       throw new InfrastructureError(
-        verdict.error,
+        assembled.classification.error,
         first ? { ...billedFacts(first.run), axis: first.axis } : undefined,
         others.map((r) => ({ ...billedFacts(r.run), axis: r.axis })),
       );
     }
-    log(`${stage}: ${verdict.outcome}`);
-    for (const { axis, run } of runs)
+    log(`${stage}: ${assembled.classification.outcome}`);
+    for (const { axis, run } of assembled.axes)
       if (run.commits.length > 0)
         log(
           `review: WARNING the ${axis} review made ${run.commits.length} commit(s); it should only read`,
         );
-    const factsOf = ({ axis, given, run, options }: (typeof runs)[number]) => {
-      const sources = reviewSources(run.output);
+    const factsOf = (row: (typeof assembled.axes)[number]) => {
+      const sources = reviewSources(row.run.output);
       return {
-        axis,
+        axis: row.axis,
         run: {
           // what this axis came to on its own; the stage's outcome is the two put together
-          result: axisResult(run),
+          result: row.result,
           branch: agent,
           baseSha,
-          commits: run.commits,
-          durationMs: run.durationMs,
-          ...agentFacts(deps, options, given.prompt, run),
+          commits: row.run.commits,
+          durationMs: row.run.durationMs,
+          ...agentFacts(
+            deps,
+            { ...(row.model ? { model: row.model } : {}) },
+            row.prompt,
+            row.run,
+          ),
           ...(refs.length ? { refShas } : {}),
-          output: run.output ?? { error: run.error },
+          output: row.run.output ?? { error: row.run.error },
           ...(sources ? { sources } : {}),
         },
-        findings: run.output ? reviewFindings(run.output) : [],
+        findings: row.findings,
       };
     };
-    const [first, ...others] = runs.map(factsOf);
+    const [first, ...others] = assembled.axes.map(factsOf);
     return {
       stage,
-      outcome: verdict.outcome,
+      outcome: assembled.classification.outcome,
       // the first axis is the job's own Run; any other axis is recorded beside it
       run: { ...first?.run, axis: first?.axis },
       findings: first?.findings ?? [],
@@ -977,9 +998,8 @@ async function review(
       })),
     };
   } finally {
-    for (const branch of branches.values())
-      git(mainDir, ["update-ref", "-d", `refs/heads/${branch}`]);
-    rmSync(tmp, { recursive: true, force: true });
+    git(mainDir, ["update-ref", "-d", `refs/heads/${carrier}`]);
+    git(slot.dir, ["update-ref", "-d", `refs/heads/${carrier}`]);
   }
 }
 

@@ -141,6 +141,26 @@ export {
   recheckHit,
 } from "./recheck.ts";
 export type {
+  ReviewAxisRun,
+  ReviewFinding,
+  RunReviewInput,
+  RunReviewResult,
+} from "./review.ts";
+export { runReview } from "./review.ts";
+export type {
+  CalibrationAnswer,
+  CalibrationHit,
+  CalibrationSample,
+  RunReviewCalibrationInput,
+} from "./review-calibration.ts";
+export {
+  formatCalibrationTable,
+  loadAnswers,
+  loadSamples,
+  runReviewCalibration,
+  scoreDefect,
+} from "./review-calibration.ts";
+export type {
   SandboxDocker,
   SandboxKind,
   SandboxLimits,
