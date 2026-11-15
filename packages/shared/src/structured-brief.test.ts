@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { structuredBrief } from "./structured-brief.ts";
+import { sameReasonRepeatLine, structuredBrief } from "./structured-brief.ts";
 import { readTicketFiles } from "./ticket-files.ts";
 import { BLOCKED_REASONS } from "./ticket-state.ts";
 
@@ -418,5 +418,87 @@ needs a new field on Order
         command: "plat spec waive-final S-19",
       },
     ]);
+  });
+
+  it("adds the interval and switches a ticket to takeover or edit when the last two blocks share a reason", () => {
+    const brief = structuredBrief({
+      reason: "gate-failed",
+      ...ids,
+      recentBlocked: [
+        { reason: "gate-failed", at: "2026-01-01T00:15:00.000Z" },
+        { reason: "gate-failed", at: "2026-01-01T00:00:00.000Z" },
+      ],
+      brief: source("gate", { failureLog: "boom" }),
+    });
+    expect(brief.sameReasonRepeatMinutes).toBe(15);
+    expect(brief.reason).toBe("gate-failed");
+    expect(brief.step).toBe("gate");
+    expect(brief.summary).toBe("门禁失败");
+    expect(brief.evidence).toEqual({ lastLogLines: "boom" });
+    expect(brief.recommendedAction).toBe("接手自己改，或改票后再试");
+    expect(brief.commands).toEqual([
+      { label: "接手", command: "plat ticket takeover T-12" },
+      { label: "改票", command: "plat ticket edit T-12 --file …" },
+    ]);
+  });
+
+  it("keeps the retry suggestion when the last two block reasons differ", () => {
+    const brief = structuredBrief({
+      reason: "gate-failed",
+      ...ids,
+      recentBlocked: [
+        { reason: "gate-failed", at: "2026-01-01T00:15:00.000Z" },
+        { reason: "timeout", at: "2026-01-01T00:00:00.000Z" },
+      ],
+      brief: source("gate", { failureLog: "boom" }),
+    });
+    expect(brief.sameReasonRepeatMinutes).toBeUndefined();
+    expect(brief.recommendedAction).toBe(
+      "看失败的测试，修好后带说明重试，保留已有提交",
+    );
+    expect(brief.commands).toEqual([
+      {
+        label: "带说明继续",
+        command: 'plat ticket retry T-12 --mode continue --note "…"',
+      },
+    ]);
+  });
+
+  it("keeps the retry suggestion when the ticket has only blocked once", () => {
+    const brief = structuredBrief({
+      reason: "gate-failed",
+      ...ids,
+      recentBlocked: [
+        { reason: "gate-failed", at: "2026-01-01T00:00:00.000Z" },
+      ],
+      brief: source("gate", { failureLog: "boom" }),
+    });
+    expect(brief.sameReasonRepeatMinutes).toBeUndefined();
+    expect(brief.commands[0]?.command).toContain("retry");
+  });
+
+  it("switches a repeating wrap-up away from retry-final", () => {
+    const brief = structuredBrief({
+      reason: "job-failed",
+      specDisplayId: "S-19",
+      wrapUpStep: "final-review",
+      recentBlocked: [
+        { reason: "job-failed", at: "2026-01-01T00:20:00.000Z" },
+        { reason: "job-failed", at: "2026-01-01T00:00:00.000Z" },
+      ],
+      brief: source("final-review", { error: "three" }),
+    });
+    expect(brief.sameReasonRepeatMinutes).toBe(20);
+    expect(brief.summary).toBe("作业失败");
+    expect(brief.recommendedAction).toBe("取消需求");
+    expect(brief.commands).toEqual([
+      { label: "取消需求", command: "plat spec cancel S-19" },
+    ]);
+  });
+
+  it("names the same-reason repeat in the spec's words", () => {
+    expect(sameReasonRepeatLine(15)).toBe(
+      "上次重试后同一原因再次发生（间隔 15 分钟）",
+    );
   });
 });

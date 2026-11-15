@@ -3215,4 +3215,86 @@ describe("structured brief on blocked tickets", () => {
     const detail = await call("GET", "/tickets/2");
     expect(detail.body.ticket.structuredBrief).toEqual(item.structuredBrief);
   });
+
+  it("says the same gate-failed happened again after retry and suggests takeover, not retry", async () => {
+    await gateFailed();
+    await db.pool.query(
+      `UPDATE events SET at = at - interval '15 minutes'
+       WHERE type = 'ticket' AND to_state = 'blocked' AND ticket_id = 1`,
+    );
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    await stage("implement", DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "boom again" } },
+    });
+    await stage("gate-fix", DONE);
+    await stage("gate", {
+      outcome: "failed",
+      run: { output: { failureLog: "still boom" } },
+    });
+    const queue = await call("GET", "/blocked");
+    const brief = queue.body.tickets[0].structuredBrief;
+    expect(brief.sameReasonRepeatMinutes).toBe(15);
+    expect(brief.summary).toBe("门禁失败");
+    expect(brief.recommendedAction).toBe("接手自己改，或改票后再试");
+    expect(brief.commands).toEqual([
+      { label: "接手", command: "plat ticket takeover T-1" },
+      { label: "改票", command: "plat ticket edit T-1 --file …" },
+    ]);
+    const detail = await call("GET", "/tickets/1");
+    expect(detail.body.ticket.structuredBrief).toEqual(brief);
+  });
+
+  it("does not treat a second block of a different reason as a same-reason repeat", async () => {
+    await gateFailed();
+    await call("POST", "/tickets/1/retry", { mode: "continue" });
+    await stage("implement", GAVE_UP);
+    const brief = (await call("GET", "/blocked")).body.tickets[0]
+      .structuredBrief;
+    expect(brief.sameReasonRepeatMinutes).toBeUndefined();
+    expect(brief.recommendedAction).toBe("看它卡住的地方，带一句话说明后继续");
+    expect(brief.commands).toEqual([
+      {
+        label: "带说明继续",
+        command: 'plat ticket retry T-1 --mode continue --note "…"',
+      },
+    ]);
+  });
+
+  it("says a wrap-up blocked twice for the same reason is a repeat, not another retry-final", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await stage("implement", DONE);
+    await stage("gate", { outcome: "passed" });
+    await stage("review", { outcome: "pass" });
+    await stage("merge", { outcome: "merged", headSha: "h" });
+    await stage("final-review", {
+      outcome: "fix",
+      run: { output: { findings: [{ kind: "must-fix", body: "rename" }] } },
+    });
+    await stage("final-fix", {
+      outcome: "agent-gave-up",
+      run: { output: { detail: "still stuck" } },
+    });
+    await db.pool.query(
+      `UPDATE events SET at = at - interval '20 minutes'
+       WHERE type = 'finalization' AND to_state = 'blocked' AND spec_id = $1`,
+      [specId],
+    );
+    expect((await call("POST", `/specs/${specId}/final/retry`)).status).toBe(
+      200,
+    );
+    await stage("final-fix", {
+      outcome: "agent-gave-up",
+      run: { output: { detail: "still stuck" } },
+    });
+    const brief = (await call("GET", "/blocked")).body.finalizations[0]
+      .structuredBrief;
+    expect(brief.sameReasonRepeatMinutes).toBe(20);
+    expect(brief.summary).toBe("模型放弃");
+    expect(brief.recommendedAction).toBe("取消需求");
+    expect(brief.commands).toEqual([
+      { label: "取消需求", command: "plat spec cancel S-1" },
+    ]);
+  });
 });

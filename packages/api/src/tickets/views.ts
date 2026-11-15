@@ -25,7 +25,13 @@ import {
 import { specLeadTime } from "./lead-time.ts";
 import { ticketFileOf } from "./ticket-file.ts";
 import { specTimeline } from "./timeline.ts";
-import { type Blocking, rankWaitingQueue } from "./waiting-queue.ts";
+import {
+  type Blocking,
+  rankWaitingQueue,
+  recentE2eBlockedEvents,
+  recentFinalizationBlockedEvents,
+  recentTicketBlockedEvents,
+} from "./waiting-queue.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -51,6 +57,7 @@ function structuredBriefFor(input: {
   contractBlockedBy?: readonly string[];
   wrapUpStep?: string;
   autoRetried?: boolean;
+  recentBlocked?: ReadonlyArray<{ reason: string | null; at: Date }>;
   brief: Brief | null;
 }): StructuredBrief | null {
   if (!input.reason) return null;
@@ -62,6 +69,7 @@ function structuredBriefFor(input: {
     contractBlockedBy: input.contractBlockedBy,
     wrapUpStep: input.wrapUpStep,
     autoRetried: input.autoRetried,
+    recentBlocked: input.recentBlocked,
     brief: input.brief,
   });
 }
@@ -194,6 +202,11 @@ async function finalizations(
      WHERE ${where} ORDER BY f.id`,
     params,
   );
+  const recentByRepo = includeBrief
+    ? await recentFinalizationBlockedEvents(pool, [
+        ...new Set(rows.map((row) => row.spec_id as number)),
+      ])
+    : new Map();
   return Promise.all(
     rows.map(async (row) => {
       const specDisplayId = formatDisplayId("spec", row.spec_id);
@@ -226,6 +239,9 @@ async function finalizations(
                     row.spec_id,
                     row.repo_id,
                   )) === row.step,
+                recentBlocked: recentByRepo.get(
+                  `${row.spec_id}:${row.repo_id}`,
+                ),
                 brief,
               })
             : null,
@@ -249,6 +265,11 @@ async function finalE2eSteps(
      WHERE ${where} ORDER BY e.id`,
     params,
   );
+  const recentBySpec = includeBrief
+    ? await recentE2eBlockedEvents(pool, [
+        ...new Set(rows.map((row) => row.spec_id as number)),
+      ])
+    : new Map();
   return Promise.all(
     rows.map(async (row) => {
       const bad =
@@ -293,6 +314,7 @@ async function finalE2eSteps(
                 reason: blockedReason,
                 specDisplayId,
                 wrapUpStep: "final-e2e",
+                recentBlocked: recentBySpec.get(row.spec_id as number),
                 brief,
               })
             : null,
@@ -373,10 +395,11 @@ async function summaries(
     pool,
     rows.filter((row) => row.auto_retried).map((row) => row.id as number),
   );
-  const contractBy = await contractUpstreamByTicket(
-    pool,
-    items.filter((item) => item.state === "blocked").map((item) => item.id),
-  );
+  const blockedIds = items
+    .filter((item) => item.state === "blocked")
+    .map((item) => item.id);
+  const contractBy = await contractUpstreamByTicket(pool, blockedIds);
+  const recentBlocked = await recentTicketBlockedEvents(pool, blockedIds);
   return items.map((item) => ({
     ...item,
     structuredBrief:
@@ -389,6 +412,7 @@ async function summaries(
             contractBlockedBy: contractBy.get(item.id) ?? [],
             autoRetried:
               item.brief !== null && retried.get(item.id) === item.brief.stage,
+            recentBlocked: recentBlocked.get(item.id),
             brief: item.brief,
           })
         : null,
