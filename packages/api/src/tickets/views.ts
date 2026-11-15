@@ -17,6 +17,7 @@ import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 import { potentialConflictsOf } from "../host/trial-merge.ts";
 import { linksBySpec } from "../links/view.ts";
+import { recallGateTestCases } from "../stages/gate-records.ts";
 import {
   type IntegrationAttempt,
   integrationAttempts,
@@ -24,7 +25,13 @@ import {
 import { specLeadTime } from "./lead-time.ts";
 import { ticketFileOf } from "./ticket-file.ts";
 import { specTimeline } from "./timeline.ts";
-import { type Blocking, rankWaitingQueue } from "./waiting-queue.ts";
+import {
+  type Blocking,
+  rankWaitingQueue,
+  recentE2eBlockedEvents,
+  recentFinalizationBlockedEvents,
+  recentTicketBlockedEvents,
+} from "./waiting-queue.ts";
 
 // What a person looks at: one ticket, one spec, and the queue of things waiting for a decision. The "brief" of
 // a blocked ticket is the Run that went wrong: which stage, how it ended, and what the agent or the gate said
@@ -50,6 +57,7 @@ function structuredBriefFor(input: {
   contractBlockedBy?: readonly string[];
   wrapUpStep?: string;
   autoRetried?: boolean;
+  recentBlocked?: ReadonlyArray<{ reason: string | null; at: Date }>;
   brief: Brief | null;
 }): StructuredBrief | null {
   if (!input.reason) return null;
@@ -61,6 +69,7 @@ function structuredBriefFor(input: {
     contractBlockedBy: input.contractBlockedBy,
     wrapUpStep: input.wrapUpStep,
     autoRetried: input.autoRetried,
+    recentBlocked: input.recentBlocked,
     brief: input.brief,
   });
 }
@@ -193,6 +202,11 @@ async function finalizations(
      WHERE ${where} ORDER BY f.id`,
     params,
   );
+  const recentByRepo = includeBrief
+    ? await recentFinalizationBlockedEvents(pool, [
+        ...new Set(rows.map((row) => row.spec_id as number)),
+      ])
+    : new Map();
   return Promise.all(
     rows.map(async (row) => {
       const specDisplayId = formatDisplayId("spec", row.spec_id);
@@ -225,6 +239,9 @@ async function finalizations(
                     row.spec_id,
                     row.repo_id,
                   )) === row.step,
+                recentBlocked: recentByRepo.get(
+                  `${row.spec_id}:${row.repo_id}`,
+                ),
                 brief,
               })
             : null,
@@ -248,6 +265,11 @@ async function finalE2eSteps(
      WHERE ${where} ORDER BY e.id`,
     params,
   );
+  const recentBySpec = includeBrief
+    ? await recentE2eBlockedEvents(pool, [
+        ...new Set(rows.map((row) => row.spec_id as number)),
+      ])
+    : new Map();
   return Promise.all(
     rows.map(async (row) => {
       const bad =
@@ -292,6 +314,7 @@ async function finalE2eSteps(
                 reason: blockedReason,
                 specDisplayId,
                 wrapUpStep: "final-e2e",
+                recentBlocked: recentBySpec.get(row.spec_id as number),
                 brief,
               })
             : null,
@@ -372,10 +395,11 @@ async function summaries(
     pool,
     rows.filter((row) => row.auto_retried).map((row) => row.id as number),
   );
-  const contractBy = await contractUpstreamByTicket(
-    pool,
-    items.filter((item) => item.state === "blocked").map((item) => item.id),
-  );
+  const blockedIds = items
+    .filter((item) => item.state === "blocked")
+    .map((item) => item.id);
+  const contractBy = await contractUpstreamByTicket(pool, blockedIds);
+  const recentBlocked = await recentTicketBlockedEvents(pool, blockedIds);
   return items.map((item) => ({
     ...item,
     structuredBrief:
@@ -388,6 +412,7 @@ async function summaries(
             contractBlockedBy: contractBy.get(item.id) ?? [],
             autoRetried:
               item.brief !== null && retried.get(item.id) === item.brief.stage,
+            recentBlocked: recentBlocked.get(item.id),
             brief: item.brief,
           })
         : null,
@@ -456,12 +481,33 @@ export async function ticketView(
   );
   const shas = runs.rows.map((r) => r.head_sha).filter(Boolean);
   const gates = shas.length
-    ? await pool.query(
-        `SELECT kind, commit_sha, config_sha, command_results, tests_total, tests_skipped FROM gate_results
+    ? await pool.query<{
+        kind: "gate" | "e2e";
+        commit_sha: string;
+        config_sha: string;
+        command_results: unknown;
+        tests_total: number | null;
+        tests_skipped: number | null;
+        test_cases_hash: string | null;
+      }>(
+        `SELECT kind, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases_hash FROM gate_results
          WHERE repo_id = (SELECT repo_id FROM tickets WHERE id = $1) AND commit_sha = ANY($2) ORDER BY id`,
         [ticketId, shas],
       )
     : { rows: [] };
+  const gateResults = [];
+  for (const g of gates.rows) {
+    const testCases = await recallGateTestCases(pool, g.test_cases_hash);
+    gateResults.push({
+      kind: g.kind,
+      commitSha: g.commit_sha,
+      configSha: g.config_sha,
+      commandResults: g.command_results as unknown[],
+      testsTotal: g.tests_total ?? null,
+      testsSkipped: g.tests_skipped ?? null,
+      ...(testCases ? { testCases } : {}),
+    });
+  }
   return {
     // an integration ticket's e2e tries, with their diagnoses and fix tickets; null for any other ticket
     integration:
@@ -508,14 +554,7 @@ export async function ticketView(
       resolution: f.resolution as string,
       axis: (f.axis as ReviewAxis | null) ?? null,
     })),
-    gateResults: gates.rows.map((g) => ({
-      kind: g.kind as "gate" | "e2e",
-      commitSha: g.commit_sha as string,
-      configSha: g.config_sha as string,
-      commandResults: g.command_results as unknown[],
-      testsTotal: (g.tests_total as number | null) ?? null,
-      testsSkipped: (g.tests_skipped as number | null) ?? null,
-    })),
+    gateResults,
   };
 }
 
@@ -961,6 +1000,7 @@ export interface SpecListQuery {
   sort?: "startedAt" | "state" | "progress";
   dir?: "asc" | "desc";
   ids?: number[];
+  includeEmptyCancelled?: boolean;
 }
 
 const SPEC_LIST_DEFAULT_LIMIT = 50;
@@ -1094,6 +1134,12 @@ export async function specList(
   if (query.states && query.states.length > 0) {
     params.push(query.states);
     where.push(`s.state = ANY($${params.length})`);
+  }
+  if (query.ids === undefined && query.includeEmptyCancelled !== true) {
+    where.push(`NOT (
+      s.state = 'cancelled'
+      AND NOT EXISTS (SELECT 1 FROM tickets cancelled_tickets WHERE cancelled_tickets.spec_id = s.id)
+    )`);
   }
   if (query.repo) {
     const { rows: repoRows } = await pool.query<{

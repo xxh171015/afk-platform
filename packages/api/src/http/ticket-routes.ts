@@ -121,6 +121,7 @@ const StructuredBrief = z
       }),
     ),
     ticketDraft: z.string().optional(),
+    sameReasonRepeatMinutes: z.number().int().optional(),
   })
   .nullable();
 
@@ -299,6 +300,16 @@ const ticketRoute = createRoute({
             commandResults: z.array(z.unknown()),
             testsTotal: Id.nullable(),
             testsSkipped: Id.nullable(),
+            // names from the gate JUnit report; omitted when the row stored none
+            testCases: z
+              .array(
+                z.object({
+                  name: z.string(),
+                  classname: z.string(),
+                  status: z.string().optional(),
+                }),
+              )
+              .optional(),
           }),
         ),
       }),
@@ -490,6 +501,7 @@ const specsRoute = createRoute({
       repo: z.string().trim().min(1).max(200).optional(),
       sort: z.enum(["startedAt", "state", "progress"]).optional(),
       dir: z.enum(["asc", "desc"]).optional(),
+      includeEmptyCancelled: z.enum(["true", "false"]).optional(),
     }),
   },
   responses: {
@@ -676,6 +688,16 @@ const WorkbenchWaiting = z.object({
       specDisplayId: z.string(),
       title: z.string(),
       reason: z.string(),
+    }),
+  ),
+  stale: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      title: z.string(),
+      state: z.enum(SPEC_STATES),
+      command: z.string().nullable(),
+      note: z.string().nullable(),
     }),
   ),
 });
@@ -1165,6 +1187,7 @@ export function registerTicketRoutes(
         repo: query.repo,
         sort: query.sort,
         dir: query.dir,
+        includeEmptyCancelled: query.includeEmptyCancelled === "true",
       }),
       200,
     );

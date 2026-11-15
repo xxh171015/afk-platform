@@ -1006,6 +1006,7 @@ export interface paths {
           repo?: string;
           sort?: "startedAt" | "state" | "progress";
           dir?: "asc" | "desc";
+          includeEmptyCancelled?: "true" | "false";
         };
         header?: never;
         path?: never;
@@ -1201,8 +1202,9 @@ export interface paths {
                 type:
                   | "module-overlap"
                   | "old-contract-pending"
-                  | "old-contract-started";
-                tickets: [string, string];
+                  | "old-contract-started"
+                  | "critical-path";
+                tickets: string[];
                 repoId: number;
                 message: string;
               }[];
@@ -3049,6 +3051,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -3188,6 +3191,11 @@ export interface paths {
                 commandResults: unknown[];
                 testsTotal: number | null;
                 testsSkipped: number | null;
+                testCases?: {
+                  name: string;
+                  classname: string;
+                  status?: string;
+                }[];
               }[];
             };
           };
@@ -3484,6 +3492,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -3571,6 +3580,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 /** @enum {string} */
                 hostKind?: "github" | "gitlab";
@@ -4070,6 +4080,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 waitingSince?: string;
                 blocking?: {
@@ -4157,6 +4168,7 @@ export interface paths {
                     command: string;
                   }[];
                   ticketDraft?: string;
+                  sameReasonRepeatMinutes?: number;
                 } | null;
                 /** @enum {string} */
                 hostKind?: "github" | "gitlab";
@@ -4442,6 +4454,25 @@ export interface paths {
                   specDisplayId: string;
                   title: string;
                   reason: string;
+                }[];
+                stale: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  command: string | null;
+                  note: string | null;
                 }[];
               };
               running: {

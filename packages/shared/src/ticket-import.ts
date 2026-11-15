@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatDisplayId } from "./display-id.ts";
+import { DEFAULT_LIMITS } from "./limits.ts";
 import type { EdgeKind } from "./schemas.ts";
 import { userStoriesOf } from "./user-stories.ts";
 
@@ -72,8 +73,12 @@ export interface PlannedEdge {
 }
 
 export interface ImportWarning {
-  type: "module-overlap" | "old-contract-pending" | "old-contract-started";
-  tickets: [string, string];
+  type:
+    | "module-overlap"
+    | "old-contract-pending"
+    | "old-contract-started"
+    | "critical-path";
+  tickets: string[];
   repoId: number;
   message: string;
 }
@@ -86,7 +91,7 @@ export type PlannedWarning = ImportWarning & {
 
 const warning = (
   type: ImportWarning["type"],
-  tickets: [string, string],
+  tickets: string[],
   repoId: number,
   describe: (name: (key: string) => string) => string,
 ): PlannedWarning =>
@@ -132,6 +137,7 @@ export function planImport(
   specId: number,
   existing?: ExistingGraph,
   specBody = "",
+  concurrency?: number,
 ): ImportPlan {
   const parsed = ImportFileSchema.safeParse(input);
   if (!parsed.success) {
@@ -335,6 +341,11 @@ export function planImport(
       ...(existing
         ? staleContractWarnings(file.tickets, repos, existing, merged)
         : []),
+      ...criticalPathWarnings(
+        everyone,
+        merged,
+        concurrency ?? DEFAULT_LIMITS.projectConcurrency,
+      ),
     ],
   };
 }
@@ -501,6 +512,49 @@ function findCycle(
 }
 
 type OverlapTicket = Pick<PlannedTicket, "key" | "repoId" | "modules">;
+
+// The longest path in the merged graph; warn when it is strictly more than two thirds of the tickets.
+function criticalPathWarnings(
+  tickets: readonly Pick<OverlapTicket, "key" | "repoId">[],
+  edges: readonly PlannedEdge[],
+  concurrency: number,
+): PlannedWarning[] {
+  const next = new Map<string, string[]>();
+  for (const edge of edges)
+    next.set(edge.from, [...(next.get(edge.from) ?? []), edge.to]);
+  const memo = new Map<string, string[]>();
+  const pathFrom = (node: string): string[] => {
+    const cached = memo.get(node);
+    if (cached !== undefined) return cached;
+    let best: string[] = [node];
+    for (const child of next.get(node) ?? []) {
+      const rest = pathFrom(child);
+      if (rest.length + 1 > best.length) best = [node, ...rest];
+    }
+    memo.set(node, best);
+    return best;
+  };
+  let path: string[] = [];
+  for (const ticket of tickets) {
+    const candidate = pathFrom(ticket.key);
+    if (candidate.length > path.length) path = candidate;
+  }
+  const total = tickets.length;
+  const chain = path.length;
+  if (chain < 2 || 3 * chain <= 2 * total) return [];
+  const repoId =
+    tickets.find((ticket) => ticket.key === path[0])?.repoId ??
+    tickets[0]?.repoId ??
+    0;
+  return [
+    warning(
+      "critical-path",
+      path,
+      repoId,
+      () => `${total} 张票里 ${chain} 张串成一条线，并发 ${concurrency} 用不上`,
+    ),
+  ];
+}
 
 function overlapWarnings(
   tickets: OverlapTicket[],

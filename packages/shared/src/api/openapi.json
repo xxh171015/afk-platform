@@ -1838,6 +1838,15 @@
             "required": false,
             "name": "dir",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false,
+            "name": "includeEmptyCancelled",
+            "in": "query"
           }
         ],
         "responses": {
@@ -2110,19 +2119,16 @@
                             "enum": [
                               "module-overlap",
                               "old-contract-pending",
-                              "old-contract-started"
+                              "old-contract-started",
+                              "critical-path"
                             ]
                           },
                           "tickets": {
                             "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ]
+                            "items": {
+                              "type": "string"
+                            },
+                            "minItems": 1
                           },
                           "repoId": {
                             "type": "integer",
@@ -5419,6 +5425,9 @@
                             },
                             "ticketDraft": {
                               "type": "string"
+                            },
+                            "sameReasonRepeatMinutes": {
+                              "type": "integer"
                             }
                           },
                           "required": [
@@ -5868,6 +5877,24 @@
                           },
                           "testsSkipped": {
                             "type": ["integer", "null"]
+                          },
+                          "testCases": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "classname": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["name", "classname"]
+                            }
                           }
                         },
                         "required": [
@@ -6595,6 +6622,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -6892,6 +6922,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -8388,6 +8421,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -8685,6 +8721,9 @@
                               },
                               "ticketDraft": {
                                 "type": "string"
+                              },
+                              "sameReasonRepeatMinutes": {
+                                "type": "integer"
                               }
                             },
                             "required": [
@@ -9543,6 +9582,52 @@
                               "reason"
                             ]
                           }
+                        },
+                        "stale": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "displayId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "planned",
+                                  "running",
+                                  "finalizing",
+                                  "awaiting-review",
+                                  "partially-merged",
+                                  "reworking",
+                                  "merged",
+                                  "paused",
+                                  "cancelled"
+                                ]
+                              },
+                              "command": {
+                                "type": ["string", "null"]
+                              },
+                              "note": {
+                                "type": ["string", "null"]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "displayId",
+                              "title",
+                              "state",
+                              "command",
+                              "note"
+                            ]
+                          }
                         }
                       },
                       "required": [
@@ -9553,7 +9638,8 @@
                         "readyFailures",
                         "planning",
                         "specs",
-                        "locates"
+                        "locates",
+                        "stale"
                       ]
                     },
                     "running": {

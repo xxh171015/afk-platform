@@ -1,0 +1,4 @@
+# Tiny fixture for tests. Rewrite repo and base to a throwaway clone before a real run.
+repo: local
+base: HEAD
+kind: ticket

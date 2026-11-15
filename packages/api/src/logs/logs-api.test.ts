@@ -464,6 +464,63 @@ describe("log retention", () => {
     );
     expect((await readLog(runId)).body.text).toBe("");
   });
+
+  it("clears result of done and failed jobs older than 7 days and leaves newer jobs and the Run summary", async () => {
+    const expired = new FakeWorker(api.url, "e", []);
+    const kept = new FakeWorker(api.url, "k", []);
+    const oldRun = await claimedRun(expired, "old-job");
+    const liveRun = await claimedRun(kept, "live-job");
+    const SUMMARY = { status: "done", summary: "keep the run" };
+    const USAGE = { inputTokens: 9, outputTokens: 2 };
+    await expired.complete(oldRun.job.id, oldRun.job.attempt, {
+      stage: "implement",
+      outcome: "done",
+      run: { output: SUMMARY, tokenUsage: USAGE },
+    });
+    await kept.complete(liveRun.job.id, liveRun.job.attempt, {
+      stage: "implement",
+      outcome: "done",
+      run: { output: { status: "done" } },
+    });
+    await db.pool.query(
+      `INSERT INTO jobs (type, payload, state, idempotency_key, result, created_at)
+       VALUES ('agent-run', '{}'::jsonb, 'failed', 'old-failed', $1::jsonb, $2),
+              ('agent-run', '{}'::jsonb, 'queued', 'old-queued', $1::jsonb, $2)`,
+      [
+        JSON.stringify({ bulky: true }),
+        new Date(clock.now().getTime() - 8 * DAY * 1000),
+      ],
+    );
+    await db.pool.query("UPDATE jobs SET created_at = $2 WHERE id = $1", [
+      oldRun.job.id,
+      new Date(clock.now().getTime() - 8 * DAY * 1000),
+    ]);
+    await db.pool.query("UPDATE jobs SET created_at = $2 WHERE id = $1", [
+      liveRun.job.id,
+      new Date(clock.now().getTime() - 6 * DAY * 1000),
+    ]);
+
+    await sweep();
+
+    const resultOf = async (sql: string, params: unknown[]) =>
+      (
+        await db.pool.query<{ result: unknown }>(
+          `SELECT result FROM jobs WHERE ${sql}`,
+          params,
+        )
+      ).rows[0]?.result;
+    expect(await resultOf("id = $1", [oldRun.job.id])).toBeNull();
+    expect(await resultOf("id = $1", [liveRun.job.id])).not.toBeNull();
+    expect(await resultOf("idempotency_key = $1", ["old-failed"])).toBeNull();
+    expect(
+      await resultOf("idempotency_key = $1", ["old-queued"]),
+    ).not.toBeNull();
+    const run = await db.pool.query<{
+      output: unknown;
+      token_usage: unknown;
+    }>("SELECT output, token_usage FROM runs WHERE id = $1", [oldRun.runId]);
+    expect(run.rows[0]).toEqual({ output: SUMMARY, token_usage: USAGE });
+  });
 });
 
 describe("orphan run directories at the logs root", () => {

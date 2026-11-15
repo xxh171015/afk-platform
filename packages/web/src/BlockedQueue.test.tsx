@@ -265,6 +265,36 @@ describe("the queue of what waits for a person", () => {
     ).toBeTruthy();
   });
 
+  it("shows the same-reason repeat line and takeover instead of retry", async () => {
+    const { fake } = server(
+      queue({
+        tickets: [
+          ticket(1, "gate-failed", {
+            structuredBrief: structuredBrief({
+              reason: "gate-failed",
+              specDisplayId: "S-1",
+              ticketDisplayId: "T-1",
+              recentBlocked: [
+                { reason: "gate-failed", at: "2026-01-01T00:15:00.000Z" },
+                { reason: "gate-failed", at: "2026-01-01T00:00:00.000Z" },
+              ],
+              brief: brief({ stage: "gate", result: "failed" }),
+            }),
+          }),
+        ],
+      }),
+    );
+    renderWithApp(<BlockedQueue />, fake);
+    await screen.findByTestId("blocked-T-1");
+    const note = card("T-1").getByRole("note");
+    expect(note.textContent).toContain(
+      "上次重试后同一原因再次发生（间隔 15 分钟）",
+    );
+    expect(note.textContent).toContain("接手自己改，或改票后再试");
+    expect(note.textContent).toContain("plat ticket takeover T-1");
+    expect(note.textContent).not.toContain("plat ticket retry");
+  });
+
   it("puts a copy button on every command and does not add write actions for those commands", async () => {
     const { fake } = server(
       queue({
@@ -278,7 +308,7 @@ describe("the queue of what waits for a person", () => {
     await screen.findByTestId("blocked-T-2");
     expect(
       card("T-2").getByRole("button", {
-        name: "复制命令 plat ticket approve-protected T-2",
+        name: "复制命令 plat ticket approve T-2 --protected",
       }),
     ).toBeTruthy();
     expect(

@@ -1,4 +1,4 @@
-import type { StructuredBrief } from "@afk/shared";
+import { type StructuredBrief, sameReasonRepeatLine } from "@afk/shared";
 import { Mono } from "./components/afk/badges.tsx";
 import { CollapsibleCode, CopyCommand } from "./components/afk/code.tsx";
 import { stageLabel } from "./lib/labels.ts";
@@ -21,6 +21,11 @@ export function StructuredBriefView({
     >
       <h2 className="text-sm font-semibold">为什么卡住</h2>
       <p className="leading-6">{brief.summary}</p>
+      {brief.sameReasonRepeatMinutes !== undefined ? (
+        <p className="leading-6">
+          {sameReasonRepeatLine(brief.sameReasonRepeatMinutes)}
+        </p>
+      ) : null}
       {brief.step ? (
         <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           失败步骤 <Mono title={stepMeaning}>{brief.step}</Mono>

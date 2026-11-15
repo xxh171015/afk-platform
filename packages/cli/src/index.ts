@@ -2241,11 +2241,109 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `${id} is ${data.state}`);
     });
   ticketCommands
+    .command("approve <ticket>")
+    .description(
+      "approve a blocked ticket: protected paths, removed tests, a Recheck, or extra protected paths",
+    )
+    .option(
+      "--protected",
+      "accept the protected path changes of a ticket blocked by protected-path-changed",
+    )
+    .option(
+      "--removed-tests",
+      "accept the missing test names of a ticket blocked by tests-removed",
+    )
+    .option(
+      "--recheck",
+      "accept the Recheck of a ticket blocked by recheck-failed",
+    )
+    .option(
+      "--path <paths...>",
+      "approve protected paths for a blocked ticket's next run (then: ticket retry)",
+    )
+    .action(
+      async (
+        id: string,
+        options: {
+          protected?: boolean;
+          removedTests?: boolean;
+          recheck?: boolean;
+          path?: string[];
+        },
+      ) => {
+        const kinds = [
+          options.protected ? "protected" : undefined,
+          options.removedTests ? "removed-tests" : undefined,
+          options.recheck ? "recheck" : undefined,
+          options.path ? "path" : undefined,
+        ].filter((kind): kind is string => kind !== undefined);
+        if (kinds.length !== 1) {
+          throw new Failure(
+            "choose exactly one of --protected, --removed-tests, --recheck, --path <p...>\nUsage: plat ticket approve <ticket> --protected | --removed-tests | --recheck | --path <p...>",
+          );
+        }
+        if (options.protected) {
+          const { data, response, error } = await api().POST(
+            "/tickets/{id}/approve-protected",
+            {
+              params: { path: { id: ticketIdOf(id) } },
+            },
+          );
+          if (!data) throw failureFrom(response, error);
+          print(
+            data,
+            `approved: ${data.approved.join(", ")}; ${id} goes on from the gate`,
+          );
+          return;
+        }
+        if (options.removedTests) {
+          const { data, response, error } = await api().POST(
+            "/tickets/{id}/approve-removed-tests",
+            {
+              params: { path: { id: ticketIdOf(id) } },
+            },
+          );
+          if (!data) throw failureFrom(response, error);
+          const names = data.approved
+            .map((n) => (n.classname ? `${n.classname} ${n.name}` : n.name))
+            .join(", ");
+          print(data, `approved: ${names}; ${id} goes on from the gate`);
+          return;
+        }
+        if (options.recheck) {
+          const { data, response, error } = await api().POST(
+            "/tickets/{id}/approve-recheck",
+            {
+              params: { path: { id: ticketIdOf(id) } },
+            },
+          );
+          if (!data) throw failureFrom(response, error);
+          print(data, `approved ${data.sha}; ${id} goes on from the merge`);
+          return;
+        }
+        if (options.path) {
+          const { data, response, error } = await api().POST(
+            "/tickets/{id}/allow-paths",
+            {
+              params: { path: { id: ticketIdOf(id) } },
+              body: { paths: options.path },
+            },
+          );
+          if (!data) throw failureFrom(response, error);
+          print(
+            data,
+            `approved for ${id}: ${data.allowed.join(", ")}; retry it with: plat ticket retry ${id} --mode continue|restart`,
+          );
+        }
+      },
+    );
+  ticketCommands
     .command("approve-protected <ticket>")
     .description(
       "accept the protected path changes of a ticket blocked by protected-path-changed",
     )
     .action(async (id: string) => {
+      io.stderr(`use plat ticket approve ${id} --protected\n`);
       const { data, response, error } = await api().POST(
         "/tickets/{id}/approve-protected",
         {
@@ -2262,6 +2360,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .command("approve-recheck <ticket>")
     .description("accept the Recheck of a ticket blocked by recheck-failed")
     .action(async (id: string) => {
+      io.stderr(`use plat ticket approve ${id} --recheck\n`);
       const { data, response, error } = await api().POST(
         "/tickets/{id}/approve-recheck",
         {
@@ -2277,6 +2376,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "accept the missing test names of a ticket blocked by tests-removed",
     )
     .action(async (id: string) => {
+      io.stderr(`use plat ticket approve ${id} --removed-tests\n`);
       const { data, response, error } = await api().POST(
         "/tickets/{id}/approve-removed-tests",
         {
@@ -2295,6 +2395,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "approve protected paths for a blocked ticket's next run (then: ticket retry)",
     )
     .action(async (id: string, paths: string[]) => {
+      io.stderr(`use plat ticket approve ${id} --path ${paths.join(" ")}\n`);
       const { data, response, error } = await api().POST(
         "/tickets/{id}/allow-paths",
         { params: { path: { id: ticketIdOf(id) } }, body: { paths } },
@@ -2421,9 +2522,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `sent a test card to ${data.chatId}`);
     });
 
-  program
-    .command("run")
-    .description("runs")
+  const runCommands = program.command("run").description("runs");
+  runCommands
+    .command("show <run>")
+    .description(
+      "a run: stage, result, token usage and structured output, e.g. R-5",
+    )
+    .action(async (id: string) => {
+      const parsed = parseDisplayId(id);
+      if (parsed?.kind !== "run") {
+        throw new Failure(`${id} is not a run id like R-5`);
+      }
+      const { data, response, error } = await api().GET("/runs/{id}", {
+        params: { path: { id: parsed.id } },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `${data.displayId}  ${data.stage}${data.axis ? ` (${data.axis})` : ""} #${data.attempt}  ${data.result ?? "running"}`,
+      );
+    });
+  runCommands
     .command("logs <run>")
     .description("print the log of a run, e.g. R-5")
     .option(

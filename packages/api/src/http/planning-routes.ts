@@ -478,8 +478,9 @@ const ImportWarning = z.object({
     "module-overlap",
     "old-contract-pending",
     "old-contract-started",
+    "critical-path",
   ]),
-  tickets: z.tuple([z.string(), z.string()]),
+  tickets: z.array(z.string()).min(1),
   repoId: Id,
   message: z.string(),
 });

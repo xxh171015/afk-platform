@@ -1634,3 +1634,36 @@ describe("Recheck", () => {
     ).toBe(404);
   });
 });
+
+describe("gate test case names", () => {
+  const CASES = [
+    { name: "exports a csv", classname: "orders", status: "passed" as const },
+    { name: "keeps the order", classname: "orders", status: "passed" as const },
+  ];
+  const facts = (commitSha: string) => ({
+    commitSha,
+    configSha: "cfg",
+    treeSha: "tree-same",
+    configBlob: "gates.yaml-blob",
+    commandResults: [{ name: "test", exitCode: 0, ms: 10 }],
+    testsTotal: 2,
+    testsSkipped: 0,
+    testCases: CASES,
+  });
+
+  it("keeps one row when the same tree and config are gated twice", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", { outcome: "failed", gate: facts("sha-one") });
+    await stage("gate-fix", IMPLEMENT_DONE);
+    await stage("gate", { outcome: "passed", gate: facts("sha-two") });
+    const names = await db.pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM gate_test_cases",
+    );
+    expect(names.rows[0].n).toBe(1);
+    const gates = await db.pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM gate_results",
+    );
+    expect(gates.rows[0].n).toBe(2);
+  });
+});

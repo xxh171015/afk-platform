@@ -33,7 +33,8 @@ import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
 // cancelled, the spec cancelled or paused) may have freed a slot another spec waits for, so once that transaction
 // commits every running spec of the project gets a pass of its own; the API also passes over every running spec
 // now and then, for any trigger that was missed. Specs take turns: a slot goes to the spec holding fewer, and of two
-// holding as many, to the one that started a ticket longer ago.
+// holding as many, to the one that started a ticket longer ago. Within a spec, startable tickets are picked by
+// longest downstream chain, then by id.
 
 export interface ScheduledTicket {
   ticketId: number;
@@ -294,7 +295,12 @@ export async function scheduleProject(
 // The periodic pass the API makes over every project with a running spec.
 export async function scheduleRunningSpecs(
   pool: pg.Pool,
+  now: Date = new Date(),
 ): Promise<ScheduleResult> {
+  const { expireUnconfirmedBugDrafts } = await import(
+    "../planning/locate-bug.ts"
+  );
+  await expireUnconfirmedBugDrafts(pool, now);
   const projects = await pool.query<{ project_id: number }>(
     "SELECT DISTINCT project_id FROM specs WHERE state = 'running' ORDER BY project_id",
   );
@@ -466,6 +472,7 @@ async function schedulingPass(
 }
 
 // The pending tickets of a spec whose edges are satisfied, each with its incoming edges; slots are not looked at.
+// Ordered by longest downstream chain (all of this spec's edges), then by id.
 async function startableTickets(
   client: pg.PoolClient,
   specId: number,
@@ -485,6 +492,12 @@ async function startableTickets(
     [specId],
   );
   const incoming = new Map<number, IncomingEdge[]>();
+  const outgoing = new Map<number, number[]>();
+  const live = new Set(
+    tickets.rows
+      .filter((ticket) => ticket.state !== "cancelled")
+      .map((ticket) => ticket.id),
+  );
   for (const edge of edges.rows) {
     const blocker = byId.get(edge.from_ticket_id);
     const list = incoming.get(edge.to_ticket_id) ?? [];
@@ -502,7 +515,14 @@ async function startableTickets(
         : { kind: edge.kind, scope: "cross-spec", satisfied: false },
     );
     incoming.set(edge.to_ticket_id, list);
+    if (live.has(edge.from_ticket_id) && live.has(edge.to_ticket_id)) {
+      outgoing.set(edge.from_ticket_id, [
+        ...(outgoing.get(edge.from_ticket_id) ?? []),
+        edge.to_ticket_id,
+      ]);
+    }
   }
+  const chainLength = longestDownstream(live, outgoing);
   return tickets.rows
     .map((ticket) => ({ ...ticket, edges: incoming.get(ticket.id) ?? [] }))
     .filter(
@@ -510,7 +530,32 @@ async function startableTickets(
         ticket.state === "pending" &&
         isRunnable({ state: ticket.state, edges: ticket.edges, limits: [] })
           .runnable,
-    );
+    )
+    .sort((a, b) => {
+      const longer =
+        (chainLength.get(b.id) ?? 1) - (chainLength.get(a.id) ?? 1);
+      return longer !== 0 ? longer : a.id - b.id;
+    });
+}
+
+// Tickets on the longest path starting at each node, counting the node itself. The graph is a DAG (import rejects cycles).
+function longestDownstream(
+  nodes: Iterable<number>,
+  outgoing: Map<number, number[]>,
+): Map<number, number> {
+  const memo = new Map<number, number>();
+  const lengthOf = (id: number): number => {
+    const cached = memo.get(id);
+    if (cached !== undefined) return cached;
+    let best = 1;
+    for (const child of outgoing.get(id) ?? []) {
+      best = Math.max(best, 1 + lengthOf(child));
+    }
+    memo.set(id, best);
+    return best;
+  };
+  for (const id of nodes) lengthOf(id);
+  return memo;
 }
 
 interface Turn {

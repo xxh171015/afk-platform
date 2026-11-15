@@ -307,6 +307,57 @@ describe("the spec list", () => {
     expect(screen.getByText("Order export")).toBeTruthy();
   });
 
+  it("hides empty cancelled specs until the filter to include them is turned on", async () => {
+    const emptyCancelled = spec({
+      id: 20,
+      displayId: "S-20",
+      title: "Empty cancelled",
+      state: "cancelled",
+      repos: [],
+      progress: {
+        total: 0,
+        done: 0,
+        active: 0,
+        blocked: 0,
+        pending: 0,
+        cancelled: 0,
+      },
+    });
+    const withTickets = spec({
+      id: 11,
+      displayId: "S-11",
+      title: "Cancelled with tickets",
+      state: "cancelled",
+      progress: {
+        total: 2,
+        done: 0,
+        active: 0,
+        blocked: 0,
+        pending: 0,
+        cancelled: 2,
+      },
+    });
+    const server = fakeServer({
+      "GET /specs": ({ url }) => ({
+        json: {
+          specs:
+            url.searchParams.get("includeEmptyCancelled") === "true"
+              ? [emptyCancelled, withTickets]
+              : [withTickets],
+          nextCursor: null,
+        },
+      }),
+    });
+    renderWithApp(<SpecList />, server);
+    expect(await screen.findByText("Cancelled with tickets")).toBeTruthy();
+    expect(screen.queryByText("Empty cancelled")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "包括 0 票的取消需求" }),
+    );
+    expect(await screen.findByText("Empty cancelled")).toBeTruthy();
+    expect(screen.getByText("Cancelled with tickets")).toBeTruthy();
+  });
+
   it("says so when there is nothing yet", async () => {
     renderWithApp(
       <SpecList />,

@@ -8,6 +8,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildAcceptancePack } from "../acceptance/pack.ts";
+import { buildBundle } from "../stages/bundle.ts";
+import { findPassingGate } from "../stages/gate-records.ts";
 import { assertMigrated, MIGRATIONS_FOLDER, migrate } from "./migrate.ts";
 import { createTestDatabase, type TestDatabase } from "./test-db.ts";
 
@@ -21,6 +24,7 @@ const ENTITY_TABLES = [
   "finalizations",
   "findings",
   "gate_results",
+  "gate_test_cases",
   "instance",
   "jobs",
   "links",
@@ -568,6 +572,132 @@ describe("final-fix findings already on disk", () => {
         { body: "backend suggestion", resolution: "acceptance-pack" },
         { body: "frontend must-fix", resolution: "unhandled" },
         { body: "failed-spec must-fix", resolution: "unhandled" },
+      ]);
+    } finally {
+      rmSync(before, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("gate test case names moved onto a content-hash table", () => {
+  const CASES = [
+    { name: "exports a csv", classname: "orders", status: "passed" },
+    { name: "rejects empty", classname: "orders", status: "failed" },
+    {
+      name: "flakes then passes",
+      classname: "orders",
+      status: "passed",
+      flaky: true,
+    },
+  ];
+  const NAMES = CASES.map((c) => ({ classname: c.classname, name: c.name }));
+
+  it("keeps name compare, reused passes and the acceptance pack after migrating rows written on the old column", async () => {
+    const before = mkdtempSync(join(tmpdir(), "afk-migrations-"));
+    try {
+      cpSync(MIGRATIONS_FOLDER, before, { recursive: true });
+      const journalPath = join(before, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+      journal.entries = omitFrom(journal.entries, "0082_gate_test_cases");
+      writeFileSync(journalPath, JSON.stringify(journal));
+      await migrate(db.pool, before);
+
+      await db.pool.query("INSERT INTO projects (name) VALUES ('shop')");
+      await db.pool.query(
+        "INSERT INTO repos (project_id, url, name) VALUES (1, 'git@x:backend', 'backend')",
+      );
+      await db.pool.query(
+        `INSERT INTO specs (project_id, type, slug, title, state)
+         VALUES (1, 'feature', 'export', 'Export', 'running')`,
+      );
+      await db.pool.query(
+        `INSERT INTO tickets (spec_id, repo_id, type, title, state, acceptance_criteria)
+         VALUES (1, 1, 'implementation', 'A', 'done', ARRAY['exports orders', 'empty range is refused'])`,
+      );
+      await db.pool.query(
+        `INSERT INTO jobs (type, payload, state, idempotency_key)
+         VALUES ('gate', $1::jsonb, 'queued', 'T-1:1:gate:1')`,
+        [
+          JSON.stringify({
+            ticketId: 1,
+            specId: 1,
+            repoId: 1,
+            stage: "implement",
+            contentVersion: 1,
+          }),
+        ],
+      );
+      await db.pool.query(
+        `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, result, output)
+         VALUES (1, 1, 1, 'implement', 'done', $1::jsonb)`,
+        [
+          JSON.stringify({
+            acceptance: {
+              "exports orders": ["exports a csv"],
+              "empty range is refused": ["rejects empty"],
+            },
+          }),
+        ],
+      );
+      await db.pool.query(
+        `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, result, head_sha)
+         VALUES (1, 1, 1, 'gate', 'passed', 'aaa'),
+                (1, 1, 1, 'merge', 'merged', 'aaa')`,
+      );
+      await db.pool.query(
+        `INSERT INTO gate_results (
+           repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped,
+           test_cases, kind, tree_sha, config_blob
+         ) VALUES (
+           1, 'aaa', 'cfg', $1::jsonb, 3, 0, $2::jsonb, 'gate', 'tree-same', 'gates.yaml-blob'
+         )`,
+        [
+          JSON.stringify([{ name: "test", exitCode: 0, ms: 10 }]),
+          JSON.stringify(CASES),
+        ],
+      );
+
+      await migrate(db.pool);
+
+      const reused = await findPassingGate(db.pool, 1, {
+        tree: "tree-same",
+        configBlob: "gates.yaml-blob",
+      });
+      expect(reused?.testCases).toEqual(CASES);
+
+      const bundle = await buildBundle(db.pool, {
+        id: 1,
+        attempt: 1,
+        payload: {
+          ticketId: 1,
+          stage: "implement",
+          contentVersion: 1,
+        },
+      });
+      expect(bundle?.gateBaseline).toEqual({
+        tests: 3,
+        skipped: 0,
+        names: NAMES,
+      });
+      expect(bundle?.ticketGateNames).toEqual(NAMES);
+
+      const pack = await buildAcceptancePack(db.pool, 1, new Date());
+      expect(pack.repos[0]?.flakyTests).toEqual([
+        { name: "flakes then passes", classname: "orders" },
+      ]);
+      expect(pack.repos[0]?.tickets[0]?.criteria).toEqual([
+        {
+          text: "exports orders",
+          tests: ["exports a csv"],
+          status: "verified",
+          reason: null,
+        },
+        {
+          text: "empty range is refused",
+          tests: ["rejects empty"],
+          status: "unverified",
+          reason: "failed: rejects empty",
+        },
       ]);
     } finally {
       rmSync(before, { recursive: true, force: true });

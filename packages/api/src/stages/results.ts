@@ -25,6 +25,7 @@ import {
 } from "../scheduling/scheduler.ts";
 import { applyAutoRetry } from "./auto-retry.ts";
 import { contractsOf } from "./contracts.ts";
+import { rememberGateTestCases } from "./gate-records.ts";
 import { createFixTicket } from "./integration.ts";
 import { mergeRecheckIntoOutput, recheckTriggerOf } from "./recheck-hit.ts";
 import { reviewOutcomeWithRulings } from "./review-rulings.ts";
@@ -610,15 +611,16 @@ export async function writeFacts(
 
   if (result?.gate) {
     const gate = result.gate;
+    const testCasesHash = await rememberGateTestCases(client, gate.testCases);
     // The same commit can be gated again (a rerun after a restart): the latest facts win.
     await client.query(
-      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases, kind,
+      `INSERT INTO gate_results (repo_id, commit_sha, config_sha, command_results, tests_total, tests_skipped, test_cases_hash, kind,
          tree_sha, config_blob)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (repo_id, commit_sha, kind) DO UPDATE SET config_sha = EXCLUDED.config_sha,
          tree_sha = EXCLUDED.tree_sha, config_blob = EXCLUDED.config_blob,
          command_results = EXCLUDED.command_results, tests_total = EXCLUDED.tests_total,
-         tests_skipped = EXCLUDED.tests_skipped, test_cases = EXCLUDED.test_cases`,
+         tests_skipped = EXCLUDED.tests_skipped, test_cases_hash = EXCLUDED.test_cases_hash`,
       [
         owner.repo_id,
         gate.commitSha,
@@ -626,7 +628,7 @@ export async function writeFacts(
         JSON.stringify(gate.commandResults),
         gate.testsTotal ?? null,
         gate.testsSkipped ?? null,
-        gate.testCases === undefined ? null : JSON.stringify(gate.testCases),
+        testCasesHash,
         gate.kind,
         gate.treeSha ?? null,
         gate.configBlob ?? null,

@@ -143,11 +143,18 @@ export const instance = pgTable(
     lastNotifiedEventId: bigint("last_notified_event_id", { mode: "number" })
       .notNull()
       .default(0),
+    // Beijing calendar date (YYYY-MM-DD) of the last daily digest. A conditional update claims the day
+    // so a pass and a restart send at most once (docs/optimization-plan.md 8.6).
+    digestSentOn: text("digest_sent_on"),
   },
   (t) => [
     check("instance_singleton_check", sql`${t.singleton}`),
     check("instance_id_check", sql`${t.id} ~ '^[0-9a-f]{6}$'`),
     check("instance_disk_noticed_check", oneOf(t.diskNoticed, DISK_NOTICED)),
+    check(
+      "instance_digest_sent_on_check",
+      sql`${t.digestSentOn} is null or ${t.digestSentOn} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
   ],
 );
 
@@ -695,6 +702,12 @@ export const findings = pgTable(
   ],
 );
 
+// JUnit case lists addressed by content hash, so gate_results does not store the same names on every run.
+export const gateTestCases = pgTable("gate_test_cases", {
+  hash: text("hash").primaryKey(),
+  cases: jsonb("cases").notNull(),
+});
+
 export const gateResults = pgTable(
   "gate_results",
   {
@@ -713,8 +726,8 @@ export const gateResults = pgTable(
     commandResults: jsonb("command_results").notNull().default([]),
     testsTotal: integer("tests_total"),
     testsSkipped: integer("tests_skipped"),
-    // Every case of the JUnit report ({ name, classname, status }); the acceptance pack checks criteria against it.
-    testCases: jsonb("test_cases"),
+    // SHA-256 of the JUnit list stored in gate_test_cases.
+    testCasesHash: text("test_cases_hash").references(() => gateTestCases.hash),
     createdAt: createdAt(),
   },
   (t) => [

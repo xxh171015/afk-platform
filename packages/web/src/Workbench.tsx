@@ -11,6 +11,7 @@ import {
 import type { ReactNode } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { Mono, Pill } from "./components/afk/badges.tsx";
+import { CopyCommand } from "./components/afk/code.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { ErrorState, Skeleton, StaleNotice } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
@@ -129,6 +130,50 @@ function ItemLink({
         </div>
       ) : null}
     </a>
+  );
+}
+
+function StaleGroup({
+  items,
+}: {
+  items: {
+    id: number;
+    displayId: string;
+    title: string;
+    state: string;
+    command: string | null;
+    note: string | null;
+  }[];
+}) {
+  return (
+    <div className="border-b">
+      <h3 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+        放了很久
+      </h3>
+      {items.map((item) => (
+        <div key={`stale-${item.id}`} className="px-2 py-3">
+          <a
+            href={paths.spec(item.id)}
+            className="group flex min-w-0 items-start gap-2 text-[13px] hover:bg-accent/50"
+          >
+            <span className="max-w-[45%] shrink-0 break-all font-mono text-xs text-muted-foreground">
+              {item.displayId}
+            </span>
+            <span className="min-w-0 flex-1 break-words font-medium">
+              {item.title}
+            </span>
+            <StatusBadge kind="spec" code={item.state} />
+          </a>
+          <div className="mt-2">
+            {item.command ? (
+              <CopyCommand command={item.command} />
+            ) : (
+              <p className="text-xs text-muted-foreground">{item.note}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -302,6 +347,9 @@ export function Workbench() {
                     />
                   </ItemLink>
                 ))}
+                {(data.waiting.stale ?? []).length > 0 ? (
+                  <StaleGroup items={data.waiting.stale ?? []} />
+                ) : null}
               </>
             )}
           </Quadrant>

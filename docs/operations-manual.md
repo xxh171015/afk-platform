@@ -34,6 +34,7 @@ scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只
 - 前提：3000、5173 端口空着（旧的 API/worker 要先停）。
 - 启动后：API `http://127.0.0.1:3000`，页面 `http://127.0.0.1:5173`。终端里 Ctrl-C 停全部（worker 会先中止手头的 run，最多等 60 秒；再按一次立即全停）。
 - 这个终端要一直开着。平台停了，spec 不会前进，但已有数据都在 Postgres 里，重启后接着做。
+- 升级之后、接新需求之前先跑金丝雀（见 [1.5](#15-金丝雀)）。`up.sh` 只提示，不自动跑。
 
 ### 1.2 接入一个项目（每个项目一次）
 
@@ -121,6 +122,28 @@ grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `d
 
 - 文档第一行是版本标记（平台版本、skills SHA、项目和仓库）；平台版本只写在仓库根 `package.json` 的 `version`，改了平台、想让规划过的人知道时手动加一，文档是否过期则看整份比对；开头的分流表说明哪些事去平台（to-spec、to-tickets、implement 读票、code-review 找 spec，用 `plat`），哪些留在代码托管上（wayfinder、triage、把 PR 当请求，用 `gh` 或 `glab`）。多个仓库且登记了契约路径时，文档会自带跨仓库的规则，不用再手工补。
 - 之后每次 `plat spec create` 和 `plat tickets import` 都会检查两件事，只告警，不改变命令的结果和退出码：规划仓库里的 `docs/agents/issue-tracker.md` 和现在重新生成的结果是否整份一致（模板更新、项目配置改了、有人手改过都会发现），以及规划仓库里的 afk-setup 和各个规划 skill 是否是平台的版本（只看规划仓库里的 `.agents/skills`、`.claude/skills`、`.cursor/skills`，用户级的不算）。告警里会写出更新命令 `plat sync`。
+
+### 1.5 金丝雀
+
+升级平台或刚 `up.sh` 起来之后，接新需求前跑一次：
+
+```sh
+scripts/canary.sh --project <id>
+```
+
+在平台仓库的 checkout 里跑（规划仓库也是它时最省事）。项目编号 `--project` 必填；API 地址用 `--api-url`，省略则和其它 `plat` 命令一样走 `$AFK_API_URL` 或 `plat connect` 记住的地址。
+
+脚本只用 `plat --json`：建一个 improvement 需求，导入 `docs/canary/` 里那张固定的票（每次只把一个带日期时间的字符串写进票正文，agent 去改 `docs/canary/stamp.txt`），`confirm`，然后轮询。默认在票全部 `done` 后取消，收尾还没开 PR。需要把收尾也验一遍时加 `--through-final`，等到 `awaiting-review` 再取消。
+
+停下后逐项打印三项检查，任一项 `fail` 都以非零退出：
+
+| 检查 | 含义 |
+| --- | --- |
+| `token usage` | 这次 Run 上记下了 token 用量（`tokenUsage` / 需求上的 `usageByStage`） |
+| `decisions` | implement 的结构化输出里有 `decisions` 数组（可以为空，但字段必须在） |
+| `test names` | 门禁结果里有用例名（`gateResults.testCases`） |
+
+票 `blocked` 或需求 `paused` 时打印原因码，取消需求，以非零退出。取消后轮询清理，再用 `git ls-remote` 确认没有这个需求的 `spec/*`、`agent/*` 分支，也没有开着的 PR；有残留就打印 `leftover:` 并以非零退出。
 
 ## 2. 场景 A：只有后端
 
@@ -259,8 +282,8 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | 情况                                                                 | 做法                                                                                                                                                                                                                                                                                         |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 票 blocked，想让它再试一次                                           | `plat ticket retry T-n`（`--mode continue` 接着做 / `--mode restart` 重来；可选 `--note "…"` 只对下一次 Run 有效）。页面待处理和票页也能写这句说明再重试。                                                                                                                                   |
-| 门禁发现改了保护路径，且你同意                                       | `plat ticket approve-protected T-n`，再 retry                                                                                                                                                                                                                                                |
-| 票需要改某个保护路径但文件里没批准                                   | `plat ticket allow-path T-n <路径>`，再 retry                                                                                                                                                                                                                                                |
+| 门禁发现改了保护路径，且你同意                                       | `plat ticket approve T-n --protected`，再 retry                                                                                                                                                                                                                                              |
+| 票需要改某个保护路径但文件里没批准                                   | `plat ticket approve T-n --path <路径>`，再 retry                                                                                                                                                                                                                                            |
 | 票的描述有问题                                                       | `plat ticket view T-n --md > t.md`，改完 `plat ticket edit T-n --file t.md`（只对 pending / blocked 的票，可改标题、正文、模块、已批准的保护路径，验收标准从正文重新解析；改仓库、类型、依赖要取消后追加）                                                                                   |
 | 漏了票或要拆票                                                       | `plat tickets import S-n <目录> --append`（立即生效，可用 `T-n` 引用已有票）；拆票时再 `plat ticket cancel T-n` 旧票                                                                                                                                                                         |
 | 不要这张票了                                                         | `plat ticket cancel T-n`（`--cascade` 一并取消下游）                                                                                                                                                                                                                                         |

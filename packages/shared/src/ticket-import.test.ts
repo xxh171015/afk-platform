@@ -251,8 +251,10 @@ describe("module overlap warnings", () => {
 
   it("does not warn when the tickets are connected, directly or transitively", () => {
     const modules = ["src/orders/**"];
+    const overlap = (input: unknown) =>
+      warningsOf(input).filter((w) => w.type === "module-overlap");
     expect(
-      warningsOf(
+      overlap(
         file(
           ticket("a", { modules }),
           ticket("b", { modules, blocked_by: ["a"] }),
@@ -260,7 +262,7 @@ describe("module overlap warnings", () => {
       ),
     ).toEqual([]);
     expect(
-      warningsOf(
+      overlap(
         file(
           ticket("a", { modules }),
           ticket("mid", { modules: ["docs/**"], blocked_by: ["a"] }),
@@ -644,6 +646,95 @@ describe("appending to a spec that already has tickets", () => {
     expect(appendPlan(file(ticket("plain")))).toMatchObject({
       ok: true,
       warnings: [],
+    });
+  });
+});
+
+describe("critical path warnings", () => {
+  const warningsOf = (input: unknown, concurrency?: number) => {
+    const result = planImport(input, repos, 12, undefined, "", concurrency);
+    if (!result.ok) throw new Error(result.errors.join("; "));
+    return result.warnings;
+  };
+
+  it("warns when a chain is more than two thirds of the tickets, naming the count, length and concurrency", () => {
+    const warnings = warningsOf(
+      file(
+        ticket("a"),
+        ticket("b", { blocked_by: ["a"] }),
+        ticket("c", { blocked_by: ["b"] }),
+        ticket("d"),
+      ),
+      4,
+    );
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        type: "critical-path",
+        tickets: ["a", "b", "c"],
+        message: "4 张票里 3 张串成一条线，并发 4 用不上",
+      }),
+    ]);
+  });
+
+  it("does not warn when the longest chain is at most two thirds of the tickets", () => {
+    expect(
+      warningsOf(
+        file(
+          ticket("a"),
+          ticket("b", { blocked_by: ["a"] }),
+          ticket("c"),
+          ticket("d"),
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      warningsOf(
+        file(
+          ticket("a"),
+          ticket("b", { blocked_by: ["a"] }),
+          ticket("c", { blocked_by: ["b"] }),
+          ticket("d", { blocked_by: ["c"] }),
+          ticket("e"),
+          ticket("f"),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("warns on append when the merged graph's critical path is over two thirds", () => {
+    const result = planImport(
+      file(
+        ticket("b", { blocked_by: ["T-1"] }),
+        ticket("c", { blocked_by: ["b"] }),
+      ),
+      repos,
+      12,
+      {
+        tickets: [
+          {
+            key: "T-1",
+            repo: "backend",
+            repoId: 1,
+            type: "implementation",
+            state: "pending",
+            modules: ["src/a/**"],
+          },
+        ],
+        cancelled: [],
+        edges: [],
+      },
+      "",
+      2,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      warnings: [
+        {
+          type: "critical-path",
+          tickets: ["T-1", "b", "c"],
+          message: "3 张票里 3 张串成一条线，并发 2 用不上",
+        },
+      ],
     });
   });
 });
