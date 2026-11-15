@@ -1,24 +1,6 @@
 # 审查校准的答案。只在审查跑完、打分时读；不要放进审查 agent 的上下文。
 # type: user-story 违反需求或票的验收标准；standards 违反仓库的 AGENTS.md。
 # lines: 应用 change.patch 之后文件里的行号范围。
-- sample: tiny
-  id: us-1
-  type: user-story
-  file: src/app.ts
-  lines: "6-7"
-  description: skipped the negative check the story asked for
-- sample: tiny
-  id: st-1
-  type: standards
-  file: src/app.ts
-  lines: "10-10"
-  description: skipped test leftover
-- sample: tiny
-  id: miss-1
-  type: user-story
-  file: src/app.ts
-  lines: "2-2"
-  description: unused greet path
 - sample: s14-backend-batch-ship
   id: s14-1
   type: user-story
