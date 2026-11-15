@@ -2110,19 +2110,16 @@
                             "enum": [
                               "module-overlap",
                               "old-contract-pending",
-                              "old-contract-started"
+                              "old-contract-started",
+                              "critical-path"
                             ]
                           },
                           "tickets": {
                             "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ]
+                            "items": {
+                              "type": "string"
+                            },
+                            "minItems": 1
                           },
                           "repoId": {
                             "type": "integer",
