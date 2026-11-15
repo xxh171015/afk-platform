@@ -144,7 +144,7 @@ describe("structuredBrief", () => {
     ).toEqual([
       {
         label: "批准这次改动",
-        command: "plat ticket approve-recheck T-12",
+        command: "plat ticket approve T-12 --recheck",
       },
     ]);
   });
@@ -177,7 +177,7 @@ describe("structuredBrief", () => {
     ).toEqual([
       {
         label: "批准删掉的测试",
-        command: "plat ticket approve-removed-tests T-12",
+        command: "plat ticket approve T-12 --removed-tests",
       },
     ]);
   });
@@ -208,7 +208,7 @@ describe("structuredBrief", () => {
     ).toEqual([
       {
         label: "批准保护路径",
-        command: "plat ticket approve-protected T-12",
+        command: "plat ticket approve T-12 --protected",
       },
       {
         label: "再重试",

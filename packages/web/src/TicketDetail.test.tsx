@@ -451,7 +451,7 @@ describe("the ticket page", () => {
     await screen.findByRole("note");
     expect(
       screen.getByRole("button", {
-        name: "复制命令 plat ticket approve-protected T-4",
+        name: "复制命令 plat ticket approve T-4 --protected",
       }),
     ).toBeTruthy();
     expect(
@@ -534,7 +534,7 @@ describe("the ticket page", () => {
     renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(
       await screen.findByRole("button", {
-        name: "复制命令 plat ticket approve-recheck T-4",
+        name: "复制命令 plat ticket approve T-4 --recheck",
       }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "批准这次改动" }));
@@ -576,7 +576,7 @@ describe("the ticket page", () => {
     renderWithApp(<TicketDetail ticketId={4} />, server);
     expect(
       await screen.findByRole("button", {
-        name: "复制命令 plat ticket approve-removed-tests T-4",
+        name: "复制命令 plat ticket approve T-4 --removed-tests",
       }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "批准删掉的测试" }));
