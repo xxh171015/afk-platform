@@ -2421,9 +2421,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `sent a test card to ${data.chatId}`);
     });
 
-  program
-    .command("run")
-    .description("runs")
+  const runCommands = program.command("run").description("runs");
+  runCommands
+    .command("show <run>")
+    .description(
+      "a run: stage, result, token usage and structured output, e.g. R-5",
+    )
+    .action(async (id: string) => {
+      const parsed = parseDisplayId(id);
+      if (parsed?.kind !== "run") {
+        throw new Failure(`${id} is not a run id like R-5`);
+      }
+      const { data, response, error } = await api().GET("/runs/{id}", {
+        params: { path: { id: parsed.id } },
+      });
+      if (!data) throw failureFrom(response, error);
+      print(
+        data,
+        `${data.displayId}  ${data.stage}${data.axis ? ` (${data.axis})` : ""} #${data.attempt}  ${data.result ?? "running"}`,
+      );
+    });
+  runCommands
     .command("logs <run>")
     .description("print the log of a run, e.g. R-5")
     .option(

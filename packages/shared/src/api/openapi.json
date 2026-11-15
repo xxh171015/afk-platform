@@ -5868,6 +5868,24 @@
                           },
                           "testsSkipped": {
                             "type": ["integer", "null"]
+                          },
+                          "testCases": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "classname": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["name", "classname"]
+                            }
                           }
                         },
                         "required": [
