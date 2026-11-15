@@ -199,15 +199,6 @@ async function staleSpecs(pool: pg.Pool, now: Date): Promise<StaleSpec[]> {
            WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'awaiting-review'
            ORDER BY e.id DESC LIMIT 1
          ) < $1::timestamptz - interval '3 days'
-       UNION ALL
-       SELECT s.id FROM specs s
-       WHERE s.state = 'cancelled'
-         AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.spec_id = s.id)
-         AND (
-           SELECT e.at FROM events e
-           WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'cancelled'
-           ORDER BY e.id DESC LIMIT 1
-         ) < $1::timestamptz - interval '1 day'
      ) stale ORDER BY id`,
     [now],
   );

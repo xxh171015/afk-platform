@@ -21,7 +21,7 @@ export function waitingCount(queue: {
   planning?: readonly unknown[];
   specs: readonly unknown[];
   locates?: readonly unknown[];
-  stale?: readonly unknown[];
+  stale?: readonly { state?: string }[];
 }): number {
   return (
     queue.tickets.length +
@@ -32,7 +32,7 @@ export function waitingCount(queue: {
     (queue.planning?.length ?? 0) +
     queue.specs.length +
     (queue.locates?.length ?? 0) +
-    (queue.stale?.length ?? 0)
+    (queue.stale ?? []).filter((item) => item.state !== "cancelled").length
   );
 }
 
