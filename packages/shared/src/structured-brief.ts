@@ -158,8 +158,7 @@ function timeOf(at: Date | string): number {
 
 function recommendedActionWhenRepeating(input: StructuredBriefInput): string {
   if (input.ticketDisplayId) return "接手自己改，或改票后再试";
-  if (input.wrapUpStep === "final-e2e") return "放行联调或取消需求";
-  return "取消需求";
+  return "先看原因，带说明重试收尾这一步";
 }
 
 function commandsWhenRepeating(
@@ -172,24 +171,23 @@ function commandsWhenRepeating(
       { label: "改票", command: `plat ticket edit ${ticket} --file …` },
     ];
   }
-  if (input.wrapUpStep === "final-e2e") {
-    return [
-      {
-        label: "跳过联调仍然开 PR",
-        command: `plat spec waive-final ${input.specDisplayId}`,
-      },
-      {
-        label: "取消需求",
-        command: `plat spec cancel ${input.specDisplayId}`,
-      },
-    ];
-  }
-  return [
+  const commands: StructuredBriefCommand[] = [
     {
-      label: "取消需求",
-      command: `plat spec cancel ${input.specDisplayId}`,
+      label: "带说明重试收尾",
+      command: `plat spec retry-final ${input.specDisplayId} --note "…"`,
     },
   ];
+  if (input.wrapUpStep === "final-e2e") {
+    commands.push({
+      label: "跳过联调仍然开 PR",
+      command: `plat spec waive-final ${input.specDisplayId}`,
+    });
+  }
+  commands.push({
+    label: "取消需求",
+    command: `plat spec cancel ${input.specDisplayId}`,
+  });
+  return commands;
 }
 
 const CONTINUE_WITH_NOTE = new Set<string>([

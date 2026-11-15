@@ -498,12 +498,13 @@ function systemNotice(data: Record<string, unknown>): MappedNotice | undefined {
   if (kind === "daily-digest") {
     const projectId = Number(data.projectId);
     const body = typeof data.body === "string" ? data.body : "";
+    const hostKind: HostKind = data.hostKind === "gitlab" ? "gitlab" : "github";
     return {
       notice: {
-        title: "待合并需求",
+        title: `待合并 ${pullAbbrev(hostKind)}`,
         body: `${body}\n${pageUrl("/")}`,
       },
-      hostKind: "github",
+      hostKind,
       projectId: Number.isFinite(projectId) ? projectId : undefined,
     };
   }

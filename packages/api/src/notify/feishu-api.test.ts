@@ -631,6 +631,58 @@ describe("daily digest of awaiting-review specs", () => {
     expect(JSON.stringify(defaultCard?.content)).toContain("入库单");
   });
 
+  it("uses MR wording for a GitLab project's morning digest and PR for GitHub", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const github = await call("POST", "/projects", { name: "shop" });
+    const githubId = github.body.id as number;
+    await call("POST", `/projects/${githubId}/repos`, {
+      url: "https://github.com/me/shop.git",
+      role: "backend",
+    });
+    await pendingSpec(githubId, {
+      title: "导出订单",
+      slug: "export",
+      prUrl: "https://github.com/me/shop/pull/7",
+    });
+    const gitlab = await call("POST", "/projects", { name: "lab" });
+    const gitlabId = gitlab.body.id as number;
+    await call("POST", `/projects/${gitlabId}/repos`, {
+      url: "https://gitlab.com/acme/backend.git",
+      role: "backend",
+    });
+    await pendingSpec(gitlabId, {
+      title: "入库单",
+      slug: "inbound",
+      prUrl: "https://gitlab.com/acme/backend/-/merge_requests/3",
+    });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const events = await digestEvents();
+    const githubBody = events.rows.find(
+      (row) => row.project_id === String(githubId),
+    )?.body;
+    const gitlabBody = events.rows.find(
+      (row) => row.project_id === String(gitlabId),
+    )?.body;
+    expect(githubBody).toContain("PR 开出");
+    expect(githubBody).not.toContain("MR 开出");
+    expect(gitlabBody).toContain("MR 开出");
+    expect(gitlabBody).not.toContain("PR 开出");
+
+    await waitForFeishu(2);
+    const cards = fake.messages.map((row) => JSON.stringify(row.content));
+    expect(
+      cards.some(
+        (card) => card.includes("待合并 PR") && card.includes("导出订单"),
+      ),
+    ).toBe(true);
+    expect(
+      cards.some(
+        (card) => card.includes("待合并 MR") && card.includes("入库单"),
+      ),
+    ).toBe(true);
+  });
+
   it("still notifies macOS when Feishu is closed", async () => {
     await start({ secrets: false });
     const shop = await call("POST", "/projects", { name: "shop" });
@@ -648,7 +700,7 @@ describe("daily digest of awaiting-review specs", () => {
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
     expect(macos.length).toBeGreaterThan(0);
-    expect(macos.some((args) => args.join(" ").includes("待合并需求"))).toBe(
+    expect(macos.some((args) => args.join(" ").includes("待合并 PR"))).toBe(
       true,
     );
     expect(fake.requests).toEqual([]);

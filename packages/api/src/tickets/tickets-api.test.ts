@@ -3335,8 +3335,12 @@ describe("structured brief on blocked tickets", () => {
       .structuredBrief;
     expect(brief.sameReasonRepeatMinutes).toBe(20);
     expect(brief.summary).toBe("模型放弃");
-    expect(brief.recommendedAction).toBe("取消需求");
+    expect(brief.recommendedAction).toBe("先看原因，带说明重试收尾这一步");
     expect(brief.commands).toEqual([
+      {
+        label: "带说明重试收尾",
+        command: 'plat spec retry-final S-1 --note "…"',
+      },
       { label: "取消需求", command: "plat spec cancel S-1" },
     ]);
   });
