@@ -281,6 +281,8 @@ export async function processJob(
         try {
           if ((await api.heartbeat(job)) === "lost") {
             log("the lease is gone, stopping");
+            stoppedBeats = true;
+            clearInterval(heartbeats);
             lost.abort();
           }
         } catch (error) {
