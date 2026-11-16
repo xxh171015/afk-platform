@@ -185,7 +185,10 @@ function staleOf(spec: {
   };
 }
 
-export async function staleSpecs(pool: pg.Pool, now: Date): Promise<StaleSpec[]> {
+export async function staleSpecs(
+  pool: pg.Pool,
+  now: Date,
+): Promise<StaleSpec[]> {
   const ids = await specIdsIn(
     pool,
     `SELECT id FROM (

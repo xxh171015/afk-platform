@@ -2224,6 +2224,7 @@ describe("what a person sees", () => {
       planning: [],
       locates: [],
       specs: [],
+      stale: [],
       items: [],
     });
   });
