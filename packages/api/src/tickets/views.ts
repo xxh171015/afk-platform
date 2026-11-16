@@ -14,6 +14,7 @@ import {
 import { uncoveredUserStories } from "@afk/shared/user-stories";
 import type pg from "pg";
 import { pullRequestRows, readAcceptancePack } from "../acceptance/pack.ts";
+import { autoMergeViewOf } from "../host/auto-merge.ts";
 import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 import { potentialConflictsOf } from "../host/trial-merge.ts";
@@ -948,6 +949,7 @@ export async function specView(
     usageByStage: await usageByStageOf(pool, specId),
     links: (await linksBySpec(pool, specId)) ?? [],
     cleanup: await cleanupJobOf(pool, specId),
+    autoMerge: await autoMergeViewOf(pool, specId, now),
     edges: edges.rows.map((e) => ({
       from: formatDisplayId("ticket", e.from_ticket_id),
       to: formatDisplayId("ticket", e.to_ticket_id),
