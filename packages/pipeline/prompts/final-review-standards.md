@@ -17,7 +17,7 @@
 ```
 <result>
 {
-  "verdict": "pass",
+  "verdict": "fix",
   "mustFix": [{ "file": "src/x.ts", "line": 12, "problem": "..." }],
   "suggestions": ["..."],
   "scopeCreep": [],
@@ -27,4 +27,4 @@
 </result>
 ```
 
-`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`。Standards 轴的 `scopeCreep` 留空数组。没有 `sources` 按现有的无效输出规则处理。
+`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`，没有就是空数组和 `"pass"`。`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`（`line` 可省略），不能写成一句字符串，否则整条结果无效。Standards 轴的 `scopeCreep` 留空数组。没有 `sources` 按现有的无效输出规则处理。
