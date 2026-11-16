@@ -12,9 +12,26 @@ export const MANUAL_MERGE_NOTE =
   "Merging is up to you; the platform never merges.";
 export const AUTO_IMPROVEMENT_MERGE_NOTE =
   "满足条件时平台会在 30 分钟后自动合并，在 PR 上写评论即可阻止";
+export const AUTO_MERGED_MARK = "<!-- afk:auto-merged -->";
+export const AUTO_MERGED_NOTE = "平台已自动合并";
+export const AUTO_MERGED_SECTION = `${AUTO_MERGED_MARK}\n${AUTO_MERGED_NOTE}`;
 
 export function wrapMergeNote(note: string): string {
   return `${MERGE_NOTE_MARK_START}\n${note}\n${MERGE_NOTE_MARK_END}`;
+}
+
+// Replaces the marked merge-note with `section`, leaving what a person wrote outside it.
+export function spliceMergeNote(existing: string, section: string): string {
+  const start = existing.indexOf(MERGE_NOTE_MARK_START);
+  const end = existing.indexOf(MERGE_NOTE_MARK_END);
+  if (start >= 0 && end > start) {
+    const after = end + MERGE_NOTE_MARK_END.length;
+    const before = existing.slice(0, start).trimEnd();
+    const rest = existing.slice(after).replace(/^\n/, "");
+    return [before, section, rest.trimStart()].filter(Boolean).join("\n\n");
+  }
+  const body = existing.trimEnd();
+  return body ? `${body}\n\n${section}` : section;
 }
 
 // GitHub's pull request body limit. Past this the marked section is a summary and a link to the spec.

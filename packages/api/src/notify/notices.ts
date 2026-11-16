@@ -21,6 +21,8 @@ export const NOTICE_KINDS = [
   "locate-succeeded",
   "spec-merged",
   "waiting-other",
+  "auto-merged",
+  "auto-merge-failed",
 ] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -34,6 +36,8 @@ export const NOTICE_TITLES: Record<NoticeKind, string> = {
   "locate-succeeded": "定位成功",
   "spec-merged": "需求已合并",
   "waiting-other": "待处理",
+  "auto-merged": "平台已自动合并",
+  "auto-merge-failed": "自动合并失败",
 };
 
 // Ticket stuck first so a coalesced window never hides a block behind a later merge (ADR 0009).
@@ -47,6 +51,8 @@ export const NOTICE_PRIORITY: readonly NoticeKind[] = [
   "pr-ready",
   "awaiting-review",
   "locate-succeeded",
+  "auto-merge-failed",
+  "auto-merged",
   "spec-merged",
 ];
 
@@ -133,6 +139,7 @@ export interface Shot {
   readyFailedPullIds: number[];
   hostKind: HostKind;
   tokenMerged: boolean;
+  autoMerged?: boolean;
 }
 
 function blockedSummary(
@@ -301,7 +308,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
     );
   }
 
-  if (after.tokenMerged && !before.tokenMerged) {
+  if (after.tokenMerged && !before.tokenMerged && !after.autoMerged) {
     out.push(
       notice({
         kind: "waiting-other",

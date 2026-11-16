@@ -117,6 +117,19 @@ export function readIndexPrLinksPayload(job: {
     : undefined;
 }
 
+export function readAutoMergePayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): AutoMergePayload | undefined {
+  const { specId, pullId, expectedHeadSha } = job.payload;
+  return job.type === "auto-merge" &&
+    typeof specId === "number" &&
+    typeof pullId === "number" &&
+    typeof expectedHeadSha === "string"
+    ? { specId, pullId, expectedHeadSha }
+    : undefined;
+}
+
 export const openPrKeyPrefix = ({ specId, repoId }: OpenPrPayload) =>
   `${formatDisplayId("spec", specId)}:repo-${repoId}:open-pr:`;
 
