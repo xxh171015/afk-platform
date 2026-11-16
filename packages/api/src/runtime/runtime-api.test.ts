@@ -82,9 +82,8 @@ async function runningSpec(keys: string[], projectName = "shop") {
 
 describe("GET /runtime", () => {
   it("returns the platform instance id and empty job lists", async () => {
-    const id = (
-      await db.pool.query<{ id: string }>("SELECT id FROM instance")
-    ).rows[0]?.id;
+    const id = (await db.pool.query<{ id: string }>("SELECT id FROM instance"))
+      .rows[0]?.id;
     const reply = await call("GET", "/runtime");
     expect(reply.status).toBe(200);
     expect(reply.body.instance).toEqual({ id });
