@@ -18,6 +18,7 @@ const info = (url: string): PullRequestInfo => ({
   conflictsWithDefault: false,
   mergeSha: null,
   squashSha: null,
+  humanComments: 0,
 });
 
 function fakeAdapter(name: string): HostAdapter {
@@ -26,6 +27,7 @@ function fakeAdapter(name: string): HostAdapter {
     getPullRequest: async () => info(name),
     getPullRequestBody: async () => name,
     updatePullRequestBody: async () => {},
+    mergePullRequest: async () => info(name),
     markReady: async () => info(name),
     closePullRequest: async () => info(name),
     deleteBranch: async () => "deleted",

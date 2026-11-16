@@ -102,6 +102,7 @@ const PullFacts = {
   conflictsWithDefault: z.boolean().optional(),
   mergeSha: z.string().nullable().optional(),
   squashSha: z.string().nullable().optional(),
+  humanComments: z.number().int().nonnegative().optional(),
 };
 
 export const OpenPrResultSchema = z.object({
@@ -712,7 +713,7 @@ export async function recordHostSync(
     await client.query(
       `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now(),
          merged_at = COALESCE($8::timestamptz, merged_at), merged_by = COALESCE($9, merged_by),
-         conflicts_with_default = $10
+         conflicts_with_default = $10, human_comments = $11
        FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7`,
       [
         pull.id,
@@ -725,6 +726,7 @@ export async function recordHostSync(
         mergedAt,
         pull.mergedBy ?? null,
         pull.conflictsWithDefault === true,
+        pull.humanComments ?? 0,
       ],
     );
     if (pull.mergedByPlatform)

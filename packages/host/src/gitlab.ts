@@ -12,9 +12,9 @@ import {
 
 // The GitLab CE side of HostAdapter. Draft is a `Draft: ` title prefix (not /ready); close is
 // `state_event=close`; a second create for the same source branch is 409 and the open pull request is returned.
-// Nothing here calls GitLab's merge endpoint; a person merges. TokenPermissions are ignored: the PAT's
-// user role is what counts, and the file is reread on every call. A look at an MR also reads its pipeline,
-// approvals and reviewers; 429 carries Retry-After.
+// Merge is mergePullRequest (ADR 0011). TokenPermissions are ignored: the PAT's user role is what counts, and
+// the file is reread on every call. A look at an MR also reads its pipeline, approvals, reviewers and notes;
+// 429 carries Retry-After.
 
 export interface GitLabOptions {
   tokens: TokenSource;
@@ -89,7 +89,12 @@ function info(
   extra: Partial<
     Pick<
       PullRequestInfo,
-      "ci" | "review" | "mergedBy" | "mergedAt" | "mergedByPlatform"
+      | "ci"
+      | "review"
+      | "mergedBy"
+      | "mergedAt"
+      | "mergedByPlatform"
+      | "humanComments"
     >
   > = {},
 ): PullRequestInfo {
@@ -110,6 +115,7 @@ function info(
     conflictsWithDefault: raw.has_conflicts === true,
     mergeSha: namedSha(raw.merge_commit_sha),
     squashSha: namedSha(raw.squash_commit_sha),
+    humanComments: extra.humanComments ?? 0,
   };
 }
 
@@ -191,6 +197,39 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
     return body;
   }
 
+  async function asHumanComments(repo: RepoRef, iid: number): Promise<number> {
+    const notes: {
+      system?: boolean;
+      author?: RawUser | null;
+    }[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const { status, body } = await call(
+        repo,
+        "GET",
+        `/merge_requests/${iid}/notes?per_page=100&page=${page}`,
+      );
+      if (status !== 200)
+        throw new HostError(
+          `GitLab answered ${status} for GET ${repo.owner}/${repo.name}/merge_requests/${iid}/notes`,
+          status,
+        );
+      const batch = Array.isArray(body)
+        ? (body as { system?: boolean; author?: RawUser | null }[])
+        : [];
+      notes.push(...batch);
+      if (batch.length < 100) break;
+      if (page === 50)
+        throw new HostError(
+          `GitLab has more than 5000 notes for ${repo.owner}/${repo.name} pull request ${iid}; not judging by the first of them`,
+          200,
+        );
+    }
+    const humans = notes.filter((note) => note.system !== true);
+    if (humans.length === 0) return 0;
+    const me = await tokenUsername(repo);
+    return humans.filter((note) => usernameOf(note.author) !== me).length;
+  }
+
   async function asReview(repo: RepoRef, iid: number): Promise<ReviewState> {
     const reviewers = await optionalGet(
       repo,
@@ -257,7 +296,30 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
     return can;
   }
 
+  const getPullRequest: HostAdapter["getPullRequest"] = async ({
+    repo,
+    number,
+  }) => {
+    const raw = await read(repo, number);
+    const mergedBy = usernameOf(raw.merged_by) ?? usernameOf(raw.merge_user);
+    const mergedAt = typeof raw.merged_at === "string" ? raw.merged_at : null;
+    let mergedByPlatform = false;
+    if (asState(raw) === "merged" && mergedBy !== null) {
+      const canPush = await canPushDefault(repo);
+      if (!canPush) mergedByPlatform = mergedBy === (await tokenUsername(repo));
+    }
+    return info(raw, {
+      ci: asCi(raw.head_pipeline),
+      review: await asReview(repo, number),
+      mergedBy,
+      mergedAt,
+      mergedByPlatform,
+      humanComments: await asHumanComments(repo, number),
+    });
+  };
+
   return {
+    getPullRequest,
     async getBranchSha({ repo, branch }) {
       const path = `/repository/branches/${encodeURIComponent(branch)}`;
       const read = await call(repo, "GET", path);
@@ -269,23 +331,19 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
         );
       return sha;
     },
-    async getPullRequest({ repo, number }) {
-      const raw = await read(repo, number);
-      const mergedBy = usernameOf(raw.merged_by) ?? usernameOf(raw.merge_user);
-      const mergedAt = typeof raw.merged_at === "string" ? raw.merged_at : null;
-      let mergedByPlatform = false;
-      if (asState(raw) === "merged" && mergedBy !== null) {
-        const canPush = await canPushDefault(repo);
-        if (!canPush)
-          mergedByPlatform = mergedBy === (await tokenUsername(repo));
-      }
-      return info(raw, {
-        ci: asCi(raw.head_pipeline),
-        review: await asReview(repo, number),
-        mergedBy,
-        mergedAt,
-        mergedByPlatform,
-      });
+    async mergePullRequest({ repo, number, expectedHeadSha }) {
+      const merged = await call(
+        repo,
+        "PUT",
+        `/merge_requests/${number}/merge`,
+        { sha: expectedHeadSha },
+      );
+      if (merged.status !== 200)
+        throw new HostError(
+          `GitLab answered ${merged.status} merging pull request ${number}`,
+          merged.status,
+        );
+      return getPullRequest({ repo, number });
     },
     async getPullRequestBody({ repo, number }) {
       return (await read(repo, number)).description ?? "";

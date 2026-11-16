@@ -273,7 +273,7 @@ describe("getPullRequest", () => {
     const before = github.notModified;
     const second = await a.getPullRequest({ repo, number: 1 });
     expect(second).toEqual(first);
-    expect(github.notModified - before).toBe(4); // pull, reviews, check runs, status
+    expect(github.notModified - before).toBe(6); // pull, reviews, check runs, status, issue comments, review comments
   });
 
   it("keeps a bounded number of responses: the one used longest ago is forgotten first", async () => {
@@ -283,7 +283,7 @@ describe("getPullRequest", () => {
         credentials: { appId: "1", installationId: "2", privateKey },
         apiUrl: github.url,
       }),
-      maxCachedResponses: 4, // one pull request is four responses
+      maxCachedResponses: 6, // one pull request is six responses
     });
     await open(a);
     await a.openPullRequest({
@@ -297,7 +297,7 @@ describe("getPullRequest", () => {
     await a.getPullRequest({ repo, number: 2 });
     let before = github.notModified;
     await a.getPullRequest({ repo, number: 2 });
-    expect(github.notModified - before).toBe(4);
+    expect(github.notModified - before).toBe(6);
     before = github.notModified;
     await a.getPullRequest({ repo, number: 1 });
     expect(github.notModified - before).toBe(0);
@@ -458,6 +458,108 @@ describe("deleteBranch", () => {
     await expect(
       adapter().deleteBranch({ repo, branch: "agent/T-1" }),
     ).rejects.toMatchObject({ name: "HostError", status: 403 });
+  });
+});
+
+describe("mergePullRequest", () => {
+  it("merges with the expected head SHA as a merge commit", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    const merged = await a.mergePullRequest({
+      repo,
+      number: 1,
+      expectedHeadSha: opened.headSha,
+    });
+    expect(merged.state).toBe("merged");
+    expect(github.mergeBodies).toEqual([
+      { merge_method: "merge", sha: opened.headSha },
+    ]);
+    expect(github.pullRequests()[0]).toMatchObject({
+      merged: true,
+      state: "closed",
+    });
+  });
+
+  it("throws a HostError when the head SHA does not match", async () => {
+    const a = adapter();
+    await open(a);
+    const error = await a
+      .mergePullRequest({
+        repo,
+        number: 1,
+        expectedHeadSha: "not-the-head",
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(409);
+    expect(github.pullRequests()[0]?.merged).toBe(false);
+  });
+
+  it("throws a HostError when GitHub answers 403", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    github.refuseMerge = true;
+    const error = await a
+      .mergePullRequest({
+        repo,
+        number: 1,
+        expectedHeadSha: opened.headSha,
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(403);
+  });
+
+  it("throws a HostError when the pull request conflicts", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    github.setMergeable(1, false);
+    const error = await a
+      .mergePullRequest({
+        repo,
+        number: 1,
+        expectedHeadSha: opened.headSha,
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(405);
+  });
+});
+
+describe("humanComments", () => {
+  it("counts issue comments, inline comments, and reviews that have a body", async () => {
+    const a = adapter();
+    await open(a);
+    github.addIssueComment(1, { user: "ann", body: "please wait" });
+    github.addPullComment(1, { user: "bob", body: "nits" });
+    github.addReview(1, {
+      user: "cara",
+      state: "APPROVED",
+      body: "looks good",
+    });
+    github.addReview(1, { user: "dan", state: "APPROVED" });
+    expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(3);
+  });
+
+  it("does not count bot comments or the token's own comments", async () => {
+    const a = adapter();
+    await open(a);
+    github.tokenLogin = "ann";
+    github.tokenType = "User";
+    github.addIssueComment(1, {
+      user: "dependabot[bot]",
+      type: "Bot",
+      body: "bump",
+    });
+    github.addIssueComment(1, { user: "ann", body: "from the token" });
+    github.addIssueComment(1, { user: "zed", body: "from a person" });
+    github.addReview(1, {
+      user: "github-actions[bot]",
+      type: "Bot",
+      state: "COMMENTED",
+      body: "ci note",
+    });
+    expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
   });
 });
 
