@@ -3029,6 +3029,16 @@ describe("auto-merge jobs after host-sync", () => {
     expect(await jobsOf("auto-merge")).toEqual([]);
   });
 
+  it("does not queue when the worker did not report a comment count", async () => {
+    await openImprovement({ minutesAgo: 30 });
+    await look([asOpened(1, { ci: "success" })]);
+    expect(await jobsOf("auto-merge")).toEqual([]);
+    expect(
+      (await db.pool.query("SELECT human_comments FROM pull_requests")).rows[0]
+        .human_comments,
+    ).toBeNull();
+  });
+
   it("does not queue when the spec has two pull requests", async () => {
     await openImprovement({
       repos: ["backend", "frontend"],

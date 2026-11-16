@@ -28,7 +28,7 @@ export type {
 } from "./auto-merge.ts";
 export {
   AUTO_MERGE_DELAY_MS,
-  autoMerge,
+  autoMergeForecast,
   autoMergeLine,
   DEFAULT_MERGE_POLICY,
   MERGE_POLICIES,

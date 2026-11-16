@@ -183,47 +183,7 @@ export async function runHostTask(
     }
   }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
-  if (task.kind === "auto-merge") {
-    try {
-      const current = await deps.adapter.getPullRequestBody({
-        repo: repoRef(task.repoUrl),
-        number: task.number,
-      });
-      await deps.adapter.updatePullRequestBody({
-        repo: repoRef(task.repoUrl),
-        number: task.number,
-        body: spliceMergeNote(current, task.section),
-      });
-      log(`updated description of pull request ${task.number}`);
-    } catch (error) {
-      throw new InfrastructureError(
-        error instanceof HostError || error instanceof RangeError
-          ? error.message
-          : `could not update the pull request description: ${String(error)}`,
-      );
-    }
-    try {
-      await deps.adapter.mergePullRequest({
-        repo: repoRef(task.repoUrl),
-        number: task.number,
-        expectedHeadSha: task.expectedHeadSha,
-      });
-      log(`merged pull request ${task.number}`);
-      return { stage: "auto-merge", outcome: "merged" };
-    } catch (error) {
-      if (error instanceof HostError)
-        return {
-          stage: "auto-merge",
-          outcome: "failed",
-          reason: error.message,
-        };
-      throw new InfrastructureError(
-        error instanceof RangeError
-          ? error.message
-          : `could not merge the pull request: ${String(error)}`,
-      );
-    }
-  }
+  if (task.kind === "auto-merge") return autoMerge(deps, task, log);
   if (task.kind === "index-pr-links") {
     if (!deps.repoDir)
       throw new InfrastructureError(
@@ -381,4 +341,59 @@ async function cleanUp(
       `spec cleanup could not do: ${failures.join("; ")}`.slice(0, 1000),
     );
   return { stage: "spec-cleanup", closed };
+}
+
+// Every way this can go wrong ends as a recorded failure that tells a person to merge
+// (ADR 0011: not retried). If the merge does not happen, the old description goes back
+// so the PR does not claim the platform merged it.
+async function autoMerge(
+  deps: HostDeps,
+  task: Extract<HostTask, { kind: "auto-merge" }>,
+  log: (line: string) => void,
+): Promise<Record<string, unknown>> {
+  const repo = (deps.repoRef ?? parseRepoUrl)(task.repoUrl);
+  const failed = (reason: string) => ({
+    stage: "auto-merge",
+    outcome: "failed",
+    reason,
+  });
+  const reasonOf = (error: unknown, doing: string) =>
+    error instanceof HostError || error instanceof RangeError
+      ? error.message
+      : `could not ${doing}: ${String(error)}`;
+  let current: string;
+  try {
+    current = await deps.adapter.getPullRequestBody({
+      repo,
+      number: task.number,
+    });
+    await deps.adapter.updatePullRequestBody({
+      repo,
+      number: task.number,
+      body: spliceMergeNote(current, task.section),
+    });
+    log(`updated description of pull request ${task.number}`);
+  } catch (error) {
+    return failed(reasonOf(error, "update the pull request description"));
+  }
+  try {
+    await deps.adapter.mergePullRequest({
+      repo,
+      number: task.number,
+      expectedHeadSha: task.expectedHeadSha,
+    });
+    log(`merged pull request ${task.number}`);
+    return { stage: "auto-merge", outcome: "merged" };
+  } catch (error) {
+    try {
+      await deps.adapter.updatePullRequestBody({
+        repo,
+        number: task.number,
+        body: current,
+      });
+    } catch {
+      log(`could not put back the description of pull request ${task.number}`);
+    }
+    return failed(reasonOf(error, "merge the pull request"));
+  }
 }

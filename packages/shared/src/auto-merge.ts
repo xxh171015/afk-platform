@@ -26,7 +26,8 @@ export interface AutoMergePull {
   ci: "none" | "pending" | "success" | "failure";
   review: "none" | "approved" | "changes-requested";
   conflictsWithDefault: boolean;
-  humanComments: number;
+  // null until a host-sync has counted them: unknown never counts as "nobody commented".
+  humanComments: number | null;
   headSha: string;
 }
 
@@ -97,7 +98,7 @@ function fail(reason: string): AutoMergeResult {
   return { willMerge: false, reason };
 }
 
-export function autoMerge(input: AutoMergeInput): AutoMergeResult {
+export function autoMergeForecast(input: AutoMergeInput): AutoMergeResult {
   if (parseMergePolicy(input.mergePolicy) !== "auto-improvement") {
     return fail("项目合并策略不是 auto-improvement");
   }
@@ -123,6 +124,9 @@ export function autoMerge(input: AutoMergeInput): AutoMergeResult {
   if (pull.review === "changes-requested") {
     return fail("PR 被要求修改");
   }
+  if (pull.humanComments === null) {
+    return fail("还不知道 PR 上有没有人评论");
+  }
   if (pull.humanComments > 0) {
     return fail("PR 上有人写过评论");
   }
@@ -135,8 +139,12 @@ export function autoMerge(input: AutoMergeInput): AutoMergeResult {
   if (input.hadAutoMergeJob) {
     return fail("已经有过 auto-merge 作业");
   }
-  const entered = input.awaitingReviewAt ?? input.now;
-  const mergeAt = new Date(entered.getTime() + AUTO_MERGE_DELAY_MS);
+  if (!input.awaitingReviewAt) {
+    return fail("找不到需求进入 awaiting-review 的时间");
+  }
+  const mergeAt = new Date(
+    input.awaitingReviewAt.getTime() + AUTO_MERGE_DELAY_MS,
+  );
   return {
     willMerge: true,
     mergeAt,

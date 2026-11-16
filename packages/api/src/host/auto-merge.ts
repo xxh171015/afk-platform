@@ -1,6 +1,7 @@
 import {
   type AutoMergePull,
-  autoMerge,
+  type AutoMergeResult,
+  autoMergeForecast,
   type MergePolicy,
   parseMergePolicy,
 } from "@afk/shared";
@@ -34,7 +35,7 @@ function asPull(row: PullRow): AutoMergePull {
     ci: row.ci as AutoMergePull["ci"],
     review: row.review as AutoMergePull["review"],
     conflictsWithDefault: row.conflicts_with_default === true,
-    humanComments: row.human_comments ?? 0,
+    humanComments: row.human_comments,
     headSha: row.head_sha,
   };
 }
@@ -52,6 +53,43 @@ export type AutoMergeView = {
   event: AutoMergeEventView | null;
 };
 
+// The one place that reads what the forecast needs, for the page and for the queue alike.
+async function forecastFor(
+  db: Pick<pg.Pool, "query">,
+  spec: SpecRow,
+  mergePolicy: string | null | undefined,
+  now: Date,
+): Promise<{ forecast: AutoMergeResult; pulls: PullRow[] }> {
+  const pulls = await db.query<PullRow>(
+    `SELECT id, state, draft, ci, review, conflicts_with_default, human_comments, head_sha
+     FROM pull_requests WHERE spec_id = $1 ORDER BY id`,
+    [spec.id],
+  );
+  const pack = await db.query<{
+    content: { needsDecision?: { kind?: string }[] } | null;
+  }>("SELECT content FROM acceptance_packs WHERE spec_id = $1", [spec.id]);
+  const opened = await db.query<{ at: Date | null }>(
+    `SELECT min(e.at) AS at FROM events e
+     WHERE e.spec_id = $1 AND e.type = 'spec' AND e.to_state = 'awaiting-review'`,
+    [spec.id],
+  );
+  const existing = await db.query(
+    `SELECT 1 FROM jobs WHERE type = 'auto-merge' AND (payload->>'specId')::int = $1 LIMIT 1`,
+    [spec.id],
+  );
+  const forecast = autoMergeForecast({
+    mergePolicy,
+    specType: spec.type,
+    specState: spec.state,
+    pullRequests: pulls.rows.map(asPull),
+    needsDecision: pack.rows[0]?.content?.needsDecision ?? [],
+    awaitingReviewAt: opened.rows[0]?.at ?? null,
+    hadAutoMergeJob: (existing.rowCount ?? 0) > 0,
+    now,
+  });
+  return { forecast, pulls: pulls.rows };
+}
+
 export async function autoMergeViewOf(
   pool: Pick<pg.Pool, "query">,
   specId: number,
@@ -68,22 +106,11 @@ export async function autoMergeViewOf(
   );
   const row = spec.rows[0];
   const mergePolicy = row?.merge_policy;
-  const pulls = await pool.query<PullRow>(
-    `SELECT id, state, draft, ci, review, conflicts_with_default, human_comments, head_sha
-     FROM pull_requests WHERE spec_id = $1 ORDER BY id`,
-    [specId],
-  );
-  const pack = await pool.query<{
-    content: { needsDecision?: { kind?: string }[] } | null;
-  }>("SELECT content FROM acceptance_packs WHERE spec_id = $1", [specId]);
-  const opened = await pool.query<{ at: Date | null }>(
-    `SELECT min(e.at) AS at FROM events e
-     WHERE e.spec_id = $1 AND e.type = 'spec' AND e.to_state = 'awaiting-review'`,
-    [specId],
-  );
-  const existing = await pool.query(
-    `SELECT 1 FROM jobs WHERE type = 'auto-merge' AND (payload->>'specId')::int = $1 LIMIT 1`,
-    [specId],
+  const { forecast } = await forecastFor(
+    pool,
+    { id: specId, type: row?.type ?? "", state: row?.state ?? "" },
+    mergePolicy,
+    now,
   );
   const event = await pool.query<AutoMergeEventView>(
     `SELECT type, reason FROM events
@@ -91,16 +118,6 @@ export async function autoMergeViewOf(
      ORDER BY id DESC LIMIT 1`,
     [specId],
   );
-  const forecast = autoMerge({
-    mergePolicy,
-    specType: row?.type ?? "",
-    specState: row?.state ?? "",
-    pullRequests: pulls.rows.map(asPull),
-    needsDecision: pack.rows[0]?.content?.needsDecision ?? [],
-    awaitingReviewAt: opened.rows[0]?.at ?? null,
-    hadAutoMergeJob: (existing.rowCount ?? 0) > 0,
-    now,
-  });
   return {
     policy: parseMergePolicy(mergePolicy),
     willMerge: forecast.willMerge,
@@ -127,35 +144,14 @@ export async function queueDueAutoMerges(
     [projectId],
   );
   for (const spec of specs.rows) {
-    const pulls = await client.query<PullRow>(
-      `SELECT id, state, draft, ci, review, conflicts_with_default, human_comments, head_sha
-       FROM pull_requests WHERE spec_id = $1 ORDER BY id`,
-      [spec.id],
-    );
-    const pack = await client.query<{
-      content: { needsDecision?: { kind?: string }[] } | null;
-    }>("SELECT content FROM acceptance_packs WHERE spec_id = $1", [spec.id]);
-    const opened = await client.query<{ at: Date | null }>(
-      `SELECT min(e.at) AS at FROM events e
-       WHERE e.spec_id = $1 AND e.type = 'spec' AND e.to_state = 'awaiting-review'`,
-      [spec.id],
-    );
-    const existing = await client.query(
-      `SELECT 1 FROM jobs WHERE type = 'auto-merge' AND (payload->>'specId')::int = $1 LIMIT 1`,
-      [spec.id],
-    );
-    const forecast = autoMerge({
+    const { forecast, pulls } = await forecastFor(
+      client,
+      spec,
       mergePolicy,
-      specType: spec.type,
-      specState: spec.state,
-      pullRequests: pulls.rows.map(asPull),
-      needsDecision: pack.rows[0]?.content?.needsDecision ?? [],
-      awaitingReviewAt: opened.rows[0]?.at ?? null,
-      hadAutoMergeJob: (existing.rowCount ?? 0) > 0,
       now,
-    });
+    );
     if (!forecast.willMerge || !forecast.due) continue;
-    const [pull] = pulls.rows;
+    const [pull] = pulls;
     if (!pull) continue;
     await enqueueAutoMerge(client, {
       specId: spec.id,
