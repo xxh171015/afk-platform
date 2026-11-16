@@ -215,8 +215,23 @@ async function drive(plan: Plan = {}) {
       result = planned ?? { outcome: "pass", run: { output: REVIEW_PASS } };
     } else if (stage === "final-fix") {
       result = { outcome: "done" };
-    } else if (stage === "final-merge") {
-      result = { outcome: "merged", headSha: "final-head" };
+    } else if (stage === "final-tidy") {
+      result = {
+        outcome: "done",
+        run: {
+          output: {
+            status: "done",
+            summary: "tidied",
+            tidied: [0],
+            skipped: [],
+          },
+        },
+      };
+    } else if (stage === "final-merge" || stage === "tidy-merge") {
+      result = {
+        outcome: "merged",
+        headSha: stage === "tidy-merge" ? "tidied" : "final-head",
+      };
     } else if (stage === "e2e") {
       result = e2eRun("passed", "fe-head");
     } else if (stage === "implement") {
@@ -262,17 +277,32 @@ async function completeUntilFinalE2e(): Promise<Claimed> {
           : { outcome: "pass", run: { output: REVIEW_PASS } }
         : stage === "final-fix"
           ? { outcome: "done" }
-          : stage === "final-merge"
-            ? { outcome: "merged", headSha: "h" }
-            : stage === "e2e"
-              ? e2eRun("passed", "fe-head")
-              : stage === "gate"
-                ? { outcome: "passed" }
-                : stage === "review"
-                  ? { outcome: "pass" }
-                  : stage === "implement"
-                    ? { outcome: "done" }
-                    : { outcome: "merged", headSha: "head" };
+          : stage === "final-tidy"
+            ? {
+                outcome: "done",
+                run: {
+                  output: {
+                    status: "done",
+                    summary: "tidied",
+                    tidied: [0],
+                    skipped: [],
+                  },
+                },
+              }
+            : stage === "final-merge" || stage === "tidy-merge"
+              ? {
+                  outcome: "merged",
+                  headSha: stage === "tidy-merge" ? "tidied" : "h",
+                }
+              : stage === "e2e"
+                ? e2eRun("passed", "fe-head")
+                : stage === "gate"
+                  ? { outcome: "passed" }
+                  : stage === "review"
+                    ? { outcome: "pass" }
+                    : stage === "implement"
+                      ? { outcome: "done" }
+                      : { outcome: "merged", headSha: "head" };
     await worker.complete(job.id, job.attempt, { stage, ...result });
   }
   throw new Error("no final e2e job");
@@ -297,6 +327,30 @@ describe("the e2e before the pull requests", () => {
     const seen = await drive();
     expect(seen.some((j) => j.payload.finalE2e)).toBe(false);
     expect(await finalE2e()).toBeUndefined();
+    expect(await queuedOf("open-pr")).toHaveLength(2);
+  });
+
+  it("runs after a tidy-merge even when no repo had a final fix", async () => {
+    await runningSpec();
+    const seen = await drive({
+      review: {
+        1: {
+          outcome: "pass",
+          run: {
+            axis: "standards",
+            output: { ...REVIEW_PASS, suggestions: ["extract helper"] },
+          },
+          findings: [{ kind: "suggestion", body: "extract helper" }],
+        },
+      },
+      finalE2e: { e2e: [e2eRun("passed", "fe-tidied")] },
+    });
+    const e2e = seen.filter((j) => j.payload.finalE2e);
+    expect(e2e.map((j) => j.payload.stage)).toEqual(["e2e"]);
+    expect(seen.some((j) => j.payload.stage === "final-tidy")).toBe(true);
+    expect(seen.some((j) => j.payload.stage === "tidy-merge")).toBe(true);
+    expect(seen.some((j) => j.payload.stage === "final-fix")).toBe(false);
+    expect(await finalE2e()).toMatchObject({ state: "done" });
     expect(await queuedOf("open-pr")).toHaveLength(2);
   });
 

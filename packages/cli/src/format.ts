@@ -21,6 +21,7 @@ export function projectText(project: {
   feishuChatId?: string | null;
   ticketReview?: TicketReviewMode;
   stageModels?: StageModels;
+  tidy?: boolean;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
@@ -32,6 +33,9 @@ export function projectText(project: {
   }
   if (project.ticketReview) {
     lines.push(`ticket-review: ${project.ticketReview}`);
+  }
+  if (project.tidy !== undefined) {
+    lines.push(`tidy: ${project.tidy ? "on" : "off"}`);
   }
   const stageModels = Object.entries(project.stageModels ?? {})
     .filter(([, model]) => model)

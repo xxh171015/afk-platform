@@ -561,6 +561,16 @@ describe("plat", () => {
     expect(
       (await plat("project", "edit", "1", "--ticket-review", "both")).code,
     ).toBe(0);
+    expect((await plat("project", "edit", "1", "--tidy", "off")).code).toBe(0);
+    expect(
+      (await db.pool.query("SELECT tidy FROM projects WHERE id = 1")).rows[0]
+        .tidy,
+    ).toBe(false);
+    const shownTidy = await plat("project", "show", "1");
+    expect(shownTidy.stdout).toContain("tidy: off");
+    expect((await plat("project", "edit", "1", "--tidy", "maybe")).code).toBe(
+      1,
+    );
     expect(
       (await db.pool.query("SELECT ticket_review FROM projects WHERE id = 1"))
         .rows[0].ticket_review,

@@ -9,6 +9,7 @@ export type {
   LocateOutcome,
   LocateOutput,
   ReviewOutput,
+  TidyOutput,
 } from "./agent.ts";
 export {
   CANNOT_PROCEED_REASONS,
@@ -31,6 +32,7 @@ export {
   reviewSources,
   StandardsReviewOutputSchema,
   sourcesCiteAgentsMd,
+  TidyOutputSchema,
   writePrompt,
 } from "./agent.ts";
 export type { ContextInput, RunFacts, RunGate } from "./context.ts";

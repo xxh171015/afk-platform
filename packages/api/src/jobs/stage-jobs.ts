@@ -105,8 +105,8 @@ export function readFinalPayload(
   return { specId, repoId, step: stage as FinalStep };
 }
 
-// final-review and final-fix are agent runs; final-merge puts the fix on the integration branch, so it holds the
-// same lock a ticket's merge does.
+// final-review, final-fix and final-tidy are agent runs; final-merge and tidy-merge put the branch
+// under the same lock a ticket's merge does.
 export async function enqueueFinalJob(
   client: pg.PoolClient,
   target: { specId: number; repoId: number },
@@ -119,7 +119,8 @@ export async function enqueueFinalJob(
     [`${finalJobKeyPrefix(keyParts)}%`],
   );
   let lockKey: string | undefined;
-  if (step === "final-merge") {
+  const lockedMerge = step === "final-merge" || step === "tidy-merge";
+  if (lockedMerge) {
     const { rows } = await client.query<{ slug: string }>(
       "SELECT slug FROM specs WHERE id = $1",
       [target.specId],
@@ -127,7 +128,7 @@ export async function enqueueFinalJob(
     lockKey = `integration:${target.repoId}:spec/${rows[0]?.slug}`;
   }
   const { job } = await enqueueJob(client, {
-    type: step === "final-merge" ? "merge" : "agent-run",
+    type: lockedMerge ? "merge" : "agent-run",
     payload: {
       stage: step,
       specId: target.specId,

@@ -163,12 +163,18 @@ export async function settleFinalization(
       await startOpeningPullRequests(client, specId);
     return;
   }
-  // Only a final fix can have changed what the tickets' e2e saw; with no integration ticket there is nothing to run.
-  const fixed = await client.query(
-    `SELECT 1 FROM runs WHERE spec_id = $1 AND ticket_id IS NULL AND stage = 'final-fix' AND result = 'done' LIMIT 1`,
+  // A final fix or a tidy-merge can have changed what the tickets' e2e saw; with no integration ticket there is nothing to run.
+  const changed = await client.query(
+    `SELECT 1 FROM runs WHERE spec_id = $1 AND ticket_id IS NULL AND (
+       (stage = 'final-fix' AND result = 'done')
+       OR (stage = 'tidy-merge' AND result = 'merged')
+     ) LIMIT 1`,
     [specId],
   );
-  if (fixed.rowCount && (await integrationTickets(client, specId)).length > 0) {
+  if (
+    changed.rowCount &&
+    (await integrationTickets(client, specId)).length > 0
+  ) {
     await client.query(
       "INSERT INTO final_e2e (spec_id, job_floor) VALUES ($1, (SELECT COALESCE(max(id), 0) FROM jobs))",
       [specId],

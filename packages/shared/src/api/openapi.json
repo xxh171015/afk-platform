@@ -133,6 +133,9 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "tidy": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["name"],
@@ -289,6 +292,9 @@
                       },
                       "additionalProperties": false
                     },
+                    "tidy": {
+                      "type": "boolean"
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -328,6 +334,7 @@
                     "feishuChatId",
                     "ticketReview",
                     "stageModels",
+                    "tidy",
                     "repos"
                   ]
                 }
@@ -481,6 +488,9 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "tidy": {
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": false

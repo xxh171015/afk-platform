@@ -644,6 +644,7 @@ describe("project view", () => {
       feishuChatId: null,
       ticketReview: "spec",
       stageModels: {},
+      tidy: true,
       repos: [
         {
           name: "backend",
@@ -842,6 +843,43 @@ describe("project edit", () => {
       (await post(`/specs/${specId}/tickets/import`, importBody(specId, file)))
         .status,
     ).toBe(200);
+  });
+});
+
+describe("tidy", () => {
+  it("defaults to true, stores false, and refuses a non-boolean", async () => {
+    const created = await post("/projects", { name: "shop" });
+    expect(created.status).toBe(201);
+    expect(
+      (
+        await fetch(`${api.url}/projects/${created.body.id}`).then((r) =>
+          r.json(),
+        )
+      ).tidy,
+    ).toBe(true);
+    expect(
+      (await patch(`/projects/${created.body.id}`, { tidy: false })).status,
+    ).toBe(200);
+    expect(
+      (
+        await db.pool.query("SELECT tidy FROM projects WHERE id = $1", [
+          created.body.id,
+        ])
+      ).rows[0].tidy,
+    ).toBe(false);
+    expect(
+      (
+        await fetch(`${api.url}/projects/${created.body.id}`).then((r) =>
+          r.json(),
+        )
+      ).tidy,
+    ).toBe(false);
+    expect(
+      (await patch(`/projects/${created.body.id}`, { tidy: "off" })).status,
+    ).toBe(400);
+    expect(
+      (await post("/projects", { name: "nope", tidy: "off" })).status,
+    ).toBe(400);
   });
 });
 

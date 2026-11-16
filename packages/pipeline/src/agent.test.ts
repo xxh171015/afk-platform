@@ -33,6 +33,7 @@ import {
   reviewOutputSchemaFor,
   reviewSources,
   StandardsReviewOutputSchema,
+  TidyOutputSchema,
   writePrompt,
 } from "./agent.ts";
 import { renderContext } from "./context.ts";
@@ -86,6 +87,27 @@ describe("the structured outputs", () => {
         reason: "old style",
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts a tidy result with tidied indices, and rejects done without them", () => {
+    expect(
+      TidyOutputSchema.safeParse({
+        status: "done",
+        summary: "extracted a helper",
+        tidied: [0],
+        skipped: [{ index: 1, reason: "would change tests" }],
+      }).success,
+    ).toBe(true);
+    expect(
+      TidyOutputSchema.safeParse({ status: "done", summary: "x" }).success,
+    ).toBe(false);
+    expect(
+      TidyOutputSchema.safeParse({
+        status: "cannot-proceed",
+        blockedReason: "agent-gave-up",
+        detail: "nothing safe to tidy",
+      }).success,
+    ).toBe(true);
   });
 
   it("accepts typed decisions on implement, maps a legacy string array to choice, and rejects an unknown kind", () => {
@@ -664,6 +686,7 @@ const STAGES_WITH_PROMPTS = [
   "update-branch",
   "final-review",
   "final-fix",
+  "final-tidy",
   "recheck",
   "diagnose",
   "locate-bug",
@@ -683,6 +706,7 @@ describe("the prompts", () => {
       "merge-fix",
       "update-branch",
       "final-fix",
+      "final-tidy",
     ] as const) {
       const prompt = whole(stage);
       expect(prompt).toContain("cannot-proceed");
@@ -878,6 +902,9 @@ describe("the prompts", () => {
         "/home/agent/.cursor/skills/",
       );
     expect(readFileSync(PROMPTS.mergeFix, "utf8")).toContain("不读 skill");
+    expect(readFileSync(PROMPTS.finalTidy, "utf8")).not.toContain(
+      "/home/agent/.cursor/skills/",
+    );
     expect(readFileSync(PROMPTS.updateBranch, "utf8")).toContain(
       "git merge <defaultBranch>",
     );
@@ -938,6 +965,7 @@ describe("the prompts", () => {
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
     expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
     expect(promptFor("recheck")).toBe(PROMPTS.recheck);
+    expect(promptFor("final-tidy")).toBe(PROMPTS.finalTidy);
   });
 
   const CODE_CHANGING_PROMPTS = [
@@ -947,12 +975,13 @@ describe("the prompts", () => {
     PROMPTS.reviewFix,
     PROMPTS.mergeFix,
     PROMPTS.finalFix,
+    PROMPTS.finalTidy,
     PROMPTS.updateBranch,
     PROMPTS.diagnose,
   ] as const;
 
   it("tells every code-changing stage to run the named commands in run.json's gate", () => {
-    expect(CODE_CHANGING_PROMPTS).toHaveLength(8);
+    expect(CODE_CHANGING_PROMPTS).toHaveLength(9);
     for (const file of CODE_CHANGING_PROMPTS) {
       const prompt = readFileSync(file, "utf8");
       expect(prompt).toContain("/context/run.json");
@@ -978,6 +1007,17 @@ describe("the prompts", () => {
       expect(example.mustFix.length, path).toBeGreaterThan(0);
       expect(schema.safeParse(example).success, path).toBe(true);
     }
+  });
+
+  it("tells final-tidy not to change existing tests, config, or test names, and not to read tdd", () => {
+    const prompt = readFileSync(PROMPTS.finalTidy, "utf8");
+    expect(prompt).toContain("不改已有测试和配置");
+    expect(prompt).toContain("不改测试名");
+    expect(prompt).not.toContain("/home/agent/.cursor/skills/tdd/SKILL.md");
+    const json = /<result>\s*([\s\S]*?)\s*<\/result>/.exec(prompt)?.[1];
+    expect(TidyOutputSchema.safeParse(JSON.parse(json ?? "")).success).toBe(
+      true,
+    );
   });
 
   it("names no concrete build or test command; a mention of AGENTS.md is not a violation", () => {
