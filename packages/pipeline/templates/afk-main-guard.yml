@@ -1,6 +1,7 @@
-# Detection only: the platform never pushes to main or merges a PR (docs/specs/m1-platform.md「推送出口与检测」),
+# Detection only: the platform never pushes to main (docs/specs/m1-platform.md「推送出口与检测」, ADR 0011),
 # and this workflow tells you if anything else did. Copy it to .github/workflows/ of every repo the platform
 # works on. It cannot prevent a push (a free personal account has no branch protection); it makes one visible.
+# A bot push from a pull request already merged by a bot, whose body has the auto-merged marker, is allowed.
 name: afk-main-guard
 
 on:
@@ -28,7 +29,20 @@ jobs:
           set -euo pipefail
           problems=""
           case "$ACTOR$PUSHER" in
-            *"[bot]"*) problems="${problems}- pushed by a bot account (actor: $ACTOR, pusher: $PUSHER)"$'\n' ;;
+            *"[bot]"*)
+              allowed=0
+              if bot_pulls=$(gh api "repos/$REPO/commits/$SHA/pulls"); then
+                allowed=$(echo "$bot_pulls" | jq '[.[] | select(
+                  .merged_at != null
+                  and .base.ref == "main"
+                  and ((.merged_by.login // "") | contains("[bot]"))
+                  and ((.body // "") | contains("<!-- afk:auto-merged -->"))
+                )] | length')
+              fi
+              if [ "${allowed:-0}" -eq 0 ]; then
+                problems="${problems}- pushed by a bot account (actor: $ACTOR, pusher: $PUSHER)"$'\n'
+              fi
+              ;;
           esac
 
           # Every commit this push brought in, not only the newest one (the tip alone for a new branch or when the

@@ -35,6 +35,7 @@ export function adapterByHost(
       of(input.repo).getPullRequestBody(input),
     updatePullRequestBody: async (input) =>
       of(input.repo).updatePullRequestBody(input),
+    mergePullRequest: async (input) => of(input.repo).mergePullRequest(input),
     markReady: async (input) => of(input.repo).markReady(input),
     closePullRequest: async (input) => of(input.repo).closePullRequest(input),
     deleteBranch: async (input) => of(input.repo).deleteBranch(input),

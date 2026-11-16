@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTO_IMPROVEMENT_MERGE_NOTE,
+  AUTO_MERGED_SECTION,
   fitPrDescription,
   GITHUB_PR_BODY_LIMIT,
   PACK_MARK_END,
   PACK_MARK_START,
+  spliceMergeNote,
   splicePackSection,
+  wrapMergeNote,
   wrapPackSection,
 } from "./pr-description.ts";
 
@@ -29,6 +33,25 @@ describe("splicePackSection", () => {
       "A person rewrote this from scratch.",
     );
     expect(splicePackSection(existing, "pack")).toContain("pack");
+  });
+});
+
+describe("spliceMergeNote", () => {
+  it("replaces the marked merge-note and keeps what a person wrote outside", () => {
+    const existing = `Spec: S-1\n\n${wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE)}\n\nI added a note`;
+    expect(spliceMergeNote(existing, AUTO_MERGED_SECTION)).toBe(
+      `Spec: S-1\n\n${AUTO_MERGED_SECTION}\n\nI added a note`,
+    );
+  });
+
+  it("does not overwrite the whole description when the merge-note markers are missing", () => {
+    const existing = "A person rewrote this from scratch.";
+    expect(spliceMergeNote(existing, AUTO_MERGED_SECTION)).toContain(
+      "A person rewrote this from scratch.",
+    );
+    expect(spliceMergeNote(existing, AUTO_MERGED_SECTION)).toContain(
+      AUTO_MERGED_SECTION,
+    );
   });
 });
 

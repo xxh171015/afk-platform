@@ -130,6 +130,7 @@ export function SpecDetail({
     leadTime,
     usageByStage,
     links,
+    autoMerge,
   } = data;
   const timeline = visibleTimeline(timelineEvents);
 
@@ -403,6 +404,8 @@ export function SpecDetail({
           finalRuns={finalRuns}
           repos={spec.repos ?? []}
           hostKind={hostKind}
+          autoMerge={autoMerge}
+          specState={spec.state}
         />
       ) : null}
       {section === "timeline" ? (

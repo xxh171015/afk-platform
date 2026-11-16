@@ -173,7 +173,7 @@ const ticket = (key: string, extra: Record<string, unknown> = {}) => ({
 async function confirmedSpec(
   tickets: Record<string, unknown>[],
   project: Record<string, unknown> = {},
-  { flatNames = false } = {},
+  { flatNames = false, specType = "feature" } = {},
 ) {
   const created = await post("/projects", {
     name: "shop",
@@ -186,7 +186,7 @@ async function confirmedSpec(
   });
   const spec = await post("/specs", {
     projectId: created.body.id,
-    type: "feature",
+    type: specType,
     slug: "order-export",
     title: "Order export",
   });
@@ -3822,6 +3822,74 @@ describe("from the last ticket to a merged spec, with a fake GitHub", {
     await look();
     expect(await waiting()).toEqual([]);
     expect(await specState()).toBe("merged");
+  });
+
+  async function dueForAutoMerge() {
+    await db.pool.query(
+      `UPDATE events SET at = $1
+       WHERE type = 'spec' AND to_state = 'awaiting-review'`,
+      [clock.now()],
+    );
+    clock.advanceSeconds(30 * 60);
+    await db.pool.query(
+      "UPDATE jobs SET not_before = NULL WHERE type = 'host-sync' AND state = 'queued'",
+    );
+  }
+
+  it("auto-merges an improvement spec on an auto-improvement project after 30 minutes", async () => {
+    await confirmedSpec(
+      [ticket("a")],
+      { mergePolicy: "auto-improvement" },
+      {
+        specType: "improvement",
+      },
+    );
+    await runWorker(hostWorker());
+    expect(await specState()).toBe("awaiting-review");
+    expect(github.pullRequests()[0]?.body).toContain(
+      "满足条件时平台会在 30 分钟后自动合并",
+    );
+
+    await dueForAutoMerge();
+    await runWorker(hostWorker());
+    expect(github.pullRequests()[0]).toMatchObject({ merged: true });
+    expect(github.pullRequests()[0]?.body).toContain(
+      "<!-- afk:auto-merged -->",
+    );
+    expect(github.pullRequests()[0]?.body).toContain("平台已自动合并");
+    expect(github.mergeBodies[0]).toMatchObject({
+      merge_method: "merge",
+      sha: github.pullRequests()[0]?.sha,
+    });
+
+    await db.pool.query(
+      "UPDATE jobs SET not_before = NULL WHERE type = 'host-sync' AND state = 'queued'",
+    );
+    await runWorker(hostWorker());
+    expect(await specState()).toBe("merged");
+  });
+
+  it("does not auto-merge when a person has commented on the pull request", async () => {
+    await confirmedSpec(
+      [ticket("a")],
+      { mergePolicy: "auto-improvement" },
+      {
+        specType: "improvement",
+      },
+    );
+    await runWorker(hostWorker());
+    github.addIssueComment(1, { user: "ann", body: "hold on" });
+    await dueForAutoMerge();
+    await runWorker(hostWorker());
+    expect(github.pullRequests()[0]?.merged).toBe(false);
+    expect(await specState()).toBe("awaiting-review");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT count(*)::int AS n FROM jobs WHERE type = 'auto-merge'",
+        )
+      ).rows[0].n,
+    ).toBe(0);
   });
 
   it("is not done by a worker that has no code host: it leaves the jobs alone", async () => {
