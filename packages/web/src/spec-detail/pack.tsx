@@ -147,6 +147,27 @@ export function PackRepoSection({
           </ul>
         </>
       ) : null}
+      {list(repo.reviewUncertainties).length > 0 ? (
+        <>
+          <p className="note">审查拿不准的</p>
+          <ul className="review-uncertainties">
+            {list(repo.reviewUncertainties).map((item) => {
+              const axis =
+                item.axis === "spec"
+                  ? "Spec 轴"
+                  : item.axis === "standards"
+                    ? "Standards 轴"
+                    : "";
+              return (
+                <li key={`${item.run}-${item.body}`}>
+                  {axis ? `${axis} ` : ""}
+                  {item.ticket ?? "spec"} {item.stage} {item.run}: {item.body}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : null}
       <PackDecisions repo={repo} />
       {repo.gate ? (
         <p className="gates">

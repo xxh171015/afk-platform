@@ -1685,6 +1685,142 @@ describe("the acceptance pack", () => {
     ]);
   });
 
+  it("puts a wrap-up uncertainty in 审查拿不准的 with the axis", async () => {
+    await settledSpec(["backend"], undefined, {
+      stages: {
+        "final-review": {
+          outcome: "pass",
+          run: {
+            axis: "standards",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              uncertainties: ["migration order"],
+            },
+          },
+          findings: [{ kind: "uncertainty", body: "migration order" }],
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.repos[0].reviewUncertainties).toEqual([
+      {
+        ticket: null,
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "final-review",
+        body: "migration order",
+        axis: "standards",
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain("### 审查拿不准的");
+    expect(task.section).toContain("Standards 轴 spec final-review");
+    expect(task.section).toContain("migration order");
+  });
+
+  it("puts a Recheck uncertainty in 审查拿不准的", async () => {
+    await settledSpec(["backend"], undefined, {
+      stages: {
+        merge: [
+          { outcome: "conflict" },
+          { outcome: "merged", headSha: "head" },
+        ],
+        "merge-fix": {
+          outcome: "done",
+          run: {
+            recheck: {
+              hit: true,
+              paths: ["src/a.test.ts"],
+              fromSha: "aaa111",
+              toSha: "bbb222",
+            },
+          },
+        },
+        recheck: {
+          outcome: "pass",
+          run: {
+            axis: "spec",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              uncertainties: ["the assertion still looks weak"],
+            },
+          },
+          findings: [
+            { kind: "uncertainty", body: "the assertion still looks weak" },
+          ],
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.repos[0].reviewUncertainties).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "recheck",
+        body: "the assertion still looks weak",
+        axis: "spec",
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain("### 审查拿不准的");
+    expect(task.section).toContain("Spec 轴 T-1 recheck");
+    expect(task.section).toContain("the assertion still looks weak");
+  });
+
+  it("puts a ticket-review Spec-axis uncertainty in 审查拿不准的, not among the other findings", async () => {
+    await settledSpec(["backend"], undefined, {
+      stages: {
+        review: {
+          outcome: "pass",
+          run: {
+            axis: "spec",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              uncertainties: ["the ticket does not say the date format"],
+            },
+          },
+          findings: [
+            {
+              kind: "uncertainty",
+              body: "the ticket does not say the date format",
+            },
+          ],
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.repos[0].reviewUncertainties).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "review",
+        body: "the ticket does not say the date format",
+        axis: "spec",
+      },
+    ]);
+    expect(
+      acceptancePack.repos[0].findings.map((f: Json) => f.kind),
+    ).not.toContain("uncertainty");
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain("### 审查拿不准的");
+    expect(task.section).toContain("- Spec 轴 T-1 review");
+    expect(task.section).toContain("the ticket does not say the date format");
+  });
+
   it("carries the review's findings with what became of them, and every uncertainty", async () => {
     const { acceptancePack } = await packOf();
     expect(acceptancePack.repos[0].findings).toEqual([

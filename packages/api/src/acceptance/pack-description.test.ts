@@ -59,6 +59,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
         },
       ],
       scopeCreep: [],
+      reviewUncertainties: [],
       decisions: [
         {
           source: "T-1 implement",
@@ -110,6 +111,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       ],
       findings: [],
       scopeCreep: [],
+      reviewUncertainties: [],
       decisions: [],
       protectedPathApprovals: [],
       flakyTests: [],
@@ -279,6 +281,30 @@ describe("renderPackSection", () => {
     );
     expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
       "Unstable tests",
+    );
+  });
+
+  it("lists review uncertainties as 审查拿不准的 with the axis, and omits the group when there are none", () => {
+    const withUnsure = pack();
+    withUnsure.repos[0].reviewUncertainties = [
+      {
+        ticket: "T-1",
+        run: "R-2",
+        stage: "review",
+        body: "the ticket does not say the date format",
+        axis: "spec",
+      },
+    ];
+    const { section } = renderPackSection(withUnsure, "backend", 1);
+    expect(section).toContain("### 审查拿不准的");
+    expect(section).toContain(
+      "- Spec 轴 T-1 review R-2: the ticket does not say the date format",
+    );
+    expect(renderPackSection(pack(), "backend", 1).section).not.toContain(
+      "审查拿不准的",
+    );
+    expect(renderPackSection(pack(), "frontend", 1).section).not.toContain(
+      "审查拿不准的",
     );
   });
 
