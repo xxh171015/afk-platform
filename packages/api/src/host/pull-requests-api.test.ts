@@ -161,10 +161,17 @@ async function settledSpec(
     tickets?: Record<string, unknown>[];
     stages?: StageResults;
     contractPaths?: Record<string, string>; // repo name -> its contract path
+    mergePolicy?: string;
+    specType?: string;
   } = {},
 ) {
   let held: { id: number; attempt: number } | undefined;
-  const project = await call("POST", "/projects", { name: "shop" });
+  const project = await call("POST", "/projects", {
+    name: "shop",
+    ...(options.mergePolicy !== undefined
+      ? { mergePolicy: options.mergePolicy }
+      : {}),
+  });
   for (const role of repos)
     await call("POST", `/projects/${project.body.id}/repos`, {
       url: `https://github.com/me/shop-${role}.git`,
@@ -185,7 +192,7 @@ async function settledSpec(
   }
   const spec = await call("POST", "/specs", {
     projectId: project.body.id,
-    type: "feature",
+    type: options.specType ?? "feature",
     slug: "export",
     title: "Export orders",
   });
@@ -657,6 +664,30 @@ describe("opening the pull requests", () => {
     expect(task.body.body).toContain("- T-1 Ticket backend");
     expect(task.body.body).toContain("the platform never merges");
     expect(task.body.body).not.toContain("afk-acceptance-pack");
+  });
+
+  it("says the platform will auto-merge and how to stop it when the project is auto-improvement", async () => {
+    await settledSpec(["backend"], undefined, {
+      mergePolicy: "auto-improvement",
+    });
+    const job = await claimOf("open-pr");
+    const body = (await taskOf(job)).body.body as string;
+    expect(body).toContain(
+      "满足条件时平台会在 30 分钟后自动合并，在 PR 上写评论即可阻止",
+    );
+    expect(body).not.toContain("the platform never merges");
+    expect(body).toContain("<!-- afk:merge-note -->");
+    expect(body).toContain("<!-- /afk:merge-note -->");
+  });
+
+  it("keeps the never-merges sentence when the project is manual", async () => {
+    await settledSpec(["backend"], undefined, { mergePolicy: "manual" });
+    const job = await claimOf("open-pr");
+    const body = (await taskOf(job)).body.body as string;
+    expect(body).toContain("the platform never merges");
+    expect(body).not.toContain(
+      "满足条件时平台会在 30 分钟后自动合并，在 PR 上写评论即可阻止",
+    );
   });
 
   it("opens the pull request from the flat branch of a spec that was made before the databases had ids", async () => {
@@ -2923,6 +2954,97 @@ describe("indexing pr Links after a pull request is first merged", () => {
         expect.objectContaining({ kind: "pr", pullNumber: 7 }),
       ]),
     );
+  });
+});
+
+describe("auto-merge jobs after host-sync", () => {
+  async function openImprovement(
+    options: {
+      mergePolicy?: string;
+      specType?: string;
+      repos?: string[];
+      minutesAgo?: number;
+    } = {},
+  ) {
+    const repos = options.repos ?? ["backend"];
+    const { specId } = await settledSpec(repos, undefined, {
+      mergePolicy: options.mergePolicy ?? "auto-improvement",
+      specType: options.specType ?? "improvement",
+    });
+    for (const [i] of repos.entries()) {
+      const job = await claimOf("open-pr");
+      await worker.complete(job.id, job.attempt, opened(i + 1));
+    }
+    if (options.minutesAgo !== undefined) {
+      await db.pool.query(
+        `UPDATE events SET at = $2
+         WHERE spec_id = $1 AND type = 'spec' AND to_state = 'awaiting-review'`,
+        [
+          specId,
+          new Date(clock.now().getTime() - options.minutesAgo * 60 * 1000),
+        ],
+      );
+    }
+    return specId;
+  }
+
+  const look = (pulls: Json[]) => syncWith(pulls);
+
+  it("queues an auto-merge job with the head SHA when the spec is due, and does not queue a second one", async () => {
+    const specId = await openImprovement({ minutesAgo: 30 });
+    await look([
+      asOpened(1, { headSha: "head-ready", ci: "success", humanComments: 0 }),
+    ]);
+    expect(await jobsOf("auto-merge")).toMatchObject([
+      {
+        state: "queued",
+        payload: {
+          specId,
+          pullId: 1,
+          expectedHeadSha: "head-ready",
+        },
+      },
+    ]);
+    await look([
+      asOpened(1, { headSha: "head-ready", ci: "success", humanComments: 0 }),
+    ]);
+    expect(await jobsOf("auto-merge")).toHaveLength(1);
+  });
+
+  it("does not queue for a manual project", async () => {
+    await openImprovement({ mergePolicy: "manual", minutesAgo: 30 });
+    await look([asOpened(1, { ci: "success" })]);
+    expect(await jobsOf("auto-merge")).toEqual([]);
+  });
+
+  it("does not queue for a feature spec", async () => {
+    await openImprovement({ specType: "feature", minutesAgo: 30 });
+    await look([asOpened(1, { ci: "success" })]);
+    expect(await jobsOf("auto-merge")).toEqual([]);
+  });
+
+  it("does not queue when a person has commented", async () => {
+    await openImprovement({ minutesAgo: 30 });
+    await look([asOpened(1, { ci: "success", humanComments: 1 })]);
+    expect(await jobsOf("auto-merge")).toEqual([]);
+  });
+
+  it("does not queue when the spec has two pull requests", async () => {
+    await openImprovement({
+      repos: ["backend", "frontend"],
+      minutesAgo: 30,
+    });
+    await look([
+      asOpened(1, { ci: "success" }),
+      asOpened(2, { ci: "success" }),
+    ]);
+    expect(await jobsOf("auto-merge")).toEqual([]);
+  });
+
+  it("does not queue before 30 minutes have passed", async () => {
+    await openImprovement({ minutesAgo: 10 });
+    await look([asOpened(1, { ci: "success" })]);
+    expect(await jobsOf("auto-merge")).toEqual([]);
   });
 });
 

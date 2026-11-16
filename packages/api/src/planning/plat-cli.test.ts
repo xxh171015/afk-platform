@@ -488,6 +488,17 @@ describe("plat", () => {
     expect(confirmed.stdout).toContain("S-1 is running");
   });
 
+  it("names manual and auto-improvement on --merge-policy for project create and edit", async () => {
+    const createHelp = await plat("project", "create", "--help");
+    expect(createHelp.stdout).toContain("--merge-policy");
+    expect(createHelp.stdout).toContain("manual");
+    expect(createHelp.stdout).toContain("auto-improvement");
+    const editHelp = await plat("project", "edit", "--help");
+    expect(editHelp.stdout).toContain("--merge-policy");
+    expect(editHelp.stdout).toContain("manual");
+    expect(editHelp.stdout).toContain("auto-improvement");
+  });
+
   it("passes --limit overrides to the project", async () => {
     await plat(
       "project",

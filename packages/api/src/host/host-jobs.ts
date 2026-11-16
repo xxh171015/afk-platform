@@ -6,7 +6,8 @@ import { enqueueJob, requeueJob } from "../jobs/queue.ts";
 // (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` follows every
 // pull request of a project that is still worth a look (one row per project, put back in the queue after each
 // look), `patch-pr-body` writes the acceptance pack into a description, `index-pr-links` walks trailers on
-// the default branch after a pull request is first merged. None of them holds a lock key.
+// the default branch after a pull request is first merged, `auto-merge` merges an improvement spec's pull
+// request when ADR 0011's conditions hold. None of them holds a lock key.
 
 export const SYNC_INTERVAL_SECONDS = 60;
 
@@ -40,6 +41,12 @@ export interface IndexPrLinksPayload {
   pullId: number;
   mergeSha?: string;
   squashSha?: string;
+}
+
+export interface AutoMergePayload {
+  specId: number;
+  pullId: number;
+  expectedHeadSha: string;
 }
 
 export function readPrReadyPayload(job: {
@@ -254,6 +261,9 @@ export async function enqueuePatchPrBody(
 const indexPrLinksKey = ({ pullId }: IndexPrLinksPayload) =>
   `pull-${pullId}:index-pr-links`;
 
+export const autoMergeKey = ({ specId }: Pick<AutoMergePayload, "specId">) =>
+  `${formatDisplayId("spec", specId)}:auto-merge`;
+
 // First time host-sync sees a pull request merged, with a merge or squash SHA: walk trailers on
 // the default branch. The same key means a later look does not queue another.
 export async function enqueueIndexPrLinks(
@@ -265,6 +275,18 @@ export async function enqueueIndexPrLinks(
     payload: { ...payload },
     requiredCapabilities: [HOST_CAPABILITY],
     idempotencyKey: indexPrLinksKey(payload),
+  });
+}
+
+export async function enqueueAutoMerge(
+  client: pg.PoolClient,
+  payload: AutoMergePayload,
+) {
+  return enqueueJob(client, {
+    type: "auto-merge",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: autoMergeKey(payload),
   });
 }
 

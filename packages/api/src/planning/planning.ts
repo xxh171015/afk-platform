@@ -5,6 +5,7 @@ import {
   type HostKind,
   type ImportWarning,
   type LimitOverrides,
+  type MergePolicy,
   mergeStageModels,
   type PlanningDocsAtImport,
   parseDisplayId,
@@ -13,6 +14,7 @@ import {
   resolveLimits,
   type SPEC_TYPES,
   type StageModels,
+  storedMergePolicy,
   type TicketReviewMode,
 } from "@afk/shared";
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
@@ -37,7 +39,7 @@ export interface NewProject {
   protectedPaths?: string[];
   maxConcurrency?: number;
   budgetLimit?: number;
-  mergePolicy?: string;
+  mergePolicy?: MergePolicy | "";
   limits?: LimitOverrides;
   ticketReview?: TicketReviewMode;
   stageModels?: StageModels;
@@ -57,7 +59,7 @@ export async function createProject(
       project.protectedPaths ?? [],
       project.maxConcurrency ?? null,
       project.budgetLimit ?? null,
-      project.mergePolicy ?? null,
+      storedMergePolicy(project.mergePolicy),
       JSON.stringify(project.limits ?? {}),
       project.ticketReview ?? DEFAULT_TICKET_REVIEW,
       JSON.stringify(parseStageModels(project.stageModels ?? {})),
@@ -74,6 +76,7 @@ export type ProjectEdit = Partial<
     | "protectedPaths"
     | "maxConcurrency"
     | "budgetLimit"
+    | "mergePolicy"
     | "limits"
     | "ticketReview"
     | "stageModels"
@@ -104,6 +107,8 @@ export async function editProject(
   if (edit.maxConcurrency !== undefined)
     set("max_concurrency", edit.maxConcurrency);
   if (edit.budgetLimit !== undefined) set("budget_limit", edit.budgetLimit);
+  if (edit.mergePolicy !== undefined)
+    set("merge_policy", storedMergePolicy(edit.mergePolicy));
   if (edit.limits !== undefined)
     set("limits", JSON.stringify(edit.limits), "limits || $::jsonb");
   if (edit.feishuChatId !== undefined)
