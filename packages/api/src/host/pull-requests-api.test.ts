@@ -3046,6 +3046,150 @@ describe("auto-merge jobs after host-sync", () => {
     await look([asOpened(1, { ci: "success" })]);
     expect(await jobsOf("auto-merge")).toEqual([]);
   });
+
+  async function dueAutoMerge(headSha = "head-ready") {
+    await openImprovement({ minutesAgo: 30 });
+    await look([asOpened(1, { headSha, ci: "success", humanComments: 0 })]);
+    return claimOf("auto-merge");
+  }
+
+  async function flushNotices() {
+    clock.advanceSeconds(30);
+    await clock.flush();
+  }
+
+  const autoMergeEvents = async () =>
+    (
+      await db.pool.query<{
+        type: string;
+        reason: string | null;
+        data: { url?: string; reason?: string };
+      }>(
+        `SELECT type, reason, data FROM events
+         WHERE type IN ('auto-merged', 'auto-merge-failed') ORDER BY id`,
+      )
+    ).rows;
+
+  it("tells the worker to rewrite the merge-note and merge at the job's head SHA", async () => {
+    const job = await dueAutoMerge("head-ready");
+    const task = await taskOf(job);
+    expect(task.status).toBe(200);
+    expect(task.body).toMatchObject({
+      kind: "auto-merge",
+      repoUrl: "https://github.com/me/shop-backend.git",
+      number: 1,
+      expectedHeadSha: "head-ready",
+    });
+    expect(task.body.section).toContain("<!-- afk:auto-merged -->");
+    expect(task.body.section).toContain("平台已自动合并");
+  });
+
+  it("records a failed merge without retrying, leaves the spec awaiting-review, and notifies", async () => {
+    const job = await dueAutoMerge();
+    await flushNotices();
+    notices.length = 0;
+    expect(
+      (
+        await worker.complete(job.id, job.attempt, {
+          stage: "auto-merge",
+          outcome: "failed",
+          reason: "GitHub answered 403 merging pull request 1",
+        })
+      ).status,
+    ).toBe(200);
+    expect(await specState()).toBe("awaiting-review");
+    expect(await jobsOf("auto-merge")).toMatchObject([{ state: "done" }]);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT count(*)::int AS n FROM jobs WHERE type = 'auto-merge'",
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    expect(await autoMergeEvents()).toEqual([
+      {
+        type: "auto-merge-failed",
+        reason: "GitHub answered 403 merging pull request 1",
+        data: {
+          url: "https://github.com/me/shop/pull/1",
+          reason: "GitHub answered 403 merging pull request 1",
+        },
+      },
+    ]);
+    const blocked = (await call("GET", "/blocked")).body;
+    expect(blocked.tickets).toEqual([]);
+    expect(blocked.finalizations).toEqual([]);
+    await flushNotices();
+    expect(notices).toEqual([
+      {
+        title: "自动合并失败",
+        body: expect.stringMatching(
+          /S-1 Export orders：自动合并失败，等人合并：GitHub answered 403 merging pull request 1/,
+        ),
+      },
+    ]);
+  });
+
+  it("records a successful merge, notifies, then host-sync merges the spec without the token-merged notice", async () => {
+    const job = await dueAutoMerge();
+    await flushNotices();
+    notices.length = 0;
+    await worker.complete(job.id, job.attempt, {
+      stage: "auto-merge",
+      outcome: "merged",
+    });
+    expect(await specState()).toBe("awaiting-review");
+    expect(await autoMergeEvents()).toEqual([
+      {
+        type: "auto-merged",
+        reason: null,
+        data: { url: "https://github.com/me/shop/pull/1" },
+      },
+    ]);
+    await flushNotices();
+    expect(notices).toEqual([
+      {
+        title: "平台已自动合并",
+        body: expect.stringMatching(/S-1 Export orders：平台已自动合并/),
+      },
+    ]);
+    notices.length = 0;
+    await look([
+      synced(1, {
+        state: "merged",
+        mergedBy: "bot",
+        mergedAt: "2026-11-09T10:00:00.000Z",
+        mergedByPlatform: true,
+        ci: "success",
+      }),
+    ]);
+    expect(await specState()).toBe("merged");
+    await flushNotices();
+    expect(notices.map((n) => n.title)).toEqual(["需求已合并"]);
+    expect(notices[0]?.body).not.toMatch(/平台账号合并了/);
+  });
+
+  it("still notifies when the platform token merged a pull request that was not auto-merged", async () => {
+    await settledSpec(["backend"]);
+    const openedJob = await claimOf("open-pr");
+    await worker.complete(openedJob.id, openedJob.attempt, opened(1));
+    await flushNotices();
+    notices.length = 0;
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [
+        synced(1, {
+          state: "merged",
+          mergedBy: "bot",
+          mergedAt: "2026-11-09T10:00:00.000Z",
+          mergedByPlatform: true,
+        }),
+      ],
+    });
+    await flushNotices();
+    expect(notices.some((n) => /平台账号合并了/.test(n.body))).toBe(true);
+  });
 });
 
 function attachQueryCounter(pool: pg.Pool) {
