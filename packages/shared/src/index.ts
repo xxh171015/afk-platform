@@ -188,6 +188,9 @@ export {
 } from "./planning-docs.ts";
 export {
   AUTO_IMPROVEMENT_MERGE_NOTE,
+  AUTO_MERGED_MARK,
+  AUTO_MERGED_NOTE,
+  AUTO_MERGED_SECTION,
   fitPrDescription,
   GITHUB_PR_BODY_LIMIT,
   MANUAL_MERGE_NOTE,
@@ -195,6 +198,7 @@ export {
   MERGE_NOTE_MARK_START,
   PACK_MARK_END,
   PACK_MARK_START,
+  spliceMergeNote,
   splicePackSection,
   wrapMergeNote,
   wrapPackSection,

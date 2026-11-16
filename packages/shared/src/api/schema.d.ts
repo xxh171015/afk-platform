@@ -2243,7 +2243,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2322,6 +2322,14 @@ export interface paths {
                   number: number;
                   mergeSha: string | null;
                   squashSha: string | null;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "auto-merge";
+                  repoUrl: string;
+                  number: number;
+                  expectedHeadSha: string;
+                  section: string;
                 };
           };
         };
