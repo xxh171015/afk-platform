@@ -8021,6 +8021,44 @@
                         }
                       },
                       "required": ["state"]
+                    },
+                    "autoMerge": {
+                      "type": "object",
+                      "properties": {
+                        "policy": {
+                          "type": "string",
+                          "enum": ["manual", "auto-improvement"]
+                        },
+                        "willMerge": {
+                          "type": "boolean"
+                        },
+                        "mergeAt": {
+                          "type": ["string", "null"]
+                        },
+                        "reason": {
+                          "type": ["string", "null"]
+                        },
+                        "event": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["auto-merged", "auto-merge-failed"]
+                            },
+                            "reason": {
+                              "type": ["string", "null"]
+                            }
+                          },
+                          "required": ["type", "reason"]
+                        }
+                      },
+                      "required": [
+                        "policy",
+                        "willMerge",
+                        "mergeAt",
+                        "reason",
+                        "event"
+                      ]
                     }
                   },
                   "required": [
@@ -8039,7 +8077,8 @@
                     "leadTime",
                     "links",
                     "usageByStage",
-                    "cleanup"
+                    "cleanup",
+                    "autoMerge"
                   ]
                 }
               }

@@ -23,11 +23,13 @@ export type {
   AutoMergeInput,
   AutoMergePull,
   AutoMergeResult,
+  AutoMergeStatus,
   MergePolicy,
 } from "./auto-merge.ts";
 export {
   AUTO_MERGE_DELAY_MS,
   autoMerge,
+  autoMergeLine,
   DEFAULT_MERGE_POLICY,
   MERGE_POLICIES,
   parseMergePolicy,
