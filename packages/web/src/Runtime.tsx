@@ -1,10 +1,19 @@
 import { formatDiskBytes, formatGib } from "@afk/shared";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { type ReactNode, useMemo } from "react";
 import { describeError, useApi } from "./api.tsx";
 import { Mono, Pill } from "./components/afk/badges.tsx";
 import { Page } from "./components/afk/page.tsx";
-import { ErrorState, RowsSkeleton, StaleNotice } from "./components/afk/states.tsx";
+import {
+  ErrorState,
+  RowsSkeleton,
+  StaleNotice,
+} from "./components/afk/states.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { useEvents, useResourcePoll } from "./EventsProvider.tsx";
 import { useNow } from "./hooks/use-now.ts";
@@ -236,10 +245,7 @@ export function Runtime() {
   if (view.isError && !view.data) {
     return (
       <Page title="运行实例">
-        <ErrorState
-          error={view.error}
-          onRetry={() => void view.refetch()}
-        />
+        <ErrorState error={view.error} onRetry={() => void view.refetch()} />
       </Page>
     );
   }

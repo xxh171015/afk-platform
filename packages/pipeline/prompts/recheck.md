@@ -4,6 +4,8 @@
 
 审查已经做过。这次只看 `/context/recheck.json` 列出的这一次改动：`fromSha` 到 `toSha` 之间、`paths` 里的文件。diff 用 `git diff <fromSha> <toSha> --` 加上这些路径。不要看整张票相对基准的全部 diff。
 
+跟进 main（update-branch）和 merge-fix 时，`fromSha` 是自动合并结果（运行前的分支头与合进来的提交的 `merge-tree`），diff 里只有 agent 在那之上的改动，合进来的默认分支或集成分支自己的改动不在里面。review-fix、final-fix、final-tidy 的 `fromSha` 仍是运行之前的分支头。
+
 对照物：有 `/context/ticket.md` 时用它的 `## What to build` 和 `## Acceptance criteria`，以及其中「这张票负责的 User Story」的原文；没有票时用 `/context/spec.md` 和 `/context/tickets.md`。`/context/decisions.json` 里已有决定也对照。不要求 Ruling，不要写 `rulings`。
 
 只问两件事：
@@ -28,4 +30,4 @@
 </result>
 ```
 
-`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`，没有就是空数组和 `"pass"`。`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`（`line` 可省略），不能写成一句字符串，否则整条结果无效。
+`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`，没有就是空数组和 `"pass"`。`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`（`line` 可省略），不能写成一句字符串，否则整条结果无效。`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串。

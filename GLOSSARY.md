@@ -208,7 +208,7 @@ _Avoid_: 评论、issue
 _Avoid_: 重构阶段、refactor、cleanup
 
 **Recheck（复查）**：
-审查之后的修复或 Update-branch 删改了已有测试、或改了测试和构建配置时，合并前那次只看这次改动的 Spec 轴，只问有没有改变已有行为或放松检查。由确定性检查触发，没命中就不跑。不是 pass 就叫人批准这次改动，不派 fix。
+审查之后的修复或 Update-branch 删改了已有测试、或改了测试和构建配置时，合并前那次只看这次改动的 Spec 轴，只问有没有改变已有行为或放松检查。由确定性检查触发，没命中就不跑。不是 pass 就叫人批准这次改动，不派 fix。Update-branch 和 merge-fix 时，这次改动从自动合并结果算起，合进来的默认分支或集成分支自己的改动不算；解冲突时删改任何一边已有的测试行仍算。review-fix、final-fix、final-tidy 仍从运行前的分支头算。
 _Avoid_: 二次审查、re-review
 
 **Review axis（审查轴）**：

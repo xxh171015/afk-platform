@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   classifyReviewRun,
+  ensureRecheckFromSha,
   git,
   gitOrThrow,
   hasRef,
   promptFor,
+  RECHECK_REF_PREFIX,
   reviewFindings,
   reviewOutputSchemaFor,
   reviewSources,
@@ -32,6 +34,26 @@ import {
   subjectLabel,
   tip,
 } from "./common.ts";
+
+function bringCommit(
+  slot: Slot,
+  mainDir: string,
+  fromSha: string,
+  toSha: string,
+) {
+  if (git(slot.dir, ["cat-file", "-e", `${fromSha}^{commit}`]).code === 0)
+    return;
+  // The main clone stores the auto-merge as refs/afk/recheck/<Run>; fetch parks the object by SHA.
+  const fetched = git(slot.dir, [
+    "fetch",
+    "--quiet",
+    "--no-tags",
+    mainDir,
+    `${fromSha}:${RECHECK_REF_PREFIX}${fromSha}`,
+  ]);
+  if (fetched.code === 0) return;
+  ensureRecheckFromSha(slot.dir, fromSha, toSha);
+}
 
 function recheckArgs(
   bundle: Bundle,
@@ -80,6 +102,7 @@ export async function recheck(
   gitOrThrow(mainDir, ["update-ref", `refs/heads/${branch}`, reviewed]);
   try {
     bringBranches(slot, mainDir, [branch]);
+    if (hit?.fromSha) bringCommit(slot, mainDir, hit.fromSha, hit.toSha);
     const ctxDir = await renderFor(deps, context, baseSha, tmp, mainDir);
     if (hit) {
       writeFileSync(

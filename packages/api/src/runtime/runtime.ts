@@ -66,7 +66,8 @@ function collectIds(rows: JobRow[]) {
     const payload = row.payload;
     if (typeof payload.ticketId === "number") ticketIds.add(payload.ticketId);
     if (typeof payload.specId === "number") specIds.add(payload.specId);
-    if (typeof payload.projectId === "number") projectIds.add(payload.projectId);
+    if (typeof payload.projectId === "number")
+      projectIds.add(payload.projectId);
     if (typeof payload.repoId === "number") repoIds.add(payload.repoId);
   }
   return { ticketIds, specIds, projectIds, repoIds };
@@ -228,7 +229,9 @@ async function jobRows(
   return rows.map((row) => ({
     ...row,
     payload:
-      row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+      row.payload &&
+      typeof row.payload === "object" &&
+      !Array.isArray(row.payload)
         ? (row.payload as Record<string, unknown>)
         : {},
   }));
