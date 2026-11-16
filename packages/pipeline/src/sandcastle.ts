@@ -23,7 +23,11 @@ import {
 } from "@ai-hero/sandcastle";
 import type { z } from "zod";
 import type { AgentRunner, AgentRunOptions, AgentRunResult } from "./agent.ts";
-import { type CursorRunFacts, factsFromCursorLine } from "./cursor-result.ts";
+import {
+  type CursorRunFacts,
+  factsFromCursorLine,
+  finalTextFromCursorLine,
+} from "./cursor-result.ts";
 import { type ExecResult, exec } from "./exec.ts";
 import {
   type GateSandbox,
@@ -31,6 +35,7 @@ import {
   type SandboxSession,
   shellQuote,
 } from "./gate.ts";
+import { resultBlock } from "./result-block.ts";
 
 export interface SandcastleConfig {
   cwd: string; // the slot's clone of the repo: the agent and the gate only ever see this copy
@@ -460,6 +465,29 @@ export function classifyAgentError(error: unknown): {
   return { message, errorKind: timedOut ? "timeout" : "other", commits: [] };
 }
 
+// Sandcastle cuts <result> at the first tag it finds, even one inside the JSON's strings. When it gave up on a
+// result, read the block again from the agent's last message the way the prompts ask for it; a block that then
+// passes the same schema is the run's output, with the commits the run made.
+export function recoverTaggedOutput<Schema extends z.ZodType>(
+  error: unknown,
+  finalText: string | undefined,
+  schema: Schema,
+): { output: z.infer<Schema>; commits: string[] } | undefined {
+  if (!(error instanceof StructuredOutputError) || finalText === undefined)
+    return undefined;
+  const block = resultBlock(finalText, error.tag);
+  if (block === undefined) return undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(block);
+  } catch {
+    return undefined;
+  }
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) return undefined;
+  return { output: parsed.data, commits: error.commits.map((c) => c.sha) };
+}
+
 export class SandcastleAgentRunner implements AgentRunner {
   private readonly config: SandcastleConfig;
 
@@ -483,6 +511,7 @@ export class SandcastleAgentRunner implements AgentRunner {
     options.signal?.addEventListener("abort", onJobLost, { once: true });
     const started = Date.now();
     let billed: CursorRunFacts = {};
+    let finalText: string | undefined;
     try {
       const result = await run({
         agent: cursor(options.model ?? config.model, {
@@ -518,6 +547,7 @@ export class SandcastleAgentRunner implements AgentRunner {
             options.onRawLine?.(event.line);
             const next = factsFromCursorLine(event.line);
             if (next) billed = next;
+            finalText = finalTextFromCursorLine(event.line) ?? finalText;
           },
         },
       });
@@ -528,6 +558,17 @@ export class SandcastleAgentRunner implements AgentRunner {
         ...billed,
       };
     } catch (error) {
+      const recovered = recoverTaggedOutput(error, finalText, options.schema);
+      if (recovered) {
+        config.onNote?.(
+          "read <result> again from the last message: Sandcastle had cut it at a tag inside the JSON",
+        );
+        return {
+          ...recovered,
+          durationMs: Date.now() - started,
+          ...billed,
+        };
+      }
       const failure = classifyAgentError(error);
       return {
         commits: failure.commits,

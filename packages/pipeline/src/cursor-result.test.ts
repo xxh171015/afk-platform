@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { factsFromCursorLine, factsFromCursorLines } from "./cursor-result.ts";
+import {
+  factsFromCursorLine,
+  factsFromCursorLines,
+  finalTextFromCursorLine,
+} from "./cursor-result.ts";
 
 const usage = {
   inputTokens: 143_000,
@@ -65,5 +69,30 @@ describe("factsFromCursorLines", () => {
         "gate: test exit 0",
       ]),
     ).toEqual({});
+  });
+});
+
+describe("finalTextFromCursorLine", () => {
+  it("is the text of a result line: the agent's last message", () => {
+    expect(
+      finalTextFromCursorLine(
+        JSON.stringify({
+          type: "result",
+          result: "done.\n<result>\n{}\n</result>",
+        }),
+      ),
+    ).toBe("done.\n<result>\n{}\n</result>");
+  });
+
+  it("is nothing for any other line, a result line without text, or a line that is not JSON", () => {
+    expect(
+      finalTextFromCursorLine(
+        JSON.stringify({ type: "assistant", result: "x" }),
+      ),
+    ).toBe(undefined);
+    expect(finalTextFromCursorLine(JSON.stringify({ type: "result" }))).toBe(
+      undefined,
+    );
+    expect(finalTextFromCursorLine("not json")).toBe(undefined);
   });
 });

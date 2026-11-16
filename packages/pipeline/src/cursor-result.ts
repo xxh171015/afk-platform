@@ -39,6 +39,22 @@ export function factsFromCursorLine(line: string): CursorRunFacts | undefined {
   return facts;
 }
 
+// The agent's last message, as the result line carries it: where the platform reads <result> again when
+// Sandcastle could not (result-block.ts).
+export function finalTextFromCursorLine(line: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object") return undefined;
+  const row = parsed as Record<string, unknown>;
+  return row.type === "result" && typeof row.result === "string"
+    ? row.result
+    : undefined;
+}
+
 export function factsFromCursorLines(lines: readonly string[]): CursorRunFacts {
   let last: CursorRunFacts = {};
   for (const line of lines) {
