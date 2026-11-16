@@ -3,9 +3,9 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Guarantees about the platform's code as a whole (docs/specs/m1-platform.md「推送出口与检测」): it never merges
-// a pull request and never pushes except through the one exit function. Checked on the source, so a change that
-// breaks them fails here and not in production.
+// Guarantees about the platform's code as a whole (docs/specs/m1-platform.md「推送出口与检测」, ADR 0011): merge
+// calls only exist in the host adapters' mergePullRequest, and it never pushes except through the one exit
+// function. Checked on the source, so a change that breaks them fails here and not in production.
 
 const packages = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -25,6 +25,26 @@ function sources(dir: string): string[] {
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const MIN_FILES = 30; // sanity: the scan found the code, not an empty directory
 
+// The auto-merge host task is the one caller of mergePullRequest outside the adapters (ADR 0011).
+function withoutAutoMergeTask(text: string): string {
+  const match = /if\s*\(\s*task\.kind\s*===\s*["']auto-merge["']\s*\)/.exec(
+    text,
+  );
+  if (!match || match.index === undefined) return text;
+  const brace = text.indexOf("{", match.index);
+  if (brace < 0) return text;
+  let depth = 0;
+  for (let i = brace; i < text.length; i++) {
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0)
+        return `${text.slice(0, match.index)}${text.slice(i + 1)}`;
+    }
+  }
+  return text;
+}
+
 const code = [
   ...sources(packages),
   join(root, "package.json"),
@@ -39,12 +59,12 @@ describe("the platform's source", () => {
     expect(code.length).toBeGreaterThan(MIN_FILES);
   });
 
-  it("never merges a pull request, through any API or CLI", () => {
-    const merging = [
+  it("calls a merge endpoint only from mergePullRequest in the GitHub and GitLab adapters", () => {
+    const endpoints = [
       /pulls\/[^\s"'`]*\/merge/i,
+      /merge_requests\/[^\s"'`]*\/merge/i,
       /\/merge["'`]/,
       /merge_pull_request/i,
-      /mergePullRequest/i,
       /enable_?auto_?merge/i,
       /gh\s+pr\s+merge/i,
       /\bpulls\.merge\b/,
@@ -52,12 +72,35 @@ describe("the platform's source", () => {
       /["'`]pr["'`]\s*,\s*["'`]merge["'`]/,
       /pulls\[["'`]merge["'`]\]/,
     ];
-    const hits = code.flatMap(({ file, text }) =>
-      merging
+    const methodName = /mergePullRequest/;
+    const adapterImpl = new Set(["host/src/github.ts", "host/src/gitlab.ts"]);
+    const adapterSurface = new Set([
+      "host/src/types.ts",
+      "host/src/by-host.ts",
+    ]);
+    const hits = code.flatMap(({ file, text }) => {
+      if (adapterImpl.has(file)) return [];
+      const found = endpoints
         .filter((pattern) => pattern.test(text))
-        .map((pattern) => `${file}: ${pattern}`),
-    );
+        .map((pattern) => `${file}: ${pattern}`);
+      const scanned =
+        file === "worker/src/host.ts" ? withoutAutoMergeTask(text) : text;
+      if (methodName.test(scanned) && !adapterSurface.has(file))
+        found.push(`${file}: ${methodName}`);
+      return found;
+    });
     expect(hits).toEqual([]);
+  });
+
+  it("calls mergePullRequest only from the auto-merge host task", () => {
+    const host = code.find(({ file }) => file === "worker/src/host.ts");
+    expect(host).toBeDefined();
+    expect(host?.text).toMatch(
+      /if\s*\(\s*task\.kind\s*===\s*["']auto-merge["']\s*\)/,
+    );
+    expect(withoutAutoMergeTask(host?.text ?? "")).not.toMatch(
+      /mergePullRequest/,
+    );
   });
 
   it("runs `git push` only in the push exit", () => {

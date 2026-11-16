@@ -28,6 +28,14 @@ interface FakeCommit {
 export interface FakeReview {
   user: string;
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+  body?: string;
+  type?: "User" | "Bot";
+}
+
+export interface FakeComment {
+  user: string;
+  type?: "User" | "Bot";
+  body: string;
 }
 
 export interface FakeCheck {
@@ -48,6 +56,11 @@ export class FakeGitHub {
   tokenLifetimeMs = 60 * 60 * 1000;
   refuseReady: "status" | "error" | false = false; // how a mark-ready is refused: HTTP 403, or a GraphQL error
   refuseBranchDeletes = false; // answer 403 to a branch delete, as a token without contents:write would get
+  refuseMerge = false; // answer 403 to PUT .../merge
+  hideUser = false; // answer 403 to GET /user, as an installation token often would
+  tokenLogin = "afk-platform[bot]";
+  tokenType: "User" | "Bot" = "Bot";
+  readonly mergeBodies: Record<string, unknown>[] = [];
   // The App's installation: false when the App is installed nowhere for this owner; the repositories it was given
   // (any, unless a test names them) and the permissions it was granted.
   installed = true;
@@ -71,6 +84,8 @@ export class FakeGitHub {
   private readonly branchNames = new Set<string>();
   private readonly protectedBranches = new Set<string>();
   private readonly reviews = new Map<number, FakeReview[]>();
+  private readonly issueComments = new Map<number, FakeComment[]>();
+  private readonly pullComments = new Map<number, FakeComment[]>();
   private readonly checks = new Map<string, FakeCheck[]>();
   private readonly statuses = new Map<string, string>();
   private readonly commits = new Map<string, FakeCommit>();
@@ -144,6 +159,18 @@ export class FakeGitHub {
   }
   addReview(number: number, review: FakeReview): void {
     this.reviews.set(number, [...(this.reviews.get(number) ?? []), review]);
+  }
+  addIssueComment(number: number, comment: FakeComment): void {
+    this.issueComments.set(number, [
+      ...(this.issueComments.get(number) ?? []),
+      comment,
+    ]);
+  }
+  addPullComment(number: number, comment: FakeComment): void {
+    this.pullComments.set(number, [
+      ...(this.pullComments.get(number) ?? []),
+      comment,
+    ]);
   }
   setChecks(sha: string, checks: FakeCheck[]): void {
     this.checks.set(sha, checks);
@@ -273,6 +300,17 @@ export class FakeGitHub {
     if (!expiry || expiry <= this.now())
       return this.json(res, 401, { message: "Bad credentials" });
 
+    if (req.method === "GET" && path === "/user") {
+      if (this.hideUser)
+        return this.json(res, 403, {
+          message: "Resource not accessible by integration",
+        });
+      return this.json(res, 200, {
+        login: this.tokenLogin,
+        type: this.tokenType,
+      });
+    }
+
     if (req.method === "POST" && path === "/graphql") {
       const query = String(body.query ?? "");
       const id = (body.variables as { id?: string } | undefined)?.id;
@@ -357,6 +395,53 @@ export class FakeGitHub {
       if (typeof body.body === "string") pull.body = body.body;
       return this.json(res, 200, this.render(pull));
     }
+    const merge = /^\/pulls\/(\d+)\/merge$/.exec(rest);
+    if (req.method === "PUT" && merge) {
+      const pull = this.pulls.find((p) => p.number === Number(merge[1]));
+      if (!pull) return this.json(res, 404, { message: "Not Found" });
+      this.mergeBodies.push(body);
+      if (this.refuseMerge)
+        return this.json(res, 403, { message: "Resource not accessible" });
+      if (typeof body.sha === "string" && body.sha !== pull.sha)
+        return this.json(res, 409, { message: "Head branch was modified" });
+      if (pull.mergeable === false)
+        return this.json(res, 405, {
+          message: "Pull Request is not mergeable",
+        });
+      pull.merged = true;
+      pull.state = "closed";
+      return this.json(res, 200, {
+        sha: pull.sha,
+        merged: true,
+        message: "Pull Request successfully merged",
+      });
+    }
+    const issueComments = /^\/issues\/(\d+)\/comments$/.exec(rest);
+    if (req.method === "GET" && issueComments)
+      return this.conditional(
+        req,
+        res,
+        this.page(
+          url,
+          (this.issueComments.get(Number(issueComments[1])) ?? []).map((c) => ({
+            user: { login: c.user, type: c.type ?? "User" },
+            body: c.body,
+          })),
+        ),
+      );
+    const pullComments = /^\/pulls\/(\d+)\/comments$/.exec(rest);
+    if (req.method === "GET" && pullComments)
+      return this.conditional(
+        req,
+        res,
+        this.page(
+          url,
+          (this.pullComments.get(Number(pullComments[1])) ?? []).map((c) => ({
+            user: { login: c.user, type: c.type ?? "User" },
+            body: c.body,
+          })),
+        ),
+      );
     const ref = /^\/git\/refs\/heads\/(.+)$/.exec(rest);
     const refOne = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
     const gitRef = ref ?? refOne;
@@ -393,8 +478,9 @@ export class FakeGitHub {
         this.page(
           url,
           (this.reviews.get(Number(reviews[1])) ?? []).map((r) => ({
-            user: { login: r.user },
+            user: { login: r.user, type: r.type ?? "User" },
             state: r.state,
+            body: r.body ?? "",
           })),
         ),
       );

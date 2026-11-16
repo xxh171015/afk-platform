@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { acceptancePackText, blockedText, ticketText } from "./format.ts";
+import {
+  acceptancePackText,
+  blockedText,
+  specText,
+  ticketText,
+} from "./format.ts";
 
 const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
   ticket: {
@@ -517,5 +522,82 @@ describe("the e2e before the pull requests", () => {
     expect(text).toContain("choice: 1, workaround: 0");
     expect(text).not.toContain("named it export");
     expect(text).not.toContain("uncertainties:");
+  });
+});
+
+const specShow = (
+  autoMerge: {
+    policy: string;
+    willMerge: boolean;
+    mergeAt: string | null;
+    reason: string | null;
+    event: { type: string; reason: string | null } | null;
+  },
+  state = "awaiting-review",
+) =>
+  specText({
+    spec: {
+      displayId: "S-1",
+      title: "Export",
+      state,
+      pauseReason: null,
+      warnings: [],
+    },
+    tickets: [],
+    finalizations: [],
+    edges: [],
+    autoMerge,
+  } as never);
+
+describe("plat spec show auto-merge", () => {
+  it("prints the same auto-merge line as the delivery page", async () => {
+    expect(
+      specShow({
+        policy: "auto-improvement",
+        willMerge: true,
+        mergeAt: "2026-01-01T00:30:00.000Z",
+        reason: null,
+        event: null,
+      }),
+    ).toContain("将于 08:30 自动合并，在 PR 上写评论即可阻止");
+    expect(
+      specShow({
+        policy: "auto-improvement",
+        willMerge: false,
+        mergeAt: null,
+        reason: "PR 上有人写过评论",
+        event: null,
+      }),
+    ).toContain("不会自动合并：PR 上有人写过评论");
+    expect(
+      specShow(
+        {
+          policy: "auto-improvement",
+          willMerge: false,
+          mergeAt: null,
+          reason: "已经有过 auto-merge 作业",
+          event: { type: "auto-merged", reason: null },
+        },
+        "merged",
+      ),
+    ).toContain("平台已自动合并");
+    expect(
+      specShow({
+        policy: "auto-improvement",
+        willMerge: false,
+        mergeAt: null,
+        reason: "已经有过 auto-merge 作业",
+        event: { type: "auto-merge-failed", reason: "GitHub answered 403" },
+      }),
+    ).toContain("自动合并失败：GitHub answered 403");
+    expect(
+      specShow({
+        policy: "manual",
+        willMerge: false,
+        mergeAt: null,
+        reason: "项目合并策略不是 auto-improvement",
+        event: null,
+      }),
+    ).not.toContain("自动合并");
   });
 });

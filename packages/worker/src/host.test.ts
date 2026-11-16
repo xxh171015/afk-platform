@@ -10,7 +10,14 @@ import {
 import { FakeGitHub, FakeGitLab } from "@afk/host/testing";
 import { git, gitOrThrow } from "@afk/pipeline";
 import { makeRepo, type TestRepo } from "@afk/pipeline/testing";
-import type { HostTask } from "@afk/shared";
+import {
+  AUTO_IMPROVEMENT_MERGE_NOTE,
+  AUTO_MERGED_MARK,
+  AUTO_MERGED_NOTE,
+  AUTO_MERGED_SECTION,
+  type HostTask,
+  wrapMergeNote,
+} from "@afk/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { InfrastructureError } from "./executor.ts";
 import { runHostTask } from "./host.ts";
@@ -32,6 +39,7 @@ const info = (
   conflictsWithDefault: false,
   mergeSha: null,
   squashSha: null,
+  humanComments: 0,
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
@@ -50,6 +58,9 @@ const noCleanup = {
     throw new Error("not used");
   },
   updatePullRequestBody: async () => {
+    throw new Error("not used");
+  },
+  mergePullRequest: async () => {
     throw new Error("not used");
   },
   getBranchSha: async () => {
@@ -104,6 +115,69 @@ describe("a pr-ready task", () => {
     await expect(
       runHostTask({ adapter, repoRef: ref }, task, log),
     ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+});
+
+describe("an auto-merge task", () => {
+  const task = {
+    kind: "auto-merge" as const,
+    repoUrl: "https://github.com/me/pilot.git",
+    number: 7,
+    expectedHeadSha: "sha-from-job",
+    section: AUTO_MERGED_SECTION,
+  };
+
+  it("replaces the marked merge-note, keeps what a person wrote outside, then merges at the job's head SHA", async () => {
+    const calls: string[] = [];
+    const writes: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7),
+      getPullRequestBody: async () =>
+        `Spec: S-1\n\n${wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE)}\n\nI added a note`,
+      updatePullRequestBody: async ({ body }) => {
+        calls.push("update");
+        writes.push(body);
+      },
+      mergePullRequest: async (input) => {
+        calls.push("merge");
+        merges.push(input);
+        return info(7, { state: "merged", headSha: "sha-from-job" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(calls).toEqual(["update", "merge"]);
+    expect(writes[0]).toContain("Spec: S-1");
+    expect(writes[0]).toContain("I added a note");
+    expect(writes[0]).toContain(AUTO_MERGED_MARK);
+    expect(writes[0]).toContain(AUTO_MERGED_NOTE);
+    expect(writes[0]).not.toContain(AUTO_IMPROVEMENT_MERGE_NOTE);
+    expect(merges).toEqual([
+      { repo: ref(), number: 7, expectedHeadSha: "sha-from-job" },
+    ]);
+    expect(result).toEqual({ stage: "auto-merge", outcome: "merged" });
+  });
+
+  it("reports failed with the host's reason when merge throws HostError, and does not treat it as infrastructure", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async () => {},
+      mergePullRequest: async () => {
+        throw new HostError("GitHub answered 403 merging pull request 7", 403);
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "GitHub answered 403 merging pull request 7",
+    });
   });
 });
 
@@ -284,6 +358,7 @@ describe("a host-sync task", () => {
           conflictsWithDefault: false,
           mergeSha: null,
           squashSha: null,
+          humanComments: 0,
         },
         {
           id: 2,
@@ -298,9 +373,26 @@ describe("a host-sync task", () => {
           conflictsWithDefault: false,
           mergeSha: null,
           squashSha: null,
+          humanComments: 0,
         },
       ],
       defaults: [],
+    });
+  });
+
+  it("passes on the human comment count", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1, { humanComments: 3 }),
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      { kind: "host-sync", pulls: [{ id: 1, repoUrl: "u", number: 1 }] },
+      log,
+    );
+    expect(result).toMatchObject({
+      pulls: [{ id: 1, humanComments: 3 }],
     });
   });
 
@@ -532,6 +624,7 @@ describe("a spec-cleanup task", () => {
       getPullRequest: async () => info(0),
       getPullRequestBody: async () => "",
       updatePullRequestBody: async () => {},
+      mergePullRequest: async () => info(0),
       markReady: async () => info(0),
       closePullRequest: async ({ number }) => {
         calls.push(`close ${number}`);
