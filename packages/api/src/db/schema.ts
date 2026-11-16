@@ -662,6 +662,9 @@ export const runs = pgTable(
     durationMs: integer("duration_ms"),
     durationApiMs: integer("duration_api_ms"),
     tokenUsage: jsonb("token_usage"),
+    // null: accepted as written. `normalized`: preprocess made it valid.
+    // `repaired`: a throwaway format-repair run rewrote <result>.
+    resultFix: text("result_fix"),
     result: text("result"),
     output: jsonb("output"),
     // The Retry note this Run was given, if any; null when the retry had none.

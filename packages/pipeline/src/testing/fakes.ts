@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -10,8 +11,20 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { z } from "zod";
-import type { AgentRunner, AgentRunOptions, AgentRunResult } from "../agent.ts";
-import { factsFromCursorLines } from "../cursor-result.ts";
+import {
+  type AgentRunner,
+  type AgentRunOptions,
+  type AgentRunResult,
+  addTokenUsage,
+  recoverStructuredOutput,
+  repairRunOptions,
+  resultSectionOf,
+  writeRepairPrompt,
+} from "../agent.ts";
+import {
+  factsFromCursorLines,
+  lastAssistantFromCursorLines,
+} from "../cursor-result.ts";
 import { exec, git, gitOrThrow } from "../exec.ts";
 import type { GateSandbox, SandboxPlacement, SandboxSession } from "../gate.ts";
 import type { DockerCli, DockerResult } from "../integration-env.ts";
@@ -27,6 +40,8 @@ export interface FakeAgentStep {
   output?: unknown; // the agent's structured result, validated against the stage's schema
   error?: { kind: "invalid-output" | "timeout" | "other"; message: string };
   rawLines?: string[]; // Cursor's event lines, as the run produces them
+  // The <result> text Sandcastle matched; empty/undefined means the tag was missing
+  rawMatched?: string;
 }
 
 export interface FakeAgentContext {
@@ -39,6 +54,7 @@ export interface FakeAgentContext {
   idleSeconds: number; // the limits and the model the run was asked for
   wallClockMs: number;
   model?: string;
+  resultRepair?: boolean; // a follow-up run that only rewrites <result>
 }
 
 export class FakeAgentRunner implements AgentRunner {
@@ -59,6 +75,56 @@ export class FakeAgentRunner implements AgentRunner {
   async run<Schema extends z.ZodType>(
     options: AgentRunOptions<Schema>,
   ): Promise<AgentRunResult<z.infer<Schema>>> {
+    const first = await this.execute(options);
+    if (options.resultRepair) return publicResult(first);
+    if (first.output || first.errorKind !== "invalid-output") {
+      return publicResult(first);
+    }
+    const repairDir = mkdtempSync(join(tmpdir(), "afk-result-repair-"));
+    const repairBranch = `result-repair/${randomUUID()}`;
+    try {
+      const given = writeRepairPrompt(repairDir, {
+        resultSection: resultSectionOf(
+          readFileSync(options.promptFile, "utf8"),
+        ),
+        rawText: first.invalidRaw ?? "",
+        issues: first.invalidIssues ?? [],
+      });
+      const repairOptions = repairRunOptions(
+        options,
+        given.promptFile,
+        repairBranch,
+      );
+      const repair = await this.execute(repairOptions);
+      const tokenUsage = addTokenUsage(first.tokenUsage, repair.tokenUsage);
+      if (repair.output) {
+        return publicResult({
+          output: repair.output,
+          commits: first.commits,
+          durationMs: first.durationMs + repair.durationMs,
+          resultFix: "repaired",
+          ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+          ...(first.durationApiMs !== undefined
+            ? { durationApiMs: first.durationApiMs }
+            : {}),
+          ...(first.cursorCliVersion
+            ? { cursorCliVersion: first.cursorCliVersion }
+            : {}),
+        });
+      }
+      return publicResult({
+        ...first,
+        ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+      });
+    } finally {
+      git(this.repoDir, ["branch", "-D", repairBranch]);
+      rmSync(repairDir, { recursive: true, force: true });
+    }
+  }
+
+  private async execute<Schema extends z.ZodType>(
+    options: AgentRunOptions<Schema>,
+  ): Promise<InternalRun<z.infer<Schema>>> {
     this.calls.push(options);
     const started = Date.now();
     // like Sandcastle: the branch is created from baseBranch when it does not exist yet
@@ -88,6 +154,7 @@ export class FakeAgentRunner implements AgentRunner {
         idleSeconds: options.idleSeconds,
         wallClockMs: options.wallClockMs,
         ...(options.model ? { model: options.model } : {}),
+        ...(options.resultRepair ? { resultRepair: true } : {}),
         prompt: readFileSync(options.promptFile, "utf8"),
         context: (file) => {
           const path = join(options.ctxDir, file);
@@ -95,31 +162,33 @@ export class FakeAgentRunner implements AgentRunner {
         },
       });
       for (const line of step.rawLines ?? []) options.onRawLine?.(line);
-      for (const [path, content] of Object.entries(step.files ?? {})) {
-        mkdirSync(dirname(join(worktree, path)), { recursive: true });
-        writeFileSync(join(worktree, path), content);
-      }
-      for (const path of step.remove ?? [])
-        rmSync(join(worktree, path), { force: true });
-      if (
-        Object.keys(step.files ?? {}).length > 0 ||
-        (step.remove?.length ?? 0) > 0
-      ) {
-        gitOrThrow(worktree, ["add", "-A"]);
-        // A failed commit is infrastructure, not "the agent said done". Swallowing it
-        // classified the run as no-commits and blocked the ticket.
-        gitOrThrow(worktree, [
-          "-c",
-          "user.name=Fake Agent",
-          "-c",
-          "user.email=agent@example.com",
-          "-c",
-          "commit.gpgsign=false",
-          "commit",
-          "--quiet",
-          "-m",
-          step.message ?? "agent change",
-        ]);
+      if (!options.resultRepair) {
+        for (const [path, content] of Object.entries(step.files ?? {})) {
+          mkdirSync(dirname(join(worktree, path)), { recursive: true });
+          writeFileSync(join(worktree, path), content);
+        }
+        for (const path of step.remove ?? [])
+          rmSync(join(worktree, path), { force: true });
+        if (
+          Object.keys(step.files ?? {}).length > 0 ||
+          (step.remove?.length ?? 0) > 0
+        ) {
+          gitOrThrow(worktree, ["add", "-A"]);
+          // A failed commit is infrastructure, not "the agent said done". Swallowing it
+          // classified the run as no-commits and blocked the ticket.
+          gitOrThrow(worktree, [
+            "-c",
+            "user.name=Fake Agent",
+            "-c",
+            "user.email=agent@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            step.message ?? "agent change",
+          ]);
+        }
       }
       const commits = gitOrThrow(worktree, [
         "rev-list",
@@ -139,7 +208,7 @@ export class FakeAgentRunner implements AgentRunner {
           ...billed,
         };
       }
-      if (step.error) {
+      if (step.error && step.error.kind !== "invalid-output") {
         return {
           commits,
           error: step.error.message,
@@ -148,22 +217,52 @@ export class FakeAgentRunner implements AgentRunner {
           ...billed,
         };
       }
-      const parsed = options.schema.safeParse(step.output);
-      if (!parsed.success) {
+      const lastAssistant = lastAssistantFromCursorLines(step.rawLines ?? []);
+      const recovered = recoverStructuredOutput(options.schema, {
+        ...(step.rawMatched !== undefined
+          ? { rawMatched: step.rawMatched }
+          : {}),
+        ...(lastAssistant ? { lastAssistant } : {}),
+        ...(step.output !== undefined ? { output: step.output } : {}),
+      });
+      if (!recovered.ok) {
         return {
           commits,
-          error: parsed.error.message.slice(0, 400),
+          error: recovered.issues
+            .map((issue) => `${issue.path}: ${issue.message}`)
+            .join("; ")
+            .slice(0, 400),
           errorKind: "invalid-output",
           durationMs,
           ...billed,
+          invalidRaw: recovered.rawText,
+          invalidIssues: recovered.issues,
         };
       }
-      return { output: parsed.data, commits, durationMs, ...billed };
+      return {
+        output: recovered.output,
+        commits,
+        durationMs,
+        ...billed,
+        ...(recovered.resultFix ? { resultFix: recovered.resultFix } : {}),
+      };
     } finally {
       git(this.repoDir, ["worktree", "remove", "--force", worktree]);
       rmSync(dir, { recursive: true, force: true });
     }
   }
+}
+
+type InternalRun<Output> = AgentRunResult<Output> & {
+  invalidRaw?: string;
+  invalidIssues?: { path: string; message: string }[];
+};
+
+function publicResult<Output>(
+  run: InternalRun<Output>,
+): AgentRunResult<Output> {
+  const { invalidRaw: _raw, invalidIssues: _issues, ...rest } = run;
+  return rest;
 }
 
 // The gate's "fresh sandbox": a detached worktree of the ref, where string commands run with `sh -c` and argv
