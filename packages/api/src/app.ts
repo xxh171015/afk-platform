@@ -17,6 +17,7 @@ import { registerPlanningRoutes } from "./http/planning-routes.ts";
 import { refuseOutdatedPlat } from "./http/plat-freshness.ts";
 import { registerTicketRoutes } from "./http/ticket-routes.ts";
 import { registerWorkerRoutes } from "./http/worker-routes.ts";
+import { renewHeldLeases } from "./jobs/queue.ts";
 import { LogStore } from "./logs/log-store.ts";
 import {
   fanOutNotifications,
@@ -134,6 +135,14 @@ export function createApp(options: AppOptions): OpenAPIHono {
       }),
   };
   const app = new OpenAPIHono();
+  const heldLeasesRenewed =
+    typeof options.pool?.query === "function"
+      ? renewHeldLeases(options.pool, context.clock(), context.leaseSeconds)
+      : Promise.resolve();
+  app.use("*", async (_c, next) => {
+    await heldLeasesRenewed;
+    await next();
+  });
   bindEventsHub(app, context.events);
   bindDispatcher(
     app,

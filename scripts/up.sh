@@ -7,8 +7,9 @@
 # and how to fix it. Code-host credentials are at least one of the GitHub App or a GitLab PAT
 # (~/.afk/secrets/gitlab/<host>, mode 600, verified against that host). --check never asks.
 #
-# Usage: scripts/up.sh            (Ctrl-C stops everything; Ctrl-C twice: stop them at once)
+# Usage: scripts/up.sh            (Ctrl-C stops everything and abandons jobs; Ctrl-C twice: stop them at once)
 #        scripts/up.sh --check    only check, start nothing
+# Planned restart of one process without losing in-hand work: scripts/restart.sh api|web|worker
 # Settings are read from the environment first, then from ~/.afk/env (the file the worker reads
 # CURSOR_API_KEY from): AFK_MODEL (the Cursor model), CURSOR_API_KEY. Also: DATABASE_URL (default the compose database), PORT (API, default 3000),
 # WEB=0 or WORKER=0 to leave that one out. The worker's own settings (AFK_HOME, AFK_SLOTS,
@@ -264,6 +265,13 @@ set -m # every pipeline below gets its own process group, so Ctrl-C reaches only
 
 pgids=() # process groups, started order
 names=()
+restart_at=() # unix seconds when to start this one again; 0 means it should be running
+given_up=()   # 1 once a process crashed 5 times in 60s
+backoff=()    # seconds to wait before the next restart
+
+run_dir="$afk_home/run"
+mkdir -p "$run_dir"
+echo $$ >"$run_dir/up.pid"
 
 # Everything the processes print also goes to a file, so a crash can be looked at after the terminal is gone.
 # One file per start; files older than 14 days are deleted.
@@ -271,25 +279,187 @@ log_dir="$afk_home/logs"
 mkdir -p "$log_dir"
 find "$log_dir" -name 'up-*.log' -type f -mtime +14 -delete 2>/dev/null || true
 up_log="$log_dir/up-$(date +%Y%m%d-%H%M%S).log"
+printf '%s\n' "$up_log" >"$run_dir/up.log"
 
-# start <name> <command...>: run it in the background with every output line prefixed by the name
-start() {
+alive() {
+  [ "$1" != gone ] && kill -0 -- "-$1" 2>/dev/null
+}
+
+# start <name> <command...>: run it in the background with every output line prefixed by the name.
+# The command's pid is written to $run_dir/<name>.pid. Do not wrap this in $() — tee's stdout is
+# the terminal, and a substitution would wait until the process exits.
+# A new sh so $$ is the command, not this script ($$ in a { } pipeline is still up.sh).
+run_named() {
   local name=$1
   shift
-  "$@" 2>&1 | sed -u "s/^/[$name] /" | tee -a "$up_log" &
-  pgids+=("$(ps -o pgid= -p "$!" | tr -d ' ')")
+  sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$run_dir/$name.pid" "$@" 2>&1 |
+    sed -u "s/^/[$name] /" | tee -a "$up_log" &
+}
+
+start() {
+  local name=$1 g
+  shift
+  run_named "$name" "$@"
+  g="$(ps -o pgid= -p "$!" 2>/dev/null | tr -d ' ')" || true
+  [ -n "$g" ] || g=gone
+  pgids+=("$g")
   names+=("$name")
+  restart_at+=(0)
+  given_up+=(0)
+  backoff+=(1)
+}
+
+restart() {
+  local i=$1 g
+  run_named "${names[i]}" pnpm "${names[i]}"
+  g="$(ps -o pgid= -p "$!" 2>/dev/null | tr -d ' ')" || true
+  [ -n "$g" ] || g=gone
+  pgids[i]="$g"
+  restart_at[i]=0
+}
+
+index_of() {
+  local i
+  for i in "${!names[@]}"; do
+    if [ "${names[i]}" = "$1" ]; then
+      echo "$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+planned_restart() {
+  local name=$1 i pid n=0
+  i=$(index_of "$name") || {
+    echo "restart.sh: $name is not running" | tee -a "$up_log" >&2
+    return 1
+  }
+  pid=$(tr -d ' \n' <"$run_dir/$name.pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 50 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+  fi
+  given_up[i]=0
+  backoff[i]=1
+  restart "$i"
+}
+
+rolling_restart_worker() {
+  local i old_pid new_pid n=0
+  i=$(index_of worker) || {
+    echo "restart.sh: worker is not running" | tee -a "$up_log" >&2
+    return 1
+  }
+  old_pid=$(tr -d ' \n' <"$run_dir/worker.pid" 2>/dev/null || true)
+  given_up[i]=0
+  backoff[i]=1
+  restart "$i"
+  while [ "$n" -lt 50 ]; do
+    new_pid=$(tr -d ' \n' <"$run_dir/worker.pid" 2>/dev/null || true)
+    if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && kill -0 "$new_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+    n=$((n + 1))
+  done
+  if [ -n "$old_pid" ]; then
+    kill -USR2 "$old_pid" 2>/dev/null || true
+  fi
+}
+
+record_crash() {
+  local name=$1 now=$2 file="$run_dir/$1.crashes" cutoff tmp
+  cutoff=$((now - 60))
+  tmp="$(mktemp)"
+  if [ -f "$file" ]; then
+    while read -r t; do
+      [ -n "$t" ] && [ "$t" -gt "$cutoff" ] && echo "$t"
+    done <"$file" >"$tmp"
+  fi
+  echo "$now" >>"$tmp"
+  mv "$tmp" "$file"
+}
+
+crash_count() {
+  local file="$run_dir/$1.crashes"
+  if [ ! -f "$file" ]; then
+    echo 0
+    return
+  fi
+  wc -l <"$file" | tr -d ' '
+}
+
+handle_death() {
+  local i=$1 now count
+  now=$(date +%s)
+  if [ "${names[i]}" = worker ]; then
+    echo "worker exited; stopping the rest (log: $up_log)" | tee -a "$up_log" >&2
+    exit 1
+  fi
+  record_crash "${names[i]}" "$now"
+  count=$(crash_count "${names[i]}")
+  if [ "$count" -ge 5 ]; then
+    echo "${names[i]} crashed 5 times in 60s; not restarting (too many crashes)" | tee -a "$up_log" >&2
+    given_up[i]=1
+    return
+  fi
+  echo "${names[i]} exited; restarting in ${backoff[i]}s (log: $up_log)" | tee -a "$up_log" >&2
+  restart_at[i]=$((now + backoff[i]))
+  if [ "${backoff[i]}" -lt 8 ]; then
+    backoff[i]=$((backoff[i] * 2))
+  fi
+}
+
+pid_alive() {
+  local pidfile="$run_dir/$1.pid" pid
+  # a missing file means start() has not written the pid yet, not that the process died
+  [ -f "$pidfile" ] || return 0
+  pid=$(tr -d ' \n' <"$pidfile")
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+tick() {
+  local i now target
+  if [ -f "$run_dir/restart.request" ]; then
+    target=$(tr -d ' \n' <"$run_dir/restart.request")
+    rm -f "$run_dir/restart.request"
+    case "$target" in
+      api | web) planned_restart "$target" ;;
+      worker) rolling_restart_worker ;;
+    esac
+  fi
+  now=$(date +%s)
+  for i in "${!pgids[@]}"; do
+    if [ "${given_up[i]}" = 1 ]; then
+      continue
+    fi
+    if [ "${restart_at[i]}" -gt 0 ]; then
+      if [ "$now" -ge "${restart_at[i]}" ]; then
+        restart "$i"
+      fi
+      continue
+    fi
+    if ! pid_alive "${names[i]}"; then
+      handle_death "$i"
+    fi
+  done
 }
 
 stopping=0
 stop_all() {
   [ "$stopping" = 0 ] || return 0
   stopping=1
+  rm -f "$run_dir/up.pid"
   echo "stopping (the worker aborts the runs in hand first; Ctrl-C again stops them at once)..."
+  echo "要不丢活地重启，请用 scripts/restart.sh（Ctrl-C 会放弃正在跑的作业）"
   local i
   # reverse order: worker, then page, then API
   for ((i = ${#pgids[@]} - 1; i >= 0; i--)); do
-    kill -INT -- "-${pgids[i]}" 2>/dev/null || true
+    alive "${pgids[i]}" && kill -INT -- "-${pgids[i]}" 2>/dev/null || true
     # the worker needs a moment to abort its runs; the others stop at once
     if [ "${names[i]}" = worker ]; then wait_group "${pgids[i]}"; fi
   done
@@ -308,12 +478,16 @@ check_signal() { if [ "$sigs" -gt 0 ]; then exit 130; fi; }
 
 force_stop() {
   local g
-  for g in ${pgids[@]+"${pgids[@]}"}; do kill -TERM -- "-$g" 2>/dev/null || true; done
+  for g in ${pgids[@]+"${pgids[@]}"}; do
+    [ "$g" = gone ] && continue
+    kill -TERM -- "-$g" 2>/dev/null || true
+  done
   exit 130
 }
 
 wait_group() {
   local n=0
+  [ "$1" = gone ] && return 0
   while kill -0 -- "-$1" 2>/dev/null && [ "$n" -lt 120 ]; do
     sleep 0.5
     n=$((n + 1))
@@ -322,18 +496,23 @@ wait_group() {
 trap on_signal INT TERM HUP
 trap stop_all EXIT
 
-docker compose up -d --wait postgres
-pnpm db:migrate
+if [ "${AFK_UP_SKIP_STACK:-}" != 1 ]; then
+  docker compose up -d --wait postgres
+  pnpm db:migrate
+fi
 
 start api pnpm api
-until curl -s -o /dev/null "$AFK_API_URL/"; do
-  check_signal
-  if ! kill -0 -- "-${pgids[0]}" 2>/dev/null; then
-    echo "the API stopped before it came up" >&2
-    exit 1
-  fi
-  sleep 0.5
-done
+if [ "${AFK_UP_SKIP_STACK:-}" != 1 ]; then
+  until curl -s -o /dev/null "$AFK_API_URL/"; do
+    check_signal
+    tick
+    if [ "${given_up[0]}" = 1 ]; then
+      echo "the API stopped before it came up" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+fi
 
 [ "${WEB:-1}" = 0 ] || start web pnpm web
 [ "${WORKER:-1}" = 0 ] || start worker pnpm worker
@@ -343,14 +522,10 @@ echo "log: $up_log"
 echo "next: in the planning repo, run the command on the page's 接入 card (curl -fsSL $AFK_API_URL/setup.sh | sh), then /afk-setup in Cursor or Claude Code"
 echo "next: 接新需求前先跑 scripts/canary.sh --project <id> (not started automatically)"
 
-# leave as soon as any process dies, then stop the rest (macOS bash 3.2 has no `wait -n`)
+# macOS bash 3.2 has no `wait -n`. API or the page dying is restarted with backoff; the worker dying
+# still stops the rest, as before.
 while :; do
   check_signal
-  for i in "${!pgids[@]}"; do
-    if ! kill -0 -- "-${pgids[i]}" 2>/dev/null; then
-      echo "${names[i]} exited; stopping the rest (log: $up_log)" | tee -a "$up_log" >&2
-      exit 1
-    fi
-  done
+  tick
   sleep 1
 done

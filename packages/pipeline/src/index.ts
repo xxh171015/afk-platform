@@ -170,6 +170,7 @@ export type {
 } from "./sandcastle.ts";
 export {
   agentEnv,
+  agentRunPlacement,
   CONTEXT_SANDBOX_PATH,
   classifyAgentError,
   DEFAULT_SANDBOX_LIMITS,

@@ -111,6 +111,7 @@ const claimRoute = createRoute({
           schema: z.object({
             workerId: z.string().min(1).max(200),
             capabilities: z.array(z.string().max(200)).max(100),
+            takeSlot: z.boolean().optional(),
           }),
         },
       },
@@ -839,7 +840,7 @@ export function registerWorkerRoutes(
   });
 
   app.openapi(claimRoute, async (c) => {
-    const { workerId, capabilities } = c.req.valid("json");
+    const { workerId, capabilities, takeSlot } = c.req.valid("json");
     if (
       await claimsStopped(
         context.pool,
@@ -855,6 +856,7 @@ export function registerWorkerRoutes(
       capabilities,
       now: context.clock(),
       leaseSeconds: context.leaseSeconds,
+      takeSlot: takeSlot !== false,
     });
     if (!job) return c.json({ job: null }, 200);
     const specIds = await specIdsOfJob(context.pool, job.id);

@@ -1,4 +1,4 @@
-import type { JobState } from "@afk/shared";
+import { type JobState, SLOTLESS_JOB_TYPES } from "@afk/shared";
 import type pg from "pg";
 import { AGENT_JOB_TYPE, probeHandedOut } from "../agents-pause.ts";
 import { applyOrigin } from "../events/origin.ts";
@@ -70,6 +70,7 @@ export interface ClaimRequest {
   capabilities: string[];
   now: Date;
   leaseSeconds: number;
+  takeSlot?: boolean;
 }
 
 // A job belongs to a project through whatever id its payload carries (host-sync has projectId, most
@@ -128,10 +129,18 @@ export async function claimJob(
              NOT EXISTS (SELECT 1 FROM jobs h WHERE h.lock_key = j.lock_key AND h.state = 'running' AND h.lease_expires_at > $4)
              -- ... and nothing older is still waiting for it (first in, first out)
              AND NOT EXISTS (SELECT 1 FROM jobs e WHERE e.lock_key = j.lock_key AND e.state = 'queued' AND e.id < j.id)))
+           AND ($5::boolean OR j.type = ANY($6::text[]))
          ORDER BY COALESCE(p.last_claimed_at, '-infinity'::timestamptz), j.id
          FOR UPDATE OF j SKIP LOCKED LIMIT 1)
        RETURNING ${COLUMNS}`,
-      [request.workerId, leaseExpiresAt, request.capabilities, request.now],
+      [
+        request.workerId,
+        leaseExpiresAt,
+        request.capabilities,
+        request.now,
+        request.takeSlot !== false,
+        [...SLOTLESS_JOB_TYPES],
+      ],
     );
     const job = (rows[0] as LeasedJob | undefined) ?? null;
     if (job?.type === AGENT_JOB_TYPE)
@@ -155,6 +164,21 @@ export async function claimJob(
   } finally {
     client.release(broken);
   }
+}
+
+// Before the API accepts claims: every job still in a worker's hands gets a fresh lease, so a lease that
+// ran out while this process was down is not expired on the first claim (the worker may still be running it).
+export async function renewHeldLeases(
+  pool: Queryable,
+  now: Date,
+  leaseSeconds: number,
+): Promise<void> {
+  const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1000);
+  await pool.query(
+    `UPDATE jobs SET lease_expires_at = $1
+     WHERE state = 'running' AND lease_owner IS NOT NULL`,
+    [leaseExpiresAt],
+  );
 }
 
 // Running jobs whose lease ran out: their worker died, hung or could not reach the API.

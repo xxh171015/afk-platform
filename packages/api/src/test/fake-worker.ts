@@ -274,10 +274,13 @@ export class FakeWorker {
     });
   }
 
-  claim(): Promise<Reply<{ job: ClaimedJob | null }>> {
+  claim(opts?: {
+    takeSlot?: boolean;
+  }): Promise<Reply<{ job: ClaimedJob | null }>> {
     return this.post("/worker/jobs/claim", {
       workerId: this.id,
       capabilities: this.capabilities,
+      ...(opts?.takeSlot === false ? { takeSlot: false } : {}),
     });
   }
 }

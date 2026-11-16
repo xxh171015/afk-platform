@@ -20,6 +20,9 @@ const sql = {
   trigger: TRIGGER_SQL,
   alpha: "CREATE TABLE alpha (id integer PRIMARY KEY);\n",
   beta: "CREATE TABLE beta (id integer PRIMARY KEY);\n",
+  x: "CREATE TABLE x (id integer PRIMARY KEY);\n",
+  y: "CREATE TABLE y (id integer PRIMARY KEY);\n",
+  z: "CREATE TABLE z (id integer PRIMARY KEY);\n",
 };
 
 function drizzleJournal(tags: { tag: string; when: number }[]): string {
@@ -76,6 +79,26 @@ function rebase(repo: TestRepo, upstreamSha?: string): string {
       ...(upstreamSha ? { AFK_GENERATED_UPSTREAM_SHA: upstreamSha } : {}),
     },
   });
+}
+
+function rebaseAttempt(
+  repo: TestRepo,
+  upstreamSha?: string,
+): { code: number; out: string } {
+  try {
+    const stdout = rebase(repo, upstreamSha);
+    return { code: 0, out: stdout };
+  } catch (error) {
+    const failed = error as {
+      status?: number | null;
+      stdout?: string;
+      stderr?: string;
+    };
+    return {
+      code: failed.status ?? 1,
+      out: `${failed.stdout ?? ""}${failed.stderr ?? ""}`,
+    };
+  }
 }
 
 function entriesOf(repo: TestRepo): {
@@ -153,7 +176,7 @@ function twoTicketRepo(kind: "distinct" | "same-path"): TestRepo {
 describe("scripts/rebase-migrations.sh", () => {
   it("renumbers the incoming ticket's migrations after the integration tip, with matching journal names and a later timestamp", () => {
     repo = twoTicketRepo("distinct");
-    rebase(repo);
+    rebase(repo, gitOut(repo.dir, ["rev-parse", "HEAD^1"]));
     expect(read(repo, "packages/api/drizzle/0002_alpha.sql")).toBe(sql.alpha);
     expect(read(repo, "packages/api/drizzle/0003_beta.sql")).toBe(sql.beta);
     expect(() => read(repo, "packages/api/drizzle/0002_beta.sql")).toThrow();
@@ -170,7 +193,7 @@ describe("scripts/rebase-migrations.sh", () => {
   it("keeps handwritten trigger SQL and the rebased set migrates on an empty database", async () => {
     repo = twoTicketRepo("distinct");
     const triggerBefore = read(repo, "packages/api/drizzle/0001_triggers.sql");
-    rebase(repo);
+    rebase(repo, gitOut(repo.dir, ["rev-parse", "HEAD^1"]));
     expect(read(repo, "packages/api/drizzle/0001_triggers.sql")).toBe(
       triggerBefore,
     );
@@ -209,7 +232,7 @@ describe("scripts/rebase-migrations.sh", () => {
     const before = gitOut(repo.dir, ["status", "--porcelain"]);
     const journal = read(repo, "packages/api/drizzle/meta/_journal.json");
     const snapshot = read(repo, "packages/api/drizzle/meta/0001_snapshot.json");
-    rebase(repo);
+    rebase(repo, gitOut(repo.dir, ["rev-parse", "HEAD^1"]));
     expect(gitOut(repo.dir, ["status", "--porcelain"])).toBe(before);
     expect(read(repo, "packages/api/drizzle/meta/_journal.json")).toBe(journal);
     expect(read(repo, "packages/api/drizzle/meta/0001_snapshot.json")).toBe(
@@ -219,7 +242,7 @@ describe("scripts/rebase-migrations.sh", () => {
 
   it("recovers a same-path incoming migration that take-ours replaced with the integration blob", () => {
     repo = twoTicketRepo("same-path");
-    rebase(repo);
+    rebase(repo, gitOut(repo.dir, ["rev-parse", "HEAD^1"]));
     expect(read(repo, "packages/api/drizzle/0002_alpha.sql")).toBe(sql.alpha);
     expect(read(repo, "packages/api/drizzle/0003_alpha.sql")).toBe(sql.beta);
     const entries = entriesOf(repo);
@@ -235,7 +258,7 @@ describe("scripts/rebase-migrations.sh", () => {
   it("does not touch snapshot files", () => {
     repo = twoTicketRepo("distinct");
     const snapshot = read(repo, "packages/api/drizzle/meta/0001_snapshot.json");
-    rebase(repo);
+    rebase(repo, gitOut(repo.dir, ["rev-parse", "HEAD^1"]));
     expect(read(repo, "packages/api/drizzle/meta/0001_snapshot.json")).toBe(
       snapshot,
     );
@@ -322,5 +345,97 @@ describe("scripts/rebase-migrations.sh", () => {
       "0002_alpha",
       "0003_beta",
     ]);
+  });
+
+  function s40UpdateBranchRepo(): { mainTip: string } {
+    repo = makeRepo(baseFiles());
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit(
+      {
+        "packages/api/drizzle/0084_x.sql": sql.x,
+        "packages/api/drizzle/meta/_journal.json": journalWith({
+          tag: "0084_x",
+          when: 3000,
+        }),
+      },
+      "spec adds 0084_x",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    repo.commit(
+      {
+        "packages/api/drizzle/0084_y.sql": sql.y,
+        "packages/api/drizzle/0085_z.sql": sql.z,
+        "packages/api/drizzle/meta/_journal.json": journalWith(
+          { tag: "0084_y", when: 3000 },
+          { tag: "0085_z", when: 4000 },
+        ),
+      },
+      "main adds 0084_y and 0085_z",
+    );
+    const mainTip = gitOut(repo.dir, ["rev-parse", "HEAD"]);
+    git(repo.dir, ["checkout", "--quiet", "spec/s"]);
+    const merged = mergeTakingOurs(
+      repo.dir,
+      "spec/s",
+      "main",
+      ["packages/api/drizzle/meta/_journal.json"],
+      "update-branch ours",
+    );
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "--detach", merged.candidate]);
+    return { mainTip };
+  }
+
+  it("S-40: keeps main's 0084_y and 0085_z and renumbers the spec's 0084_x to 0086_x, with matching journal", () => {
+    const { mainTip } = s40UpdateBranchRepo();
+    rebase(repo, mainTip);
+    expect(read(repo, "packages/api/drizzle/0084_y.sql")).toBe(sql.y);
+    expect(read(repo, "packages/api/drizzle/0085_z.sql")).toBe(sql.z);
+    expect(read(repo, "packages/api/drizzle/0086_x.sql")).toBe(sql.x);
+    expect(() => read(repo, "packages/api/drizzle/0084_x.sql")).toThrow();
+    expect(
+      gitOut(repo.dir, ["show", `${mainTip}:packages/api/drizzle/0084_y.sql`]),
+    ).toBe(sql.y.trimEnd());
+    expect(
+      gitOut(repo.dir, ["show", `${mainTip}:packages/api/drizzle/0085_z.sql`]),
+    ).toBe(sql.z.trimEnd());
+    const entries = entriesOf(repo);
+    expect(entries.map((e) => `${e.idx}:${e.tag}`)).toEqual([
+      "0:0000_init",
+      "1:0001_triggers",
+      "2:0084_y",
+      "3:0085_z",
+      "4:0086_x",
+    ]);
+    expect(entries[4]?.when).toBeGreaterThan(entries[3]?.when ?? 0);
+    expect(entries[3]?.when).toBeGreaterThan(entries[2]?.when ?? 0);
+  });
+
+  it("does not rename or delete a migration that already exists on the upstream commit", () => {
+    const { mainTip } = s40UpdateBranchRepo();
+    rebase(repo, mainTip);
+    expect(read(repo, "packages/api/drizzle/0084_y.sql")).toBe(sql.y);
+    expect(read(repo, "packages/api/drizzle/0085_z.sql")).toBe(sql.z);
+    expect(
+      gitOut(repo.dir, [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        mainTip,
+        "--",
+        "packages/api/drizzle",
+      ]),
+    ).toContain("packages/api/drizzle/0084_y.sql");
+  });
+
+  it("exits non-zero when it cannot tell which side is upstream, and leaves upstream files in place", () => {
+    s40UpdateBranchRepo();
+    const yBefore = read(repo, "packages/api/drizzle/0084_y.sql");
+    const zBefore = read(repo, "packages/api/drizzle/0085_z.sql");
+    const result = rebaseAttempt(repo);
+    expect(result.code).not.toBe(0);
+    expect(result.out).toMatch(/upstream/i);
+    expect(read(repo, "packages/api/drizzle/0084_y.sql")).toBe(yBefore);
+    expect(read(repo, "packages/api/drizzle/0085_z.sql")).toBe(zBefore);
+    expect(() => read(repo, "packages/api/drizzle/0086_x.sql")).toThrow();
   });
 });

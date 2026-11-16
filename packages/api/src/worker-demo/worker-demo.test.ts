@@ -2883,15 +2883,18 @@ describe("the merge stage", { timeout: 60_000 }, () => {
   it("recognises a merge it already did when the result never reached the API", async () => {
     await confirmedSpec([ticket("a")]);
     const real = workerFor();
-    // the API is unreachable exactly when the merge result is handed in
+    const stop = new AbortController();
+    // the API is unreachable exactly when the merge result is handed in; the process is then told to exit
     const unreachable = {
       ...real,
       complete: async (
         job: Parameters<typeof real.complete>[0],
         body: unknown,
       ) => {
-        if ((body as { stage: string }).stage === "merge")
+        if ((body as { stage: string }).stage === "merge") {
+          stop.abort();
           throw new Error("connection reset");
+        }
         return real.complete(job, body);
       },
     };
@@ -2900,6 +2903,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
       executor: deps(),
       stopWhenIdle: true,
       heartbeatMs: 20,
+      signal: stop.signal,
     });
     expect(await stateOf()).toEqual(["1:merging"]);
     const mergesAfterFirst = gitOut(origin, [
@@ -2963,6 +2967,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
       return undefined;
     };
     const real = workerFor();
+    const stop = new AbortController();
     let merges = 0;
     let lost: number | undefined;
     // the API is unreachable whenever the result of the second merge job (ticket b's) is handed in
@@ -2974,7 +2979,10 @@ describe("the merge stage", { timeout: 60_000 }, () => {
       ) => {
         if ((body as { stage: string }).stage === "merge") {
           if (lost === undefined && ++merges === 2) lost = job.id;
-          if (job.id === lost) throw new Error("connection reset");
+          if (job.id === lost) {
+            stop.abort();
+            throw new Error("connection reset");
+          }
         }
         return real.complete(job, body);
       },
@@ -2984,6 +2992,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
       executor: deps({ script }),
       stopWhenIdle: true,
       heartbeatMs: 20,
+      signal: stop.signal,
     });
     expect(await stateOf()).toEqual(["1:done", "2:merging", "3:pending"]);
 
@@ -3017,14 +3026,17 @@ describe("the merge stage", { timeout: 60_000 }, () => {
   it("still reports a merge it recognises when the merged head cannot be measured", async () => {
     await confirmedSpec([ticket("a")]);
     const real = workerFor();
+    const stop = new AbortController();
     const unreachable = {
       ...real,
       complete: async (
         job: Parameters<typeof real.complete>[0],
         body: unknown,
       ) => {
-        if ((body as { stage: string }).stage === "merge")
+        if ((body as { stage: string }).stage === "merge") {
+          stop.abort();
           throw new Error("connection reset");
+        }
         return real.complete(job, body);
       },
     };
@@ -3033,6 +3045,7 @@ describe("the merge stage", { timeout: 60_000 }, () => {
       executor: deps(),
       stopWhenIdle: true,
       heartbeatMs: 20,
+      signal: stop.signal,
     });
     clock.advanceSeconds(121);
     const recovering = deps();
@@ -3263,10 +3276,14 @@ describe("trouble reaching the API, or no room to work", {
 
   it("gives the job up without failing it when the result cannot be handed in at all", async () => {
     const { api2, job } = await claimed();
+    const stop = new AbortController();
     let failCalled = false;
+    let tries = 0;
     const down = {
       ...api2,
       complete: async () => {
+        tries += 1;
+        if (tries >= 2) stop.abort();
         throw new Error("connection refused");
       },
       fail: async () => {
@@ -3275,20 +3292,26 @@ describe("trouble reaching the API, or no room to work", {
       },
     };
     expect(
-      await processJob({ api: down, executor: deps(), heartbeatMs: 50 }, job),
+      await processJob(
+        { api: down, executor: deps(), heartbeatMs: 50, signal: stop.signal },
+        job,
+      ),
     ).toBe("abandoned");
     expect(failCalled).toBe(false);
   });
 
   it("stops working when the heartbeat keeps failing", async () => {
     const { api2, job } = await claimed();
-    let sawAbort = false;
+    let failedBeats = 0;
     // the network goes once the agent runs: heartbeats go on during the fetches before it
     let agentRunning = false;
     const flaky = {
       ...api2,
       heartbeat: async (held: typeof job) => {
-        if (agentRunning) throw new Error("network down");
+        if (agentRunning) {
+          failedBeats += 1;
+          throw new Error("network down");
+        }
         return api2.heartbeat(held);
       },
     };
@@ -3296,17 +3319,17 @@ describe("trouble reaching the API, or no room to work", {
       script: async (ctx) => {
         if (ctx.stage !== "implement") return undefined;
         agentRunning = true;
-        await new Promise<void>((resolve) =>
-          ctx.signal?.addEventListener("abort", () => resolve()),
-        );
-        sawAbort = true;
+        const deadline = Date.now() + 400;
+        while (failedBeats < 5 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
         return { output: DONE };
       },
     });
     expect(
       await processJob({ api: flaky, executor, heartbeatMs: 20 }, job),
-    ).toBe("abandoned");
-    expect(sawAbort).toBe(true);
+    ).toBe("completed");
+    expect(failedBeats).toBeGreaterThanOrEqual(5);
   });
 
   it("uploads the log while the stage is still running", async () => {

@@ -631,6 +631,46 @@ describe("a job the worker could not carry out", () => {
   });
 });
 
+describe("a lease that ran out while the API was down", () => {
+  async function restartApi() {
+    await api.close();
+    api = await listen(testApp({ pool: db.pool, clock: clock.now }));
+    worker = new FakeWorker(api.url, "w1", []);
+  }
+
+  it("is not a failure on the first claim after the API starts", async () => {
+    await runningSpec([ticket("a")]);
+    await claim();
+    clock.advanceSeconds(121);
+    await restartApi();
+    expect(await claim()).toBeNull();
+    expect((await state()).state).toBe("running");
+    expect(await keys()).toEqual([
+      { idempotency_key: "T-1:1:implement:1", state: "running" },
+    ]);
+  });
+
+  it("is lease-expired and counts as a failure once a full lease after start still has no heartbeat", async () => {
+    await runningSpec([ticket("a")]);
+    await claim();
+    clock.advanceSeconds(121);
+    await restartApi();
+    expect(await claim()).toBeNull();
+    clock.advanceSeconds(121);
+    const again = await claim();
+    expect(again?.payload.stage).toBe("implement");
+    expect(await keys()).toEqual([
+      { idempotency_key: "T-1:1:implement:1", state: "failed" },
+      { idempotency_key: "T-1:1:implement:2", state: "running" },
+    ]);
+    const failed = await db.pool.query(
+      "SELECT error FROM jobs WHERE idempotency_key = $1",
+      ["T-1:1:implement:1"],
+    );
+    expect(failed.rows[0].error).toMatch(/^lease-expired:/);
+  });
+});
+
 describe("a lease that ran out", () => {
   // The worker holding the job died, hung, or could not reach the API: nobody renewed the lease.
   async function loseLease() {

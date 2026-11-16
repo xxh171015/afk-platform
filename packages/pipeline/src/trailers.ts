@@ -21,8 +21,8 @@ export interface StampRequest {
   before: string; // the branch tip before this run: commits up to here are stamped already
   ids: TrailerIds;
   // Commits that came in from elsewhere, such as the integration branch merged into the ticket's branch by a
-  // merge-fix, belong to someone else and keep their identity.
-  exclude?: string;
+  // merge-fix, or the default branch merged in by update-branch, belong to someone else and keep their identity.
+  exclude?: string | readonly string[];
 }
 
 export interface StampResult {
@@ -44,13 +44,19 @@ export function stampTrailers(request: StampRequest): StampResult {
     }
   }
   const tip = gitOrThrow(repoDir, ["rev-parse", branch]);
+  const excluded =
+    request.exclude === undefined
+      ? []
+      : typeof request.exclude === "string"
+        ? [request.exclude]
+        : [...request.exclude];
   const listing = git(repoDir, [
     "rev-list",
     "--reverse",
     "--topo-order",
     tip,
     `^${before}`,
-    ...(request.exclude ? [`^${request.exclude}`] : []),
+    ...excluded.map((ref) => `^${ref}`),
   ]);
   if (listing.code !== 0) {
     return {

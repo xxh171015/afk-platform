@@ -7,6 +7,7 @@ import {
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   MAX_LOG_CHUNK_BYTES,
+  occupiesSlot,
   PLANNING_COMMIT_JOB,
   TRIAL_MERGE_JOB,
 } from "@afk/shared";
@@ -41,7 +42,14 @@ export interface WorkerOptions {
   concurrency?: number; // jobs at once; no more than there are slots
   stopWhenIdle?: boolean; // return as soon as a claim finds nothing (tests, one-shot runs)
   signal?: AbortSignal; // stop: claim nothing more and abandon the jobs in hand
+  drain?: AbortSignal; // SIGUSR2: claim nothing more; finish the jobs in hand and then return
   log?: (line: string) => void;
+  // Tests inject a stand-in for executeStage (the fake runner). Production never sets this.
+  runStage?: (context: {
+    job: ClaimedJob;
+    signal: AbortSignal;
+    log: (line: string) => void;
+  }) => Promise<{ stage: string; outcome: string }>;
   // Home disk: below stopBelow the loop waits instead of claiming (a running job still finishes). A report on
   // each ok/warn/stop change is how the API learns this worker's remaining space for the banner.
   disk?: {
@@ -52,11 +60,11 @@ export interface WorkerOptions {
   };
 }
 
-const MAX_FAILED_HEARTBEATS = 3;
 const DEFAULT_RETRY_MS = 5_000;
-const COMPLETE_ATTEMPTS = 3;
+const HANDOVER_RETRY_CAP_MS = 30_000;
 export const DEFAULT_LOG_FLUSH_MS = 400;
 export const LOG_FLUSH_BYTES = 64 * 1024;
+export const LOG_BUFFER_MAX_BYTES = 8 * 1024 * 1024;
 
 export type JobOutcome = "completed" | "failed" | "abandoned";
 
@@ -77,15 +85,42 @@ export async function runWorker(
   options: WorkerOptions,
 ): Promise<{ jobs: number }> {
   let jobs = 0;
-  const claim = () =>
-    options.api.claim([
-      ...(options.capabilities ?? []),
-      ...(options.host ? [HOST_CAPABILITY] : []),
-    ]);
+  const capabilities = [
+    ...(options.capabilities ?? []),
+    ...(options.host ? [HOST_CAPABILITY] : []),
+  ];
+  const claim = (takeSlot: boolean) =>
+    options.api.claim(capabilities, { takeSlot });
+  const stopOrDrain = () => {
+    const signals = [options.signal, options.drain].filter(
+      (s): s is AbortSignal => s !== undefined,
+    );
+    return signals.length > 0 ? AbortSignal.any(signals) : undefined;
+  };
+  let reserved = 0;
+  let reserveGate = Promise.resolve();
+  const decideTakeSlot = async (): Promise<boolean> => {
+    if (!options.executor.slots?.idleCount) return true;
+    const next = reserveGate.then(async () => {
+      const free = await options.executor.slots.idleCount();
+      if (free > reserved) {
+        reserved += 1;
+        return true;
+      }
+      return false;
+    });
+    reserveGate = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
   const loop = async () => {
     let lastDiskLevel: DiskLevel | undefined;
-    while (!options.signal?.aborted) {
+    while (!options.signal?.aborted && !options.drain?.aborted) {
       let job: ClaimedJob | null;
+      let takeSlot = true;
+      let heldReservation = false;
       try {
         if (options.disk) {
           const free = await options.disk.free();
@@ -107,25 +142,30 @@ export async function runWorker(
             options.log?.(
               `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
             );
-            await sleep(options.pollMs ?? 2_000, options.signal);
+            await sleep(options.pollMs ?? 2_000, stopOrDrain());
             continue;
           }
         }
-        job = await claim();
+        takeSlot = await decideTakeSlot();
+        heldReservation = takeSlot && options.executor.slots?.idleCount != null;
+        job = await claim(takeSlot);
       } catch (error) {
+        if (heldReservation) reserved -= 1;
         // The API or its database is down for a moment (Docker restarting, say): wait and ask again. Exiting
         // would also abandon the jobs the other loops are running.
         options.log?.(`claim failed, retrying: ${String(error)}`);
-        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, options.signal);
+        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, stopOrDrain());
         continue;
       }
+      if (heldReservation && (!job || !occupiesSlot(job.type))) reserved -= 1;
       if (!job) {
-        if (options.stopWhenIdle) return;
-        await sleep(options.pollMs ?? 2_000, options.signal);
+        if (options.stopWhenIdle || options.drain?.aborted) return;
+        await sleep(options.pollMs ?? 2_000, stopOrDrain());
         continue;
       }
       jobs += 1;
       await processJob(options, job);
+      if (heldReservation && occupiesSlot(job.type)) reserved -= 1;
     }
   };
   await Promise.all(Array.from({ length: options.concurrency ?? 1 }, loop));
@@ -148,6 +188,7 @@ export class LogUploader {
     const text = line.endsWith("\n") ? line : `${line}\n`;
     this.buffer.push(text);
     this.bufferedBytes += Buffer.byteLength(text);
+    this.dropOldest();
     if (this.bufferedBytes >= LOG_FLUSH_BYTES) void this.flush();
   };
 
@@ -157,29 +198,51 @@ export class LogUploader {
     return next;
   };
 
+  private dropOldest() {
+    while (
+      this.bufferedBytes > LOG_BUFFER_MAX_BYTES &&
+      this.buffer.length > 0
+    ) {
+      const gone = this.buffer.shift();
+      if (gone === undefined) break;
+      this.bufferedBytes -= Buffer.byteLength(gone);
+    }
+  }
+
+  private restore(lines: string[]) {
+    this.buffer = lines.concat(this.buffer);
+    this.bufferedBytes = this.buffer.reduce(
+      (n, line) => n + Buffer.byteLength(line),
+      0,
+    );
+    this.dropOldest();
+  }
+
   private async flushNow() {
     const lines = this.buffer;
     this.buffer = [];
     this.bufferedBytes = 0;
     // the API takes no more than a chunk's worth at once, and raw events can come fast
-    let chunk = "";
-    let size = 0;
-    for (const line of lines) {
-      const bytes = Buffer.byteLength(line);
-      if (chunk && size + bytes > MAX_LOG_CHUNK_BYTES) {
-        await this.upload(chunk);
-        chunk = "";
-        size = 0;
+    let start = 0;
+    try {
+      while (start < lines.length) {
+        let chunk = "";
+        let size = 0;
+        let end = start;
+        while (end < lines.length) {
+          const bytes = Buffer.byteLength(lines[end]);
+          if (chunk && size + bytes > MAX_LOG_CHUNK_BYTES) break;
+          chunk += lines[end];
+          size += bytes;
+          end += 1;
+        }
+        await this.send(chunk);
+        start = end;
       }
-      chunk += line;
-      size += bytes;
+    } catch {
+      // a log that cannot be uploaded is never a reason to fail the stage: put it back for the next flush
+      this.restore(lines.slice(start));
     }
-    if (chunk) await this.upload(chunk);
-  }
-
-  // a log that cannot be uploaded is never a reason to fail the stage
-  private upload(chunk: string) {
-    return this.send(chunk).catch(() => undefined);
   }
 }
 
@@ -202,7 +265,6 @@ export async function processJob(
     push: (request, token) =>
       options.executor.push({ ...request, signal: lost.signal }, token),
   };
-  let failedBeats = 0;
   let heartbeatChain = Promise.resolve();
   let stoppedBeats = false;
   const heartbeats = setInterval(() => {
@@ -213,17 +275,14 @@ export async function processJob(
         try {
           if ((await api.heartbeat(job)) === "lost") {
             log("the lease is gone, stopping");
+            stoppedBeats = true;
+            clearInterval(heartbeats);
             lost.abort();
           }
-          failedBeats = 0;
         } catch (error) {
-          // A blip is fine, the lease has two minutes of slack; a run of them means the lease is as good as gone.
-          failedBeats += 1;
-          log(`heartbeat failed (${failedBeats}): ${String(error)}`);
-          if (failedBeats >= MAX_FAILED_HEARTBEATS) {
-            log("the API cannot be reached, stopping");
-            lost.abort();
-          }
+          // The API is down or the network blipped: keep the job and try the next beat. Only an explicit
+          // "lost" means this worker is no longer the holder.
+          log(`heartbeat failed: ${String(error)}`);
         }
       })
       .catch(() => undefined);
@@ -323,16 +382,22 @@ export async function processJob(
       upload.add(line);
     };
 
-    const body = await executeStage(
-      { ...executor, api },
-      {
-        job,
-        bundle,
-        signal: lost.signal,
-        log: stageLog,
-        logRaw: rawLogSink(upload.add),
-      },
-    );
+    const body = options.runStage
+      ? await options.runStage({
+          job,
+          signal: lost.signal,
+          log: stageLog,
+        })
+      : await executeStage(
+          { ...executor, api },
+          {
+            job,
+            bundle,
+            signal: lost.signal,
+            log: stageLog,
+            logRaw: rawLogSink(upload.add),
+          },
+        );
     stageLog(`result: ${body.stage} ${body.outcome}`);
     await upload.flush();
     if (lost.signal.aborted) return "abandoned";
@@ -377,22 +442,26 @@ export async function processJob(
   }
 }
 
-// The facts of a finished stage must not be lost to a hiccup: try again a few times, and if the API stays out
-// of reach give the job up un-failed, so that it is dispatched again (a merge that already went through is
-// recognised as merged the second time).
+// The facts of a finished stage must not be lost to a hiccup: keep trying until the API answers. Back off
+// between tries, up to 30 s. Only a process told to exit (SIGINT/SIGTERM) stops the retries; the job is then
+// left un-failed so it is dispatched again (a merge that already went through is recognised as merged the
+// second time).
 async function handOver(
   options: WorkerOptions,
   job: ClaimedJob,
   body: unknown,
   log: (line: string) => void,
 ): Promise<"held" | "lost" | "unreachable"> {
-  for (let attempt = 1; attempt <= COMPLETE_ATTEMPTS; attempt++) {
+  let delay = Math.min(options.heartbeatMs ?? 30_000, 1_000);
+  for (let attempt = 1; ; attempt++) {
+    if (options.signal?.aborted) return "unreachable";
     try {
       return await options.api.complete(job, body);
     } catch (error) {
       log(`could not hand in the result (try ${attempt}): ${String(error)}`);
-      await sleep(Math.min(options.heartbeatMs ?? 30_000, 1_000));
+      if (options.signal?.aborted) return "unreachable";
+      await sleep(delay, options.signal);
+      delay = Math.min(delay * 2, HANDOVER_RETRY_CAP_MS);
     }
   }
-  return "unreachable";
 }

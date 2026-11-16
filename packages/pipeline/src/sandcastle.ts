@@ -389,6 +389,18 @@ export function sandboxProvider(options: SandboxProviderOptions) {
   });
 }
 
+// Merge per-run sandbox variables (AFK_GENERATED_UPSTREAM_SHA) with an integration placement.
+export function agentRunPlacement(options: {
+  env?: Record<string, string>;
+  placement?: SandboxPlacement;
+}): SandboxPlacement | undefined {
+  if (!options.placement && !options.env) return undefined;
+  return {
+    network: options.placement?.network ?? "",
+    env: { ...options.placement?.env, ...options.env },
+  };
+}
+
 const provider = (
   config: SandcastleConfig,
   kind: SandboxKind,
@@ -481,7 +493,7 @@ export class SandcastleAgentRunner implements AgentRunner {
           "agent",
           options.ctxDir,
           options.refs,
-          options.placement,
+          agentRunPlacement(options),
         ),
         cwd: config.cwd,
         branchStrategy: {

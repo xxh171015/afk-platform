@@ -14,6 +14,8 @@
 修订：2026-11-09 M3 改为先在 Mac 本机用起来（GitLab、多需求并行、基础度量），迁服务器挪到 M4；日志不再换 MinIO。
 修订：2026-11-10 写清项目并发（同时跑 agent 的票数，merging 不计入）和 worker 槽位（合并、联调的开销；领取按项目轮流）各管什么。
 修订：2026-11-11 M4 改为继续在 Mac 本机：飞书通知、事件驱动的通知/SSE/时间线、容器加固、Link 与 `plat bug` 定位；迁服务器、登录、多 worker、出网白名单、pgvector 挪到以后。见 [M4 spec](specs/m4-plan.md)。
+修订：2026-11-16 worker 连不上 API 时不放弃作业；API 启动时给持有中的租约续一次期。
+修订：2026-11-16 worker 收到 SIGUSR2 后排空（不再领作业，手上的交完结果再以 0 退出）；`scripts/restart.sh worker` 滚动重启，新 worker 只按空闲槽位领要占槽的作业。
 
 ## 背景与目标
 
@@ -171,7 +173,7 @@ flowchart TB
     shared["@afk/shared · 各包共用<br/>状态机：spec / ticket / job / stage / finalize<br/>runnable、分支命名、导入校验、合并顺序<br/>zod schema、OpenAPI 客户端、SKILLS_SHA"]
 
     subgraph L3["执行层 · 本机 Worker（无人值守）"]
-        wloop["Worker 循环 · @afk/worker<br/>claim → bundle → 执行一个阶段 → 回传<br/>30s 心跳，被拒即 AbortSignal 中止"]
+        wloop["Worker 循环 · @afk/worker<br/>claim → bundle → 执行一个阶段 → 回传<br/>30s 心跳，API 回答 lost 才中止<br/>连不上 API 时不放弃作业<br/>SIGUSR2 排空后退出"]
         wgit["Git 与本地目录 · @afk/worker<br/>主 clone ~/.afk/repos、槽位 ~/.afk/slots<br/>O_EXCL 槽位锁、僵尸回收、salvage<br/>git archive 快照、推送只放行 agent/* spec/*"]
         pipe["流水线 · @afk/pipeline<br/>渲染 /context、Sandcastle 封装、结构化输出<br/>门禁 gates.yaml + JUnit、保护路径<br/>契约副本核对、trailer、merge-tree<br/>联调环境 compose、e2e"]
         prompts["prompts/<br/>overlay.md + 各阶段薄 prompt<br/>票级 review 默认 Spec 轴；final-review 两轴"]
@@ -740,7 +742,7 @@ flowchart LR
 
 作业协议：
 
-- **租约**：worker 用 `SELECT … FOR UPDATE SKIP LOCKED` 取作业，拿到 2 分钟租约，每 30 秒心跳续期。租约过期的作业回到队列，attempt 加一。
+- **租约**：worker 用 `SELECT … FOR UPDATE SKIP LOCKED` 取作业，拿到 2 分钟租约，每 30 秒心跳续期。租约过期的作业回到队列，attempt 加一。心跳失败只记日志并重试；只有 API 回答租约 `"lost"` 时 worker 才放弃作业。交结果一直重试到 API 回答为止。API 启动时给所有被领走、还没完成的作业续一次租约（到期时间设成现在 + 租约时长），所以停机期间到期的租约不会在第一次领作业时被判失败；worker 真的死了时，这些租约在 API 启动一个租约时长之后照常过期。
 - **fencing**：worker 回传结果和推送集成分支前都带上 (job id, attempt)。API 只接受当前 attempt 的写入。所以电脑睡醒后，旧进程的写入会被拒绝，旧进程收到拒绝后自行退出。
 - **幂等键**：每个阶段的幂等键是 `(ticket, 内容版本, 阶段, 序号)`。重跑时先查这个阶段有没有已记录的结果，有就跳过。合并阶段额外检查：agent 分支的 head 已经是集成分支的祖先，就当作已合并。
 - **能力标签**：作业声明需要的能力（docker、能访问哪些仓库），worker 只拉自己能做的。
@@ -767,7 +769,8 @@ flowchart LR
 
 - 中断发生在 agent 运行中，下一个作业回收这个僵尸槽位时按顺序做三件事：(1) 槽位里的 `agent/<ticket-id>` 比主 clone 多出 commit 时，先按「Git 操作规范」的取回规则取回（保留 commits）；(2) 把槽位里 `.sandcastle/worktrees/<分支名里的 / 换成 ->/` 的未提交改动存成 diff 文件，放在 worker 的 `<AFK_HOME>/salvage/job-<作业号>-attempt-<次数>.diff`（不写进运行日志；取不回 commits 的槽位 clone 也整个挪到 `salvage/clone-*`，不删）；(3) 整个槽位删掉重建。在这三步之前，先删掉仍然挂着这个槽位目录的沙箱容器：被 `SIGKILL` 的 worker 不会清理自己的沙箱，容器还在往旧目录写，重建出来的同名目录也挂不进新容器（M1 演练实测：docker 报 `error while creating mount source path`）。取回的 commits 留在 `agent/<ticket-id>` 上，implement 阶段重跑时 agent 看到的是带着它们的分支；agent 发现活已干完而没有新 commit 时，只要分支上已有 commit 就算 `done`（0 个 commit 且分支为空才是 `no-commits`），这些 commit 若还没有 `Run:` trailer，从分叉点起补上。这个阶段从头跑：新会话不知道半成品的意图，所以不接着用它。
 - 中断发生在门禁或合并：这两步没有副作用，直接重跑。集成分支只在门禁通过后前移，而且是用 `--force-with-lease` 一次完成的，所以不会出现“分支前移了，状态却没写回”的情况；就算真的出现，幂等检查也会把它识别成已合并。
-- 心跳被拒绝时，worker 用 `AbortSignal` 立刻中止本地运行。同一台机器上，槽位锁（见「Git 操作规范」）保证新旧进程不会同时用同一个槽位。Sandcastle 的 worktree 锁（ADR 0007）在 0.12.0 里没有发布，这把槽位锁取代它；新作业拿到别的空闲槽位，没有空闲槽位就退回队列稍后重试。
+- 心跳被拒绝（API 回答 `"lost"`）时，worker 用 `AbortSignal` 立刻中止本地运行。连不上 API 时不放弃作业，等 API 回来再续租约、交结果。同一台机器上，槽位锁（见「Git 操作规范」）保证新旧进程不会同时用同一个槽位。Sandcastle 的 worktree 锁（ADR 0007）在 0.12.0 里没有发布，这把槽位锁取代它。领作业前按空闲槽位判断：锁还被活着的进程持有、且 API 认为它还持有这个作业，这个槽位就算被占；没有空闲槽位时不领要占槽的作业（host-sync 之类不占槽的照常领），免得新 worker 领到作业后又因为没有槽放手。SIGINT/SIGTERM 仍然立刻放弃手上的作业。
+- **排空与滚动重启。** worker 收到 SIGUSR2 后不再领新作业，手上的跑完、交完结果后以 0 退出。计划内重启用 `scripts/restart.sh api|web|worker`：`api`/`web` 只换那一个；`worker` 先用当前代码起新 worker，再给旧 worker 发 SIGUSR2，被排空退出不算崩溃、不把其余进程停掉。Ctrl-C `up.sh` 是关机，会放弃正在跑的作业。
 
 电脑休眠时租约和 fencing 怎么起作用：
 

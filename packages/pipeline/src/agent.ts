@@ -172,6 +172,8 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   schema: Schema;
   // Put the agent's sandbox on an integration environment's network, with the addresses of its services
   placement?: SandboxPlacement;
+  // Extra variables inside the agent sandbox (AFK_GENERATED_UPSTREAM_SHA on update-branch and merge-fix).
+  env?: Record<string, string>;
   idleSeconds: number;
   wallClockMs: number;
   model?: string; // for this run; the runner's own model when not given

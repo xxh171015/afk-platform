@@ -29,10 +29,14 @@
 ```sh
 cd ~/code/afk-platform
 scripts/up.sh            # 第一次会检查并引导补齐缺项；--check 只检查
+scripts/restart.sh api   # 只换 API，worker 继续跑手上的作业
+scripts/restart.sh web   # 只换页面
+scripts/restart.sh worker # 新 worker 立刻接活；旧 worker 收到 SIGUSR2，跑完手上的再退出
 ```
 
-- 前提：3000、5173 端口空着（旧的 API/worker 要先停）。
-- 启动后：API `http://127.0.0.1:3000`，页面 `http://127.0.0.1:5173`。终端里 Ctrl-C 停全部（worker 会先中止手头的 run，最多等 60 秒；再按一次立即全停）。
+- 前提：3000、5173 端口空着（旧的 API/worker 要先停）。`restart.sh` 需要已经有一个 `up.sh` 在跑。
+- 启动后：API `http://127.0.0.1:3000`，页面 `http://127.0.0.1:5173`。终端里 **Ctrl-C 等于关机**：停全部，并放弃正在跑的作业（worker 会先中止手头的 run，最多等 60 秒；再按一次立即全停）。要不丢活地重启，请用 `scripts/restart.sh`，不要 Ctrl-C。
+- API 或页面崩溃时，`up.sh` 只把它自动拉起（有退避；60 秒内连续崩溃 5 次就不再拉起），worker 和它手上的作业继续跑。worker 自己崩溃仍然会停掉其余进程；被排空后退出不算崩溃。
 - 这个终端要一直开着。平台停了，spec 不会前进，但已有数据都在 Postgres 里，重启后接着做。
 - 升级之后、接新需求之前先跑金丝雀（见 [1.5](#15-金丝雀)）。`up.sh` 只提示，不自动跑。
 
@@ -302,7 +306,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 - [ ] 你知道怎么看 `plat blocked` 并处理（第 6 节练过一次）。
 - [ ] 清楚平台当前的边界：**没有认证**，只监听 127.0.0.1；只有一个 worker，同时只跑一个需求；PR 评论返工、页面上追加票/改依赖、多个需求并行都还没有。pending / blocked 的票可以在页面上改正文、带说明重试。
 - [ ] **升级平台前先确认没有在跑的作业**（`plat blocked` 和页面上都没有 running 的票）：迁移随重启执行，没跑完的作业重跑时，前后阶段可能读到两种拼法的票正文。
-- [ ] 停机方式：Ctrl-C；正在跑的 run 会在 worker 租约到期后重新派发，不会丢，但记这个阶段的一次失败。同一阶段累计三次失败（worker 报的和租约过期的合在一起算）票会停下等人，`plat ticket retry` 再给三次。
+- [ ] 停机方式：Ctrl-C 等于关机，会放弃正在跑的作业（租约到期后重新派发，记这个阶段的一次失败）。要不丢活地重启用 `scripts/restart.sh`。同一阶段累计三次失败（worker 报的和租约过期的合在一起算）票会停下等人，`plat ticket retry` 再给三次。
 
 ## 8. 常见问题
 
@@ -338,7 +342,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 4. 改覆盖层声明的 SHA，让它和新常量一致。
 5. `pnpm check`：`VENDORED.md` 的 SHA 和常量不一致、提示词引用的 skill 没在挂载目录里时，守卫测试会失败。
 
-合并后，worker 重启就用上新 skill（`scripts/up.sh` 重启即可）。规划机器不用操作：平台发出的 plat 变了，规划机器上的 plat 下一条命令就替换自己、重装 skill、重写规划文件（见 1.2 节「以后平台升级了」）。
+合并后，`scripts/restart.sh worker` 让 worker 用上新 skill（旧 worker 排空手上的作业再退出）。规划机器不用操作：平台发出的 plat 变了，规划机器上的 plat 下一条命令就替换自己、重装 skill、重写规划文件（见 1.2 节「以后平台升级了」）。
 
 ## 附录 A：场景 A 的票目录
 

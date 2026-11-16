@@ -98,6 +98,15 @@ export class SlotManager {
     return join(this.slotDir(index), "lock");
   }
 
+  // How many slots are not held by a live process whose job the API still considers held.
+  async idleCount(): Promise<number> {
+    let n = 0;
+    for (let index = 0; index < this.options.count; index++) {
+      if (!(await this.holderIsLive(index))) n += 1;
+    }
+    return n;
+  }
+
   // A free slot with a fresh clone, or undefined when every slot is busy.
   async acquire(task: SlotTask): Promise<Slot | undefined> {
     if (!parseTicketBranch(task.ref))

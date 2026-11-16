@@ -60,6 +60,19 @@ describe("claiming", () => {
     expect((await worker("w1").claim()).body.job).not.toBeNull();
     expect((await worker("w2").claim()).body.job).toBeNull();
   });
+
+  it("does not claim a slot job when takeSlot is false, but still claims host-sync", async () => {
+    await enqueue("slot-job");
+    await enqueueJob(db.pool, {
+      type: "host-sync",
+      idempotencyKey: "project-1:host-sync",
+      requiredCapabilities: ["host"],
+      payload: { projectId: 1 },
+    });
+    const reply = await worker("w1", ["host"]).claim({ takeSlot: false });
+    expect(reply.status).toBe(200);
+    expect(reply.body.job?.type).toBe("host-sync");
+  });
 });
 
 describe("working a claimed job", () => {
@@ -143,6 +156,39 @@ describe("working a claimed job", () => {
 
   it("an unknown job is a 404, not a server error", async () => {
     expect((await worker().heartbeat(99999, 1)).status).toBe(404);
+  });
+});
+
+describe("leases when the API starts", () => {
+  it("does not take back a lease that ran out while it was down, on the first claim after it starts", async () => {
+    await enqueue("a");
+    const job = (await worker("w1").claim()).body.job as ClaimedJob;
+    clock.advanceSeconds(121);
+    await api.close();
+    api = await listen(testApp({ pool: db.pool, clock: clock.now }));
+    expect((await worker("w2").claim()).body.job).toBeNull();
+    const stored = await db.pool.query(
+      "SELECT state, attempt, error FROM jobs WHERE id = $1",
+      [job.id],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      state: "running",
+      attempt: job.attempt,
+      error: null,
+    });
+    expect((await worker("w1").complete(job.id, job.attempt)).status).toBe(200);
+  });
+
+  it("takes the job back as usual once a full lease after start still has no heartbeat", async () => {
+    await enqueue("a");
+    const job = (await worker("w1").claim()).body.job as ClaimedJob;
+    clock.advanceSeconds(121);
+    await api.close();
+    api = await listen(testApp({ pool: db.pool, clock: clock.now }));
+    expect((await worker("w2").claim()).body.job).toBeNull();
+    clock.advanceSeconds(121);
+    const retaken = (await worker("w2").claim()).body.job;
+    expect(retaken).toMatchObject({ id: job.id, attempt: job.attempt + 1 });
   });
 });
 

@@ -165,6 +165,10 @@ _Avoid_: 分布式锁、advisory lock
 Worker 上一次任务独占的一次性 clone，沙箱只挂它，不挂主 clone；任务结束即删（失败的保留到下次占用）。
 _Avoid_: 工作区、沙箱目录
 
+**Drain（排空）**：
+正在跑的 worker 收到 SIGUSR2 后不再领新作业，手上的跑完、交完结果后以 0 退出。`scripts/restart.sh worker` 用它做滚动重启；被排空退出不算崩溃。不是 `plat drain`：那是 `docs/platform-evolution.md` 里尚未实现的「升级不停工」CLI（worker 报协议版本、只领兼容的作业）。
+_Avoid_: plat drain（未做的协议升级命令）、排干
+
 **Gate（门禁）**：
 在不信任 agent 的前提下判断一次改动能否接受的确定性检查。
 _Avoid_: CI、检查
