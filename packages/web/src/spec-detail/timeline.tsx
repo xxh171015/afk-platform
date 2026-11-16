@@ -232,7 +232,10 @@ function TimelineTicketRailRow({
           onClick={() => setOpen((o) => !o)}
         >
           <ChevronDown
-            className={cn("size-4 transition-transform", open && "rotate-180")}
+            className={cn(
+              "size-4 transition-transform",
+              !open && "-rotate-90",
+            )}
           />
         </button>
         <span className="min-w-0 flex-1">

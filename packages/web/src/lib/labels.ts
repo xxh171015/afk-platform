@@ -38,6 +38,16 @@ export const edgeKindLabel: Record<string, string> = {
   contract: "契约",
 };
 
+export const jobTypeLabel: Record<string, string> = {
+  "agent-run": "Agent",
+  gate: "门禁",
+  merge: "合并",
+  e2e: "端到端",
+  "host-sync": "PR 同步",
+  "open-pr": "开 PR",
+  "spec-cleanup": "分支清理",
+};
+
 export const runResultLabel: Record<string, string> = {
   done: "成功",
   passed: "成功",

@@ -11,13 +11,18 @@ describe("resourcePollMs", () => {
 
 describe("queryKeysForInvalidate", () => {
   it("invalidates only the workbench and waiting when no id is filled", () => {
-    expect(queryKeysForInvalidate({})).toEqual([["workbench"], ["blocked"]]);
+    expect(queryKeysForInvalidate({})).toEqual([
+      ["workbench"],
+      ["blocked"],
+      ["runtime"],
+    ]);
   });
 
   it("invalidates the matching resource plus workbench and waiting for each filled id", () => {
     expect(queryKeysForInvalidate({ specId: 3 })).toEqual([
       ["workbench"],
       ["blocked"],
+      ["runtime"],
       ["spec", 3],
       ["specs"],
       ["search"],
@@ -27,11 +32,13 @@ describe("queryKeysForInvalidate", () => {
     expect(queryKeysForInvalidate({ ticketId: 9 })).toEqual([
       ["workbench"],
       ["blocked"],
+      ["runtime"],
       ["ticket", 9],
     ]);
     expect(queryKeysForInvalidate({ runId: 12 })).toEqual([
       ["workbench"],
       ["blocked"],
+      ["runtime"],
       ["log", 12],
       ["run", 12],
     ]);
@@ -40,6 +47,7 @@ describe("queryKeysForInvalidate", () => {
     ).toEqual([
       ["workbench"],
       ["blocked"],
+      ["runtime"],
       ["spec", 3],
       ["specs"],
       ["search"],

@@ -13,6 +13,7 @@ import { registerEventRoutes, SSE_KEEPALIVE_MS } from "./http/event-routes.ts";
 import { registerLinkRoutes } from "./http/link-routes.ts";
 import { registerLogRoutes } from "./http/log-routes.ts";
 import { registerMetricsRoutes } from "./http/metrics-routes.ts";
+import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerPlanningRoutes } from "./http/planning-routes.ts";
 import { refuseOutdatedPlat } from "./http/plat-freshness.ts";
 import { registerTicketRoutes } from "./http/ticket-routes.ts";
@@ -202,6 +203,7 @@ export function createApp(options: AppOptions): OpenAPIHono {
   registerTicketRoutes(app, context);
   registerLinkRoutes(app, context);
   registerMetricsRoutes(app, context);
+  registerRuntimeRoutes(app, context);
   registerEventRoutes(app, context);
   return app;
 }

@@ -17,7 +17,11 @@ export const DETAIL_POLL_MS = 3_000;
 export function queryKeysForInvalidate(
   payload: InvalidatePayload,
 ): readonly (readonly unknown[])[] {
-  const keys: (readonly unknown[])[] = [["workbench"], ["blocked"]];
+  const keys: (readonly unknown[])[] = [
+    ["workbench"],
+    ["blocked"],
+    ["runtime"],
+  ];
   if (payload.specId !== undefined) {
     keys.push(
       ["spec", payload.specId],

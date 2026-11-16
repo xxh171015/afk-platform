@@ -76,6 +76,14 @@ export const emptyWorkbench = {
   },
 };
 
+export const emptyRuntime = {
+  instance: { id: "abcdef" },
+  summary: { running: 0, queued: 0 },
+  jobs: { running: [] as unknown[], queued: [] as unknown[] },
+  workers: [] as unknown[],
+  status: emptyWorkbench.status,
+};
+
 // A stand-in for the platform API: `routes` maps "METHOD /path" to what it answers. Every call is recorded.
 export function fakeServer(routes: Record<string, Handler>) {
   const calls: string[] = [];

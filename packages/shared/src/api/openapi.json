@@ -12485,6 +12485,364 @@
           }
         }
       }
+    },
+    "/runtime": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Live jobs, workers and platform instance status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "instance": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id"]
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "running": {
+                          "type": "integer"
+                        },
+                        "queued": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["running", "queued"]
+                    },
+                    "jobs": {
+                      "type": "object",
+                      "properties": {
+                        "running": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": ["running", "queued"]
+                              },
+                              "attempt": {
+                                "type": "integer"
+                              },
+                              "leaseOwner": {
+                                "type": ["string", "null"]
+                              },
+                              "leaseExpiresAt": {
+                                "type": ["string", "null"]
+                              },
+                              "lockKey": {
+                                "type": ["string", "null"]
+                              },
+                              "notBefore": {
+                                "type": ["string", "null"]
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "stage": {
+                                "type": ["string", "null"]
+                              },
+                              "specId": {
+                                "type": ["integer", "null"]
+                              },
+                              "specDisplayId": {
+                                "type": ["string", "null"]
+                              },
+                              "ticketId": {
+                                "type": ["integer", "null"]
+                              },
+                              "ticketDisplayId": {
+                                "type": ["string", "null"]
+                              },
+                              "runId": {
+                                "type": ["integer", "null"]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "type",
+                              "state",
+                              "attempt",
+                              "leaseOwner",
+                              "leaseExpiresAt",
+                              "lockKey",
+                              "notBefore",
+                              "label",
+                              "stage",
+                              "specId",
+                              "specDisplayId",
+                              "ticketId",
+                              "ticketDisplayId",
+                              "runId"
+                            ]
+                          }
+                        },
+                        "queued": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": ["running", "queued"]
+                              },
+                              "attempt": {
+                                "type": "integer"
+                              },
+                              "leaseOwner": {
+                                "type": ["string", "null"]
+                              },
+                              "leaseExpiresAt": {
+                                "type": ["string", "null"]
+                              },
+                              "lockKey": {
+                                "type": ["string", "null"]
+                              },
+                              "notBefore": {
+                                "type": ["string", "null"]
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "stage": {
+                                "type": ["string", "null"]
+                              },
+                              "specId": {
+                                "type": ["integer", "null"]
+                              },
+                              "specDisplayId": {
+                                "type": ["string", "null"]
+                              },
+                              "ticketId": {
+                                "type": ["integer", "null"]
+                              },
+                              "ticketDisplayId": {
+                                "type": ["string", "null"]
+                              },
+                              "runId": {
+                                "type": ["integer", "null"]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "type",
+                              "state",
+                              "attempt",
+                              "leaseOwner",
+                              "leaseExpiresAt",
+                              "lockKey",
+                              "notBefore",
+                              "label",
+                              "stage",
+                              "specId",
+                              "specDisplayId",
+                              "ticketId",
+                              "ticketDisplayId",
+                              "runId"
+                            ]
+                          }
+                        }
+                      },
+                      "required": ["running", "queued"]
+                    },
+                    "workers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reportedAt": {
+                            "type": "string"
+                          },
+                          "freeBytes": {
+                            "type": ["number", "null"]
+                          },
+                          "cleaned": {
+                            "type": "object",
+                            "properties": {
+                              "sandboxLogs": {
+                                "type": "integer"
+                              },
+                              "salvage": {
+                                "type": "integer"
+                              },
+                              "snapshots": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["sandboxLogs", "salvage", "snapshots"]
+                          },
+                          "heldJobId": {
+                            "type": ["integer", "null"]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reportedAt",
+                          "freeBytes",
+                          "cleaned",
+                          "heldJobId"
+                        ]
+                      }
+                    },
+                    "status": {
+                      "type": "object",
+                      "properties": {
+                        "agentsPaused": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "since": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "nextProbeAt": {
+                              "type": ["string", "null"]
+                            }
+                          },
+                          "required": ["since", "reason", "nextProbeAt"]
+                        },
+                        "logDirBytes": {
+                          "type": "number"
+                        },
+                        "apiFreeBytes": {
+                          "type": "number"
+                        },
+                        "diskLevel": {
+                          "type": "string",
+                          "enum": ["ok", "warn", "stop"]
+                        },
+                        "warnGib": {
+                          "type": "number"
+                        },
+                        "stopGib": {
+                          "type": "number"
+                        },
+                        "lastCleanup": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": ["string", "null"]
+                            },
+                            "runs": {
+                              "type": "integer"
+                            },
+                            "orphans": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["at", "runs", "orphans"]
+                        },
+                        "workers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reportedAt": {
+                                "type": "string"
+                              },
+                              "freeBytes": {
+                                "type": ["number", "null"]
+                              },
+                              "cleaned": {
+                                "type": "object",
+                                "properties": {
+                                  "sandboxLogs": {
+                                    "type": "integer"
+                                  },
+                                  "salvage": {
+                                    "type": "integer"
+                                  },
+                                  "snapshots": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "sandboxLogs",
+                                  "salvage",
+                                  "snapshots"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reportedAt",
+                              "freeBytes",
+                              "cleaned"
+                            ]
+                          }
+                        },
+                        "feishu": {
+                          "type": "object",
+                          "properties": {
+                            "open": {
+                              "type": "boolean"
+                            },
+                            "closedReason": {
+                              "type": ["string", "null"],
+                              "enum": [
+                                "missing",
+                                "permissions",
+                                "invalid",
+                                null
+                              ]
+                            }
+                          },
+                          "required": ["open", "closedReason"]
+                        }
+                      },
+                      "required": [
+                        "agentsPaused",
+                        "logDirBytes",
+                        "apiFreeBytes",
+                        "diskLevel",
+                        "warnGib",
+                        "stopGib",
+                        "lastCleanup",
+                        "workers",
+                        "feishu"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "instance",
+                    "summary",
+                    "jobs",
+                    "workers",
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

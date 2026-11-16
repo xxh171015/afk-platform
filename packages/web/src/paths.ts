@@ -4,6 +4,7 @@ export const PAGE_PATHS = [
   "/",
   "/waiting",
   "/metrics",
+  "/runtime",
   "/specs",
   "/specs/$specId",
   "/specs/$specId/description",

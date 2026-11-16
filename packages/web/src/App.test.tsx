@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeServer, renderApp } from "./test-utils.tsx";
+import { emptyRuntime, fakeServer, renderApp } from "./test-utils.tsx";
 
 afterEach(cleanup);
 
@@ -34,6 +34,7 @@ const server = () =>
   fakeServer({
     "GET /workbench": () => ({ json: emptyWorkbench }),
     "GET /blocked": () => ({ json: emptyWaiting }),
+    "GET /runtime": () => ({ json: emptyRuntime }),
     "GET /metrics": () => ({
       json: {
         since: null,

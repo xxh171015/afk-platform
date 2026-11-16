@@ -13,6 +13,7 @@ import {
   Moon,
   PanelLeft,
   Search,
+  Server,
   Sun,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -38,6 +39,7 @@ const nav = [
   { to: "/specs", label: "需求", icon: FileText, exact: false },
   { to: "/waiting", label: "待处理", icon: Inbox, exact: false, badge: true },
   { to: "/metrics", label: "度量", icon: BarChart3, exact: false },
+  { to: "/runtime", label: "运行实例", icon: Server, exact: false },
 ] as const;
 
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {

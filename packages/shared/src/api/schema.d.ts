@@ -6237,6 +6237,131 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/runtime": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Live jobs, workers and platform instance status */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              instance: {
+                id: string;
+              };
+              summary: {
+                running: number;
+                queued: number;
+              };
+              jobs: {
+                running: {
+                  id: number;
+                  type: string;
+                  /** @enum {string} */
+                  state: "running" | "queued";
+                  attempt: number;
+                  leaseOwner: string | null;
+                  leaseExpiresAt: string | null;
+                  lockKey: string | null;
+                  notBefore: string | null;
+                  label: string;
+                  stage: string | null;
+                  specId: number | null;
+                  specDisplayId: string | null;
+                  ticketId: number | null;
+                  ticketDisplayId: string | null;
+                  runId: number | null;
+                }[];
+                queued: {
+                  id: number;
+                  type: string;
+                  /** @enum {string} */
+                  state: "running" | "queued";
+                  attempt: number;
+                  leaseOwner: string | null;
+                  leaseExpiresAt: string | null;
+                  lockKey: string | null;
+                  notBefore: string | null;
+                  label: string;
+                  stage: string | null;
+                  specId: number | null;
+                  specDisplayId: string | null;
+                  ticketId: number | null;
+                  ticketDisplayId: string | null;
+                  runId: number | null;
+                }[];
+              };
+              workers: {
+                id: string;
+                reportedAt: string;
+                freeBytes: number | null;
+                cleaned: {
+                  sandboxLogs: number;
+                  salvage: number;
+                  snapshots: number;
+                };
+                heldJobId: number | null;
+              }[];
+              status: {
+                agentsPaused: {
+                  since: string;
+                  reason: string;
+                  nextProbeAt: string | null;
+                } | null;
+                logDirBytes: number;
+                apiFreeBytes: number;
+                /** @enum {string} */
+                diskLevel: "ok" | "warn" | "stop";
+                warnGib: number;
+                stopGib: number;
+                lastCleanup: {
+                  at: string | null;
+                  runs: number;
+                  orphans: number;
+                };
+                workers: {
+                  id: string;
+                  reportedAt: string;
+                  freeBytes: number | null;
+                  cleaned: {
+                    sandboxLogs: number;
+                    salvage: number;
+                    snapshots: number;
+                  };
+                }[];
+                feishu: {
+                  open: boolean;
+                  /** @enum {string|null} */
+                  closedReason: "missing" | "permissions" | "invalid" | null;
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {

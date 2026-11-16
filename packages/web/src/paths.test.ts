@@ -7,6 +7,7 @@ describe("shareable addresses", () => {
       "/",
       "/waiting",
       "/metrics",
+      "/runtime",
       "/specs",
       "/specs/$specId",
       "/specs/$specId/description",
