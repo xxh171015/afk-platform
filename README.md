@@ -65,7 +65,7 @@ Four processes: Postgres, the API, the page and one worker. All of them listen o
 
 The skills the agents run in the sandbox (implement, tdd, code-review, codebase-design) are in this repo, copied from mattpocock/skills at the pinned SHA: the worker mounts `packages/pipeline/skills/` read-only.
 
-**Each time**: `AFK_MODEL=<cursor model> scripts/up.sh` starts all of the below in one terminal (output prefixed `[api]`, `[web]`, `[worker]`; Ctrl-C stops them; `WEB=0` / `WORKER=0` leave one out). Or by hand, one terminal each:
+**Each time**: `AFK_MODEL=<cursor model> scripts/up.sh` starts all of the below in one terminal (output prefixed `[api]`, `[web]`, `[worker]`; Ctrl-C is shutdown and abandons jobs in hand; planned restart without losing work is `scripts/restart.sh api|web|worker`, see `docs/operations-manual.md` §1.1; `WEB=0` / `WORKER=0` leave one out). Or by hand, one terminal each:
 
 ```sh
 docker compose up -d --wait postgres

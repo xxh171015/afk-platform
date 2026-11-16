@@ -1159,7 +1159,7 @@ S-28（M4：飞书通知、容器加固、追溯与 bug 定位）在用户 Mac �
 
 S-40 执行到一半时有人在 `scripts/up.sh` 的终端里 Ctrl-C 再启动，白跑了 T-97、T-99 各 16.5 分钟（Run 571、574、575 都是 `lease-expired`）。四处原因：`up.sh` 里任意进程退出就全部停掉；worker 收到 SIGINT 会放弃手上的作业；心跳连续失败 3 次或交结果试 3 次失败就主动放弃；API 启动后第一次领作业就把停机期间到期的租约判失败。
 
-本需求做了：worker 连不上 API 时不放弃作业（心跳失败只记日志并重试，只有 API 回答 `"lost"` 才放弃；交结果一直重试到 API 回答，上限 30 秒）；API 启动时给所有持有中的租约续一次期；`up.sh` 在 API 或页面退出时只把它重新拉起（60 秒内连续崩溃 5 次就不再拉起），worker 不受影响。
+本需求做了：worker 连不上 API 时不放弃作业（心跳失败只记日志并重试，只有 API 回答 `"lost"` 才放弃；交结果一直重试到 API 回答，上限 30 秒）；API 启动时给所有持有中的租约续一次期；`up.sh` 在 API 或页面退出时只把它重新拉起（60 秒内连续崩溃 5 次就不再拉起），worker 不受影响；worker 收到 SIGUSR2 后排空（不再领作业，手上的交完再以 0 退出）；`scripts/restart.sh api|web|worker` 做计划内重启，新旧 worker 只按空闲槽位领要占槽的作业。Ctrl-C `up.sh` 仍是关机。细节见操作手册 §1.1。
 
 没做的：**worker 崩溃后接管容器**。Sandcastle 0.12 的 cursor provider 不支持会话恢复，要做就得绕开 Sandcastle 自己读 agent 输出。Mac 或 Docker 重启时容器本身就没了，也不做。
 
