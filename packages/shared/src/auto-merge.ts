@@ -45,6 +45,54 @@ export type AutoMergeResult =
   | { willMerge: true; mergeAt: Date; due: boolean }
   | { willMerge: false; reason: string };
 
+// What GET /specs/{id} and plat spec show print: the forecast plus any auto-merge event.
+export interface AutoMergeStatus {
+  policy: MergePolicy;
+  willMerge: boolean;
+  mergeAt: string | null;
+  reason: string | null;
+  event: {
+    type: "auto-merged" | "auto-merge-failed";
+    reason: string | null;
+  } | null;
+}
+
+function hourMinuteInShanghai(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+  return `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+}
+
+export function autoMergeLine(
+  status: AutoMergeStatus | null | undefined,
+  specState: string,
+): string | null {
+  if (!status) return null;
+  if (status.event?.type === "auto-merged") return "平台已自动合并";
+  if (status.event?.type === "auto-merge-failed") {
+    return status.event.reason
+      ? `自动合并失败：${status.event.reason}`
+      : "自动合并失败";
+  }
+  if (status.policy === "manual") return null;
+  if (specState !== "awaiting-review") return null;
+  if (status.willMerge && status.mergeAt) {
+    return `将于 ${hourMinuteInShanghai(status.mergeAt)} 自动合并，在 PR 上写评论即可阻止`;
+  }
+  if (!status.willMerge && status.reason) {
+    return `不会自动合并：${status.reason}`;
+  }
+  return null;
+}
+
 function fail(reason: string): AutoMergeResult {
   return { willMerge: false, reason };
 }

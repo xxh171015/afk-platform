@@ -1,4 +1,4 @@
-import type { HostKind } from "@afk/shared";
+import { autoMergeLine, type HostKind } from "@afk/shared";
 import { ExternalLink } from "lucide-react";
 import { FinalizeProgress, UpdateBranchRuns } from "../FinalizeProgress.tsx";
 import { pullAbbrev } from "../host-copy.ts";
@@ -17,6 +17,8 @@ export function Delivery({
   finalRuns,
   repos: specRepos,
   hostKind,
+  autoMerge,
+  specState,
 }: Pick<
   SpecView,
   | "pullRequests"
@@ -25,9 +27,11 @@ export function Delivery({
   | "acceptancePack"
   | "finalizations"
   | "finalRuns"
+  | "autoMerge"
 > & {
   repos: NonNullable<SpecView["spec"]["repos"]>;
   hostKind: HostKind;
+  specState: SpecView["spec"]["state"];
 }) {
   const repoUrls = new Map(
     list(specRepos).map((repo) => [repo.name, repo.url]),
@@ -41,6 +45,7 @@ export function Delivery({
   const hasUpdate = updateRuns.length > 0;
   const hasPrs = prs.length > 0;
   const nothing = !hasFinalize && !hasUpdate && !hasPrs && !acceptancePack;
+  const mergeLine = autoMergeLine(autoMerge, specState);
   const prRepos = [
     ...list(mergeOrder?.ordered),
     ...prs.map((pr) => pr.repo),
@@ -48,6 +53,11 @@ export function Delivery({
 
   return (
     <>
+      {mergeLine ? (
+        <p className="note mb-4" data-testid="auto-merge">
+          {mergeLine}
+        </p>
+      ) : null}
       {nothing ? <p className="note">还没有可交付的内容</p> : null}
       {list(orderBroken).map((b) => (
         <p key={b.repo} className="error" data-testid="order-broken">

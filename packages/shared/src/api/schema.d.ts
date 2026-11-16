@@ -3887,6 +3887,18 @@ export interface paths {
                 /** @enum {string} */
                 state: "queued" | "running" | "done" | "failed";
               } | null;
+              autoMerge: {
+                /** @enum {string} */
+                policy: "manual" | "auto-improvement";
+                willMerge: boolean;
+                mergeAt: string | null;
+                reason: string | null;
+                event: {
+                  /** @enum {string} */
+                  type: "auto-merged" | "auto-merge-failed";
+                  reason: string | null;
+                } | null;
+              };
             };
           };
         };
