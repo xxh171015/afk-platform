@@ -207,6 +207,9 @@ export const EVENT_TYPES = [
   "system",
   // a Locate run found the original spec, or failed to
   "locate",
+  // the auto-merge host task merged a pull request, or could not (ADR 0011)
+  "auto-merged",
+  "auto-merge-failed",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

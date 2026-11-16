@@ -3923,7 +3923,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -4168,6 +4168,34 @@
                         "number",
                         "mergeSha",
                         "squashSha"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["auto-merge"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "expectedHeadSha": {
+                          "type": "string"
+                        },
+                        "section": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "number",
+                        "expectedHeadSha",
+                        "section"
                       ]
                     }
                   ]

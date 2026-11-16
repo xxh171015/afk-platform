@@ -230,6 +230,11 @@ export async function noticeFromEvent(
     const spec = await specContext(pool, event.specId);
     if (!spec) return undefined;
     if (tokenMerged) {
+      const autoMerged = await pool.query(
+        `SELECT 1 FROM events WHERE spec_id = $1 AND type = 'auto-merged' LIMIT 1`,
+        [event.specId],
+      );
+      if (autoMerged.rows[0]) return undefined;
       const pr = pullAbbrev(spec.hostKind);
       return mapped(
         {
@@ -355,6 +360,46 @@ export async function noticeFromEvent(
         title: spec.title,
         reason: `${pr} 读不出`,
         path: "/waiting",
+      },
+      spec.hostKind,
+      spec.projectId,
+      event.specId,
+    );
+  }
+
+  if (event.type === "auto-merged" || event.type === "auto-merge-failed") {
+    if (event.specId == null) return undefined;
+    const spec = await specContext(pool, event.specId);
+    if (!spec) return undefined;
+    const specDisplay = formatDisplayId("spec", event.specId);
+    if (event.type === "auto-merged") {
+      return mapped(
+        {
+          kind: "auto-merged",
+          displayId: specDisplay,
+          title: spec.title,
+          reason: "平台已自动合并",
+          path: `/specs/${event.specId}/delivery`,
+        },
+        spec.hostKind,
+        spec.projectId,
+        event.specId,
+      );
+    }
+    const reason =
+      event.reason ??
+      (typeof asRecord(event.data).reason === "string"
+        ? (asRecord(event.data).reason as string)
+        : "");
+    return mapped(
+      {
+        kind: "auto-merge-failed",
+        displayId: specDisplay,
+        title: spec.title,
+        reason: reason
+          ? `自动合并失败，等人合并：${reason}`
+          : "自动合并失败，等人合并",
+        path: `/specs/${event.specId}/delivery`,
       },
       spec.hostKind,
       spec.projectId,

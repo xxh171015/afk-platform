@@ -25,6 +25,26 @@ function sources(dir: string): string[] {
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const MIN_FILES = 30; // sanity: the scan found the code, not an empty directory
 
+// The auto-merge host task is the one caller of mergePullRequest outside the adapters (ADR 0011).
+function withoutAutoMergeTask(text: string): string {
+  const match = /if\s*\(\s*task\.kind\s*===\s*["']auto-merge["']\s*\)/.exec(
+    text,
+  );
+  if (!match || match.index === undefined) return text;
+  const brace = text.indexOf("{", match.index);
+  if (brace < 0) return text;
+  let depth = 0;
+  for (let i = brace; i < text.length; i++) {
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0)
+        return `${text.slice(0, match.index)}${text.slice(i + 1)}`;
+    }
+  }
+  return text;
+}
+
 const code = [
   ...sources(packages),
   join(root, "package.json"),
@@ -63,11 +83,24 @@ describe("the platform's source", () => {
       const found = endpoints
         .filter((pattern) => pattern.test(text))
         .map((pattern) => `${file}: ${pattern}`);
-      if (methodName.test(text) && !adapterSurface.has(file))
+      const scanned =
+        file === "worker/src/host.ts" ? withoutAutoMergeTask(text) : text;
+      if (methodName.test(scanned) && !adapterSurface.has(file))
         found.push(`${file}: ${methodName}`);
       return found;
     });
     expect(hits).toEqual([]);
+  });
+
+  it("calls mergePullRequest only from the auto-merge host task", () => {
+    const host = code.find(({ file }) => file === "worker/src/host.ts");
+    expect(host).toBeDefined();
+    expect(host?.text).toMatch(
+      /if\s*\(\s*task\.kind\s*===\s*["']auto-merge["']\s*\)/,
+    );
+    expect(withoutAutoMergeTask(host?.text ?? "")).not.toMatch(
+      /mergePullRequest/,
+    );
   });
 
   it("runs `git push` only in the push exit", () => {
