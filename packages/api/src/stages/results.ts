@@ -545,20 +545,34 @@ export async function writeFacts(
   ];
   // The Run was started when the job was claimed: fill it in. (An UPDATE first, because an INSERT that runs
   // into the unique job id still uses up a serial number, and display ids should not have holes.)
+  const durationFromTimes = `CASE
+       WHEN COALESCE($17::timestamptz, started_at) IS NOT NULL THEN
+         GREATEST(0, LEAST((extract(epoch FROM (
+           COALESCE($18::timestamptz, now()) - COALESCE($17::timestamptz, started_at)
+         )) * 1000)::bigint, 2147483647)::int)
+     END`;
   let inserted = await client.query<{ id: number }>(
     `UPDATE runs SET agent = $2, model = $3, skills_sha = $4, axis = $5, prompt = $6, cursor_cli_version = $7,
-       branch = $8, base_sha = $9, head_sha = $10, commits = $11, duration_ms = $12, duration_api_ms = $13,
+       branch = $8, base_sha = $9, head_sha = $10, commits = $11,
+       duration_ms = COALESCE($12, ${durationFromTimes}),
+       duration_api_ms = $13,
        token_usage = $14, result = $15, output = $16, started_at = COALESCE($17, started_at),
        finished_at = COALESCE($18, now())
      WHERE job_id = $1 RETURNING id`,
     [job.id, ...facts],
   );
   if (!inserted.rows[0]) {
+    const insertDuration = `COALESCE($18, CASE
+         WHEN $23::timestamptz IS NOT NULL THEN
+           GREATEST(0, LEAST((extract(epoch FROM (
+             COALESCE($24::timestamptz, now()) - $23::timestamptz
+           )) * 1000)::bigint, 2147483647)::int)
+       END)`;
     inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, job_id, stage, attempt, agent, model, skills_sha,
          axis, prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms,
          token_usage, result, output, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, COALESCE($24, now()))
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, ${insertDuration}, $19, $20, $21, $22, $23, COALESCE($24, now()))
        RETURNING id`,
       [
         owner.spec_id,
@@ -675,11 +689,17 @@ export async function writeFacts(
       "SELECT count(*) AS n FROM runs WHERE spec_id = $1 AND ticket_id IS NOT DISTINCT FROM $2 AND stage = $3 AND axis IS NOT DISTINCT FROM $4",
       [owner.spec_id, owner.ticket_id, stage, extra.run.axis ?? null],
     );
+    const extraDuration = `COALESCE($17, CASE
+         WHEN COALESCE($22::timestamptz, (SELECT started_at FROM runs WHERE id = $24)) IS NOT NULL THEN
+           GREATEST(0, LEAST((extract(epoch FROM (
+             COALESCE($23::timestamptz, now()) - COALESCE($22::timestamptz, (SELECT started_at FROM runs WHERE id = $24))
+           )) * 1000)::bigint, 2147483647)::int)
+       END)`;
     const inserted = await client.query<{ id: number }>(
       `INSERT INTO runs (spec_id, repo_id, ticket_id, ticket_version, stage, attempt, agent, model, skills_sha, axis,
          prompt, cursor_cli_version, branch, base_sha, head_sha, commits, duration_ms, duration_api_ms, token_usage,
          result, output, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ${extraDuration}, $18, $19, $20, $21,
          COALESCE($22, (SELECT started_at FROM runs WHERE id = $24)), COALESCE($23, now()))
        RETURNING id`,
       [

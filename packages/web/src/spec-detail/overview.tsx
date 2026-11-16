@@ -180,15 +180,43 @@ export function Overview({
         {usageByStage.length > 0 ? (
           <div className="sm:col-span-2" data-testid="usage-by-stage">
             <dt className="text-xs text-muted-foreground">用量</dt>
-            <dd className="mt-1 space-y-1 text-sm">
-              {usageByStage.map((row) => (
-                <div key={row.stage}>
-                  {stageLabel[row.stage] ?? row.stage} 输入{" "}
-                  {formatTokens(row.inputTokens)} 输出{" "}
-                  {formatTokens(row.outputTokens)} 缓存读{" "}
-                  {formatTokens(row.cacheReadTokens)}
-                </div>
-              ))}
+            <dd className="mt-1 max-w-full overflow-x-auto">
+              <table className="w-max min-w-[16rem] overflow-hidden rounded-md border bg-card text-left text-xs">
+                <thead className="border-b bg-surface text-[11px] text-muted-foreground">
+                  <tr>
+                    <th className="whitespace-nowrap py-2 pl-3 pr-6 font-medium">
+                      阶段
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">
+                      输入
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">
+                      输出
+                    </th>
+                    <th className="whitespace-nowrap py-2 pl-3 pr-3 text-right font-medium tabular-nums">
+                      缓存读
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {usageByStage.map((row) => (
+                    <tr key={row.stage}>
+                      <td className="whitespace-nowrap py-2 pl-3 pr-6">
+                        {stageLabel[row.stage] ?? row.stage}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-[11px] tabular-nums">
+                        {formatTokens(row.inputTokens)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-[11px] tabular-nums">
+                        {formatTokens(row.outputTokens)}
+                      </td>
+                      <td className="whitespace-nowrap py-2 pl-3 pr-3 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+                        {formatTokens(row.cacheReadTokens)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </dd>
           </div>
         ) : null}
