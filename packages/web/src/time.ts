@@ -69,3 +69,20 @@ export function formatCompactDuration(ms: number | null): string {
 export function formatSeconds(ms: number | null): string {
   return ms === null ? "—" : `${Math.round(ms / 1000)} s`;
 }
+
+export interface RunTiming {
+  durationMs: number | null;
+  startedAt: string | null;
+  finishedAt?: string | null;
+}
+
+// How long a Run took, or has been going for.
+export function runElapsedMs(run: RunTiming, now: number): number | null {
+  if (run.durationMs !== null && run.durationMs !== undefined)
+    return run.durationMs;
+  if (!run.startedAt) return null;
+  const end = run.finishedAt ? Date.parse(run.finishedAt) : now;
+  const start = Date.parse(run.startedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - start);
+}

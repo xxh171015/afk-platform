@@ -466,6 +466,10 @@ describe("what is recorded", () => {
       ["gate-fix", 1, "done"],
       ["gate", 2, "passed"],
     ]);
+    const gatePassed = runs.rows.find(
+      (r) => r.stage === "gate" && r.attempt === 2,
+    );
+    expect(gatePassed?.duration_ms).toBeGreaterThanOrEqual(0);
     expect(runs.rows[0]).toMatchObject({
       agent: "cursor",
       model: "auto",

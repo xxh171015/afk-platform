@@ -131,10 +131,4 @@ function stepResult(latest: FinalRunRow[]): string | null {
   return results.find((result) => result !== "pass") ?? results[0] ?? null;
 }
 
-// How long a Run took, or has been going for.
-export function runElapsedMs(run: FinalRunRow, now: number): number | null {
-  if (run.durationMs !== null) return run.durationMs;
-  if (!run.startedAt) return null;
-  const end = run.finishedAt ? Date.parse(run.finishedAt) : now;
-  return Math.max(0, end - Date.parse(run.startedAt));
-}
+export { runElapsedMs } from "./time.ts";
