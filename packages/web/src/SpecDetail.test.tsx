@@ -65,6 +65,13 @@ const view = (
       unordered: string[];
     };
     orderBroken?: unknown[];
+    autoMerge?: {
+      policy: string;
+      willMerge: boolean;
+      mergeAt: string | null;
+      reason: string | null;
+      event: { type: string; reason: string | null } | null;
+    } | null;
   } = {},
 ) => ({
   spec: {
@@ -103,6 +110,7 @@ const view = (
   leadTime: over.leadTime ?? null,
   usageByStage: over.usageByStage ?? [],
   links: over.links ?? [],
+  autoMerge: over.autoMerge,
 });
 
 const ticketView = (n: number, over: Record<string, unknown> = {}) => ({
@@ -1054,6 +1062,106 @@ describe("the spec page", () => {
     expect(server.calls.some((call) => /blame|\/context/i.test(call))).toBe(
       false,
     );
+  });
+});
+
+describe("auto-merge on the delivery page", () => {
+  const delivery = (
+    autoMerge: {
+      policy: string;
+      willMerge: boolean;
+      mergeAt: string | null;
+      reason: string | null;
+      event: { type: string; reason: string | null } | null;
+    },
+    spec: Record<string, unknown> = { state: "awaiting-review" },
+  ) =>
+    fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec,
+          tickets: [ticket(1, "done")],
+          edges: [],
+          autoMerge,
+        }),
+      }),
+    });
+
+  it("does not show an auto-merge line on a manual project", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery({
+        policy: "manual",
+        willMerge: false,
+        mergeAt: null,
+        reason: "项目合并策略不是 auto-improvement",
+        event: null,
+      }),
+    );
+    await screen.findByRole("heading", { name: "验收包" });
+    expect(screen.queryByText(/自动合并/)).toBeNull();
+  });
+
+  it("shows when auto-merge will happen, why not, and the result after it ran", async () => {
+    const { unmount } = renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery({
+        policy: "auto-improvement",
+        willMerge: true,
+        mergeAt: "2026-01-01T00:30:00.000Z",
+        reason: null,
+        event: null,
+      }),
+    );
+    expect(
+      await screen.findByText("将于 08:30 自动合并，在 PR 上写评论即可阻止"),
+    ).toBeTruthy();
+    unmount();
+
+    const blocked = renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery({
+        policy: "auto-improvement",
+        willMerge: false,
+        mergeAt: null,
+        reason: "PR 上有人写过评论",
+        event: null,
+      }),
+    );
+    expect(
+      await screen.findByText("不会自动合并：PR 上有人写过评论"),
+    ).toBeTruthy();
+    blocked.unmount();
+
+    const merged = renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery(
+        {
+          policy: "auto-improvement",
+          willMerge: false,
+          mergeAt: null,
+          reason: "已经有过 auto-merge 作业",
+          event: { type: "auto-merged", reason: null },
+        },
+        { state: "merged" },
+      ),
+    );
+    expect(await screen.findByText("平台已自动合并")).toBeTruthy();
+    merged.unmount();
+
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      delivery({
+        policy: "auto-improvement",
+        willMerge: false,
+        mergeAt: null,
+        reason: "已经有过 auto-merge 作业",
+        event: { type: "auto-merge-failed", reason: "GitHub answered 403" },
+      }),
+    );
+    expect(
+      await screen.findByText("自动合并失败：GitHub answered 403"),
+    ).toBeTruthy();
   });
 });
 

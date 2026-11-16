@@ -238,9 +238,7 @@ describe("getPullRequest", () => {
     const before = gitlab.requests.length;
     await a.getPullRequest({ repo, number: 1 });
     expect(
-      gitlab.requests
-        .slice(before)
-        .some((r) => r.includes("/notes") || r.includes("/discussions")),
+      gitlab.requests.slice(before).some((r) => r.includes("/discussions")),
     ).toBe(false);
   });
 
@@ -387,6 +385,107 @@ describe("getBranchSha", () => {
     await expect(
       adapter().getBranchSha({ repo, branch: "master" }),
     ).rejects.toMatchObject({ name: "HostError", status: 404 });
+  });
+});
+
+describe("mergePullRequest", () => {
+  it("merges with the expected head SHA", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    const merged = await a.mergePullRequest({
+      repo,
+      number: 1,
+      expectedHeadSha: opened.headSha,
+    });
+    expect(merged.state).toBe("merged");
+    expect(gitlab.mergeBodies).toEqual([{ sha: opened.headSha }]);
+    expect(gitlab.mergeRequests()[0]?.state).toBe("merged");
+  });
+
+  it("throws a HostError when the head SHA does not match", async () => {
+    const a = adapter();
+    await open(a);
+    const error = await a
+      .mergePullRequest({
+        repo,
+        number: 1,
+        expectedHeadSha: "not-the-head",
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(409);
+    expect(gitlab.mergeRequests()[0]?.state).toBe("opened");
+  });
+
+  it("throws a HostError when GitLab answers 403", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    gitlab.refuseMerge = true;
+    const error = await a
+      .mergePullRequest({
+        repo,
+        number: 1,
+        expectedHeadSha: opened.headSha,
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(403);
+  });
+
+  it("throws a HostError when the merge request conflicts", async () => {
+    const a = adapter();
+    const opened = await open(a);
+    gitlab.setHasConflicts(1, true);
+    const error = await a
+      .mergePullRequest({
+        repo,
+        number: 1,
+        expectedHeadSha: opened.headSha,
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error.status).toBe(405);
+  });
+});
+
+describe("humanComments", () => {
+  it("counts notes that are not system notes", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.addNote(1, { username: "alice", body: "please wait" });
+    gitlab.addNote(1, { username: "alice", body: "nits" });
+    gitlab.addNote(1, {
+      username: "alice",
+      body: "approved this merge request",
+      system: true,
+    });
+    expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(2);
+  });
+
+  it("does not count system notes or the token user's notes", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.username = "token-user";
+    gitlab.addNote(1, { username: "token-user", body: "from the bot" });
+    gitlab.addNote(1, {
+      username: "alice",
+      body: "merged",
+      system: true,
+    });
+    gitlab.addNote(1, { username: "alice", body: "from a person" });
+    expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
+  });
+
+  it("does not count bot notes", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.addNote(1, { username: "alice", body: "from a person" });
+    gitlab.addNote(1, {
+      username: "renovate-bot",
+      body: "bump",
+      bot: true,
+    });
+    expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
   });
 });
 

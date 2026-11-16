@@ -5,6 +5,7 @@ import {
   type HostKind,
   LimitOverridesSchema,
   MAX_PLANNING_PATCH_BYTES,
+  MERGE_POLICIES,
   PLANNING_STATES,
   PlanningDocsAtImportSchema,
   parseStageModels,
@@ -77,6 +78,8 @@ const projectSettings = {
 
 // Empty clears the project's Feishu group. Not on create: set it with plat project edit --feishu-chat.
 const FeishuChatId = z.string().max(200);
+// Empty is the same as omitting it (manual). Listed with the two policies so OpenAPI names them.
+const MergePolicyInput = z.enum([...MERGE_POLICIES, ""]);
 
 const projectRoute = createRoute({
   method: "post",
@@ -89,7 +92,7 @@ const projectRoute = createRoute({
             name: Text,
             defaultAgent: Text.optional(),
             defaultModel: Text.optional(),
-            mergePolicy: Text.optional(),
+            mergePolicy: MergePolicyInput.optional(),
             ...projectSettings,
           })
           .strict(),
@@ -99,7 +102,7 @@ const projectRoute = createRoute({
   responses: {
     201: reply("Created", z.object({ id: Id, name: z.string() })),
     400: reply(
-      "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+      "The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
       ErrorReply,
     ),
   },
@@ -177,6 +180,7 @@ const projectEditRoute = createRoute({
             defaultAgent: Text.optional(),
             defaultModel: Text.optional(),
             feishuChatId: FeishuChatId.optional(),
+            mergePolicy: MergePolicyInput.optional(),
             ...projectSettings,
           })
           .strict(),
@@ -186,7 +190,7 @@ const projectEditRoute = createRoute({
   responses: {
     200: reply("Updated", z.object({ id: Id })),
     400: reply(
-      "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+      "The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
       ErrorReply,
     ),
     404: reply("No such project", ErrorReply),

@@ -19,6 +19,22 @@ export {
   PLAT_HEADER,
   PLAT_OUTDATED,
 } from "./api/client.ts";
+export type {
+  AutoMergeInput,
+  AutoMergePull,
+  AutoMergeResult,
+  AutoMergeStatus,
+  MergePolicy,
+} from "./auto-merge.ts";
+export {
+  AUTO_MERGE_DELAY_MS,
+  autoMerge,
+  autoMergeLine,
+  DEFAULT_MERGE_POLICY,
+  MERGE_POLICIES,
+  parseMergePolicy,
+  storedMergePolicy,
+} from "./auto-merge.ts";
 export { committedShasFromBlame, UNCOMMITTED_SHA } from "./blame.ts";
 export {
   branchNames,
@@ -173,11 +189,20 @@ export {
   PLANNING_STATES,
 } from "./planning-docs.ts";
 export {
+  AUTO_IMPROVEMENT_MERGE_NOTE,
+  AUTO_MERGED_MARK,
+  AUTO_MERGED_NOTE,
+  AUTO_MERGED_SECTION,
   fitPrDescription,
   GITHUB_PR_BODY_LIMIT,
+  MANUAL_MERGE_NOTE,
+  MERGE_NOTE_MARK_END,
+  MERGE_NOTE_MARK_START,
   PACK_MARK_END,
   PACK_MARK_START,
+  spliceMergeNote,
   splicePackSection,
+  wrapMergeNote,
   wrapPackSection,
 } from "./pr-description.ts";
 export type { PushErrorKind, PushFailureTips } from "./push-error.ts";

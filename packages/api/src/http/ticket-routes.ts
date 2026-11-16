@@ -2,6 +2,7 @@ import {
   FAILURE_SOURCES,
   HOST_KINDS,
   JOB_STATES,
+  MERGE_POLICIES,
   PLANNING_STATES,
   REVIEW_AXES,
   SPEC_STATES,
@@ -465,6 +466,18 @@ const specRoute = createRoute({
             state: z.enum(JOB_STATES),
           })
           .nullable(),
+        autoMerge: z.object({
+          policy: z.enum(MERGE_POLICIES),
+          willMerge: z.boolean(),
+          mergeAt: z.string().nullable(),
+          reason: z.string().nullable(),
+          event: z
+            .object({
+              type: z.enum(["auto-merged", "auto-merge-failed"]),
+              reason: z.string().nullable(),
+            })
+            .nullable(),
+        }),
       }),
     ),
     404: reply("No such spec", ErrorReply),

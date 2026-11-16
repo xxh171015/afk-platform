@@ -1,5 +1,7 @@
 import {
   type AcceptancePackView,
+  type AutoMergeStatus,
+  autoMergeLine,
   decisionTally,
   LOCATE_REASON_LABELS,
   MAX_INTEGRATION_ROUNDS,
@@ -806,9 +808,12 @@ export function specText(view: {
   orderBroken?: { repo: string; skipped: string[] }[];
   pullRequests?: PullRequestRowView[];
   acceptancePack?: AcceptancePackView | null;
+  autoMerge?: AutoMergeStatus | null;
 }): string {
+  const mergeLine = autoMergeLine(view.autoMerge, view.spec.state);
   return [
     `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
+    ...(mergeLine ? [mergeLine] : []),
     ...(view.spec.pauseReason
       ? [`paused: ${pauseReasonLabel(view.spec.pauseReason)}`]
       : []),

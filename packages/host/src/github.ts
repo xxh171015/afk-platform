@@ -12,8 +12,7 @@ import {
 
 // The GitHub side of HostAdapter. Reads are conditional (If-None-Match): GitHub answers 304 without counting
 // against the rate limit when nothing changed, which is what a poll every minute mostly finds. The ETags are
-// kept in memory, the ones used longest ago dropped past a limit. Nothing here calls GitHub's merge endpoint;
-// a person merges.
+// kept in memory, the ones used longest ago dropped past a limit. Merge is mergePullRequest (ADR 0011).
 
 export interface GitHubOptions {
   tokens: TokenSource;
@@ -27,6 +26,7 @@ const MAX_PAGES = 50; // a list longer than this is refused, not judged by its f
 
 const OPEN: TokenPermissions = { pull_requests: "write", contents: "read" };
 const CLOSE: TokenPermissions = { pull_requests: "write" };
+const MERGE: TokenPermissions = { pull_requests: "write", contents: "write" };
 // GitHub refuses the GraphQL markPullRequestReadyForReview to a token that cannot write contents too (seen on a real
 // pilot repo, #92): "Resource not accessible by integration"
 const MARK_READY: TokenPermissions = {
@@ -64,11 +64,12 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
   const doFetch = options.fetch ?? fetch;
   const etags = new Map<string, { etag: string; body: unknown }>();
   const maxCached = options.maxCachedResponses ?? 500;
+  const loginByToken = new Map<string, string | null>();
 
   async function call(
     repo: RepoRef,
     permissions: TokenPermissions,
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     body?: unknown,
   ): Promise<{ status: number; body: unknown }> {
@@ -136,20 +137,77 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
     );
   }
 
-  async function review(repo: RepoRef, number: number): Promise<ReviewState> {
-    const reviews = await getPages(
-      repo,
-      `/pulls/${number}/reviews`,
-      (body) => body as { user: { login: string }; state: string }[],
-    );
+  interface RawReview {
+    user?: { login?: string; type?: string } | null;
+    state: string;
+    body?: string | null;
+  }
+
+  interface RawComment {
+    user?: { login?: string; type?: string } | null;
+    body?: string | null;
+  }
+
+  function reviewState(reviews: RawReview[]): ReviewState {
     // What counts is each reviewer's latest verdict; a comment does not take back an approval.
     const latest = new Map<string, string>();
     for (const r of reviews)
-      if (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED")
+      if (
+        (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED") &&
+        typeof r.user?.login === "string"
+      )
         latest.set(r.user.login, r.state);
     const verdicts = [...latest.values()];
     if (verdicts.includes("CHANGES_REQUESTED")) return "changes-requested";
     return verdicts.includes("APPROVED") ? "approved" : "none";
+  }
+
+  async function tokenLogin(repo: RepoRef): Promise<string | null> {
+    const token = await options.tokens.tokenFor({ repo, permissions: READ });
+    if (loginByToken.has(token)) return loginByToken.get(token) ?? null;
+    const response = await doFetch(`${apiUrl}/user`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    const parsed = (await response.json().catch(() => ({}))) as {
+      login?: string;
+    };
+    const login =
+      response.ok && typeof parsed.login === "string" && parsed.login !== ""
+        ? parsed.login
+        : null;
+    loginByToken.set(token, login);
+    return login;
+  }
+
+  async function humanComments(
+    repo: RepoRef,
+    number: number,
+    reviews: RawReview[],
+  ): Promise<number> {
+    const issue = await getPages(
+      repo,
+      `/issues/${number}/comments`,
+      (body) => body as RawComment[],
+    );
+    const inline = await getPages(
+      repo,
+      `/pulls/${number}/comments`,
+      (body) => body as RawComment[],
+    );
+    const withBody = reviews.filter(
+      (r) => typeof r.body === "string" && r.body.trim() !== "",
+    );
+    const humans = [...issue, ...inline, ...withBody].filter(
+      (row) => row.user?.type !== "Bot",
+    );
+    if (humans.length === 0) return 0;
+    const me = await tokenLogin(repo);
+    return humans.filter((row) => me === null || row.user?.login !== me).length;
   }
 
   async function ci(repo: RepoRef, sha: string): Promise<CiState> {
@@ -204,6 +262,11 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
 
   async function info(repo: RepoRef, raw: RawPull): Promise<PullRequestInfo> {
     const shas = await mergeShas(repo, raw);
+    const reviews = await getPages(
+      repo,
+      `/pulls/${raw.number}/reviews`,
+      (body) => body as RawReview[],
+    );
     return {
       number: raw.number,
       url: raw.html_url,
@@ -211,13 +274,14 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       draft: raw.draft === true,
       headSha: raw.head.sha,
       ci: await ci(repo, raw.head.sha),
-      review: await review(repo, raw.number),
+      review: reviewState(reviews),
       mergedBy: raw.merged_by?.login ?? null,
       mergedAt: raw.merged_at ?? null,
       mergedByPlatform: false,
       conflictsWithDefault: raw.mergeable === false,
       mergeSha: shas.mergeSha,
       squashSha: shas.squashSha,
+      humanComments: await humanComments(repo, raw.number, reviews),
     };
   }
 
@@ -271,6 +335,21 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       etags.delete(
         `${apiUrl}/repos/${repo.owner}/${repo.name}/pulls/${number}`,
       );
+    },
+    async mergePullRequest({ repo, number, expectedHeadSha }) {
+      const merged = await call(repo, MERGE, "PUT", `/pulls/${number}/merge`, {
+        merge_method: "merge",
+        sha: expectedHeadSha,
+      });
+      if (merged.status !== 200)
+        throw new HostError(
+          `GitHub answered ${merged.status} merging pull request ${number}`,
+          merged.status,
+        );
+      etags.delete(
+        `${apiUrl}/repos/${repo.owner}/${repo.name}/pulls/${number}`,
+      );
+      return getPullRequest({ repo, number });
     },
     async markReady({ repo, number }) {
       const raw = (await get(repo, `/pulls/${number}`)) as RawPull;

@@ -53,7 +53,8 @@ export interface paths {
             name: string;
             defaultAgent?: string;
             defaultModel?: string;
-            mergePolicy?: string;
+            /** @enum {string} */
+            mergePolicy?: "manual" | "auto-improvement" | "";
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -93,7 +94,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
+        /** @description The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -193,6 +194,8 @@ export interface paths {
             defaultAgent?: string;
             defaultModel?: string;
             feishuChatId?: string;
+            /** @enum {string} */
+            mergePolicy?: "manual" | "auto-improvement" | "";
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -231,7 +234,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
+        /** @description The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -2244,7 +2247,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2323,6 +2326,14 @@ export interface paths {
                   number: number;
                   mergeSha: string | null;
                   squashSha: string | null;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "auto-merge";
+                  repoUrl: string;
+                  number: number;
+                  expectedHeadSha: string;
+                  section: string;
                 };
           };
         };
@@ -3888,6 +3899,18 @@ export interface paths {
                 /** @enum {string} */
                 state: "queued" | "running" | "done" | "failed";
               } | null;
+              autoMerge: {
+                /** @enum {string} */
+                policy: "manual" | "auto-improvement";
+                willMerge: boolean;
+                mergeAt: string | null;
+                reason: string | null;
+                event: {
+                  /** @enum {string} */
+                  type: "auto-merged" | "auto-merge-failed";
+                  reason: string | null;
+                } | null;
+              };
             };
           };
         };
