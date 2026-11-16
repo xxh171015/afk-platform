@@ -72,7 +72,7 @@ describe("the run page", () => {
     expect(screen.getByText("结果")).toBeTruthy();
     expect(screen.getByText("done")).toBeTruthy();
     expect(screen.getByText("耗时")).toBeTruthy();
-    expect(screen.getByText("146 s")).toBeTruthy();
+    expect(screen.getByText("2m 26s")).toBeTruthy();
     expect(screen.getByTestId("run-usage").textContent).toBe("—");
     expect(screen.getByRole("link", { name: /T-9/ }).getAttribute("href")).toBe(
       "/tickets/9",

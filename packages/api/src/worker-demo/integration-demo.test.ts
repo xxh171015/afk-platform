@@ -335,7 +335,7 @@ describe("the e2e stage of an integration ticket", { timeout: 60_000 }, () => {
       ref_shas: { backend: backendHead },
       tests_total: 2,
       tests_failed: 0,
-      duration_ms: null, // not agent time
+      duration_ms: expect.any(Number),
     });
     expect(run.env_up_ms).toBeGreaterThanOrEqual(0);
 

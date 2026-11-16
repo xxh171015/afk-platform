@@ -110,7 +110,7 @@ describe("the ticket page", () => {
     ).toBe("/runs/10");
     expect(implement.getByText("implement #1")).toBeTruthy();
     expect(implement.getByText("成功").getAttribute("title")).toBe("done");
-    expect(implement.getByText("146 s")).toBeTruthy();
+    expect(implement.getByText("2m 26s")).toBeTruthy();
     expect(implement.getByRole("time").getAttribute("dateTime")).toBe(
       "2026-10-28T10:00:00.000Z",
     );
@@ -120,7 +120,27 @@ describe("the ticket page", () => {
       "/runs/11",
     );
     expect(gate.getByText("失败").getAttribute("title")).toBe("failed");
-    expect(gate.getByText("20 s")).toBeTruthy();
+    expect(gate.getByText("20.0 s")).toBeTruthy();
+  });
+
+  it("shows elapsed time from start and finish when durationMs is missing", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          runs: [
+            run(12, "merge", {
+              result: "merged",
+              durationMs: null,
+              startedAt: "2026-10-28T12:00:00.000Z",
+              finishedAt: "2026-10-28T12:05:30.000Z",
+            }),
+          ],
+        }),
+      }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    const row = (await screen.findAllByRole("row"))[1] as HTMLElement;
+    expect(within(row).getByText("5m 30s")).toBeTruthy();
   });
 
   it("opens a compare dialog of title, body and acceptance criteria from the version list", async () => {

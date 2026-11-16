@@ -69,7 +69,7 @@ import {
 import { StatusBadge } from "./StatusBadge.tsx";
 import { StructuredBriefView } from "./StructuredBriefView.tsx";
 import { TicketEdit } from "./TicketEdit.tsx";
-import { formatSeconds } from "./time.ts";
+import { formatDuration, formatSeconds, runElapsedMs } from "./time.ts";
 
 export function peekTicketClick(
   event: {
@@ -518,8 +518,8 @@ function TicketContent({
                             run.result ??
                             "running"}
                         </td>
-                        <td className="whitespace-nowrap p-2.5">
-                          {formatSeconds(run.durationMs)}
+                        <td className="whitespace-nowrap p-2.5 tabular-nums">
+                          {formatDuration(runElapsedMs(run, Date.now()))}
                         </td>
                         <td className="whitespace-nowrap p-2.5">
                           {run.startedAt ? (

@@ -24,7 +24,7 @@ import { DETAIL_POLL_MS } from "./live.ts";
 import { Markdown } from "./Markdown.tsx";
 import { paths } from "./paths.ts";
 import { RunLog } from "./RunLog.tsx";
-import { formatDuration, formatSeconds } from "./time.ts";
+import { formatDuration, formatSeconds, runElapsedMs } from "./time.ts";
 import { formatTokens, tokenCounts } from "./token-usage.ts";
 
 function usageLabel(usage: unknown): string {
@@ -92,7 +92,8 @@ export function RunDetail({
   if (!run) return null;
 
   const result = run.result ?? "running";
-  const duration = formatDuration(run.durationMs);
+  const elapsedMs = runElapsedMs(run, Date.now());
+  const duration = formatDuration(elapsedMs);
   const commits = run.commits ?? [];
   const contractEntries = run.contractShas
     ? Object.entries(run.contractShas)
@@ -142,7 +143,7 @@ export function RunDetail({
         </div>
         <div className="flex items-center gap-2">
           <dt className="text-muted-foreground">耗时</dt>
-          <dd>{formatSeconds(run.durationMs)}</dd>
+          <dd>{formatDuration(elapsedMs)}</dd>
         </div>
         <div className="flex items-center gap-2">
           <dt className="text-muted-foreground">API 耗时</dt>
