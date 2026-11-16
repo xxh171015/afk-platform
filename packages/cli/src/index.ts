@@ -13,6 +13,8 @@ import {
   HOST_KINDS,
   hostKindOfUrl,
   MAX_PLANNING_PATCH_BYTES,
+  MERGE_POLICIES,
+  type MergePolicy,
   PLAT_HEADER,
   PLAT_OUTDATED,
   parseDisplayId,
@@ -261,6 +263,12 @@ const toTicketReview = (value: string): TicketReviewMode => {
   }
   return value as TicketReviewMode;
 };
+const toMergePolicy = (value: string): MergePolicy => {
+  if (!(MERGE_POLICIES as readonly string[]).includes(value)) {
+    throw new InvalidArgumentError("must be manual or auto-improvement");
+  }
+  return value as MergePolicy;
+};
 const collect = (value: string, previous: string[] = []) => [
   ...previous,
   value,
@@ -460,7 +468,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--protected-path <glob>", "repeatable", collect)
     .option("--max-concurrency <n>", "tickets running at once", toInt)
     .option("--budget-limit <n>", "budget limit", toInt)
-    .option("--merge-policy <policy>")
+    .option(
+      "--merge-policy <policy>",
+      "manual (default) or auto-improvement",
+      toMergePolicy,
+    )
     .option(
       "--limit <name=value>",
       "override a concurrency or budget default, e.g. repoConcurrency=3 (repeatable)",
@@ -518,6 +530,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--max-concurrency <n>", "tickets running at once", toInt)
     .option("--budget-limit <n>", "budget limit", toInt)
     .option(
+      "--merge-policy <policy>",
+      "manual (default) or auto-improvement",
+      toMergePolicy,
+    )
+    .option(
       "--limit <name=value>",
       "override a concurrency or budget default, merged with the ones already set (repeatable)",
       collect,
@@ -544,6 +561,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         protectedPaths: options.protectedPath,
         maxConcurrency: options.maxConcurrency,
         budgetLimit: options.budgetLimit,
+        mergePolicy: options.mergePolicy,
         limits: parseLimits(options.limit),
         feishuChatId: options.feishuChat as string | undefined,
         ticketReview: options.ticketReview,
@@ -551,7 +569,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --limit, --feishu-chat, --ticket-review or --stage-model",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --merge-policy, --limit, --feishu-chat, --ticket-review or --stage-model",
         );
       }
       const projectId = toInt(id);
