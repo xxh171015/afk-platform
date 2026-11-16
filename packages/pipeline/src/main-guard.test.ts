@@ -179,6 +179,37 @@ describe("the workflow's script", () => {
     expect(result.issues).not.toContain("no merged pull request");
   });
 
+  it("passes when a bot merged a pull request marked auto-merged", () => {
+    const result = guard({
+      pulls: [
+        {
+          ...mergedPr,
+          merged_by: { login: "afk-platform[bot]" },
+          body: "Platform already merged this.\n\n<!-- afk:auto-merged -->",
+        },
+      ],
+      actor: "afk-platform[bot]",
+      pusher: "afk-platform[bot]",
+    });
+    expect(result).toMatchObject({ code: 0, issues: "" });
+  });
+
+  it("fails when a bot merged a pull request without the auto-merged marker", () => {
+    const result = guard({
+      pulls: [
+        {
+          ...mergedPr,
+          merged_by: { login: "afk-platform[bot]" },
+          body: "Platform already merged this.",
+        },
+      ],
+      actor: "afk-platform[bot]",
+      pusher: "afk-platform[bot]",
+    });
+    expect(result.code).toBe(1);
+    expect(result.issues).toContain("pushed by a bot account");
+  });
+
   it("reports both problems in one issue", () => {
     const result = guard({ pulls: [], actor: "x[bot]", pusher: "x[bot]" });
     expect(result.issues).toContain("pushed by a bot account");

@@ -32,6 +32,7 @@ const info = (
   conflictsWithDefault: false,
   mergeSha: null,
   squashSha: null,
+  humanComments: 0,
   ...extra,
 });
 const ref = () => ({ owner: "me", name: "pilot" });
@@ -50,6 +51,9 @@ const noCleanup = {
     throw new Error("not used");
   },
   updatePullRequestBody: async () => {
+    throw new Error("not used");
+  },
+  mergePullRequest: async () => {
     throw new Error("not used");
   },
   getBranchSha: async () => {
@@ -284,6 +288,7 @@ describe("a host-sync task", () => {
           conflictsWithDefault: false,
           mergeSha: null,
           squashSha: null,
+          humanComments: 0,
         },
         {
           id: 2,
@@ -298,9 +303,26 @@ describe("a host-sync task", () => {
           conflictsWithDefault: false,
           mergeSha: null,
           squashSha: null,
+          humanComments: 0,
         },
       ],
       defaults: [],
+    });
+  });
+
+  it("passes on the human comment count", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(0),
+      getPullRequest: async () => info(1, { humanComments: 3 }),
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      { kind: "host-sync", pulls: [{ id: 1, repoUrl: "u", number: 1 }] },
+      log,
+    );
+    expect(result).toMatchObject({
+      pulls: [{ id: 1, humanComments: 3 }],
     });
   });
 
@@ -532,6 +554,7 @@ describe("a spec-cleanup task", () => {
       getPullRequest: async () => info(0),
       getPullRequestBody: async () => "",
       updatePullRequestBody: async () => {},
+      mergePullRequest: async () => info(0),
       markReady: async () => info(0),
       closePullRequest: async ({ number }) => {
         calls.push(`close ${number}`);

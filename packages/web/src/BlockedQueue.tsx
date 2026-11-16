@@ -1135,44 +1135,44 @@ function inferredItems(data: Queue): WaitingRef[] {
     data.items && (data.items.length > 0 || waitingCount(data) === 0)
       ? data.items
       : [
-    ...data.tickets.map((ticket) => ({
-      kind: "ticket" as const,
-      id: ticket.id,
-    })),
-    ...data.finalizations.map((item) => ({
-      kind: "finalization" as const,
-      id: item.id,
-      step: item.step,
-    })),
-    ...data.pullRequests.map((item) => ({
-      kind: "pullRequest" as const,
-      specId: item.specId,
-      repo: item.repo,
-      number: item.number,
-    })),
-    ...data.readyFailures.map((item) => ({
-      kind: "readyFailure" as const,
-      specId: item.specId,
-      repo: item.repo,
-      number: item.number,
-    })),
-    ...data.cleanups.map((item) => ({
-      kind: "cleanup" as const,
-      specId: item.specId,
-    })),
-    ...(data.planning ?? []).map((item) => ({
-      kind: "planning" as const,
-      specId: item.specId,
-    })),
-    ...data.specs.map((spec) => ({
-      kind: "pausedSpec" as const,
-      id: spec.id,
-    })),
-    ...(data.locates ?? []).map((item) => ({
-      kind: "locate" as const,
-      specId: item.specId,
-    })),
-  ];
+          ...data.tickets.map((ticket) => ({
+            kind: "ticket" as const,
+            id: ticket.id,
+          })),
+          ...data.finalizations.map((item) => ({
+            kind: "finalization" as const,
+            id: item.id,
+            step: item.step,
+          })),
+          ...data.pullRequests.map((item) => ({
+            kind: "pullRequest" as const,
+            specId: item.specId,
+            repo: item.repo,
+            number: item.number,
+          })),
+          ...data.readyFailures.map((item) => ({
+            kind: "readyFailure" as const,
+            specId: item.specId,
+            repo: item.repo,
+            number: item.number,
+          })),
+          ...data.cleanups.map((item) => ({
+            kind: "cleanup" as const,
+            specId: item.specId,
+          })),
+          ...(data.planning ?? []).map((item) => ({
+            kind: "planning" as const,
+            specId: item.specId,
+          })),
+          ...data.specs.map((spec) => ({
+            kind: "pausedSpec" as const,
+            id: spec.id,
+          })),
+          ...(data.locates ?? []).map((item) => ({
+            kind: "locate" as const,
+            specId: item.specId,
+          })),
+        ];
   return mergeStaleItems(base, data);
 }
 
