@@ -385,6 +385,84 @@ describe("classifying a review run", () => {
       },
     ]);
   });
+
+  it("accepts a review suggestion written as { file, line, problem } and stores the finding as file:line problem", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+      suggestions: [{ file: "a.ts", line: 3, problem: "x" }],
+      uncertainties: [],
+    });
+    expect(reviewFindings(parsed)).toEqual([
+      { kind: "suggestion", body: "a.ts:3 x" },
+    ]);
+  });
+
+  it("accepts a recheck result whose suggestions and scopeCreep are objects and keeps the verdict", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+      suggestions: [{ file: "a.ts", line: 338, problem: "weaker" }],
+      scopeCreep: [{ file: "b.tsx", line: 940, problem: "extra" }],
+      uncertainties: [],
+    });
+    expect(classifyReviewRun(result({ output: parsed }))).toMatchObject({
+      outcome: "pass",
+    });
+    expect(reviewFindings(parsed)).toEqual([
+      { kind: "suggestion", body: "a.ts:338 weaker" },
+      { kind: "scope-creep", body: "b.tsx:940 extra" },
+    ]);
+    const fix = ReviewOutputSchema.parse({
+      verdict: "fix",
+      mustFix: [{ file: "c.ts", problem: "changed" }],
+      suggestions: [{ file: "a.ts", line: 338, problem: "weaker" }],
+      scopeCreep: [{ file: "b.tsx", line: 940, problem: "extra" }],
+      uncertainties: [],
+    });
+    expect(classifyReviewRun(result({ output: fix }))).toMatchObject({
+      outcome: "fix",
+    });
+  });
+
+  it("accepts a final-review uncertainty written as an object and stores the converted sentence for the acceptance pack", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+      suggestions: [],
+      uncertainties: [{ file: "a.ts", line: 1, problem: "could not tell" }],
+    });
+    expect(reviewFindings(parsed)).toEqual([
+      { kind: "uncertainty", body: "a.ts:1 could not tell" },
+    ]);
+  });
+
+  it("keeps all-string suggestions, scopeCreep and uncertainties as they are", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+      suggestions: ["rename x"],
+      scopeCreep: ["an extra flag"],
+      uncertainties: ["the review could not run the export"],
+    });
+    expect(reviewFindings(parsed)).toEqual([
+      { kind: "suggestion", body: "rename x" },
+      { kind: "scope-creep", body: "an extra flag" },
+      { kind: "uncertainty", body: "the review could not run the export" },
+    ]);
+  });
+
+  it("turns an object finding with no line into file problem, like must-fix", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+      suggestions: [{ file: "a.ts", problem: "x" }],
+      uncertainties: [],
+    });
+    expect(reviewFindings(parsed)).toEqual([
+      { kind: "suggestion", body: "a.ts x" },
+    ]);
+  });
 });
 
 describe("the two axes of a review", () => {
@@ -992,6 +1070,21 @@ describe("the prompts", () => {
 
   // Calibration 2026-11-16: with only `"mustFix": []` in the example, the Spec axis wrote each must-fix as a
   // string, and every review that found something came back invalid.
+  it("tells every review prompt that suggestions, scopeCreep and uncertainties are each a string", () => {
+    for (const path of [
+      PROMPTS.reviewSpec,
+      PROMPTS.reviewStandards,
+      PROMPTS.finalReviewSpec,
+      PROMPTS.finalReviewStandards,
+      PROMPTS.recheck,
+    ]) {
+      const text = readFileSync(path, "utf8");
+      expect(text, path).toContain(
+        "`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串",
+      );
+    }
+  });
+
   it("shows a must-fix item's shape in every review example, and each example is a valid result", () => {
     for (const [path, schema] of [
       [PROMPTS.reviewSpec, ReviewOutputSchema],

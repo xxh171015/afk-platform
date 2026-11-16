@@ -75,6 +75,27 @@ export const TidyOutputSchema = z.preprocess(
 );
 export type TidyOutput = z.infer<typeof TidyOutputObject>;
 
+const ReviewLineObject = z.object({
+  file: z.string(),
+  line: z.number().int().optional(),
+  problem: z.string().min(1),
+});
+
+function reviewLineText(item: {
+  file: string;
+  line?: number;
+  problem: string;
+}): string {
+  return `${item.file}${item.line === undefined ? "" : `:${item.line}`} ${item.problem}`;
+}
+
+// suggestions, scopeCreep and uncertainties: a string, or the same { file, line?, problem } shape as mustFix,
+// which is turned into that one-line form before it is stored as a Finding.
+const ReviewLine = z.union([
+  z.string(),
+  ReviewLineObject.transform(reviewLineText),
+]);
+
 const ReviewObject = z.object({
   verdict: z.enum(["pass", "fix"]),
   mustFix: z.array(
@@ -86,10 +107,10 @@ const ReviewObject = z.object({
       id: z.string().min(1).optional(),
     }),
   ),
-  suggestions: z.array(z.string()),
+  suggestions: z.array(ReviewLine),
   // the Spec axis's (b): behaviour nobody asked for. It goes to the acceptance pack, never to a fix.
-  scopeCreep: z.array(z.string()).default([]),
-  uncertainties: z.array(z.string()),
+  scopeCreep: z.array(ReviewLine).default([]),
+  uncertainties: z.array(ReviewLine),
   // Spec axis: a Ruling for each conflict and known-gap. Standards leaves this off.
   rulings: z.array(RulingSchema).optional(),
   // files this review used as standards sources. Required on the Standards axis.
