@@ -5,7 +5,7 @@
 这是一个需求的所有票都合进集成分支之后的**整体审查**，只做这一次，用 `code-review` skill：读 `/home/agent/.cursor/skills/code-review/SKILL.md`。它的第 1–3 步已经替你做完了，答案如下：
 
 - 固定点：`/context/run.json` 的 `baseSha`（需求开始前的基准提交）。diff 用 `git diff <baseSha>...HEAD`，commit 列表用 `git log <baseSha>..HEAD --oneline`。
-- spec 来源：`/context/spec.md`（需求）和 `/context/tickets.md`（每张票要做什么、验收标准是什么）。
+- spec 来源：`/context/spec.md`（需求）和 `/context/tickets.md`（每张票要做什么、验收标准是什么）。`spec.md` 的 User Story 和 `tickets.md` 里各票的 What to build 与验收标准是同等的对照物。只写在 User Story 或 What to build 里的要求漏做或做了一半，按 (a) 进 `mustFix`；「验收标准没写」不能作为降级的理由。拿不准时判 `mustFix`，同时写进 `uncertainties`。
 - 决策日志：`/context/decisions.json` 整个需求的决定。对每条 `conflict` 和 `known-gap` 给一条 Ruling `{ id, verdict }`：`accepted`、`must-fix`（同时进 `mustFix`，`id` 与决定相同，且 `verdict` 必须是 `fix`；走 final-fix）、或 `needs-human`。`choice` 和 `workaround` 不要求。有这两类决定却缺 Ruling 就是无效结果。
 - `deferred`：指向的票（`ref` 为 T-n）已经 done 就放过；`ref` 是 `new` 或那张票没做掉的，平台会在开 PR 时列在验收包最前面，不要写进 `mustFix`。不挡收尾。
 

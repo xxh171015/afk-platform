@@ -503,6 +503,24 @@ describe("the two axes of a review", () => {
     );
   });
 
+  it("treats What to build and the ticket's User Story as equal counterparts to the acceptance criteria, and mustFix when unsure", () => {
+    const spec = readFileSync(PROMPTS.reviewSpec, "utf8");
+    expect(spec).toContain("同等的对照物");
+    expect(spec).toContain("验收标准没写");
+    expect(spec).toMatch(/拿不准时判 `mustFix`/);
+    expect(spec).toContain("uncertainties");
+  });
+
+  it("treats the spec's User Story and each ticket's What to build as equal counterparts to the acceptance criteria, and mustFix when unsure", () => {
+    const finalSpec = readFileSync(PROMPTS.finalReviewSpec, "utf8");
+    expect(finalSpec).toContain("User Story");
+    expect(finalSpec).toContain("What to build");
+    expect(finalSpec).toContain("同等的对照物");
+    expect(finalSpec).toContain("验收标准没写");
+    expect(finalSpec).toMatch(/拿不准时判 `mustFix`/);
+    expect(finalSpec).toContain("uncertainties");
+  });
+
   it("has the Standards axis find standards sources itself and name them in sources", () => {
     for (const file of [
       PROMPTS.reviewStandards,
@@ -738,6 +756,17 @@ describe("the prompts", () => {
       expect(overlay).toContain(word);
   });
 
+  it("tells review that conservative means must-fix, and that a new test passing first time did not test new behaviour", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    expect(overlaySkillsSha(overlay)).toBe(SKILLS_SHA);
+    expect(overlay).toMatch(/审查阶段的「保守」就是判必须修/);
+    expect(overlay).toContain("新测试第一次跑就通过");
+    expect(overlay).toContain("没测到新行为");
+    expect(overlay).toContain(
+      "有意补的回归测试，在 `decisions` 里记一条 `choice`",
+    );
+  });
+
   it("gives conflict examples and the three cannot-proceed cases", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const section = overlay.slice(
@@ -813,6 +842,13 @@ describe("the prompts", () => {
       "0".repeat(40),
     );
     expect(overlaySkillsSha("no header")).toBeUndefined();
+  });
+
+  it("makes implement do every sentence of What to build, not only the acceptance criteria, and record a known-gap when it cannot", () => {
+    const implement = readFileSync(PROMPTS.implement, "utf8");
+    expect(implement).toContain("What to build");
+    expect(implement).toMatch(/每一句都要做到/);
+    expect(implement).toContain("known-gap");
   });
 
   it("makes implement read the implement skill by its absolute path and skip its code-review step", () => {
