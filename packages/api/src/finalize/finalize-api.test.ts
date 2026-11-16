@@ -1167,6 +1167,12 @@ describe("Tidy after wrap-up", () => {
     await runningSpec([ticket("a")]);
     await allTicketsDone();
   }
+  const suggestionResolutions = async () =>
+    (
+      await db.pool.query(
+        "SELECT body, resolution FROM findings WHERE kind = 'suggestion' ORDER BY id",
+      )
+    ).rows;
 
   it("runs final-tidy and tidy-merge when the Standards axis has suggestions, then opens the PR", async () => {
     await toFinalReview();
@@ -1195,6 +1201,28 @@ describe("Tidy after wrap-up", () => {
     );
     expect(findings.rows).toEqual([
       { body: "extract helper", resolution: "refactored" },
+      { body: "drop unused import", resolution: "acceptance-pack" },
+    ]);
+  });
+
+  it("a tidy-merge gate failure leaves every suggestion on the acceptance pack", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await step("final-tidy", TIDY_DONE);
+    await step("tidy-merge", { outcome: "gate-failed" });
+    expect(await suggestionResolutions()).toEqual([
+      { body: "extract helper", resolution: "acceptance-pack" },
+      { body: "drop unused import", resolution: "acceptance-pack" },
+    ]);
+  });
+
+  it("a tidy-merge conflict leaves every suggestion on the acceptance pack", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await step("final-tidy", TIDY_DONE);
+    await step("tidy-merge", { outcome: "conflict" });
+    expect(await suggestionResolutions()).toEqual([
+      { body: "extract helper", resolution: "acceptance-pack" },
       { body: "drop unused import", resolution: "acceptance-pack" },
     ]);
   });

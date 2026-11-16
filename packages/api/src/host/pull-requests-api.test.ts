@@ -1926,6 +1926,125 @@ describe("the acceptance pack", () => {
     expect(task.section).toContain("reload still skips the note filter");
   });
 
+  it("after tidy-merge, tidied wrap-up suggestions are 已由 Tidy 整理 in the pack and pull request", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [ticket("a", "backend")],
+      stages: {
+        "final-review": {
+          outcome: "pass",
+          run: {
+            axis: "standards",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: ["extract helper", "drop unused import"],
+              uncertainties: [],
+            },
+          },
+          findings: [
+            { kind: "suggestion", body: "extract helper" },
+            { kind: "suggestion", body: "drop unused import" },
+          ],
+        },
+        "final-tidy": {
+          outcome: "done",
+          run: {
+            output: {
+              status: "done",
+              summary: "extracted a helper",
+              tidied: [0],
+              skipped: [{ index: 1, reason: "would touch many files" }],
+            },
+          },
+        },
+        "tidy-merge": { outcome: "merged", headSha: "tidied" },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    const wrapUp = acceptancePack.repos[0].findings.filter(
+      (f: Json) => f.stage === "final-review",
+    );
+    expect(wrapUp).toEqual([
+      {
+        ticket: null,
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "final-review",
+        kind: "suggestion",
+        body: "extract helper",
+        resolution: "已由 Tidy 整理",
+        axis: "standards",
+      },
+      {
+        ticket: null,
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "final-review",
+        kind: "suggestion",
+        body: "drop unused import",
+        resolution: "acceptance-pack",
+        axis: "standards",
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain(
+      "[已由 Tidy 整理] spec final-review (standards) suggestion: extract helper",
+    );
+    expect(task.section).toContain(
+      "[acceptance-pack] spec final-review (standards) suggestion: drop unused import",
+    );
+  });
+
+  it("a discarded tidy-merge leaves wrap-up suggestions on the pack, not 已由 Tidy 整理", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [ticket("a", "backend")],
+      stages: {
+        "final-review": {
+          outcome: "pass",
+          run: {
+            axis: "standards",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: ["extract helper", "drop unused import"],
+              uncertainties: [],
+            },
+          },
+          findings: [
+            { kind: "suggestion", body: "extract helper" },
+            { kind: "suggestion", body: "drop unused import" },
+          ],
+        },
+        "final-tidy": {
+          outcome: "done",
+          run: {
+            output: {
+              status: "done",
+              summary: "extracted a helper",
+              tidied: [0],
+              skipped: [{ index: 1, reason: "would touch many files" }],
+            },
+          },
+        },
+        "tidy-merge": { outcome: "gate-failed" },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    const wrapUp = acceptancePack.repos[0].findings.filter(
+      (f: Json) => f.stage === "final-review",
+    );
+    expect(wrapUp.map((f: Json) => [f.body, f.resolution])).toEqual([
+      ["extract helper", "acceptance-pack"],
+      ["drop unused import", "acceptance-pack"],
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).not.toContain("已由 Tidy 整理");
+  });
+
   it("omits a deferred whose ticket is done, and puts an unfinished one at the front of the pack and the PR", async () => {
     await settledSpec(["backend"], undefined, {
       tickets: [
