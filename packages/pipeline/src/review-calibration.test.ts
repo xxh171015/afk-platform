@@ -16,6 +16,7 @@ import {
   loadAnswers,
   loadSamples,
   runReviewCalibration,
+  scoreDefect,
 } from "./review-calibration.ts";
 import { FakeAgentRunner } from "./testing/fakes.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
@@ -451,5 +452,62 @@ describe("runReviewCalibration when an axis run fails", () => {
     expect(table).toMatch(
       /\| tiny \(spec\) \| 失败 \| not a git repository \|/,
     );
+  });
+});
+
+describe("scoreDefect", () => {
+  const defect = { file: "src/orders/model.ts", lines: "155-159" };
+  const review = (
+    mustFix: { file: string; line?: number; problem: string }[],
+    suggestions: string[] = [],
+  ) => ({
+    verdict: mustFix.length ? ("fix" as const) : ("pass" as const),
+    mustFix,
+    suggestions,
+    scopeCreep: [],
+    uncertainties: [],
+  });
+
+  // Calibration 2026-11-16: the Spec axis named line 160 for a defect answered as 155-159.
+  it("counts a must-fix a few lines outside the answer's range", () => {
+    expect(
+      scoreDefect(
+        defect,
+        review([{ file: "src/orders/model.ts", line: 160, problem: "x" }]),
+      ),
+    ).toBe("must-fix");
+    expect(
+      scoreDefect(
+        defect,
+        review([{ file: "src/orders/model.ts", line: 150, problem: "x" }]),
+      ),
+    ).toBe("must-fix");
+  });
+
+  it("does not count a must-fix far from the range or in another file", () => {
+    expect(
+      scoreDefect(
+        defect,
+        review([{ file: "src/orders/model.ts", line: 40, problem: "x" }]),
+      ),
+    ).toBe("未发现");
+    expect(
+      scoreDefect(
+        defect,
+        review([{ file: "src/orders/routes.ts", line: 157, problem: "x" }]),
+      ),
+    ).toBe("未发现");
+  });
+
+  it("finds file:line anywhere in a suggestion, not only at its start", () => {
+    expect(
+      scoreDefect(
+        defect,
+        review([], ["重复 id 没拦住（`src/orders/model.ts:161`），见契约"]),
+      ),
+    ).toBe("suggestion");
+    expect(
+      scoreDefect(defect, review([], ["src/orders/model.ts:90 命名"])),
+    ).toBe("未发现");
   });
 });
