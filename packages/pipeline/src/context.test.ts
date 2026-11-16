@@ -198,6 +198,79 @@ describe("renderContext", () => {
     });
   });
 
+  it("writes each ticket's What to build in tickets.md for a spec-level step", () => {
+    const dir = ctxDir();
+    renderContext({
+      dir,
+      bundle: bundleFor({
+        ticket: null,
+        specTickets: [
+          {
+            displayId: "T-1",
+            title: "Export CSV",
+            body: [
+              "## Parent",
+              "",
+              "S-12",
+              "",
+              "## What to build",
+              "",
+              "Add GET /orders/export.",
+              "",
+              "## Acceptance criteria",
+              "",
+              "- [ ] returns text/csv",
+              "",
+            ].join("\n"),
+            acceptanceCriteria: ["returns text/csv"],
+          },
+          {
+            displayId: "T-2",
+            title: "Header row",
+            body: [
+              "## Parent",
+              "",
+              "S-12",
+              "",
+              "## What to build",
+              "",
+              "The CSV starts with a header row.",
+              "",
+              "## Acceptance criteria",
+              "",
+              "- [ ] first line is a header",
+              "",
+            ].join("\n"),
+            acceptanceCriteria: ["first line is a header"],
+          },
+        ],
+      }),
+      run,
+    });
+    expect(read(dir, "tickets.md")).toBe(
+      [
+        "# Tickets of S-12",
+        "",
+        "## T-1 Export CSV",
+        "",
+        "## What to build",
+        "",
+        "Add GET /orders/export.",
+        "",
+        "- returns text/csv",
+        "",
+        "## T-2 Header row",
+        "",
+        "## What to build",
+        "",
+        "The CSV starts with a header row.",
+        "",
+        "- first line is a header",
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("puts the approved protected paths and the stage in run.json", () => {
     const dir = ctxDir();
     renderContext({

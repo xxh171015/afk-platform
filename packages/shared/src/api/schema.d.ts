@@ -2015,6 +2015,7 @@ export interface paths {
               specTickets: {
                 displayId: string;
                 title: string;
+                body: string;
                 acceptanceCriteria: string[];
               }[];
               spec: {
