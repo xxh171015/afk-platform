@@ -22,7 +22,7 @@ interface FakeMr {
   approvedBy: string[];
   reviewers: { username: string; state: string }[];
   hasConflicts: boolean;
-  notes: { body: string; system: boolean; username: string }[];
+  notes: { body: string; system: boolean; username: string; bot: boolean }[];
 }
 
 export class FakeGitLab {
@@ -144,12 +144,13 @@ export class FakeGitLab {
 
   addNote(
     iid: number,
-    note: { body: string; system?: boolean; username: string },
+    note: { body: string; system?: boolean; username: string; bot?: boolean },
   ): void {
     this.mr(iid).notes.push({
       body: note.body,
       system: note.system === true,
       username: note.username,
+      bot: note.bot === true,
     });
   }
 
@@ -357,7 +358,7 @@ export class FakeGitLab {
         mr.notes.map((row) => ({
           body: row.body,
           system: row.system,
-          author: { username: row.username },
+          author: { username: row.username, bot: row.bot },
         })),
       );
     }

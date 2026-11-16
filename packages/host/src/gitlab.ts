@@ -26,6 +26,7 @@ const DRAFT = /^draft:\s*/i;
 
 interface RawUser {
   username?: string;
+  bot?: boolean;
 }
 
 interface RawMr {
@@ -224,7 +225,9 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
           200,
         );
     }
-    const humans = notes.filter((note) => note.system !== true);
+    const humans = notes.filter(
+      (note) => note.system !== true && note.author?.bot !== true,
+    );
     if (humans.length === 0) return 0;
     const me = await tokenUsername(repo);
     return humans.filter((note) => usernameOf(note.author) !== me).length;
