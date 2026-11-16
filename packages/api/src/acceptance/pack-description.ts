@@ -93,6 +93,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     `## ${repo}`,
     criteriaLines(section),
     findingsLines(section),
+    reviewUncertaintyLines(section),
     standardsSourceLines(section),
     gateLines(section),
     flakyTestLines(section),
@@ -139,6 +140,27 @@ function findingsLines(section: AcceptancePack["repos"][number]): string {
   for (const creep of section.scopeCreep) {
     lines.push(
       `- scope creep: ${creep.ticket ?? "spec"} ${creep.run}: ${creep.body}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function axisLabel(axis: "standards" | "spec" | null): string {
+  if (axis === "spec") return "Spec 轴";
+  if (axis === "standards") return "Standards 轴";
+  return "";
+}
+
+function reviewUncertaintyLines(
+  section: AcceptancePack["repos"][number],
+): string {
+  if (section.reviewUncertainties.length === 0) return "";
+  const lines = ["### 审查拿不准的"];
+  for (const item of section.reviewUncertainties) {
+    const axis = axisLabel(item.axis);
+    const who = item.ticket ?? "spec";
+    lines.push(
+      `- ${axis ? `${axis} ` : ""}${who} ${item.stage} ${item.run}: ${item.body}`,
     );
   }
   return lines.join("\n");

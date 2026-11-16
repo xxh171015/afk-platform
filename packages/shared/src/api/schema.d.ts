@@ -3707,6 +3707,14 @@ export interface paths {
                     run: string;
                     body: string;
                   }[];
+                  reviewUncertainties: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    body: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
+                  }[];
                   decisions: {
                     source: string;
                     run: string;

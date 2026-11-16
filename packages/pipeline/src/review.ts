@@ -26,7 +26,7 @@ import { git, gitOrThrow } from "./exec.ts";
 // classify and turn the outputs into findings. The executor and the calibration script both call this.
 
 export type ReviewFinding = {
-  kind: "must-fix" | "suggestion" | "scope-creep";
+  kind: "must-fix" | "suggestion" | "scope-creep" | "uncertainty";
   body: string;
 };
 

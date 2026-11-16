@@ -712,6 +712,18 @@ export function acceptancePackText(pack: AcceptancePackView): string {
             (s) => `      ${s.ticket ?? "spec"} ${s.run}: ${s.body}`,
           ),
         ),
+        ...section(
+          "审查拿不准的",
+          (repo.reviewUncertainties ?? []).map((item) => {
+            const axis =
+              item.axis === "spec"
+                ? "Spec 轴"
+                : item.axis === "standards"
+                  ? "Standards 轴"
+                  : "";
+            return `      ${axis ? `${axis} ` : ""}${item.ticket ?? "spec"} ${item.stage} ${item.run}: ${item.body}`;
+          }),
+        ),
         ...section("decisions", decisionRows(repo.decisions ?? [])),
         ...section(
           "gate",

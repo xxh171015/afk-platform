@@ -258,6 +258,37 @@ describe("the overall review and the one fix", () => {
     return specId;
   }
 
+  it("an uncertainty does not run a wrap-up fix", async () => {
+    await toFinalReview();
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: ["migration order"],
+        },
+      },
+      findings: [{ kind: "uncertainty", body: "migration order" }],
+    });
+    expect(await fin()).toEqual([
+      { step: "final-review", state: "done", blocked_reason: null },
+    ]);
+    expect((await jobs()).map((j: Json) => j.stage)).toEqual(["final-review"]);
+    const findings = await db.pool.query(
+      "SELECT kind, body, resolution FROM findings",
+    );
+    expect(findings.rows).toEqual([
+      {
+        kind: "uncertainty",
+        body: "migration order",
+        resolution: "acceptance-pack",
+      },
+    ]);
+  });
+
   it("a review that passes ends it: no fix, no merge", async () => {
     await toFinalReview();
     await step("final-review", REVIEW_PASS);
