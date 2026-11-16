@@ -883,6 +883,90 @@ describe("tidy", () => {
   });
 });
 
+describe("mergePolicy", () => {
+  it("accepts manual and auto-improvement, allows empty, and refuses any other value", async () => {
+    const omitted = await post("/projects", { name: "plain" });
+    expect(omitted.status).toBe(201);
+    expect(
+      (
+        await db.pool.query("SELECT merge_policy FROM projects WHERE id = $1", [
+          omitted.body.id,
+        ])
+      ).rows[0].merge_policy,
+    ).toBeNull();
+
+    const empty = await post("/projects", { name: "empty", mergePolicy: "" });
+    expect(empty.status).toBe(201);
+    expect(
+      (
+        await db.pool.query("SELECT merge_policy FROM projects WHERE id = $1", [
+          empty.body.id,
+        ])
+      ).rows[0].merge_policy,
+    ).toBeNull();
+
+    const created = await post("/projects", {
+      name: "shop",
+      mergePolicy: "auto-improvement",
+    });
+    expect(created.status).toBe(201);
+    expect(
+      (
+        await db.pool.query("SELECT merge_policy FROM projects WHERE id = $1", [
+          created.body.id,
+        ])
+      ).rows[0].merge_policy,
+    ).toBe("auto-improvement");
+
+    expect(
+      (await patch(`/projects/${created.body.id}`, { mergePolicy: "manual" }))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await db.pool.query("SELECT merge_policy FROM projects WHERE id = $1", [
+          created.body.id,
+        ])
+      ).rows[0].merge_policy,
+    ).toBe("manual");
+
+    expect(
+      (await patch(`/projects/${created.body.id}`, { mergePolicy: "" })).status,
+    ).toBe(200);
+    expect(
+      (
+        await db.pool.query("SELECT merge_policy FROM projects WHERE id = $1", [
+          created.body.id,
+        ])
+      ).rows[0].merge_policy,
+    ).toBeNull();
+
+    expect(
+      (
+        await patch(`/projects/${created.body.id}`, {
+          mergePolicy: "auto-improvement",
+        })
+      ).status,
+    ).toBe(200);
+
+    const refusedPatch = await patch(`/projects/${created.body.id}`, {
+      mergePolicy: "squash",
+    });
+    expect(refusedPatch.status).toBe(400);
+    expect(
+      (
+        await db.pool.query("SELECT merge_policy FROM projects WHERE id = $1", [
+          created.body.id,
+        ])
+      ).rows[0].merge_policy,
+    ).toBe("auto-improvement");
+
+    expect(
+      (await post("/projects", { name: "nope", mergePolicy: "squash" })).status,
+    ).toBe(400);
+  });
+});
+
 describe("ticketReview", () => {
   it("defaults to spec, stores both, and refuses any other value", async () => {
     const created = await post("/projects", { name: "shop" });

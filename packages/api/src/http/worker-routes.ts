@@ -25,6 +25,7 @@ import {
 import { markFinalClaimed, recordFinalResult } from "../finalize/finalize.ts";
 import { reportHosts } from "../host/code-hosts.ts";
 import {
+  readAutoMergePayload,
   readHostSyncPayload,
   readIndexPrLinksPayload,
   readOpenPrPayload,
@@ -35,6 +36,7 @@ import {
 import {
   buildHostTask,
   hostSyncFailed,
+  recordAutoMerge,
   recordHostSync,
   recordIndexPrLinks,
   recordOpenPr,
@@ -503,6 +505,13 @@ const HostTask = z.discriminatedUnion("kind", [
     mergeSha: z.string().nullable(),
     squashSha: z.string().nullable(),
   }),
+  z.object({
+    kind: z.literal("auto-merge"),
+    repoUrl: z.string(),
+    number: z.number().int(),
+    expectedHeadSha: z.string(),
+    section: z.string(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -518,7 +527,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -989,6 +998,7 @@ export function registerWorkerRoutes(
                 const ready = readPrReadyPayload(job.rows[0]);
                 const access = readRepoAccessPayload(job.rows[0]);
                 const indexLinks = readIndexPrLinksPayload(job.rows[0]);
+                const autoMerge = readAutoMergePayload(job.rows[0]);
                 if (access)
                   await recordRepoAccess(
                     client,
@@ -1005,6 +1015,8 @@ export function registerWorkerRoutes(
                 else if (ready) await recordPrReady(client, ready, result);
                 else if (indexLinks)
                   await recordIndexPrLinks(client, indexLinks, result);
+                else if (autoMerge)
+                  await recordAutoMerge(client, autoMerge, result);
               }
             }
           }
@@ -1073,7 +1085,8 @@ export function registerWorkerRoutes(
         readPrReadyPayload(row) ??
         readSpecCleanupPayload(row) ??
         readPatchPrBodyPayload(row) ??
-        readIndexPrLinksPayload(row));
+        readIndexPrLinksPayload(row) ??
+        readAutoMergePayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)

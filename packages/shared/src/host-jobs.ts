@@ -8,6 +8,7 @@ export const HOST_JOB_TYPES = [
   "patch-pr-body",
   "repo-access",
   "index-pr-links",
+  "auto-merge",
 ] as const;
 export const HOST_CAPABILITY = "host";
 

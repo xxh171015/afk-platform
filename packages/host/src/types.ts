@@ -1,5 +1,5 @@
 // The code host (GitHub or GitLab CE) as the platform sees it: it opens a pull request and reads one
-// back. It has no call that merges one: a person does that on the host (docs/design.md「代码托管」).
+// back. The one merge call is mergePullRequest (ADR 0011); only the auto-merge host task uses it.
 
 import type { RepoRef } from "@afk/shared";
 
@@ -47,6 +47,9 @@ export interface PullRequestInfo {
   // (one parent). Null until merged, or when the host did not name one.
   mergeSha: string | null;
   squashSha: string | null;
+  // Issue comments, inline comments, and reviews with a body, minus bots and the token's own user.
+  // GitLab: notes with system: false, minus the token's own user.
+  humanComments: number;
 }
 
 export interface OpenPullRequestInput {
@@ -67,12 +70,18 @@ export interface HostAdapter {
   }): Promise<PullRequestInfo>;
   // The current description, so a PATCH can keep what a person wrote outside the platform's markers.
   getPullRequestBody(input: { repo: RepoRef; number: number }): Promise<string>;
-  // Writes the description. Pull requests:write is enough; this never merges.
+  // Writes the description. Pull requests:write is enough. Merging is mergePullRequest.
   updatePullRequestBody(input: {
     repo: RepoRef;
     number: number;
     body: string;
   }): Promise<void>;
+  // The one merge exit (ADR 0011). Ordinary merge commit; the host refuses if head is not expectedHeadSha.
+  mergePullRequest(input: {
+    repo: RepoRef;
+    number: number;
+    expectedHeadSha: string;
+  }): Promise<PullRequestInfo>;
   // Turns a draft pull request into one that is ready for review. One that is not a draft (a person got there
   // first) is returned as it is, nothing is sent.
   markReady(input: { repo: RepoRef; number: number }): Promise<PullRequestInfo>;

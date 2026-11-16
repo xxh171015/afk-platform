@@ -1,18 +1,26 @@
 import {
+  AUTO_IMPROVEMENT_MERGE_NOTE,
+  AUTO_MERGED_SECTION,
   type BlockedReason,
   branchNames,
   formatDisplayId,
+  MANUAL_MERGE_NOTE,
   parseDisplayId,
+  parseMergePolicy,
   type SpecState,
   specTransition,
+  wrapMergeNote,
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
 import { renderPackSection } from "../acceptance/pack-description.ts";
+import { recordAutoMergeEvent } from "../events/auto-merge.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
+import { queueDueAutoMerges } from "./auto-merge.ts";
 import {
+  type AutoMergePayload,
   enqueueHostSync,
   enqueueIndexPrLinks,
   enqueueOpenPr,
@@ -37,8 +45,8 @@ import {
   projectHasRunningSpecs,
 } from "./update-branch.ts";
 
-// A spec's pull requests: opened once its repos are all finalized, then followed until a person has merged them
-// all. The platform only records what the host says; it has no call that merges (docs/design.md「代码托管」).
+// A spec's pull requests: opened once its repos are all finalized, then followed until they are merged.
+// The one merge call is the auto-merge host task (ADR 0011).
 
 // The pull requests still worth a look: not merged, and of a spec that is not over. One closed without merge stays in,
 // so that a reopen or a merge is noticed. Written for queries that alias the pull request `p` and its spec `s`.
@@ -88,6 +96,13 @@ export type HostTask =
       number: number;
       mergeSha: string | null;
       squashSha: string | null;
+    }
+  | {
+      kind: "auto-merge";
+      repoUrl: string;
+      number: number;
+      expectedHeadSha: string;
+      section: string;
     };
 
 const PullFacts = {
@@ -102,6 +117,7 @@ const PullFacts = {
   conflictsWithDefault: z.boolean().optional(),
   mergeSha: z.string().nullable().optional(),
   squashSha: z.string().nullable().optional(),
+  humanComments: z.number().int().nonnegative().optional(),
 };
 
 export const OpenPrResultSchema = z.object({
@@ -133,6 +149,18 @@ export const IndexPrLinksResultSchema = z.object({
     }),
   ),
 });
+
+export const AutoMergeResultSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    stage: z.literal("auto-merge"),
+    outcome: z.literal("merged"),
+  }),
+  z.object({
+    stage: z.literal("auto-merge"),
+    outcome: z.literal("failed"),
+    reason: z.string().min(1),
+  }),
+]);
 
 export const HostSyncResultSchema = z.object({
   stage: z.literal("host-sync"),
@@ -193,8 +221,27 @@ export async function buildHostTask(
     | SpecCleanupPayload
     | PrReadyPayload
     | PatchPrBodyPayload
-    | IndexPrLinksPayload,
+    | IndexPrLinksPayload
+    | AutoMergePayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "auto-merge") {
+    const { pullId, expectedHeadSha } = payload as AutoMergePayload;
+    const pull = (
+      await pool.query<{ url: string; number: number }>(
+        `SELECT r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    return pull
+      ? {
+          kind: "auto-merge",
+          repoUrl: pull.url,
+          number: pull.number,
+          expectedHeadSha,
+          section: AUTO_MERGED_SECTION,
+        }
+      : undefined;
+  }
   if (job.type === "index-pr-links") {
     const { pullId, mergeSha, squashSha } = payload as IndexPrLinksPayload;
     const pull = (
@@ -265,9 +312,12 @@ export async function buildHostTask(
         slug: string;
         title: string;
         branch_namespace: string | null;
-      }>("SELECT slug, title, branch_namespace FROM specs WHERE id = $1", [
-        specId,
-      ])
+        merge_policy: string | null;
+      }>(
+        `SELECT s.slug, s.title, s.branch_namespace, p.merge_policy
+         FROM specs s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+        [specId],
+      )
     ).rows[0];
     const repo = (
       await pool.query<{ url: string; default_branch: string; name: string }>(
@@ -297,7 +347,12 @@ export async function buildHostTask(
           (t) => `- ${formatDisplayId("ticket", t.id)} ${t.title}`,
         ),
         "",
-        "Opened by the AFK platform. Merging is up to you; the platform never merges.",
+        "Opened by the AFK platform.",
+        wrapMergeNote(
+          parseMergePolicy(spec.merge_policy) === "auto-improvement"
+            ? AUTO_IMPROVEMENT_MERGE_NOTE
+            : MANUAL_MERGE_NOTE,
+        ),
       ].join("\n"),
       // a repo that uses another repo's contract is merged after it, and says so by being a draft until then
       draft:
@@ -494,6 +549,36 @@ export async function recordIndexPrLinks(
 
 // The worker turned a draft pull request ready (or found it already so): the platform does not wait for the next
 // look at the host to know.
+export async function recordAutoMerge(
+  client: pg.PoolClient,
+  read: AutoMergePayload,
+  result: unknown,
+): Promise<RecordHostResult> {
+  const parsed = AutoMergeResultSchema.safeParse(result);
+  if (!parsed.success)
+    return { status: "ignored", reason: "auto-merge result is not valid" };
+  const pull = (
+    await client.query<{
+      spec_id: number;
+      repo_id: number;
+      url: string;
+    }>("SELECT spec_id, repo_id, url FROM pull_requests WHERE id = $1", [
+      read.pullId,
+    ])
+  ).rows[0];
+  if (!pull || pull.spec_id !== read.specId)
+    return { status: "ignored", reason: "no such pull request" };
+  await lockSpec(client, read.specId);
+  await recordAutoMergeEvent(client, {
+    specId: read.specId,
+    repoId: pull.repo_id,
+    outcome: parsed.data.outcome,
+    url: pull.url,
+    ...(parsed.data.outcome === "failed" ? { reason: parsed.data.reason } : {}),
+  });
+  return { status: "applied" };
+}
+
 export async function recordPrReady(
   client: pg.PoolClient,
   read: PrReadyPayload,
@@ -712,7 +797,7 @@ export async function recordHostSync(
     await client.query(
       `UPDATE pull_requests p SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now(),
          merged_at = COALESCE($8::timestamptz, merged_at), merged_by = COALESCE($9, merged_by),
-         conflicts_with_default = $10
+         conflicts_with_default = $10, human_comments = $11
        FROM repos r WHERE p.id = $1 AND r.id = p.repo_id AND r.project_id = $7`,
       [
         pull.id,
@@ -725,14 +810,22 @@ export async function recordHostSync(
         mergedAt,
         pull.mergedBy ?? null,
         pull.conflictsWithDefault === true,
+        pull.humanComments ?? 0,
       ],
     );
-    if (pull.mergedByPlatform)
-      await client.query(
-        `UPDATE specs SET token_merged = true FROM pull_requests p
-         WHERE specs.id = p.spec_id AND p.id = $1 AND NOT specs.token_merged`,
+    if (pull.mergedByPlatform) {
+      const autoMerged = await client.query(
+        `SELECT 1 FROM events e JOIN pull_requests p ON p.spec_id = e.spec_id
+         WHERE p.id = $1 AND e.type = 'auto-merged' LIMIT 1`,
         [pull.id],
       );
+      if (!autoMerged.rowCount)
+        await client.query(
+          `UPDATE specs SET token_merged = true FROM pull_requests p
+           WHERE specs.id = p.spec_id AND p.id = $1 AND NOT specs.token_merged`,
+          [pull.id],
+        );
+    }
     await enqueueIfConflictsWithDefault(
       client,
       pull,
@@ -745,6 +838,7 @@ export async function recordHostSync(
     await markMergedWhenAllAre(client, specId);
     await queueReadyPullRequests(client, specId);
   }
+  await queueDueAutoMerges(client, read.projectId, now);
   await scheduleNextSync(client, read.projectId, now);
   return { status: "applied" };
 }

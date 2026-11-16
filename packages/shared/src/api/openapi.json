@@ -34,8 +34,7 @@
                   },
                   "mergePolicy": {
                     "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
+                    "enum": ["manual", "auto-improvement", ""]
                   },
                   "protectedPaths": {
                     "type": "array",
@@ -167,7 +166,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+            "description": "The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
             "content": {
               "application/json": {
                 "schema": {
@@ -392,6 +391,10 @@
                     "type": "string",
                     "maxLength": 200
                   },
+                  "mergePolicy": {
+                    "type": "string",
+                    "enum": ["manual", "auto-improvement", ""]
+                  },
                   "protectedPaths": {
                     "type": "array",
                     "items": {
@@ -518,7 +521,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+            "description": "The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
             "content": {
               "application/json": {
                 "schema": {
@@ -3938,7 +3941,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access or index-pr-links job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -4183,6 +4186,34 @@
                         "number",
                         "mergeSha",
                         "squashSha"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["auto-merge"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "expectedHeadSha": {
+                          "type": "string"
+                        },
+                        "section": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "number",
+                        "expectedHeadSha",
+                        "section"
                       ]
                     }
                   ]
@@ -8040,6 +8071,44 @@
                         }
                       },
                       "required": ["state"]
+                    },
+                    "autoMerge": {
+                      "type": "object",
+                      "properties": {
+                        "policy": {
+                          "type": "string",
+                          "enum": ["manual", "auto-improvement"]
+                        },
+                        "willMerge": {
+                          "type": "boolean"
+                        },
+                        "mergeAt": {
+                          "type": ["string", "null"]
+                        },
+                        "reason": {
+                          "type": ["string", "null"]
+                        },
+                        "event": {
+                          "type": ["object", "null"],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["auto-merged", "auto-merge-failed"]
+                            },
+                            "reason": {
+                              "type": ["string", "null"]
+                            }
+                          },
+                          "required": ["type", "reason"]
+                        }
+                      },
+                      "required": [
+                        "policy",
+                        "willMerge",
+                        "mergeAt",
+                        "reason",
+                        "event"
+                      ]
                     }
                   },
                   "required": [
@@ -8058,7 +8127,8 @@
                     "leadTime",
                     "links",
                     "usageByStage",
-                    "cleanup"
+                    "cleanup",
+                    "autoMerge"
                   ]
                 }
               }

@@ -12,6 +12,7 @@ import {
   type HostTask,
   isPlatformBranch,
   parseTrailers,
+  spliceMergeNote,
   splicePackSection,
 } from "@afk/shared";
 import { deleteOrphanRefs } from "./align-ticket-branch.ts";
@@ -182,6 +183,47 @@ export async function runHostTask(
     }
   }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
+  if (task.kind === "auto-merge") {
+    try {
+      const current = await deps.adapter.getPullRequestBody({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+      });
+      await deps.adapter.updatePullRequestBody({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+        body: spliceMergeNote(current, task.section),
+      });
+      log(`updated description of pull request ${task.number}`);
+    } catch (error) {
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not update the pull request description: ${String(error)}`,
+      );
+    }
+    try {
+      await deps.adapter.mergePullRequest({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+        expectedHeadSha: task.expectedHeadSha,
+      });
+      log(`merged pull request ${task.number}`);
+      return { stage: "auto-merge", outcome: "merged" };
+    } catch (error) {
+      if (error instanceof HostError)
+        return {
+          stage: "auto-merge",
+          outcome: "failed",
+          reason: error.message,
+        };
+      throw new InfrastructureError(
+        error instanceof RangeError
+          ? error.message
+          : `could not merge the pull request: ${String(error)}`,
+      );
+    }
+  }
   if (task.kind === "index-pr-links") {
     if (!deps.repoDir)
       throw new InfrastructureError(
@@ -231,6 +273,7 @@ export async function runHostTask(
         conflictsWithDefault: info.conflictsWithDefault,
         mergeSha: info.mergeSha,
         squashSha: info.squashSha,
+        humanComments: info.humanComments,
       });
     } catch (error) {
       if (error instanceof HostError && error.status === 429)

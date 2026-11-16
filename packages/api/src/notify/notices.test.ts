@@ -365,5 +365,12 @@ describe("noticesFromTransition", () => {
         body: "S-4 导出订单：平台账号合并了 MR\nhttp://127.0.0.1:5173/specs/4/delivery",
       },
     ]);
+    expect(
+      noticesFromTransition(gitlab, {
+        ...gitlab,
+        tokenMerged: true,
+        autoMerged: true,
+      }),
+    ).toEqual([]);
   });
 });
