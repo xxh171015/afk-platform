@@ -6,9 +6,12 @@ export const FINDING_RESOLUTIONS = [
   "unhandled",
   "fixed",
   "acceptance-pack",
+  "refactored",
 ] as const;
 export type FindingResolution = (typeof FINDING_RESOLUTIONS)[number];
 
 export function findingResolutionPhrase(resolution: string): string {
-  return resolution === "fixed" ? "已交给 fix 处理" : resolution;
+  if (resolution === "fixed") return "已交给 fix 处理";
+  if (resolution === "refactored") return "已由 Tidy 整理";
+  return resolution;
 }

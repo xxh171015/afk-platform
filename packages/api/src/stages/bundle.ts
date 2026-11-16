@@ -74,6 +74,7 @@ export interface Bundle {
   specTickets: {
     displayId: string;
     title: string;
+    body: string;
     acceptanceCriteria: string[];
   }[];
   spec: {
@@ -258,7 +259,7 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   }>(
     `SELECT g.tests_total, g.tests_skipped, g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 1`,
     [specId, repoId],
@@ -280,7 +281,7 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
   }>(
     `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped, g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 50`,
     [specId, repoId],
@@ -545,7 +546,7 @@ async function buildFinalBundle(
   const row = found.rows[0];
   if (!row) return undefined;
   const tickets = await pool.query(
-    `SELECT id, title, acceptance_criteria FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
+    `SELECT id, title, body, acceptance_criteria FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
     [final.specId, final.repoId],
   );
   const run = await pool.query<{ id: number; retry_note: string | null }>(
@@ -575,6 +576,7 @@ async function buildFinalBundle(
     specTickets: tickets.rows.map((t) => ({
       displayId: formatDisplayId("ticket", t.id),
       title: t.title as string,
+      body: t.body as string,
       acceptanceCriteria: t.acceptance_criteria as string[],
     })),
     spec: {

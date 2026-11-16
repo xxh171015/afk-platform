@@ -23,6 +23,7 @@ export function projectText(project: {
   feishuChatId?: string | null;
   ticketReview?: TicketReviewMode;
   stageModels?: StageModels;
+  tidy?: boolean;
 }): string {
   const lines = [`project ${project.id} ${project.name}`];
   if (project.defaultAgent !== null) {
@@ -34,6 +35,9 @@ export function projectText(project: {
   }
   if (project.ticketReview) {
     lines.push(`ticket-review: ${project.ticketReview}`);
+  }
+  if (project.tidy !== undefined) {
+    lines.push(`tidy: ${project.tidy ? "on" : "off"}`);
   }
   const stageModels = Object.entries(project.stageModels ?? {})
     .filter(([, model]) => model)
@@ -713,6 +717,18 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           repo.scopeCreep.map(
             (s) => `      ${s.ticket ?? "spec"} ${s.run}: ${s.body}`,
           ),
+        ),
+        ...section(
+          "审查拿不准的",
+          (repo.reviewUncertainties ?? []).map((item) => {
+            const axis =
+              item.axis === "spec"
+                ? "Spec 轴"
+                : item.axis === "standards"
+                  ? "Standards 轴"
+                  : "";
+            return `      ${axis ? `${axis} ` : ""}${item.ticket ?? "spec"} ${item.stage} ${item.run}: ${item.body}`;
+          }),
         ),
         ...section("decisions", decisionRows(repo.decisions ?? [])),
         ...section(

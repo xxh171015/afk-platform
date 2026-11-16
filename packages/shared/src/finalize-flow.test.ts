@@ -82,7 +82,99 @@ describe("finalization of a spec's integration branch", () => {
       "final-fix",
       "recheck",
       "final-merge",
+      "final-tidy",
+      "tidy-merge",
     ]);
+  });
+
+  it("a review that passes with tidyWanted goes to final-tidy", () => {
+    expect(
+      advanceFinalization(
+        { step: "final-review", outcome: "pass" },
+        false,
+        true,
+      ),
+    ).toEqual({ type: "enqueue", step: "final-tidy" });
+  });
+
+  it("a merged final-fix with tidyWanted goes to final-tidy", () => {
+    expect(
+      advanceFinalization(
+        { step: "final-merge", outcome: "merged" },
+        false,
+        true,
+      ),
+    ).toEqual({ type: "enqueue", step: "final-tidy" });
+  });
+
+  it("a finished final-tidy goes to tidy-merge, and any other tidy result is the end", () => {
+    expect(
+      advanceFinalization({ step: "final-tidy", outcome: "done" }, false, true),
+    ).toEqual({ type: "enqueue", step: "tidy-merge" });
+    for (const outcome of [
+      "invalid-output",
+      "timeout",
+      "no-commits",
+      "agent-gave-up",
+      "contract-change-needed",
+    ] as const) {
+      expect(
+        advanceFinalization({ step: "final-tidy", outcome }, false, true),
+      ).toEqual({ type: "done" });
+      expect(
+        advanceFinalization({ step: "final-tidy", outcome }, true, true),
+      ).toEqual({ type: "done" });
+    }
+  });
+
+  it("every tidy-merge result is the end, and only merged counts as the tidy taking effect", () => {
+    for (const outcome of [
+      "merged",
+      "conflict",
+      "gate-failed",
+      "tests-removed",
+    ] as const) {
+      expect(
+        advanceFinalization({ step: "tidy-merge", outcome }, false, true),
+      ).toEqual({ type: "done" });
+    }
+  });
+
+  it("tidyWanted false leaves each step's decision as it was", () => {
+    expect(
+      advanceFinalization(
+        { step: "final-review", outcome: "pass" },
+        false,
+        false,
+      ),
+    ).toEqual({ type: "done" });
+    expect(
+      advanceFinalization(
+        { step: "final-merge", outcome: "merged" },
+        false,
+        false,
+      ),
+    ).toEqual({ type: "done" });
+    expect(
+      advanceFinalization(
+        { step: "final-review", outcome: "fix" },
+        false,
+        true,
+      ),
+    ).toEqual({ type: "enqueue", step: "final-fix" });
+    expect(
+      advanceFinalization({ step: "final-fix", outcome: "done" }, false, true),
+    ).toEqual({ type: "enqueue", step: "final-merge" });
+    expect(
+      advanceFinalization({ step: "recheck", outcome: "pass" }, false, true),
+    ).toEqual({ type: "enqueue", step: "final-merge" });
+    expect(
+      advanceFinalization(
+        { step: "final-merge", outcome: "conflict" },
+        false,
+        true,
+      ),
+    ).toEqual({ type: "block", reason: "merge-conflict" });
   });
 
   it.each([

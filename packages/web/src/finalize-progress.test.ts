@@ -51,6 +51,8 @@ describe("finalizeProgress", () => {
       "final-fix:skipped",
       "recheck:skipped",
       "final-merge:skipped",
+      "final-tidy:skipped",
+      "tidy-merge:skipped",
     ]);
     expect(backend?.steps[0]?.result).toBe("pass");
   });
@@ -77,6 +79,8 @@ describe("finalizeProgress", () => {
       "final-fix:running",
       "recheck:waiting",
       "final-merge:waiting",
+      "final-tidy:waiting",
+      "tidy-merge:waiting",
     ]);
     // a review asks for a fix when either axis does
     expect(frontend?.steps[0]?.result).toBe("fix");
@@ -111,6 +115,8 @@ describe("finalizeProgress", () => {
       "final-fix:waiting",
       "recheck:waiting",
       "final-merge:waiting",
+      "final-tidy:waiting",
+      "tidy-merge:waiting",
     ]);
     expect(blocked?.status).toBe("blocked");
     expect(blocked?.steps[3]).toMatchObject({

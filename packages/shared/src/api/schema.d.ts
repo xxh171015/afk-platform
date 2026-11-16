@@ -77,6 +77,7 @@ export interface paths {
               "update-branch"?: string;
               "merge-fix"?: string;
             };
+            tidy?: boolean;
           };
         };
       };
@@ -148,6 +149,7 @@ export interface paths {
                 "update-branch"?: string;
                 "merge-fix"?: string;
               };
+              tidy: boolean;
               repos: {
                 name: string;
                 url: string;
@@ -216,6 +218,7 @@ export interface paths {
               "update-branch"?: string;
               "merge-fix"?: string;
             };
+            tidy?: boolean;
           };
         };
       };
@@ -2015,6 +2018,7 @@ export interface paths {
               specTickets: {
                 displayId: string;
                 title: string;
+                body: string;
                 acceptanceCriteria: string[];
               }[];
               spec: {
@@ -3717,6 +3721,14 @@ export interface paths {
                     ticket: string | null;
                     run: string;
                     body: string;
+                  }[];
+                  reviewUncertainties: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    body: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
                   }[];
                   decisions: {
                     source: string;

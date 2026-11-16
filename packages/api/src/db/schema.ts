@@ -73,6 +73,8 @@ export const projects = pgTable(
     ticketReview: text("ticket_review").notNull().default("spec"),
     // Per-role model overrides: standards, update-branch, merge-fix. Empty object: the default model.
     stageModels: jsonb("stage_models").notNull().default({}),
+    // Wrap-up Tidy after Standards suggestions. Off skips it; default on (ADR 0011).
+    tidy: boolean("tidy").notNull().default(true),
     createdAt: createdAt(),
   },
   (t) => [

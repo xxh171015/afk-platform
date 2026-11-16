@@ -380,4 +380,16 @@ describe("closed vocabularies (mirrors @afk/shared)", () => {
     expect(await outcome(sql, ["a", "running"])).toBe("ok");
     expect(await outcome(sql, ["b", "weird"])).toBe(CHECK_VIOLATION);
   });
+
+  it("a finding's resolution may be refactored", async () => {
+    const { specId, repoId } = await seed();
+    const runId = await insert(
+      "INSERT INTO runs (spec_id, repo_id, stage) VALUES ($1, $2, 'final-review')",
+      [specId, repoId],
+    );
+    const sql =
+      "INSERT INTO findings (run_id, kind, body, resolution) VALUES ($1, 'suggestion', 'extract helper', $2)";
+    expect(await outcome(sql, [runId, "refactored"])).toBe("ok");
+    expect(await outcome(sql, [runId, "tidied"])).toBe(CHECK_VIOLATION);
+  });
 });

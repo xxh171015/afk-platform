@@ -33,6 +33,7 @@ import {
   reviewOutputSchemaFor,
   reviewSources,
   StandardsReviewOutputSchema,
+  TidyOutputSchema,
   writePrompt,
 } from "./agent.ts";
 import { renderContext } from "./context.ts";
@@ -86,6 +87,27 @@ describe("the structured outputs", () => {
         reason: "old style",
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts a tidy result with tidied indices, and rejects done without them", () => {
+    expect(
+      TidyOutputSchema.safeParse({
+        status: "done",
+        summary: "extracted a helper",
+        tidied: [0],
+        skipped: [{ index: 1, reason: "would change tests" }],
+      }).success,
+    ).toBe(true);
+    expect(
+      TidyOutputSchema.safeParse({ status: "done", summary: "x" }).success,
+    ).toBe(false);
+    expect(
+      TidyOutputSchema.safeParse({
+        status: "cannot-proceed",
+        blockedReason: "agent-gave-up",
+        detail: "nothing safe to tidy",
+      }).success,
+    ).toBe(true);
   });
 
   it("accepts typed decisions on implement, maps a legacy string array to choice, and rejects an unknown kind", () => {
@@ -348,6 +370,21 @@ describe("classifying a review run", () => {
       }),
     ).toEqual([{ kind: "must-fix", body: "b.ts p" }]);
   });
+
+  it("turns uncertainties into findings that go to the acceptance pack", () => {
+    expect(
+      reviewFindings({
+        ...output("pass"),
+        uncertainties: ["the review could not run the export"],
+      }),
+    ).toEqual([
+      { kind: "suggestion", body: "rename x" },
+      {
+        kind: "uncertainty",
+        body: "the review could not run the export",
+      },
+    ]);
+  });
 });
 
 describe("the two axes of a review", () => {
@@ -486,6 +523,24 @@ describe("the two axes of a review", () => {
     expect(readFileSync(PROMPTS.reviewStandards, "utf8")).toContain(
       "不许删除或跳过测试",
     );
+  });
+
+  it("treats What to build and the ticket's User Story as equal counterparts to the acceptance criteria, and mustFix when unsure", () => {
+    const spec = readFileSync(PROMPTS.reviewSpec, "utf8");
+    expect(spec).toContain("同等的对照物");
+    expect(spec).toContain("验收标准没写");
+    expect(spec).toMatch(/拿不准时判 `mustFix`/);
+    expect(spec).toContain("uncertainties");
+  });
+
+  it("treats the spec's User Story and each ticket's What to build as equal counterparts to the acceptance criteria, and mustFix when unsure", () => {
+    const finalSpec = readFileSync(PROMPTS.finalReviewSpec, "utf8");
+    expect(finalSpec).toContain("User Story");
+    expect(finalSpec).toContain("What to build");
+    expect(finalSpec).toContain("同等的对照物");
+    expect(finalSpec).toContain("验收标准没写");
+    expect(finalSpec).toMatch(/拿不准时判 `mustFix`/);
+    expect(finalSpec).toContain("uncertainties");
   });
 
   it("has the Standards axis find standards sources itself and name them in sources", () => {
@@ -631,6 +686,7 @@ const STAGES_WITH_PROMPTS = [
   "update-branch",
   "final-review",
   "final-fix",
+  "final-tidy",
   "recheck",
   "diagnose",
   "locate-bug",
@@ -650,6 +706,7 @@ describe("the prompts", () => {
       "merge-fix",
       "update-branch",
       "final-fix",
+      "final-tidy",
     ] as const) {
       const prompt = whole(stage);
       expect(prompt).toContain("cannot-proceed");
@@ -721,6 +778,17 @@ describe("the prompts", () => {
       "单个测试文件怎么跑看仓库的 `AGENTS.md`",
     ])
       expect(overlay).toContain(word);
+  });
+
+  it("tells review that conservative means must-fix, and that a new test passing first time did not test new behaviour", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    expect(overlaySkillsSha(overlay)).toBe(SKILLS_SHA);
+    expect(overlay).toMatch(/审查阶段的「保守」就是判必须修/);
+    expect(overlay).toContain("新测试第一次跑就通过");
+    expect(overlay).toContain("没测到新行为");
+    expect(overlay).toContain(
+      "有意补的回归测试，在 `decisions` 里记一条 `choice`",
+    );
   });
 
   it("gives conflict examples and the three cannot-proceed cases", () => {
@@ -800,6 +868,13 @@ describe("the prompts", () => {
     expect(overlaySkillsSha("no header")).toBeUndefined();
   });
 
+  it("makes implement do every sentence of What to build, not only the acceptance criteria, and record a known-gap when it cannot", () => {
+    const implement = readFileSync(PROMPTS.implement, "utf8");
+    expect(implement).toContain("What to build");
+    expect(implement).toMatch(/每一句都要做到/);
+    expect(implement).toContain("known-gap");
+  });
+
   it("makes implement read the implement skill by its absolute path and skip its code-review step", () => {
     const implement = readFileSync(PROMPTS.implement, "utf8");
     expect(implement).toContain(
@@ -827,6 +902,9 @@ describe("the prompts", () => {
         "/home/agent/.cursor/skills/",
       );
     expect(readFileSync(PROMPTS.mergeFix, "utf8")).toContain("不读 skill");
+    expect(readFileSync(PROMPTS.finalTidy, "utf8")).not.toContain(
+      "/home/agent/.cursor/skills/",
+    );
     expect(readFileSync(PROMPTS.updateBranch, "utf8")).toContain(
       "git merge <defaultBranch>",
     );
@@ -887,6 +965,7 @@ describe("the prompts", () => {
     expect(promptFor("merge-fix")).toBe(PROMPTS.mergeFix);
     expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
     expect(promptFor("recheck")).toBe(PROMPTS.recheck);
+    expect(promptFor("final-tidy")).toBe(PROMPTS.finalTidy);
   });
 
   const CODE_CHANGING_PROMPTS = [
@@ -896,12 +975,13 @@ describe("the prompts", () => {
     PROMPTS.reviewFix,
     PROMPTS.mergeFix,
     PROMPTS.finalFix,
+    PROMPTS.finalTidy,
     PROMPTS.updateBranch,
     PROMPTS.diagnose,
   ] as const;
 
   it("tells every code-changing stage to run the named commands in run.json's gate", () => {
-    expect(CODE_CHANGING_PROMPTS).toHaveLength(8);
+    expect(CODE_CHANGING_PROMPTS).toHaveLength(9);
     for (const file of CODE_CHANGING_PROMPTS) {
       const prompt = readFileSync(file, "utf8");
       expect(prompt).toContain("/context/run.json");
@@ -927,6 +1007,17 @@ describe("the prompts", () => {
       expect(example.mustFix.length, path).toBeGreaterThan(0);
       expect(schema.safeParse(example).success, path).toBe(true);
     }
+  });
+
+  it("tells final-tidy not to change existing tests, config, or test names, and not to read tdd", () => {
+    const prompt = readFileSync(PROMPTS.finalTidy, "utf8");
+    expect(prompt).toContain("不改已有测试和配置");
+    expect(prompt).toContain("不改测试名");
+    expect(prompt).not.toContain("/home/agent/.cursor/skills/tdd/SKILL.md");
+    const json = /<result>\s*([\s\S]*?)\s*<\/result>/.exec(prompt)?.[1];
+    expect(TidyOutputSchema.safeParse(JSON.parse(json ?? "")).success).toBe(
+      true,
+    );
   });
 
   it("names no concrete build or test command; a mention of AGENTS.md is not a violation", () => {

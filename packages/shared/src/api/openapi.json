@@ -132,6 +132,9 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "tidy": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["name"],
@@ -288,6 +291,9 @@
                       },
                       "additionalProperties": false
                     },
+                    "tidy": {
+                      "type": "boolean"
+                    },
                     "repos": {
                       "type": "array",
                       "items": {
@@ -327,6 +333,7 @@
                     "feishuChatId",
                     "ticketReview",
                     "stageModels",
+                    "tidy",
                     "repos"
                   ]
                 }
@@ -484,6 +491,9 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "tidy": {
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": false
@@ -3250,6 +3260,9 @@
                           "title": {
                             "type": "string"
                           },
+                          "body": {
+                            "type": "string"
+                          },
                           "acceptanceCriteria": {
                             "type": "array",
                             "items": {
@@ -3257,7 +3270,12 @@
                             }
                           }
                         },
-                        "required": ["displayId", "title", "acceptanceCriteria"]
+                        "required": [
+                          "displayId",
+                          "title",
+                          "body",
+                          "acceptanceCriteria"
+                        ]
                       }
                     },
                     "spec": {
@@ -7430,6 +7448,37 @@
                                   "required": ["ticket", "run", "body"]
                                 }
                               },
+                              "reviewUncertainties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "body",
+                                    "axis"
+                                  ]
+                                }
+                              },
                               "decisions": {
                                 "type": "array",
                                 "items": {
@@ -7517,6 +7566,7 @@
                               "tickets",
                               "findings",
                               "scopeCreep",
+                              "reviewUncertainties",
                               "decisions",
                               "protectedPathApprovals"
                             ]

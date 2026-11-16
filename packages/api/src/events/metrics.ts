@@ -45,7 +45,7 @@ export async function specEventMetrics(
   const merges = await pool.query<{ generated: boolean }>(
     `SELECT (output->>'generatedOnlyConflict')::boolean AS generated
      FROM runs
-     WHERE spec_id = $1 AND stage IN ('merge', 'final-merge', 'update-branch')
+     WHERE spec_id = $1 AND stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch')
        AND output ? 'generatedOnlyConflict'`,
     [specId],
   );

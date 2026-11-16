@@ -48,7 +48,52 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
     headSha: z.string().min(1).optional(),
     ...commonFields,
   }),
+  z.object({
+    stage: z.literal("final-tidy"),
+    outcome: z.enum(["done", ...AGENT_FAILURES]),
+    ...commonFields,
+  }),
+  z.object({
+    stage: z.literal("tidy-merge"),
+    outcome: z.enum(["merged", "conflict", "gate-failed", "tests-removed"]),
+    headSha: z.string().min(1).optional(),
+    ...commonFields,
+  }),
 ]);
+
+async function tidyWantedOf(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<boolean> {
+  const project = await client.query<{ tidy: boolean }>(
+    `SELECT p.tidy FROM specs s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+    [specId],
+  );
+  if (project.rows[0]?.tidy !== true) return false;
+  const ran = await client.query(
+    `SELECT 1 FROM runs
+     WHERE spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-tidy'
+     LIMIT 1`,
+    [specId, repoId],
+  );
+  if (ran.rowCount) return false;
+  const suggestions = await client.query(
+    `SELECT 1 FROM runs r
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.ticket_id IS NULL
+       AND r.stage = 'final-review' AND r.axis = 'standards'
+       AND (
+         jsonb_typeof(r.output->'suggestions') = 'array'
+           AND jsonb_array_length(r.output->'suggestions') > 0
+         OR EXISTS (
+           SELECT 1 FROM findings f WHERE f.run_id = r.id AND f.kind = 'suggestion'
+         )
+       )
+     LIMIT 1`,
+    [specId, repoId],
+  );
+  return (suggestions.rowCount ?? 0) > 0;
+}
 
 export type RecordFinalResult =
   | { status: "not-final" }
@@ -131,6 +176,7 @@ export async function recordFinalResult(
           outcome: valid.outcome,
         } as FinalReport,
         fin.auto_retried,
+        await tidyWantedOf(client, read.specId, read.repoId),
       )
     : { type: "block", reason: "invalid-output" };
   const trigger = recheckTriggerOf(valid?.run);
@@ -145,6 +191,25 @@ export async function recordFinalResult(
     );
     if (!spec.rows[0]?.allowed.includes(trigger.toSha))
       decision = { type: "enqueue", step: "recheck" };
+  }
+  if (
+    valid?.stage === "final-tidy" &&
+    valid.outcome === "done" &&
+    trigger?.hit
+  ) {
+    decision = { type: "done" };
+  }
+
+  if (
+    valid &&
+    (valid.stage === "final-merge" || valid.stage === "tidy-merge") &&
+    valid.outcome === "merged"
+  ) {
+    await enqueueTrialMerge(client, {
+      specId: read.specId,
+      repoId: read.repoId,
+      headSha: valid.headSha,
+    });
   }
 
   if (decision.type === "enqueue") {
@@ -178,15 +243,8 @@ export async function recordFinalResult(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",
       [fin.id],
     );
-    if (valid?.stage === "final-merge") {
-      await enqueueTrialMerge(client, {
-        specId: read.specId,
-        repoId: read.repoId,
-        headSha: valid.headSha,
-      });
-    }
     // the last repo to settle sends all of the spec's pull requests out, after the e2e that comes first when a
-    // final fix changed a branch
+    // final fix or a tidy-merge changed a branch
     await settleFinalization(client, read.specId);
   } else {
     await client.query(

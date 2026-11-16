@@ -1047,6 +1047,10 @@ describe("a review of two axes", () => {
         kind: "scope-creep",
         body,
       })),
+      ...(o.uncertainties as string[]).map((body) => ({
+        kind: "uncertainty",
+        body,
+      })),
     ];
     await stage("review", {
       outcome,
@@ -1126,6 +1130,24 @@ describe("a review of two axes", () => {
     });
     expect(bundle.review.standards.mustFix).toHaveLength(1);
     expect(bundle.review.spec.mustFix).toHaveLength(1);
+  });
+
+  it("keeps an uncertainty as a finding of the Spec axis that no fix is asked to handle", async () => {
+    await reviewed(
+      axisOutput("pass"),
+      axisOutput("pass", {
+        uncertainties: ["the ticket does not say the date format"],
+      }),
+      "pass",
+    );
+    const view = (await call("GET", "/tickets/1")).body;
+    expect(
+      view.findings.map((f: Json) => `${f.axis}:${f.kind}:${f.resolution}`),
+    ).toEqual(["spec:uncertainty:acceptance-pack"]);
+    // the review passed: the next step is the merge, not a fix
+    expect(((await worker.claim()).body.job as Claimed).payload.stage).toBe(
+      "merge",
+    );
   });
 
   it("keeps scope creep as a finding of the Spec axis that no fix is asked to handle", async () => {
@@ -2224,8 +2246,8 @@ describe("what a person sees", () => {
       planning: [],
       locates: [],
       specs: [],
-      stale: [],
       items: [],
+      stale: [],
     });
   });
 

@@ -15,6 +15,8 @@ export const FINAL_STEPS = [
   "final-fix",
   "recheck",
   "final-merge",
+  "final-tidy",
+  "tidy-merge",
 ] as const;
 export type FinalStep = (typeof FINAL_STEPS)[number];
 
@@ -31,6 +33,11 @@ export type FinalReport =
   | {
       step: "final-merge";
       outcome: "merged" | "conflict" | "gate-failed" | "tests-removed";
+    }
+  | { step: "final-tidy"; outcome: "done" | (typeof AGENT_FAILURES)[number] }
+  | {
+      step: "tidy-merge";
+      outcome: "merged" | "conflict" | "gate-failed" | "tests-removed";
     };
 
 export type FinalDecision =
@@ -39,20 +46,29 @@ export type FinalDecision =
   | { type: "done" }
   | { type: "block"; reason: BlockedReason };
 
+const MERGE_STEPS = new Set<FinalStep>(["final-merge", "tidy-merge"]);
+
 // `autoRetried`: this finalization has spent its one automatic retry (a person's retry gives it back).
+// `tidyWanted`: the project has tidy on, this wrap-up's Standards axis left suggestions, and this repo
+// has not run Tidy yet.
 export function advanceFinalization(
   report: FinalReport,
   autoRetried = false,
+  tidyWanted = false,
 ): FinalDecision {
   if (
-    report.step !== "final-merge" &&
+    !MERGE_STEPS.has(report.step) &&
+    report.step !== "final-tidy" &&
     isAutoRetryOutcome(report.outcome) &&
     !autoRetried
   )
     return { type: "enqueue", step: report.step, autoRetry: report.outcome };
   switch (report.step) {
     case "final-review":
-      if (report.outcome === "pass") return { type: "done" };
+      if (report.outcome === "pass")
+        return tidyWanted
+          ? { type: "enqueue", step: "final-tidy" }
+          : { type: "done" };
       if (report.outcome === "fix")
         return { type: "enqueue", step: "final-fix" };
       return { type: "block", reason: report.outcome };
@@ -65,7 +81,10 @@ export function advanceFinalization(
         return { type: "enqueue", step: "final-merge" };
       return { type: "block", reason: "recheck-failed" };
     case "final-merge":
-      if (report.outcome === "merged") return { type: "done" };
+      if (report.outcome === "merged")
+        return tidyWanted
+          ? { type: "enqueue", step: "final-tidy" }
+          : { type: "done" };
       if (report.outcome === "tests-removed")
         return { type: "block", reason: "tests-removed" };
       return {
@@ -75,5 +94,11 @@ export function advanceFinalization(
             ? "merge-conflict"
             : "post-merge-gate-failed",
       };
+    case "final-tidy":
+      return report.outcome === "done"
+        ? { type: "enqueue", step: "tidy-merge" }
+        : { type: "done" };
+    case "tidy-merge":
+      return { type: "done" };
   }
 }

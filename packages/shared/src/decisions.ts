@@ -112,5 +112,6 @@ export const CODE_CHANGING_STAGES = [
   "review-fix",
   "merge-fix",
   "final-fix",
+  "final-tidy",
   "update-branch",
 ] as const;

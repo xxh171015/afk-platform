@@ -10,7 +10,8 @@
 - 知道没做、或做了但有问题：`kind` 是 `known-gap`。联调 implement 怀疑别的仓库有问题时也记成 `known-gap`，写明哪个仓库、什么现象。
 - 留给别的票：`kind` 是 `deferred`，`ref` 写票的显示编号（T-n），没有现成的票写 `new`。
 - 绕过仓库或环境的问题：`kind` 是 `workaround`。
-- `cannot-proceed` 只留给三种情况：缺做下去必需的东西、要改没批准的保护路径、契约非改不可。有 `cannot-proceed` 的阶段就输出它，`blockedReason` 写 `contract-change-needed`（契约非改不可）或 `agent-gave-up`（其他），`detail` 写清楚卡在哪里、需要什么。没有 `cannot-proceed` 的阶段（审查、诊断）把它写进 `uncertainties`，按保守的一边下结论。
+- `cannot-proceed` 只留给三种情况：缺做下去必需的东西、要改没批准的保护路径、契约非改不可。有 `cannot-proceed` 的阶段就输出它，`blockedReason` 写 `contract-change-needed`（契约非改不可）或 `agent-gave-up`（其他），`detail` 写清楚卡在哪里、需要什么。没有 `cannot-proceed` 的阶段（审查、诊断）把它写进 `uncertainties`，按保守的一边下结论。审查阶段的「保守」就是判必须修。
+- 所有会写测试的阶段都适用：新测试第一次跑就通过，说明它没测到新行为，要改测试；有意补的回归测试，在 `decisions` 里记一条 `choice`。
 
 ## /context 就是 tracker
 

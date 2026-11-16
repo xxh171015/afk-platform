@@ -11,6 +11,7 @@ import {
   recheckHit,
   type SandboxPlacement,
   stampTrailers,
+  TidyOutputSchema,
   writePrompt,
 } from "@afk/pipeline";
 import { isNetworkPushError } from "@afk/shared";
@@ -43,6 +44,7 @@ const RECHECK_TRIGGER_STAGES = new Set([
   "review-fix",
   "merge-fix",
   "final-fix",
+  "final-tidy",
   "update-branch",
 ]);
 
@@ -68,7 +70,8 @@ export async function agentChange(
     | "review-fix"
     | "merge-fix"
     | "update-branch"
-    | "final-fix";
+    | "final-fix"
+    | "final-tidy";
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
   const baseSha = branchBase(mainDir, integration, agent);
@@ -111,7 +114,8 @@ export async function agentChange(
         promptFile: given.promptFile,
         ctxDir,
         refs,
-        schema: ImplementOutputSchema,
+        schema:
+          stage === "final-tidy" ? TidyOutputSchema : ImplementOutputSchema,
         ...(placement ? { placement } : {}),
         ...options,
         signal: context.signal,

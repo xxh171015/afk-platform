@@ -110,6 +110,17 @@ const RepoSection = z.object({
       body: z.string(),
     }),
   ),
+  // Review uncertainties (kind: uncertainty), listed apart like scope creep. Not
+  // `uncertainties`: stored packs used that name for the old Decision list.
+  reviewUncertainties: z.array(
+    z.object({
+      ticket: z.string().nullable(),
+      run: z.string(),
+      stage: z.string(),
+      body: z.string(),
+      axis: z.enum(REVIEW_AXES).nullable(),
+    }),
+  ),
   decisions: z.array(
     z.object({
       source: z.string(),
@@ -345,7 +356,7 @@ export async function buildAcceptancePack(
             g.command_results, g.test_cases_hash
      FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND r.result = 'merged'
      ORDER BY r.repo_id, r.id DESC`,
     [specId],
   );
@@ -391,6 +402,7 @@ export async function buildAcceptancePack(
         tickets: [],
         findings: [],
         scopeCreep: [],
+        reviewUncertainties: [],
         decisions: [],
         protectedPathApprovals: [],
         standardsSources: [],
@@ -505,6 +517,16 @@ export async function buildAcceptancePack(
         ticket,
         run,
         body: f.body,
+      });
+      continue;
+    }
+    if (f.kind === "uncertainty") {
+      sectionOf(f.repo_id, f.repo).reviewUncertainties.push({
+        ticket,
+        run,
+        stage: f.stage,
+        body: f.body,
+        axis: f.axis,
       });
       continue;
     }
@@ -973,6 +995,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         }),
         findings: asArray(repo.findings as never[]),
         scopeCreep: asArray(repo.scopeCreep as never[]),
+        reviewUncertainties: asArray(repo.reviewUncertainties as never[]),
         decisions: storedDecisions(repo),
         protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
         standardsSources: asArray(repo.standardsSources as never[]),

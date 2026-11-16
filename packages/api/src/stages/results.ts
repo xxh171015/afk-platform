@@ -659,9 +659,12 @@ export async function writeFacts(
       [owner.spec_id, owner.repo_id],
     );
   }
+  if (stage === "tidy-merge" && result?.outcome === "merged") {
+    await markTidiedSuggestions(client, owner.spec_id, owner.repo_id);
+  }
   if (
     result?.outcome === "merged" &&
-    (stage === "merge" || stage === "final-merge")
+    (stage === "merge" || stage === "final-merge" || stage === "tidy-merge")
   ) {
     await recordTicketLinks(client, owner, stage);
   }
@@ -730,16 +733,56 @@ export async function writeFacts(
   }
 }
 
+async function markTidiedSuggestions(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<void> {
+  const tidy = await client.query<{ output: { tidied?: unknown } | null }>(
+    `SELECT output FROM runs
+     WHERE spec_id = $1 AND repo_id = $2 AND ticket_id IS NULL AND stage = 'final-tidy'
+     ORDER BY id DESC LIMIT 1`,
+    [specId, repoId],
+  );
+  const listed = tidy.rows[0]?.output?.tidied;
+  if (!Array.isArray(listed)) return;
+  const indices = new Set(
+    listed.filter(
+      (n): n is number => Number.isInteger(n) && (n as number) >= 0,
+    ),
+  );
+  if (indices.size === 0) return;
+  const findings = await client.query<{ id: number }>(
+    `SELECT f.id FROM findings f
+     JOIN runs r ON r.id = f.run_id
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.ticket_id IS NULL
+       AND r.stage = 'final-review' AND r.axis = 'standards'
+       AND f.kind = 'suggestion'
+     ORDER BY f.id`,
+    [specId, repoId],
+  );
+  const ids = findings.rows
+    .filter((_, index) => indices.has(index))
+    .map((row) => row.id);
+  if (ids.length === 0) return;
+  await client.query(
+    `UPDATE findings SET resolution = 'refactored' WHERE id = ANY($1::int[])`,
+    [ids],
+  );
+}
+
 async function insertFindings(
   client: pg.PoolClient,
   runId: number,
   found: { kind: string; body: string; resolution?: string }[],
 ): Promise<void> {
   for (const finding of found) {
-    // A review's suggestions and scope creep do not trigger a fix; they travel to the acceptance pack.
+    // A review's suggestions, scope creep and uncertainties do not trigger a fix; they travel to the acceptance pack.
     const resolution =
       finding.resolution ??
-      (finding.kind === "suggestion" || finding.kind === "scope-creep"
+      (finding.kind === "suggestion" ||
+      finding.kind === "scope-creep" ||
+      finding.kind === "uncertainty"
         ? "acceptance-pack"
         : "unhandled");
     await client.query(

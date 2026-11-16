@@ -46,6 +46,9 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
     Partial<Record<StageModelKey, string>>
   >({});
   const storedModels = project.data?.stageModels ?? {};
+  const [tidyDraft, setTidyDraft] = useState<boolean | null>(null);
+  const storedTidy = project.data?.tidy ?? true;
+  const tidy = tidyDraft ?? storedTidy;
   const stageModelValue = (key: StageModelKey) =>
     Object.hasOwn(stageModelDraft, key)
       ? (stageModelDraft[key] ?? "")
@@ -75,6 +78,17 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
       const { data, error } = await api.PATCH("/projects/{projectId}", {
         params: { path: { projectId } },
         body: { ticketReview: next },
+      });
+      if (!data) throw new Error(describeError(error));
+      await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      return data;
+    },
+  });
+  const saveTidy = useMutation({
+    mutationFn: async (next: boolean) => {
+      const { data, error } = await api.PATCH("/projects/{projectId}", {
+        params: { path: { projectId } },
+        body: { tidy: next },
       });
       if (!data) throw new Error(describeError(error));
       await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
@@ -129,7 +143,7 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
   return (
     <Page
       title={project.data ? `项目：${project.data.name}` : "项目"}
-      subtitle="此页改飞书群、票级审查、阶段模型，并查仓库托管。默认模型、并发、保护路径用 plat project edit。"
+      subtitle="此页改飞书群、票级审查、Tidy、阶段模型，并查仓库托管。默认模型、并发、保护路径用 plat project edit。"
       actions={<StaleNotice error={project.data ? project.error : null} />}
     >
       {!project.data ? (
@@ -168,6 +182,37 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
             </Button>
             {saveReview.error ? (
               <p role="alert">{saveReview.error.message}</p>
+            ) : null}
+          </section>
+          <section
+            aria-label="Tidy"
+            className="space-y-4 rounded-lg border bg-card p-5"
+          >
+            <h2 className="text-sm font-medium">Tidy</h2>
+            <Hint>
+              需求收尾时，若 final-review 的 Standards
+              轴有建议，就整理一次。失败会丢掉这次整理、照原样开
+              PR。不想整理的团队可以关掉。
+            </Hint>
+            <div className="flex items-center gap-2 text-sm">
+              <input
+                id="tidy"
+                type="checkbox"
+                aria-label="Tidy"
+                checked={tidy}
+                onChange={(event) => setTidyDraft(event.target.checked)}
+              />
+              <label htmlFor="tidy">需求收尾时整理 Standards 建议</label>
+            </div>
+            <Button
+              type="button"
+              disabled={saveTidy.isPending}
+              onClick={() => saveTidy.mutate(tidy)}
+            >
+              保存 Tidy
+            </Button>
+            {saveTidy.error ? (
+              <p role="alert">{saveTidy.error.message}</p>
             ) : null}
           </section>
           <section

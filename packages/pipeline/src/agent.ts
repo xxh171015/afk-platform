@@ -47,6 +47,34 @@ export const ImplementOutputSchema = z.preprocess(
 );
 export type ImplementOutput = z.infer<typeof ImplementOutputObject>;
 
+const TidySkipped = z.object({
+  index: z.number().int().min(0),
+  reason: z.string().min(1),
+});
+const TidyOutputObject = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("done"),
+    summary: z.string(),
+    tidied: z.array(z.number().int().min(0)),
+    skipped: z.array(TidySkipped),
+    decisions: DecisionsField,
+  }),
+  z.object({
+    status: z.literal("cannot-proceed"),
+    blockedReason: z.enum(CANNOT_PROCEED_REASONS),
+    detail: z.string().min(1),
+    summary: z.string().default(""),
+    tidied: z.array(z.number().int().min(0)).default([]),
+    skipped: z.array(TidySkipped).default([]),
+    decisions: DecisionsField.default([]),
+  }),
+]);
+export const TidyOutputSchema = z.preprocess(
+  coerceDecisionsInput,
+  TidyOutputObject,
+);
+export type TidyOutput = z.infer<typeof TidyOutputObject>;
+
 const ReviewObject = z.object({
   verdict: z.enum(["pass", "fix"]),
   mustFix: z.array(
@@ -189,9 +217,13 @@ function failureOf(
   return { kind: "infrastructure-failure", error: result.error };
 }
 
-// implement and the three fixes: the agent says done or cannot-proceed, and "done" needs a commit.
+// implement, the three fixes, and Tidy: the agent says done or cannot-proceed, and "done" needs a commit.
 export function classifyAgentRun(
-  result: AgentRunResult<ImplementOutput>,
+  result: AgentRunResult<{
+    status: "done" | "cannot-proceed";
+    blockedReason?: (typeof CANNOT_PROCEED_REASONS)[number];
+    detail?: string;
+  }>,
 ): Classification<AgentOutcome> {
   const failure = failureOf(result);
   if (failure) return failure;
@@ -199,6 +231,13 @@ export function classifyAgentRun(
   if (!output)
     return { kind: "outcome", outcome: "invalid-output", detail: "no result" };
   if (output.status === "cannot-proceed") {
+    if (!output.blockedReason || !output.detail) {
+      return {
+        kind: "outcome",
+        outcome: "invalid-output",
+        detail: output.detail ?? "no result",
+      };
+    }
     return {
       kind: "outcome",
       outcome: output.blockedReason,
@@ -300,11 +339,12 @@ export function classifyReviewRun(
   return { kind: "outcome", outcome: result.output.verdict };
 }
 
-// The review's findings as the API records them: must-fix problems, and suggestions and scope creep that go to the
-// acceptance pack.
-export function reviewFindings(
-  output: ReviewOutput,
-): { kind: "must-fix" | "suggestion" | "scope-creep"; body: string }[] {
+// The review's findings as the API records them: must-fix problems, and suggestions, scope creep
+// and uncertainties that go to the acceptance pack.
+export function reviewFindings(output: ReviewOutput): {
+  kind: "must-fix" | "suggestion" | "scope-creep" | "uncertainty";
+  body: string;
+}[] {
   return [
     ...output.mustFix.map((item) => ({
       kind: "must-fix" as const,
@@ -316,6 +356,10 @@ export function reviewFindings(
     })),
     ...output.scopeCreep.map((body) => ({
       kind: "scope-creep" as const,
+      body,
+    })),
+    ...output.uncertainties.map((body) => ({
+      kind: "uncertainty" as const,
       body,
     })),
   ];
@@ -381,6 +425,7 @@ export const PROMPTS = {
   finalReviewStandards: join(PROMPT_DIR, "final-review-standards.md"),
   finalReviewSpec: join(PROMPT_DIR, "final-review-spec.md"),
   finalFix: join(PROMPT_DIR, "final-fix.md"),
+  finalTidy: join(PROMPT_DIR, "final-tidy.md"),
   recheck: join(PROMPT_DIR, "recheck.md"),
 } as const;
 
@@ -420,6 +465,7 @@ export function promptFor(
     | "update-branch"
     | "final-review"
     | "final-fix"
+    | "final-tidy"
     | "recheck"
     | "diagnose"
     | "locate-bug",
@@ -432,6 +478,8 @@ export function promptFor(
         : PROMPTS.finalReviewStandards;
     case "final-fix":
       return PROMPTS.finalFix;
+    case "final-tidy":
+      return PROMPTS.finalTidy;
     case "recheck":
       return PROMPTS.recheck;
     case "diagnose":

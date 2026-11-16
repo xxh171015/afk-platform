@@ -263,6 +263,11 @@ const toTicketReview = (value: string): TicketReviewMode => {
   }
   return value as TicketReviewMode;
 };
+const toTidy = (value: string): boolean => {
+  if (value === "on" || value === "true") return true;
+  if (value === "off" || value === "false") return false;
+  throw new InvalidArgumentError("must be on or off");
+};
 const toMergePolicy = (value: string): MergePolicy => {
   if (!(MERGE_POLICIES as readonly string[]).includes(value)) {
     throw new InvalidArgumentError("must be manual or auto-improvement");
@@ -488,6 +493,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "model for standards, update-branch, or merge-fix (repeatable; empty clears)",
       collect,
     )
+    .option(
+      "--tidy <on|off>",
+      "run Tidy after wrap-up Standards suggestions (default on)",
+      toTidy,
+    )
     .action(async (name: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const { data, response, error } = await api().POST("/projects", {
@@ -502,6 +512,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           limits: parseLimits(options.limit),
           ticketReview: options.ticketReview,
           stageModels: stageModelsFromPairs(options.stageModel),
+          tidy: options.tidy,
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -553,6 +564,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "model for standards, update-branch, or merge-fix (repeatable; empty clears that key)",
       collect,
     )
+    .option(
+      "--tidy <on|off>",
+      "run Tidy after wrap-up Standards suggestions",
+      toTidy,
+    )
     .action(async (id: string, options) => {
       if (options.contractPath !== undefined) throw contractPathMoved();
       const body = {
@@ -566,10 +582,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         feishuChatId: options.feishuChat as string | undefined,
         ticketReview: options.ticketReview,
         stageModels: stageModelsFromPairs(options.stageModel),
+        tidy: options.tidy as boolean | undefined,
       };
       if (Object.values(body).every((value) => value === undefined)) {
         throw new Failure(
-          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --merge-policy, --limit, --feishu-chat, --ticket-review or --stage-model",
+          "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --merge-policy, --limit, --feishu-chat, --ticket-review, --stage-model or --tidy",
         );
       }
       const projectId = toInt(id);

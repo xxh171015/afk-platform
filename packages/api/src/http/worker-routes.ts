@@ -290,6 +290,8 @@ const Bundle = z.object({
     z.object({
       displayId: z.string(),
       title: z.string(),
+      // The ticket body as stored (Parent / What to build / Acceptance criteria).
+      body: z.string(),
       acceptanceCriteria: z.array(z.string()),
     }),
   ),

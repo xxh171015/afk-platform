@@ -6,6 +6,7 @@ const SHA = /^[0-9a-f]{40}$/;
 const STAGES_FOR = {
   merge: AGENT_STAGES,
   "final-merge": ["final-fix"],
+  "tidy-merge": ["final-tidy"],
 } as const;
 
 // When a ticket or wrap-up fix merge advances the integration branch, write a ticket-kind Link for

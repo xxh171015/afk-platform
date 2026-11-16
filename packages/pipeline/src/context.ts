@@ -74,15 +74,28 @@ export function specMarkdownForContext(
     .join("\n")}\n`;
 }
 
+function whatToBuildOf(body: string): string {
+  const lines = body.split("\n");
+  const start = lines.findIndex((line) => /^## What to build\s*$/.test(line));
+  if (start < 0) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^## /.test(line));
+  return (end < 0 ? rest : rest.slice(0, end)).join("\n").trim();
+}
+
 function specTicketsMarkdown(bundle: Bundle): string {
   return [
     `# Tickets of ${bundle.spec.displayId}`,
     "",
-    ...bundle.specTickets.flatMap((t) => [
-      `## ${t.displayId} ${t.title}`,
-      ...t.acceptanceCriteria.map((c) => `- ${c}`),
-      "",
-    ]),
+    ...bundle.specTickets.flatMap((t) => {
+      const what = whatToBuildOf(t.body);
+      return [
+        `## ${t.displayId} ${t.title}`,
+        ...(what ? ["", "## What to build", "", what, ""] : []),
+        ...t.acceptanceCriteria.map((c) => `- ${c}`),
+        "",
+      ];
+    }),
   ].join("\n");
 }
 

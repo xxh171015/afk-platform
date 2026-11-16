@@ -95,6 +95,7 @@ const AGENT_RUN_STAGES = new Set([
   "diagnose",
   "final-review",
   "final-fix",
+  "final-tidy",
   "recheck",
 ]);
 
@@ -103,6 +104,7 @@ const GATE_RUN_STAGES = new Set([
   "merge",
   "e2e",
   "final-merge",
+  "tidy-merge",
   "final-e2e",
 ]);
 
