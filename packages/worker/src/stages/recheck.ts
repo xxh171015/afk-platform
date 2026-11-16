@@ -8,6 +8,7 @@ import {
   gitOrThrow,
   hasRef,
   promptFor,
+  RECHECK_REF_PREFIX,
   reviewFindings,
   reviewOutputSchemaFor,
   reviewSources,
@@ -42,12 +43,13 @@ function bringCommit(
 ) {
   if (git(slot.dir, ["cat-file", "-e", `${fromSha}^{commit}`]).code === 0)
     return;
+  // The main clone stores the auto-merge as refs/afk/recheck/<Run>; fetch parks the object by SHA.
   const fetched = git(slot.dir, [
     "fetch",
     "--quiet",
     "--no-tags",
     mainDir,
-    `${fromSha}:refs/afk/recheck/${fromSha}`,
+    `${fromSha}:${RECHECK_REF_PREFIX}${fromSha}`,
   ]);
   if (fetched.code === 0) return;
   ensureRecheckFromSha(slot.dir, fromSha, toSha);

@@ -81,15 +81,11 @@ const ReviewLineObject = z.object({
   problem: z.string().min(1),
 });
 
-function reviewLineText(item: {
-  file: string;
-  line?: number;
-  problem: string;
-}): string {
+function reviewLineText(item: z.infer<typeof ReviewLineObject>): string {
   return `${item.file}${item.line === undefined ? "" : `:${item.line}`} ${item.problem}`;
 }
 
-// suggestions, scopeCreep and uncertainties: a string, or the same { file, line?, problem } shape as mustFix,
+// suggestions, scopeCreep and uncertainties: a string, or ReviewLineObject (mustFix without id),
 // which is turned into that one-line form before it is stored as a Finding.
 const ReviewLine = z.union([
   z.string(),
@@ -99,10 +95,7 @@ const ReviewLine = z.union([
 const ReviewObject = z.object({
   verdict: z.enum(["pass", "fix"]),
   mustFix: z.array(
-    z.object({
-      file: z.string(),
-      line: z.number().int().optional(),
-      problem: z.string().min(1),
+    ReviewLineObject.extend({
       // a must-fix Ruling points at the Decision by this id (R-n#index)
       id: z.string().min(1).optional(),
     }),
