@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AutoMergeInput,
   type AutoMergePull,
-  autoMerge,
+  autoMergeForecast,
 } from "./auto-merge.ts";
 
 const ENTERED = new Date("2026-01-01T00:00:00Z");
@@ -31,9 +31,9 @@ const ready = (extra: Partial<AutoMergeInput> = {}): AutoMergeInput => ({
   ...extra,
 });
 
-describe("autoMerge", () => {
+describe("autoMergeForecast", () => {
   it("will merge when every condition is met and 30 minutes have passed", () => {
-    expect(autoMerge(ready())).toEqual({
+    expect(autoMergeForecast(ready())).toEqual({
       willMerge: true,
       mergeAt: DUE_AT,
       due: true,
@@ -41,21 +41,21 @@ describe("autoMerge", () => {
   });
 
   it("will not merge when the project policy is not auto-improvement", () => {
-    expect(autoMerge(ready({ mergePolicy: "manual" }))).toEqual({
+    expect(autoMergeForecast(ready({ mergePolicy: "manual" }))).toEqual({
       willMerge: false,
       reason: "项目合并策略不是 auto-improvement",
     });
   });
 
   it("will not merge when the spec type is not improvement", () => {
-    expect(autoMerge(ready({ specType: "feature" }))).toEqual({
+    expect(autoMergeForecast(ready({ specType: "feature" }))).toEqual({
       willMerge: false,
       reason: "需求类型不是 improvement",
     });
   });
 
   it("will not merge when the spec is not awaiting-review", () => {
-    expect(autoMerge(ready({ specState: "running" }))).toEqual({
+    expect(autoMergeForecast(ready({ specState: "running" }))).toEqual({
       willMerge: false,
       reason: "需求不在 awaiting-review",
     });
@@ -63,7 +63,7 @@ describe("autoMerge", () => {
 
   it("will not merge when the spec does not have exactly one pull request", () => {
     expect(
-      autoMerge(ready({ pullRequests: [readyPull(), readyPull()] })),
+      autoMergeForecast(ready({ pullRequests: [readyPull(), readyPull()] })),
     ).toEqual({
       willMerge: false,
       reason: "需求不是只有一个 PR",
@@ -72,7 +72,7 @@ describe("autoMerge", () => {
 
   it("will not merge when the pull request is a draft", () => {
     expect(
-      autoMerge(ready({ pullRequests: [readyPull({ draft: true })] })),
+      autoMergeForecast(ready({ pullRequests: [readyPull({ draft: true })] })),
     ).toEqual({
       willMerge: false,
       reason: "PR 不是打开的非草稿",
@@ -81,7 +81,9 @@ describe("autoMerge", () => {
 
   it("will not merge when CI is pending or failure", () => {
     expect(
-      autoMerge(ready({ pullRequests: [readyPull({ ci: "pending" })] })),
+      autoMergeForecast(
+        ready({ pullRequests: [readyPull({ ci: "pending" })] }),
+      ),
     ).toEqual({
       willMerge: false,
       reason: "CI 是 pending 或 failure",
@@ -90,7 +92,7 @@ describe("autoMerge", () => {
 
   it("will not merge when the pull request conflicts with the default branch", () => {
     expect(
-      autoMerge(
+      autoMergeForecast(
         ready({ pullRequests: [readyPull({ conflictsWithDefault: true })] }),
       ),
     ).toEqual({
@@ -101,7 +103,7 @@ describe("autoMerge", () => {
 
   it("will not merge when review is changes-requested", () => {
     expect(
-      autoMerge(
+      autoMergeForecast(
         ready({
           pullRequests: [readyPull({ review: "changes-requested" })],
         }),
@@ -114,16 +116,36 @@ describe("autoMerge", () => {
 
   it("will not merge when a person has commented on the pull request", () => {
     expect(
-      autoMerge(ready({ pullRequests: [readyPull({ humanComments: 1 })] })),
+      autoMergeForecast(
+        ready({ pullRequests: [readyPull({ humanComments: 1 })] }),
+      ),
     ).toEqual({
       willMerge: false,
       reason: "PR 上有人写过评论",
     });
   });
 
+  it("will not merge while the comment count is unknown", () => {
+    expect(
+      autoMergeForecast(
+        ready({ pullRequests: [readyPull({ humanComments: null })] }),
+      ),
+    ).toEqual({
+      willMerge: false,
+      reason: "还不知道 PR 上有没有人评论",
+    });
+  });
+
+  it("will not merge when the time it entered awaiting-review is unknown", () => {
+    expect(autoMergeForecast(ready({ awaitingReviewAt: null }))).toEqual({
+      willMerge: false,
+      reason: "找不到需求进入 awaiting-review 的时间",
+    });
+  });
+
   it("will not merge when the acceptance pack has a needs-human item", () => {
     expect(
-      autoMerge(ready({ needsDecision: [{ kind: "needs-human" }] })),
+      autoMergeForecast(ready({ needsDecision: [{ kind: "needs-human" }] })),
     ).toEqual({
       willMerge: false,
       reason: "验收包有 needs-human",
@@ -131,16 +153,16 @@ describe("autoMerge", () => {
   });
 
   it("will not merge when the acceptance pack has an unfinished deferred item", () => {
-    expect(autoMerge(ready({ needsDecision: [{ kind: "deferred" }] }))).toEqual(
-      {
-        willMerge: false,
-        reason: "验收包有未做掉的 deferred",
-      },
-    );
+    expect(
+      autoMergeForecast(ready({ needsDecision: [{ kind: "deferred" }] })),
+    ).toEqual({
+      willMerge: false,
+      reason: "验收包有未做掉的 deferred",
+    });
   });
 
   it("will not merge when the spec already had an auto-merge job", () => {
-    expect(autoMerge(ready({ hadAutoMergeJob: true }))).toEqual({
+    expect(autoMergeForecast(ready({ hadAutoMergeJob: true }))).toEqual({
       willMerge: false,
       reason: "已经有过 auto-merge 作业",
     });
@@ -148,7 +170,7 @@ describe("autoMerge", () => {
 
   it("will merge but is not due before 30 minutes have passed", () => {
     const now = new Date(DUE_AT.getTime() - 1);
-    expect(autoMerge(ready({ now }))).toEqual({
+    expect(autoMergeForecast(ready({ now }))).toEqual({
       willMerge: true,
       mergeAt: DUE_AT,
       due: false,
@@ -157,7 +179,7 @@ describe("autoMerge", () => {
 
   it("will merge and is due after 30 minutes have passed", () => {
     const now = new Date(DUE_AT.getTime() + 1);
-    expect(autoMerge(ready({ now }))).toEqual({
+    expect(autoMergeForecast(ready({ now }))).toEqual({
       willMerge: true,
       mergeAt: DUE_AT,
       due: true,

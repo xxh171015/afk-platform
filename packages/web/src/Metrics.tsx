@@ -167,7 +167,7 @@ export function Metrics() {
         <div
           role="tablist"
           aria-label="项目"
-          className="inline-flex rounded-md border bg-surface p-0.5"
+          className="flex max-w-full overflow-x-auto rounded-md border bg-surface p-0.5"
         >
           <button
             type="button"
@@ -175,7 +175,7 @@ export function Metrics() {
             aria-selected={projectId === "all"}
             onClick={() => setProjectId("all")}
             className={cn(
-              "flex h-7 items-center rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
+              "flex h-7 shrink-0 items-center whitespace-nowrap rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
               projectId === "all" && "bg-background text-foreground shadow-sm",
             )}
           >
@@ -189,7 +189,7 @@ export function Metrics() {
               aria-selected={projectId === String(project.id)}
               onClick={() => setProjectId(String(project.id))}
               className={cn(
-                "flex h-7 items-center rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
+                "flex h-7 shrink-0 items-center whitespace-nowrap rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
                 projectId === String(project.id) &&
                   "bg-background text-foreground shadow-sm",
               )}
@@ -200,8 +200,11 @@ export function Metrics() {
         </div>
       }
     >
-      <div className="grid gap-8 lg:grid-cols-2">
-        <section data-testid="metrics-lead-time">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section
+          data-testid="metrics-lead-time"
+          className="min-w-0 rounded-lg border bg-card p-5"
+        >
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
             <BarChart3 className="size-4" />
             工期
@@ -222,7 +225,10 @@ export function Metrics() {
           {selected ? <LeadWeekDetail week={selected} /> : null}
         </section>
 
-        <section data-testid="metrics-attribution">
+        <section
+          data-testid="metrics-attribution"
+          className="min-w-0 rounded-lg border bg-card p-5"
+        >
           <h2 className="mb-3 text-sm font-semibold">失败归因</h2>
           {failedWeeks.length === 0 ? (
             <p className="text-sm text-muted-foreground">无</p>
@@ -235,17 +241,26 @@ export function Metrics() {
           )}
         </section>
 
-        <section data-testid="metrics-failure-rate">
+        <section
+          data-testid="metrics-failure-rate"
+          className="min-w-0 rounded-lg border bg-card p-5"
+        >
           <h2 className="mb-3 text-sm font-semibold">平台故障率</h2>
           <FailureRateChart weeks={weeks} />
         </section>
 
-        <section data-testid="metrics-success">
+        <section
+          data-testid="metrics-success"
+          className="min-w-0 rounded-lg border bg-card p-5"
+        >
           <h2 className="mb-3 text-sm font-semibold">成功标准</h2>
           <SuccessTable weeks={weeks} />
         </section>
 
-        <section data-testid="metrics-agents-pauses">
+        <section
+          data-testid="metrics-agents-pauses"
+          className="min-w-0 rounded-lg border bg-card p-5"
+        >
           <h2 className="mb-3 text-sm font-semibold">Agent 暂停</h2>
           {pausedWeeks.length === 0 ? (
             <p className="text-sm text-muted-foreground">无</p>

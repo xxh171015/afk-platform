@@ -64,9 +64,16 @@ function Quadrant({
     <section
       aria-label={title}
       data-testid={`quadrant-${title}`}
-      className="min-w-0 border-t"
+      data-lane={
+        title === "等你处理"
+          ? "attention"
+          : title === "正在运行"
+            ? "running"
+            : "standard"
+      }
+      className="afk-quadrant min-w-0 rounded-lg border bg-card p-4 lg:p-5"
     >
-      <h2 className="flex h-12 items-center gap-2 text-sm font-medium">
+      <h2 className="flex h-11 items-center gap-2 border-b text-sm font-semibold">
         {icon}
         {title}
         <span className="ml-auto font-mono text-xs text-muted-foreground tabular">
@@ -115,7 +122,7 @@ function ItemLink({
     <a
       href={href}
       {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
-      className="group block min-w-0 border-b px-2 py-3 transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+      className="group block min-w-0 border-b px-2 py-3 transition-[background-color,transform] duration-150 hover:translate-x-0.5 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
     >
       <div className="flex min-w-0 items-start gap-2 text-[13px]">
         <span className="max-w-[45%] shrink-0 break-all font-mono text-xs text-muted-foreground">
@@ -199,11 +206,14 @@ export function Workbench() {
   return (
     <Page
       title="工作台"
+      subtitle="平台按依赖图逐张票推进；需要人处理的事集中在这里。"
       actions={<StaleNotice error={data ? board.error : null} />}
     >
-      {data ? <Onboarding feishu={data.status?.feishu} /> : null}
+      {data && projects.data?.length === 0 ? (
+        <Onboarding feishu={data.status?.feishu} />
+      ) : null}
       {!data ? (
-        <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
+        <div className="afk-workbench-grid grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
           <p className="sr-only">加载工作台…</p>
           <Quadrant
             title="等你处理"
@@ -231,7 +241,7 @@ export function Workbench() {
           </Quadrant>
         </div>
       ) : (
-        <div className="grid grid-cols-2 items-start gap-x-8 gap-y-8">
+        <div className="afk-workbench-grid grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
           {(data.takenOver ?? []).length > 0 ? (
             <Quadrant
               title="人接手"
@@ -451,6 +461,11 @@ export function Workbench() {
           </Quadrant>
         </div>
       )}
+      {data && projects.data && projects.data.length > 0 ? (
+        <div className="mt-9">
+          <Onboarding feishu={data.status?.feishu} />
+        </div>
+      ) : null}
       {data?.status ? (
         <StatusArea
           status={data.status}

@@ -810,7 +810,7 @@ export async function recordHostSync(
         mergedAt,
         pull.mergedBy ?? null,
         pull.conflictsWithDefault === true,
-        pull.humanComments ?? 0,
+        pull.humanComments ?? null,
       ],
     );
     if (pull.mergedByPlatform) {

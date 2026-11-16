@@ -79,16 +79,23 @@ function Sidebar({
     <aside
       className={cn(
         "afk-sidebar sticky top-0 flex h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-150",
-        collapsed ? "w-[52px]" : "w-[200px]",
+        collapsed ? "w-[56px]" : "w-[224px]",
       )}
     >
-      <div className="flex h-12 items-center gap-2 border-b border-sidebar-border px-3">
-        <img src="/icon.png" alt="" className="size-6 shrink-0 rounded-sm" />
+      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
+        <img src="/icon.png" alt="" className="size-8 shrink-0 rounded-sm" />
         {!collapsed && (
-          <span className="truncate text-[13px] font-semibold">AFK 平台</span>
+          <span className="min-w-0">
+            <strong className="block truncate text-[15px] leading-tight tracking-[0.08em]">
+              AFK
+            </strong>
+            <span className="block text-[10px] tracking-[0.16em] text-muted-foreground">
+              CONTROL TOWER
+            </span>
+          </span>
         )}
       </div>
-      <nav className="flex-1 space-y-0.5 p-2">
+      <nav className="flex-1 space-y-1 p-3" aria-label="主导航">
         {nav.map((item) => {
           const active = item.exact
             ? path === item.to
@@ -99,12 +106,12 @@ function Sidebar({
             <Link
               key={item.to}
               to={item.to}
-              title={collapsed ? item.label : undefined}
+              title={item.label}
               aria-label={"badge" in item ? countLabel : item.label}
               className={cn(
-                "relative flex h-8 items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                "relative flex h-10 items-center gap-3 rounded-md px-2.5 text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 active &&
-                  "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+                  "afk-nav-active bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
               )}
             >
               <Icon className="size-4 shrink-0" />
@@ -144,52 +151,19 @@ function Sidebar({
   );
 }
 
-function Topbar({
-  onSearch,
-  waiting,
-}: {
-  onSearch: () => void;
-  waiting: number;
-}) {
-  const path = useRouterState({ select: (s) => s.location.pathname });
+function Topbar({ onSearch }: { onSearch: () => void }) {
   return (
-    <header className="afk-topbar sticky top-0 z-20 flex h-12 items-center gap-3 border-b bg-background/85 px-5 backdrop-blur">
+    <header className="afk-topbar sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/90 px-6 backdrop-blur lg:px-10">
       <EntityCrumbs />
-      <nav
-        aria-label="顶部导航"
-        className="flex shrink-0 items-center gap-1 text-xs"
-      >
-        {nav.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            aria-label={
-              "badge" in item && waiting > 0
-                ? `待处理 (${waiting})`
-                : item.label
-            }
-            aria-current={
-              (item.exact ? path === item.to : path.startsWith(item.to))
-                ? "page"
-                : undefined
-            }
-            className="flex h-7 items-center gap-1.5 rounded-sm px-2 text-muted-foreground hover:bg-accent hover:text-foreground aria-[current=page]:bg-accent aria-[current=page]:text-foreground"
-          >
-            {item.label}
-            {"badge" in item && waiting > 0 ? (
-              <span className="font-mono text-state-blocked tabular">
-                {waiting}
-              </span>
-            ) : null}
-          </Link>
-        ))}
-      </nav>
+      <span className="ml-auto hidden text-xs tracking-wide text-muted-foreground lg:block">
+        让实现阶段无人值守
+      </span>
       <Button
         type="button"
         variant="ghost"
         aria-label="搜索需求与票"
         onClick={onSearch}
-        className="flex h-7 w-64 items-center gap-2 rounded-md border bg-surface px-2 text-[12px] text-muted-foreground hover:border-border-strong"
+        className="afk-search flex h-8 w-64 items-center gap-2 rounded-md border bg-surface px-2 text-[12px] text-muted-foreground hover:border-border-strong lg:ml-3"
       >
         <Search className="size-3.5" />
         <span className="flex-1 text-left">搜索需求、票、运行…</span>
@@ -302,7 +276,7 @@ function Chrome() {
           waiting={waiting}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar onSearch={() => setSearchOpen(true)} waiting={waiting} />
+          <Topbar onSearch={() => setSearchOpen(true)} />
           <TokenExpiryBanner />
           <AgentsPausedBanner />
           <DiskBanner />

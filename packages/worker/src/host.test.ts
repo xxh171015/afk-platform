@@ -179,6 +179,57 @@ describe("an auto-merge task", () => {
       reason: "GitHub answered 403 merging pull request 7",
     });
   });
+
+  it("reports failed, without merging, when the description cannot be updated", async () => {
+    const calls: string[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async () => {
+        throw new TypeError("fetch failed");
+      },
+      mergePullRequest: async () => {
+        calls.push("merge");
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(calls).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason:
+        "could not update the pull request description: TypeError: fetch failed",
+    });
+  });
+
+  it("reports failed and puts the old description back when the merge fails for any reason", async () => {
+    const original = `Spec: S-1\n\n${wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE)}`;
+    const writes: string[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => info(7),
+      getPullRequestBody: async () => original,
+      updatePullRequestBody: async ({ body }) => {
+        writes.push(body);
+      },
+      mergePullRequest: async () => {
+        throw new TypeError("fetch failed");
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toBe(original);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "could not merge the pull request: TypeError: fetch failed",
+    });
+  });
 });
 
 describe("a patch-pr-body task", () => {

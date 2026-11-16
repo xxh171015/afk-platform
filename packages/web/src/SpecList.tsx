@@ -66,7 +66,7 @@ function nextSort(prev: Sort, key: SortKey): Sort {
 }
 
 const GRID =
-  "grid-cols-[4.5rem_minmax(0,16rem)_9rem_5.5rem_7rem_minmax(0,1fr)_8rem_8rem]";
+  "grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[4.5rem_minmax(0,16rem)_9rem_5.5rem_7rem_minmax(0,1fr)_8rem_8rem]";
 
 function SortHeader({
   label,
@@ -232,20 +232,20 @@ export function SpecList() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
+            <div className="relative max-sm:w-full">
               <Search className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="搜索标题或编号…"
-                className="h-7 w-52 pl-7 text-[12px]"
+                className="h-8 w-52 pl-7 text-[12px] max-sm:w-full"
                 aria-label="搜索标题或编号"
               />
             </div>
             <Select value={project} onValueChange={setProject}>
               <SelectTrigger
-                className="h-7 w-auto gap-1.5 text-[12px]"
+                className="h-8 w-auto gap-1.5 text-[12px]"
                 aria-label="按项目筛选"
               >
                 <SelectValue placeholder="项目" />
@@ -259,6 +259,28 @@ export function SpecList() {
                 ))}
               </SelectContent>
             </Select>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground md:hidden">
+              排序
+              <select
+                aria-label="排序"
+                className="h-8 rounded-md border bg-background px-2 text-foreground"
+                value={`${sort.key}:${sort.dir}`}
+                onChange={(event) => {
+                  const [key, dir] = event.target.value.split(":") as [
+                    SortKey,
+                    Sort["dir"],
+                  ];
+                  setSort({ key, dir });
+                }}
+              >
+                <option value="startedAt:desc">最新开始</option>
+                <option value="startedAt:asc">最早开始</option>
+                <option value="state:asc">状态升序</option>
+                <option value="state:desc">状态降序</option>
+                <option value="progress:asc">进度升序</option>
+                <option value="progress:desc">进度降序</option>
+              </select>
+            </label>
             <fieldset
               className="flex flex-wrap items-center gap-1 border-0 p-0"
               aria-label="按状态筛选"
@@ -335,7 +357,7 @@ export function SpecList() {
               className="overflow-x-auto rounded-md border bg-card text-[13px]"
               role="table"
             >
-              <div className="min-w-[1200px]">
+              <div className="md:min-w-[1200px]">
                 {/* biome-ignore lint/a11y/useSemanticElements: keep CSS grid + role=row */}
                 {/* biome-ignore lint/a11y/useFocusableInteractive: header is not a control */}
                 <div
@@ -347,27 +369,30 @@ export function SpecList() {
                 >
                   <span>编号</span>
                   <span>标题</span>
-                  <span>项目</span>
-                  <span>类型</span>
+                  <span className="hidden md:block">项目</span>
+                  <span className="hidden md:block">类型</span>
                   <SortHeader
                     label="状态"
                     k="state"
                     sort={sort}
                     onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                    className="hidden md:inline-flex"
                   />
                   <SortHeader
                     label="进度"
                     k="progress"
                     sort={sort}
                     onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                    className="hidden md:inline-flex"
                   />
                   <SortHeader
                     label="开始"
                     k="startedAt"
                     sort={sort}
                     onSort={(key) => setSort((prev) => nextSort(prev, key))}
+                    className="hidden md:inline-flex"
                   />
-                  <span>结束</span>
+                  <span className="hidden md:block">结束</span>
                 </div>
                 <div className="divide-y">
                   {filtered.map((s) => {
@@ -378,7 +403,7 @@ export function SpecList() {
                         key={s.id}
                         role="row"
                         className={cn(
-                          "grid items-center gap-3 px-3 py-2.5 hover:bg-accent/50",
+                          "grid items-center gap-x-3 gap-y-2 px-3 py-3 hover:bg-accent/50 md:py-2.5",
                           GRID,
                         )}
                       >
@@ -387,12 +412,12 @@ export function SpecList() {
                         </span>
                         <a
                           href={paths.spec(s.id)}
-                          className="min-w-0 truncate hover:underline"
+                          className="min-w-0 break-words font-medium hover:underline md:truncate"
                           title={s.title}
                         >
                           {s.title}
                         </a>
-                        <div className="min-w-0 overflow-hidden">
+                        <div className="hidden min-w-0 overflow-hidden md:block">
                           <div className="flex w-full min-w-0 flex-nowrap gap-1 overflow-hidden">
                             {(s.repos ?? []).length === 0 ? (
                               <span className="truncate text-[11px] text-muted-foreground">
@@ -411,7 +436,7 @@ export function SpecList() {
                           </div>
                         </div>
                         <span
-                          className="truncate font-mono text-[11px] whitespace-nowrap text-muted-foreground"
+                          className="hidden truncate font-mono text-[11px] whitespace-nowrap text-muted-foreground md:block"
                           title={specTypeLabel[s.type]}
                         >
                           {s.type}
@@ -438,10 +463,10 @@ export function SpecList() {
                               : ""}
                           </span>
                         </div>
-                        <span className="min-w-0 truncate whitespace-nowrap text-[12px] text-muted-foreground">
+                        <span className="hidden min-w-0 truncate whitespace-nowrap text-[12px] text-muted-foreground md:block">
                           <RelativeTime iso={s.startedAt} />
                         </span>
-                        <span className="min-w-0 truncate whitespace-nowrap text-[12px] text-muted-foreground">
+                        <span className="hidden min-w-0 truncate whitespace-nowrap text-[12px] text-muted-foreground md:block">
                           {s.endedAt ? <RelativeTime iso={s.endedAt} /> : "—"}
                         </span>
                       </div>

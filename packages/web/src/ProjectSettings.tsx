@@ -149,8 +149,11 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
       {!project.data ? (
         <Skeleton className="h-8 w-64" />
       ) : (
-        <div className="max-w-xl space-y-8">
-          <section aria-label="票级审查" className="space-y-4">
+        <div className="max-w-2xl space-y-4">
+          <section
+            aria-label="票级审查"
+            className="space-y-4 rounded-lg border bg-card p-5"
+          >
             <h2 className="text-sm font-medium">票级审查</h2>
             <Hint>
               默认只跑 Spec 轴。Standards 轴仍在需求收尾的 final-review 跑。
@@ -181,7 +184,10 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
               <p role="alert">{saveReview.error.message}</p>
             ) : null}
           </section>
-          <section aria-label="Tidy" className="space-y-4">
+          <section
+            aria-label="Tidy"
+            className="space-y-4 rounded-lg border bg-card p-5"
+          >
             <h2 className="text-sm font-medium">Tidy</h2>
             <Hint>
               需求收尾时，若 final-review 的 Standards
@@ -209,7 +215,10 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
               <p role="alert">{saveTidy.error.message}</p>
             ) : null}
           </section>
-          <section aria-label="阶段模型" className="space-y-4">
+          <section
+            aria-label="阶段模型"
+            className="space-y-4 rounded-lg border bg-card p-5"
+          >
             <h2 className="text-sm font-medium">阶段模型</h2>
             <Hint>
               只读或机械的环节可以单独指定模型。空白表示用项目默认模型。implement、gate-fix
@@ -248,7 +257,10 @@ export function ProjectSettings({ projectId }: { projectId: number }) {
               <p role="alert">{saveStageModels.error.message}</p>
             ) : null}
           </section>
-          <section aria-label="飞书通知" className="space-y-4">
+          <section
+            aria-label="飞书通知"
+            className="space-y-4 rounded-lg border bg-card p-5"
+          >
             <h2 className="text-sm font-medium">飞书通知</h2>
             <Hint>
               票卡住、可验收时会发到这个群，本机横幅同时还会响。密钥不要填在网页里。
