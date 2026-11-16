@@ -1,19 +1,7 @@
-import {
-  HOST_JOB_TYPES,
-  type JobState,
-  PLANNING_COMMIT_JOB,
-  TRIAL_MERGE_JOB,
-} from "@afk/shared";
+import { type JobState, SLOTLESS_JOB_TYPES } from "@afk/shared";
 import type pg from "pg";
 import { AGENT_JOB_TYPE, probeHandedOut } from "../agents-pause.ts";
 import { applyOrigin } from "../events/origin.ts";
-
-const SLOTLESS_JOB_TYPES: string[] = [
-  ...HOST_JOB_TYPES,
-  TRIAL_MERGE_JOB,
-  PLANNING_COMMIT_JOB,
-  "readiness-gate",
-];
 
 // The job queue lives on the `jobs` table (docs/specs/m1-platform.md「作业队列」).
 // Every function takes `now` so lease expiry is decided by the caller's clock, not by waiting.
@@ -151,7 +139,7 @@ export async function claimJob(
         request.capabilities,
         request.now,
         request.takeSlot !== false,
-        SLOTLESS_JOB_TYPES,
+        [...SLOTLESS_JOB_TYPES],
       ],
     );
     const job = (rows[0] as LeasedJob | undefined) ?? null;

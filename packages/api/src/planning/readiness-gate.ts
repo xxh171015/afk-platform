@@ -1,10 +1,11 @@
+import { READINESS_GATE_JOB } from "@afk/shared";
 import type pg from "pg";
 import { enqueueJob } from "../jobs/queue.ts";
 
 // `plat repo check` (operations manual 1.3): a worker runs a repo's gate on a pushed branch in the platform's
 // sandbox. The job carries the answer in its result; nothing else in the platform reads it.
 
-export const READINESS_GATE_JOB = "readiness-gate";
+export { READINESS_GATE_JOB };
 
 export interface ReadinessGatePayload {
   repoId: number;

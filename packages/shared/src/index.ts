@@ -274,6 +274,11 @@ export {
 } from "./schemas.ts";
 export { SKILLS_PACKAGE } from "./skills-package.ts";
 export { SKILLS_SHA } from "./skills-sha.ts";
+export {
+  occupiesSlot,
+  READINESS_GATE_JOB,
+  SLOTLESS_JOB_TYPES,
+} from "./slotless-jobs.ts";
 export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specResumeTarget, specTransition } from "./spec-state.ts";

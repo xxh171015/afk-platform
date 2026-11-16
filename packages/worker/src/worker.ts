@@ -7,6 +7,7 @@ import {
   HOST_CAPABILITY,
   HOST_JOB_TYPES,
   MAX_LOG_CHUNK_BYTES,
+  occupiesSlot,
   PLANNING_COMMIT_JOB,
   TRIAL_MERGE_JOB,
 } from "@afk/shared";
@@ -80,13 +81,6 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     );
   });
 
-function occupiesSlot(type: string): boolean {
-  if ((HOST_JOB_TYPES as readonly string[]).includes(type)) return false;
-  if (type === TRIAL_MERGE_JOB || type === PLANNING_COMMIT_JOB) return false;
-  if (type === READINESS_GATE_JOB) return false;
-  return true;
-}
-
 export async function runWorker(
   options: WorkerOptions,
 ): Promise<{ jobs: number }> {
@@ -97,7 +91,7 @@ export async function runWorker(
   ];
   const claim = (takeSlot: boolean) =>
     options.api.claim(capabilities, { takeSlot });
-  const idle = () => {
+  const stopOrDrain = () => {
     const signals = [options.signal, options.drain].filter(
       (s): s is AbortSignal => s !== undefined,
     );
@@ -148,7 +142,7 @@ export async function runWorker(
             options.log?.(
               `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
             );
-            await sleep(options.pollMs ?? 2_000, idle());
+            await sleep(options.pollMs ?? 2_000, stopOrDrain());
             continue;
           }
         }
@@ -160,13 +154,13 @@ export async function runWorker(
         // The API or its database is down for a moment (Docker restarting, say): wait and ask again. Exiting
         // would also abandon the jobs the other loops are running.
         options.log?.(`claim failed, retrying: ${String(error)}`);
-        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, idle());
+        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, stopOrDrain());
         continue;
       }
       if (heldReservation && (!job || !occupiesSlot(job.type))) reserved -= 1;
       if (!job) {
         if (options.stopWhenIdle || options.drain?.aborted) return;
-        await sleep(options.pollMs ?? 2_000, idle());
+        await sleep(options.pollMs ?? 2_000, stopOrDrain());
         continue;
       }
       jobs += 1;

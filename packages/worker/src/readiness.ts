@@ -14,11 +14,10 @@ import type { RepoStore } from "./repos.ts";
 // runs the repo's gate on it exactly as it gates a ticket, in the platform's sandbox, with the gates.yaml of that
 // branch. Nothing is pushed and no ticket is involved; the answer goes back to the person who asked.
 
-import type { ReadinessTask } from "@afk/shared";
+import { READINESS_GATE_JOB, type ReadinessTask } from "@afk/shared";
 
 export type { ReadinessTask };
-
-export const READINESS_GATE_JOB = "readiness-gate";
+export { READINESS_GATE_JOB };
 
 export interface ReadinessGateResult {
   stage: "readiness-gate";
