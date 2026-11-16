@@ -1,0 +1,28 @@
+I'll start by reading the ticket, spec, run context, and the implement skill so I can follow the stage steps exactly.I'll read the TDD tests guide and all stage prompts so I can map each `<result>` example to its schema.I'll follow TDD: first add a test that every prompt `<result>` example matches its schema and that overlay allows `ref` only on `deferred` — that should fail on the current overlay wording.The test failed on the overlay’s `{ kind, text, ref? }` wording, as expected. I’ll update that line so `ref` is only for `deferred`.The overlay mentions `<result>` tags in prose, so the extractor treated that as an example. I’ll skip overlay and only parse stage prompts.Slice 1 is green. Next I’ll add a failing test that every prompt’s result section spells out field shapes.The field-shape test is red. I’ll add the missing shape notes to each prompt’s result section.Typecheck and the prompt tests passed. Next I’ll run the full test suite and lint, writing the output to files as the gate requires.每个阶段提示词里的 `<result>` 示例都会按该阶段现有 schema 校验；覆盖层把 `decisions` 写成 `{ kind, text }`，只有 `deferred` 才带 `ref`；各字段形状也写进了结果说明。门禁 typecheck / test / lint 已通过。
+
+<result>
+{
+  "status": "done",
+  "summary": "给每个阶段提示词的结果示例加了对照 schema 的测试，覆盖层把 decisions 的 ref 只留给 deferred，并写明了各字段形状。",
+  "acceptance": {
+    "新测试覆盖每个带 `<result>` 示例的提示词，全部通过；把某个示例里的 `mustFix` 改成字符串时，测试失败": ["every prompt result example passes its stage schema, and a mustFix written as a string does not"],
+    "覆盖层写明 `ref` 只给 `deferred`，示例里非 `deferred` 的决定都不带 `ref`": ["every prompt result example passes its stage schema, and a mustFix written as a string does not"],
+    "每个提示词的结果说明写明了字段形状": ["tells every prompt the shape of each result field"],
+    "「不许写死命令」的扫描、绑定 SHA 的测试照旧通过": ["names no concrete build or test command; a mention of AGENTS.md is not a violation", "is written for the skills SHA the platform pins, which the mounted skills were copied at"]
+  },
+  "decisions": [
+    {
+      "kind": "conflict",
+      "text": "Testing Decisions 把「覆盖层写明自查步骤」和「ref 只给 deferred」写在同一条提示词测试里；这张票的 What to build 和验收标准只覆盖 User Story 2/3，没有自查命令。按票的范围做了 ref 文案和示例校验，自查步骤留给实现 User Story 1 的票。"
+    },
+    {
+      "kind": "conflict",
+      "text": "票的 modules 写了 packages/pipeline/src/prompts*（仓库里没有这个文件）和 agent.test.ts，没有列 agent.ts；同时又说阶段和 schema 的对应关系复用 agent.ts 里现有的。测试放在 agent.test.ts，用 promptFor 和 reviewOutputSchemaFor 做对应，没有往 agent.ts 加新导出。"
+    },
+    {
+      "kind": "choice",
+      "text": "审查结果里 suggestions、scopeCreep、uncertainties 仍按 T-109 提示词写成一句字符串；schema 也接受对象是 T-109 的容错，不写进给 agent 的形状说明。"
+    }
+  ]
+}
+</result>That first test run was the expected TDD red: the overlay still said `{ kind, text, ref? }`. Overlay wording, field-shape notes, and the schema example tests were already finished and committed on this branch after that.
