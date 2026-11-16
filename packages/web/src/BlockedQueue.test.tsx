@@ -64,6 +64,8 @@ interface Queue {
   readyFailures: unknown[];
   planning: unknown[];
   specs: unknown[];
+  locates?: unknown[];
+  stale?: unknown[];
   items?: unknown[];
 }
 
@@ -1342,6 +1344,34 @@ describe("when there is nothing to show", () => {
       fakeServer({ "GET /blocked": () => ({ json: queue() }) }),
     );
     expect(await screen.findByText("没有在等你的事")).toBeTruthy();
+  });
+
+  it("lists stale specs when that is the only waiting item", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            stale: [
+              {
+                id: 9,
+                displayId: "S-9",
+                title: "Old draft",
+                state: "draft",
+                command: "plat spec cancel S-9",
+                note: null,
+              },
+            ],
+            items: [],
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByTestId("stale-S-9")).toBeTruthy();
+    expect(screen.queryByText("没有在等你的事")).toBeNull();
+    expect(screen.getByRole("tab", { name: /全部/ }).textContent).toContain(
+      "1",
+    );
   });
 
   it("says it is loading, and says what went wrong", async () => {

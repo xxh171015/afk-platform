@@ -996,6 +996,42 @@ function BlockedPlanning({ item }: { item: Queue["planning"][number] }) {
   );
 }
 
+function StaleSpec({
+  item,
+}: {
+  item: {
+    id: number;
+    displayId: string;
+    title: string;
+    state: string;
+    command: string | null;
+    note: string | null;
+  };
+}) {
+  return (
+    <Card
+      category="paused"
+      testId={`stale-${item.displayId}`}
+      title={
+        <>
+          <IdChip displayId={item.displayId} id={item.id} />
+          <a href={paths.spec(item.id)} className="truncate hover:underline">
+            {item.title}
+          </a>
+          <StateBadge kind="spec" state={item.state} />
+        </>
+      }
+      sub={<span>放了很久，建议清理或继续推进</span>}
+    >
+      {item.command ? (
+        <CopyCommand command={item.command} />
+      ) : (
+        <p className="text-xs text-muted-foreground">{item.note}</p>
+      )}
+    </Card>
+  );
+}
+
 function FailedLocate({
   item,
 }: {
@@ -1081,11 +1117,24 @@ function CalmIllustration() {
 const FILTERS = ["all", "tickets", "final", "pr", "cleanup", "paused"] as const;
 type Filter = (typeof FILTERS)[number];
 
+function staleRefs(data: Queue): WaitingRef[] {
+  return (data.stale ?? [])
+    .filter((item) => item.state !== "cancelled")
+    .map((item) => ({ kind: "staleSpec" as const, id: item.id }));
+}
+
+function mergeStaleItems(base: WaitingRef[], data: Queue): WaitingRef[] {
+  const stale = staleRefs(data);
+  if (stale.length === 0) return base;
+  const seen = new Set(base.map((item) => refKey(item)));
+  return [...base, ...stale.filter((item) => !seen.has(refKey(item)))];
+}
+
 function inferredItems(data: Queue): WaitingRef[] {
-  if (data.items && (data.items.length > 0 || waitingCount(data) === 0)) {
-    return data.items;
-  }
-  return [
+  const base =
+    data.items && (data.items.length > 0 || waitingCount(data) === 0)
+      ? data.items
+      : [
     ...data.tickets.map((ticket) => ({
       kind: "ticket" as const,
       id: ticket.id,
@@ -1124,6 +1173,7 @@ function inferredItems(data: Queue): WaitingRef[] {
       specId: item.specId,
     })),
   ];
+  return mergeStaleItems(base, data);
 }
 
 function specIdOf(data: Queue, ref: WaitingRef): number {
@@ -1136,7 +1186,7 @@ function specIdOf(data: Queue, ref: WaitingRef): number {
         ?.specId ?? ref.id
     );
   }
-  if (ref.kind === "pausedSpec") return ref.id;
+  if (ref.kind === "pausedSpec" || ref.kind === "staleSpec") return ref.id;
   return ref.specId;
 }
 
@@ -1167,6 +1217,7 @@ function waitingItemOf(data: Queue, ref: WaitingRef) {
       return (data.planning ?? []).find((item) => item.specId === ref.specId);
     if (ref.kind === "locate")
       return (data.locates ?? []).find((item) => item.specId === ref.specId);
+    if (ref.kind === "staleSpec") return undefined;
     return data.specs.find((item) => item.id === ref.id);
   };
   return lookup();
@@ -1184,7 +1235,8 @@ function rankFields(data: Queue, ref: WaitingRef) {
   const serialId =
     ref.kind === "ticket" ||
     ref.kind === "finalization" ||
-    ref.kind === "pausedSpec"
+    ref.kind === "pausedSpec" ||
+    ref.kind === "staleSpec"
       ? ref.id
       : ref.kind === "pullRequest" || ref.kind === "readyFailure"
         ? ref.number
@@ -1200,7 +1252,11 @@ function refKey(item: WaitingRef): string {
   if (item.kind === "finalization") {
     return `${item.kind}-${item.id}-${item.step}`;
   }
-  if (item.kind === "ticket" || item.kind === "pausedSpec") {
+  if (
+    item.kind === "ticket" ||
+    item.kind === "pausedSpec" ||
+    item.kind === "staleSpec"
+  ) {
     return `${item.kind}-${item.id}`;
   }
   if (item.kind === "pullRequest" || item.kind === "readyFailure") {
@@ -1253,6 +1309,10 @@ function CardFor({ data, item }: { data: Queue; item: WaitingRef }) {
       (entry) => entry.specId === item.specId,
     );
     return row ? <FailedLocate item={row} /> : null;
+  }
+  if (item.kind === "staleSpec") {
+    const row = (data.stale ?? []).find((entry) => entry.id === item.id);
+    return row ? <StaleSpec item={row} /> : null;
   }
   const spec = data.specs.find((row) => row.id === item.id);
   return spec ? <PausedSpec spec={spec} /> : null;
@@ -1329,12 +1389,13 @@ export function BlockedQueue() {
         final: data.finalizations.length,
         pr: data.pullRequests.length + data.readyFailures.length,
         cleanup: data.cleanups.length,
-        paused: data.specs.length + (data.planning?.length ?? 0),
-        all: 0,
+        paused:
+          data.specs.length +
+          (data.planning?.length ?? 0) +
+          (data.locates?.length ?? 0),
+        all: waitingCount(data),
       }
     : { all: 0, tickets: 0, final: 0, pr: 0, cleanup: 0, paused: 0 };
-  counts.all =
-    counts.tickets + counts.final + counts.pr + counts.cleanup + counts.paused;
   const filterLabel: Record<Filter, string> = {
     all: "全部",
     tickets: "卡住的票",
@@ -1412,7 +1473,7 @@ export function BlockedQueue() {
             </div>
           ))}
         </div>
-      ) : counts[type] === 0 ? (
+      ) : (type === "all" ? waitingCount(data) : counts[type]) === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
           <CalmIllustration />
           <p className="mt-4 text-sm font-medium">

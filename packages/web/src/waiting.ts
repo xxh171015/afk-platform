@@ -52,7 +52,8 @@ export type WaitingRef =
   | { kind: "readyFailure"; specId: number; repo: string; number: number }
   | { kind: "planning"; specId: number }
   | { kind: "pausedSpec"; id: number }
-  | { kind: "locate"; specId: number };
+  | { kind: "locate"; specId: number }
+  | { kind: "staleSpec"; id: number };
 
 export function rankOf(blocking: Blocking): number {
   if (blocking.downstream.length > 0) return 0;

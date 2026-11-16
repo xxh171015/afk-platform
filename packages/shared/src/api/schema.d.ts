@@ -4329,6 +4329,25 @@ export interface paths {
                   | "spec"
                   | null;
               }[];
+              stale: {
+                id: number;
+                displayId: string;
+                title: string;
+                /** @enum {string} */
+                state:
+                  | "draft"
+                  | "planned"
+                  | "running"
+                  | "finalizing"
+                  | "awaiting-review"
+                  | "partially-merged"
+                  | "reworking"
+                  | "merged"
+                  | "paused"
+                  | "cancelled";
+                command: string | null;
+                note: string | null;
+              }[];
               items: (
                 | {
                     /** @enum {string} */

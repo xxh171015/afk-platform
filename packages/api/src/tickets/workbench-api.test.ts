@@ -587,6 +587,10 @@ describe("GET /workbench", () => {
         note: null,
       },
     ]);
+
+    const blocked = await call("GET", "/blocked");
+    expect(blocked.status).toBe(200);
+    expect(blocked.body.stale).toEqual(reply.body.waiting.stale);
   });
 
   it("does not list empty cancelled specs in 放了很久, and still lists old draft and awaiting-review", async () => {

@@ -48,7 +48,7 @@ import {
   specView,
   ticketView,
 } from "../tickets/views.ts";
-import { workbench } from "../tickets/workbench.ts";
+import { staleSpecs, workbench } from "../tickets/workbench.ts";
 import { LinkRow } from "./link-routes.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
@@ -630,6 +630,16 @@ const BlockedQueue = z.object({
       })
       .merge(WaitingFields),
   ),
+  stale: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      title: z.string(),
+      state: z.enum(SPEC_STATES),
+      command: z.string().nullable(),
+      note: z.string().nullable(),
+    }),
+  ),
   items: z.array(WaitingRef),
 });
 
@@ -1203,7 +1213,15 @@ export function registerTicketRoutes(
     c.json(await search(pool, c.req.valid("query").q), 200),
   );
 
-  app.openapi(blockedRoute, async (c) => c.json(await blockedQueue(pool), 200));
+  app.openapi(blockedRoute, async (c) =>
+    c.json(
+      {
+        ...(await blockedQueue(pool)),
+        stale: await staleSpecs(pool, context.clock()),
+      },
+      200,
+    ),
+  );
 
   app.openapi(workbenchRoute, async (c) => {
     const board = await workbench(pool, context.clock());
