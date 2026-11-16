@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -51,7 +52,7 @@ export type CalibrationSample = {
 
 export type CalibrationAnswer = z.infer<typeof AnswerYaml>;
 
-export type CalibrationHit = "must-fix" | "suggestion" | "未发现";
+export type CalibrationHit = "must-fix" | "suggestion" | "未发现" | "运行失败";
 
 export interface RunReviewCalibrationInput {
   root: string;
@@ -63,6 +64,7 @@ type AxisOutput = {
   axis: ReviewAxis;
   model?: string;
   output?: ReviewOutput;
+  error?: string;
   tokenUsage?: unknown;
 };
 
@@ -285,7 +287,11 @@ async function reviewSample(
   sample: CalibrationSample,
   input: RunReviewCalibrationInput,
 ): Promise<SampleRun> {
-  const dest = mkdtempSync(join(tmpdir(), `afk-cal-${sample.name}-`));
+  // The real path: on macOS tmpdir() is /var/folders, a symlink to /private/var/folders. Git worktrees record
+  // the real path, and the sandbox mounts only the path it is given.
+  const dest = realpathSync(
+    mkdtempSync(join(tmpdir(), `afk-cal-${sample.name}-`)),
+  );
   try {
     const defaultBranch = prepareClone(sample, dest);
     const agentBranch = `calibration/${sample.name}`;
@@ -317,6 +323,7 @@ async function reviewSample(
         axis: row.axis,
         ...(row.model ? { model: row.model } : {}),
         ...(row.run.output ? { output: row.run.output } : {}),
+        ...(row.run.error ? { error: row.run.error } : {}),
         ...(row.run.tokenUsage !== undefined
           ? { tokenUsage: row.run.tokenUsage }
           : {}),
@@ -347,11 +354,25 @@ export function formatCalibrationTable(
     if (run?.error) continue;
     const spec = run?.axes.find((row) => row.axis === "spec");
     const standards = run?.axes.find((row) => row.axis === "standards");
+    const cell = (row: AxisOutput | undefined): CalibrationHit =>
+      row?.error && !row.output ? "运行失败" : scoreDefect(answer, row?.output);
     hits.push(
-      `| ${answer.sample}/${answer.id} | ${answer.type} | ${scoreDefect(answer, spec?.output)} | ${scoreDefect(answer, standards?.output)} |`,
+      `| ${answer.sample}/${answer.id} | ${answer.type} | ${cell(spec)} | ${cell(standards)} |`,
     );
   }
-  const failed = runs.filter((row) => row.error);
+  const failed = [
+    ...runs
+      .filter((row) => row.error)
+      .map((row) => ({ name: row.sample.name, error: row.error ?? "" })),
+    ...runs.flatMap((row) =>
+      row.axes
+        .filter((axis) => axis.error && !axis.output)
+        .map((axis) => ({
+          name: `${row.sample.name} (${axis.axis})`,
+          error: axis.error ?? "",
+        })),
+    ),
+  ];
   const failures =
     failed.length === 0
       ? []
@@ -363,7 +384,7 @@ export function formatCalibrationTable(
           "| --- | --- | --- |",
           ...failed.map(
             (row) =>
-              `| ${row.sample.name} | 失败 | ${(row.error ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|")} |`,
+              `| ${row.name} | 失败 | ${row.error.replace(/\s+/g, " ").replace(/\|/g, "\\|")} |`,
           ),
         ];
   const usage = [
