@@ -128,24 +128,31 @@ function filesEqual(left: string, right: string): boolean {
   return norm(left) === norm(right);
 }
 
+// A reviewer points at the line it reasons from, often just past the lines the defect touched.
+const LINE_SLACK = 5;
+
 function lineInRange(
   line: number | undefined,
   range: { start: number; end: number },
 ): boolean {
   if (line === undefined) return true;
-  return line >= range.start && line <= range.end;
+  return line >= range.start - LINE_SLACK && line <= range.end + LINE_SLACK;
 }
 
+// Any `file:line` in the suggestion's text, wherever it sits.
 function suggestionHits(
   text: string,
   file: string,
   range: { start: number; end: number },
 ): boolean {
-  const match = /^(.+?):(\d+)(?:-\d+)?(?:\s|$)/.exec(text);
-  if (!match) return false;
-  return (
-    filesEqual(match[1] ?? "", file) && lineInRange(Number(match[2]), range)
-  );
+  for (const match of text.matchAll(/([\w./\\-]+):(\d+)/g)) {
+    if (
+      filesEqual(match[1] ?? "", file) &&
+      lineInRange(Number(match[2]), range)
+    )
+      return true;
+  }
+  return false;
 }
 
 export function scoreDefect(
