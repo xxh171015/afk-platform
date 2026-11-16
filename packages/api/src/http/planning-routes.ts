@@ -72,6 +72,7 @@ const projectSettings = {
   limits: LimitOverridesSchema.optional(),
   ticketReview: z.enum(TICKET_REVIEW_MODES).optional(),
   stageModels: StageModelsSchema.optional(),
+  tidy: z.boolean().optional(),
 };
 
 // Empty clears the project's Feishu group. Not on create: set it with plat project edit --feishu-chat.
@@ -122,6 +123,7 @@ const projectViewRoute = createRoute({
         feishuChatId: z.string().nullable(),
         ticketReview: z.enum(TICKET_REVIEW_MODES),
         stageModels: StageModelsSchema,
+        tidy: z.boolean(),
         repos: z.array(
           z.object({
             name: z.string(),
@@ -690,7 +692,7 @@ export function registerPlanningRoutes(
   app.openapi(projectViewRoute, async (c) => {
     const { projectId } = c.req.valid("param");
     const project = await pool.query(
-      "SELECT id, name, default_agent, feishu_chat_id, ticket_review, stage_models FROM projects WHERE id = $1",
+      "SELECT id, name, default_agent, feishu_chat_id, ticket_review, stage_models, tidy FROM projects WHERE id = $1",
       [projectId],
     );
     if (!project.rows[0]) return c.json({ error: "no such project" }, 404);
@@ -707,6 +709,7 @@ export function registerPlanningRoutes(
         ticketReview: project.rows[0]
           .ticket_review as (typeof TICKET_REVIEW_MODES)[number],
         stageModels: parseStageModels(project.rows[0].stage_models),
+        tidy: project.rows[0].tidy as boolean,
         repos: repos.rows.map((r) => ({
           name: r.name as string,
           url: r.url as string,

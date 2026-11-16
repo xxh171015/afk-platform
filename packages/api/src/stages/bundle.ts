@@ -258,7 +258,7 @@ async function gateBaselineFor(pool: pg.Pool, specId: number, repoId: number) {
   }>(
     `SELECT g.tests_total, g.tests_skipped, g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 1`,
     [specId, repoId],
@@ -280,7 +280,7 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
   }>(
     `SELECT r.head_sha AS sha, g.tests_total, g.tests_skipped, g.test_cases_hash FROM runs r
      JOIN gate_results g ON g.repo_id = r.repo_id AND g.commit_sha = r.head_sha AND g.kind = 'gate'
-     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'update-branch') AND r.result = 'merged'
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND r.result = 'merged'
        AND g.tests_total IS NOT NULL
      ORDER BY r.id DESC LIMIT 50`,
     [specId, repoId],

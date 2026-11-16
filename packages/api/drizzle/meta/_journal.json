@@ -589,6 +589,13 @@
       "when": 1794731608617,
       "tag": "0083_daily_digest",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794740000000,
+      "tag": "0084_project_tidy",
+      "breakpoints": true
     }
   ]
 }

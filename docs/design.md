@@ -161,7 +161,7 @@ flowchart TB
             sched["调度器 scheduling/<br/>按依赖边实时算可开工<br/>全局 / 项目 / 仓库并发和预算"]
             queue["作业队列 jobs/（自研）<br/>租约 120s、fencing attempt<br/>幂等键、lock_key、能力标签"]
             stages["阶段推进 stages/<br/>bundle：context 数据、契约 SHA、refs SHA<br/>结果 → 下一阶段或 blocked<br/>联调失败建修复票，最多 2 轮"]
-            fin["收尾与验收 finalize/、acceptance/<br/>final-review / final-fix / final-e2e<br/>验收包"]
+            fin["收尾与验收 finalize/、acceptance/<br/>final-review / final-fix / final-tidy / tidy-merge / final-e2e<br/>验收包"]
             hostjobs["托管编排 host/<br/>open-pr、host-sync（每分钟轮询）<br/>spec-cleanup、pr-ready<br/>按契约关系定合并顺序、draft"]
         end
         logs["运行日志 logs/<br/>~/.afk/logs/实例号/run-n/attempt-n.log"]
@@ -227,7 +227,7 @@ flowchart TB
 | `@afk/api`      | 控制面 | `http/` 四组路由；`planning/`、`tickets/`、`scheduling/`、`jobs/`、`stages/`、`finalize/`、`host/`、`acceptance/`、`logs/`；`db/schema.ts` 15 张表      |
 | `@afk/shared`   | 共用   | 状态机和流转（`spec-state`、`ticket-state`、`stage-flow`、`finalize-flow`）、`runnable`、`branches`、`ticket-import`、OpenAPI 客户端                    |
 | `@afk/worker`   | 执行层 | 循环 `worker.ts`、`executor.ts`；`slots`、`repos`、`snapshots`、`contracts`、`environments`、`push`、`host`                                             |
-| `@afk/pipeline` | 执行层 | `sandcastle`、`agent`、`context`、`gate`、`protected-paths`、`contract-copy`、`trailers`、`merge`、`integration-env`、`e2e`；`prompts/` 里 12 份 prompt |
+| `@afk/pipeline` | 执行层 | `sandcastle`、`agent`、`context`、`gate`、`protected-paths`、`contract-copy`、`trailers`、`merge`、`integration-env`、`e2e`；`prompts/` 里 overlay 加各阶段薄 prompt（含 `final-tidy.md`） |
 | `@afk/host`     | 执行层 | `github-app.ts` 换 installation token，`github.ts` 实现 `types.ts` 里的托管接口                                                                         |
 
 ### 加上 M3–M5 的目标架构
@@ -358,8 +358,8 @@ M2 spec 的 Out of Scope 把 rework、update-branch、trial-merge、多需求并
 | Spec       | 类型（feature / bug / improvement）、正文（to-spec 模板）、状态、每个涉及仓库的集成分支、来源（bug 指向原 spec）                                                                                                                                                                                                                                                                                                                      | 一个需求                                                                                      |
 | Ticket     | 所属 spec、目标仓库、类型（契约 / 实现 / 联调 / 修复 / 系统）、正文、验收标准、会改动的模块（path glob）、状态、blocked 原因码、内容版本号（每版留快照）、契约 SHA（契约票完成后写入）、参考的仓库（`refs`）、联调环境的仓库（`environment`，只有联调票有）                                                                                                                                                                           | 一张票，只对应一个仓库。每次编辑内容版本号加一                                                |
 | Edge       | from、to、类型（blocks / contract）                                                                                                                                                                                                                                                                                                                                                                                                   | 依赖图，允许跨 spec，满足条件见下                                                             |
-| Run        | spec、repo、ticket（可空）、ticket 内容版本、阶段（implement / gate-fix / review / review-fix / merge-fix / e2e / diagnose / update-branch / final-review / final-fix / final-e2e / locate-bug / rework）、用到的契约 SHA（按仓库）、参考快照和联调环境里各仓库的 SHA、agent、模型、分支、起止 commit、commits、耗时（含 agent 报的 `duration_ms` 和 `duration_api_ms`）、token 用量（可空，Cursor 不报）、结果、结构化输出、日志地址 | 每次尝试新增一条，不覆盖。update-branch、收尾、Locate 和返工这类运行不属于某张票，ticket 为空 |
-| Finding    | 来源 run、类型（review / 门禁 / 人工 / PR 评论）、内容、处理结果（已修复 / 未处理 / 进验收包）                                                                                                                                                                                                                                                                                                                                        | review 意见和门禁失败                                                                         |
+| Run        | spec、repo、ticket（可空）、ticket 内容版本、阶段（implement / gate-fix / review / review-fix / merge-fix / e2e / diagnose / update-branch / final-review / final-fix / final-tidy / tidy-merge / final-e2e / locate-bug / rework）、用到的契约 SHA（按仓库）、参考快照和联调环境里各仓库的 SHA、agent、模型、分支、起止 commit、commits、耗时（含 agent 报的 `duration_ms` 和 `duration_api_ms`）、token 用量（可空，Cursor 不报）、结果、结构化输出、日志地址 | 每次尝试新增一条，不覆盖。update-branch、收尾、Locate 和返工这类运行不属于某张票，ticket 为空 |
+| Finding    | 来源 run、类型（review / 门禁 / 人工 / PR 评论）、内容、处理结果（已修复 / 未处理 / 进验收包 / 已由 Tidy 整理）                                                                                                                                                                                                                                                                                                                                        | review 意见和门禁失败                                                                         |
 | Link       | commit SHA ↔ ticket（可空）↔ spec ↔ PR；kind 为 ticket（集成分支）或 pr（默认分支合并）；bug 是 type=bug 的 Spec                                                                                                                                                                                                                                                                                                                      | 追溯和回流的基础，以 commit trailer 为准，见「上下文沉淀与缺陷回流」                          |
 | Job        | 类型、payload、状态、租约持有者、租约到期时间、attempt（fencing token）、幂等键、互斥键（`lock_key`，可空）、需要的 worker 能力                                                                                                                                                                                                                                                                                                       | 见「作业与恢复」                                                                              |
 | GateResult | repo、commit SHA、门禁配置来源 SHA、每条命令的退出码、测试总数、跳过数、日志地址                                                                                                                                                                                                                                                                                                                                                      | 按 commit 存，后续检查用它当基线                                                              |
@@ -527,7 +527,7 @@ flowchart LR
 2. **确认拆分（人）**：在平台页面看依赖图和导入时的告警，确认后 Spec 进入 planned。
 3. **调度**：平台为每个涉及的仓库从 main 建 `spec/<id>/<slug>` 集成分支，把可以开工的票放进队列。
 4. **执行（worker，每张票）**：按「单票执行流水线」跑完 implement → 门禁 → review → 合并 → 合并后门禁，票标为 done，重新计算可以开工的票。
-5. **收尾**：全部票 done 后，对每个仓库的集成分支跑一次整体 code-review 和一次修复（final-review / final-fix，各只跑一次），修复后再过门禁。然后为每个仓库开 PR（`spec/<slug>` → main），生成验收包。
+5. **收尾**：全部票 done 后，对每个仓库的集成分支跑一次整体 code-review 和一次修复（final-review / final-fix，各只跑一次），修复后再过门禁。若项目开着 Tidy、这次 final-review 的 Standards 轴有建议、且这个仓库还没跑过 Tidy，再跑一次 `final-tidy` 和 `tidy-merge`：只做不改变行为的整理，失败就丢掉、照原样收尾。有联调票且分支被改过（final-fix 或 tidy-merge 已合并）时，开 PR 前再跑最终 e2e。然后为每个仓库开 PR（`spec/<slug>` → main），生成验收包。
 6. **验收（人）**：看验收包，在代码托管上按建议顺序合并 PR。PR 上的评论可以拉回平台，生成返工运行（rework）。
 
 ```mermaid
@@ -1170,6 +1170,7 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | implement / fix / rework | `status`（done / cannot-proceed）、`blockedReason`（cannot-proceed 时必填，枚举：`agent-gave-up` / `contract-change-needed`）、`detail`（cannot-proceed 时的说明，自由文本）、`summary`、`acceptance`（验收标准 → 测试名列表）、`uncertainties` |
 | review / final-review    | `verdict`（pass / fix）、`mustFix`（文件、行、问题）、`suggestions`、`uncertainties`                                                                                                                                                            |
+| final-tidy               | `status`（done / cannot-proceed）、`summary`、`tidied`（处理了的 suggestions 下标）、`skipped`（`{ index, reason }`）                                                                                                                           |
 | integration（diagnose）  | `result`（pass / fail）、`failingRepo`（仓库名或 unknown）、`evidence`、`failingTests`                                                                                                                                                          |
 
 `cannot-proceed` 给 agent 一个正当的出口：遇到需要人回答的问题时，输出原因然后结束，而不是停下来等提问被回答。
@@ -1180,11 +1181,12 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 - 公共覆盖层把 skill 里每个"去问人"的地方写死成答案：implement 的"reference 不明确就问"，票就是 `/context/ticket.md`；tdd 的"和用户确认 seams"，spec 里的 seams 已经确认；code-review 的"问固定点"，是 `run.json` 的 `baseSha`，按 skill 原文用三点 diff；code-review 的"问 spec 在哪"，由阶段 prompt 给出。没列到的提问，能撤回的小事自己决定，需要人决定的输出 `cannot-proceed`。覆盖层第一行写明它对应的 skills SHA，守卫测试要求它等于固定的 `SKILLS_SHA` 和快照的 SHA；升级 SHA 时必须回头核对覆盖层。
 - implement：按绝对路径读 `/home/agent/.cursor/skills/implement/SKILL.md` 照做（它是 `disable-model-invocation: true`，模型不会自己调用；agent 也没有 Skill 工具，所以按文件读），**跳过它最后调用 `code-review` 的那一步**，平台另有 review 阶段。tdd 只做红 → 绿，不在循环里重构；每条验收标准都要有测试，结果里带验收对照表。
 - gate-fix、review-fix、final-fix：读 tdd，先写会失败的测试再修；review-fix 和 final-fix 把两个审查轴的 `mustFix` 一起修；不用 `diagnosing-bugs`。merge-fix 不读 skill，只用覆盖层。
+- final-tidy：不读 tdd。读 `/context/review.json` 里 Standards 轴的建议，只挑改动小、局部、不改变行为的去做；不改已有测试和配置，不改测试名。按 `gate` 跑通后再提交。任何失败都丢掉这次整理。
 - review、final-review：跑 `code-review`，固定点是 `baseSha`，diff 用三点 diff。skill 要求 Standards 和 Spec 两个轴用并行子 agent 互相隔离，平台不让 agent 自己开子 agent，而是按轴各开一次 agent 运行（各开新沙箱、各用一条自己的临时分支，各记一条 Run，Run 上标明审查轴 `axis`），每次运行扮演一个轴的子 agent，prompt 写“第 1–3 步已替你做完；你就是第 4 步里这一轴的子 agent”。**票级审查默认只跑 Spec 轴**（项目设置 `ticketReview: spec`）；`ticketReview: both` 时票级也两轴并行，和现在一样。Standards 轴照常在需求级 final-review 跑，那里看的是整份改动。worker 再按第 5 步把跑过的轴并排拼起来，不合并也不重排；没跑的那一轴不出现在拼好的结果和 review-fix 读到的 `review.json` 里。任一轴 invalid-output 或超时，整个阶段按这个结果处理，重试时把这次该跑的轴一起重跑；任一已跑的轴有 `mustFix` 就判 fix。Spec 轴在单票审查里对照 `/context/ticket.md` 和契约（`spec.md` 只是背景），在 final-review 里对照 `spec.md` 和 `tickets.md`。映射：`mustFix` 收文档写明的硬性违规、Spec 轴的缺失或做了一半、做错了；`suggestions` 收所有坏味道；Spec 轴的 scope creep 另记为 `scopeCreep`（意见 `scope-creep`），只进验收包并单独列出，从不触发修复。每条意见带它那次运行的审查轴；review-fix 和 final-fix 读到的 `review.json` 是已跑轴并排的结果加上带轴的全部 `mustFix`，一次处理完。
 - 联调票的 implement 和诊断：只接公共覆盖层，不跑 skill，因为 e2e 是对着已经实现好的服务写的，套不上 tdd 的红 → 绿。
 - **rework**（处理 PR 评论）平台还没有实现；实现时按 review-fix 的方式：读 tdd，先写会失败的测试再改，覆盖层照用。
 - 结构化输出的 `<result>` 格式按阶段写在阶段 prompt 里。
-- prompt 文件在 `packages/pipeline/prompts/`：`overlay.md`、`implement.md`、`integration-implement.md`、`gate-fix.md`、`review-fix.md`、`merge-fix.md`、`final-fix.md`、`review.md`、`final-review.md`、`afk-integration.md`（诊断）。
+- prompt 文件在 `packages/pipeline/prompts/`：`overlay.md`、`implement.md`、`integration-implement.md`、`gate-fix.md`、`review-fix.md`、`merge-fix.md`、`final-fix.md`、`final-tidy.md`、`review.md`、`final-review.md`、`afk-integration.md`（诊断）。
 
 **密钥**：
 

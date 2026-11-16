@@ -76,6 +76,7 @@ export interface paths {
               "update-branch"?: string;
               "merge-fix"?: string;
             };
+            tidy?: boolean;
           };
         };
       };
@@ -147,6 +148,7 @@ export interface paths {
                 "update-branch"?: string;
                 "merge-fix"?: string;
               };
+              tidy: boolean;
               repos: {
                 name: string;
                 url: string;
@@ -213,6 +215,7 @@ export interface paths {
               "update-branch"?: string;
               "merge-fix"?: string;
             };
+            tidy?: boolean;
           };
         };
       };

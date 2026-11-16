@@ -218,6 +218,12 @@ const PASS = {
   uncertainties: [],
   sources: ["AGENTS.md"],
 };
+const TIDY_SKIP = {
+  status: "done" as const,
+  summary: "left the suggestions on the pack",
+  tidied: [] as number[],
+  skipped: [{ index: 0, reason: "demo" }],
+};
 
 // The fake agent: every ticket adds a file named after its branch; the script can be overridden per stage.
 type Script = (
@@ -247,6 +253,7 @@ function deps(
           ctx.stage === "recheck"
         )
           return { output: PASS };
+        if (ctx.stage === "final-tidy") return { output: TIDY_SKIP };
         return {
           files: {
             [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,
@@ -303,8 +310,8 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     });
 
     expect(await stateOf()).toEqual(["1:done", "2:done"]);
-    // implement, gate, review, merge: four jobs per ticket, then the overall review
-    expect(run.jobs).toBe(9);
+    // implement, gate, review, merge: four jobs per ticket, then overall review and Tidy
+    expect(run.jobs).toBe(10);
 
     // the integration branch on "GitHub" has both tickets' work, and main was never touched
     expect(
@@ -369,11 +376,16 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
     expect(seen.map((s) => s.stage).sort()).toEqual([
       "final-review",
       "final-review",
+      "final-tidy",
       "implement",
       "review",
     ]);
     for (const s of seen) {
-      const stage = s.stage as "implement" | "review" | "final-review";
+      const stage = s.stage as
+        | "implement"
+        | "review"
+        | "final-review"
+        | "final-tidy";
       const allowed = (["standards", "spec"] as const).map((axis) =>
         composePrompt(promptFor(stage, { axis })),
       );
@@ -405,6 +417,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "review",
       "final-review",
       "final-review",
+      "final-tidy",
     ]);
     expect(runs.rows.find((r) => r.stage === "implement")?.prompt).toBe(
       seen[0]?.prompt,
@@ -726,6 +739,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       ["merge", "merged"],
       ["final-review", "pass"],
       ["final-review", "pass"],
+      ["final-tidy", "no-commits"],
     ]);
     expect(runs.rows.every((r) => r.finished_at !== null)).toBe(true);
     const gates = await db.pool.query(
@@ -795,6 +809,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "merge:merged",
       "final-review:pass",
       "final-review:pass",
+      "final-tidy:no-commits",
     ]);
     const hashes = await db.pool.query<{ test_cases_hash: string | null }>(
       "SELECT test_cases_hash FROM gate_results WHERE kind = 'gate' ORDER BY id",
@@ -843,6 +858,7 @@ describe("a whole spec with a fake agent", { timeout: 60_000 }, () => {
       "merge:merged",
       "final-review:pass",
       "final-review:pass",
+      "final-tidy:no-commits",
     ]);
   });
 
@@ -1686,7 +1702,7 @@ describe("the overall review of the integration branch", {
     });
     expect(await stateOf()).toEqual(["1:done", "2:done"]);
     expect(await finalization()).toEqual([
-      { step: "final-review", state: "done", blocked_reason: null },
+      { step: "final-tidy", state: "done", blocked_reason: null },
     ]);
     expect(seen.runJson).toMatchObject({
       stage: "final-review",
@@ -2185,11 +2201,11 @@ describe("what the project says about a run", { timeout: 60_000 }, () => {
       heartbeatMs: 20,
     });
     const agent = await db.pool.query(
-      "SELECT DISTINCT skills_sha FROM runs WHERE stage IN ('implement', 'review', 'final-review')",
+      "SELECT DISTINCT skills_sha FROM runs WHERE stage IN ('implement', 'review', 'final-review', 'final-tidy')",
     );
     expect(agent.rows).toEqual([{ skills_sha: "abc1234" }]);
     const gates = await db.pool.query(
-      "SELECT DISTINCT skills_sha FROM runs WHERE stage NOT IN ('implement', 'review', 'final-review', 'fix', 'rework', 'diagnose')",
+      "SELECT DISTINCT skills_sha FROM runs WHERE stage NOT IN ('implement', 'review', 'final-review', 'final-tidy', 'fix', 'rework', 'diagnose')",
     );
     expect(gates.rows.every((r) => r.skills_sha === null)).toBe(true);
     expect(gates.rows.length).toBeGreaterThan(0);
@@ -2345,6 +2361,7 @@ describe("token usage on a run", { timeout: 60_000 }, () => {
     const rawLines = [usageLine(ctx.stage === "review" ? 50 : 10)];
     if (ctx.stage === "review" || ctx.stage === "final-review")
       return { output: PASS, rawLines };
+    if (ctx.stage === "final-tidy") return { output: TIDY_SKIP, rawLines };
     return {
       files: {
         [`src/agent-${ctx.branch.split("/").at(-1)}.ts`]: `export const ${ctx.stage.replace("-", "")} = 1;\n`,

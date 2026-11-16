@@ -49,6 +49,8 @@ const FINAL_STAGES = new Set([
   "final-review",
   "final-fix",
   "final-merge",
+  "final-tidy",
+  "tidy-merge",
   "final-e2e",
 ]);
 

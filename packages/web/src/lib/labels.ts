@@ -14,6 +14,8 @@ export const stageLabel: Record<string, string> = {
   "final-review": "终审",
   "final-fix": "终审修复",
   "final-merge": "最终合并",
+  "final-tidy": "Tidy",
+  "tidy-merge": "Tidy 合并",
   "update-branch": "合 main",
 };
 

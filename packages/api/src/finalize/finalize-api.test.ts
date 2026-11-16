@@ -52,8 +52,11 @@ const ticket = (key: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-async function runningSpec(tickets: Record<string, unknown>[]) {
-  const created = await call("POST", "/projects", { name: "shop" });
+async function runningSpec(
+  tickets: Record<string, unknown>[],
+  project: Record<string, unknown> = {},
+) {
+  const created = await call("POST", "/projects", { name: "shop", ...project });
   await call("POST", `/projects/${created.body.id}/repos`, {
     url: "git@x:backend",
     name: "backend",
@@ -1080,5 +1083,229 @@ describe("when it goes wrong", () => {
     await db.pool.query("UPDATE specs SET state = 'finalizing'");
     expect((await call("POST", "/specs/1/final/retry")).status).toBe(409);
     expect((await call("POST", "/specs/99/final/retry")).status).toBe(404);
+  });
+});
+
+const STANDARDS_SUGGESTIONS = {
+  outcome: "pass",
+  run: {
+    axis: "standards",
+    output: {
+      verdict: "pass",
+      mustFix: [],
+      suggestions: ["extract helper", "drop unused import"],
+      uncertainties: [],
+    },
+  },
+  findings: [
+    { kind: "suggestion", body: "extract helper" },
+    { kind: "suggestion", body: "drop unused import" },
+  ],
+};
+
+const TIDY_DONE = {
+  outcome: "done",
+  run: {
+    output: {
+      status: "done",
+      summary: "extracted a helper",
+      tidied: [0],
+      skipped: [{ index: 1, reason: "would touch many files" }],
+    },
+  },
+};
+
+const openPr = async () =>
+  (
+    await db.pool.query(
+      "SELECT type FROM jobs WHERE type = 'open-pr' ORDER BY id",
+    )
+  ).rows;
+const blockedFinal = async () =>
+  ((await call("GET", "/blocked")).body.finalizations as Json[]) ?? [];
+const wrapUpMerged = async () =>
+  (
+    await db.pool.query(
+      `SELECT stage, result, head_sha FROM runs
+       WHERE ticket_id IS NULL AND result = 'merged' ORDER BY id`,
+    )
+  ).rows;
+
+describe("Tidy after wrap-up", () => {
+  async function toFinalReview() {
+    await runningSpec([ticket("a")]);
+    await allTicketsDone();
+  }
+
+  it("runs final-tidy and tidy-merge when the Standards axis has suggestions, then opens the PR", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    const tidy = await step("final-tidy", TIDY_DONE);
+    expect(tidy.lockKey).toBeNull();
+    const merge = await step("tidy-merge", {
+      outcome: "merged",
+      headSha: "tidied",
+    });
+    expect(merge.lockKey).toBe("integration:1:spec/s");
+    expect(await fin()).toEqual([
+      { step: "tidy-merge", state: "done", blocked_reason: null },
+    ]);
+    expect((await jobs()).map((j: Json) => j.stage)).toEqual([
+      "final-review",
+      "final-tidy",
+      "tidy-merge",
+    ]);
+    expect(await spec()).toBe("finalizing");
+    expect(await claim()).toBeNull();
+    expect(await openPr()).toHaveLength(1);
+    expect(await blockedFinal()).toEqual([]);
+    const findings = await db.pool.query(
+      "SELECT body, resolution FROM findings ORDER BY id",
+    );
+    expect(findings.rows).toEqual([
+      { body: "extract helper", resolution: "refactored" },
+      { body: "drop unused import", resolution: "acceptance-pack" },
+    ]);
+  });
+
+  it("a tidy-merge gate failure still opens the PR, does not block, and leaves the integration head", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await step("final-tidy", TIDY_DONE);
+    await step("tidy-merge", { outcome: "gate-failed" });
+    expect(await fin()).toEqual([
+      { step: "tidy-merge", state: "done", blocked_reason: null },
+    ]);
+    expect(await blockedFinal()).toEqual([]);
+    expect(await openPr()).toHaveLength(1);
+    expect(await wrapUpMerged()).toEqual([]);
+  });
+
+  it("a tidy-merge conflict still opens the PR, does not block, and leaves the integration head", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await step("final-tidy", TIDY_DONE);
+    await step("tidy-merge", { outcome: "conflict" });
+    expect(await fin()).toEqual([
+      { step: "tidy-merge", state: "done", blocked_reason: null },
+    ]);
+    expect(await blockedFinal()).toEqual([]);
+    expect(await openPr()).toHaveLength(1);
+    expect(await wrapUpMerged()).toEqual([]);
+  });
+
+  it("agent-gave-up on final-tidy still opens the PR, does not block, and skips tidy-merge", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await step("final-tidy", { outcome: "agent-gave-up" });
+    expect(await fin()).toEqual([
+      { step: "final-tidy", state: "done", blocked_reason: null },
+    ]);
+    expect((await jobs()).map((j: Json) => j.stage)).toEqual([
+      "final-review",
+      "final-tidy",
+    ]);
+    expect(await blockedFinal()).toEqual([]);
+    expect(await openPr()).toHaveLength(1);
+    expect(await wrapUpMerged()).toEqual([]);
+    expect(await claim()).toBeNull();
+  });
+
+  it("discards a final-tidy that hits Recheck: no Recheck, no merge, the PR still opens", async () => {
+    await toFinalReview();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    await step("final-tidy", {
+      outcome: "done",
+      run: {
+        output: {
+          status: "done",
+          summary: "renamed a test",
+          tidied: [0],
+          skipped: [],
+        },
+        recheck: {
+          hit: true,
+          paths: ["src/a.test.ts"],
+          fromSha: "aaa",
+          toSha: "bbb",
+        },
+      },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-tidy", state: "done", blocked_reason: null },
+    ]);
+    expect((await jobs()).map((j: Json) => j.stage)).toEqual([
+      "final-review",
+      "final-tidy",
+    ]);
+    expect(await blockedFinal()).toEqual([]);
+    expect(await openPr()).toHaveLength(1);
+    expect(await wrapUpMerged()).toEqual([]);
+    expect(await claim()).toBeNull();
+  });
+
+  it("skips Tidy when the project setting is off", async () => {
+    await runningSpec([ticket("a")], { tidy: false });
+    await allTicketsDone();
+    await step("final-review", STANDARDS_SUGGESTIONS);
+    expect(await fin()).toEqual([
+      { step: "final-review", state: "done", blocked_reason: null },
+    ]);
+    expect((await jobs()).map((j: Json) => j.stage)).toEqual(["final-review"]);
+    expect(await openPr()).toHaveLength(1);
+    expect(await claim()).toBeNull();
+  });
+
+  it("skips Tidy when the Standards axis has no suggestions", async () => {
+    await toFinalReview();
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "standards",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+        },
+      },
+    });
+    expect(await fin()).toEqual([
+      { step: "final-review", state: "done", blocked_reason: null },
+    ]);
+    expect((await jobs()).map((j: Json) => j.stage)).toEqual(["final-review"]);
+    expect(await openPr()).toHaveLength(1);
+  });
+
+  it("goes to final-tidy after a merged final-fix when tidy is wanted", async () => {
+    await toFinalReview();
+    await step("final-review", {
+      outcome: "fix",
+      run: {
+        axis: "standards",
+        output: {
+          verdict: "fix",
+          mustFix: [
+            {
+              file: "src/a.ts",
+              line: 3,
+              problem: "a and b disagree on the name",
+            },
+          ],
+          suggestions: ["extract helper"],
+          uncertainties: [],
+        },
+      },
+      findings: [
+        { kind: "must-fix", body: "src/a.ts:3 a and b disagree on the name" },
+        { kind: "suggestion", body: "extract helper" },
+      ],
+    });
+    await step("final-fix", { outcome: "done" });
+    await step("final-merge", { outcome: "merged", headSha: "settled" });
+    expect((await claim())?.payload.stage).toBe("final-tidy");
+    expect(await fin()).toEqual([
+      { step: "final-tidy", state: "active", blocked_reason: null },
+    ]);
   });
 });

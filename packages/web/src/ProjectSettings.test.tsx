@@ -17,6 +17,7 @@ type ProjectDetail = {
   feishuChatId: string | null;
   ticketReview: TicketReviewMode;
   stageModels: StageModels;
+  tidy: boolean;
   repos: {
     name: string;
     url: string;
@@ -33,6 +34,7 @@ const projectDetail = (repos: ProjectDetail["repos"]): ProjectDetail => ({
   feishuChatId: "oc_shop",
   ticketReview: "spec",
   stageModels: {},
+  tidy: true,
   repos,
 });
 
@@ -203,6 +205,28 @@ describe("the project Feishu page", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存审查设置" }));
     await waitFor(() => expect(fake.calls).toContain("PATCH /projects/1"));
     expect(project.ticketReview).toBe("both");
+  });
+
+  it("lets you see and change tidy", async () => {
+    const project = projectDetail([]);
+    const fake = fakeServer({
+      ...workbench(),
+      "GET /projects/1": () => ({ json: project }),
+      "PATCH /projects/1": ({ body }) => {
+        const next = (body as { tidy?: boolean }).tidy;
+        if (next !== undefined) project.tidy = next;
+        return { json: { id: 1 } };
+      },
+    });
+    renderWithApp(<ProjectSettings projectId={1} />, fake);
+    const box = (await screen.findByRole("checkbox", {
+      name: "Tidy",
+    })) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole("button", { name: "保存 Tidy" }));
+    await waitFor(() => expect(fake.calls).toContain("PATCH /projects/1"));
+    expect(project.tidy).toBe(false);
   });
 
   it("lets you see and change stageModels", async () => {
