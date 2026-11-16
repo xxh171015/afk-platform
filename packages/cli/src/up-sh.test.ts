@@ -23,6 +23,9 @@ const execFileAsync = promisify(execFile);
 // host-credential behaviour is what these tests see.
 
 const upSh = fileURLToPath(new URL("../../../scripts/up.sh", import.meta.url));
+const restartSh = fileURLToPath(
+  new URL("../../../scripts/restart.sh", import.meta.url),
+);
 
 const TOKEN = "glpat-test-token";
 
@@ -318,6 +321,7 @@ esac
     });
     return {
       home,
+      env,
       output: () => output,
       child,
     };
@@ -370,6 +374,144 @@ exit 1`;
     expect(existsSync(`/proc/${pid}`)).toBe(true);
     expect(child.exitCode).toBeNull();
   });
+
+  it("restart.sh api replaces only the API process and leaves the worker pid unchanged", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home, env, output, child } = stack({ api: hold, worker: hold });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiPid = join(home, "run", "api.pid");
+    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const worker = readFileSync(workerPid, "utf8").trim();
+    const api = readFileSync(apiPid, "utf8").trim();
+    expect(worker).toMatch(/^\d+$/);
+    expect(api).toMatch(/^\d+$/);
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn("bash", [restartSh, "api"], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, `${result.text}\n${output()}`).toBe(0);
+    await waitUntil("api pid changed", () => {
+      if (!existsSync(apiPid)) return false;
+      const next = readFileSync(apiPid, "utf8").trim();
+      return next !== api && existsSync(`/proc/${next}`);
+    });
+    expect(readFileSync(workerPid, "utf8").trim()).toBe(worker);
+    expect(existsSync(`/proc/${worker}`)).toBe(true);
+    expect(existsSync(`/proc/${api}`)).toBe(false);
+    expect(child.exitCode).toBeNull();
+    expect(output()).not.toMatch(/stopping the rest/);
+  });
+
+  it("restart.sh worker starts a new worker, drains the old one with SIGUSR2, and leaves the rest running", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const workerHold = `nfile="$AFK_HOME/worker-starts"
+n=$(($(cat "$nfile" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$nfile"
+echo $$ > "$AFK_HOME/worker-live.pid"
+trap 'exit 0' INT TERM
+trap 'echo usr2 > "$AFK_HOME/worker-usr2"; exit 0' USR2
+while true; do sleep 1; done`;
+    const { home, env, output, child } = stack({
+      api: hold,
+      worker: workerHold,
+    });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiPid = join(home, "run", "api.pid");
+    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const oldWorker = readFileSync(workerPid, "utf8").trim();
+    const api = readFileSync(apiPid, "utf8").trim();
+    expect(oldWorker).toMatch(/^\d+$/);
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn("bash", [restartSh, "worker"], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, `${result.text}\n${output()}`).toBe(0);
+    await waitUntil("new worker", () => {
+      if (!existsSync(workerPid)) return false;
+      const next = readFileSync(workerPid, "utf8").trim();
+      return next !== oldWorker && existsSync(`/proc/${next}`);
+    });
+    const usr2 = join(home, "worker-usr2");
+    await waitUntil("old worker got SIGUSR2", () => existsSync(usr2));
+    expect(readFileSync(usr2, "utf8")).toMatch(/usr2/);
+    await waitUntil(
+      "old worker exited",
+      () => !existsSync(`/proc/${oldWorker}`),
+    );
+    expect(readFileSync(apiPid, "utf8").trim()).toBe(api);
+    expect(existsSync(`/proc/${api}`)).toBe(true);
+    expect(child.exitCode).toBeNull();
+    expect(output()).not.toMatch(/stopping the rest/);
+  });
+});
+
+describe("scripts/restart.sh", () => {
+  async function runRestart(args: string[], env: Record<string, string>) {
+    try {
+      const result = await execFileAsync("bash", [restartSh, ...args], {
+        encoding: "utf8",
+        timeout: 10_000,
+        env: {
+          PATH: env.PATH ?? process.env.PATH,
+          HOME: env.HOME,
+          AFK_HOME: env.AFK_HOME,
+        },
+      });
+      return { status: 0, stdout: result.stdout, stderr: result.stderr };
+    } catch (error) {
+      const failure = error as {
+        code?: number | string;
+        stdout?: string;
+        stderr?: string;
+      };
+      return {
+        status: typeof failure.code === "number" ? failure.code : null,
+        stdout: failure.stdout ?? "",
+        stderr: failure.stderr ?? "",
+      };
+    }
+  }
+
+  it("exits non-zero and says to run scripts/up.sh when up.sh is not running", async () => {
+    const home = tempDir("afk-restart-none-");
+    const result = await runRestart(["worker"], {
+      HOME: home,
+      AFK_HOME: home,
+    });
+    const text = `${result.stdout}${result.stderr}`;
+    expect(result.status, text).not.toBe(0);
+    expect(text).toMatch(/scripts\/up\.sh/);
+  });
 });
 
 describe("restart docs", () => {
@@ -388,10 +530,57 @@ describe("restart docs", () => {
     expect(section).toMatch(/自动拉起|重新拉起/);
   });
 
+  it("the operations manual tells how to restart without losing work, and that Ctrl-C abandons jobs", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/operations-manual.md"),
+      "utf8",
+    );
+    const section = text.slice(
+      text.indexOf("### 1.1"),
+      text.indexOf("### 1.2"),
+    );
+    expect(section).toMatch(/scripts\/restart\.sh api/);
+    expect(section).toMatch(/scripts\/restart\.sh web/);
+    expect(section).toMatch(/scripts\/restart\.sh worker/);
+    expect(section).toMatch(/Ctrl-C/);
+    expect(section).toMatch(/放弃/);
+  });
+
+  it("the operations manual restarts the worker with restart.sh, not up.sh", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/operations-manual.md"),
+      "utf8",
+    );
+    const section9 = text.slice(text.indexOf("## 9."), text.indexOf("## 附录"));
+    expect(section9).toMatch(/scripts\/restart\.sh worker/);
+    expect(section9).not.toMatch(/scripts\/up\.sh.*重启/);
+    expect(text).not.toMatch(/改了 worker 就用 `scripts\/up\.sh` 重启/);
+  });
+
   it("the design says the worker keeps a job when it cannot reach the API, and the API renews leases at start", () => {
     const text = readFileSync(join(repoRoot, "docs/design.md"), "utf8");
     expect(text).toMatch(/连不上 API 时不放弃作业/);
     expect(text).toMatch(/API 启动时.*续.*租约/);
+  });
+
+  it("the design describes draining on SIGUSR2 and rolling worker restart", () => {
+    const text = readFileSync(join(repoRoot, "docs/design.md"), "utf8");
+    expect(text).toMatch(/SIGUSR2/);
+    expect(text).toMatch(/排空/);
+    expect(text).toMatch(/滚动重启|scripts\/restart\.sh worker/);
+  });
+
+  it("CLAUDE.md restarts worker and API with restart.sh, not up.sh", () => {
+    const text = readFileSync(join(repoRoot, "CLAUDE.md"), "utf8");
+    const section = text.slice(
+      text.indexOf("## 本机平台栈"),
+      text.indexOf("## 在这个仓库里规划"),
+    );
+    expect(section).toMatch(/scripts\/restart\.sh worker/);
+    expect(section).toMatch(/scripts\/restart\.sh api/);
+    expect(section).not.toMatch(
+      /改 `packages\/pipeline\/skills` 或 pipeline 后 \*\*重启 worker\*\*（`scripts\/up\.sh`）/,
+    );
   });
 
   it("optimization plan 8.15 records the restart waste and what this spec did not do", () => {

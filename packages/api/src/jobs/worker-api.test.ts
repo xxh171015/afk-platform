@@ -60,6 +60,19 @@ describe("claiming", () => {
     expect((await worker("w1").claim()).body.job).not.toBeNull();
     expect((await worker("w2").claim()).body.job).toBeNull();
   });
+
+  it("does not claim a slot job when takeSlot is false, but still claims host-sync", async () => {
+    await enqueue("slot-job");
+    await enqueueJob(db.pool, {
+      type: "host-sync",
+      idempotencyKey: "project-1:host-sync",
+      requiredCapabilities: ["host"],
+      payload: { projectId: 1 },
+    });
+    const reply = await worker("w1", ["host"]).claim({ takeSlot: false });
+    expect(reply.status).toBe(200);
+    expect(reply.body.job?.type).toBe("host-sync");
+  });
 });
 
 describe("working a claimed job", () => {

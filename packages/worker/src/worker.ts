@@ -41,6 +41,7 @@ export interface WorkerOptions {
   concurrency?: number; // jobs at once; no more than there are slots
   stopWhenIdle?: boolean; // return as soon as a claim finds nothing (tests, one-shot runs)
   signal?: AbortSignal; // stop: claim nothing more and abandon the jobs in hand
+  drain?: AbortSignal; // SIGUSR2: claim nothing more; finish the jobs in hand and then return
   log?: (line: string) => void;
   // Tests inject a stand-in for executeStage (the fake runner). Production never sets this.
   runStage?: (context: {
@@ -79,19 +80,53 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     );
   });
 
+function occupiesSlot(type: string): boolean {
+  if ((HOST_JOB_TYPES as readonly string[]).includes(type)) return false;
+  if (type === TRIAL_MERGE_JOB || type === PLANNING_COMMIT_JOB) return false;
+  if (type === READINESS_GATE_JOB) return false;
+  return true;
+}
+
 export async function runWorker(
   options: WorkerOptions,
 ): Promise<{ jobs: number }> {
   let jobs = 0;
-  const claim = () =>
-    options.api.claim([
-      ...(options.capabilities ?? []),
-      ...(options.host ? [HOST_CAPABILITY] : []),
-    ]);
+  const capabilities = [
+    ...(options.capabilities ?? []),
+    ...(options.host ? [HOST_CAPABILITY] : []),
+  ];
+  const claim = (takeSlot: boolean) =>
+    options.api.claim(capabilities, { takeSlot });
+  const idle = () => {
+    const signals = [options.signal, options.drain].filter(
+      (s): s is AbortSignal => s !== undefined,
+    );
+    return signals.length > 0 ? AbortSignal.any(signals) : undefined;
+  };
+  let reserved = 0;
+  let reserveGate = Promise.resolve();
+  const decideTakeSlot = async (): Promise<boolean> => {
+    if (!options.executor.slots?.idleCount) return true;
+    const next = reserveGate.then(async () => {
+      const free = await options.executor.slots.idleCount();
+      if (free > reserved) {
+        reserved += 1;
+        return true;
+      }
+      return false;
+    });
+    reserveGate = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
   const loop = async () => {
     let lastDiskLevel: DiskLevel | undefined;
-    while (!options.signal?.aborted) {
+    while (!options.signal?.aborted && !options.drain?.aborted) {
       let job: ClaimedJob | null;
+      let takeSlot = true;
+      let heldReservation = false;
       try {
         if (options.disk) {
           const free = await options.disk.free();
@@ -113,25 +148,30 @@ export async function runWorker(
             options.log?.(
               `disk ${formatGib(free)} free: not claiming until above ${formatGib(options.disk.stopBelow)}`,
             );
-            await sleep(options.pollMs ?? 2_000, options.signal);
+            await sleep(options.pollMs ?? 2_000, idle());
             continue;
           }
         }
-        job = await claim();
+        takeSlot = await decideTakeSlot();
+        heldReservation = takeSlot && options.executor.slots?.idleCount != null;
+        job = await claim(takeSlot);
       } catch (error) {
+        if (heldReservation) reserved -= 1;
         // The API or its database is down for a moment (Docker restarting, say): wait and ask again. Exiting
         // would also abandon the jobs the other loops are running.
         options.log?.(`claim failed, retrying: ${String(error)}`);
-        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, options.signal);
+        await sleep(options.retryMs ?? DEFAULT_RETRY_MS, idle());
         continue;
       }
+      if (heldReservation && (!job || !occupiesSlot(job.type))) reserved -= 1;
       if (!job) {
-        if (options.stopWhenIdle) return;
-        await sleep(options.pollMs ?? 2_000, options.signal);
+        if (options.stopWhenIdle || options.drain?.aborted) return;
+        await sleep(options.pollMs ?? 2_000, idle());
         continue;
       }
       jobs += 1;
       await processJob(options, job);
+      if (heldReservation && occupiesSlot(job.type)) reserved -= 1;
     }
   };
   await Promise.all(Array.from({ length: options.concurrency ?? 1 }, loop));

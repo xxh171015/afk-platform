@@ -25,7 +25,10 @@ export interface ClaimedJob {
 export type Holding = "held" | "lost";
 
 export interface WorkerApi {
-  claim(capabilities: string[]): Promise<ClaimedJob | null>;
+  claim(
+    capabilities: string[],
+    opts?: { takeSlot?: boolean },
+  ): Promise<ClaimedJob | null>;
   heartbeat(job: ClaimedJob): Promise<Holding>;
   prePush(job: ClaimedJob): Promise<Holding>;
   bundle(job: ClaimedJob): Promise<Bundle | "lost">;
@@ -78,9 +81,13 @@ export function createWorkerApi(
     body: { workerId, attempt: job.attempt },
   });
   return {
-    async claim(capabilities) {
+    async claim(capabilities, opts) {
       const { data, response } = await client.POST("/worker/jobs/claim", {
-        body: { workerId, capabilities },
+        body: {
+          workerId,
+          capabilities,
+          ...(opts?.takeSlot === false ? { takeSlot: false } : {}),
+        },
       });
       if (!data) throw new Error(`claim failed: HTTP ${response.status}`);
       return data.job;

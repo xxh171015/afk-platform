@@ -1,7 +1,19 @@
-import type { JobState } from "@afk/shared";
+import {
+  HOST_JOB_TYPES,
+  type JobState,
+  PLANNING_COMMIT_JOB,
+  TRIAL_MERGE_JOB,
+} from "@afk/shared";
 import type pg from "pg";
 import { AGENT_JOB_TYPE, probeHandedOut } from "../agents-pause.ts";
 import { applyOrigin } from "../events/origin.ts";
+
+const SLOTLESS_JOB_TYPES: string[] = [
+  ...HOST_JOB_TYPES,
+  TRIAL_MERGE_JOB,
+  PLANNING_COMMIT_JOB,
+  "readiness-gate",
+];
 
 // The job queue lives on the `jobs` table (docs/specs/m1-platform.md「作业队列」).
 // Every function takes `now` so lease expiry is decided by the caller's clock, not by waiting.
@@ -70,6 +82,7 @@ export interface ClaimRequest {
   capabilities: string[];
   now: Date;
   leaseSeconds: number;
+  takeSlot?: boolean;
 }
 
 // A job belongs to a project through whatever id its payload carries (host-sync has projectId, most
@@ -128,10 +141,18 @@ export async function claimJob(
              NOT EXISTS (SELECT 1 FROM jobs h WHERE h.lock_key = j.lock_key AND h.state = 'running' AND h.lease_expires_at > $4)
              -- ... and nothing older is still waiting for it (first in, first out)
              AND NOT EXISTS (SELECT 1 FROM jobs e WHERE e.lock_key = j.lock_key AND e.state = 'queued' AND e.id < j.id)))
+           AND ($5::boolean OR j.type = ANY($6::text[]))
          ORDER BY COALESCE(p.last_claimed_at, '-infinity'::timestamptz), j.id
          FOR UPDATE OF j SKIP LOCKED LIMIT 1)
        RETURNING ${COLUMNS}`,
-      [request.workerId, leaseExpiresAt, request.capabilities, request.now],
+      [
+        request.workerId,
+        leaseExpiresAt,
+        request.capabilities,
+        request.now,
+        request.takeSlot !== false,
+        SLOTLESS_JOB_TYPES,
+      ],
     );
     const job = (rows[0] as LeasedJob | undefined) ?? null;
     if (job?.type === AGENT_JOB_TYPE)
