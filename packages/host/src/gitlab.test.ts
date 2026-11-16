@@ -475,6 +475,18 @@ describe("humanComments", () => {
     gitlab.addNote(1, { username: "alice", body: "from a person" });
     expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
   });
+
+  it("does not count bot notes", async () => {
+    const a = adapter();
+    await open(a);
+    gitlab.addNote(1, { username: "alice", body: "from a person" });
+    gitlab.addNote(1, {
+      username: "renovate-bot",
+      body: "bump",
+      bot: true,
+    });
+    expect((await a.getPullRequest({ repo, number: 1 })).humanComments).toBe(1);
+  });
 });
 
 describe("deleteBranch", () => {
