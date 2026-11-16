@@ -1,4 +1,9 @@
-import { type AutoMergePull, autoMerge } from "@afk/shared";
+import {
+  type AutoMergePull,
+  autoMerge,
+  type MergePolicy,
+  parseMergePolicy,
+} from "@afk/shared";
 import type pg from "pg";
 import { enqueueAutoMerge } from "./host-jobs.ts";
 
@@ -31,6 +36,77 @@ function asPull(row: PullRow): AutoMergePull {
     conflictsWithDefault: row.conflicts_with_default === true,
     humanComments: row.human_comments ?? 0,
     headSha: row.head_sha,
+  };
+}
+
+export type AutoMergeEventView = {
+  type: "auto-merged" | "auto-merge-failed";
+  reason: string | null;
+};
+
+export type AutoMergeView = {
+  policy: MergePolicy;
+  willMerge: boolean;
+  mergeAt: string | null;
+  reason: string | null;
+  event: AutoMergeEventView | null;
+};
+
+export async function autoMergeViewOf(
+  pool: Pick<pg.Pool, "query">,
+  specId: number,
+  now: Date,
+): Promise<AutoMergeView> {
+  const spec = await pool.query<{
+    type: string;
+    state: string;
+    merge_policy: string | null;
+  }>(
+    `SELECT s.type, s.state, p.merge_policy
+     FROM specs s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+    [specId],
+  );
+  const row = spec.rows[0];
+  const mergePolicy = row?.merge_policy;
+  const pulls = await pool.query<PullRow>(
+    `SELECT id, state, draft, ci, review, conflicts_with_default, human_comments, head_sha
+     FROM pull_requests WHERE spec_id = $1 ORDER BY id`,
+    [specId],
+  );
+  const pack = await pool.query<{
+    content: { needsDecision?: { kind?: string }[] } | null;
+  }>("SELECT content FROM acceptance_packs WHERE spec_id = $1", [specId]);
+  const opened = await pool.query<{ at: Date | null }>(
+    `SELECT min(e.at) AS at FROM events e
+     WHERE e.spec_id = $1 AND e.type = 'spec' AND e.to_state = 'awaiting-review'`,
+    [specId],
+  );
+  const existing = await pool.query(
+    `SELECT 1 FROM jobs WHERE type = 'auto-merge' AND (payload->>'specId')::int = $1 LIMIT 1`,
+    [specId],
+  );
+  const event = await pool.query<AutoMergeEventView>(
+    `SELECT type, reason FROM events
+     WHERE spec_id = $1 AND type IN ('auto-merged', 'auto-merge-failed')
+     ORDER BY id DESC LIMIT 1`,
+    [specId],
+  );
+  const forecast = autoMerge({
+    mergePolicy,
+    specType: row?.type ?? "",
+    specState: row?.state ?? "",
+    pullRequests: pulls.rows.map(asPull),
+    needsDecision: pack.rows[0]?.content?.needsDecision ?? [],
+    awaitingReviewAt: opened.rows[0]?.at ?? null,
+    hadAutoMergeJob: (existing.rowCount ?? 0) > 0,
+    now,
+  });
+  return {
+    policy: parseMergePolicy(mergePolicy),
+    willMerge: forecast.willMerge,
+    mergeAt: forecast.willMerge ? forecast.mergeAt.toISOString() : null,
+    reason: forecast.willMerge ? null : forecast.reason,
+    event: event.rows[0] ?? null,
   };
 }
 
