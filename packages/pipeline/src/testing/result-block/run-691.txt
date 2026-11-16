@@ -1,0 +1,38 @@
+I'll start by reading the ticket, spec, run context, and the implement skill so the work stays aligned with this stage.Ticket T-115 is about repairing invalid agent results instead of rerunning the stage. Next I’ll read TDD, prior decisions, and the current runner/result-fix code.I'll inspect how runs are stored, how the fake runner works, and how follow-main Recheck is wired so the repair path can sit on the same seams.Seams are the existing FakeAgentRunner tests plus worker implement, final-review, and follow-main Recheck. I’ll write the first failing test, then implement just enough to make it pass.The first test is red. I’ll add the repair prompt, recovery helper, and FakeAgentRunner path so an invalid result can be repaired.Slice 1 is green. Next I’ll add the normalization test, then the remaining FakeAgentRunner cases.The still-invalid case passed as an intentional regression. Next I’ll add the no-`<result>`-tag test, which should fail until we use the last assistant message.Stage tests pass. Next I’ll wire Sandcastle recovery, persist `resultFix` on the Run, and add the remaining tests and docs.Structured output that fails schema is recovered before the stage fails: first by the existing normalize pass (`resultFix: "normalized"`), then by a 3-minute format-repair session that keeps the original commits and adds repair tokens (`resultFix: "repaired"`). If repair still fails, `invalid-output` is unchanged (ticket/wrap-up auto-retry once; follow-main Recheck still pauses). `resultFix` is stored on the Run and returned from ticket and run views.
+
+<result>
+{
+  "status": "done",
+  "summary": "结构化结果不合格时先规范化、再起一次 3 分钟修格式会话，保留原 commits 并在 Run 上记下 resultFix；修不好才走原来的 invalid-output。",
+  "acceptance": {
+    "假 runner：第一次输出无效、修格式输出有效 → 阶段 done，`commits` 是第一次运行的，Run 上有 `resultFix: \"repaired\"`，token 用量包含修格式那次": ["an invalid result that a format-repair run can fix keeps the original commits, sets resultFix repaired, and adds the repair tokens"],
+    "假 runner：输出经规范化就有效 → 阶段 done，`resultFix: \"normalized\"`，没有起修格式运行": ["a result that is valid after normalization is done with resultFix normalized and does not start a format-repair run"],
+    "假 runner：修格式也无效 → invalid-output，后续和现在一样（自动重试一次）": ["a result that is still invalid after format-repair is invalid-output"],
+    "假 runner：没有 `<result>` 标签 → 用最后一条消息修格式": ["a run with no result tag uses the last assistant message as the text to repair"],
+    "票的 implement、需求收尾的 final-review、跟进 main 之后的 Recheck，各有一条测试证明修格式生效": [
+      "an invalid result that format-repair fixes is done with the first run's commits, resultFix repaired, and tokens from both runs",
+      "final-review: an invalid result that format-repair fixes is pass with resultFix repaired",
+      "Recheck: an invalid result that format-repair fixes is pass with resultFix repaired"
+    ],
+    "修格式的提示词通过「不许写死命令」的扫描": ["names no concrete build or test command; a mention of AGENTS.md is not a violation"]
+  },
+  "decisions": [
+    {
+      "kind": "choice",
+      "text": "Seams are FakeAgentRunner (agent.test.ts) plus worker implement/recheck and pipeline runReview, matching spec Testing Decisions. SandcastleAgentRunner implements the same recovery; tests do not call real Sandcastle."
+    },
+    {
+      "kind": "choice",
+      "text": "The still-invalid-after-repair test passed on first run as a regression of the existing invalid-output path (the repair session returns the same unusable output)."
+    },
+    {
+      "kind": "choice",
+      "text": "The writeFacts/GET resultFix persistence test was added after the column was wired, as regression coverage for recording normalized vs repaired on the Run."
+    },
+    {
+      "kind": "conflict",
+      "text": "票 What to build 第 3 点写修不好按现在 invalid-output 处理（自动重试一次），同时又写跟进 main 之后的 Recheck 现在一判无效就暂停叫人。选 Recheck 维持现有立刻暂停（修好格式则 pass 并继续）；票流水线和需求收尾的 invalid-output 仍自动重试一次。"
+    }
+  ]
+}
+</result>

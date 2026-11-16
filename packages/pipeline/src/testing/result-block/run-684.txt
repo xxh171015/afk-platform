@@ -1,0 +1,30 @@
+I'll start by reading the ticket, spec, run context, and the implement skill so I can follow the stage steps without asking anyone.Ticket T-112 is about making each prompt’s result example pass its schema, and tightening overlay `decisions` so `ref` is only for `deferred`. Next I’ll read TDD, existing tests, and the prompt files.I'll inspect the overlay, prompt result blocks, and how stages map onto schemas so the new test can reuse that mapping.I'll add the overlay `ref`-only-for-`deferred` test first so it fails, then implement just enough to make that pass.The overlay test failed as expected; the examples-vs-schema test already passes, so I’ll treat that as a regression net and next fix the overlay wording.Overlay wording is green. Next I’ll add a field-shape test that should fail, then document those shapes in each prompt.Field-shape test is red. I’ll document each result field’s shape in the stage prompts so that test can pass.Full tests passed. Lint only wants single-quoted strings in those assertions, so I’ll match that and re-run it.每个阶段提示词里的 `<result>` 示例现在都会按 `agent.ts` 里对应的 schema 校验；覆盖层把 `decisions` 写成 `{ kind, text }`，只有 `deferred` 才带 `ref`；各提示词的结果说明补上了字段形状。绑定 skills SHA 没动。
+
+门禁：typecheck、2892 个测试、lint 都通过。提交 `9222d17`。
+
+<result>
+{
+  "status": "done",
+  "summary": "每个阶段提示词的 <result> 示例都按对应 schema 校验通过；覆盖层写明 decisions 是 { kind, text }、ref 只给 deferred；各提示词补上了字段形状。",
+  "acceptance": {
+    "新测试覆盖每个带 `<result>` 示例的提示词，全部通过；把某个示例里的 `mustFix` 改成字符串时，测试失败": ["every stage prompt's <result> example passes that stage's schema"],
+    "覆盖层写明 `ref` 只给 `deferred`，示例里非 `deferred` 的决定都不带 `ref`": ["tells the overlay that ref is only for deferred, and examples of other kinds omit it"],
+    "每个提示词的结果说明写明了字段形状": ["documents the shape of each result field in every stage prompt"],
+    "「不许写死命令」的扫描、绑定 SHA 的测试照旧通过": ["names no concrete build or test command; a mention of AGENTS.md is not a violation", "is written for the skills SHA the platform pins, which the mounted skills were copied at"]
+  },
+  "decisions": [
+    {
+      "kind": "choice",
+      "text": "「every stage prompt's <result> example passes that stage's schema」第一次跑就通过：现有示例本来就符合 schema。留下作回归网，故意把 mustFix 改成字符串时会失败。"
+    },
+    {
+      "kind": "choice",
+      "text": "阶段和 schema 的对应写在测试里的 SCHEMA_BY_PROMPT，键是 agent.ts 的 PROMPTS，值是同一文件导出的 schema / reviewOutputSchemaFor，没有往 agent.ts 加 resultSchemaFor。"
+    },
+    {
+      "kind": "conflict",
+      "text": "Spec Testing Decisions 写提示词测试还要覆盖层写明自查步骤；本票只负责 User Story 2 和 3，What to build 和验收标准都没有自查。按票做，自查留给故事 1。"
+    }
+  ]
+}
+</result>
