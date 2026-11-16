@@ -1089,6 +1089,19 @@ describe("following the pull requests", () => {
     );
   });
 
+  it("stores the human comment count the host reported", async () => {
+    await awaitingReview();
+    const job = await claimOf("host-sync");
+    await worker.complete(job.id, job.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { humanComments: 3 })],
+    });
+    expect(
+      (await db.pool.query("SELECT human_comments FROM pull_requests")).rows[0]
+        .human_comments,
+    ).toBe(3);
+  });
+
   it("does not flag a merge when the token did not merge it", async () => {
     await awaitingReview();
     const job = await claimOf("host-sync");

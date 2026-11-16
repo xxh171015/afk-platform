@@ -231,6 +231,7 @@ export async function runHostTask(
         conflictsWithDefault: info.conflictsWithDefault,
         mergeSha: info.mergeSha,
         squashSha: info.squashSha,
+        humanComments: info.humanComments,
       });
     } catch (error) {
       if (error instanceof HostError && error.status === 429)

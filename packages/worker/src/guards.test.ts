@@ -3,9 +3,9 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Guarantees about the platform's code as a whole (docs/specs/m1-platform.md「推送出口与检测」): it never merges
-// a pull request and never pushes except through the one exit function. Checked on the source, so a change that
-// breaks them fails here and not in production.
+// Guarantees about the platform's code as a whole (docs/specs/m1-platform.md「推送出口与检测」, ADR 0011): merge
+// calls only exist in the host adapters' mergePullRequest, and it never pushes except through the one exit
+// function. Checked on the source, so a change that breaks them fails here and not in production.
 
 const packages = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -39,12 +39,12 @@ describe("the platform's source", () => {
     expect(code.length).toBeGreaterThan(MIN_FILES);
   });
 
-  it("never merges a pull request, through any API or CLI", () => {
-    const merging = [
+  it("calls a merge endpoint only from mergePullRequest in the GitHub and GitLab adapters", () => {
+    const endpoints = [
       /pulls\/[^\s"'`]*\/merge/i,
+      /merge_requests\/[^\s"'`]*\/merge/i,
       /\/merge["'`]/,
       /merge_pull_request/i,
-      /mergePullRequest/i,
       /enable_?auto_?merge/i,
       /gh\s+pr\s+merge/i,
       /\bpulls\.merge\b/,
@@ -52,11 +52,21 @@ describe("the platform's source", () => {
       /["'`]pr["'`]\s*,\s*["'`]merge["'`]/,
       /pulls\[["'`]merge["'`]\]/,
     ];
-    const hits = code.flatMap(({ file, text }) =>
-      merging
+    const methodName = /mergePullRequest/;
+    const adapterImpl = new Set(["host/src/github.ts", "host/src/gitlab.ts"]);
+    const adapterSurface = new Set([
+      "host/src/types.ts",
+      "host/src/by-host.ts",
+    ]);
+    const hits = code.flatMap(({ file, text }) => {
+      if (adapterImpl.has(file)) return [];
+      const found = endpoints
         .filter((pattern) => pattern.test(text))
-        .map((pattern) => `${file}: ${pattern}`),
-    );
+        .map((pattern) => `${file}: ${pattern}`);
+      if (methodName.test(text) && !adapterSurface.has(file))
+        found.push(`${file}: ${methodName}`);
+      return found;
+    });
     expect(hits).toEqual([]);
   });
 

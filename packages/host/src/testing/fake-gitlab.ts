@@ -22,11 +22,14 @@ interface FakeMr {
   approvedBy: string[];
   reviewers: { username: string; state: string }[];
   hasConflicts: boolean;
+  notes: { body: string; system: boolean; username: string }[];
 }
 
 export class FakeGitLab {
   readonly requests: string[] = [];
   refuseBranchDeletes = false;
+  refuseMerge = false;
+  readonly mergeBodies: Record<string, unknown>[] = [];
   hideApprovals = false;
   hideReviewers = false;
   rateLimitSeconds: number | null = null;
@@ -137,6 +140,17 @@ export class FakeGitLab {
 
   setHasConflicts(iid: number, hasConflicts: boolean): void {
     this.mr(iid).hasConflicts = hasConflicts;
+  }
+
+  addNote(
+    iid: number,
+    note: { body: string; system?: boolean; username: string },
+  ): void {
+    this.mr(iid).notes.push({
+      body: note.body,
+      system: note.system === true,
+      username: note.username,
+    });
   }
 
   private mr(iid: number): FakeMr {
@@ -296,6 +310,7 @@ export class FakeGitLab {
         approvedBy: [],
         reviewers: [],
         hasConflicts: false,
+        notes: [],
       };
       this.mrs.push(mr);
       return this.json(res, 201, this.render(mr));
@@ -330,6 +345,36 @@ export class FakeGitLab {
           user: { username },
         })),
       });
+    }
+
+    const notes = /^\/merge_requests\/(\d+)\/notes$/.exec(rest);
+    if (notes && req.method === "GET") {
+      const mr = this.mrs.find((m) => m.iid === Number(notes[1]));
+      if (!mr) return this.json(res, 404, { message: "404 Not found" });
+      return this.json(
+        res,
+        200,
+        mr.notes.map((row) => ({
+          body: row.body,
+          system: row.system,
+          author: { username: row.username },
+        })),
+      );
+    }
+
+    const merge = /^\/merge_requests\/(\d+)\/merge$/.exec(rest);
+    if (merge && req.method === "PUT") {
+      const mr = this.mrs.find((m) => m.iid === Number(merge[1]));
+      if (!mr) return this.json(res, 404, { message: "404 Not found" });
+      this.mergeBodies.push(body);
+      if (this.refuseMerge)
+        return this.json(res, 403, { message: "403 Forbidden" });
+      if (typeof body.sha === "string" && body.sha !== mr.sha)
+        return this.json(res, 409, { message: "SHA does not match HEAD" });
+      if (mr.hasConflicts)
+        return this.json(res, 405, { message: "Method Not Allowed" });
+      this.mergeMr(mr.iid, { by: this.username });
+      return this.json(res, 200, this.render(mr));
     }
 
     const reviewers = /^\/merge_requests\/(\d+)\/reviewers$/.exec(rest);
