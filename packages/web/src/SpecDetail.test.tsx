@@ -930,11 +930,17 @@ describe("the spec page", () => {
     );
     const usage = await screen.findByTestId("usage-by-stage");
     expect(usage.textContent).toContain("用量");
+    expect(
+      within(usage).getByRole("columnheader", { name: "输入" }),
+    ).toBeTruthy();
+    expect(
+      within(usage).getByRole("columnheader", { name: "缓存读" }),
+    ).toBeTruthy();
     expect(usage.textContent).toContain("实现");
-    expect(usage.textContent).toContain("输入 143,000");
-    expect(usage.textContent).toContain("缓存读 5,110,000");
+    expect(usage.textContent).toContain("143,000");
+    expect(usage.textContent).toContain("5,110,000");
     expect(usage.textContent).toContain("自审");
-    expect(usage.textContent).toContain("输入 76,000");
+    expect(usage.textContent).toContain("76,000");
   });
 
   it("shows the overall review of a finalizing spec", async () => {
