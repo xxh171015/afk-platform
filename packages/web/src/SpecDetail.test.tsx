@@ -431,6 +431,7 @@ describe("the spec page", () => {
               body: "an export flag nobody asked for",
             },
           ],
+          reviewUncertainties: [],
           decisions: [
             {
               source: "T-1 implement",
@@ -478,6 +479,7 @@ describe("the spec page", () => {
           ],
           findings: [],
           scopeCreep: [],
+          reviewUncertainties: [],
           decisions: [],
           protectedPathApprovals: [],
         },
@@ -563,6 +565,7 @@ describe("the spec page", () => {
       .closest("details") as HTMLDetailsElement;
     expect(counted.open).toBe(false);
     expect(screen.queryByText("模型不确定的地方：")).toBeNull();
+    expect(screen.queryByText("审查拿不准的")).toBeNull();
     fireEvent.click(screen.getByText("小事 1 条，绕过 1 条"));
     expect(counted.open).toBe(true);
     expect(within(counted).getByText(/date format\?/)).toBeTruthy();
@@ -654,6 +657,52 @@ describe("the spec page", () => {
     expect(screen.getByTestId("pack-integration").textContent).toContain(
       "passed",
     );
+  });
+
+  it("lists review uncertainties as 审查拿不准的 with the axis", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            acceptancePack: {
+              generatedAt: "2026-10-28T10:00:00.000Z",
+              mergeOrder: {
+                ordered: ["backend"],
+                after: {},
+                unordered: [],
+              },
+              repos: [
+                {
+                  repo: "backend",
+                  tickets: [],
+                  findings: [],
+                  scopeCreep: [],
+                  reviewUncertainties: [
+                    {
+                      ticket: "T-1",
+                      run: "R-2",
+                      stage: "review",
+                      body: "the ticket does not say the date format",
+                      axis: "spec",
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("审查拿不准的")).toBeTruthy();
+    expect(
+      screen.getByText(/the ticket does not say the date format/).closest("ul")
+        ?.className,
+    ).toBe("review-uncertainties");
+    expect(screen.getByText(/Spec 轴/)).toBeTruthy();
   });
 
   it("says a pull request closed on the host was closed without merge", async () => {

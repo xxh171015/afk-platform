@@ -110,6 +110,17 @@ const RepoSection = z.object({
       body: z.string(),
     }),
   ),
+  // Review uncertainties (kind: uncertainty), listed apart like scope creep. Not
+  // `uncertainties`: stored packs used that name for the old Decision list.
+  reviewUncertainties: z.array(
+    z.object({
+      ticket: z.string().nullable(),
+      run: z.string(),
+      stage: z.string(),
+      body: z.string(),
+      axis: z.enum(REVIEW_AXES).nullable(),
+    }),
+  ),
   decisions: z.array(
     z.object({
       source: z.string(),
@@ -391,6 +402,7 @@ export async function buildAcceptancePack(
         tickets: [],
         findings: [],
         scopeCreep: [],
+        reviewUncertainties: [],
         decisions: [],
         protectedPathApprovals: [],
         standardsSources: [],
@@ -505,6 +517,16 @@ export async function buildAcceptancePack(
         ticket,
         run,
         body: f.body,
+      });
+      continue;
+    }
+    if (f.kind === "uncertainty") {
+      sectionOf(f.repo_id, f.repo).reviewUncertainties.push({
+        ticket,
+        run,
+        stage: f.stage,
+        body: f.body,
+        axis: f.axis,
       });
       continue;
     }
@@ -973,6 +995,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         }),
         findings: asArray(repo.findings as never[]),
         scopeCreep: asArray(repo.scopeCreep as never[]),
+        reviewUncertainties: asArray(repo.reviewUncertainties as never[]),
         decisions: storedDecisions(repo),
         protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
         standardsSources: asArray(repo.standardsSources as never[]),

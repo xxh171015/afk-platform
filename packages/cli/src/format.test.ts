@@ -517,5 +517,40 @@ describe("the e2e before the pull requests", () => {
     expect(text).toContain("choice: 1, workaround: 0");
     expect(text).not.toContain("named it export");
     expect(text).not.toContain("uncertainties:");
+    expect(text).not.toContain("审查拿不准的");
+  });
+
+  it("lists review uncertainties as 审查拿不准的 with the axis, and omits the group when there are none", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [
+        {
+          repo: "backend",
+          pullRequest: null,
+          gate: null,
+          tickets: [],
+          findings: [],
+          scopeCreep: [],
+          reviewUncertainties: [
+            {
+              ticket: "T-1",
+              run: "R-2",
+              stage: "review",
+              body: "the ticket does not say the date format",
+              axis: "spec",
+            },
+          ],
+          decisions: [],
+          protectedPathApprovals: [],
+          standardsSources: [],
+        },
+      ],
+      cancelledTickets: [],
+    } as never);
+    expect(text).toContain("审查拿不准的:");
+    expect(text).toContain(
+      "Spec 轴 T-1 review R-2: the ticket does not say the date format",
+    );
   });
 });

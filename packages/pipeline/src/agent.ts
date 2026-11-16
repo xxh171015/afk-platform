@@ -339,11 +339,12 @@ export function classifyReviewRun(
   return { kind: "outcome", outcome: result.output.verdict };
 }
 
-// The review's findings as the API records them: must-fix problems, and suggestions and scope creep that go to the
-// acceptance pack.
-export function reviewFindings(
-  output: ReviewOutput,
-): { kind: "must-fix" | "suggestion" | "scope-creep"; body: string }[] {
+// The review's findings as the API records them: must-fix problems, and suggestions, scope creep
+// and uncertainties that go to the acceptance pack.
+export function reviewFindings(output: ReviewOutput): {
+  kind: "must-fix" | "suggestion" | "scope-creep" | "uncertainty";
+  body: string;
+}[] {
   return [
     ...output.mustFix.map((item) => ({
       kind: "must-fix" as const,
@@ -355,6 +356,10 @@ export function reviewFindings(
     })),
     ...output.scopeCreep.map((body) => ({
       kind: "scope-creep" as const,
+      body,
+    })),
+    ...output.uncertainties.map((body) => ({
+      kind: "uncertainty" as const,
       body,
     })),
   ];

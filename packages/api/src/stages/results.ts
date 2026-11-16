@@ -777,10 +777,12 @@ async function insertFindings(
   found: { kind: string; body: string; resolution?: string }[],
 ): Promise<void> {
   for (const finding of found) {
-    // A review's suggestions and scope creep do not trigger a fix; they travel to the acceptance pack.
+    // A review's suggestions, scope creep and uncertainties do not trigger a fix; they travel to the acceptance pack.
     const resolution =
       finding.resolution ??
-      (finding.kind === "suggestion" || finding.kind === "scope-creep"
+      (finding.kind === "suggestion" ||
+      finding.kind === "scope-creep" ||
+      finding.kind === "uncertainty"
         ? "acceptance-pack"
         : "unhandled");
     await client.query(
