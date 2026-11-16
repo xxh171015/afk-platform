@@ -910,6 +910,25 @@ describe("the prompts", () => {
     }
   });
 
+  // Calibration 2026-11-16: with only `"mustFix": []` in the example, the Spec axis wrote each must-fix as a
+  // string, and every review that found something came back invalid.
+  it("shows a must-fix item's shape in every review example, and each example is a valid result", () => {
+    for (const [path, schema] of [
+      [PROMPTS.reviewSpec, ReviewOutputSchema],
+      [PROMPTS.finalReviewSpec, ReviewOutputSchema],
+      [PROMPTS.recheck, ReviewOutputSchema],
+      [PROMPTS.reviewStandards, StandardsReviewOutputSchema],
+      [PROMPTS.finalReviewStandards, StandardsReviewOutputSchema],
+    ] as const) {
+      const text = readFileSync(path, "utf8");
+      const json = /<result>\s*([\s\S]*?)\s*<\/result>/.exec(text)?.[1];
+      expect(json, path).toBeDefined();
+      const example = JSON.parse(json ?? "");
+      expect(example.mustFix.length, path).toBeGreaterThan(0);
+      expect(schema.safeParse(example).success, path).toBe(true);
+    }
+  });
+
   it("names no concrete build or test command; a mention of AGENTS.md is not a violation", () => {
     const promptsDir = join(OVERLAY_FILE, "..");
     const banned =
