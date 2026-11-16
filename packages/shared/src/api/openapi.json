@@ -34,8 +34,7 @@
                   },
                   "mergePolicy": {
                     "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
+                    "enum": ["manual", "auto-improvement", ""]
                   },
                   "protectedPaths": {
                     "type": "array",
@@ -164,7 +163,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+            "description": "The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
             "content": {
               "application/json": {
                 "schema": {
@@ -385,6 +384,10 @@
                     "type": "string",
                     "maxLength": 200
                   },
+                  "mergePolicy": {
+                    "type": "string",
+                    "enum": ["manual", "auto-improvement", ""]
+                  },
                   "protectedPaths": {
                     "type": "array",
                     "items": {
@@ -508,7 +511,7 @@
             }
           },
           "400": {
-            "description": "The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
+            "description": "The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix",
             "content": {
               "application/json": {
                 "schema": {

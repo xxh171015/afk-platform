@@ -4,6 +4,19 @@
 export const PACK_MARK_START = "<!-- afk-acceptance-pack -->";
 export const PACK_MARK_END = "<!-- /afk-acceptance-pack -->";
 
+// The merge-policy sentence in an open-pr description: the auto-merge host task
+// replaces this marked block before it merges (ADR 0011).
+export const MERGE_NOTE_MARK_START = "<!-- afk:merge-note -->";
+export const MERGE_NOTE_MARK_END = "<!-- /afk:merge-note -->";
+export const MANUAL_MERGE_NOTE =
+  "Merging is up to you; the platform never merges.";
+export const AUTO_IMPROVEMENT_MERGE_NOTE =
+  "满足条件时平台会在 30 分钟后自动合并，在 PR 上写评论即可阻止";
+
+export function wrapMergeNote(note: string): string {
+  return `${MERGE_NOTE_MARK_START}\n${note}\n${MERGE_NOTE_MARK_END}`;
+}
+
 // GitHub's pull request body limit. Past this the marked section is a summary and a link to the spec.
 export const GITHUB_PR_BODY_LIMIT = 65_536;
 
