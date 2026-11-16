@@ -48,7 +48,7 @@ export function ConnectedProjects({
         {projects.map((project) => (
           <li
             key={project.id}
-            className="flex flex-col gap-2 rounded-lg border border-border-strong bg-card p-4"
+            className="flex flex-col gap-2 rounded-lg border border-border-strong bg-card p-4 transition-[border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/45"
           >
             <div className="flex items-start justify-between gap-2">
               <div>

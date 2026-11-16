@@ -1411,11 +1411,11 @@ export function BlockedQueue() {
       actions={<StaleNotice error={data ? queue.error : null} />}
     >
       {!data && !queue.isError ? <p className="sr-only">加载待处理…</p> : null}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
         <div
           role="tablist"
           aria-label="按类别筛选"
-          className="inline-flex rounded-md border bg-surface p-0.5"
+          className="max-w-full overflow-x-auto rounded-md border bg-surface p-0.5 max-sm:flex"
         >
           {FILTERS.map((f) => (
             <button
@@ -1425,7 +1425,7 @@ export function BlockedQueue() {
               aria-selected={type === f}
               onClick={() => setType(f)}
               className={cn(
-                "flex h-7 items-center gap-1.5 rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
+                "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground",
                 type === f && "bg-background text-foreground shadow-sm",
               )}
             >

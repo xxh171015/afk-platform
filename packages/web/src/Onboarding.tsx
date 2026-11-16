@@ -268,7 +268,7 @@ export function Onboarding({
     return (
       <section
         aria-label="接入第一个项目"
-        className="mb-8 space-y-4 rounded-lg border border-border-strong p-5"
+        className="mb-8 space-y-4 rounded-lg border border-primary/35 bg-card p-5 shadow-[inset_3px_0_0_var(--primary)]"
       >
         <h2 className="flex items-center gap-2 text-base font-medium">
           <Plug className="size-4 text-primary" />

@@ -58,6 +58,24 @@ describe("the workbench", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("puts work needing attention before project setup for connected projects", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({ json: empty }),
+      }),
+    );
+    const attention = await screen.findByTestId("quadrant-等你处理");
+    const connected = await screen.findByRole("heading", {
+      name: "已接入的项目",
+    });
+    expect(
+      attention.compareDocumentPosition(connected) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("distinguishes a failed load from an idle board", async () => {
     renderWithApp(
       <Workbench />,

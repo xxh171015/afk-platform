@@ -102,7 +102,8 @@ export function RunDetail({
 
   return (
     <Page
-      title={`${run.displayId} · ${run.ticketDisplayId ?? run.specDisplayId} · ${stageLabel[run.stage] ?? run.stage} · 第 ${run.attempt} 次 · ${runResultLabel[result] ?? result} · ${duration}`}
+      title={`${run.displayId} · ${stageLabel[run.stage] ?? run.stage}`}
+      subtitle={`${run.ticketDisplayId ?? run.specDisplayId} · 第 ${run.attempt} 次 · ${runResultLabel[result] ?? result} · ${duration}`}
       actions={<StaleNotice error={view.error} />}
     >
       <div className="mb-5 flex flex-wrap gap-5 text-sm">
