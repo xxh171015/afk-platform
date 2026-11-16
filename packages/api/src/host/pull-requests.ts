@@ -1,10 +1,14 @@
 import {
+  AUTO_IMPROVEMENT_MERGE_NOTE,
   type BlockedReason,
   branchNames,
   formatDisplayId,
+  MANUAL_MERGE_NOTE,
   parseDisplayId,
+  parseMergePolicy,
   type SpecState,
   specTransition,
+  wrapMergeNote,
 } from "@afk/shared";
 import type pg from "pg";
 import { z } from "zod";
@@ -12,6 +16,7 @@ import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
 import { renderPackSection } from "../acceptance/pack-description.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
+import { queueDueAutoMerges } from "./auto-merge.ts";
 import {
   enqueueHostSync,
   enqueueIndexPrLinks,
@@ -266,9 +271,12 @@ export async function buildHostTask(
         slug: string;
         title: string;
         branch_namespace: string | null;
-      }>("SELECT slug, title, branch_namespace FROM specs WHERE id = $1", [
-        specId,
-      ])
+        merge_policy: string | null;
+      }>(
+        `SELECT s.slug, s.title, s.branch_namespace, p.merge_policy
+         FROM specs s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+        [specId],
+      )
     ).rows[0];
     const repo = (
       await pool.query<{ url: string; default_branch: string; name: string }>(
@@ -298,7 +306,12 @@ export async function buildHostTask(
           (t) => `- ${formatDisplayId("ticket", t.id)} ${t.title}`,
         ),
         "",
-        "Opened by the AFK platform. Merging is up to you; the platform never merges.",
+        "Opened by the AFK platform.",
+        wrapMergeNote(
+          parseMergePolicy(spec.merge_policy) === "auto-improvement"
+            ? AUTO_IMPROVEMENT_MERGE_NOTE
+            : MANUAL_MERGE_NOTE,
+        ),
       ].join("\n"),
       // a repo that uses another repo's contract is merged after it, and says so by being a draft until then
       draft:
@@ -747,6 +760,7 @@ export async function recordHostSync(
     await markMergedWhenAllAre(client, specId);
     await queueReadyPullRequests(client, specId);
   }
+  await queueDueAutoMerges(client, read.projectId, now);
   await scheduleNextSync(client, read.projectId, now);
   return { status: "applied" };
 }

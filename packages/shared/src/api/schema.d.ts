@@ -53,7 +53,8 @@ export interface paths {
             name: string;
             defaultAgent?: string;
             defaultModel?: string;
-            mergePolicy?: string;
+            /** @enum {string} */
+            mergePolicy?: "manual" | "auto-improvement" | "";
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -92,7 +93,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
+        /** @description The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
@@ -191,6 +192,8 @@ export interface paths {
             defaultAgent?: string;
             defaultModel?: string;
             feishuChatId?: string;
+            /** @enum {string} */
+            mergePolicy?: "manual" | "auto-improvement" | "";
             protectedPaths?: string[];
             maxConcurrency?: number;
             budgetLimit?: number;
@@ -228,7 +231,7 @@ export interface paths {
             };
           };
         };
-        /** @description The default agent is not supported, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
+        /** @description The default agent is not supported, mergePolicy is not manual or auto-improvement, ticketReview is not spec or both, or stageModels has a key other than standards, update-branch, or merge-fix */
         400: {
           headers: {
             [name: string]: unknown;
