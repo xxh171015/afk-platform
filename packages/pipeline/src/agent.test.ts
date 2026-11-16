@@ -145,6 +145,85 @@ describe("the structured outputs", () => {
     ).toBe(false);
   });
 
+  it("normalizes Run 577's workaround that carried a ref so the implement schema accepts it", () => {
+    const parsed = ImplementOutputSchema.parse({
+      status: "done",
+      summary: "did it",
+      acceptance: { "returns csv": ["csv test"] },
+      decisions: [
+        { kind: "choice", text: "named it export" },
+        {
+          kind: "conflict",
+          text: "ticket said one file; tdd needed a test file; added the test",
+        },
+        { kind: "known-gap", text: "list reload skips the note filter" },
+        { kind: "deferred", text: "openapi extra field", ref: "new" },
+        {
+          kind: "workaround",
+          text: "skipped drizzle generate",
+          ref: "91813f8",
+        },
+      ],
+    });
+    expect(parsed.decisions[4]).toEqual({
+      kind: "workaround",
+      text: "skipped drizzle generate（ref: 91813f8）",
+    });
+  });
+
+  it("accepts a review that omits suggestions and uncertainties as empty arrays", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+    });
+    expect(parsed.suggestions).toEqual([]);
+    expect(parsed.uncertainties).toEqual([]);
+  });
+
+  it("keeps a deferred decision's ref instead of folding it into text", () => {
+    expect(
+      ImplementOutputSchema.parse({
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [
+          { kind: "deferred", text: "openapi extra field", ref: "T-4" },
+        ],
+      }).decisions,
+    ).toEqual([{ kind: "deferred", text: "openapi extra field", ref: "T-4" }]);
+  });
+
+  it("still rejects a must-fix item that omits file or problem", () => {
+    const base = {
+      verdict: "fix" as const,
+      suggestions: [],
+      uncertainties: [],
+    };
+    expect(
+      ReviewOutputSchema.safeParse({
+        ...base,
+        mustFix: [{ problem: "bug" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ReviewOutputSchema.safeParse({
+        ...base,
+        mustFix: [{ file: "a.ts" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("still rejects a verdict that is not pass or fix", () => {
+    expect(
+      ReviewOutputSchema.safeParse({
+        verdict: "maybe",
+        mustFix: [],
+        suggestions: [],
+        uncertainties: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it("a review with must-fix items cannot pass", () => {
     const review = {
       verdict: "pass",
