@@ -821,6 +821,32 @@ describe("the prompts", () => {
     expect(bounds).toContain("单个测试文件");
   });
 
+  it("tells the agent to cap waiting on background commands, check processes, and end leftovers", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const bounds = overlay.slice(overlay.indexOf("## 做事的边界"));
+    expect(bounds).toContain("等后台命令");
+    expect(bounds).toContain("上限");
+    expect(bounds).toContain("正常耗时");
+    expect(bounds).toContain("先查进程");
+    expect(bounds).toContain("不要再等同一个条件");
+    expect(bounds).toContain("自己之前启动");
+    expect(bounds).toContain("先结束掉");
+    expect(bounds).toContain("重跑还是放弃");
+  });
+
+  it("records Run 654's idle wait in the optimization plan and how later runs should be compared", () => {
+    const plan = readFileSync(
+      join(PROMPT_DIR, "../../../docs/optimization-plan.md"),
+      "utf8",
+    );
+    expect(plan).toContain("654");
+    expect(plan).toContain("29 分钟");
+    expect(plan).toContain("6.5 分钟");
+    expect(plan).toContain("TEST_EXIT=");
+    expect(plan).toContain("空等时长");
+    expect(plan).toContain("同类 Run");
+  });
+
   it("has afk-setup write how to run a single test file into AGENTS.md", () => {
     const skill = readFileSync(
       join(PROMPT_DIR, "../../../skills/afk-setup/SKILL.md"),
