@@ -7,8 +7,9 @@
 # and how to fix it. Code-host credentials are at least one of the GitHub App or a GitLab PAT
 # (~/.afk/secrets/gitlab/<host>, mode 600, verified against that host). --check never asks.
 #
-# Usage: scripts/up.sh            (Ctrl-C stops everything; Ctrl-C twice: stop them at once)
+# Usage: scripts/up.sh            (Ctrl-C stops everything and abandons jobs; Ctrl-C twice: stop them at once)
 #        scripts/up.sh --check    only check, start nothing
+# Planned restart of one process without losing in-hand work: scripts/restart.sh api|web|worker
 # Settings are read from the environment first, then from ~/.afk/env (the file the worker reads
 # CURSOR_API_KEY from): AFK_MODEL (the Cursor model), CURSOR_API_KEY. Also: DATABASE_URL (default the compose database), PORT (API, default 3000),
 # WEB=0 or WORKER=0 to leave that one out. The worker's own settings (AFK_HOME, AFK_SLOTS,
@@ -270,6 +271,7 @@ backoff=()    # seconds to wait before the next restart
 
 run_dir="$afk_home/run"
 mkdir -p "$run_dir"
+echo $$ >"$run_dir/up.pid"
 
 # Everything the processes print also goes to a file, so a crash can be looked at after the terminal is gone.
 # One file per start; files older than 14 days are deleted.
@@ -277,6 +279,7 @@ log_dir="$afk_home/logs"
 mkdir -p "$log_dir"
 find "$log_dir" -name 'up-*.log' -type f -mtime +14 -delete 2>/dev/null || true
 up_log="$log_dir/up-$(date +%Y%m%d-%H%M%S).log"
+printf '%s\n' "$up_log" >"$run_dir/up.log"
 
 alive() {
   [ "$1" != gone ] && kill -0 -- "-$1" 2>/dev/null
@@ -313,6 +316,59 @@ restart() {
   [ -n "$g" ] || g=gone
   pgids[i]="$g"
   restart_at[i]=0
+}
+
+index_of() {
+  local i
+  for i in "${!names[@]}"; do
+    if [ "${names[i]}" = "$1" ]; then
+      echo "$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+planned_restart() {
+  local name=$1 i pid n=0
+  i=$(index_of "$name") || {
+    echo "restart.sh: $name is not running" | tee -a "$up_log" >&2
+    return 1
+  }
+  pid=$(tr -d ' \n' <"$run_dir/$name.pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 50 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+  fi
+  given_up[i]=0
+  backoff[i]=1
+  restart "$i"
+}
+
+rolling_restart_worker() {
+  local i old_pid new_pid n=0
+  i=$(index_of worker) || {
+    echo "restart.sh: worker is not running" | tee -a "$up_log" >&2
+    return 1
+  }
+  old_pid=$(tr -d ' \n' <"$run_dir/worker.pid" 2>/dev/null || true)
+  given_up[i]=0
+  backoff[i]=1
+  restart "$i"
+  while [ "$n" -lt 50 ]; do
+    new_pid=$(tr -d ' \n' <"$run_dir/worker.pid" 2>/dev/null || true)
+    if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && kill -0 "$new_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+    n=$((n + 1))
+  done
+  if [ -n "$old_pid" ]; then
+    kill -USR2 "$old_pid" 2>/dev/null || true
+  fi
 }
 
 record_crash() {
@@ -367,7 +423,15 @@ pid_alive() {
 }
 
 tick() {
-  local i now
+  local i now target
+  if [ -f "$run_dir/restart.request" ]; then
+    target=$(tr -d ' \n' <"$run_dir/restart.request")
+    rm -f "$run_dir/restart.request"
+    case "$target" in
+      api | web) planned_restart "$target" ;;
+      worker) rolling_restart_worker ;;
+    esac
+  fi
   now=$(date +%s)
   for i in "${!pgids[@]}"; do
     if [ "${given_up[i]}" = 1 ]; then
@@ -389,7 +453,9 @@ stopping=0
 stop_all() {
   [ "$stopping" = 0 ] || return 0
   stopping=1
+  rm -f "$run_dir/up.pid"
   echo "stopping (the worker aborts the runs in hand first; Ctrl-C again stops them at once)..."
+  echo "要不丢活地重启，请用 scripts/restart.sh（Ctrl-C 会放弃正在跑的作业）"
   local i
   # reverse order: worker, then page, then API
   for ((i = ${#pgids[@]} - 1; i >= 0; i--)); do

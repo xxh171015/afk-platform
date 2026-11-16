@@ -6,7 +6,7 @@
 
 ## 本机平台栈（checkout / 重启 / 镜像）
 
-没有「平台向 worker 推文件」的通道。跑 worker 的机器上 `git pull` 到含改动的 commit，改 `packages/pipeline/skills` 或 pipeline 后 **重启 worker**（`scripts/up.sh`），改 API 后重启 api，改 `.sandcastle/Dockerfile` 后重建 `sandcastle:afk-platform` 再重启 worker。业务仓代码走 Git 远端，不靠本机未提交改动。细节见 `docs/operations-manual.md` §1 与 §9。
+没有「平台向 worker 推文件」的通道。跑 worker 的机器上 `git pull` 到含改动的 commit，改 `packages/pipeline/skills` 或 pipeline 后用 `scripts/restart.sh worker`，改 API 后用 `scripts/restart.sh api`，改 `.sandcastle/Dockerfile` 后重建 `sandcastle:afk-platform` 再 `scripts/restart.sh worker`。Ctrl-C `up.sh` 是关机，会放弃正在跑的作业。业务仓代码走 Git 远端，不靠本机未提交改动。细节见 `docs/operations-manual.md` §1 与 §9。
 
 ## 在这个仓库里规划（grill / to-spec / to-tickets）
 

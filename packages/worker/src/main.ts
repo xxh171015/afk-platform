@@ -169,6 +169,7 @@ const sandcastle = (cwd: string, runId?: string): SandcastleConfig => ({
 });
 
 const stop = new AbortController();
+const drain = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.on(signal, () => {
     if (stop.signal.aborted) {
@@ -182,6 +183,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     );
     stop.abort();
   });
+process.on("SIGUSR2", () => {
+  log("SIGUSR2: draining; finishing the jobs in hand, then exiting");
+  drain.abort();
+});
 
 let lastCleaned = { sandboxLogs: 0, salvage: 0, snapshots: 0 };
 const sweepHome = async () => {
@@ -277,6 +282,7 @@ await runWorker({
   },
   concurrency: config.slots,
   signal: stop.signal,
+  drain: drain.signal,
   log,
 });
 log("worker stopped");

@@ -1722,6 +1722,7 @@ export interface paths {
           "application/json": {
             workerId: string;
             capabilities: string[];
+            takeSlot?: boolean;
           };
         };
       };

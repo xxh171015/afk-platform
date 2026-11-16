@@ -1,7 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GIB } from "@afk/shared";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { RepoStore } from "./repos.ts";
+import { SlotManager } from "./slots.ts";
 import { processJob, runWorker, type WorkerOptions } from "./worker.ts";
 
 const executor = {
@@ -311,5 +315,117 @@ describe("log chunks while the API is unreachable", () => {
     );
     expect(outcome).toBe("completed");
     expect(uploaded.join("")).toContain("hello from the agent");
+  });
+});
+
+describe("draining on SIGUSR2", () => {
+  it("stops claiming after a drain, hands in the job in hand, and returns", {
+    timeout: 3_000,
+  }, async () => {
+    let claims = 0;
+    let releaseWork = () => {};
+    const working = new Promise<void>((resolve) => {
+      releaseWork = resolve;
+    });
+    const completed: unknown[] = [];
+    const drain = new AbortController();
+    const api = {
+      claim: async () => {
+        claims += 1;
+        if (claims === 1) return hostJob;
+        return null;
+      },
+      heartbeat: async () => "held" as const,
+      hostTask: async () => {
+        await working;
+        return { kind: "host-sync" as const, pulls: [] };
+      },
+      complete: async (_job: ClaimedJob, body: unknown) => {
+        completed.push(body);
+        return "held" as const;
+      },
+    } as unknown as WorkerApi;
+    const done = runWorker({
+      api,
+      executor,
+      host,
+      heartbeatMs: 30,
+      pollMs: 5,
+      drain: drain.signal,
+    });
+    expect(await until(() => claims >= 1)).toBe(true);
+    drain.abort();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const claimsAfterDrain = claims;
+    releaseWork();
+    await done;
+    expect(completed).toHaveLength(1);
+    expect(claims).toBe(claimsAfterDrain);
+    expect(claims).toBe(1);
+  });
+});
+
+describe("claiming when another process holds the slots", () => {
+  let slotRoot: string | undefined;
+  afterEach(() => {
+    if (slotRoot) rmSync(slotRoot, { recursive: true, force: true });
+    slotRoot = undefined;
+  });
+
+  it("does not claim a slot job when every slot is held, but still claims host-sync", async () => {
+    slotRoot = mkdtempSync(join(tmpdir(), "afk-worker-slots-"));
+    mkdirSync(join(slotRoot, "0"), { recursive: true });
+    writeFileSync(
+      join(slotRoot, "0", "lock"),
+      JSON.stringify({
+        jobId: 9,
+        attempt: 1,
+        pid: process.pid,
+        repo: "backend",
+        ref: "agent/T-9",
+      }),
+    );
+    const slots = new SlotManager({
+      root: slotRoot,
+      count: 1,
+      mainCloneFor: () => slotRoot as string,
+      salvageDir: join(slotRoot, "salvage"),
+      isHeld: async () => true,
+    });
+    const claimed: string[] = [];
+    const takeSlot: Array<boolean | undefined> = [];
+    const api = {
+      claim: async (_capabilities: string[], opts?: { takeSlot?: boolean }) => {
+        takeSlot.push(opts?.takeSlot);
+        if (claimed.length > 0) return null;
+        if (opts?.takeSlot === false) {
+          claimed.push("host-sync");
+          return hostJob;
+        }
+        claimed.push("agent-run");
+        return {
+          id: 2,
+          type: "agent-run",
+          payload: {},
+          attempt: 1,
+          lockKey: null,
+          leaseExpiresAt: "2026-01-01T00:02:00Z",
+        };
+      },
+      heartbeat: async () => "held" as const,
+      hostTask: async () => ({ kind: "host-sync" as const, pulls: [] }),
+      bundle: async () => ({ run: { id: 1, displayId: "R-1" } }),
+      complete: async () => "held" as const,
+    } as unknown as WorkerApi;
+    await runWorker({
+      api,
+      executor: { ...executor, slots },
+      host,
+      stopWhenIdle: true,
+      pollMs: 5,
+      runStage: async () => ({ stage: "implement", outcome: "done" }),
+    });
+    expect(takeSlot[0]).toBe(false);
+    expect(claimed).toEqual(["host-sync"]);
   });
 });
