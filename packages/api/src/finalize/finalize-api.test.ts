@@ -456,7 +456,11 @@ describe("the overall review and the one fix", () => {
   });
 
   it("the bundle of a final step has no ticket, but the spec, its tickets' aims, and what came before", async () => {
-    await toFinalReview();
+    await runningSpec([
+      ticket("a", { body: "A exports orders as CSV." }),
+      ticket("b", { body: "B adds the header row." }),
+    ]);
+    await allTicketsDone();
     const review = (await claim()) as Claimed;
     const bundleOf = async (job: Claimed) =>
       (await fetch(
@@ -477,8 +481,22 @@ describe("the overall review and the one fix", () => {
     });
     expect(first.run).not.toBeNull();
     expect(first.specTickets).toEqual([
-      { displayId: "T-1", title: "Ticket a", acceptanceCriteria: ["a works"] },
-      { displayId: "T-2", title: "Ticket b", acceptanceCriteria: ["b works"] },
+      {
+        displayId: "T-1",
+        title: "Ticket a",
+        body: expect.stringContaining(
+          "## What to build\n\nA exports orders as CSV.\n",
+        ),
+        acceptanceCriteria: ["a works"],
+      },
+      {
+        displayId: "T-2",
+        title: "Ticket b",
+        body: expect.stringContaining(
+          "## What to build\n\nB adds the header row.\n",
+        ),
+        acceptanceCriteria: ["b works"],
+      },
     ]);
 
     await worker.complete(review.id, review.attempt, {

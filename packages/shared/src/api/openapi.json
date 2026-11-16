@@ -3257,6 +3257,9 @@
                           "title": {
                             "type": "string"
                           },
+                          "body": {
+                            "type": "string"
+                          },
                           "acceptanceCriteria": {
                             "type": "array",
                             "items": {
@@ -3264,7 +3267,12 @@
                             }
                           }
                         },
-                        "required": ["displayId", "title", "acceptanceCriteria"]
+                        "required": [
+                          "displayId",
+                          "title",
+                          "body",
+                          "acceptanceCriteria"
+                        ]
                       }
                     },
                     "spec": {

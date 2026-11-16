@@ -74,6 +74,7 @@ export interface Bundle {
   specTickets: {
     displayId: string;
     title: string;
+    body: string;
     acceptanceCriteria: string[];
   }[];
   spec: {
@@ -545,7 +546,7 @@ async function buildFinalBundle(
   const row = found.rows[0];
   if (!row) return undefined;
   const tickets = await pool.query(
-    `SELECT id, title, acceptance_criteria FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
+    `SELECT id, title, body, acceptance_criteria FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
     [final.specId, final.repoId],
   );
   const run = await pool.query<{ id: number; retry_note: string | null }>(
@@ -575,6 +576,7 @@ async function buildFinalBundle(
     specTickets: tickets.rows.map((t) => ({
       displayId: formatDisplayId("ticket", t.id),
       title: t.title as string,
+      body: t.body as string,
       acceptanceCriteria: t.acceptance_criteria as string[],
     })),
     spec: {
