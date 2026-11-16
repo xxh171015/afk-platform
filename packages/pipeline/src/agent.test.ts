@@ -1020,6 +1020,23 @@ describe("the prompts", () => {
     );
   });
 
+  it("tells update-branch and merge-fix how to handle colliding migration numbers without naming a rebuild command", () => {
+    for (const file of [PROMPTS.updateBranch, PROMPTS.mergeFix]) {
+      const prompt = readFileSync(file, "utf8");
+      expect(prompt).toContain("迁移编号冲突");
+      expect(prompt).toContain("generated");
+      expect(prompt).toContain("AFK_GENERATED_UPSTREAM_SHA");
+      expect(prompt).toContain("上游");
+      expect(prompt).not.toMatch(/rebase-migrations/);
+    }
+    expect(readFileSync(PROMPTS.updateBranch, "utf8")).toContain(
+      "defaultBranch",
+    );
+    expect(readFileSync(PROMPTS.mergeFix, "utf8")).toContain(
+      "integrationBranch",
+    );
+  });
+
   it("names no concrete build or test command; a mention of AGENTS.md is not a violation", () => {
     const promptsDir = join(OVERLAY_FILE, "..");
     const banned =

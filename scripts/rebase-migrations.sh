@@ -19,34 +19,27 @@ if [[ ! -f "$AFK_REBASE_DRIZZLE/meta/_journal.json" ]]; then
 fi
 
 # Upstream (unchanged) side: ticket merge → integration branch; update-branch → default branch.
-# When the platform runs this in the gate sandbox it sets AFK_GENERATED_UPSTREAM_SHA; otherwise parent1/parent2.
-if [[ -n "${AFK_GENERATED_UPSTREAM_SHA:-}" ]]; then
-  export AFK_REBASE_INTEGRATION="$AFK_GENERATED_UPSTREAM_SHA"
-  # shellcheck disable=SC2046
-  set -- $(git rev-list --parents -n 1 HEAD)
-  if [[ $# -lt 3 ]]; then
-    exit 0
-  fi
-  p1="$(git rev-parse "$2")"
-  p2="$(git rev-parse "$3")"
-  up="$(git rev-parse "$AFK_GENERATED_UPSTREAM_SHA")"
-  if [[ "$p1" == "$up" ]]; then
-    export AFK_REBASE_INCOMING="$p2"
-  elif [[ "$p2" == "$up" ]]; then
-    export AFK_REBASE_INCOMING="$p1"
-  else
-    echo "rebase-migrations: AFK_GENERATED_UPSTREAM_SHA is not a parent of HEAD" >&2
-    exit 1
-  fi
+# The platform sets AFK_GENERATED_UPSTREAM_SHA; without it this script does not guess parent order.
+# shellcheck disable=SC2046
+set -- $(git rev-list --parents -n 1 HEAD)
+if [[ $# -lt 3 ]]; then
+  exit 0
+fi
+if [[ -z "${AFK_GENERATED_UPSTREAM_SHA:-}" ]]; then
+  echo "rebase-migrations: AFK_GENERATED_UPSTREAM_SHA is not set; refusing to guess which parent is upstream" >&2
+  exit 1
+fi
+export AFK_REBASE_INTEGRATION="$AFK_GENERATED_UPSTREAM_SHA"
+p1="$(git rev-parse "$2")"
+p2="$(git rev-parse "$3")"
+up="$(git rev-parse "$AFK_GENERATED_UPSTREAM_SHA")"
+if [[ "$p1" == "$up" ]]; then
+  export AFK_REBASE_INCOMING="$p2"
+elif [[ "$p2" == "$up" ]]; then
+  export AFK_REBASE_INCOMING="$p1"
 else
-  # commit parent1 parent2 → three words when HEAD is a merge
-  # shellcheck disable=SC2046
-  set -- $(git rev-list --parents -n 1 HEAD)
-  if [[ $# -lt 3 ]]; then
-    exit 0
-  fi
-  export AFK_REBASE_INTEGRATION="$2"
-  export AFK_REBASE_INCOMING="$3"
+  echo "rebase-migrations: AFK_GENERATED_UPSTREAM_SHA is not a parent of HEAD" >&2
+  exit 1
 fi
 
 exec node --input-type=module <<'NODE'
@@ -137,8 +130,15 @@ for (const oldPath of addedSql) {
   const newTag = `${String(nextNum).padStart(4, "0")}_${suffix}`;
   const newPath = `${drizzle}/${newTag}.sql`;
   const content = show(incoming, oldPath);
+  if (has(integration, newPath) && oldPath !== newPath) {
+    console.error(
+      `rebase-migrations: refusing to overwrite upstream ${newPath}`,
+    );
+    process.exit(1);
+  }
   mkdirSync(dirname(newPath), { recursive: true });
   writeFileSync(newPath, content);
+  // Upstream-side files keep their names; only incoming copies that are not on upstream may be removed.
   if (oldPath !== newPath && existsSync(oldPath) && !has(integration, oldPath)) {
     unlinkSync(oldPath);
   }

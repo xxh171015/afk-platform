@@ -9,6 +9,7 @@ import { gitOut } from "./exec.ts";
 import { runGate } from "./gate.ts";
 import {
   agentEnv,
+  agentRunPlacement,
   classifyAgentError,
   DEPS_CACHE_SANDBOX_PATH,
   SANDBOX_SKILLS_DIR,
@@ -87,6 +88,23 @@ describe("the mounts", () => {
 describe("the environment", () => {
   it("is the Cursor API key and nothing else", () => {
     expect(agentEnv("key-123")).toEqual({ CURSOR_API_KEY: "key-123" });
+  });
+
+  it("puts AFK_GENERATED_UPSTREAM_SHA from the agent run into the sandbox docker env", async () => {
+    const fake = recordingDocker();
+    const placement = agentRunPlacement({
+      env: { AFK_GENERATED_UPSTREAM_SHA: "abc123" },
+    });
+    await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({ skillsMount: SANDBOX_SKILLS_DIR }),
+      kind: "agent",
+      env: placement?.env,
+      docker: fake.docker,
+    });
+    expect(dockerRunOf(fake.calls)).toEqual(
+      expect.arrayContaining(["-e", "AFK_GENERATED_UPSTREAM_SHA=abc123"]),
+    );
   });
 });
 

@@ -5,7 +5,7 @@
 不要改集成分支。你的提交只在 `run.json` 的 `branch` 上；平台随后把它合进去。
 
 1. 读 `/context/run.json`：`integrationBranch` 是集成分支，`defaultBranch` 是要合进来的默认分支，`branch` 是你工作的临时分支。再读 `/context/spec.md` 弄清这个需求的意图，以及仓库根目录的 `AGENTS.md`。没有 `/context/ticket.md`。
-2. 执行 `git merge <defaultBranch>`，解决冲突，保留两边的意图。
+2. 执行 `git merge <defaultBranch>`，解决冲突，保留两边的意图。若迁移编号冲突：跑 `/context/run.json` 里 `gate.generated` 声明的再生成命令，不要另写一套；环境变量 `AFK_GENERATED_UPSTREAM_SHA` 已是默认分支（`defaultBranch`）的提交，上游一侧已有的迁移不改名、不删除。
 3. 提交前按 `/context/run.json` 的 `gate` 逐条跑通，再提交。`setup` 只列出来，不要求你自己再跑。
 
 ## 结果

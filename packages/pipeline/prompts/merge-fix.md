@@ -3,7 +3,7 @@
 集成分支在这张票之外前进了，或者合并后的门禁失败了（日志在 `/context/failure/gate.log`，如果有）。这个阶段不读 skill，只用覆盖层。
 
 1. 读 `/context/run.json`：`integrationBranch` 是集成分支。再读 `/context/ticket.md` 弄清这张票的意图，以及仓库根目录的 `AGENTS.md`。有 `/context/failure/gate.log` 就读。有 `/context/failure/cases.json` 就读：那是合并后门禁重跑后仍失败的用例（文件、用例名、失败信息头几行）。
-2. 执行 `git merge <integrationBranch>`，解决冲突，保留两边的意图。
+2. 执行 `git merge <integrationBranch>`，解决冲突，保留两边的意图。若迁移编号冲突：跑 `/context/run.json` 里 `gate.generated` 声明的再生成命令，不要另写一套；环境变量 `AFK_GENERATED_UPSTREAM_SHA` 已是集成分支（`integrationBranch`）的提交，上游一侧已有的迁移不改名、不删除。
 3. 提交前：若有 `/context/failure/cases.json`，先只跑它列出的文件，修好后再按 `/context/run.json` 的 `gate` 逐条跑通。没有这个文件就只按 `gate` 逐条跑。`setup` 只列出来，不要求你自己再跑。
 
 ## 结果
