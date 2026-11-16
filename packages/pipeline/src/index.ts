@@ -137,9 +137,12 @@ export {
 } from "./protected-paths.ts";
 export type { RecheckTrigger } from "./recheck.ts";
 export {
+  autoMergeCommit,
   DEFAULT_RECHECK_CONFIG_PATHS,
+  ensureRecheckFromSha,
   isConfigPath,
   isTestPath,
+  RECHECK_REF_PREFIX,
   recheckHit,
 } from "./recheck.ts";
 export type {
