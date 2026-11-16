@@ -29,7 +29,7 @@
 - 研发上下文沉淀下来，反哺后续的缺陷修复和优化
 - 可扩展，能作为基础平台给更多项目使用
 
-不在本期范围：合并到 main 的自动化。前期由人合并，见「合并到 main 与信任阶梯」。
+不在本期范围：合并到 main 的自动化。前期由人合并，见「合并到 main 与信任阶梯」。2026-11-16 起，项目可以打开第一级自动合并（[ADR 0011](adr/0011-the-platform-may-merge-through-one-exit.md)）。
 
 ## 已定决策
 
@@ -38,7 +38,7 @@
 | #   | 决策                                                                                                                                                              | 对设计的影响                                                                                                                                                                            |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | 前后端分仓，不收成 monorepo（项目大，分开开发、维护、部署）                                                                                                       | 跨仓库需求是主路径，按契约先行拆票                                                                                                                                                      |
-| 2   | 平台是研发信息的记录系统，PR 留在代码托管                                                                                                                         | 平台同步并展示 PR 状态，自己不做合并                                                                                                                                                    |
+| 2   | 平台是研发信息的记录系统，PR 留在代码托管                                                                                                                         | 平台同步并展示 PR 状态；默认不做合并，项目开了自动合并时只合符合条件的 improvement 需求（ADR 0011）                                                                                                                                                    |
 | 3   | PoC 在自己机器上跑，稳定后上公司服务器                                                                                                                            | 同一套代码，迁移只改配置                                                                                                                                                                |
 | 4   | 合并到 main 由人做，后续再考虑交给 agent                                                                                                                          | 在代码托管上用分支保护强制；用指标积累信任。GitHub 免费个人账号的私有仓库用不了分支保护和 ruleset（2026-10-28 实测），PoC 阶段改用“平台自己保证 + 事后检测”，见「平台与代码托管的分工」 |
 | 5   | 代码托管：PoC 用 GitHub，生产用自建 GitLab CE 17.3.1                                                                                                              | 做代码托管适配器，先 GitHub，后 GitLab                                                                                                                                                  |
@@ -1016,7 +1016,7 @@ flowchart LR
 | ------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | 内容   | spec、tickets、依赖图、运行记录和日志、agent 的 review 意见、验收结论、追溯链接                           | 代码、分支、PR/MR、人写的 review 评论、CI |
 | 能看到 | 每个需求下：各仓库 PR 的状态（CI、review、是否已合并）、票的进度、运行日志、待处理的 blocked 票、潜在冲突 | 代码差异和评论                            |
-| 能操作 | 确认拆分、编辑 / 重试 / 取消票、处理 blocked、触发最终 review、开 PR、跳转到 PR                           | 合并（由人做）                            |
+| 能操作 | 确认拆分、编辑 / 重试 / 取消票、处理 blocked、触发最终 review、开 PR、跳转到 PR；项目开了自动合并时合并符合条件的 PR（ADR 0011） | 合并（默认由人做）                        |
 
 适配器的差异：
 
@@ -1027,6 +1027,8 @@ flowchart LR
 | CI           | GitHub Actions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | GitLab CI                                                                             |
 | bot 账号     | **GitHub App**，装在个人账号上，只勾选需要的仓库（PoC 先只装 `afk-pilot-backend`）。权限：Contents 读写、Pull requests 读写、Checks 只读、Commit statuses 只读；**不给** Workflows、Administration、Actions 写、Issues、Secrets。不订阅 webhook，状态靠轮询。PR 作者显示为 `<app>[bot]`，与你本人是不同身份。不用机器账号：仓库属于个人账号，fine-grained token 一个只能访问一个所有者的资源，不支持协作者身份，只能退到范围很大的 classic token。凭据（App ID、安装 ID、私钥 PEM）放 `~/.afk/secrets/github-app/`（权限 600，不放 `~/.afk/env`）；worker 用私钥换 installation token（每小时过期），换的时候限定本次任务需要的仓库和权限，缓存到过期前 5 分钟；推送仍通过 `http.extraHeader` 传，M0 用的个人 `GITHUB_TOKEN` 在 App 跑通后废掉。token 不能按分支限权，bot 只写 `agent/*`、`spec/*` 由平台保证                                                                                                                                                                                                                                                 | bot 用户 + PAT，Developer 角色，PAT 放 `~/.afk/secrets/gitlab/<主机>`                 |
 | 强制由人合并 | **PoC（GitHub 免费个人账号，私有仓库）用不了 ruleset 和分支保护，也没有 bypass 名单**（2026-10-28 对试点仓库实测：接口返回 `Upgrade to GitHub Pro or make this repository public`）。所以改成三层，GitHub 不强制，平台自己保证，已知缺口：(1) worker 里所有 `git push` 走同一个函数，只放行 `refs/heads/agent/*` 和 `refs/heads/spec/*`，其余拒绝；平台代码里不调用任何合并 PR 的接口；两个测试：给这个函数传 `main` 必须报错，代码里搜不到合并接口的调用。(2) 每个仓库放一个检测用的 Actions 工作流，监听 `push` 到 `main`，用 `GET /commits/{sha}/pulls` 查这次提交有没有对应的已合并 PR，没有、或推送者是 bot，就失败并在仓库里开一个 issue；只做事后检测，不阻止，出事后人工回滚。免费个人账号的私有仓库每月 2000 分钟 Actions 额度，这个工作流每次几秒，用不到六分之一；额度用完又没绑支付方式时它会静默不跑，需留意邮件提醒。(3) App 不给 Workflows 权限，据说这样改不了 `.github/workflows/`，bot 出 bug 也关不掉第 2 层（待验证）。以后要 GitHub 真强制，升级 Pro 后加 ruleset：要求经 PR 合并且至少 1 个 approve，bot 不在 bypass 列表，前三层不用改 | 受保护分支：允许 push 设为“无”，允许合并设为 Maintainer。bot 只是 Developer，合不进去 |
+
+2026-11-16 起第 (1) 层改为「只有一个合并出口、只在项目开了自动合并时调用」，第 (2) 层放行带自动合并标记、由 bot 合并的 PR，第 3 层不变，见 [ADR 0011](adr/0011-the-platform-may-merge-through-one-exit.md)。
 
 GitLab 免费版的 MR 审批是可选的，没有审批也能合并；“必须几人审批”的规则是 Premium 功能。所以在 CE 上靠角色限制来保证由人合并（[受保护分支](https://docs.gitlab.com/user/project/repository/branches/protected/)、[MR 审批](https://docs.gitlab.com/user/project/merge_requests/approvals/)）。Developer 能写所有未受保护的分支，同样由平台保证只写 `agent/*`、`spec/*`。
 
@@ -1061,7 +1063,7 @@ sequenceDiagram
 
 ## 合并到 main 与信任阶梯
 
-前期合并到 main 全部由人做，在代码托管上强制（见上一节）。平台用验收包缩短人的验收时间，用指标决定什么时候放权。
+前期合并到 main 全部由人做，在代码托管上强制（见上一节）。2026-11-16 起项目可以打开 L1（[ADR 0011](adr/0011-the-platform-may-merge-through-one-exit.md)），默认仍是 L0。平台用验收包缩短人的验收时间，用指标决定什么时候放权。
 
 验收包在每个需求收尾时生成，人看完就能决定合不合：
 
@@ -1076,10 +1078,10 @@ sequenceDiagram
 | 级别       | 谁合进 main                                                              | 进入条件                |
 | ---------- | ------------------------------------------------------------------------ | ----------------------- |
 | L0（现在） | 全部由人合并                                                             | 无                      |
-| L1         | 低风险类型（文档、测试、门禁全过的小 bug 修复）由 agent 合并，人事后抽查 | 阈值待 PoC 跑出数据后定 |
+| L1         | 项目合并策略为 `auto-improvement` 时，只改一个仓库、验收包没有待人定的事、PR 上没人评论的 improvement 需求，开 PR 30 分钟后由平台合并（ADR 0011）；人事后抽查 | 审查校准 Spec 轴对 User Story 缺陷命中过半（8.5：4/4） |
 | L2         | 指标长期达标的项目放开到 feature                                         | 阈值待定                |
 
-升级到 L1 时 bot 需要 main 的合并权限。GitLab CE 只能按角色授权，没法按 PR 类型区分，所以"只合并低风险类型"这条限制只能靠平台的合并策略保证。
+升级到 L1 时 bot 需要 main 的合并权限：GitHub App 的 Contents 写权限已经够；GitLab 的 bot 是 Developer，合不进受保护分支，所以 L1 先只在 GitHub 上生效。GitLab CE 只能按角色授权，没法按 PR 类型区分，所以"只合并低风险类型"这条限制只能靠平台的合并策略保证。
 
 ## 上下文沉淀与缺陷回流
 
