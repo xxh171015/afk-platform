@@ -2,7 +2,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -353,5 +355,101 @@ describe("runReviewCalibration", () => {
     expect(table).toMatch(/tiny\/us-1/);
     expect(table).toContain("must-fix");
     expect(table).toContain("suggestion");
+  });
+});
+
+function writeTinySample(root: string, repo: string, base: string): void {
+  const sampleDir = join(root, "samples", "tiny");
+  mkdirSync(sampleDir, { recursive: true });
+  writeFileSync(
+    join(sampleDir, "sample.yaml"),
+    [`repo: ${repo}`, `base: ${base}`, "kind: ticket", ""].join("\n"),
+  );
+  for (const name of ["change.patch", "spec.md", "ticket.md"] as const) {
+    writeFileSync(join(sampleDir, name), readFileSync(join(tinyDocs, name)));
+  }
+  writeFileSync(
+    join(root, "answers.yaml"),
+    readFileSync(join(fixtureRoot, "answers.yaml")),
+  );
+}
+
+describe("runReviewCalibration on a temp dir behind a symlink", () => {
+  const savedTmp = process.env.TMPDIR;
+  afterEach(() => {
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
+  });
+
+  // macOS: /var/folders is a symlink to /private/var/folders. Git worktrees record the real path, and the
+  // sandbox only mounts the path it was given, so the clone must already sit at its real path.
+  it("hands the runner the clone's real path", async () => {
+    origin = makeRepo({ "src/app.ts": BASE_APP, "AGENTS.md": "x\n" });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-link-"));
+    dirs.push(root);
+    writeTinySample(root, origin.dir, base);
+    const realTmp = join(root, "real-tmp");
+    mkdirSync(realTmp);
+    const linkTmp = join(root, "link-tmp");
+    symlinkSync(realTmp, linkTmp);
+    process.env.TMPDIR = linkTmp;
+
+    const seen: string[] = [];
+    await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) => {
+        seen.push(repoDir);
+        return new FakeAgentRunner(repoDir, () => ({
+          output: {
+            verdict: "pass",
+            mustFix: [],
+            suggestions: [],
+            uncertainties: [],
+            sources: ["AGENTS.md"],
+          },
+        }));
+      },
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.startsWith(realpathSync(realTmp))).toBe(true);
+  });
+});
+
+describe("runReviewCalibration when an axis run fails", () => {
+  it("shows 运行失败 for that axis and lists the error, not 未发现", async () => {
+    origin = makeRepo({ "src/app.ts": BASE_APP, "AGENTS.md": "x\n" });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-axisfail-"));
+    dirs.push(root);
+    writeTinySample(root, origin.dir, base);
+
+    const table = await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) =>
+        new FakeAgentRunner(repoDir, (ctx) => {
+          if (ctx.prompt.includes("阶段：review，Spec 轴")) {
+            return {
+              error: { kind: "other", message: "not a git repository" },
+            };
+          }
+          return {
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        }),
+    });
+
+    const usRow = table.split("\n").find((line) => line.includes("tiny/us-1"));
+    expect(usRow).toMatch(/\| 运行失败 \| 未发现 \|$/);
+    expect(table).toMatch(
+      /\| tiny \(spec\) \| 失败 \| not a git repository \|/,
+    );
   });
 });

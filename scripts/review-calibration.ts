@@ -9,7 +9,7 @@ import {
   SANDBOX_SKILLS_DIR,
   SandcastleAgentRunner,
 } from "../packages/pipeline/src/sandcastle.ts";
-import { loadConfig } from "../packages/worker/src/config.ts";
+import { loadConfig, parseEnvFile } from "../packages/worker/src/config.ts";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 
@@ -27,11 +27,16 @@ const dir = flag("dir") ?? join(rootDir, "docs/review-calibration");
 const specModel = flag("spec-model");
 const standardsModel = flag("standards-model");
 
+const readFile = (path: string) =>
+  existsSync(path) ? readFileSync(path, "utf8") : undefined;
+// The worker gets AFK_MODEL exported by scripts/up.sh; run by hand, fall back to ~/.afk/env.
+const envFile = parseEnvFile(
+  readFile(join(process.env.AFK_HOME || join(homedir(), ".afk"), "env")) ?? "",
+);
 const config = loadConfig({
-  env: process.env,
+  env: { AFK_MODEL: envFile.AFK_MODEL, ...process.env },
   homedir: homedir(),
-  readFile: (path) =>
-    existsSync(path) ? readFileSync(path, "utf8") : undefined,
+  readFile,
 });
 const logDir = join(config.home, "calibration-logs");
 mkdirSync(logDir, { recursive: true });
