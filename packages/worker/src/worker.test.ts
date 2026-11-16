@@ -151,3 +151,165 @@ describe("heartbeats while a job is in hand", () => {
     expect(finished).toBe(true);
   });
 });
+
+const hostJob: ClaimedJob = {
+  id: 1,
+  type: "host-sync",
+  payload: {},
+  attempt: 1,
+  lockKey: null,
+  leaseExpiresAt: "2026-01-01T00:02:00Z",
+};
+
+const host = { adapter: {} } as WorkerOptions["host"];
+
+const until = async (what: () => boolean, ms = 2_000) => {
+  const deadline = Date.now() + ms;
+  while (!what() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  return what();
+};
+
+describe("when the API cannot be reached while a job is in hand", () => {
+  it("hands the result in once the API returns, instead of abandoning after missed heartbeats", async () => {
+    let heartbeats = 0;
+    let apiUp = false;
+    let releaseWork = () => {};
+    const working = new Promise<void>((resolve) => {
+      releaseWork = resolve;
+    });
+    const completed: unknown[] = [];
+    const api = {
+      heartbeat: async () => {
+        heartbeats += 1;
+        if (!apiUp) throw new Error("connection refused");
+        return "held" as const;
+      },
+      hostTask: async () => {
+        await working;
+        return { kind: "host-sync" as const, pulls: [] };
+      },
+      complete: async (_job: ClaimedJob, body: unknown) => {
+        completed.push(body);
+        return "held" as const;
+      },
+    } as unknown as WorkerApi;
+    const done = processJob({ api, executor, host, heartbeatMs: 20 }, hostJob);
+    expect(await until(() => heartbeats >= 5)).toBe(true);
+    apiUp = true;
+    releaseWork();
+    expect(await done).toBe("completed");
+    expect(completed).toHaveLength(1);
+  });
+
+  it("abandons the job as soon as a heartbeat answers lost", async () => {
+    let releaseWork = () => {};
+    const working = new Promise<void>((resolve) => {
+      releaseWork = resolve;
+    });
+    let heartbeats = 0;
+    const api = {
+      heartbeat: async () => {
+        heartbeats += 1;
+        return "lost" as const;
+      },
+      hostTask: async () => {
+        await working;
+        return { kind: "host-sync" as const, pulls: [] };
+      },
+      complete: async () => "held" as const,
+    } as unknown as WorkerApi;
+    const done = processJob({ api, executor, host, heartbeatMs: 20 }, hostJob);
+    expect(await until(() => heartbeats >= 1)).toBe(true);
+    // the run is aborted; hostTask is still waiting, so unblocking it lets processJob see the abort
+    releaseWork();
+    expect(await done).toBe("abandoned");
+  });
+
+  it("keeps handing in the result until the API answers, past the old three tries", async () => {
+    let tries = 0;
+    const api = {
+      heartbeat: async () => "held" as const,
+      hostTask: async () => ({ kind: "host-sync" as const, pulls: [] }),
+      complete: async () => {
+        tries += 1;
+        if (tries < 5) throw new Error("connection refused");
+        return "held" as const;
+      },
+    } as unknown as WorkerApi;
+    expect(
+      await processJob({ api, executor, host, heartbeatMs: 20 }, hostJob),
+    ).toBe("completed");
+    expect(tries).toBe(5);
+  });
+
+  it("stops handing in the result when the process is told to exit", async () => {
+    const stop = new AbortController();
+    let tries = 0;
+    const api = {
+      heartbeat: async () => "held" as const,
+      hostTask: async () => ({ kind: "host-sync" as const, pulls: [] }),
+      complete: async () => {
+        tries += 1;
+        if (tries === 2) stop.abort();
+        throw new Error("connection refused");
+      },
+    } as unknown as WorkerApi;
+    expect(
+      await processJob(
+        { api, executor, host, heartbeatMs: 20, signal: stop.signal },
+        hostJob,
+      ),
+    ).toBe("abandoned");
+    expect(tries).toBe(2);
+  });
+});
+
+describe("log chunks while the API is unreachable", () => {
+  const job: ClaimedJob = {
+    id: 1,
+    type: "agent-run",
+    payload: {},
+    attempt: 1,
+    lockKey: null,
+    leaseExpiresAt: "2026-01-01T00:02:00Z",
+  };
+
+  it("uploads chunks that failed while the API was down once it returns", async () => {
+    const uploaded: string[] = [];
+    let apiUp = false;
+    let failedUploads = 0;
+    const api = {
+      heartbeat: async () => "held" as const,
+      bundle: async () => ({
+        run: { id: 7, displayId: "R-7" },
+      }),
+      appendLog: async (_runId: number, _job: ClaimedJob, chunk: string) => {
+        if (!apiUp) {
+          failedUploads += 1;
+          throw new Error("connection refused");
+        }
+        uploaded.push(chunk);
+        return "held" as const;
+      },
+      complete: async () => "held" as const,
+    } as unknown as WorkerApi;
+    const outcome = await processJob(
+      {
+        api,
+        executor,
+        heartbeatMs: 30,
+        logFlushMs: 20,
+        runStage: async ({ log }) => {
+          log("hello from the agent");
+          expect(await until(() => failedUploads >= 1)).toBe(true);
+          apiUp = true;
+          return { stage: "implement", outcome: "done" };
+        },
+      },
+      job,
+    );
+    expect(outcome).toBe("completed");
+    expect(uploaded.join("")).toContain("hello from the agent");
+  });
+});
