@@ -157,6 +157,21 @@ export async function claimJob(
   }
 }
 
+// Before the API accepts claims: every job still in a worker's hands gets a fresh lease, so a lease that
+// ran out while this process was down is not expired on the first claim (the worker may still be running it).
+export async function renewHeldLeases(
+  pool: Queryable,
+  now: Date,
+  leaseSeconds: number,
+): Promise<void> {
+  const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1000);
+  await pool.query(
+    `UPDATE jobs SET lease_expires_at = $1
+     WHERE state = 'running' AND lease_owner IS NOT NULL`,
+    [leaseExpiresAt],
+  );
+}
+
 // Running jobs whose lease ran out: their worker died, hung or could not reach the API.
 export async function expiredJobIds(pool: Queryable, now: Date) {
   const { rows } = await pool.query<{ id: number }>(

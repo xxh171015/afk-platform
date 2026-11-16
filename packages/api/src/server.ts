@@ -1,8 +1,9 @@
 import { serve } from "@hono/node-server";
 import type pg from "pg";
-import { createApp } from "./app.ts";
+import { createApp, LEASE_SECONDS } from "./app.ts";
 import { assertMigrated } from "./db/migrate.ts";
 import { eventsHubOf } from "./events/hub.ts";
+import { renewHeldLeases } from "./jobs/queue.ts";
 import { defaultLogDir, LogStore } from "./logs/log-store.ts";
 import { retainLogs } from "./logs/retention.ts";
 import {
@@ -41,18 +42,20 @@ export async function startServer(options: {
     "SELECT id FROM instance",
   );
   const logDir = options.logDir ?? defaultLogDir(rows[0]?.id ?? "");
+  const clock = options.clock ?? (() => new Date());
   const app = createApp({
     pool: options.pool,
     logDir,
+    clock,
     liveNotifications: true,
     feishu: {
       secretsPath: feishuSecretsPath(),
       defaultChatId: process.env.AFK_FEISHU_DEFAULT_CHAT,
     },
   });
+  await renewHeldLeases(options.pool, clock(), LEASE_SECONDS);
   await eventsHubOf(app)?.whenReady();
   await dispatcherOf(app)?.start();
-  const clock = options.clock ?? (() => new Date());
   const sweep = periodicScheduling(
     options.pool,
     options.scheduleEveryMs ?? 60_000,

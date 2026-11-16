@@ -146,6 +146,39 @@ describe("working a claimed job", () => {
   });
 });
 
+describe("leases when the API starts", () => {
+  it("does not take back a lease that ran out while it was down, on the first claim after it starts", async () => {
+    await enqueue("a");
+    const job = (await worker("w1").claim()).body.job as ClaimedJob;
+    clock.advanceSeconds(121);
+    await api.close();
+    api = await listen(testApp({ pool: db.pool, clock: clock.now }));
+    expect((await worker("w2").claim()).body.job).toBeNull();
+    const stored = await db.pool.query(
+      "SELECT state, attempt, error FROM jobs WHERE id = $1",
+      [job.id],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      state: "running",
+      attempt: job.attempt,
+      error: null,
+    });
+    expect((await worker("w1").complete(job.id, job.attempt)).status).toBe(200);
+  });
+
+  it("takes the job back as usual once a full lease after start still has no heartbeat", async () => {
+    await enqueue("a");
+    const job = (await worker("w1").claim()).body.job as ClaimedJob;
+    clock.advanceSeconds(121);
+    await api.close();
+    api = await listen(testApp({ pool: db.pool, clock: clock.now }));
+    expect((await worker("w2").claim()).body.job).toBeNull();
+    clock.advanceSeconds(121);
+    const retaken = (await worker("w2").claim()).body.job;
+    expect(retaken).toMatchObject({ id: job.id, attempt: job.attempt + 1 });
+  });
+});
+
 describe("leases that run out", () => {
   it("goes back to the queue with the attempt bumped, and the old holder is shut out", async () => {
     await enqueue("a");
