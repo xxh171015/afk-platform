@@ -348,6 +348,21 @@ describe("classifying a review run", () => {
       }),
     ).toEqual([{ kind: "must-fix", body: "b.ts p" }]);
   });
+
+  it("turns uncertainties into findings that go to the acceptance pack", () => {
+    expect(
+      reviewFindings({
+        ...output("pass"),
+        uncertainties: ["the review could not run the export"],
+      }),
+    ).toEqual([
+      { kind: "suggestion", body: "rename x" },
+      {
+        kind: "uncertainty",
+        body: "the review could not run the export",
+      },
+    ]);
+  });
 });
 
 describe("the two axes of a review", () => {

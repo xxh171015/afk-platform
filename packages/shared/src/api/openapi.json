@@ -7399,6 +7399,37 @@
                                   "required": ["ticket", "run", "body"]
                                 }
                               },
+                              "reviewUncertainties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "body",
+                                    "axis"
+                                  ]
+                                }
+                              },
                               "decisions": {
                                 "type": "array",
                                 "items": {
@@ -7486,6 +7517,7 @@
                               "tickets",
                               "findings",
                               "scopeCreep",
+                              "reviewUncertainties",
                               "decisions",
                               "protectedPathApprovals"
                             ]
