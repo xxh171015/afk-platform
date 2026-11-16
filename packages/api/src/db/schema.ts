@@ -554,7 +554,7 @@ export const pullRequests = pgTable(
       .notNull()
       .default(false),
     // Issue comments, inline comments, and reviews with a body, minus bots and the token's own user.
-    humanComments: integer("human_comments").notNull().default(0),
+    humanComments: integer("human_comments"),
     // The SHA the platform last pushed to this pull request's head branch. When host-sync records a
     // merge, the pull-request event stores whether the merged head is this SHA (docs/specs/m3-platform.md「成功标准」).
     platformHeadSha: text("platform_head_sha"),

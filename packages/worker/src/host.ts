@@ -183,45 +183,56 @@ export async function runHostTask(
     }
   }
   if (task.kind === "spec-cleanup") return cleanUp(deps, task, log);
+  // Every way this can go wrong ends as a recorded failure that tells a person to merge
+  // (ADR 0011: not retried). If the merge does not happen, the old description goes back
+  // so the PR does not claim the platform merged it.
   if (task.kind === "auto-merge") {
+    const repo = repoRef(task.repoUrl);
+    const failed = (reason: string) => ({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason,
+    });
+    const reasonOf = (error: unknown, doing: string) =>
+      error instanceof HostError || error instanceof RangeError
+        ? error.message
+        : `could not ${doing}: ${String(error)}`;
+    let current: string;
     try {
-      const current = await deps.adapter.getPullRequestBody({
-        repo: repoRef(task.repoUrl),
+      current = await deps.adapter.getPullRequestBody({
+        repo,
         number: task.number,
       });
       await deps.adapter.updatePullRequestBody({
-        repo: repoRef(task.repoUrl),
+        repo,
         number: task.number,
         body: spliceMergeNote(current, task.section),
       });
       log(`updated description of pull request ${task.number}`);
     } catch (error) {
-      throw new InfrastructureError(
-        error instanceof HostError || error instanceof RangeError
-          ? error.message
-          : `could not update the pull request description: ${String(error)}`,
-      );
+      return failed(reasonOf(error, "update the pull request description"));
     }
     try {
       await deps.adapter.mergePullRequest({
-        repo: repoRef(task.repoUrl),
+        repo,
         number: task.number,
         expectedHeadSha: task.expectedHeadSha,
       });
       log(`merged pull request ${task.number}`);
       return { stage: "auto-merge", outcome: "merged" };
     } catch (error) {
-      if (error instanceof HostError)
-        return {
-          stage: "auto-merge",
-          outcome: "failed",
-          reason: error.message,
-        };
-      throw new InfrastructureError(
-        error instanceof RangeError
-          ? error.message
-          : `could not merge the pull request: ${String(error)}`,
-      );
+      try {
+        await deps.adapter.updatePullRequestBody({
+          repo,
+          number: task.number,
+          body: current,
+        });
+      } catch {
+        log(
+          `could not put back the description of pull request ${task.number}`,
+        );
+      }
+      return failed(reasonOf(error, "merge the pull request"));
     }
   }
   if (task.kind === "index-pr-links") {
