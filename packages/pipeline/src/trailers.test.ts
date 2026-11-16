@@ -185,3 +185,46 @@ describe("a branch that took in the integration branch (merge-fix)", () => {
     expect(body("spec/s~1")).not.toContain("Ticket:");
   });
 });
+
+describe("a branch that took in the default branch (update-branch)", () => {
+  function updatedBranch() {
+    repo = makeRepo({ "base.txt": "base\n" });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "spec.txt": "spec\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    const before = gitOut(repo.dir, ["rev-parse", "HEAD"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    repo.commit({ "from-main.txt": "main\n" }, "main moved");
+    const mainTip = gitOut(repo.dir, ["rev-parse", "main"]);
+    git(repo.dir, ["checkout", "--quiet", "agent/T-123"]);
+    git(repo.dir, ["merge", "--no-edit", "main"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    return { before, mainTip };
+  }
+
+  it("leaves the default branch's own commits exactly as they are when both sides are excluded", () => {
+    const { before, mainTip } = updatedBranch();
+    const result = stamp(before, { exclude: ["spec/s", "main"] });
+    expect(result.rewritten).toBe(1);
+    expect(gitOut(repo.dir, ["rev-parse", "main"])).toBe(mainTip);
+    expect(
+      git(repo.dir, ["merge-base", "--is-ancestor", "main", "agent/T-123"])
+        .code,
+    ).toBe(0);
+    expect(body("main")).not.toContain("Ticket:");
+    expect(body("main")).not.toContain("Spec:");
+    expect(body("agent/T-123")).toContain("Ticket: T-123");
+    expect(body("agent/T-123")).toContain("Spec: S-12");
+    expect(body("agent/T-123")).toContain("Run: R-456");
+    const parents = gitOut(repo.dir, [
+      "rev-list",
+      "--parents",
+      "-n",
+      "1",
+      "agent/T-123",
+    ])
+      .split(" ")
+      .slice(1);
+    expect(parents).toEqual([before, mainTip]);
+  });
+});

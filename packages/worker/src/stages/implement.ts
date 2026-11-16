@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   classifyAgentRun,
+  GENERATED_UPSTREAM_ENV,
   git,
   gitOrThrow,
   ImplementOutputSchema,
@@ -104,6 +105,15 @@ export async function agentChange(
       align.expectedOld,
       context.signal,
     );
+    const generatedUpstream =
+      stage === "update-branch"
+        ? tip(mainDir, bundle.repo.defaultBranch)
+        : stage === "merge-fix"
+          ? tip(mainDir, integration)
+          : undefined;
+    const generatedEnv = generatedUpstream
+      ? { [GENERATED_UPSTREAM_ENV]: generatedUpstream }
+      : undefined;
     // An integration ticket's agent works in its integration environment: it writes the e2e against real services,
     // and a fix reproduces the failure there. The environment is gone again when the run is over.
     const runAgent = (placement?: SandboxPlacement) =>
@@ -117,6 +127,7 @@ export async function agentChange(
         schema:
           stage === "final-tidy" ? TidyOutputSchema : ImplementOutputSchema,
         ...(placement ? { placement } : {}),
+        ...(generatedEnv ? { env: generatedEnv } : {}),
         ...options,
         signal: context.signal,
       });
@@ -171,7 +182,9 @@ export async function agentChange(
       repoDir: mainDir,
       branch: agent,
       before: stampFrom,
-      exclude: integration,
+      // Integration commits (merge-fix) and default-branch commits (update-branch)
+      // already exist elsewhere; rewriting them changes hashes and GitHub sees duplicates.
+      exclude: [integration, bundle.repo.defaultBranch],
       ids: {
         spec: bundle.spec.displayId,
         ...(bundle.ticket ? { ticket: bundle.ticket.displayId } : {}),
