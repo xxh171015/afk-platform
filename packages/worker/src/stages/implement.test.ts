@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GENERATED_UPSTREAM_ENV, git, gitOut } from "@afk/pipeline";
+import { GENERATED_UPSTREAM_ENV, git, gitOrThrow, gitOut } from "@afk/pipeline";
 import {
   bundleFor,
   FakeAgentRunner,
@@ -12,7 +12,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { TicketAlign } from "../align-ticket-branch.ts";
 import type { ClaimedJob } from "../api.ts";
-import type { ExecutorDeps } from "../executor.ts";
+import type { ExecutorDeps, StageOutcomeBody } from "../executor.ts";
 import { pushRef } from "../push.ts";
 import { RepoStore } from "../repos.ts";
 import type { Slot } from "../slots.ts";
@@ -84,7 +84,10 @@ function slot(ref: string): Slot {
   };
 }
 
-function context(bundle: ReturnType<typeof bundleFor>): {
+function context(
+  bundle: ReturnType<typeof bundleFor>,
+  payload: Record<string, unknown> = {},
+): {
   job: ClaimedJob;
   bundle: ReturnType<typeof bundleFor>;
   signal: AbortSignal;
@@ -92,12 +95,27 @@ function context(bundle: ReturnType<typeof bundleFor>): {
   logRaw: () => void;
 } {
   return {
-    job,
+    job: { ...job, payload },
     bundle,
     signal: new AbortController().signal,
     log: () => {},
     logRaw: () => {},
   };
+}
+
+type RecheckFacts = {
+  hit: boolean;
+  paths: string[];
+  fromSha: string;
+  toSha: string;
+};
+
+function recheckOf(outcome: StageOutcomeBody): RecheckFacts {
+  const run = outcome.run;
+  if (!run || typeof run !== "object" || Array.isArray(run)) {
+    throw new Error("missing recheck");
+  }
+  return (run as { recheck: RecheckFacts }).recheck;
 }
 
 function deps(runner: FakeAgentRunner): ExecutorDeps {
@@ -290,5 +308,411 @@ describe("AFK_GENERATED_UPSTREAM_SHA in the agent sandbox", () => {
     );
 
     expect(runner.calls[0]?.env?.[GENERATED_UPSTREAM_ENV]).toBe(integrationTip);
+  });
+});
+
+describe("Recheck range after update-branch and merge-fix", () => {
+  it("update-branch: does not hit when main flips an existing test and the agent leaves it", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "src/feature.ts": "1\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    const mainTip = repo.commit(
+      { "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n' },
+      "main flips assertion",
+    );
+    originAndSlot();
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "main"]);
+      return { output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "update-branch",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+        }),
+        { mainSha: mainTip },
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+      align,
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: false,
+      paths: [],
+    });
+  });
+
+  it("update-branch: hits when the agent drops main's test lines in a conflict", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("shared", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit(
+      {
+        "src/a.test.ts":
+          'it("shared", () => expect(n).toBe(1));\nit("spec", () => expect(true).toBe(true));\n',
+      },
+      "spec adds a test",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    const mainTip = repo.commit(
+      {
+        "src/a.test.ts":
+          'it("shared", () => expect(n).toBe(2));\nit("main", () => expect(true).toBe(true));\n',
+      },
+      "main flips assertion",
+    );
+    originAndSlot();
+
+    const resolved =
+      'it("shared", () => expect(n).toBe(1));\nit("spec", () => expect(true).toBe(true));\n';
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "main"]);
+      writeFileSync(join(ctx.dir, "src/a.test.ts"), resolved);
+      return { files: { "src/a.test.ts": resolved }, output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "update-branch",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+        }),
+        { mainSha: mainTip },
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+      align,
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+    });
+  });
+
+  it("update-branch: hits when the agent edits an existing spec-side test after the auto-merge", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "src/feature.ts": "1\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    const mainTip = repo.commit({ "src/from-main.ts": "1\n" }, "main moves");
+    originAndSlot();
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "main"]);
+      return {
+        files: {
+          "src/a.test.ts": 'it("is 1", () => expect(n).toBe(9));\n',
+        },
+        output: DONE,
+      };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "update-branch",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+        }),
+        { mainSha: mainTip },
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+      align,
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+    });
+  });
+
+  it("merge-fix: does not hit when the integration branch flips an existing test and the agent leaves it", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    repo.commit({ "src/ticket.ts": "1\n" }, "ticket work");
+    git(repo.dir, ["checkout", "--quiet", "spec/s"]);
+    repo.commit(
+      { "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n' },
+      "integration flips assertion",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/T-123"]);
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "spec/s"]);
+      return { output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "merge-fix",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: false,
+      paths: [],
+    });
+  });
+
+  it("merge-fix: hits when the agent drops the integration branch's test lines in a conflict", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("shared", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    repo.commit(
+      {
+        "src/a.test.ts":
+          'it("shared", () => expect(n).toBe(1));\nit("ticket", () => expect(true).toBe(true));\n',
+      },
+      "ticket adds a test",
+    );
+    git(repo.dir, ["checkout", "--quiet", "spec/s"]);
+    repo.commit(
+      {
+        "src/a.test.ts":
+          'it("shared", () => expect(n).toBe(2));\nit("integration", () => expect(true).toBe(true));\n',
+      },
+      "integration flips assertion",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/T-123"]);
+
+    const resolved =
+      'it("shared", () => expect(n).toBe(1));\nit("ticket", () => expect(true).toBe(true));\n';
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "spec/s"]);
+      writeFileSync(join(ctx.dir, "src/a.test.ts"), resolved);
+      return { files: { "src/a.test.ts": resolved }, output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "merge-fix",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+    });
+  });
+
+  it("merge-fix: hits when the agent edits an existing ticket-side test after the auto-merge", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    repo.commit({ "src/ticket.ts": "1\n" }, "ticket work");
+    git(repo.dir, ["checkout", "--quiet", "spec/s"]);
+    repo.commit({ "src/from-int.ts": "1\n" }, "integration moves");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/T-123"]);
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "spec/s"]);
+      return {
+        files: {
+          "src/a.test.ts": 'it("is 1", () => expect(n).toBe(9));\n',
+        },
+        output: DONE,
+      };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "merge-fix",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+    });
+  });
+
+  it("review-fix Recheck still starts at the pre-run tip", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/T-123"]);
+    const before = gitOut(repo.dir, ["rev-parse", "agent/T-123"]);
+
+    const runner = new FakeAgentRunner(slotDir, async () => ({
+      files: {
+        "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n',
+      },
+      output: DONE,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "review-fix",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+      fromSha: before,
+    });
+  });
+
+  it("final-fix Recheck still starts at the pre-run tip", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/S-12-final"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/S-12-final"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/S-12-final"]);
+    const before = gitOut(repo.dir, ["rev-parse", "agent/S-12-final"]);
+
+    const runner = new FakeAgentRunner(slotDir, async () => ({
+      files: {
+        "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n',
+      },
+      output: DONE,
+    }));
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "final-fix",
+          ticket: null,
+          agentBranch: "agent/S-12-final",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/S-12-final"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(recheckOf(outcome)).toMatchObject({
+      hit: true,
+      paths: ["src/a.test.ts"],
+      fromSha: before,
+    });
+  });
+
+  it("stores the auto-merge commit as fromSha under refs/afk/recheck and git diff reaches it", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "src/feature.ts": "1\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    const mainTip = repo.commit(
+      { "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n' },
+      "main flips assertion",
+    );
+    originAndSlot();
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "main"]);
+      return { output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "update-branch",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+        }),
+        { mainSha: mainTip },
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+      align,
+    );
+
+    const trigger = recheckOf(outcome);
+    const stored = gitOrThrow(repo.dir, ["rev-parse", "refs/afk/recheck/R-9"]);
+    expect(trigger.fromSha).toBe(stored);
+    expect(trigger.fromSha).not.toBe(mainTip);
+    expect(gitOrThrow(repo.dir, ["cat-file", "-t", trigger.fromSha])).toBe(
+      "commit",
+    );
+    expect(git(repo.dir, ["diff", trigger.fromSha, trigger.toSha]).code).toBe(
+      0,
+    );
   });
 });

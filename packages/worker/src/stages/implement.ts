@@ -2,12 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  autoMergeCommit,
   classifyAgentRun,
   GENERATED_UPSTREAM_ENV,
   git,
   gitOrThrow,
   ImplementOutputSchema,
   promptFor,
+  RECHECK_REF_PREFIX,
   readGateConfig,
   recheckHit,
   type SandboxPlacement,
@@ -55,6 +57,22 @@ function extraRecheckConfig(repoDir: string, sha: string): string[] {
   } catch {
     return [];
   }
+}
+
+function incomingForRecheck(
+  stage: string,
+  context: StageContext,
+  mainDir: string,
+  integration: string,
+  defaultBranch: string,
+): string | undefined {
+  if (stage === "update-branch") {
+    const mainSha = context.job.payload.mainSha;
+    if (typeof mainSha === "string" && mainSha.length > 0) return mainSha;
+    return tip(mainDir, defaultBranch);
+  }
+  if (stage === "merge-fix") return tip(mainDir, integration);
+  return undefined;
 }
 
 export async function agentChange(
@@ -252,9 +270,24 @@ export async function agentChange(
       RECHECK_TRIGGER_STAGES.has(stage) &&
       typeof facts.headSha === "string"
     ) {
+      const incoming = incomingForRecheck(
+        stage,
+        context,
+        mainDir,
+        integration,
+        bundle.repo.defaultBranch,
+      );
+      const fromSha = incoming
+        ? autoMergeCommit({
+            repoDir: mainDir,
+            oursSha: before,
+            theirsSha: incoming,
+            ref: `${RECHECK_REF_PREFIX}${runIdOf(bundle)}`,
+          })
+        : before;
       facts.recheck = recheckHit({
         repoDir: mainDir,
-        fromSha: before,
+        fromSha,
         toSha: facts.headSha,
         baselineSha: branchBase(mainDir, integration, agent),
         extraConfigPaths: extraRecheckConfig(mainDir, facts.headSha),
