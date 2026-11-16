@@ -1,8 +1,10 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -220,5 +222,192 @@ describe("scripts/up.sh with no code-host credentials", () => {
     expect(text).not.toMatch(/\[github\/gitlab\]/i);
     expect(text).not.toMatch(/\[Y\/n\]/);
     expect(text).not.toContain("All checks passed.");
+  });
+});
+
+describe("scripts/up.sh restarts a crashed API without stopping the worker", {
+  timeout: 45_000,
+}, () => {
+  let live: ChildProcess | undefined;
+  afterEach(() => {
+    if (live?.pid) {
+      try {
+        process.kill(live.pid, "SIGTERM");
+      } catch {
+        // already gone
+      }
+    }
+    live = undefined;
+  });
+
+  async function waitUntil(label: string, ok: () => boolean, ms = 15_000) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (ok()) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`timed out waiting for ${label}`);
+  }
+
+  function stack(options: { api: string; worker: string; web?: string }) {
+    const home = tempDir("afk-up-stack-");
+    const githubDir = join(home, "secrets", "github-app");
+    mkdirSync(githubDir, { recursive: true });
+    writeFileSync(join(githubDir, "private-key.pem"), "dummy");
+    writeFileSync(join(githubDir, "app.json"), "{}");
+    const bin = tempDir("afk-up-stack-bin-");
+    writeFileSync(
+      join(bin, "docker"),
+      readFileSync(join(stubDocker(), "docker")),
+    );
+    chmodSync(join(bin, "docker"), 0o755);
+    writeFileSync(
+      join(bin, "pnpm"),
+      `#!/bin/sh
+case "$1" in
+  -v) echo "9.0.0"; exit 0 ;;
+  api) exec "$AFK_FAKE_API" ;;
+  web) exec "$AFK_FAKE_WEB" ;;
+  worker) exec "$AFK_FAKE_WORKER" ;;
+  *) echo "unexpected pnpm $*" >&2; exit 1 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    chmodSync(join(bin, "pnpm"), 0o755);
+    const fakeApi = join(bin, "fake-api");
+    const fakeWorker = join(bin, "fake-worker");
+    const fakeWeb = join(bin, "fake-web");
+    writeFileSync(fakeApi, `#!/bin/sh\n${options.api}\n`, { mode: 0o755 });
+    writeFileSync(fakeWorker, `#!/bin/sh\n${options.worker}\n`, {
+      mode: 0o755,
+    });
+    writeFileSync(fakeWeb, `#!/bin/sh\n${options.web ?? "exec sleep 3600"}\n`, {
+      mode: 0o755,
+    });
+    chmodSync(fakeApi, 0o755);
+    chmodSync(fakeWorker, 0o755);
+    chmodSync(fakeWeb, 0o755);
+    const env = {
+      PATH: `${bin}:${process.env.PATH}`,
+      HOME: home,
+      AFK_HOME: home,
+      AFK_GITHUB_APP_DIR: githubDir,
+      AFK_GITLAB_DIR: join(home, "secrets", "gitlab"),
+      AFK_MODEL: "cursor-test-model",
+      CURSOR_API_KEY: "test-key",
+      AFK_SANDBOX_IMAGE: "sandcastle:afk-test",
+      AFK_UP_SKIP_STACK: "1",
+      WEB: "0",
+      PORT: String(18000 + Math.floor(Math.random() * 1000)),
+      AFK_FAKE_API: fakeApi,
+      AFK_FAKE_WORKER: fakeWorker,
+      AFK_FAKE_WEB: fakeWeb,
+    };
+    let output = "";
+    const child = spawn("bash", [upSh], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    live = child;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    return {
+      home,
+      output: () => output,
+      child,
+    };
+  }
+
+  it("restarts the API after it exits and leaves the worker pid unchanged", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const apiOnce = `nfile="$AFK_HOME/api-starts"
+n=$(($(cat "$nfile" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$nfile"
+echo $$ > "$AFK_HOME/api-live.pid"
+if [ "$n" -eq 1 ]; then exit 1; fi
+${hold}`;
+    const { home, output } = stack({ api: apiOnce, worker: hold });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiStarts = join(home, "api-starts");
+    await waitUntil("worker pid", () => existsSync(workerPid));
+    const pid = readFileSync(workerPid, "utf8").trim();
+    expect(pid).toMatch(/^\d+$/);
+    await waitUntil("API restarted", () => {
+      if (!existsSync(apiStarts)) return false;
+      return Number(readFileSync(apiStarts, "utf8").trim()) >= 2;
+    });
+    expect(readFileSync(workerPid, "utf8").trim()).toBe(pid);
+    expect(existsSync(`/proc/${pid}`)).toBe(true);
+    expect(output()).not.toMatch(/stopping the rest/);
+  });
+
+  it("stops restarting the API after 5 crashes in 60s and prints why", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const crash = `nfile="$AFK_HOME/api-starts"
+n=$(($(cat "$nfile" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$nfile"
+exit 1`;
+    const { home, output, child } = stack({ api: crash, worker: hold });
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("worker pid", () => existsSync(workerPid));
+    const pid = readFileSync(workerPid, "utf8").trim();
+    await waitUntil(
+      "give up restarting",
+      () => /crashed 5 times in 60s/.test(output()),
+      30_000,
+    );
+    expect(output()).toMatch(/not restarting/);
+    expect(readFileSync(workerPid, "utf8").trim()).toBe(pid);
+    expect(existsSync(`/proc/${pid}`)).toBe(true);
+    expect(child.exitCode).toBeNull();
+  });
+});
+
+describe("restart docs", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+
+  it("the operations manual says a crashed API is brought back up", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/operations-manual.md"),
+      "utf8",
+    );
+    const section = text.slice(
+      text.indexOf("### 1.1"),
+      text.indexOf("### 1.2"),
+    );
+    expect(section).toMatch(/API/);
+    expect(section).toMatch(/自动拉起|重新拉起/);
+  });
+
+  it("the design says the worker keeps a job when it cannot reach the API, and the API renews leases at start", () => {
+    const text = readFileSync(join(repoRoot, "docs/design.md"), "utf8");
+    expect(text).toMatch(/连不上 API 时不放弃作业/);
+    expect(text).toMatch(/API 启动时.*续.*租约/);
+  });
+
+  it("optimization plan 8.15 records the restart waste and what this spec did not do", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/optimization-plan.md"),
+      "utf8",
+    );
+    expect(text).toMatch(/### 8\.15/);
+    expect(text).toContain("T-97");
+    expect(text).toContain("T-99");
+    expect(text).toContain("16.5");
+    expect(text).toContain("571");
+    expect(text).toContain("574");
+    expect(text).toContain("575");
+    expect(text).toContain("lease-expired");
+    expect(text).toMatch(/worker 崩溃后接管容器/);
+    expect(text).toContain("Sandcastle 0.12");
   });
 });
