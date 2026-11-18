@@ -1,9 +1,16 @@
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import {
+  type ChildProcess,
+  execFile,
+  execFileSync,
+  spawn,
+} from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -39,6 +46,147 @@ function tempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   trash.push(dir);
   return dir;
+}
+
+function pnpmCommands(home: string): string[] {
+  const path = join(home, "pnpm.log");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+}
+
+function isolatedCheckout(lock: "fresh" | "stale"): string {
+  const root = tempDir("afk-up-checkout-");
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  copyFileSync(upSh, join(root, "scripts/up.sh"));
+  copyFileSync(restartSh, join(root, "scripts/restart.sh"));
+  mkdirSync(join(root, "packages/api"), { recursive: true });
+  mkdirSync(join(root, "packages/worker"), { recursive: true });
+  writeFileSync(join(root, "pnpm-lock.yaml"), "lock-a\n");
+  mkdirSync(join(root, "node_modules/.pnpm"), { recursive: true });
+  writeFileSync(
+    join(root, "node_modules/.pnpm/lock.yaml"),
+    lock === "fresh" ? "lock-a\n" : "lock-b\n",
+  );
+  return root;
+}
+
+function makeLockStale(checkout: string) {
+  writeFileSync(join(checkout, "node_modules/.pnpm/lock.yaml"), "lock-stale\n");
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    throw error;
+  }
+}
+
+function processesMatching(home: string): { pid: number; command: string }[] {
+  const stdout = execFileSync("ps", ["-ax", "-o", "pid=", "-o", "command="], {
+    encoding: "utf8",
+  });
+  const rows: { pid: number; command: string }[] = [];
+  for (const line of stdout.split("\n")) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    if (match[2].includes(home)) {
+      rows.push({ pid: Number(match[1]), command: match[2] });
+    }
+  }
+  return rows;
+}
+
+function ppidOf(pid: number): number | undefined {
+  try {
+    const stdout = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+      encoding: "utf8",
+    });
+    const ppid = Number(stdout.trim());
+    return Number.isInteger(ppid) && ppid > 0 ? ppid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function pgidOf(pid: number): number | undefined {
+  try {
+    const stdout = execFileSync("ps", ["-o", "pgid=", "-p", String(pid)], {
+      encoding: "utf8",
+    });
+    const pgid = Number(stdout.trim());
+    return Number.isInteger(pgid) && pgid > 0 ? pgid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function processesInGroup(pgid: number): { pid: number; command: string }[] {
+  const stdout = execFileSync(
+    "ps",
+    ["-ax", "-o", "pid=", "-o", "pgid=", "-o", "command="],
+    {
+      encoding: "utf8",
+    },
+  );
+  const rows: { pid: number; command: string }[] = [];
+  for (const line of stdout.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    if (Number(match[2]) === pgid) {
+      rows.push({ pid: Number(match[1]), command: match[3] });
+    }
+  }
+  return rows;
+}
+
+function killProcessGroup(pgid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(-pgid, signal);
+  } catch {
+    // already gone
+  }
+}
+
+function pidFilePids(home: string): number[] {
+  const dir = join(home, "run");
+  if (!existsSync(dir)) return [];
+  const pids: number[] = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".pid")) continue;
+    const pid = Number(readFileSync(join(dir, name), "utf8").trim());
+    if (Number.isInteger(pid) && pid > 0) pids.push(pid);
+  }
+  return pids;
+}
+
+function stopStack(home: string | undefined, child: ChildProcess | undefined) {
+  if (home) {
+    for (const pid of pidFilePids(home)) {
+      const pgid = pgidOf(pid);
+      if (pgid !== undefined) killProcessGroup(pgid, "SIGTERM");
+    }
+  }
+  if (child?.pid) {
+    killProcessGroup(pgidOf(child.pid) ?? child.pid, "SIGTERM");
+  }
+  for (const dir of trash) {
+    for (const row of processesMatching(dir)) {
+      try {
+        process.kill(row.pid, "SIGTERM");
+      } catch {
+        // already gone
+      }
+      const pgid = pgidOf(row.pid);
+      if (pgid !== undefined) killProcessGroup(pgid, "SIGTERM");
+    }
+  }
 }
 
 function stubDocker(): string {
@@ -97,9 +245,34 @@ function listenGitLabUser(options: {
   });
 }
 
-async function runUp(args: string[], env: Record<string, string>) {
+function stubPnpm(): string {
+  const dir = tempDir("afk-up-pnpm-");
+  writeFileSync(
+    join(dir, "pnpm"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$AFK_HOME/pnpm.log"
+case "$1" in
+  -v) echo "9.0.0"; exit 0 ;;
+  install)
+    echo "unexpected pnpm install during --check" >&2
+    exit 1
+    ;;
+  *) echo "unexpected pnpm $*" >&2; exit 1 ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  chmodSync(join(dir, "pnpm"), 0o755);
+  return dir;
+}
+
+async function runUp(
+  args: string[],
+  env: Record<string, string>,
+  script = upSh,
+) {
   try {
-    const result = await execFileAsync("bash", [upSh, ...args], {
+    const result = await execFileAsync("bash", [script, ...args], {
       encoding: "utf8",
       timeout: 20_000,
       env: {
@@ -228,19 +401,52 @@ describe("scripts/up.sh with no code-host credentials", () => {
   });
 });
 
+describe("scripts/up.sh --check with stale dependencies", () => {
+  it("reports that the lockfile is stale and does not run pnpm install", async () => {
+    const checkout = isolatedCheckout("stale");
+    const gitlabDir = tempDir("afk-up-gitlab-");
+    const env = machine(gitlabDir);
+    writeFileSync(join(env.AFK_GITHUB_APP_DIR, "private-key.pem"), "dummy");
+    writeFileSync(join(env.AFK_GITHUB_APP_DIR, "app.json"), "{}");
+    env.PATH = `${stubPnpm()}:${env.PATH}`;
+    const result = await runUp(
+      ["--check"],
+      env,
+      join(checkout, "scripts/up.sh"),
+    );
+    const text = `${result.stdout}${result.stderr}`;
+    expect(result.status, text).not.toBe(0);
+    expect(text).toContain("依赖和锁文件不一致，运行 pnpm install");
+    expect(pnpmCommands(env.AFK_HOME)).not.toContain(
+      "install --frozen-lockfile",
+    );
+  });
+});
+
 describe("scripts/up.sh restarts a crashed API without stopping the worker", {
   timeout: 45_000,
 }, () => {
   let live: ChildProcess | undefined;
-  afterEach(() => {
-    if (live?.pid) {
+  let liveHome: string | undefined;
+  afterEach(async () => {
+    const home = liveHome;
+    const child = live;
+    live = undefined;
+    liveHome = undefined;
+    stopStack(home, child);
+    if (!home) return;
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && processesMatching(home).length > 0) {
+      stopStack(home, child);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    for (const row of processesMatching(home)) {
       try {
-        process.kill(live.pid, "SIGTERM");
+        process.kill(row.pid, "SIGKILL");
       } catch {
         // already gone
       }
     }
-    live = undefined;
   });
 
   async function waitUntil(label: string, ok: () => boolean, ms = 15_000) {
@@ -252,7 +458,12 @@ describe("scripts/up.sh restarts a crashed API without stopping the worker", {
     throw new Error(`timed out waiting for ${label}`);
   }
 
-  function stack(options: { api: string; worker: string; web?: string }) {
+  function stack(options: {
+    api: string;
+    worker: string;
+    web?: string;
+    checkout?: string;
+  }) {
     const home = tempDir("afk-up-stack-");
     const githubDir = join(home, "secrets", "github-app");
     mkdirSync(githubDir, { recursive: true });
@@ -267,17 +478,66 @@ describe("scripts/up.sh restarts a crashed API without stopping the worker", {
     writeFileSync(
       join(bin, "pnpm"),
       `#!/bin/sh
+printf '%s\\n' "$*" >> "$AFK_HOME/pnpm.log"
 case "$1" in
   -v) echo "9.0.0"; exit 0 ;;
-  api) exec "$AFK_FAKE_API" ;;
-  web) exec "$AFK_FAKE_WEB" ;;
-  worker) exec "$AFK_FAKE_WORKER" ;;
+  install)
+    if [ "\${AFK_PNPM_INSTALL_STATUS:-0}" != 0 ]; then
+      echo "Cannot find package 'esbuild'" >&2
+      exit "\${AFK_PNPM_INSTALL_STATUS}"
+    fi
+    exit 0
+    ;;
+  api)
+    "$AFK_FAKE_API" &
+    wait
+    ;;
+  web)
+    "$AFK_FAKE_WEB" &
+    wait
+    ;;
+  worker)
+    "$AFK_FAKE_WORKER" &
+    wait
+    ;;
   *) echo "unexpected pnpm $*" >&2; exit 1 ;;
 esac
 `,
       { mode: 0o755 },
     );
     chmodSync(join(bin, "pnpm"), 0o755);
+    writeFileSync(
+      join(bin, "node"),
+      `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "src/main.ts" ]; then
+    case "$PWD" in
+      */packages/api) exec "$AFK_FAKE_API" ;;
+      */packages/worker) exec "$AFK_FAKE_WORKER" ;;
+    esac
+  fi
+done
+bindir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+PATH_WITHOUT_BIN=
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+  if [ "$dir" != "$bindir" ]; then
+    if [ -n "$PATH_WITHOUT_BIN" ]; then
+      PATH_WITHOUT_BIN="$PATH_WITHOUT_BIN:$dir"
+    else
+      PATH_WITHOUT_BIN=$dir
+    fi
+  fi
+done
+IFS=$old_ifs
+PATH=$PATH_WITHOUT_BIN
+export PATH
+exec node "$@"
+`,
+      { mode: 0o755 },
+    );
+    chmodSync(join(bin, "node"), 0o755);
     const fakeApi = join(bin, "fake-api");
     const fakeWorker = join(bin, "fake-worker");
     const fakeWeb = join(bin, "fake-web");
@@ -308,11 +568,16 @@ esac
       AFK_FAKE_WEB: fakeWeb,
     };
     let output = "";
-    const child = spawn("bash", [upSh], {
+    const script = options.checkout
+      ? join(options.checkout, "scripts/up.sh")
+      : upSh;
+    const child = spawn("bash", [script], {
       env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
     live = child;
+    liveHome = home;
     child.stdout?.on("data", (chunk: Buffer) => {
       output += chunk.toString();
     });
@@ -324,6 +589,7 @@ esac
       env,
       output: () => output,
       child,
+      checkout: options.checkout,
     };
   }
 
@@ -348,7 +614,7 @@ ${hold}`;
       return Number(readFileSync(apiStarts, "utf8").trim()) >= 2;
     });
     expect(readFileSync(workerPid, "utf8").trim()).toBe(pid);
-    expect(existsSync(`/proc/${pid}`)).toBe(true);
+    expect(processAlive(Number(pid))).toBe(true);
     expect(output()).not.toMatch(/stopping the rest/);
   });
 
@@ -371,7 +637,7 @@ exit 1`;
     );
     expect(output()).toMatch(/not restarting/);
     expect(readFileSync(workerPid, "utf8").trim()).toBe(pid);
-    expect(existsSync(`/proc/${pid}`)).toBe(true);
+    expect(processAlive(Number(pid))).toBe(true);
     expect(child.exitCode).toBeNull();
   });
 
@@ -379,14 +645,25 @@ exit 1`;
     const hold = `echo $$ > "$AFK_HOME/run-live.pid"
 trap 'exit 0' INT TERM
 while true; do sleep 1; done`;
-    const { home, env, output, child } = stack({ api: hold, worker: hold });
+    const apiHold = `echo $$ > "$AFK_HOME/run-live.pid"
+sleep 3600 &
+echo $! > "$AFK_HOME/api-child.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home, env, output, child } = stack({ api: apiHold, worker: hold });
     const workerPid = join(home, "run", "worker.pid");
     const apiPid = join(home, "run", "api.pid");
-    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const apiChild = join(home, "api-child.pid");
+    await waitUntil(
+      "pids",
+      () => existsSync(workerPid) && existsSync(apiPid) && existsSync(apiChild),
+    );
     const worker = readFileSync(workerPid, "utf8").trim();
     const api = readFileSync(apiPid, "utf8").trim();
     expect(worker).toMatch(/^\d+$/);
     expect(api).toMatch(/^\d+$/);
+    const oldApiGroup = pgidOf(Number(api));
+    expect(oldApiGroup).toBeDefined();
     const result = await new Promise<{
       status: number | null;
       text: string;
@@ -408,11 +685,15 @@ while true; do sleep 1; done`;
     await waitUntil("api pid changed", () => {
       if (!existsSync(apiPid)) return false;
       const next = readFileSync(apiPid, "utf8").trim();
-      return next !== api && existsSync(`/proc/${next}`);
+      return next !== api && processAlive(Number(next));
     });
     expect(readFileSync(workerPid, "utf8").trim()).toBe(worker);
-    expect(existsSync(`/proc/${worker}`)).toBe(true);
-    expect(existsSync(`/proc/${api}`)).toBe(false);
+    expect(processAlive(Number(worker))).toBe(true);
+    expect(processAlive(Number(api))).toBe(false);
+    await waitUntil(
+      "old api process group empty",
+      () => processesInGroup(oldApiGroup as number).length === 0,
+    );
     expect(child.exitCode).toBeNull();
     expect(output()).not.toMatch(/stopping the rest/);
   });
@@ -434,10 +715,17 @@ while true; do sleep 1; done`;
     });
     const workerPid = join(home, "run", "worker.pid");
     const apiPid = join(home, "run", "api.pid");
-    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const workerLive = join(home, "worker-live.pid");
+    await waitUntil(
+      "pids",
+      () =>
+        existsSync(workerPid) && existsSync(apiPid) && existsSync(workerLive),
+    );
     const oldWorker = readFileSync(workerPid, "utf8").trim();
+    const oldLive = readFileSync(workerLive, "utf8").trim();
     const api = readFileSync(apiPid, "utf8").trim();
     expect(oldWorker).toMatch(/^\d+$/);
+    expect(oldWorker).toBe(oldLive);
     const result = await new Promise<{
       status: number | null;
       text: string;
@@ -459,19 +747,278 @@ while true; do sleep 1; done`;
     await waitUntil("new worker", () => {
       if (!existsSync(workerPid)) return false;
       const next = readFileSync(workerPid, "utf8").trim();
-      return next !== oldWorker && existsSync(`/proc/${next}`);
+      return next !== oldWorker && processAlive(Number(next));
     });
     const usr2 = join(home, "worker-usr2");
     await waitUntil("old worker got SIGUSR2", () => existsSync(usr2));
     expect(readFileSync(usr2, "utf8")).toMatch(/usr2/);
     await waitUntil(
       "old worker exited",
-      () => !existsSync(`/proc/${oldWorker}`),
+      () => !processAlive(Number(oldWorker)),
+    );
+    await waitUntil("drained log", () =>
+      new RegExp(`old worker ${oldWorker} drained`).test(output()),
     );
     expect(readFileSync(apiPid, "utf8").trim()).toBe(api);
-    expect(existsSync(`/proc/${api}`)).toBe(true);
+    expect(processAlive(Number(api))).toBe(true);
     expect(child.exitCode).toBeNull();
     expect(output()).not.toMatch(/stopping the rest/);
+  });
+
+  it("SIGINT to up.sh during a worker drain reaches the old worker", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const workerHold = `nfile="$AFK_HOME/worker-starts"
+n=$(($(cat "$nfile" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$nfile"
+echo $$ > "$AFK_HOME/worker-live.pid"
+trap 'echo $$ > "$AFK_HOME/worker-int-$$"; exit 0' INT
+trap 'exit 0' TERM
+trap 'echo usr2 > "$AFK_HOME/worker-usr2"' USR2
+while true; do sleep 1; done`;
+    const { home, env } = stack({ api: hold, worker: workerHold });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiPid = join(home, "run", "api.pid");
+    const workerLive = join(home, "worker-live.pid");
+    await waitUntil(
+      "pids",
+      () =>
+        existsSync(workerPid) && existsSync(apiPid) && existsSync(workerLive),
+    );
+    const oldWorker = readFileSync(workerPid, "utf8").trim();
+    expect(oldWorker).toBe(readFileSync(workerLive, "utf8").trim());
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn("bash", [restartSh, "worker"], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, result.text).toBe(0);
+    const usr2 = join(home, "worker-usr2");
+    await waitUntil("old worker got SIGUSR2", () => existsSync(usr2));
+    expect(processAlive(Number(oldWorker))).toBe(true);
+    const upPid = Number(
+      readFileSync(join(home, "run", "up.pid"), "utf8").trim(),
+    );
+    expect(upPid).toBeGreaterThan(0);
+    process.kill(upPid, "SIGINT");
+    const intFile = join(home, `worker-int-${oldWorker}`);
+    await waitUntil("old worker got SIGINT", () => existsSync(intFile));
+    expect(readFileSync(intFile, "utf8").trim()).toBe(oldWorker);
+  });
+
+  it("runs the fake worker as a child of fake pnpm instead of exec", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const workerHold = `echo $$ > "$AFK_HOME/worker-child.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home } = stack({ api: hold, worker: workerHold });
+    const workerPid = join(home, "run", "worker.pid");
+    const childPid = join(home, "worker-child.pid");
+    await waitUntil(
+      "pids",
+      () => existsSync(workerPid) && existsSync(childPid),
+    );
+    const wrapper = Number(readFileSync(workerPid, "utf8").trim());
+    const child = Number(readFileSync(childPid, "utf8").trim());
+    // Worker no longer starts under pnpm: worker.pid is the process that
+    // handles SIGUSR2 (the fake worker itself), not an outer wrapper.
+    expect(wrapper).toBe(child);
+    expect(ppidOf(child)).toBeGreaterThan(1);
+  });
+
+  it("does not leave processes whose command line contains the temp AFK_HOME", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home, child } = stack({ api: hold, worker: hold });
+    await waitUntil("worker pid", () =>
+      existsSync(join(home, "run", "worker.pid")),
+    );
+    stopStack(home, child);
+    live = undefined;
+    liveHome = undefined;
+    await waitUntil("no leftovers", () => processesMatching(home).length === 0);
+    expect(processesMatching(home).map((row) => row.command)).toEqual([]);
+  });
+
+  it("runs pnpm install --frozen-lockfile before starting when node_modules lock.yaml differs from pnpm-lock.yaml", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const checkout = isolatedCheckout("stale");
+    const { home } = stack({
+      api: hold,
+      worker: hold,
+      checkout,
+    });
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("worker pid", () => existsSync(workerPid));
+    expect(pnpmCommands(home)).toContain("install --frozen-lockfile");
+  });
+
+  it("does not run pnpm install when node_modules lock.yaml matches pnpm-lock.yaml", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const checkout = isolatedCheckout("fresh");
+    const { home } = stack({
+      api: hold,
+      worker: hold,
+      checkout,
+    });
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("worker pid", () => existsSync(workerPid));
+    expect(pnpmCommands(home)).not.toContain("install --frozen-lockfile");
+  });
+
+  it("restart.sh worker installs stale dependencies before restarting", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const checkout = isolatedCheckout("fresh");
+    const { home, env, output } = stack({
+      api: hold,
+      worker: hold,
+      checkout,
+    });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiPid = join(home, "run", "api.pid");
+    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const oldWorker = readFileSync(workerPid, "utf8").trim();
+    makeLockStale(checkout);
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn(
+        "bash",
+        [join(checkout, "scripts/restart.sh"), "worker"],
+        {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, `${result.text}\n${output()}`).toBe(0);
+    expect(pnpmCommands(home)).toContain("install --frozen-lockfile");
+    await waitUntil("new worker", () => {
+      if (!existsSync(workerPid)) return false;
+      const next = readFileSync(workerPid, "utf8").trim();
+      return next !== oldWorker && processAlive(Number(next));
+    });
+  });
+
+  it("restart.sh worker exits non-zero without writing restart.request when install fails", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const checkout = isolatedCheckout("fresh");
+    const { home, env, child } = stack({
+      api: hold,
+      worker: hold,
+      checkout,
+    });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiPid = join(home, "run", "api.pid");
+    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const worker = readFileSync(workerPid, "utf8").trim();
+    const api = readFileSync(apiPid, "utf8").trim();
+    makeLockStale(checkout);
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn(
+        "bash",
+        [join(checkout, "scripts/restart.sh"), "worker"],
+        {
+          env: { ...env, AFK_PNPM_INSTALL_STATUS: "1" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, result.text).not.toBe(0);
+    expect(result.text).toMatch(/pnpm install --frozen-lockfile failed/);
+    expect(existsSync(join(home, "run", "restart.request"))).toBe(false);
+    expect(readFileSync(workerPid, "utf8").trim()).toBe(worker);
+    expect(readFileSync(apiPid, "utf8").trim()).toBe(api);
+    expect(processAlive(Number(worker))).toBe(true);
+    expect(processAlive(Number(api))).toBe(true);
+    expect(child.exitCode).toBeNull();
+  });
+
+  it("does not run pnpm install when restart.sh dependencies already match the lockfile", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const checkout = isolatedCheckout("fresh");
+    const { home, env, output } = stack({
+      api: hold,
+      worker: hold,
+      checkout,
+    });
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("worker pid", () => existsSync(workerPid));
+    const oldWorker = readFileSync(workerPid, "utf8").trim();
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn(
+        "bash",
+        [join(checkout, "scripts/restart.sh"), "worker"],
+        {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, `${result.text}\n${output()}`).toBe(0);
+    expect(pnpmCommands(home)).not.toContain("install --frozen-lockfile");
+    await waitUntil("new worker", () => {
+      if (!existsSync(workerPid)) return false;
+      const next = readFileSync(workerPid, "utf8").trim();
+      return next !== oldWorker && processAlive(Number(next));
+    });
   });
 });
 
@@ -544,6 +1091,10 @@ describe("restart docs", () => {
     expect(section).toMatch(/scripts\/restart\.sh worker/);
     expect(section).toMatch(/Ctrl-C/);
     expect(section).toMatch(/放弃/);
+    expect(section).toMatch(/\bps\b/);
+    expect(section).toMatch(/src\/main\.ts/);
+    expect(section).toMatch(/old worker/);
+    expect(section).toMatch(/drained/);
   });
 
   it("the operations manual restarts the worker with restart.sh, not up.sh", () => {
@@ -557,6 +1108,24 @@ describe("restart docs", () => {
     expect(text).not.toMatch(/改了 worker 就用 `scripts\/up\.sh` 重启/);
   });
 
+  it("the operations manual says git pull then restart.sh installs stale dependencies", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/operations-manual.md"),
+      "utf8",
+    );
+    const section1 = text.slice(
+      text.indexOf("### 1.1"),
+      text.indexOf("### 1.2"),
+    );
+    const section9 = text.slice(text.indexOf("## 9."), text.indexOf("## 附录"));
+    for (const section of [section1, section9]) {
+      expect(section).toMatch(/git pull/);
+      expect(section).toMatch(/scripts\/restart\.sh/);
+      expect(section).toMatch(/pnpm install|依赖/);
+      expect(section).toMatch(/装失败|安装失败/);
+    }
+  });
+
   it("the design says the worker keeps a job when it cannot reach the API, and the API renews leases at start", () => {
     const text = readFileSync(join(repoRoot, "docs/design.md"), "utf8");
     expect(text).toMatch(/连不上 API 时不放弃作业/);
@@ -568,6 +1137,8 @@ describe("restart docs", () => {
     expect(text).toMatch(/SIGUSR2/);
     expect(text).toMatch(/排空/);
     expect(text).toMatch(/滚动重启|scripts\/restart\.sh worker/);
+    expect(text).toMatch(/SIGUSR2.*node 进程|node 进程.*SIGUSR2/);
+    expect(text).toMatch(/Ctrl-C.*排空中的旧 worker|排空中的旧 worker.*Ctrl-C/);
   });
 
   it("CLAUDE.md restarts worker and API with restart.sh, not up.sh", () => {
@@ -581,6 +1152,33 @@ describe("restart docs", () => {
     expect(section).not.toMatch(
       /改 `packages\/pipeline\/skills` 或 pipeline 后 \*\*重启 worker\*\*（`scripts\/up\.sh`）/,
     );
+  });
+
+  it("optimization plan 8.17 records leftover workers after restart.sh and S-47 invalid-output", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/optimization-plan.md"),
+      "utf8",
+    );
+    expect(text).toMatch(/### 8\.17/);
+    expect(text).toContain("#343");
+    expect(text).toContain("734");
+    expect(text).toContain("736");
+    expect(text).toContain("737");
+    expect(text).toContain("invalid-output");
+    expect(text).toMatch(/pnpm/);
+  });
+
+  it("optimization plan 8.17 records the 15:25 start failure that stopped the API", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/optimization-plan.md"),
+      "utf8",
+    );
+    const start = text.indexOf("### 8.17");
+    const end = text.indexOf("## 建议的推进顺序");
+    const section = text.slice(start, end);
+    expect(section).toContain("15:25");
+    expect(section).toMatch(/esbuild/);
+    expect(section).toMatch(/API/);
   });
 
   it("optimization plan 8.15 records the restart waste and what this spec did not do", () => {
@@ -598,5 +1196,23 @@ describe("restart docs", () => {
     expect(text).toContain("lease-expired");
     expect(text).toMatch(/worker 崩溃后接管容器/);
     expect(text).toContain("Sandcastle 0.12");
+  });
+});
+
+describe("scripts/up.sh stack test harness", () => {
+  it("does not look up process liveness through procfs", () => {
+    const src = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    expect(src).not.toContain(["", "proc", ""].join("/"));
+  });
+
+  it("compares lock files with cmp so macOS bash 3.2 can run the scripts", () => {
+    const up = readFileSync(upSh, "utf8");
+    const restart = readFileSync(restartSh, "utf8");
+    expect(up).toMatch(
+      /cmp -s pnpm-lock\.yaml node_modules\/\.pnpm\/lock\.yaml/,
+    );
+    expect(restart).toMatch(
+      /cmp -s pnpm-lock\.yaml node_modules\/\.pnpm\/lock\.yaml/,
+    );
   });
 });
