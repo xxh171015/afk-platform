@@ -281,8 +281,7 @@ names=()
 restart_at=() # unix seconds when to start this one again; 0 means it should be running
 given_up=()   # 1 once a process crashed 5 times in 60s
 backoff=()    # seconds to wait before the next restart
-draining_pgids=() # process groups of workers rolling-restarted and still draining
-draining_pids=()
+draining=() # "pgid:pid" of workers rolling-restarted and still draining
 
 run_dir="$afk_home/run"
 mkdir -p "$run_dir"
@@ -304,16 +303,9 @@ alive() {
 # The command's pid is written to $run_dir/<name>.pid. Do not wrap this in $() — tee's stdout is
 # the terminal, and a substitution would wait until the process exits.
 # A new sh so $$ is the command, not this script ($$ in a { } pipeline is still up.sh).
-# api and worker exec node from their package dirs so <name>.pid is the node process
-# that handles SIGUSR2. The page still goes through pnpm (vite).
+# dir=. stays at the repo root; api and worker pass packages/<name> so <name>.pid is the
+# node process that handles SIGUSR2. The page still goes through pnpm (vite).
 run_named() {
-  local name=$1
-  shift
-  sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$run_dir/$name.pid" "$@" 2>&1 |
-    sed -u "s/^/[$name] /" | tee -a "$up_log" &
-}
-
-run_named_in() {
   local name=$1 dir=$2
   shift 2
   sh -c 'echo $$ >"$1"; cd "$2" && shift 2 && exec "$@"' sh "$run_dir/$name.pid" "$dir" "$@" 2>&1 |
@@ -324,10 +316,10 @@ launch_named() {
   local name=$1
   case "$name" in
     api | worker)
-      run_named_in "$name" "packages/$name" node src/main.ts
+      run_named "$name" "packages/$name" node src/main.ts
       ;;
     *)
-      run_named "$name" pnpm "$name"
+      run_named "$name" . pnpm "$name"
       ;;
   esac
 }
@@ -413,30 +405,27 @@ rolling_restart_worker() {
     n=$((n + 1))
   done
   if [ -n "$old_pid" ]; then
-    draining_pgids+=("$old_pgid")
-    draining_pids+=("$old_pid")
+    draining+=("$old_pgid:$old_pid")
     kill -USR2 "$old_pid" 2>/dev/null || true
   fi
 }
 
 reap_draining() {
-  local j pid g
-  local keep_pgids=() keep_pids=()
-  for j in ${draining_pids[@]+"${!draining_pids[@]}"}; do
-    pid="${draining_pids[j]}"
-    g="${draining_pgids[j]}"
+  local j entry pid g
+  local keep=()
+  for j in ${draining[@]+"${!draining[@]}"}; do
+    entry="${draining[j]}"
+    g="${entry%%:*}"
+    pid="${entry#*:}"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      keep_pgids+=("$g")
-      keep_pids+=("$pid")
+      keep+=("$entry")
     else
       echo "old worker $pid drained" | tee -a "$up_log" >&2
     fi
   done
-  draining_pgids=()
-  draining_pids=()
-  if [ ${#keep_pids[@]} -gt 0 ]; then
-    draining_pgids=("${keep_pgids[@]}")
-    draining_pids=("${keep_pids[@]}")
+  draining=()
+  if [ ${#keep[@]} -gt 0 ]; then
+    draining=("${keep[@]}")
   fi
 }
 
@@ -526,14 +515,15 @@ stop_all() {
   rm -f "$run_dir/up.pid"
   echo "stopping (the worker aborts the runs in hand first; Ctrl-C again stops them at once)..."
   echo "要不丢活地重启，请用 scripts/restart.sh（Ctrl-C 会放弃正在跑的作业）"
-  local i g
+  local i g entry
   # reverse order: worker, then page, then API
   for ((i = ${#pgids[@]} - 1; i >= 0; i--)); do
     alive "${pgids[i]}" && kill -INT -- "-${pgids[i]}" 2>/dev/null || true
     # the worker needs a moment to abort its runs; the others stop at once
     if [ "${names[i]}" = worker ]; then wait_group "${pgids[i]}"; fi
   done
-  for g in ${draining_pgids[@]+"${draining_pgids[@]}"}; do
+  for entry in ${draining[@]+"${draining[@]}"}; do
+    g="${entry%%:*}"
     alive "$g" && kill -INT -- "-$g" 2>/dev/null || true
     wait_group "$g"
   done
@@ -551,8 +541,13 @@ on_signal() {
 check_signal() { if [ "$sigs" -gt 0 ]; then exit 130; fi; }
 
 force_stop() {
-  local g
-  for g in ${pgids[@]+"${pgids[@]}"} ${draining_pgids[@]+"${draining_pgids[@]}"}; do
+  local g entry
+  for g in ${pgids[@]+"${pgids[@]}"}; do
+    [ "$g" = gone ] && continue
+    kill -TERM -- "-$g" 2>/dev/null || true
+  done
+  for entry in ${draining[@]+"${draining[@]}"}; do
+    g="${entry%%:*}"
     [ "$g" = gone ] && continue
     kill -TERM -- "-$g" 2>/dev/null || true
   done
