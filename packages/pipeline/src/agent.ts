@@ -77,9 +77,16 @@ function reviewLineText(item: z.infer<typeof ReviewLineObject>): string {
   return `${item.file}${item.line === undefined ? "" : `:${item.line}`} ${item.problem}`;
 }
 
+// suggestions, scopeCreep and uncertainties: a string, or ReviewLineObject (mustFix without id),
+// which is turned into that one-line form before it is stored as a Finding.
+const ReviewLine = z.union([
+  z.string(),
+  ReviewLineObject.transform(reviewLineText),
+]);
+
 function coerceReviewLineItem(item: unknown): unknown {
-  const parsed = ReviewLineObject.safeParse(item);
-  return parsed.success ? reviewLineText(parsed.data) : item;
+  const parsed = ReviewLine.safeParse(item);
+  return parsed.success ? parsed.data : item;
 }
 
 const RESULT_ARRAY_FIELDS = [
@@ -209,13 +216,6 @@ export function recoverStructuredOutput<S extends z.ZodType>(
 
 export const ImplementOutputSchema = resultSchema(ImplementOutputObject);
 export const TidyOutputSchema = resultSchema(TidyOutputObject);
-
-// suggestions, scopeCreep and uncertainties: a string, or ReviewLineObject (mustFix without id),
-// which is turned into that one-line form before it is stored as a Finding.
-const ReviewLine = z.union([
-  z.string(),
-  ReviewLineObject.transform(reviewLineText),
-]);
 
 const ReviewObject = z.object({
   verdict: z.enum(["pass", "fix"]),
