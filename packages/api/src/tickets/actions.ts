@@ -569,14 +569,28 @@ async function recheckShaOf(
   client: pg.PoolClient,
   where: string,
   params: unknown[],
-): Promise<string | undefined> {
-  const found = await client.query<{ sha: string | null }>(
-    `SELECT payload->>'toSha' AS sha FROM jobs
+): Promise<{ sha: string; jobId: number } | undefined> {
+  const found = await client.query<{ sha: string | null; id: number }>(
+    `SELECT id, payload->>'toSha' AS sha FROM jobs
      WHERE payload->>'stage' = 'recheck' AND ${where}
      ORDER BY id DESC LIMIT 1`,
     params,
   );
-  return found.rows[0]?.sha ?? undefined;
+  const row = found.rows[0];
+  if (!row?.sha) return undefined;
+  return { sha: row.sha, jobId: row.id };
+}
+
+async function approveRecheckFindings(
+  client: pg.PoolClient,
+  jobId: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE findings SET resolution = 'approved'
+     WHERE resolution = 'unhandled' AND kind = 'must-fix'
+       AND run_id IN (SELECT id FROM runs WHERE job_id = $1)`,
+    [jobId],
+  );
 }
 
 export async function approveRecheck(
@@ -594,20 +608,24 @@ export async function approveRecheck(
         `only a ticket blocked by recheck-failed can be approved; this one is ${ticket.state}${ticket.blocked_reason ? ` (${ticket.blocked_reason})` : ""}`,
       );
     }
-    const sha = await recheckShaOf(client, "(payload->>'ticketId')::int = $1", [
-      ticketId,
-    ]);
-    if (!sha) {
+    const recheck = await recheckShaOf(
+      client,
+      "(payload->>'ticketId')::int = $1",
+      [ticketId],
+    );
+    if (!recheck) {
       return refused(
         "the Recheck job has no record of which commit it looked at",
       );
     }
+    const sha = recheck.sha;
     const next = ticketTransition(ticket.state, { type: "approve-recheck" });
     if (!next.ok || next.state === "blocked")
       return refused(next.ok ? "unexpected" : next.reason);
     const merging = ticketTransition(next.state, { type: "checks-passed" });
     if (!merging.ok || merging.state === "blocked")
       return refused(merging.ok ? "unexpected" : merging.reason);
+    await approveRecheckFindings(client, recheck.jobId);
     const allowed = [...new Set([...(ticket.allowed_recheck_shas ?? []), sha])];
     const updated = await client.query<{ content_version: number }>(
       `UPDATE tickets SET state = $2, blocked_reason = NULL, allowed_recheck_shas = $3,
@@ -669,16 +687,17 @@ export async function approveRecheckForSpec(
        WHERE spec_id = $1 AND state = 'blocked' AND blocked_reason = 'recheck-failed' ORDER BY id`,
       [specId],
     );
-    const sha = await recheckShaOf(
+    const recheck = await recheckShaOf(
       client,
       "(payload->>'specId')::int = $1 AND payload->>'ticketId' IS NULL",
       [specId],
     );
-    if (!sha) {
+    if (!recheck) {
       return refused(
         "the Recheck job has no record of which commit it looked at",
       );
     }
+    const sha = recheck.sha;
     const wrapUp = finals.rows.length > 0;
     const paused =
       spec.state === "paused" && spec.pause_reason === "recheck-failed";
@@ -697,6 +716,7 @@ export async function approveRecheckForSpec(
       "UPDATE specs SET allowed_recheck_shas = $2 WHERE id = $1",
       [specId, allowed],
     );
+    await approveRecheckFindings(client, recheck.jobId);
 
     if (wrapUp) {
       for (const row of finals.rows) {

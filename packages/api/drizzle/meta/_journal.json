@@ -624,6 +624,13 @@
       "when": 1794801234567,
       "tag": "0088_run_result_fix",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0089_finding_resolution_approved",
+      "breakpoints": true
     }
   ]
 }
