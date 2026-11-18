@@ -402,6 +402,61 @@ describe("the workbench", () => {
     expect(running.queryByText("偏慢")).toBeNull();
   });
 
+  it("shows 门禁 + 审查 as the current stage when gate and review are both running", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            waiting: emptyWaiting,
+            running: [
+              {
+                spec: {
+                  id: 3,
+                  displayId: "S-3",
+                  slug: "s",
+                  title: "Third",
+                  type: "feature",
+                  state: "running",
+                  pauseReason: null,
+                  project: "shop",
+                  progress: {
+                    total: 1,
+                    done: 0,
+                    active: 1,
+                    blocked: 0,
+                    pending: 0,
+                    cancelled: 0,
+                  },
+                },
+                tickets: [
+                  {
+                    id: 4,
+                    displayId: "T-4",
+                    title: "Export",
+                    state: "running",
+                    repo: "backend",
+                    stage: "门禁 + 审查",
+                    startedAt: "2026-11-01T11:00:00.000Z",
+                    elapsedMs: 25 * 60_000,
+                    meanMs: null,
+                    slow: false,
+                  },
+                ],
+              },
+            ],
+            awaitingAcceptance: [],
+            recentlyCompleted: [],
+          },
+        }),
+      }),
+    );
+    expect(await screen.findByText("Export")).toBeTruthy();
+    const running = within(screen.getByTestId("quadrant-正在运行"));
+    expect(running.getAllByText("门禁 + 审查")).toHaveLength(1);
+  });
+
   it("shows log-dir size, remaining space, worker reports and last cleanup", async () => {
     renderWithApp(
       <Workbench />,

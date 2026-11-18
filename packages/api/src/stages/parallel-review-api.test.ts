@@ -168,6 +168,56 @@ const REVIEW_PASS = { outcome: "pass", run: { headSha: "sha-a" } };
 const REVIEW_FIX = { outcome: "fix", run: { headSha: "sha-a" } };
 
 describe("gate and review in parallel", () => {
+  async function currentStageOf(id = 1) {
+    const view = await fetch(`${api.url}/tickets/${id}`).then(
+      (response) =>
+        response.json() as Promise<{ ticket: { currentStage: string | null } }>,
+    );
+    return view.ticket.currentStage;
+  }
+
+  it("shows 门禁 + 审查 as the ticket's current stage while both jobs are running", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    expect(await currentStageOf()).toBe("门禁 + 审查");
+  });
+
+  it("shows 门禁已通过，等审查 when the gate has passed and review is still running", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    const { gate } = await claimBoth();
+    await complete(gate, GATE_PASSED);
+    expect(await currentStageOf()).toBe("门禁已通过，等审查");
+  });
+
+  it("shows 审查 pass，等门禁 when review has passed and the gate is still running", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    const { review } = await claimBoth();
+    await complete(review, REVIEW_PASS);
+    expect(await currentStageOf()).toBe("审查 pass，等门禁");
+  });
+
+  it("puts the same current stage on the spec's ticket list", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    const spec = await fetch(`${api.url}/specs/1`).then(
+      (response) =>
+        response.json() as Promise<{
+          tickets: { currentStage: string | null }[];
+        }>,
+    );
+    expect(spec.tickets[0]?.currentStage).toBe("门禁 + 审查");
+  });
+
+  it("shows 审查 fix，等门禁 when review concluded fix and the gate is still running", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    const { review } = await claimBoth();
+    await complete(review, REVIEW_FIX);
+    expect(await currentStageOf()).toBe("审查 fix，等门禁");
+  });
+
   it("implement done queues gate and review together, and neither result alone merges", async () => {
     await runningSpec([ticket("a")]);
     await stage("implement", IMPLEMENT_DONE);

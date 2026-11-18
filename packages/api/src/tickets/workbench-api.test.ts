@@ -232,6 +232,22 @@ describe("GET /workbench", () => {
     ]);
   });
 
+  it("shows 门禁 + 审查 as the running ticket's current stage when gate and review are both out", async () => {
+    const projectId = await projectAndRepo();
+    const specId = await confirmedSpec(projectId, "now", "Now", [
+      ticketFile("now"),
+    ]);
+    const ticketId = (await call("GET", `/specs/${specId}`)).body.tickets[0]
+      .id as number;
+    await db.pool.query(
+      "UPDATE tickets SET state = 'running', parallel_review = 'running' WHERE id = $1",
+      [ticketId],
+    );
+
+    const ticket = (await call("GET", "/workbench")).body.running[0].tickets[0];
+    expect(ticket.stage).toBe("门禁 + 审查");
+  });
+
   it("does not mark 偏慢 when the project has no finished run of that stage", async () => {
     const projectId = await projectAndRepo();
     const specId = await confirmedSpec(projectId, "now", "Now", [

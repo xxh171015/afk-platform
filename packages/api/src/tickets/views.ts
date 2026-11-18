@@ -2,6 +2,7 @@ import {
   formatDisplayId,
   type HostKind,
   type JobState,
+  type ParallelReviewState,
   type PlanningDocsAtImport,
   type PlanningState,
   type ReviewAxis,
@@ -348,8 +349,24 @@ export interface TicketSummary {
   appended: boolean;
   brief: Brief | null;
   structuredBrief: StructuredBrief | null;
+  currentStage: string | null;
   waitingSince?: string;
   blocking?: Blocking;
+}
+
+// Ticket detail, spec ticket list, waiting queue and plat ticket view all print this one phrase
+// (S-49: 两边都在跑时「门禁 + 审查」，一边有结论时写明在等哪一边).
+export function currentStagePhrase(
+  parallelReview: ParallelReviewState,
+  gatePassedSha: string | null,
+): string | null {
+  if (parallelReview === "running") {
+    return gatePassedSha === null ? "门禁 + 审查" : "门禁已通过，等审查";
+  }
+  if (parallelReview === "pass" || parallelReview === "fix") {
+    return `审查 ${parallelReview}，等门禁`;
+  }
+  return null;
 }
 
 async function summaries(
@@ -360,7 +377,7 @@ async function summaries(
 ): Promise<TicketSummary[]> {
   const { rows } = await pool.query(
     `SELECT t.id, t.spec_id, t.title, t.type, t.state, t.blocked_reason, t.refs, t.environment, t.appended,
-            t.auto_retried, r.name AS repo, r.url AS repo_url, r.host_kind
+            t.auto_retried, t.parallel_review, t.gate_passed_sha, r.name AS repo, r.url AS repo_url, r.host_kind
      FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE ${where} ORDER BY t.id`,
     params,
   );
@@ -380,6 +397,10 @@ async function summaries(
       refs: row.refs as string[],
       environment: row.environment as string[],
       appended: row.appended as boolean,
+      currentStage: currentStagePhrase(
+        row.parallel_review as ParallelReviewState,
+        (row.gate_passed_sha as string | null) ?? null,
+      ),
       // an upstream cancel is not the fault of any run, so there is no brief to show
       brief:
         includeBrief &&

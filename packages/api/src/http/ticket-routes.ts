@@ -187,6 +187,7 @@ const TicketSummary = z
     appended: z.boolean(),
     brief: Brief,
     structuredBrief: StructuredBrief,
+    currentStage: z.string().nullable(),
   })
   .merge(WaitingFields);
 

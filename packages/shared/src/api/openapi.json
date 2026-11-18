@@ -5491,6 +5491,9 @@
                             "commands"
                           ]
                         },
+                        "currentStage": {
+                          "type": ["string", "null"]
+                        },
                         "waitingSince": {
                           "type": "string"
                         },
@@ -5591,6 +5594,7 @@
                         "appended",
                         "brief",
                         "structuredBrief",
+                        "currentStage",
                         "body",
                         "acceptanceCriteria",
                         "modules",
@@ -6693,6 +6697,9 @@
                               "commands"
                             ]
                           },
+                          "currentStage": {
+                            "type": ["string", "null"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -6753,7 +6760,8 @@
                           "environment",
                           "appended",
                           "brief",
-                          "structuredBrief"
+                          "structuredBrief",
+                          "currentStage"
                         ]
                       }
                     },
@@ -8574,6 +8582,9 @@
                               "commands"
                             ]
                           },
+                          "currentStage": {
+                            "type": ["string", "null"]
+                          },
                           "waitingSince": {
                             "type": "string"
                           },
@@ -8634,7 +8645,8 @@
                           "environment",
                           "appended",
                           "brief",
-                          "structuredBrief"
+                          "structuredBrief",
+                          "currentStage"
                         ]
                       }
                     },

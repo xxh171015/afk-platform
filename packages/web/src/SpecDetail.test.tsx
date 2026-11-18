@@ -345,6 +345,24 @@ describe("the spec page", () => {
     expect(item.textContent).toMatch(/门禁失败/);
   });
 
+  it("shows the ticket view's currentStage on each ticket card", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="tickets" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [
+              ticket(1, "running", { currentStage: "审查 pass，等门禁" }),
+            ],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    const cards = await screen.findByTestId("ticket-cards");
+    expect(within(cards).getByText("审查 pass，等门禁")).toBeTruthy();
+  });
+
   it("shows the pull requests in merge order and the acceptance pack: what backs each criterion, findings, doubts, gates", async () => {
     const pullRequests = [
       {

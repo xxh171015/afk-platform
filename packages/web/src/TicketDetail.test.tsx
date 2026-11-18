@@ -57,6 +57,7 @@ const view = (over: Record<string, unknown> = {}) => ({
     contractSha: null,
     fixCounts: { "gate-fix": 0, "review-fix": 0, "merge-fix": 0 },
     reviewed: false,
+    currentStage: null as string | null,
   },
   upstream: [],
   downstream: [],
@@ -94,6 +95,16 @@ const logs = (texts: Record<number, string>) =>
   );
 
 describe("the ticket page", () => {
+  it("shows the ticket view's currentStage when gate and review are both running", async () => {
+    const loaded = view();
+    loaded.ticket.currentStage = "门禁 + 审查";
+    const server = fakeServer({
+      "GET /tickets/4": () => ({ json: loaded }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    expect(await screen.findByText("门禁 + 审查")).toBeTruthy();
+  });
+
   it("lists the runs with number, stage, result, duration and start time, each linking to the run page", async () => {
     const server = fakeServer({
       "GET /tickets/4": () => ({ json: view() }),
