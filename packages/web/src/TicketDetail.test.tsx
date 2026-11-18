@@ -303,9 +303,68 @@ describe("the ticket page", () => {
     expect(
       await screen.findByText(/must-fix: src\/a.ts:3 null check/),
     ).toBeTruthy();
-    expect(screen.getByText("fixed")).toBeTruthy();
+    expect(screen.getByText("已交给 fix 处理")).toBeTruthy();
     expect(screen.getByText(/suggestion: rename x/)).toBeTruthy();
-    expect(screen.getByText("acceptance-pack")).toBeTruthy();
+    expect(screen.getByText("进验收包，留给你看")).toBeTruthy();
+  });
+
+  it("shows every finding resolution as a Chinese phrase, not the stored English code", async () => {
+    const server = fakeServer({
+      "GET /tickets/4": () => ({
+        json: view({
+          findings: [
+            {
+              id: 1,
+              runId: 12,
+              kind: "must-fix",
+              body: "null check",
+              resolution: "unhandled",
+            },
+            {
+              id: 2,
+              runId: 12,
+              kind: "must-fix",
+              body: "fixed already",
+              resolution: "fixed",
+            },
+            {
+              id: 3,
+              runId: 12,
+              kind: "suggestion",
+              body: "rename x",
+              resolution: "acceptance-pack",
+            },
+            {
+              id: 4,
+              runId: 12,
+              kind: "suggestion",
+              body: "extract helper",
+              resolution: "refactored",
+            },
+            {
+              id: 5,
+              runId: 12,
+              kind: "must-fix",
+              body: "let this Recheck stand",
+              resolution: "approved",
+            },
+          ],
+        }),
+      }),
+      ...logs({ 10: "a", 11: "b" }),
+    });
+    renderWithApp(<TicketDetail ticketId={4} />, server);
+    expect(await screen.findByText(/must-fix: null check/)).toBeTruthy();
+    expect(screen.getByText("未处理")).toBeTruthy();
+    expect(screen.getByText("已交给 fix 处理")).toBeTruthy();
+    expect(screen.getByText("进验收包，留给你看")).toBeTruthy();
+    expect(screen.getByText("已由 Tidy 整理")).toBeTruthy();
+    expect(screen.getByText("人已批准")).toBeTruthy();
+    expect(screen.queryByText("unhandled")).toBeNull();
+    expect(screen.queryByText("fixed")).toBeNull();
+    expect(screen.queryByText("acceptance-pack")).toBeNull();
+    expect(screen.queryByText("refactored")).toBeNull();
+    expect(screen.queryByText("approved")).toBeNull();
   });
 
   it("says so when there are no gates, no findings, no runs", async () => {

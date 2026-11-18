@@ -1874,7 +1874,7 @@ describe("the acceptance pack", () => {
         stage: "review",
         kind: "suggestion",
         body: "rename x",
-        resolution: "acceptance-pack",
+        resolution: "进验收包，留给你看",
         axis: "standards",
       },
     ]);
@@ -2026,7 +2026,7 @@ describe("the acceptance pack", () => {
         stage: "final-review",
         kind: "suggestion",
         body: "drop unused import",
-        resolution: "acceptance-pack",
+        resolution: "进验收包，留给你看",
         axis: "standards",
       },
     ]);
@@ -2036,7 +2036,7 @@ describe("the acceptance pack", () => {
       "[已由 Tidy 整理] spec final-review (standards) suggestion: extract helper",
     );
     expect(task.section).toContain(
-      "[acceptance-pack] spec final-review (standards) suggestion: drop unused import",
+      "[进验收包，留给你看] spec final-review (standards) suggestion: drop unused import",
     );
   });
 
@@ -2081,8 +2081,8 @@ describe("the acceptance pack", () => {
       (f: Json) => f.stage === "final-review",
     );
     expect(wrapUp.map((f: Json) => [f.body, f.resolution])).toEqual([
-      ["extract helper", "acceptance-pack"],
-      ["drop unused import", "acceptance-pack"],
+      ["extract helper", "进验收包，留给你看"],
+      ["drop unused import", "进验收包，留给你看"],
     ]);
     const patch = await claimOf("patch-pr-body");
     const task = (await taskOf(patch)).body;
@@ -2420,7 +2420,7 @@ describe("the acceptance pack", () => {
       "[unverified] empty range is refused  (orders rejects an empty range)  -- failed: orders rejects an empty range",
     );
     expect(out).toContain(
-      "[acceptance-pack] T-1 review (standards) suggestion: rename x",
+      "[进验收包，留给你看] T-1 review (standards) suggestion: rename x",
     );
     expect(out).toContain("scope creep (not asked for)");
     expect(out).toMatch(/T-1 R-\d+: an export flag nobody asked for/);

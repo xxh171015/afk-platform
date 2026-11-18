@@ -1,4 +1,8 @@
-import { type TicketState, ticketTransition } from "@afk/shared";
+import {
+  findingResolutionPhrase,
+  type TicketState,
+  ticketTransition,
+} from "@afk/shared";
 import {
   keepPreviousData,
   useMutation,
@@ -622,7 +626,10 @@ function TicketContent({
               <ul className="findings space-y-3">
                 {findings.map((finding) => (
                   <li key={finding.id} className="space-y-1 text-[13px]">
-                    <StatusBadge kind="pr" code={finding.resolution} />
+                    <StatusBadge
+                      kind="pr"
+                      code={findingResolutionPhrase(finding.resolution)}
+                    />
                     {finding.axis ? (
                       <span
                         className={`ml-2 font-mono text-[11px] axis-${finding.axis}`}

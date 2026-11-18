@@ -1,3 +1,4 @@
+import { findingResolutionPhrase } from "@afk/shared";
 import { useQuery } from "@tanstack/react-query";
 import type { MouseEvent } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -114,7 +115,10 @@ export function ReviewFindingsMenu({
                 {findings.map((finding: Finding) => (
                   <li key={finding.id} className="text-[13px] leading-snug">
                     <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
-                      <StatusBadge kind="pr" code={finding.resolution} />
+                      <StatusBadge
+                        kind="pr"
+                        code={findingResolutionPhrase(finding.resolution)}
+                      />
                       {finding.axis ? (
                         <span
                           className={`font-mono text-[11px] axis-${finding.axis}`}

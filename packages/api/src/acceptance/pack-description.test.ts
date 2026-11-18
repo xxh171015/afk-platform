@@ -157,6 +157,76 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
 });
 
 describe("renderPackSection", () => {
+  it("prints Chinese phrases for every finding resolution, not the stored English codes", () => {
+    const withResolutions = pack();
+    withResolutions.repos[0].findings = [
+      {
+        ticket: "T-1",
+        run: "R-2",
+        stage: "review",
+        kind: "must-fix",
+        body: "null check",
+        resolution: "unhandled",
+        axis: null,
+      },
+      {
+        ticket: "T-1",
+        run: "R-3",
+        stage: "review",
+        kind: "must-fix",
+        body: "fixed already",
+        resolution: "fixed",
+        axis: null,
+      },
+      {
+        ticket: "T-1",
+        run: "R-3",
+        stage: "review",
+        kind: "suggestion",
+        body: "rename x",
+        resolution: "acceptance-pack",
+        axis: "standards",
+      },
+      {
+        ticket: null,
+        run: "R-9",
+        stage: "final-review",
+        kind: "suggestion",
+        body: "extract helper",
+        resolution: "refactored",
+        axis: null,
+      },
+      {
+        ticket: "T-1",
+        run: "R-8",
+        stage: "recheck",
+        kind: "must-fix",
+        body: "let this Recheck stand",
+        resolution: "approved",
+        axis: "spec",
+      },
+    ];
+    const { section } = renderPackSection(withResolutions, "backend", 1);
+    expect(section).toContain("- [未处理] T-1 review must-fix: null check");
+    expect(section).toContain(
+      "- [已交给 fix 处理] T-1 review must-fix: fixed already",
+    );
+    expect(section).toContain(
+      "- [进验收包，留给你看] T-1 review (standards) suggestion: rename x",
+    );
+    expect(section).toContain(
+      "- [已由 Tidy 整理] spec final-review suggestion: extract helper",
+    );
+    expect(section).toContain(
+      "- [人已批准] T-1 recheck (spec) must-fix: let this Recheck stand",
+    );
+    expect(section).not.toContain("[unhandled]");
+    expect(section).not.toContain("[fixed]");
+    expect(section).not.toContain("[acceptance-pack]");
+    expect(section).not.toContain("[refactored]");
+    expect(section).not.toContain("[approved]");
+  });
+
   it("puts Recheck hits in 合并前要你定的 with their kind", () => {
     const rendered = renderPackSection(
       pack({

@@ -823,6 +823,78 @@ describe("the update-branch job", () => {
     expect(continued.payload.afterFix).toBe(true);
   });
 
+  it("approve-recheck on a spec paused by Recheck marks that Recheck's must-fix approved", async () => {
+    const hit = {
+      hit: true,
+      paths: ["src/a.test.ts"],
+      fromSha: "aaa111",
+      toSha: "bbb222",
+    };
+    const job = await queuedUpdate();
+    await agent.complete(job.id, job.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "done",
+      run: { recheck: hit },
+    });
+    const rec = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(rec.id, rec.attempt, {
+      stage: "recheck",
+      outcome: "fix",
+      findings: [
+        { kind: "must-fix", body: "src/a.test.ts weakened" },
+        { kind: "must-fix", body: "src/b.test.ts dropped a case" },
+      ],
+    });
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "recheck-failed",
+    });
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result)
+       VALUES (1, 1, 'review', 'pass')`,
+    );
+    await db.pool.query(
+      `INSERT INTO findings (run_id, kind, body, resolution)
+       VALUES (
+         (SELECT id FROM runs WHERE stage = 'review' ORDER BY id DESC LIMIT 1),
+         'must-fix', 'earlier leftover', 'unhandled'
+       )`,
+    );
+    const resolutions = async () =>
+      (
+        await db.pool.query<{
+          stage: string;
+          resolution: string;
+          body: string;
+        }>(
+          `SELECT r.stage, f.resolution, f.body FROM findings f JOIN runs r ON r.id = f.run_id
+           WHERE f.kind = 'must-fix' ORDER BY f.id`,
+        )
+      ).rows.map((row) => `${row.stage}:${row.resolution}:${row.body}`);
+    expect(await resolutions()).toEqual([
+      "recheck:unhandled:src/a.test.ts weakened",
+      "recheck:unhandled:src/b.test.ts dropped a case",
+      "review:unhandled:earlier leftover",
+    ]);
+    expect((await call("POST", "/specs/1/approve-recheck")).status).toBe(200);
+    expect(await resolutions()).toEqual([
+      "recheck:approved:src/a.test.ts weakened",
+      "recheck:approved:src/b.test.ts dropped a case",
+      "review:unhandled:earlier leftover",
+    ]);
+  });
+
   it("pauses when the merge agent gives up, with the reason the merge had", async () => {
     const job = await queuedUpdate();
     await agent.complete(job.id, job.attempt, {

@@ -1,5 +1,6 @@
 import {
   decisionTally,
+  findingResolutionPhrase,
   formatDisplayId,
   HOST_KIND_LABELS,
   type HostKind,
@@ -134,7 +135,7 @@ function findingsLines(section: AcceptancePack["repos"][number]): string {
   const lines = ["### Findings"];
   for (const finding of section.findings) {
     lines.push(
-      `- [${finding.resolution}] ${finding.ticket ?? "spec"} ${finding.stage}${finding.axis ? ` (${finding.axis})` : ""} ${finding.kind}: ${finding.body}`,
+      `- [${findingResolutionPhrase(finding.resolution)}] ${finding.ticket ?? "spec"} ${finding.stage}${finding.axis ? ` (${finding.axis})` : ""} ${finding.kind}: ${finding.body}`,
     );
   }
   for (const creep of section.scopeCreep) {

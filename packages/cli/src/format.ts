@@ -3,6 +3,7 @@ import {
   type AutoMergeStatus,
   autoMergeLine,
   decisionTally,
+  findingResolutionPhrase,
   LOCATE_REASON_LABELS,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
@@ -593,7 +594,7 @@ export function ticketText(view: {
           "findings:",
           ...view.findings.map(
             (f) =>
-              `  [${f.resolution}] ${f.axis ? `${f.axis} ` : ""}${f.kind}: ${f.body}`,
+              `  [${findingResolutionPhrase(f.resolution)}] ${f.axis ? `${f.axis} ` : ""}${f.kind}: ${f.body}`,
           ),
         ]
       : []),
@@ -702,7 +703,7 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           "findings",
           repo.findings.map(
             (f) =>
-              `      [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage}${f.axis ? ` (${f.axis})` : ""} ${f.kind}: ${f.body}`,
+              `      [${findingResolutionPhrase(f.resolution)}] ${f.ticket ?? "spec"} ${f.stage}${f.axis ? ` (${f.axis})` : ""} ${f.kind}: ${f.body}`,
           ),
         ),
         ...section(

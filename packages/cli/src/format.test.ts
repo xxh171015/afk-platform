@@ -30,6 +30,123 @@ const view = (runs: Parameters<typeof ticketText>[0]["runs"]) => ({
   findings: [],
 });
 
+describe("finding resolutions", () => {
+  it("prints Chinese phrases in ticket findings, not the stored English codes", () => {
+    const text = ticketText({
+      ...view([]),
+      findings: [
+        { kind: "must-fix", body: "null check", resolution: "unhandled" },
+        { kind: "must-fix", body: "fixed already", resolution: "fixed" },
+        {
+          kind: "suggestion",
+          body: "rename x",
+          resolution: "acceptance-pack",
+        },
+        {
+          kind: "suggestion",
+          body: "extract helper",
+          resolution: "refactored",
+        },
+        {
+          kind: "must-fix",
+          body: "let this Recheck stand",
+          resolution: "approved",
+        },
+      ],
+    });
+    expect(text).toContain("[未处理] must-fix: null check");
+    expect(text).toContain("[已交给 fix 处理] must-fix: fixed already");
+    expect(text).toContain("[进验收包，留给你看] suggestion: rename x");
+    expect(text).toContain("[已由 Tidy 整理] suggestion: extract helper");
+    expect(text).toContain("[人已批准] must-fix: let this Recheck stand");
+    expect(text).not.toContain("[unhandled]");
+    expect(text).not.toContain("[fixed]");
+    expect(text).not.toContain("[acceptance-pack]");
+    expect(text).not.toContain("[refactored]");
+    expect(text).not.toContain("[approved]");
+  });
+
+  it("prints Chinese phrases in acceptance-pack findings, not the stored English codes", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [
+        {
+          repo: "backend",
+          pullRequest: null,
+          gate: null,
+          tickets: [],
+          findings: [
+            {
+              ticket: "T-1",
+              run: "R-2",
+              stage: "review",
+              kind: "must-fix",
+              body: "null check",
+              resolution: "unhandled",
+            },
+            {
+              ticket: "T-1",
+              run: "R-3",
+              stage: "review",
+              kind: "must-fix",
+              body: "fixed already",
+              resolution: "fixed",
+            },
+            {
+              ticket: "T-1",
+              run: "R-3",
+              stage: "review",
+              kind: "suggestion",
+              body: "rename x",
+              resolution: "acceptance-pack",
+              axis: "standards",
+            },
+            {
+              ticket: null,
+              run: "R-9",
+              stage: "final-review",
+              kind: "suggestion",
+              body: "extract helper",
+              resolution: "refactored",
+            },
+            {
+              ticket: "T-1",
+              run: "R-8",
+              stage: "recheck",
+              kind: "must-fix",
+              body: "let this Recheck stand",
+              resolution: "approved",
+            },
+          ],
+          scopeCreep: [],
+          decisions: [],
+          protectedPathApprovals: [],
+        },
+      ],
+      cancelledTickets: [],
+    } as never);
+    expect(text).toContain("[未处理] T-1 review must-fix: null check");
+    expect(text).toContain(
+      "[已交给 fix 处理] T-1 review must-fix: fixed already",
+    );
+    expect(text).toContain(
+      "[进验收包，留给你看] T-1 review (standards) suggestion: rename x",
+    );
+    expect(text).toContain(
+      "[已由 Tidy 整理] spec final-review suggestion: extract helper",
+    );
+    expect(text).toContain(
+      "[人已批准] T-1 recheck must-fix: let this Recheck stand",
+    );
+    expect(text).not.toContain("[unhandled]");
+    expect(text).not.toContain("[fixed]");
+    expect(text).not.toContain("[acceptance-pack]");
+    expect(text).not.toContain("[refactored]");
+    expect(text).not.toContain("[approved]");
+  });
+});
+
 describe("ticketText runs", () => {
   it("ends a run line with the skills, contract and ref SHAs it used, and with nothing else when it used none", () => {
     const text = ticketText(
