@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StructuredOutputError } from "@ai-hero/sandcastle";
 import { afterEach, describe, expect, it } from "vitest";
-import { ImplementOutputSchema } from "./agent.ts";
+import { ImplementOutputSchema, recoverStructuredOutput } from "./agent.ts";
 import { runE2e } from "./e2e.ts";
 import { gitOut } from "./exec.ts";
 import { runGate } from "./gate.ts";
@@ -518,6 +518,62 @@ describe("reading Sandcastle's errors", () => {
       commits: [],
     });
     expect(classifyAgentError("a string").errorKind).toBe("other");
+  });
+
+  it("normalizes a StructuredOutputError whose raw JSON is valid after preprocess", () => {
+    const error = new StructuredOutputError("bad result", {
+      tag: "result",
+      rawMatched: JSON.stringify({
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [
+          {
+            kind: "workaround",
+            text: "skipped drizzle generate",
+            ref: "91813f8",
+          },
+        ],
+      }),
+      cause: new Error("schema"),
+      commits: [{ sha: "abc" }],
+      branch: "agent/T-1",
+    });
+    const recovered = recoverStructuredOutput(ImplementOutputSchema, {
+      rawMatched: error.rawMatched,
+    });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    expect(recovered.resultFix).toBe("normalized");
+    expect(recovered.output).toMatchObject({
+      decisions: [
+        {
+          kind: "workaround",
+          text: "skipped drizzle generate（ref: 91813f8）",
+        },
+      ],
+    });
+  });
+
+  it("uses the last assistant message when the StructuredOutputError has no result tag", () => {
+    const error = new StructuredOutputError("no tag", {
+      tag: "result",
+      rawMatched: undefined,
+      commits: [{ sha: "abc" }],
+      branch: "agent/T-1",
+    });
+    const recovered = recoverStructuredOutput(ImplementOutputSchema, {
+      rawMatched: error.rawMatched,
+      lastAssistant: JSON.stringify({
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [],
+      }),
+    });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    expect(recovered.resultFix).toBeUndefined();
   });
 });
 

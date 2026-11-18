@@ -657,6 +657,7 @@ interface RunDetailRecord extends RunRecord {
   sources: string[] | null;
   duration_api_ms: number | null;
   token_usage: unknown;
+  result_fix: "normalized" | "repaired" | null;
 }
 
 function runRow(r: RunRecord) {
@@ -691,7 +692,7 @@ export async function runView(pool: pg.Pool, runId: number) {
     `SELECT r.id, r.spec_id, r.ticket_id, r.stage, r.attempt, r.result, r.duration_ms, r.started_at, r.finished_at,
             r.agent, r.model, r.skills_sha, r.axis, r.cursor_cli_version, r.contract_shas, r.ref_shas,
             r.prompt, r.output, r.commits, r.sources, r.duration_api_ms, r.token_usage,
-            repo.url AS repo_url, repo.host_kind
+            r.result_fix, repo.url AS repo_url, repo.host_kind
      FROM runs r JOIN repos repo ON repo.id = r.repo_id WHERE r.id = $1`,
     [runId],
   );
@@ -711,6 +712,7 @@ export async function runView(pool: pg.Pool, runId: number) {
     sources: r.sources ?? null,
     durationApiMs: r.duration_api_ms,
     tokenUsage: r.token_usage ?? null,
+    resultFix: r.result_fix ?? null,
     repoUrl: r.repo_url,
     hostKind: r.host_kind,
   };

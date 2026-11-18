@@ -318,3 +318,74 @@ describe("recheck.json fromSha after update-branch", () => {
     expect(seen).toEqual([{ kind: "commit", diffCode: 0 }]);
   });
 });
+
+describe("result format repair after update-branch", () => {
+  it("Recheck after following main: an invalid first result that a repair run fixes is pass with resultFix repaired", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "src/a.test.ts": 'it("is 1", () => expect(n).toBe(1));\n',
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    repo.commit({ "src/feature.ts": "1\n" }, "spec work");
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    const mainTip = repo.commit(
+      { "src/a.test.ts": 'it("is 1", () => expect(n).toBe(2));\n' },
+      "main flips assertion",
+    );
+    originAndSlot();
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      if (ctx.stage === "update-branch") {
+        git(ctx.dir, ["merge", "--no-edit", "main"]);
+        return { output: DONE };
+      }
+      if (ctx.prompt.includes("不要重做这个阶段")) {
+        return { output: PASS };
+      }
+      return { output: { verdict: "pass" } };
+    });
+
+    const update = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "update-branch",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+        }),
+        { mainSha: mainTip },
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+      align,
+    );
+    const trigger = recheckOf(update);
+
+    const outcome = await recheck(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "recheck",
+          ticket: null,
+          agentBranch: "agent/S-12-update",
+          integrationBranch: "spec/s",
+          recheck: trigger,
+        }),
+        {
+          fromSha: trigger.fromSha,
+          toSha: trigger.toSha,
+          paths: trigger.paths,
+        },
+      ),
+      repo.dir,
+      slot("agent/S-12-update"),
+    );
+
+    expect(outcome.outcome).toBe("pass");
+    expect(outcome.run).toMatchObject({ resultFix: "repaired" });
+    expect(
+      runner.calls.filter((call) => call.stage === "recheck"),
+    ).toHaveLength(2);
+  });
+});

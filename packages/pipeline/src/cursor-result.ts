@@ -63,3 +63,56 @@ export function factsFromCursorLines(lines: readonly string[]): CursorRunFacts {
   }
   return last;
 }
+
+function contentText(content: unknown): string | undefined {
+  if (typeof content === "string" && content.length > 0) return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts = content.flatMap((item) => {
+    if (typeof item === "string") return [item];
+    if (
+      item &&
+      typeof item === "object" &&
+      typeof (item as { text?: unknown }).text === "string"
+    ) {
+      return [(item as { text: string }).text];
+    }
+    return [];
+  });
+  const text = parts.join("");
+  return text.length > 0 ? text : undefined;
+}
+
+export function lastAssistantFromCursorLine(line: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (
+    parsed === null ||
+    typeof parsed !== "object" ||
+    !("type" in parsed) ||
+    parsed.type !== "assistant"
+  ) {
+    return undefined;
+  }
+  const row = parsed as { message?: unknown; content?: unknown };
+  const message = row.message;
+  if (typeof message === "string" && message.length > 0) return message;
+  if (message && typeof message === "object") {
+    const text = contentText((message as { content?: unknown }).content);
+    if (text) return text;
+  }
+  return contentText(row.content);
+}
+
+export function lastAssistantFromCursorLines(
+  lines: readonly string[],
+): string | undefined {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const text = lastAssistantFromCursorLine(lines[i] ?? "");
+    if (text) return text;
+  }
+  return undefined;
+}

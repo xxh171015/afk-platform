@@ -125,6 +125,7 @@ export function agentFacts(
     tokenUsage?: unknown;
     durationApiMs?: number;
     cursorCliVersion?: string;
+    resultFix?: "normalized" | "repaired";
   },
 ) {
   return {
@@ -132,6 +133,7 @@ export function agentFacts(
     ...(options.model ? { model: options.model } : {}),
     ...(deps.skillsSha ? { skillsSha: deps.skillsSha } : {}),
     ...billedFacts(run),
+    ...(run?.resultFix ? { resultFix: run.resultFix } : {}),
   };
 }
 
