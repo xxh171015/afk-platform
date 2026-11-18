@@ -1,6 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { gitOrThrow } from "./exec.ts";
+import { globMatches } from "./protected-paths.ts";
 
 // The gate: a repo's own checks, run in a fresh sandbox on a commit (docs/design.md「门禁」). The configuration
 // is read from a trusted commit, never from the branch under test; commands run in order; a failed test command
@@ -32,6 +33,14 @@ const GeneratedGroupSchema = z
   })
   .strict();
 
+const HostCheckSchema = z
+  .object({
+    paths: z.array(z.string().min(1)).min(1),
+    run: z.string().min(1),
+    why: z.string().min(1),
+  })
+  .strict();
+
 const GateConfigSchema = z
   .object({
     version: z.number().int().optional(),
@@ -42,9 +51,35 @@ const GateConfigSchema = z
     testCompare: z.enum(["names", "counts"]).optional(),
     // Extra test/build config paths that trigger Recheck, on top of the pipeline defaults.
     recheckConfig: z.array(z.string().min(1)).min(1).optional(),
+    // Host-side checks: when the spec touches these paths, the PR lists `run` and does not auto-merge.
+    hostChecks: z.array(HostCheckSchema).min(1).optional(),
   })
   .strict();
 export type GateConfig = z.infer<typeof GateConfigSchema>;
+export type HostCheck = z.infer<typeof HostCheckSchema>;
+export type HostCheckHit = { run: string; why: string; files: string[] };
+
+export const HOST_CHECK_FILES_MAX = 20;
+
+export function matchHostChecks(
+  checks: HostCheck[] | undefined,
+  changed: readonly string[],
+): HostCheckHit[] {
+  if (!checks?.length) return [];
+  const hits: HostCheckHit[] = [];
+  for (const check of checks) {
+    const files = changed.filter((file) =>
+      check.paths.some((glob) => globMatches(glob, file)),
+    );
+    if (files.length === 0) continue;
+    hits.push({
+      run: check.run,
+      why: check.why,
+      files: files.slice(0, HOST_CHECK_FILES_MAX),
+    });
+  }
+  return hits;
+}
 
 // A sandbox that is thrown away afterwards. The only module that talks to Sandcastle implements this (#29).
 export interface SandboxSession {
@@ -116,13 +151,21 @@ const GATE_FIELD_LABELS: Record<string, string> = {
   setup: "setup",
   commands: "commands",
   generated: "generated",
+  hostChecks: "hostChecks",
   name: "name",
   run: "run",
   timeoutSeconds: "timeoutSeconds",
   junit: "junit",
   rerunFiles: "rerunFiles",
   paths: "paths",
+  why: "why",
 };
+
+function fieldLabel(path: PropertyKey[]): string {
+  const last = path.at(-1);
+  if (typeof last === "string" && GATE_FIELD_LABELS[last]) return last;
+  return path.map(String).join(".");
+}
 
 function describeGateConfigIssue(error: z.ZodError): string {
   const pieces: string[] = [];
@@ -131,12 +174,15 @@ function describeGateConfigIssue(error: z.ZodError): string {
     if (issue.code === "unrecognized_keys") {
       const keys = issue.keys.join("、");
       pieces.push(
-        `文件 ${GATE_CONFIG_PATH} 中有不认识的字段：${keys}。允许的顶层字段：version、setup、commands、generated；命令里允许：name、run、timeoutSeconds、junit、rerunFiles；generated 里允许：paths、run`,
+        `文件 ${GATE_CONFIG_PATH} 中有不认识的字段：${keys}。允许的顶层字段：version、setup、commands、generated、hostChecks；命令里允许：name、run、timeoutSeconds、junit、rerunFiles；generated 里允许：paths、run；hostChecks 里允许：paths、run、why`,
       );
       continue;
     }
-    const label = GATE_FIELD_LABELS[path] ?? path;
-    if (issue.code === "invalid_type" && issue.expected === "array") {
+    const label = GATE_FIELD_LABELS[path] ?? fieldLabel(issue.path);
+    if (
+      issue.code === "invalid_type" &&
+      /received undefined/.test(issue.message)
+    ) {
       pieces.push(`缺少必填字段 ${label}`);
       continue;
     }
