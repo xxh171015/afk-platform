@@ -221,11 +221,11 @@ export const AcceptancePack = z.object({
     .nullable()
     .optional(),
   agentSeconds: z.number().int(),
-  // Spec-axis needs-human and unfinished deferred: the front of the pack and of the PR description.
+  // Spec-axis needs-human, unfinished deferred, Recheck, and host-check: the front of the pack and of the PR description.
   needsDecision: z
     .array(
       z.object({
-        kind: z.enum(["recheck", "needs-human", "deferred"]),
+        kind: z.enum(["recheck", "needs-human", "deferred", "host-check"]),
         id: z.string(),
         source: z.string(),
         text: z.string(),
@@ -672,6 +672,7 @@ async function needsDecisionOf(
     ...(log.spec ? sourced(log.spec.displayId, log.spec.decisions) : []),
   ];
   return [
+    ...(await hostCheckNeedsDecisionOf(client, specId)),
     ...(await recheckNeedsDecisionOf(client, specId, tickets.rows)),
     ...collectNeedsDecision({
       decisions,
@@ -683,6 +684,40 @@ async function needsDecisionOf(
       })),
     }),
   ];
+}
+
+async function hostCheckNeedsDecisionOf(
+  client: Pick<pg.PoolClient, "query">,
+  specId: number,
+): Promise<NeedsDecisionItem[]> {
+  const rows = await client.query<{ name: string; host_checks: unknown }>(
+    `SELECT r.name, f.host_checks
+     FROM finalizations f JOIN repos r ON r.id = f.repo_id
+     WHERE f.spec_id = $1
+     ORDER BY r.id`,
+    [specId],
+  );
+  const items: NeedsDecisionItem[] = [];
+  for (const row of rows.rows) {
+    const checks = Array.isArray(row.host_checks) ? row.host_checks : [];
+    for (const [index, raw] of checks.entries()) {
+      if (!raw || typeof raw !== "object") continue;
+      const check = raw as { run?: unknown; why?: unknown; files?: unknown };
+      const run = typeof check.run === "string" ? check.run : "";
+      const why = typeof check.why === "string" ? check.why : "";
+      const files = Array.isArray(check.files)
+        ? check.files.filter((file): file is string => typeof file === "string")
+        : [];
+      if (!run) continue;
+      items.push({
+        kind: "host-check",
+        id: `${row.name}#${index}`,
+        source: row.name,
+        text: `在宿主机上跑：${run}（${why}；改到了 ${files.join("、")}）`,
+      });
+    }
+  }
+  return items;
 }
 
 async function recheckNeedsDecisionOf(

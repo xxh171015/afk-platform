@@ -471,6 +471,8 @@ export const finalizations = pgTable(
     // The platform's note for this repo's next Run of the step (the spec's own note is shared by all its repos).
     retryNote: text("retry_note"),
     jobFloor: integer("job_floor").notNull().default(0), // as on tickets
+    // Host checks the open-pr job found for this repo (gates.yaml hostChecks that this spec hit).
+    hostChecks: jsonb("host_checks").notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [

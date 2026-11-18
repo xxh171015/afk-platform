@@ -10,6 +10,7 @@ import {
   occupiesSlot,
   PLANNING_COMMIT_JOB,
   TRIAL_MERGE_JOB,
+  tryParseRepoUrl,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { withCredentials } from "./credentials.ts";
@@ -337,6 +338,38 @@ export async function processJob(
           task.repoUrl,
           task.defaultBranch,
         );
+        const body = await runHostTask({ ...options.host, repoDir }, task, log);
+        if (lost.signal.aborted) return "abandoned";
+        if ((await handOver(options, job, body, log)) !== "held")
+          return "abandoned";
+        log(`${job.type} ok`);
+        return "completed";
+      }
+      if (task.kind === "open-pr") {
+        // GitHub/GitLab URLs always `ensure` so the clone has default + spec/* before we match hostChecks.
+        // Local-path origins (worker-demo) are not parseable: reuse the clone tickets already made.
+        const parsed = tryParseRepoUrl(task.repoUrl);
+        let repoDir: string | undefined;
+        if (parsed) {
+          const creds = await withCredentials(
+            { ...executor, api },
+            task.repoUrl,
+          );
+          repoDir = await creds.repos.ensure(
+            parsed.name,
+            task.repoUrl,
+            task.base,
+          );
+        } else {
+          repoDir = options.executor.repos.findByUrl(task.repoUrl);
+          if (!repoDir) {
+            repoDir = await options.executor.repos.ensure(
+              "repo",
+              task.repoUrl,
+              task.base,
+            );
+          }
+        }
         const body = await runHostTask({ ...options.host, repoDir }, task, log);
         if (lost.signal.aborted) return "abandoned";
         if ((await handOver(options, job, body, log)) !== "held")

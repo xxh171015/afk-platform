@@ -298,7 +298,12 @@ describe("an open-pr task", () => {
         draft: false,
       },
     ]);
-    expect(result).toEqual({ stage: "open-pr", outcome: "opened", ...info(7) });
+    expect(result).toEqual({
+      stage: "open-pr",
+      outcome: "opened",
+      ...info(7),
+      hostChecks: [],
+    });
   });
 
   it("fails as an infrastructure problem when the host refuses, so the job is tried again", async () => {
@@ -353,6 +358,90 @@ describe("an open-pr task", () => {
       });
     } finally {
       await gitlab.stop();
+    }
+  });
+
+  it("returns only the hostChecks whose paths the integration branch changed, with those files", async () => {
+    const repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - paths: ["scripts/**"]',
+        "    run: pnpm test packages/cli/src/up-sh.test.ts",
+        "    why: host scripts need a Mac run",
+        '  - paths: ["deploy/**"]',
+        "    run: ./deploy/smoke.sh",
+        "    why: deploy scripts run on the host",
+        "",
+      ].join("\n"),
+      "src/app.ts": "v1\n",
+      "scripts/up.sh": "echo v1\n",
+      "deploy/smoke.sh": "echo v1\n",
+    });
+    try {
+      git(repo.dir, ["checkout", "--quiet", "-b", "spec/export"]);
+      repo.commit(
+        {
+          "src/app.ts": "v2\n",
+          "scripts/up.sh": "echo v2\n",
+        },
+        "touch a host script and an undeclared file",
+      );
+      const adapter: HostAdapter = {
+        ...noCleanup,
+        openPullRequest: async () => info(7),
+        getPullRequest: async () => info(7),
+      };
+      const result = await runHostTask(
+        { adapter, repoRef: ref, repoDir: repo.dir },
+        { ...open, head: "spec/export" },
+        log,
+      );
+      expect(result.hostChecks).toEqual([
+        {
+          run: "pnpm test packages/cli/src/up-sh.test.ts",
+          why: "host scripts need a Mac run",
+          files: ["scripts/up.sh"],
+        },
+      ]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("returns an empty hostChecks list when the gate config declares none", async () => {
+    const repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "",
+      ].join("\n"),
+      "src/app.ts": "v1\n",
+      "scripts/up.sh": "echo v1\n",
+    });
+    try {
+      git(repo.dir, ["checkout", "--quiet", "-b", "spec/export"]);
+      repo.commit(
+        {
+          "src/app.ts": "v2\n",
+          "scripts/up.sh": "echo v2\n",
+        },
+        "change files with no hostChecks declared",
+      );
+      const adapter: HostAdapter = {
+        ...noCleanup,
+        openPullRequest: async () => info(8),
+        getPullRequest: async () => info(8),
+      };
+      const result = await runHostTask(
+        { adapter, repoRef: ref, repoDir: repo.dir },
+        { ...open, head: "spec/export" },
+        log,
+      );
+      expect(result.hostChecks).toEqual([]);
+    } finally {
+      repo.cleanup();
     }
   });
 });
