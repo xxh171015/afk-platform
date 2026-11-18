@@ -1,4 +1,4 @@
-import { gitOrThrow, readDomainFiles } from "@afk/pipeline";
+import { gitOrThrow, isAncestor, readDomainFiles } from "@afk/pipeline";
 import type { Bundle } from "@afk/shared";
 import type { PushFn } from "./push.ts";
 import type { RepoStore } from "./repos.ts";
@@ -41,6 +41,14 @@ export async function cutIntegrationBranch(
     expectedOld: "",
   });
   if (!pushed.ok) {
+    // Two jobs can both create; the loser still proceeds if origin has the branch and it contains our start.
+    if (
+      (await repos.fetchBranch(mainDir, bundle.repo.url, branch)) &&
+      isAncestor(mainDir, base, `refs/heads/${branch}`)
+    ) {
+      log(`integration branch ${branch} was created by another job`);
+      return;
+    }
     throw new Error(`could not create ${branch}: ${pushed.error}`);
   }
 }
