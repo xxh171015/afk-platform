@@ -147,6 +147,16 @@ describe("finding resolutions", () => {
   });
 });
 
+describe("ticketText current stage", () => {
+  it("prints 门禁 + 审查 from the ticket view's currentStage", () => {
+    const text = ticketText({
+      ...view([]),
+      ticket: { ...view([]).ticket, currentStage: "门禁 + 审查" },
+    });
+    expect(text).toContain("T-3  running  门禁 + 审查  Export button");
+  });
+});
+
 describe("ticketText runs", () => {
   it("ends a run line with the skills, contract and ref SHAs it used, and with nothing else when it used none", () => {
     const text = ticketText(
@@ -282,6 +292,16 @@ const stuckTicket = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("plat blocked of a stuck ticket", () => {
+  it("prints the ticket view's currentStage next to the state", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      tickets: [stuckTicket({ currentStage: "门禁已通过，等审查" })],
+    } as never);
+    expect(text).toContain(
+      "T-12  S-19  blocked (gate-failed)  门禁已通过，等审查  Export",
+    );
+  });
+
   it("prints the structured brief's summary, recommended action and commands, not only the raw stage result", () => {
     const text = blockedText({
       ...emptyQueue,

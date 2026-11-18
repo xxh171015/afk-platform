@@ -442,6 +442,9 @@ function TicketContent({
       : undefined;
   return (
     <>
+      {ticket.currentStage ? (
+        <p className="mb-4 text-sm">{ticket.currentStage}</p>
+      ) : null}
       <TicketTakeover ticketId={ticket.id} state={ticket.state} />
       {ticket.structuredBrief ? (
         <section className="mb-6 space-y-3 border-l-2 border-destructive bg-destructive/5 p-4">

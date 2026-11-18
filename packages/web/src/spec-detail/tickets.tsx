@@ -116,6 +116,11 @@ export function TicketsPage({
                 {ticket.blockedReason ? (
                   <StatusBadge kind="blocked" code={ticket.blockedReason} />
                 ) : null}
+                {ticket.currentStage ? (
+                  <span className="text-xs text-muted-foreground">
+                    {ticket.currentStage}
+                  </span>
+                ) : null}
               </div>
               {waits.length > 0 ? (
                 <p className="mt-1.5 text-xs text-muted-foreground">

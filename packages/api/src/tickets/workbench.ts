@@ -1,7 +1,13 @@
-import { formatDisplayId, isSlowStage, type SpecState } from "@afk/shared";
+import {
+  formatDisplayId,
+  isSlowStage,
+  type ParallelReviewState,
+  type SpecState,
+} from "@afk/shared";
 import type pg from "pg";
 import {
   blockedQueue,
+  currentStagePhrase,
   type Progress,
   type SpecListItem,
   specListItems,
@@ -239,9 +245,11 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
     project_id: number;
     stage: string | null;
     started_at: Date | null;
+    parallel_review: ParallelReviewState;
+    gate_passed_sha: string | null;
   }>(
     `SELECT t.id, t.spec_id, t.title, t.state, r.name AS repo, s.project_id,
-            run.stage, run.started_at
+            run.stage, run.started_at, t.parallel_review, t.gate_passed_sha
      FROM tickets t
      JOIN repos r ON r.id = t.repo_id
      JOIN specs s ON s.id = t.spec_id
@@ -272,7 +280,9 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
       title: row.title,
       state: row.state,
       repo: row.repo,
-      stage: row.stage,
+      stage:
+        currentStagePhrase(row.parallel_review, row.gate_passed_sha) ??
+        row.stage,
       startedAt,
       elapsedMs,
       meanMs,

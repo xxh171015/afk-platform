@@ -3069,6 +3069,7 @@ export interface paths {
                   ticketDraft?: string;
                   sameReasonRepeatMinutes?: number;
                 } | null;
+                currentStage: string | null;
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -3512,6 +3513,7 @@ export interface paths {
                   ticketDraft?: string;
                   sameReasonRepeatMinutes?: number;
                 } | null;
+                currentStage: string | null;
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];
@@ -4124,6 +4126,7 @@ export interface paths {
                   ticketDraft?: string;
                   sameReasonRepeatMinutes?: number;
                 } | null;
+                currentStage: string | null;
                 waitingSince?: string;
                 blocking?: {
                   downstream: string[];

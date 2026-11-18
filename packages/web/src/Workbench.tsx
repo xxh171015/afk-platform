@@ -383,12 +383,16 @@ export function Workbench() {
                     title={ticket.title}
                   >
                     {ticket.stage ? (
-                      <>
-                        <Mono title={stageLabel[ticket.stage]}>
-                          {ticket.stage}
-                        </Mono>
-                        <span>{stageLabel[ticket.stage] ?? ticket.stage}</span>
-                      </>
+                      stageLabel[ticket.stage] ? (
+                        <>
+                          <Mono title={stageLabel[ticket.stage]}>
+                            {ticket.stage}
+                          </Mono>
+                          <span>{stageLabel[ticket.stage]}</span>
+                        </>
+                      ) : (
+                        <span>{ticket.stage}</span>
+                      )
                     ) : null}
                     {ticket.elapsedMs !== null ? (
                       <span className="font-mono tabular">

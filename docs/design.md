@@ -530,7 +530,7 @@ flowchart LR
 1. **规划（人，Cursor）**：在后端仓库工作区跑 grill-with-docs → to-spec → to-tickets。契约写在后端仓库；to-tickets 产出一个票文件，用 `plat tickets import` 一次性导入，每张票带目标仓库、模块和依赖边（格式见「`plat` CLI 与票的导入」）。
 2. **确认拆分（人）**：在平台页面看依赖图和导入时的告警，确认后 Spec 进入 planned。
 3. **调度**：平台为每个涉及的仓库从 main 建 `spec/<id>/<slug>` 集成分支，把可以开工的票放进队列。
-4. **执行（worker，每张票）**：按「单票执行流水线」跑完 implement → 门禁 → review → 合并 → 合并后门禁，票标为 done，重新计算可以开工的票。
+4. **执行（worker，每张票）**：按「单票执行流水线」跑完 implement → gate ∥ review → 汇合 → 合并 → 合并后门禁，票标为 done，重新计算可以开工的票。
 5. **收尾**：全部票 done 后，对每个仓库的集成分支跑一次整体 code-review 和一次修复（final-review / final-fix，各只跑一次），修复后再过门禁。若项目开着 Tidy、这次 final-review 的 Standards 轴有建议、且这个仓库还没跑过 Tidy，再跑一次 `final-tidy` 和 `tidy-merge`：只做不改变行为的整理，失败就丢掉、照原样收尾。有联调票且分支被改过（final-fix 或 tidy-merge 已合并）时，开 PR 前再跑最终 e2e。然后为每个仓库开 PR（`spec/<slug>` → main），生成验收包。
 6. **验收（人）**：看验收包，在代码托管上按建议顺序合并 PR。PR 上的评论可以拉回平台，生成返工运行（rework）。
 
@@ -559,7 +559,7 @@ sequenceDiagram
         W->>A: 领取作业，拿到租约
         W->>S: 起沙箱，挂 /context，跑 implement
         S-->>W: commits 和结构化输出
-        W->>W: 补 trailer、门禁、review、合并后门禁
+        W->>W: 补 trailer、门禁 ∥ review、汇合、合并后门禁
         W->>G: push agent/id，前移 spec/slug
         W->>A: 回传结果，带 fencing，票 done
     end
@@ -580,7 +580,7 @@ sequenceDiagram
 
 ## 单票执行流水线
 
-每张票的执行拆成若干阶段，每个阶段是一个独立、可重跑的作业。每个 agent 运行都是全新会话，靠分支上已有的 commits 和 `/context` 里的文件接上前一步。
+每张票的执行拆成若干阶段，每个阶段是一个独立、可重跑的作业。每个 agent 运行都是全新会话，靠分支上已有的 commits 和 `/context` 里的文件接上前一步。implement 或 gate-fix 交了提交、票还没审过时，门禁和票级审查并行：implement → gate ∥ review → 汇合 → 合并（或 review-fix / Recheck）。人接手交回后从门禁接着跑的那条路仍串行。门禁不过时丢掉审查（取消还在排队或在跑的审查作业）；丢掉的审查不算「审查只跑一次」。审查结论只对它审的那个提交有效：和门禁通过的提交不同就丢掉结论、单独再派一次审查。
 
 ```mermaid
 flowchart TD
@@ -590,12 +590,15 @@ flowchart TD
     impl --> chk{"输出合法、status 为 done<br/>且有新 commit？"}
     chk -->|是| stamp["3 补 trailer<br/>推 agent 分支"]
     stamp --> prot{"4a 改了未批准的<br/>保护路径？"}
-    prot -->|否| gate{"4b 门禁通过？<br/>配置取自基准提交"}
-    gate -->|是| reviewed{"已 review 过？"}
-    reviewed -->|否| rev["5 review<br/>新会话，对比基准提交"]
-    rev --> verdict{"verdict"}
-    verdict -->|pass| mt
-    reviewed -->|是| mt
+    prot -->|否| parallel["4b–5 门禁 ∥ review<br/>票还没审过时同时派"]
+    parallel --> join{"汇合"}
+    join -->|两边都有结论且同提交| after{"审查之后"}
+    after -->|pass，无 Recheck| mt
+    after -->|pass，有 Recheck| recheck["Recheck"]
+    recheck -->|pass| mt
+    after -->|fix| rfix["review-fix 运行<br/>读 /context/review.json"]
+    rfix --> stamp
+    join -->|门禁不过| drop["丢掉审查"]
     subgraph lock["merge 作业持有集成分支锁（lock_key）"]
         mt{"6 merge-tree<br/>有冲突？"}
         pg{"7 候选提交<br/>门禁通过？"}
@@ -607,11 +610,10 @@ flowchart TD
 
     chk -->|否| b1(["blocked<br/>invalid-output、agent-gave-up、<br/>contract-change-needed、no-commits、timeout"])
     prot -->|是| b2(["blocked<br/>protected-path-changed"])
-    gate -->|否，未 gate-fix 过| gfix["gate-fix 运行<br/>读 /context/failure"]
+    drop --> gfixq{"已 gate-fix 过？"}
+    gfixq -->|否| gfix["gate-fix 运行<br/>读 /context/failure"]
     gfix --> stamp
-    gate -->|否，已 gate-fix 过| b3(["blocked<br/>gate-failed"])
-    verdict -->|fix| rfix["review-fix 运行<br/>读 /context/review.json"]
-    rfix --> stamp
+    gfixq -->|是| b3(["blocked<br/>gate-failed"])
     mt -->|是| mq{"已 merge-fix 过？"}
     pg -->|否| mq
     mq -->|否| mfix["merge-fix 运行<br/>集成分支合进 agent 分支后修复"]
@@ -633,8 +635,8 @@ flowchart TD
 | 1   | 准备       | 取一个空闲槽位并克隆主 clone（见「Git 操作规范」的“槽位”），在槽位里从分支 `agent/<ticket-id>`（不存在则从集成分支切出，即 Sandcastle 的 `baseBranch`）建 worktree；渲染 `/context`。是否回收僵尸槽位见「作业与恢复」 | → 2                                                   | —                                                                                                                                                                                                                           |
 | 2   | implement  | agent 按 `implement.md`（加公共覆盖层）实现并 commit，最后输出 implement 结构化结果                                                                                                                                   | → 3                                                   | 输出不合法 → `invalid-output`；`cannot-proceed` 时按结构化输出里的 `blockedReason` 枚举直接映射为 `agent-gave-up` 或 `contract-change-needed`，不解析自由文本；0 个 commit → `no-commits`；超时 → `timeout`。都直接 blocked |
 | 3   | 盖章并推送 | worker 给本次新增的 commits 补 trailer（见「Git 操作规范」），把 `agent/<ticket-id>` 推到 origin                                                                                                                      | → 4                                                   | 推送失败重试，仍失败则作业失败、等重派                                                                                                                                                                                      |
-| 4   | 门禁       | 先查保护路径（已批准的除外），再跑门禁命令，见「门禁」                                                                                                                                                                | → 5                                                   | 碰到未批准的保护路径 → `protected-path-changed`，直接 blocked；门禁失败且还没 fix 过 → gate-fix 运行（prompt 指向失败日志）→ 3 → 4；再失败 → `gate-failed`                                                                  |
-| 5   | review     | 新会话按 `review.md`（加公共覆盖层）审查 `merge-base..HEAD`。票级默认只跑 Spec 轴（项目设置 `ticketReview: spec`）；`both` 时两轴并行。输出 review 结构化结果                                                          | verdict 为 pass → 6                                   | verdict 为 fix → review-fix 运行处理 mustFix → 3 → 4 → 6。不再跑第二次 review，修复情况记进 Finding 和验收包                                                                                                                |
+| 4   | 门禁       | 先查保护路径（已批准的除外），再跑门禁命令，见「门禁」。票还没审过时和第 5 步同时派；已审过（review-fix / merge-fix 之后）只派门禁                                                                                                                                 | 通过且审查也有同提交结论 → 汇合后的下一步；审查还在跑 → 等 | 碰到未批准的保护路径 → `protected-path-changed`，直接 blocked；门禁任何非 passed 的结论都丢掉同时跑的审查（不算「只跑一次」），还没 fix 过 → gate-fix 运行（prompt 指向失败日志）→ 3 → 4；再失败 → `gate-failed`            |
+| 5   | review     | 新会话按 `review.md`（加公共覆盖层）审查 `merge-base..HEAD`。票级默认只跑 Spec 轴（项目设置 `ticketReview: spec`）；`both` 时两轴并行。输出 review 结构化结果。和门禁并行；结论只对它审的那个提交有效 | 门禁已通过且同提交 → 汇合；门禁还在跑 → 等             | verdict 为 fix 且门禁已通过同提交 → review-fix 运行处理 mustFix → 3 → 4。不再跑第二次 review（丢掉的那次不算），修复情况记进 Finding 和验收包。提交和门禁通过的不同：丢掉结论、单独再派一次审查                             |
 | 6   | 合并       | 这一步起是独立的 `merge` 阶段作业，带 `lock_key`（见「作业与恢复」），领取时与同一集成分支上的其他合并类作业互斥：用 `git merge-tree --write-tree` 生成候选合并提交                                                   | 无冲突 → 7                                            | 有冲突 → 释放锁，跑 merge-fix 运行（把集成分支合进 agent 分支并解决冲突）→ 3 → 4 → 6；再冲突 → `merge-conflict`                                                                                                             |
 | 7   | 合并后门禁 | 仍在锁内：在候选提交上跑门禁                                                                                                                                                                                          | 通过 → 用 `--force-with-lease` 前移并推送集成分支 → 8 | 不前移集成分支，释放锁，跑 merge-fix 运行（把集成分支合进 agent 分支后修复）→ 3 → 4 → 6；再失败 → `post-merge-gate-failed`                                                                                                  |
 | 8   | 完成       | 票标 done；契约票记下契约 SHA；写 Link；重新计算可开工的票                                                                                                                                                            | —                                                     | —                                                                                                                                                                                                                           |
