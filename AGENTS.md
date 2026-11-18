@@ -38,6 +38,10 @@ pnpm lint                            # biome check .
 - 术语以 `GLOSSARY.md` 为准。不要引入它明确 Avoid 的叫法。
 - commit 信息用英文祈使句，一个 commit 做一件事。
 
+## 宿主机脚本
+
+这些脚本跑在 Mac 宿主机上，不在 Linux 沙箱里：`scripts/up.sh`、`scripts/restart.sh`、`scripts/canary.sh`、`scripts/drill.sh`、`scripts/check-sandbox-image.sh`、`scripts/verify-sandbox-image.sh`。写法要在 macOS 自带的 bash 3.2 和 BSD 工具上成立。`scripts/check-portability.sh` 会静态检查这些文件，镜像里有 BSD awk 时还会用它重跑宿主机脚本测试。`scripts/` 下新的 `.sh` 必须写进它的宿主机或沙箱列表。确实需要检查会拦下的写法时，在那一行加 `# portable: <理由>`。
+
 ## 保护路径
 
 下面这些路径不要改。确实需要改时，交给人决定：

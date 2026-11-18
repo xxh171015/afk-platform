@@ -69,11 +69,21 @@ write_env CURSOR_CLI_VERSION "$CURSOR_CLI_VERSION"
 write_env POSTGRES_VERSION "$POSTGRES_VERSION"
 write_env TOOLS "$TOOLS"
 write_env CHROMIUM "$CHROMIUM"
+MACOS_AWK="$(docker run --rm --entrypoint /opt/macos-compat/bin/awk "$IMAGE" -version | tr -d '\r' | tail -n1)"
+case "$MACOS_AWK" in
+  "awk version"*) ;;
+  *)
+    echo "expected BSD awk at /opt/macos-compat/bin/awk (awk -version), got: ${MACOS_AWK:-missing}" >&2
+    exit 1
+    ;;
+esac
+write_env MACOS_AWK "$MACOS_AWK"
 echo "Cursor CLI: $CURSOR_CLI_VERSION (pinned $PINNED_CURSOR)"
 echo "PostgreSQL: $POSTGRES_VERSION"
 echo "Go pin: $PINNED_GO"
 echo "$TOOLS"
 echo "Chromium cache: $CHROMIUM"
+echo "macos-compat awk: $MACOS_AWK (/opt/macos-compat/bin/awk)"
 
 FAILED=0
 run_gate() {

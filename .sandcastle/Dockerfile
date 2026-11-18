@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
   git \
   curl \
   jq \
+  original-awk \
   postgresql-common \
   && rm -rf /var/lib/apt/lists/*
 
@@ -37,6 +38,11 @@ RUN npx -y playwright@${PLAYWRIGHT_VERSION} install-deps chromium \
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+
+# /opt/macos-compat/bin is for scripts/check-portability.sh to simulate macOS.
+RUN mkdir -p /opt/macos-compat/bin \
+  && ln -s /usr/bin/original-awk /opt/macos-compat/bin/awk
+
 USER ${AGENT_UID}:${AGENT_GID}
 
 # Pin so a Run records a chosen CLI version; bumping this ARG is how that version changes.

@@ -21,6 +21,9 @@ commands:
   - name: lint
     run: pnpm lint
     timeoutSeconds: 120
+  - name: portability
+    run: scripts/check-portability.sh
+    timeoutSeconds: 300
 generated:
   - paths:
       - packages/shared/src/api/openapi.json
@@ -30,3 +33,14 @@ generated:
       - packages/api/drizzle/*.sql
       - packages/api/drizzle/meta/**
     run: scripts/rebase-migrations.sh
+hostChecks:
+  - paths:
+      - scripts/up.sh
+      - scripts/restart.sh
+      - scripts/canary.sh
+      - scripts/drill.sh
+      - scripts/check-sandbox-image.sh
+      - scripts/verify-sandbox-image.sh
+      - scripts/review-calibration.ts
+    run: pnpm test packages/cli/src/up-sh.test.ts packages/cli/src/canary-sh.test.ts
+    why: 宿主机脚本：沙箱里只模拟了 BSD awk 和静态检查
