@@ -144,3 +144,27 @@ export async function enqueueFinalJob(
   });
   return job;
 }
+
+// Stop this ticket's queued and running stage jobs (gate and review can both be out) and close their Runs.
+export async function cancelTicketJobs(
+  client: pg.PoolClient,
+  ticketId: number,
+  error: string,
+  stages?: string[],
+): Promise<void> {
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = $2,
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE state IN ('queued', 'running') AND (payload->>'ticketId')::int = $1
+       AND ($3::text[] IS NULL OR payload->>'stage' = ANY($3::text[]))`,
+    [ticketId, error, stages ?? null],
+  );
+  await client.query(
+    `UPDATE runs SET finished_at = COALESCE(finished_at, now()), result = 'cancelled',
+       duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
+       output = jsonb_build_object('error', $2::text)
+     WHERE ticket_id = $1 AND finished_at IS NULL
+       AND ($3::text[] IS NULL OR stage = ANY($3::text[]))`,
+    [ticketId, error, stages ?? null],
+  );
+}
