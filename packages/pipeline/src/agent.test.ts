@@ -975,6 +975,25 @@ describe("the prompts", () => {
     expect(section).toContain("契约非改不可");
   });
 
+  it("documents the result checker command and its sandbox path", () => {
+    const design = readFileSync(
+      join(PROMPT_DIR, "../../../docs/design.md"),
+      "utf8",
+    );
+    expect(design).toContain("/home/agent/afk/check-result.mjs");
+    expect(design).toContain("node /home/agent/afk/check-result.mjs");
+  });
+
+  it("tells the overlay to write the result file, self-check, fix until it passes, then output it", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const section = overlay.slice(overlay.indexOf("## 结果"));
+    expect(section).toContain("/tmp/afk-result.json");
+    expect(section).toContain("node /home/agent/afk/check-result.mjs");
+    expect(section).toContain("/context/run.json");
+    expect(section).toContain("改到通过");
+    expect(section).toContain("<result>");
+  });
+
   it("tells the overlay that ref is only for deferred, and examples of other kinds omit it", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const section = overlay.slice(

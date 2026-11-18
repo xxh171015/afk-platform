@@ -153,6 +153,16 @@ const ReviewParsed = ReviewObject.refine(verdictMatchesMustFix, {
 export const ReviewOutputSchema = resultSchema(ReviewParsed);
 export type ReviewOutput = z.infer<typeof ReviewParsed>;
 
+// Without the preprocess, suggestions/scopeCreep/uncertainties must already be strings
+// (Run 655's object form is what normalize turns into a sentence).
+const StrictReviewParsed = ReviewObject.extend({
+  suggestions: z.array(z.string()),
+  scopeCreep: z.array(z.string()).default([]),
+  uncertainties: z.array(z.string()),
+}).refine(verdictMatchesMustFix, {
+  message: "mustFix is not empty, so the verdict must be fix",
+});
+
 /** The standards-source files a review named, or undefined when the result has none. */
 export function reviewSources(output: unknown): string[] | undefined {
   if (!output || typeof output !== "object") return undefined;
@@ -211,6 +221,60 @@ const LocateOutputObject = z.object({
 });
 export const LocateOutputSchema = resultSchema(LocateOutputObject);
 export type LocateOutput = z.infer<typeof LocateOutputObject>;
+
+// Stages whose /context/run.json name has a result schema. The self-check command
+// (`packages/pipeline/src/check-result.ts`) looks them up here.
+export const RESULT_CHECK_STAGES = [
+  "implement",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+  "final-fix",
+  "update-branch",
+  "review",
+  "final-review",
+  "recheck",
+  "final-tidy",
+  "diagnose",
+  "locate-bug",
+] as const;
+
+const IMPLEMENT_CHECK_STAGES = new Set<string>([
+  "implement",
+  "gate-fix",
+  "review-fix",
+  "merge-fix",
+  "final-fix",
+  "update-branch",
+]);
+
+const REVIEW_CHECK_STAGES = new Set<string>([
+  "review",
+  "final-review",
+  "recheck",
+]);
+
+export function resultCheckSchema(
+  stage: string,
+  options: { normalize: boolean },
+): z.ZodType | undefined {
+  if (IMPLEMENT_CHECK_STAGES.has(stage)) {
+    return options.normalize ? ImplementOutputSchema : ImplementOutputObject;
+  }
+  if (REVIEW_CHECK_STAGES.has(stage)) {
+    return options.normalize ? ReviewOutputSchema : StrictReviewParsed;
+  }
+  if (stage === "final-tidy") {
+    return options.normalize ? TidyOutputSchema : TidyOutputObject;
+  }
+  if (stage === "diagnose") {
+    return options.normalize ? DiagnoseOutputSchema : DiagnoseOutputObject;
+  }
+  if (stage === "locate-bug") {
+    return options.normalize ? LocateOutputSchema : LocateOutputObject;
+  }
+  return undefined;
+}
 
 export interface AgentRunOptions<Schema extends z.ZodType> {
   stage: Stage | FinalStep | "update-branch" | "locate-bug";

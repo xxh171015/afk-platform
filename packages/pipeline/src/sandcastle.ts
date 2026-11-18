@@ -42,6 +42,7 @@ export interface SandcastleConfig {
   image: string; // the project's sandbox image
   model: string;
   skillsMount: string; // host directory with the pinned skills
+  checkResultMount?: string; // host path of the bundled result checker, mounted at CHECK_RESULT_SANDBOX_PATH
   cursorApiKey: string;
   logDir: string; // where the raw logs of this task go
   sandboxEnv?: Record<string, string>; // set in every sandbox, agent or gate (AFK_NPM_REGISTRIES)
@@ -58,6 +59,7 @@ const WALL_CLOCK_REASON = "wall-clock";
 const JOB_LOST_REASON = "job-lost";
 
 export const SKILLS_SANDBOX_PATH = "/home/agent/.cursor/skills";
+export const CHECK_RESULT_SANDBOX_PATH = "/home/agent/afk/check-result.mjs";
 // The skills the agents run (implement, tdd, code-review, codebase-design), copied unchanged from mattpocock/skills at
 // SKILLS_SHA (packages/pipeline/skills/VENDORED.md). The worker mounts this folder at SKILLS_SANDBOX_PATH.
 export const SANDBOX_SKILLS_DIR = fileURLToPath(
@@ -80,10 +82,11 @@ const depsCacheEnv = (path: string) => ({
 });
 export const REFS_SANDBOX_PATH = "/refs";
 
-// Read-only mounts: the context the agent reads, and the skills. Nothing else from the host is visible.
+// Read-only mounts: the context the agent reads, the skills, and the result checker. Nothing else from the host is visible.
 export function sandboxMounts(input: {
   ctxDir?: string;
   skillsMount: string;
+  checkResultMount?: string;
   refs?: readonly { name: string; dir: string }[];
 }) {
   return [
@@ -106,6 +109,15 @@ export function sandboxMounts(input: {
       sandboxPath: SKILLS_SANDBOX_PATH,
       readonly: true,
     },
+    ...(input.checkResultMount
+      ? [
+          {
+            hostPath: input.checkResultMount,
+            sandboxPath: CHECK_RESULT_SANDBOX_PATH,
+            readonly: true,
+          },
+        ]
+      : []),
   ];
 }
 
@@ -422,7 +434,12 @@ const provider = (
   return sandboxProvider({
     image: config.image,
     mounts: [
-      ...sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
+      ...sandboxMounts({
+        ctxDir,
+        skillsMount: config.skillsMount,
+        checkResultMount: config.checkResultMount,
+        refs,
+      }),
       ...(depsCacheDir
         ? [
             {
