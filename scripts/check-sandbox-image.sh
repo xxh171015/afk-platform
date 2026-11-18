@@ -69,11 +69,21 @@ write_env CURSOR_CLI_VERSION "$CURSOR_CLI_VERSION"
 write_env POSTGRES_VERSION "$POSTGRES_VERSION"
 write_env TOOLS "$TOOLS"
 write_env CHROMIUM "$CHROMIUM"
+MACOS_AWK="$(docker run --rm --entrypoint /opt/macos-compat/bin/awk "$IMAGE" -version | tr -d '\r' | tail -n1)"
+case "$MACOS_AWK" in
+  "awk version"*) ;;
+  *)
+    echo "expected BSD awk at /opt/macos-compat/bin/awk (awk -version), got: ${MACOS_AWK:-missing}" >&2
+    exit 1
+    ;;
+esac
+write_env MACOS_AWK "$MACOS_AWK"
 echo "Cursor CLI: $CURSOR_CLI_VERSION (pinned $PINNED_CURSOR)"
 echo "PostgreSQL: $POSTGRES_VERSION"
 echo "Go pin: $PINNED_GO"
 echo "$TOOLS"
 echo "Chromium cache: $CHROMIUM"
+echo "macos-compat awk: $MACOS_AWK (/opt/macos-compat/bin/awk)"
 
 FAILED=0
 run_gate() {
@@ -107,7 +117,7 @@ awk '"'"'/^setup: /{sub(/^setup: /,""); print "600\t" $0}
      /^    run: /{sub(/^    run: /,""); r=$0}
      /^    timeoutSeconds: /{sub(/^    timeoutSeconds: /,""); print $0 "\t" r}'"'"' .sandcastle/gates.yaml |
 while IFS=$'"'"'\t'"'"' read -r secs cmd; do
-  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"
+  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"  # portable: runs in the container
 done'
 
 if [[ "${SKIP_PLATFORM_GATE:-}" == 1 ]]; then
@@ -121,10 +131,10 @@ fi
 FRONTEND_GATE='set -euo pipefail
 cd /home/agent/workspace
 npm ci
-timeout 300 npm run typecheck
-timeout 120 npm run contract:check
-timeout 600 npm test
-timeout 300 npm run build'
+timeout 300 npm run typecheck  # portable: runs in the container
+timeout 120 npm run contract:check  # portable: runs in the container
+timeout 600 npm test  # portable: runs in the container
+timeout 300 npm run build  # portable: runs in the container'
 
 echo "cloning $FRONTEND_URL"
 if [[ "$FRONTEND_URL" == https://github.com/* ]]; then

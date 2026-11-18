@@ -10,6 +10,7 @@ import {
   occupiesSlot,
   PLANNING_COMMIT_JOB,
   TRIAL_MERGE_JOB,
+  tryParseRepoUrl,
 } from "@afk/shared";
 import type { ClaimedJob, WorkerApi } from "./api.ts";
 import { withCredentials } from "./credentials.ts";
@@ -330,35 +331,56 @@ export async function processJob(
         throw new InfrastructureError("this worker has no code host");
       const task = await api.hostTask(job);
       if (task === "lost") return "abandoned";
+      let host: HostDeps = options.host;
       if (task.kind === "index-pr-links") {
         const deps = await withCredentials({ ...executor, api }, task.repoUrl);
-        const repoDir = await deps.repos.ensure(
-          task.repoName,
-          task.repoUrl,
-          task.defaultBranch,
-        );
-        const body = await runHostTask({ ...options.host, repoDir }, task, log);
-        if (lost.signal.aborted) return "abandoned";
-        if ((await handOver(options, job, body, log)) !== "held")
-          return "abandoned";
-        log(`${job.type} ok`);
-        return "completed";
+        host = {
+          ...options.host,
+          repoDir: await deps.repos.ensure(
+            task.repoName,
+            task.repoUrl,
+            task.defaultBranch,
+          ),
+        };
+      } else if (task.kind === "open-pr") {
+        // GitHub/GitLab URLs always `ensure` so the clone has default + spec/* before we match hostChecks.
+        // Local-path origins (worker-demo) are not parseable: reuse the clone tickets already made.
+        const parsed = tryParseRepoUrl(task.repoUrl);
+        let repoDir: string | undefined;
+        if (parsed) {
+          const creds = await withCredentials(
+            { ...executor, api },
+            task.repoUrl,
+          );
+          repoDir = await creds.repos.ensure(
+            parsed.name,
+            task.repoUrl,
+            task.base,
+          );
+        } else {
+          repoDir = options.executor.repos.findByUrl(task.repoUrl);
+          if (!repoDir) {
+            repoDir = await options.executor.repos.ensure(
+              "repo",
+              task.repoUrl,
+              task.base,
+            );
+          }
+        }
+        host = { ...options.host, repoDir };
+      } else if (task.kind === "spec-cleanup") {
+        host = {
+          ...options.host,
+          localRepos: [
+            ...new Set(
+              task.branches
+                .map((item) => options.executor.repos.findByUrl(item.repoUrl))
+                .filter((dir): dir is string => dir !== undefined),
+            ),
+          ],
+        };
       }
-      const localRepos =
-        task.kind === "spec-cleanup"
-          ? [
-              ...new Set(
-                task.branches
-                  .map((item) => options.executor.repos.findByUrl(item.repoUrl))
-                  .filter((dir): dir is string => dir !== undefined),
-              ),
-            ]
-          : undefined;
-      const body = await runHostTask(
-        { ...options.host, ...(localRepos ? { localRepos } : {}) },
-        task,
-        log,
-      );
+      const body = await runHostTask(host, task, log);
       if (lost.signal.aborted) return "abandoned";
       if ((await handOver(options, job, body, log)) !== "held")
         return "abandoned";

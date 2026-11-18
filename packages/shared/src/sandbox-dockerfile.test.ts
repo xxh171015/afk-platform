@@ -26,4 +26,17 @@ describe("the platform sandbox Dockerfile", () => {
   it("does not put capability, memory or process limits in the image", () => {
     expect(dockerfile).not.toMatch(/cap-drop|no-new-privileges|pids-limit/);
   });
+
+  it("installs original-awk and links it at /opt/macos-compat/bin/awk before USER", () => {
+    expect(dockerfile).toMatch(
+      /git \\\n\s+curl \\\n\s+jq \\\n\s+original-awk \\\n/,
+    );
+    const awkLink = dockerfile.search(
+      /\/opt\/macos-compat\/bin\/awk.*\/usr\/bin\/original-awk|\/usr\/bin\/original-awk.*\/opt\/macos-compat\/bin\/awk/s,
+    );
+    expect(awkLink).toBeGreaterThan(-1);
+    expect(dockerfile).toMatch(/# .*scripts\/check-portability\.sh.*macOS/);
+    const user = dockerfile.search(/^USER /m);
+    expect(user).toBeGreaterThan(awkLink);
+  });
 });

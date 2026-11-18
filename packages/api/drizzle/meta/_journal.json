@@ -638,6 +638,13 @@
       "when": 1795000000000,
       "tag": "0090_parallel_review",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1795000000001,
+      "tag": "0091_finalization_host_checks",
+      "breakpoints": true
     }
   ]
 }

@@ -7783,7 +7783,12 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
-                                "enum": ["recheck", "needs-human", "deferred"]
+                                "enum": [
+                                  "recheck",
+                                  "needs-human",
+                                  "deferred",
+                                  "host-check"
+                                ]
                               },
                               "id": {
                                 "type": "string"

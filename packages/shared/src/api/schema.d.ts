@@ -3813,7 +3813,7 @@ export interface paths {
                 /** @default [] */
                 needsDecision: {
                   /** @enum {string} */
-                  kind: "recheck" | "needs-human" | "deferred";
+                  kind: "recheck" | "needs-human" | "deferred" | "host-check";
                   id: string;
                   source: string;
                   text: string;

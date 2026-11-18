@@ -228,7 +228,7 @@ _Avoid_: 报告、总结
 _Avoid_: 发布顺序、上线顺序
 
 **Auto-merge（自动合并）**：
-项目合并策略为 `auto-improvement` 时，平台自己把一个 Spec 的 PR 合进默认分支：只对 improvement 类型、只有一个 PR、验收包没有 `needs-human` 和没做掉的 `deferred`、CI 不是 pending 或 failure、不冲突、PR 上没人评论的 Spec，在进入 awaiting-review 30 分钟后做。人在这 30 分钟里在 PR 上写评论就不做。默认策略是 `manual`，全部由人合并（ADR 0011）。
+项目合并策略为 `auto-improvement` 时，平台自己把一个 Spec 的 PR 合进默认分支：只对 improvement 类型、只有一个 PR、验收包没有 `needs-human`、没做掉的 `deferred` 和 `host-check`、CI 不是 pending 或 failure、不冲突、PR 上没人评论的 Spec，在进入 awaiting-review 30 分钟后做。人在这 30 分钟里在 PR 上写评论就不做。默认策略是 `manual`，全部由人合并（ADR 0011）。
 _Avoid_: 机器人合并、auto merge（GitHub 的同名功能是另一回事）
 
 ## 度量

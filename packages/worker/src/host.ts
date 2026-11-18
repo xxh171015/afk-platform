@@ -6,7 +6,13 @@ import {
   parseRepoUrl,
   type RepoRef,
 } from "@afk/host";
-import { git } from "@afk/pipeline";
+import {
+  git,
+  gitOut,
+  type HostCheck,
+  matchHostChecks,
+  readGateConfig,
+} from "@afk/pipeline";
 import {
   fitPrDescription,
   type HostTask,
@@ -96,6 +102,24 @@ export function indexPrLinksFromRepo(input: {
   return links;
 }
 
+function hostChecksOf(
+  repoDir: string | undefined,
+  base: string,
+  head: string,
+): { run: string; why: string; files: string[] }[] {
+  if (!repoDir) return [];
+  let checks: HostCheck[] | undefined;
+  try {
+    checks = readGateConfig(repoDir, head).hostChecks;
+  } catch {
+    return [];
+  }
+  const changed = gitOut(repoDir, ["diff", "--name-only", `${base}...${head}`])
+    .split("\n")
+    .filter(Boolean);
+  return matchHostChecks(checks, changed);
+}
+
 export async function runHostTask(
   deps: HostDeps,
   task: HostTask,
@@ -103,6 +127,7 @@ export async function runHostTask(
 ): Promise<Record<string, unknown>> {
   const repoRef = deps.repoRef ?? parseRepoUrl;
   if (task.kind === "open-pr") {
+    const hostChecks = hostChecksOf(deps.repoDir, task.base, task.head);
     let pr: Awaited<ReturnType<HostAdapter["openPullRequest"]>>;
     try {
       pr = await deps.adapter.openPullRequest({
@@ -122,7 +147,7 @@ export async function runHostTask(
       );
     }
     log(`opened ${pr.url} (${pr.state})`);
-    return { stage: "open-pr", outcome: "opened", ...pr };
+    return { stage: "open-pr", outcome: "opened", ...pr, hostChecks };
   }
   if (task.kind === "patch-pr-body") {
     try {

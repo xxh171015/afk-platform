@@ -275,7 +275,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 git clone --quiet "$REPO_ROOT" "$WORK/repo"
 note "Clone: $WORK/repo (removed when the wizard exits)"
-# Same shape as the M0 prototype's execInFreshSandbox: each step is `timeout <seconds> <run>`.
+# Same shape as the M0 prototype's execInFreshSandbox: each step bounds the inner command with a seconds limit.
 # gates.yaml is read inside the container so this stays in sync with the real file.
 GATE_SCRIPT='set -euo pipefail
 cd /home/agent/workspace
@@ -283,7 +283,7 @@ awk '"'"'/^setup: /{sub(/^setup: /,""); print "600\t" $0}
      /^    run: /{sub(/^    run: /,""); r=$0}
      /^    timeoutSeconds: /{sub(/^    timeoutSeconds: /,""); print $0 "\t" r}'"'"' .sandcastle/gates.yaml |
 while IFS=$'"'"'\t'"'"' read -r secs cmd; do
-  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"
+  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"  # portable: runs in the container
 done'
 gate_start=$(date +%s)
 if docker run --rm -v "$WORK/repo:/home/agent/workspace" --entrypoint bash "$IMAGE" -c "$GATE_SCRIPT"; then
@@ -325,10 +325,10 @@ fi
 FRONTEND_GATE='set -euo pipefail
 cd /home/agent/workspace
 npm ci
-timeout 300 npm run typecheck
-timeout 120 npm run contract:check
-timeout 600 npm test
-timeout 300 npm run build'
+timeout 300 npm run typecheck  # portable: runs in the container
+timeout 120 npm run contract:check  # portable: runs in the container
+timeout 600 npm test  # portable: runs in the container
+timeout 300 npm run build  # portable: runs in the container'
 fe_start=$(date +%s)
 if docker run --rm -v "$WORK/frontend:/home/agent/workspace" --entrypoint bash "$IMAGE" -c "$FRONTEND_GATE"; then
   FRONTEND_GATE_RESULT=pass

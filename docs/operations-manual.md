@@ -122,6 +122,8 @@ scripts/verify-sandbox-image.sh         # 逐步确认的同一套检查
 
 默认打标签 `sandcastle:afk-platform`（worker 不设 `AFK_SANDBOX_IMAGE` 时用这个）。换 Cursor CLI 或 Playwright 时改 Dockerfile 里对应的 `ARG`，再跑一次上面的脚本；`PLAYWRIGHT_VERSION` 要和试点前端 `package.json` 的 `@playwright/test` 一致。沙箱里没有 Docker：试点前端的 shop e2e 由检查脚本在宿主机起联调后端，再把容器加入那张网络（`BACKEND_URL=http://backend:8080`）。
 
+本仓库门禁的 `portability` 命令在旧镜像上只做静态检查（兼容重跑打印 `macos-compat: skipped`）。重建镜像（`scripts/check-sandbox-image.sh`）之后才会用 BSD awk 做兼容重跑。重建后先在这台 Mac 上手动跑一次 `scripts/check-portability.sh`：有失败就单独开一个小需求修，不要等到下一个不相干的需求的 gate-fix。
+
 ### 1.4 tracker 文档是什么
 
 grill / to-spec / to-tickets 默认往 GitHub Issues 写。规划仓库里的 `docs/agents/issue-tracker.md` 让它们改成写平台。它只在每台规划机器上的那份 checkout 里，不提交，执行票时用不到；`plat init`（由 `/afk-setup` 调用）生成它（单独生成用 `plat tracker-doc --project <P> --repo <名字> > docs/agents/issue-tracker.md`，只打印、不写文件）。
@@ -211,6 +213,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 - 页面 `http://127.0.0.1:5173` 先看工作台（等你处理 / 正在运行 / 等你验收 / 最近完成）；终端里 `plat spec show S-n`。票卡住时本机也会发一条 macOS 通知（点开打不开页面，去待处理或通知里的链接）。
 - 全部票 done 后平台做整体 review 和修复，然后开 PR（`spec/<id>/<slug>` → `main`），并生成验收包（`plat spec show S-n` 里能看）。
 - **你**读验收包，在 GitHub 上看 diff、合并 PR。合并后平台自动清理分支，spec 变 `merged`。
+- 验收包或 PR 描述「合并前要你定的」里如果有宿主机检查（`host-check`，文字是「在宿主机上跑：…」）：在这台 Mac 上跑那条命令，通过后再**手动**合并该 PR。有宿主机检查时平台不会自动合并。
 
 ## 3. 场景 B：前后端各一个
 

@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, gitOut } from "./exec.ts";
 import {
@@ -723,6 +724,119 @@ describe("the configuration comes from the trusted commit", () => {
     });
     expect(readGateConfig(repo.dir, "main").generated).toEqual([
       { paths: ["openapi.json", "schema.d.ts"], run: "pnpm gen:api" },
+    ]);
+  });
+
+  it("keeps declared hostChecks", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - paths: ["scripts/**", "scripts/review-calibration.ts"]',
+        "    run: pnpm test packages/cli/src/up-sh.test.ts",
+        "    why: host scripts need a Mac run",
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main").hostChecks).toEqual([
+      {
+        paths: ["scripts/**", "scripts/review-calibration.ts"],
+        run: "pnpm test packages/cli/src/up-sh.test.ts",
+        why: "host scripts need a Mac run",
+      },
+    ]);
+  });
+
+  it("rejects a hostCheck that is missing paths or run", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        "  - run: pnpm test packages/cli/src/up-sh.test.ts",
+        "    why: host scripts need a Mac run",
+        "",
+      ].join("\n"),
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(
+      /缺少必填字段 paths/,
+    );
+    repo.cleanup();
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - paths: ["scripts/**"]',
+        "    why: host scripts need a Mac run",
+        "",
+      ].join("\n"),
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(/缺少必填字段 run/);
+  });
+
+  it("rejects a hostCheck field it does not know and lists the keys that are allowed", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - { paths: ["scripts/**"], run: "pnpm test", why: "mac", extra: 1 }',
+        "",
+      ].join("\n"),
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    try {
+      readGateConfig(repo.dir, "main");
+    } catch (error) {
+      expect((error as Error).message).toContain("extra");
+      expect((error as Error).message).toContain(
+        "hostChecks 里允许：paths、run、why",
+      );
+    }
+  });
+});
+
+describe("this repo's gates.yaml", () => {
+  const realGates = readFileSync(
+    fileURLToPath(new URL("../../../.sandcastle/gates.yaml", import.meta.url)),
+    "utf8",
+  );
+
+  it("has a portability command after lint with a 300s timeout", () => {
+    repo = makeRepo({ ".sandcastle/gates.yaml": realGates });
+    const config = readGateConfig(repo.dir, "main");
+    const names = config.commands.map((command) => command.name);
+    expect(names.indexOf("portability")).toBeGreaterThan(names.indexOf("lint"));
+    expect(
+      config.commands.find((command) => command.name === "portability"),
+    ).toEqual({
+      name: "portability",
+      run: "scripts/check-portability.sh",
+      timeoutSeconds: 300,
+    });
+  });
+
+  it("declares hostChecks for the six host scripts and review-calibration.ts", () => {
+    repo = makeRepo({ ".sandcastle/gates.yaml": realGates });
+    const config = readGateConfig(repo.dir, "main");
+    expect(config.hostChecks).toEqual([
+      {
+        paths: [
+          "scripts/up.sh",
+          "scripts/restart.sh",
+          "scripts/canary.sh",
+          "scripts/drill.sh",
+          "scripts/check-sandbox-image.sh",
+          "scripts/verify-sandbox-image.sh",
+          "scripts/review-calibration.ts",
+        ],
+        run: "pnpm test packages/cli/src/up-sh.test.ts packages/cli/src/canary-sh.test.ts",
+        why: "宿主机脚本：沙箱里只模拟了 BSD awk 和静态检查",
+      },
     ]);
   });
 });

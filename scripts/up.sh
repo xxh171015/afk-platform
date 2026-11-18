@@ -591,7 +591,7 @@ echo "log: $up_log"
 echo "next: in the planning repo, run the command on the page's 接入 card (curl -fsSL $AFK_API_URL/setup.sh | sh), then /afk-setup in Cursor or Claude Code"
 echo "next: 接新需求前先跑 scripts/canary.sh --project <id> (not started automatically)"
 
-# macOS bash 3.2 has no `wait -n`. API or the page dying is restarted with backoff; the worker dying
+# macOS bash 3.2 cannot wait for the next job to finish. API or the page dying is restarted with backoff; the worker dying
 # still stops the rest, as before.
 while :; do
   check_signal

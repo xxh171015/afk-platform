@@ -3,7 +3,7 @@
 到 2026-11-16 为止，合进默认分支全部由人做（信任阶梯 L0），平台用三层来保证：平台代码里搜不到任何合并接口的调用（`guards.test.ts`）；每个仓库的守卫工作流（`afk-main-guard.yml`）发现 bot 推进默认分支就开 issue；平台的令牌合并了 PR 时发一条异常通知（`token_merged`）。审查校准第一次跑完（优化计划 8.5），Spec 轴对埋进去的 User Story 缺陷、Standards 轴对规范缺陷各命中 4/4，过了 8.6 定的门槛。现在定为放开第一级（L1）：
 
 - **一个出口。** 代码托管适配器加一个合并调用，整个平台只有 worker 的 `auto-merge` 托管任务调用它。合并方式是普通合并提交（保留 `Spec:`、`Run:` trailer），带上平台判断时看到的 head SHA，PR 在这之后有了新提交就合不进去。`guards.test.ts` 从「搜不到合并调用」改成「合并调用只出现在适配器的这一个方法里，只被这一个任务调用」。
-- **只在项目开了时。** 项目的合并策略（`merge_policy`）取 `manual`（默认）或 `auto-improvement`，其他值拒绝。只有 `auto-improvement` 的项目、并且需求同时满足下面每一条，平台才排这个任务：类型是 `improvement`；只有一个 PR；验收包里 0 条 `needs-human`、0 条没做掉的 `deferred`；PR 不是草稿、CI 不是 pending 或 failure、不和默认分支冲突、没有被要求修改；PR 上没有人写过评论；进入 `awaiting-review` 已满 30 分钟。任何一条不满足就照旧等人。
+- **只在项目开了时。** 项目的合并策略（`merge_policy`）取 `manual`（默认）或 `auto-improvement`，其他值拒绝。只有 `auto-improvement` 的项目、并且需求同时满足下面每一条，平台才排这个任务：类型是 `improvement`；只有一个 PR；验收包里 0 条 `needs-human`、0 条没做掉的 `deferred`、0 条 `host-check`；PR 不是草稿、CI 不是 pending 或 failure、不和默认分支冲突、没有被要求修改；PR 上没有人写过评论；进入 `awaiting-review` 已满 30 分钟。任何一条不满足就照旧等人。
 - **人能否决。** 开 PR 时，项目开了自动合并的，PR 描述里写明「满足条件时平台会在 30 分钟后自动合并，在 PR 上写评论即可阻止」。30 分钟内人写了评论就不自动合并，这个需求以后也不再自动合并。
 - **留痕。** 合并前先把 PR 描述里的这段改成「平台已自动合并」，并带标记 `<!-- afk:auto-merged -->`；合并后记事件、发飞书。平台自己记过的自动合并不再触发 `token_merged` 异常通知；其他由平台令牌做的合并仍然是异常。
 - **守卫工作流。** 模板只放行「这个提交对应的 PR 已合并、合并者是 bot、PR 描述里有自动合并标记」的推送；bot 的其他推送照旧开 issue。已经装了守卫的仓库要由人更新一次（`.github/**` 是保护路径）。
