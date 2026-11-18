@@ -168,3 +168,7 @@ export async function cancelTicketJobs(
     [ticketId, error, stages ?? null],
   );
 }
+
+// Retry, block, and a terminal job failure all drop in-flight gate∥review join state with this SET.
+export const CLEAR_PARALLEL_REVIEW_SQL =
+  "parallel_review = 'none', parallel_review_sha = NULL, gate_passed_sha = NULL";

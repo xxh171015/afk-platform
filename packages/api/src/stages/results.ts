@@ -17,6 +17,7 @@ import type pg from "pg";
 import { z } from "zod";
 import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import {
+  CLEAR_PARALLEL_REVIEW_SQL,
   cancelTicketJobs,
   enqueueStageJob,
   readStagePayload,
@@ -1057,8 +1058,7 @@ async function blockTicket(
     throw new Error(next.ok ? "unexpected state" : next.reason);
   }
   await client.query(
-    `UPDATE tickets SET state = 'blocked', blocked_reason = $2,
-       parallel_review = 'none', parallel_review_sha = NULL, gate_passed_sha = NULL
+    `UPDATE tickets SET state = 'blocked', blocked_reason = $2, ${CLEAR_PARALLEL_REVIEW_SQL}
      WHERE id = $1`,
     [ticket.id, reason],
   );

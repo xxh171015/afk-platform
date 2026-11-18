@@ -24,7 +24,12 @@ import {
   enqueueUpdateBranch,
   holdFinalReviewForUpdate,
 } from "../host/update-branch.ts";
-import { enqueueFinalJob, enqueueStageJob } from "../jobs/stage-jobs.ts";
+import {
+  CLEAR_PARALLEL_REVIEW_SQL,
+  cancelTicketJobs,
+  enqueueFinalJob,
+  enqueueStageJob,
+} from "../jobs/stage-jobs.ts";
 import {
   inTransaction,
   lockSpec,
@@ -165,7 +170,7 @@ export async function retryTicket(
       (await finishedBranch(client, ticketId));
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, auto_retried = false,
-         parallel_review = 'none', parallel_review_sha = NULL, gate_passed_sha = NULL,
+         ${CLEAR_PARALLEL_REVIEW_SQL},
          restart = $3 AND resume_stage IS NULL, integration_rounds = 0,
          resume_stage = CASE WHEN resume_stage IS NULL AND $5 THEN 'gate' ELSE NULLIF(resume_stage, 'gate') END,
          job_floor = (SELECT COALESCE(max(id), 0) FROM jobs),
@@ -198,19 +203,7 @@ async function stopTicketWork(
   client: pg.PoolClient,
   ticketId: number,
 ): Promise<void> {
-  await client.query(
-    `UPDATE jobs SET state = 'failed', error = 'the ticket was taken over',
-       lease_owner = NULL, lease_expires_at = NULL
-     WHERE state IN ('queued', 'running') AND (payload->>'ticketId')::int = $1`,
-    [ticketId],
-  );
-  await client.query(
-    `UPDATE runs SET finished_at = now(), result = 'cancelled',
-       duration_ms = LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int,
-       output = jsonb_build_object('error', 'the ticket was taken over')
-     WHERE ticket_id = $1 AND finished_at IS NULL`,
-    [ticketId],
-  );
+  await cancelTicketJobs(client, ticketId, "the ticket was taken over");
 }
 
 export type TakeoverDetails = {
