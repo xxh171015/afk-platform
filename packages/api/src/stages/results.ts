@@ -16,7 +16,11 @@ import {
 import type pg from "pg";
 import { z } from "zod";
 import { enqueueTrialMerge } from "../host/trial-merge.ts";
-import { enqueueStageJob, readStagePayload } from "../jobs/stage-jobs.ts";
+import {
+  cancelTicketJobs,
+  enqueueStageJob,
+  readStagePayload,
+} from "../jobs/stage-jobs.ts";
 import { recordTicketLinks } from "../links/record.ts";
 import {
   finishTicket,
@@ -208,6 +212,9 @@ interface TicketRow {
   reviewed: boolean;
   recheck_pending: boolean;
   auto_retried: boolean;
+  parallel_review: "none" | "running" | "pass" | "fix";
+  parallel_review_sha: string | null;
+  gate_passed_sha: string | null;
   allowed_recheck_shas: string[];
   integration_rounds: number;
   title: string;
@@ -268,7 +275,8 @@ export async function recordStageResult(
   const ticket = (
     await client.query<TicketRow>(
       `SELECT t.id, t.spec_id, t.repo_id, t.state, t.type, t.content_version, t.fix_counts, t.reviewed,
-              t.recheck_pending, t.auto_retried, t.allowed_recheck_shas, t.integration_rounds, t.title,
+              t.recheck_pending, t.auto_retried, t.parallel_review, t.parallel_review_sha, t.gate_passed_sha,
+              t.allowed_recheck_shas, t.integration_rounds, t.title,
               t.acceptance_criteria,
               t.environment, r.name AS repo_name
        FROM tickets t JOIN repos r ON r.id = t.repo_id WHERE t.id = $1`,
@@ -284,6 +292,12 @@ export async function recordStageResult(
     return {
       status: "ignored",
       reason: `${stage} result for a ticket that is ${ticket.state} at version ${ticket.content_version}`,
+    };
+  }
+  if (stage === "review" && ticket.parallel_review !== "running") {
+    return {
+      status: "ignored",
+      reason: `review result after parallel review is ${ticket.parallel_review}`,
     };
   }
 
@@ -332,6 +346,9 @@ export async function recordStageResult(
     await client.query(
       `UPDATE tickets SET handback_pending = false, resume_stage = $2,
          reviewed = CASE WHEN $3 THEN false ELSE reviewed END,
+         parallel_review = CASE WHEN $3 THEN 'none' ELSE parallel_review END,
+         parallel_review_sha = CASE WHEN $3 THEN NULL ELSE parallel_review_sha END,
+         gate_passed_sha = CASE WHEN $3 THEN NULL ELSE gate_passed_sha END,
          last_pushed_sha = NULL,
          restart = false, state = 'pending'
        WHERE id = $1`,
@@ -390,6 +407,15 @@ export async function recordStageResult(
     integrationRounds: ticket.integration_rounds,
     recheckPending: ticket.recheck_pending,
     autoRetried: ticket.auto_retried,
+    ...(ticket.parallel_review !== "none"
+      ? { parallelReview: ticket.parallel_review }
+      : {}),
+    ...(ticket.parallel_review_sha
+      ? { parallelReviewSha: ticket.parallel_review_sha }
+      : {}),
+    ...(ticket.gate_passed_sha !== null
+      ? { gatePassedSha: ticket.gate_passed_sha }
+      : {}),
   };
   if (
     valid &&
@@ -408,7 +434,11 @@ export async function recordStageResult(
       progress.recheckPending = false;
   }
   const decision: StageDecision = valid
-    ? advanceStage(checkedDiagnosis(valid, ticket), progress, ticket.type)
+    ? advanceStage(
+        reportWithCommitSha(checkedDiagnosis(valid, ticket), valid),
+        progress,
+        ticket.type,
+      )
     : { type: "block", reason: "invalid-output" };
 
   await applyDecision(client, ticket, decision, valid);
@@ -825,6 +855,51 @@ async function insertFindings(
   }
 }
 
+function reportWithCommitSha(
+  report: StageReport,
+  valid: StageResult,
+): StageReport {
+  const sha =
+    valid.stage === "gate"
+      ? (valid.gate?.commitSha ?? valid.run?.headSha)
+      : valid.stage === "review"
+        ? valid.run?.headSha
+        : undefined;
+  if (
+    sha !== undefined &&
+    (report.stage === "gate" || report.stage === "review")
+  ) {
+    return { ...report, commitSha: sha };
+  }
+  return report;
+}
+
+async function persistProgress(
+  client: pg.PoolClient,
+  ticketId: number,
+  state: TicketState,
+  progress: Progress,
+  resumeStage?: Stage,
+): Promise<void> {
+  await client.query(
+    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4, recheck_pending = $5, auto_retried = $6,
+       parallel_review = $7, parallel_review_sha = $8, gate_passed_sha = $9,
+       resume_stage = CASE WHEN $10 = 'e2e' THEN 'e2e' ELSE resume_stage END WHERE id = $1`,
+    [
+      ticketId,
+      state,
+      JSON.stringify(progress.fixCounts),
+      progress.reviewed,
+      progress.recheckPending === true,
+      progress.autoRetried === true,
+      progress.parallelReview ?? "none",
+      progress.parallelReviewSha ?? null,
+      progress.gatePassedSha ?? null,
+      resumeStage ?? null,
+    ],
+  );
+}
+
 async function applyDecision(
   client: pg.PoolClient,
   ticket: TicketRow,
@@ -850,7 +925,28 @@ async function applyDecision(
     return;
   }
   if (decision.type === "block") {
+    await cancelTicketJobs(client, ticket.id, "the ticket was blocked");
     await blockTicket(client, ticket, decision.reason);
+    return;
+  }
+  if (decision.type === "wait") {
+    await persistProgress(client, ticket.id, ticket.state, decision.progress);
+    return;
+  }
+  if (decision.type === "enqueue-both") {
+    await persistProgress(client, ticket.id, ticket.state, decision.progress);
+    for (const stage of decision.stages) {
+      await enqueueStageJob(
+        client,
+        {
+          id: ticket.id,
+          specId: ticket.spec_id,
+          repoId: ticket.repo_id,
+          contentVersion: ticket.content_version,
+        },
+        stage,
+      );
+    }
     return;
   }
   if (decision.type === "await-fix") {
@@ -881,18 +977,17 @@ async function applyDecision(
       throw new Error(next.ok ? "unexpected block" : next.reason);
     state = next.state;
   }
-  await client.query(
-    `UPDATE tickets SET state = $2, fix_counts = $3, reviewed = $4, recheck_pending = $6, auto_retried = $7,
-       resume_stage = CASE WHEN $5 = 'e2e' THEN 'e2e' ELSE resume_stage END WHERE id = $1`,
-    [
-      ticket.id,
-      state,
-      JSON.stringify(decision.progress.fixCounts),
-      decision.progress.reviewed,
-      decision.stage,
-      decision.progress.recheckPending === true,
-      decision.progress.autoRetried === true,
-    ],
+  if (decision.stage === "gate-fix") {
+    await cancelTicketJobs(client, ticket.id, "the gate did not pass", [
+      "review",
+    ]);
+  }
+  await persistProgress(
+    client,
+    ticket.id,
+    state,
+    decision.progress,
+    decision.stage,
   );
   if (decision.autoRetry) {
     await applyAutoRetry(
@@ -962,7 +1057,9 @@ async function blockTicket(
     throw new Error(next.ok ? "unexpected state" : next.reason);
   }
   await client.query(
-    "UPDATE tickets SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+    `UPDATE tickets SET state = 'blocked', blocked_reason = $2,
+       parallel_review = 'none', parallel_review_sha = NULL, gate_passed_sha = NULL
+     WHERE id = $1`,
     [ticket.id, reason],
   );
   // A blocked ticket no longer holds an agent run, so another one may start.

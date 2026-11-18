@@ -165,6 +165,7 @@ export async function retryTicket(
       (await finishedBranch(client, ticketId));
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, auto_retried = false,
+         parallel_review = 'none', parallel_review_sha = NULL, gate_passed_sha = NULL,
          restart = $3 AND resume_stage IS NULL, integration_rounds = 0,
          resume_stage = CASE WHEN resume_stage IS NULL AND $5 THEN 'gate' ELSE NULLIF(resume_stage, 'gate') END,
          job_floor = (SELECT COALESCE(max(id), 0) FROM jobs),
