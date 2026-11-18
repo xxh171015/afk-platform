@@ -68,6 +68,21 @@ export const DecisionsField = z.union([
     ),
 ]);
 
+function foldNonDeferredDecisionRef(item: unknown): unknown {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  const decision = { ...(item as Record<string, unknown>) };
+  if (
+    decision.kind !== "deferred" &&
+    typeof decision.ref === "string" &&
+    decision.ref.length > 0
+  ) {
+    const text = typeof decision.text === "string" ? decision.text : "";
+    decision.text = `${text}（ref: ${decision.ref}）`;
+    delete decision.ref;
+  }
+  return decision;
+}
+
 export function coerceDecisionsInput(raw: unknown): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
   const obj = { ...(raw as Record<string, unknown>) };
@@ -76,6 +91,9 @@ export function coerceDecisionsInput(raw: unknown): unknown {
   }
   delete obj.uncertainties;
   if (obj.decisions === undefined) obj.decisions = [];
+  if (Array.isArray(obj.decisions)) {
+    obj.decisions = obj.decisions.map(foldNonDeferredDecisionRef);
+  }
   return obj;
 }
 

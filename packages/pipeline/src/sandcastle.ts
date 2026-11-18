@@ -22,13 +22,26 @@ import {
   StructuredOutputError,
 } from "@ai-hero/sandcastle";
 import type { z } from "zod";
-import type { AgentRunner, AgentRunOptions, AgentRunResult } from "./agent.ts";
+import {
+  type AgentRunner,
+  type AgentRunOptions,
+  type AgentRunResult,
+  addTokenUsage,
+  interpretStructuredOutput,
+  RESULT_REPAIR_WALL_CLOCK_MS,
+  recoverStructuredOutput,
+  repairRunOptions,
+  resultSectionOf,
+  strictResultSchema,
+  writeRepairPrompt,
+} from "./agent.ts";
 import {
   type CursorRunFacts,
   factsFromCursorLine,
   finalTextFromCursorLine,
+  lastAssistantFromCursorLine,
 } from "./cursor-result.ts";
-import { type ExecResult, exec } from "./exec.ts";
+import { type ExecResult, exec, git } from "./exec.ts";
 import {
   type GateSandbox,
   type SandboxPlacement,
@@ -42,6 +55,7 @@ export interface SandcastleConfig {
   image: string; // the project's sandbox image
   model: string;
   skillsMount: string; // host directory with the pinned skills
+  checkResultMount?: string; // host path of the bundled result checker, mounted at CHECK_RESULT_SANDBOX_PATH
   cursorApiKey: string;
   logDir: string; // where the raw logs of this task go
   sandboxEnv?: Record<string, string>; // set in every sandbox, agent or gate (AFK_NPM_REGISTRIES)
@@ -58,6 +72,7 @@ const WALL_CLOCK_REASON = "wall-clock";
 const JOB_LOST_REASON = "job-lost";
 
 export const SKILLS_SANDBOX_PATH = "/home/agent/.cursor/skills";
+export const CHECK_RESULT_SANDBOX_PATH = "/home/agent/afk/check-result.mjs";
 // The skills the agents run (implement, tdd, code-review, codebase-design), copied unchanged from mattpocock/skills at
 // SKILLS_SHA (packages/pipeline/skills/VENDORED.md). The worker mounts this folder at SKILLS_SANDBOX_PATH.
 export const SANDBOX_SKILLS_DIR = fileURLToPath(
@@ -80,10 +95,11 @@ const depsCacheEnv = (path: string) => ({
 });
 export const REFS_SANDBOX_PATH = "/refs";
 
-// Read-only mounts: the context the agent reads, and the skills. Nothing else from the host is visible.
+// Read-only mounts: the context the agent reads, the skills, and the result checker. Nothing else from the host is visible.
 export function sandboxMounts(input: {
   ctxDir?: string;
   skillsMount: string;
+  checkResultMount?: string;
   refs?: readonly { name: string; dir: string }[];
 }) {
   return [
@@ -106,6 +122,15 @@ export function sandboxMounts(input: {
       sandboxPath: SKILLS_SANDBOX_PATH,
       readonly: true,
     },
+    ...(input.checkResultMount
+      ? [
+          {
+            hostPath: input.checkResultMount,
+            sandboxPath: CHECK_RESULT_SANDBOX_PATH,
+            readonly: true,
+          },
+        ]
+      : []),
   ];
 }
 
@@ -422,7 +447,12 @@ const provider = (
   return sandboxProvider({
     image: config.image,
     mounts: [
-      ...sandboxMounts({ ctxDir, skillsMount: config.skillsMount, refs }),
+      ...sandboxMounts({
+        ctxDir,
+        skillsMount: config.skillsMount,
+        checkResultMount: config.checkResultMount,
+        refs,
+      }),
       ...(depsCacheDir
         ? [
             {
@@ -466,13 +496,20 @@ export function classifyAgentError(error: unknown): {
 }
 
 // Sandcastle cuts <result> at the first tag it finds, even one inside the JSON's strings. When it gave up on a
-// result, read the block again from the agent's last message the way the prompts ask for it; a block that then
-// passes the same schema is the run's output, with the commits the run made.
+// result, read the block again from the agent's last message the way the prompts ask for it. interpretStructuredOutput
+// decides as-is vs preprocess; a block that only passes after preprocess records resultFix normalized. The commits
+// are the ones the run made.
 export function recoverTaggedOutput<Schema extends z.ZodType>(
   error: unknown,
   finalText: string | undefined,
   schema: Schema,
-): { output: z.infer<Schema>; commits: string[] } | undefined {
+):
+  | {
+      output: z.infer<Schema>;
+      commits: string[];
+      resultFix?: "normalized";
+    }
+  | undefined {
   if (!(error instanceof StructuredOutputError) || finalText === undefined)
     return undefined;
   const block = resultBlock(finalText, error.tag);
@@ -483,9 +520,13 @@ export function recoverTaggedOutput<Schema extends z.ZodType>(
   } catch {
     return undefined;
   }
-  const parsed = schema.safeParse(json);
-  if (!parsed.success) return undefined;
-  return { output: parsed.data, commits: error.commits.map((c) => c.sha) };
+  const interpreted = interpretStructuredOutput(schema, json);
+  if (!interpreted.ok) return undefined;
+  return {
+    output: interpreted.output,
+    commits: error.commits.map((c) => c.sha),
+    ...(interpreted.resultFix ? { resultFix: interpreted.resultFix } : {}),
+  };
 }
 
 export class SandcastleAgentRunner implements AgentRunner {
@@ -510,8 +551,26 @@ export class SandcastleAgentRunner implements AgentRunner {
     if (options.signal?.aborted) onJobLost();
     options.signal?.addEventListener("abort", onJobLost, { once: true });
     const started = Date.now();
+    try {
+      return await this.invokeSandcastle(options, abort.signal, started);
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onJobLost);
+    }
+  }
+
+  private async invokeSandcastle<Schema extends z.ZodType>(
+    options: AgentRunOptions<Schema>,
+    signal: AbortSignal,
+    started: number,
+  ): Promise<AgentRunResult<z.infer<Schema>>> {
+    const { config } = this;
     let billed: CursorRunFacts = {};
+    let lastAssistant: string | undefined;
     let finalText: string | undefined;
+    const logName = options.resultRepair
+      ? `${options.stage}-repair`
+      : options.stage;
     try {
       const result = await run({
         agent: cursor(options.model ?? config.model, {
@@ -531,22 +590,27 @@ export class SandcastleAgentRunner implements AgentRunner {
           baseBranch: options.baseBranch,
         },
         promptFile: resolve(options.promptFile),
-        output: Output.object({ tag: "result", schema: options.schema }),
+        output: Output.object({
+          tag: "result",
+          schema: strictResultSchema(options.schema),
+        }),
         idleTimeoutSeconds: options.idleSeconds,
-        signal: abort.signal,
+        signal,
         logging: {
           type: "file",
-          path: join(config.logDir, `${options.stage}.log`),
+          path: join(config.logDir, `${logName}.log`),
           verbose: true,
           onAgentStreamEvent: (event) => {
             if (event.type !== "raw") return;
             appendFileSync(
-              join(config.logDir, `${options.stage}.stream.jsonl`),
+              join(config.logDir, `${logName}.stream.jsonl`),
               `${event.line}\n`,
             );
             options.onRawLine?.(event.line);
             const next = factsFromCursorLine(event.line);
             if (next) billed = next;
+            const text = lastAssistantFromCursorLine(event.line);
+            if (text) lastAssistant = text;
             finalText = finalTextFromCursorLine(event.line) ?? finalText;
           },
         },
@@ -558,13 +622,54 @@ export class SandcastleAgentRunner implements AgentRunner {
         ...billed,
       };
     } catch (error) {
-      const recovered = recoverTaggedOutput(error, finalText, options.schema);
-      if (recovered) {
+      const message = finalText ?? lastAssistant;
+      const reread = recoverTaggedOutput(error, message, options.schema);
+      if (reread) {
         config.onNote?.(
           "read <result> again from the last message: Sandcastle had cut it at a tag inside the JSON",
         );
         return {
-          ...recovered,
+          ...reread,
+          durationMs: Date.now() - started,
+          ...billed,
+        };
+      }
+      if (error instanceof StructuredOutputError) {
+        const block =
+          message !== undefined ? resultBlock(message, error.tag) : undefined;
+        const recovered = recoverStructuredOutput(options.schema, {
+          rawMatched: block ?? error.rawMatched,
+          lastAssistant,
+        });
+        const originalCommits = error.commits.map((c) => c.sha);
+        if (recovered.ok) {
+          return {
+            output: recovered.output,
+            commits: originalCommits,
+            durationMs: Date.now() - started,
+            ...(recovered.resultFix ? { resultFix: recovered.resultFix } : {}),
+            ...billed,
+          };
+        }
+        if (!options.resultRepair) {
+          const repaired = await this.repairStructuredOutput(
+            options,
+            signal,
+            started,
+            billed,
+            originalCommits,
+            recovered,
+          );
+          if (repaired) return repaired;
+        }
+        return {
+          commits: originalCommits,
+          error:
+            recovered.issues
+              .map((issue) => `${issue.path}: ${issue.message}`)
+              .join("; ")
+              .slice(0, 400) || classifyAgentError(error).message,
+          errorKind: "invalid-output",
           durationMs: Date.now() - started,
           ...billed,
         };
@@ -577,9 +682,79 @@ export class SandcastleAgentRunner implements AgentRunner {
         durationMs: Date.now() - started,
         ...billed,
       };
+    }
+  }
+
+  private async repairStructuredOutput<Schema extends z.ZodType>(
+    options: AgentRunOptions<Schema>,
+    signal: AbortSignal,
+    started: number,
+    billed: CursorRunFacts,
+    originalCommits: string[],
+    recovered: {
+      rawText: string;
+      issues: { path: string; message: string }[];
+    },
+  ): Promise<AgentRunResult<z.infer<Schema>> | undefined> {
+    if (signal.aborted) return undefined;
+    const repairBranch = `result-repair/${randomUUID()}`;
+    const repairDir = join(this.config.logDir, "result-repair");
+    const given = writeRepairPrompt(repairDir, {
+      resultSection: resultSectionOf(readFileSync(options.promptFile, "utf8")),
+      rawText: recovered.rawText,
+      issues: recovered.issues,
+    });
+    const repairOptions = repairRunOptions(
+      options,
+      given.promptFile,
+      repairBranch,
+    );
+    const repairAbort = new AbortController();
+    const onOuterAbort = () => repairAbort.abort(signal.reason);
+    signal.addEventListener("abort", onOuterAbort, { once: true });
+    const repairTimer = setTimeout(
+      () => repairAbort.abort(new Error(WALL_CLOCK_REASON)),
+      RESULT_REPAIR_WALL_CLOCK_MS,
+    );
+    try {
+      const repair = await this.invokeSandcastle(
+        repairOptions,
+        repairAbort.signal,
+        Date.now(),
+      );
+      const tokenUsage = addTokenUsage(billed.tokenUsage, repair.tokenUsage);
+      if (!repair.output) {
+        return {
+          commits: originalCommits,
+          error: repair.error,
+          errorKind: repair.errorKind ?? "invalid-output",
+          durationMs: Date.now() - started,
+          ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+          ...(billed.durationApiMs !== undefined
+            ? { durationApiMs: billed.durationApiMs }
+            : {}),
+          ...(billed.cursorCliVersion
+            ? { cursorCliVersion: billed.cursorCliVersion }
+            : {}),
+        };
+      }
+      return {
+        output: repair.output,
+        commits: originalCommits,
+        durationMs: Date.now() - started,
+        resultFix: "repaired",
+        ...(tokenUsage !== undefined ? { tokenUsage } : {}),
+        ...(billed.durationApiMs !== undefined
+          ? { durationApiMs: billed.durationApiMs }
+          : {}),
+        ...(billed.cursorCliVersion
+          ? { cursorCliVersion: billed.cursorCliVersion }
+          : {}),
+      };
     } finally {
-      clearTimeout(timer);
-      options.signal?.removeEventListener("abort", onJobLost);
+      clearTimeout(repairTimer);
+      signal.removeEventListener("abort", onOuterAbort);
+      git(this.config.cwd, ["branch", "-D", repairBranch]);
     }
   }
 }

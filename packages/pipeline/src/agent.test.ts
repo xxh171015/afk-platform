@@ -27,6 +27,7 @@ import {
   PROMPT_DIR,
   PROMPTS,
   promptFor,
+  RESULT_REPAIR_WALL_CLOCK_MS,
   type ReviewOutput,
   ReviewOutputSchema,
   reviewFindings,
@@ -40,7 +41,7 @@ import { renderContext } from "./context.ts";
 import { git, gitOut } from "./exec.ts";
 import { bundleFor } from "./fixtures.ts";
 import { SANDBOX_SKILLS_DIR } from "./sandcastle.ts";
-import { FakeAgentRunner } from "./testing/fakes.ts";
+import { FakeAgentRunner, type FakeAgentStep } from "./testing/fakes.ts";
 import { makeRepo, type TestRepo } from "./testing/repo.ts";
 
 let repo: TestRepo | undefined;
@@ -141,6 +142,85 @@ describe("the structured outputs", () => {
       ImplementOutputSchema.safeParse({
         ...done,
         decisions: [{ kind: "question", text: "ask someone" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("normalizes Run 577's workaround that carried a ref so the implement schema accepts it", () => {
+    const parsed = ImplementOutputSchema.parse({
+      status: "done",
+      summary: "did it",
+      acceptance: { "returns csv": ["csv test"] },
+      decisions: [
+        { kind: "choice", text: "named it export" },
+        {
+          kind: "conflict",
+          text: "ticket said one file; tdd needed a test file; added the test",
+        },
+        { kind: "known-gap", text: "list reload skips the note filter" },
+        { kind: "deferred", text: "openapi extra field", ref: "new" },
+        {
+          kind: "workaround",
+          text: "skipped drizzle generate",
+          ref: "91813f8",
+        },
+      ],
+    });
+    expect(parsed.decisions[4]).toEqual({
+      kind: "workaround",
+      text: "skipped drizzle generate（ref: 91813f8）",
+    });
+  });
+
+  it("accepts a review that omits suggestions and uncertainties as empty arrays", () => {
+    const parsed = ReviewOutputSchema.parse({
+      verdict: "pass",
+      mustFix: [],
+    });
+    expect(parsed.suggestions).toEqual([]);
+    expect(parsed.uncertainties).toEqual([]);
+  });
+
+  it("keeps a deferred decision's ref instead of folding it into text", () => {
+    expect(
+      ImplementOutputSchema.parse({
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [
+          { kind: "deferred", text: "openapi extra field", ref: "T-4" },
+        ],
+      }).decisions,
+    ).toEqual([{ kind: "deferred", text: "openapi extra field", ref: "T-4" }]);
+  });
+
+  it("still rejects a must-fix item that omits file or problem", () => {
+    const base = {
+      verdict: "fix" as const,
+      suggestions: [],
+      uncertainties: [],
+    };
+    expect(
+      ReviewOutputSchema.safeParse({
+        ...base,
+        mustFix: [{ problem: "bug" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ReviewOutputSchema.safeParse({
+        ...base,
+        mustFix: [{ file: "a.ts" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("still rejects a verdict that is not pass or fix", () => {
+    expect(
+      ReviewOutputSchema.safeParse({
+        verdict: "maybe",
+        mustFix: [],
+        suggestions: [],
+        uncertainties: [],
       }).success,
     ).toBe(false);
   });
@@ -770,6 +850,16 @@ const STAGES_WITH_PROMPTS = [
   "locate-bug",
 ] as const;
 
+function resultExamples(prompt: string): unknown[] {
+  return [...prompt.matchAll(/<result>\s*([\s\S]*?)\s*<\/result>/g)].flatMap(
+    (match) => {
+      const body = match[1].trim();
+      if (!body.startsWith("{")) return [];
+      return [JSON.parse(body) as unknown];
+    },
+  );
+}
+
 describe("the prompts", () => {
   const whole = (stage: (typeof STAGES_WITH_PROMPTS)[number]) =>
     composePrompt(promptFor(stage));
@@ -884,6 +974,56 @@ describe("the prompts", () => {
     expect(section).toContain("缺做下去必需的东西");
     expect(section).toContain("没批准的保护路径");
     expect(section).toContain("契约非改不可");
+  });
+
+  it("documents the result checker command and its sandbox path", () => {
+    const design = readFileSync(
+      join(PROMPT_DIR, "../../../docs/design.md"),
+      "utf8",
+    );
+    expect(design).toContain("/home/agent/afk/check-result.mjs");
+    expect(design).toContain("node /home/agent/afk/check-result.mjs");
+  });
+
+  it("tells the overlay to write the result file, self-check, fix until it passes, then output it", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const section = overlay.slice(overlay.indexOf("## 结果"));
+    expect(section).toContain("/tmp/afk-result.json");
+    expect(section).toContain("node /home/agent/afk/check-result.mjs");
+    expect(section).toContain("/context/run.json");
+    expect(section).toContain("改到通过");
+    expect(section).toContain("<result>");
+  });
+
+  it("tells the overlay that ref is only for deferred, and examples of other kinds omit it", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const section = overlay.slice(
+      overlay.indexOf("## 没有人回答你"),
+      overlay.indexOf("## /context 就是 tracker"),
+    );
+    expect(section).toContain("`{ kind, text }`");
+    expect(section).not.toContain("`{ kind, text, ref? }`");
+    expect(section).toContain("只有 `kind` 是 `deferred` 时才带 `ref`");
+    for (const file of readdirSync(PROMPT_DIR).filter((name) =>
+      name.endsWith(".md"),
+    )) {
+      const examples = resultExamples(
+        readFileSync(join(PROMPT_DIR, file), "utf8"),
+      );
+      for (const example of examples) {
+        if (!example || typeof example !== "object" || Array.isArray(example))
+          continue;
+        const decisions = (example as { decisions?: unknown }).decisions;
+        if (!Array.isArray(decisions)) continue;
+        for (const item of decisions) {
+          if (!item || typeof item !== "object" || Array.isArray(item))
+            continue;
+          const decision = item as { kind?: unknown; ref?: unknown };
+          if (decision.kind !== "deferred")
+            expect(decision, file).not.toHaveProperty("ref");
+        }
+      }
+    }
   });
 
   it("tells the agent to write long gate and full-suite output to a file instead of reading it all", () => {
@@ -1111,6 +1251,155 @@ describe("the prompts", () => {
     }
   });
 
+  it("has a <result> example in every stage prompt that the matching schema accepts", () => {
+    const cases = [
+      { file: promptFor("implement"), schema: ImplementOutputSchema },
+      {
+        file: promptFor("implement", { integration: true }),
+        schema: ImplementOutputSchema,
+      },
+      { file: promptFor("gate-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("review-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("merge-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("update-branch"), schema: ImplementOutputSchema },
+      { file: promptFor("final-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("final-tidy"), schema: TidyOutputSchema },
+      {
+        file: promptFor("review", { axis: "spec" }),
+        schema: reviewOutputSchemaFor("spec"),
+      },
+      {
+        file: promptFor("review", { axis: "standards" }),
+        schema: reviewOutputSchemaFor("standards"),
+      },
+      {
+        file: promptFor("final-review", { axis: "spec" }),
+        schema: reviewOutputSchemaFor("spec"),
+      },
+      {
+        file: promptFor("final-review", { axis: "standards" }),
+        schema: reviewOutputSchemaFor("standards"),
+      },
+      {
+        file: promptFor("recheck"),
+        schema: reviewOutputSchemaFor("spec"),
+      },
+      { file: promptFor("diagnose"), schema: DiagnoseOutputSchema },
+      { file: promptFor("locate-bug"), schema: LocateOutputSchema },
+    ];
+    const mapped = new Set(cases.map((row) => row.file));
+    for (const name of readdirSync(PROMPT_DIR).filter(
+      (file) =>
+        file.endsWith(".md") &&
+        file !== "overlay.md" &&
+        file !== "repair-result.md",
+    )) {
+      expect(mapped.has(join(PROMPT_DIR, name)), name).toBe(true);
+    }
+    let sawMustFix = false;
+    for (const { file, schema } of cases) {
+      const examples = resultExamples(readFileSync(file, "utf8"));
+      expect(examples.length, file).toBeGreaterThan(0);
+      for (const example of examples) {
+        expect(schema.safeParse(example).success, file).toBe(true);
+        if (
+          example &&
+          typeof example === "object" &&
+          !Array.isArray(example) &&
+          Array.isArray((example as { mustFix?: unknown }).mustFix)
+        ) {
+          sawMustFix = true;
+          expect(
+            schema.safeParse({ ...example, mustFix: "写成字符串" }).success,
+            file,
+          ).toBe(false);
+        }
+      }
+    }
+    expect(sawMustFix).toBe(true);
+  });
+
+  it("documents the shape of each result field in every stage prompt", () => {
+    const resultSection = (text: string) => {
+      const heading = text.indexOf("## 结果");
+      const last = text.indexOf("## 最后一步");
+      const start = heading >= 0 ? heading : last;
+      expect(start).toBeGreaterThanOrEqual(0);
+      return text.slice(start);
+    };
+    for (const file of [
+      PROMPTS.implement,
+      PROMPTS.integrationImplement,
+      PROMPTS.gateFix,
+      PROMPTS.reviewFix,
+      PROMPTS.mergeFix,
+      PROMPTS.updateBranch,
+      PROMPTS.finalFix,
+      PROMPTS.finalTidy,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`decisions` 是对象数组");
+      expect(section, file).toContain('每项 `{ "kind", "text" }`');
+      expect(section, file).toContain("只有 `kind` 是 `deferred` 时才带 `ref`");
+      expect(section, file).toContain("`detail` 是一句字符串");
+    }
+    for (const file of [
+      PROMPTS.implement,
+      PROMPTS.integrationImplement,
+      PROMPTS.gateFix,
+      PROMPTS.reviewFix,
+      PROMPTS.mergeFix,
+      PROMPTS.updateBranch,
+      PROMPTS.finalFix,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`summary` 是一句字符串");
+      expect(section, file).toContain("`acceptance` 的值是测试名字符串的数组");
+    }
+    const tidy = resultSection(readFileSync(PROMPTS.finalTidy, "utf8"));
+    expect(tidy).toContain("`tidied` 是从 0 起的整数的数组");
+    expect(tidy).toContain("`skipped` 是对象数组");
+    expect(tidy).toContain('每项 `{ "index", "reason" }`');
+    expect(tidy).toContain("`reason` 是一句字符串");
+    for (const file of [
+      PROMPTS.reviewSpec,
+      PROMPTS.reviewStandards,
+      PROMPTS.finalReviewSpec,
+      PROMPTS.finalReviewStandards,
+      PROMPTS.recheck,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain(
+        '`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`',
+      );
+      expect(section, file).toContain(
+        "`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串",
+      );
+    }
+    for (const file of [PROMPTS.reviewSpec, PROMPTS.finalReviewSpec]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`rulings` 是对象数组");
+      expect(section, file).toContain('每项 `{ "id", "verdict" }`');
+    }
+    for (const file of [
+      PROMPTS.reviewStandards,
+      PROMPTS.finalReviewStandards,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`sources` 是路径字符串的数组");
+    }
+    const diagnose = resultSection(readFileSync(PROMPTS.diagnose, "utf8"));
+    expect(diagnose).toContain('`result` 是 `"pass"` 或 `"fail"`');
+    expect(diagnose).toContain("`failingRepo` 是一句字符串或 null");
+    expect(diagnose).toContain("`evidence` 是一句字符串");
+    expect(diagnose).toContain("`failingTests` 是用例名字符串的数组");
+    const locate = resultSection(readFileSync(PROMPTS.locateBug, "utf8"));
+    expect(locate).toContain('`result` 是 `"found"` 或 `"unlocated"`');
+    expect(locate).toContain("`repo` 是一句字符串");
+    expect(locate).toContain("`files` 是路径字符串的数组");
+    expect(locate).toContain("`evidence` 和 `reproduction` 是一句字符串");
+  });
+
   it("shows a must-fix item's shape in every review example, and each example is a valid result", () => {
     for (const [path, schema] of [
       [PROMPTS.reviewSpec, ReviewOutputSchema],
@@ -1158,11 +1447,13 @@ describe("the prompts", () => {
 
   it("names no concrete build or test command; a mention of AGENTS.md is not a violation", () => {
     const promptsDir = join(OVERLAY_FILE, "..");
+    const files = readdirSync(promptsDir).filter((name) =>
+      name.endsWith(".md"),
+    );
+    expect(files).toContain("repair-result.md");
     const banned =
       /\b(?:npm|npx|pnpm|yarn|bun|mvn|gradlew?|cargo|pytest|dotnet)\b|\bmake\b|\bgo\s+test\b/i;
-    for (const file of readdirSync(promptsDir).filter((name) =>
-      name.endsWith(".md"),
-    )) {
+    for (const file of files) {
       const hits = readFileSync(join(promptsDir, file), "utf8")
         .split("\n")
         .filter((line) => !line.includes("AGENTS.md"))
@@ -1268,6 +1559,130 @@ describe("a fake agent run, end to end", () => {
     expect(run.errorKind).toBe("invalid-output");
     expect(run.commits).toHaveLength(1);
     expect(classifyAgentRun(run)).toMatchObject({ outcome: "invalid-output" });
+  });
+
+  it("an invalid first result that a repair run fixes keeps the original commits, records resultFix repaired, and adds the repair tokens", async () => {
+    repo = makeRepo();
+    const firstUsage = {
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+    };
+    const repairUsage = {
+      inputTokens: 3,
+      outputTokens: 2,
+      cacheReadTokens: 1,
+      cacheWriteTokens: 0,
+    };
+    const runner = new FakeAgentRunner(repo.dir, (ctx): FakeAgentStep => {
+      if (ctx.wallClockMs === RESULT_REPAIR_WALL_CLOCK_MS) {
+        return {
+          files: { "repair-should-not-land.txt": "no\n" },
+          output: DONE,
+          rawLines: [JSON.stringify({ type: "result", usage: repairUsage })],
+        };
+      }
+      return {
+        files: { "src/a.ts": "export {};\n" },
+        output: { status: "done" },
+        rawLines: [JSON.stringify({ type: "result", usage: firstUsage })],
+      };
+    });
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.errorKind).toBeUndefined();
+    expect(run.output).toMatchObject(DONE);
+    expect(run.resultFix).toBe("repaired");
+    expect(run.commits).toHaveLength(1);
+    expect(gitOut(repo.dir, ["rev-parse", "agent/T-123"])).toBe(run.commits[0]);
+    expect(
+      git(repo.dir, [
+        "cat-file",
+        "-e",
+        "agent/T-123:repair-should-not-land.txt",
+      ]).code,
+    ).not.toBe(0);
+    expect(run.tokenUsage).toEqual({
+      inputTokens: 13,
+      outputTokens: 6,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 1,
+    });
+    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls[1]?.wallClockMs).toBe(RESULT_REPAIR_WALL_CLOCK_MS);
+    expect(runner.calls[1]?.model).toBeUndefined();
+    expect(classifyAgentRun(run)).toEqual({ kind: "outcome", outcome: "done" });
+  });
+
+  it("a result that is valid after normalizing is done with resultFix normalized and starts no repair run", async () => {
+    repo = makeRepo();
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      files: { "src/a.ts": "export {};\n" },
+      output: {
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [
+          {
+            kind: "workaround",
+            text: "skipped drizzle generate",
+            ref: "91813f8",
+          },
+        ],
+      },
+    }));
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.errorKind).toBeUndefined();
+    expect(run.resultFix).toBe("normalized");
+    expect(run.output?.decisions[0]).toEqual({
+      kind: "workaround",
+      text: "skipped drizzle generate（ref: 91813f8）",
+    });
+    expect(runner.calls).toHaveLength(1);
+    expect(classifyAgentRun(run)).toEqual({ kind: "outcome", outcome: "done" });
+  });
+
+  it("a repair run that is still invalid is invalid-output, and keeps the first run's commits", async () => {
+    repo = makeRepo();
+    const runner = new FakeAgentRunner(repo.dir, () => ({
+      files: { "a.txt": "a\n" },
+      output: { status: "done" },
+    }));
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.errorKind).toBe("invalid-output");
+    expect(run.resultFix).toBeUndefined();
+    expect(run.commits).toHaveLength(1);
+    expect(runner.calls).toHaveLength(2);
+    expect(classifyAgentRun(run)).toMatchObject({ outcome: "invalid-output" });
+  });
+
+  it("a missing result tag uses the last assistant message for the repair run", async () => {
+    repo = makeRepo();
+    const runner = new FakeAgentRunner(repo.dir, (ctx) => {
+      if (ctx.wallClockMs === RESULT_REPAIR_WALL_CLOCK_MS) {
+        expect(ctx.prompt).toContain('{"status":"done"}');
+        return { output: DONE };
+      }
+      return {
+        files: { "src/a.ts": "export {};\n" },
+        error: { kind: "invalid-output", message: "no result" },
+        rawMatched: "",
+        rawLines: [
+          JSON.stringify({
+            type: "assistant",
+            message: {
+              content: [{ type: "text", text: '{"status":"done"}' }],
+            },
+          }),
+        ],
+      };
+    });
+    const run = await runner.run(options(context(), ImplementOutputSchema));
+    expect(run.errorKind).toBeUndefined();
+    expect(run.resultFix).toBe("repaired");
+    expect(run.output).toMatchObject(DONE);
+    expect(run.commits).toHaveLength(1);
+    expect(classifyAgentRun(run)).toEqual({ kind: "outcome", outcome: "done" });
   });
 
   it("carries a scripted timeout through", async () => {

@@ -8,22 +8,27 @@ export type CursorRunFacts = {
   cursorCliVersion?: string;
 };
 
-export function factsFromCursorLine(line: string): CursorRunFacts | undefined {
-  let parsed: unknown;
+function parseCursorLine(line: string): Record<string, unknown> | undefined {
   try {
-    parsed = JSON.parse(line);
+    const parsed: unknown = JSON.parse(line);
+    if (parsed === null || typeof parsed !== "object") return undefined;
+    return parsed as Record<string, unknown>;
   } catch {
     return undefined;
   }
-  if (
-    parsed === null ||
-    typeof parsed !== "object" ||
-    !("type" in parsed) ||
-    parsed.type !== "result"
-  ) {
-    return undefined;
-  }
-  const row = parsed as Record<string, unknown>;
+}
+
+function cursorLineOfType(
+  line: string,
+  type: string,
+): Record<string, unknown> | undefined {
+  const row = parseCursorLine(line);
+  return row !== undefined && row.type === type ? row : undefined;
+}
+
+export function factsFromCursorLine(line: string): CursorRunFacts | undefined {
+  const row = cursorLineOfType(line, "result");
+  if (row === undefined) return undefined;
   const facts: CursorRunFacts = {};
   if ("usage" in row) facts.tokenUsage = row.usage;
   if (
@@ -42,17 +47,8 @@ export function factsFromCursorLine(line: string): CursorRunFacts | undefined {
 // The agent's last message, as the result line carries it: where the platform reads <result> again when
 // Sandcastle could not (result-block.ts).
 export function finalTextFromCursorLine(line: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-  if (parsed === null || typeof parsed !== "object") return undefined;
-  const row = parsed as Record<string, unknown>;
-  return row.type === "result" && typeof row.result === "string"
-    ? row.result
-    : undefined;
+  const row = cursorLineOfType(line, "result");
+  return typeof row?.result === "string" ? row.result : undefined;
 }
 
 export function factsFromCursorLines(lines: readonly string[]): CursorRunFacts {
@@ -62,4 +58,44 @@ export function factsFromCursorLines(lines: readonly string[]): CursorRunFacts {
     if (next) last = next;
   }
   return last;
+}
+
+function contentText(content: unknown): string | undefined {
+  if (typeof content === "string" && content.length > 0) return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts = content.flatMap((item) => {
+    if (typeof item === "string") return [item];
+    if (
+      item &&
+      typeof item === "object" &&
+      typeof (item as { text?: unknown }).text === "string"
+    ) {
+      return [(item as { text: string }).text];
+    }
+    return [];
+  });
+  const text = parts.join("");
+  return text.length > 0 ? text : undefined;
+}
+
+export function lastAssistantFromCursorLine(line: string): string | undefined {
+  const row = cursorLineOfType(line, "assistant");
+  if (row === undefined) return undefined;
+  const message = row.message;
+  if (typeof message === "string" && message.length > 0) return message;
+  if (message && typeof message === "object") {
+    const text = contentText((message as { content?: unknown }).content);
+    if (text) return text;
+  }
+  return contentText(row.content);
+}
+
+export function lastAssistantFromCursorLines(
+  lines: readonly string[],
+): string | undefined {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const text = lastAssistantFromCursorLine(lines[i] ?? "");
+    if (text) return text;
+  }
+  return undefined;
 }

@@ -3292,6 +3292,8 @@ export interface paths {
               sources: string[] | null;
               durationApiMs: number | null;
               tokenUsage?: unknown;
+              /** @enum {string|null} */
+              resultFix: "normalized" | "repaired" | null;
               repoUrl: string;
               /** @enum {string} */
               hostKind: "github" | "gitlab";

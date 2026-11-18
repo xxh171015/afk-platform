@@ -53,6 +53,7 @@ const RunFacts = z.object({
   durationMs: z.number().int().min(0).optional(),
   durationApiMs: z.number().int().min(0).optional(),
   tokenUsage: z.unknown().optional(),
+  resultFix: z.enum(["normalized", "repaired"]).optional(),
   output: z.unknown().optional(),
   refShas: z.record(z.string(), z.string()).optional(),
   // Recheck trigger from a post-review code-changing stage (existing tests or config).
@@ -622,6 +623,12 @@ export async function writeFacts(
       sources,
     ]);
   }
+  if (run?.resultFix) {
+    await client.query("UPDATE runs SET result_fix = $2 WHERE id = $1", [
+      runId,
+      run.resultFix,
+    ]);
+  }
 
   if (result?.gate) {
     const gate = result.gate;
@@ -743,6 +750,12 @@ export async function writeFacts(
       await client.query("UPDATE runs SET sources = $2 WHERE id = $1", [
         inserted.rows[0]?.id,
         extraSources,
+      ]);
+    }
+    if (extra.run.resultFix) {
+      await client.query("UPDATE runs SET result_fix = $2 WHERE id = $1", [
+        inserted.rows[0]?.id,
+        extra.run.resultFix,
       ]);
     }
     await insertFindings(

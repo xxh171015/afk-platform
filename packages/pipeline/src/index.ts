@@ -8,10 +8,12 @@ export type {
   ImplementOutput,
   LocateOutcome,
   LocateOutput,
+  ResultFix,
   ReviewOutput,
   TidyOutput,
 } from "./agent.ts";
 export {
+  addTokenUsage,
   CANNOT_PROCEED_REASONS,
   classifyAgentRun,
   classifyDiagnoseRun,
@@ -26,7 +28,11 @@ export {
   overlaySkillsSha,
   PROMPTS,
   promptFor,
+  RESULT_REPAIR_IDLE_SECONDS,
+  RESULT_REPAIR_WALL_CLOCK_MS,
   ReviewOutputSchema,
+  recoverStructuredOutput,
+  resultSectionOf,
   reviewFindings,
   reviewOutputSchemaFor,
   reviewSources,
@@ -34,6 +40,7 @@ export {
   sourcesCiteAgentsMd,
   TidyOutputSchema,
   writePrompt,
+  writeRepairPrompt,
 } from "./agent.ts";
 export type { ContextInput, RunFacts, RunGate } from "./context.ts";
 export {
@@ -174,6 +181,7 @@ export type {
 export {
   agentEnv,
   agentRunPlacement,
+  CHECK_RESULT_SANDBOX_PATH,
   CONTEXT_SANDBOX_PATH,
   classifyAgentError,
   DEFAULT_SANDBOX_LIMITS,

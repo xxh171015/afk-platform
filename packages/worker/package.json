@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@afk/host": "workspace:*",
+    "@afk/pipeline": "workspace:*",
     "@afk/shared": "workspace:*",
-    "@afk/pipeline": "workspace:*"
+    "esbuild": "0.25.12"
   }
 }

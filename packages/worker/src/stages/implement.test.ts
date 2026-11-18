@@ -5,6 +5,7 @@ import { GENERATED_UPSTREAM_ENV, git, gitOrThrow, gitOut } from "@afk/pipeline";
 import {
   bundleFor,
   FakeAgentRunner,
+  type FakeAgentStep,
   FakeGateSandbox,
   makeRepo,
   type TestRepo,
@@ -714,5 +715,68 @@ describe("Recheck range after update-branch and merge-fix", () => {
     expect(git(repo.dir, ["diff", trigger.fromSha, trigger.toSha]).code).toBe(
       0,
     );
+  });
+});
+
+describe("result format repair", () => {
+  it("implement: an invalid first result that a repair run fixes is done with the first run's commits, resultFix repaired, and the repair tokens added", async () => {
+    repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/T-123"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/T-123"]);
+    const firstUsage = { inputTokens: 10, outputTokens: 4 };
+    const repairUsage = { inputTokens: 3, outputTokens: 2 };
+    const runner = new FakeAgentRunner(slotDir, (ctx): FakeAgentStep => {
+      if (ctx.prompt.includes("不要重做这个阶段")) {
+        return {
+          files: { "repair-should-not-land.txt": "no\n" },
+          output: {
+            status: "done",
+            summary: "did it",
+            acceptance: {},
+            decisions: [],
+          },
+          rawLines: [JSON.stringify({ type: "result", usage: repairUsage })],
+        };
+      }
+      return {
+        files: { "src/a.ts": "export {};\n" },
+        output: { status: "done" },
+        rawLines: [JSON.stringify({ type: "result", usage: firstUsage })],
+      };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(outcome.run).toMatchObject({
+      resultFix: "repaired",
+      tokenUsage: { inputTokens: 13, outputTokens: 6 },
+    });
+    const commits = (outcome.run as { commits: string[] }).commits;
+    expect(commits.length).toBeGreaterThan(0);
+    expect(
+      git(repo.dir, [
+        "cat-file",
+        "-e",
+        "agent/T-123:repair-should-not-land.txt",
+      ]).code,
+    ).not.toBe(0);
+    expect(git(repo.dir, ["cat-file", "-e", "agent/T-123:src/a.ts"]).code).toBe(
+      0,
+    );
+    expect(runner.calls).toHaveLength(2);
   });
 });

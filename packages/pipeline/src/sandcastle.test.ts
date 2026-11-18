@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StructuredOutputError } from "@ai-hero/sandcastle";
 import { afterEach, describe, expect, it } from "vitest";
-import { ImplementOutputSchema } from "./agent.ts";
+import { ImplementOutputSchema, recoverStructuredOutput } from "./agent.ts";
 import { runE2e } from "./e2e.ts";
 import { gitOut } from "./exec.ts";
 import { runGate } from "./gate.ts";
@@ -84,6 +84,24 @@ describe("the mounts", () => {
     })) {
       expect(mount.readonly).toBe(true);
     }
+  });
+
+  it("mounts the result checker read-only at /home/agent/afk/check-result.mjs", () => {
+    expect(
+      sandboxMounts({
+        ctxDir: "/c",
+        skillsMount: "/s",
+        checkResultMount: "/host/check-result.mjs",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          hostPath: "/host/check-result.mjs",
+          sandboxPath: "/home/agent/afk/check-result.mjs",
+          readonly: true,
+        },
+      ]),
+    );
   });
 });
 
@@ -370,6 +388,30 @@ describe("the hardened sandbox", () => {
       volumes.some((v) => v.includes(`${SANDBOX_SKILLS_DIR}:/context:ro`)),
     ).toBe(true);
   });
+
+  it("puts the result checker on the agent sandbox as a read-only file mount", async () => {
+    const fake = recordingDocker();
+    await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({
+        ctxDir: SANDBOX_SKILLS_DIR,
+        skillsMount: SANDBOX_SKILLS_DIR,
+        checkResultMount: "/host/check-result.mjs",
+      }),
+      kind: "agent",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    const run = dockerRunOf(fake.calls);
+    const volumes = run.flatMap((arg, i) => (run[i - 1] === "-v" ? [arg] : []));
+    expect(
+      volumes.some((v) =>
+        v.includes(
+          "/host/check-result.mjs:/home/agent/afk/check-result.mjs:ro",
+        ),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("the gate's dependency cache", () => {
@@ -519,6 +561,62 @@ describe("reading Sandcastle's errors", () => {
     });
     expect(classifyAgentError("a string").errorKind).toBe("other");
   });
+
+  it("normalizes a StructuredOutputError whose raw JSON is valid after preprocess", () => {
+    const error = new StructuredOutputError("bad result", {
+      tag: "result",
+      rawMatched: JSON.stringify({
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [
+          {
+            kind: "workaround",
+            text: "skipped drizzle generate",
+            ref: "91813f8",
+          },
+        ],
+      }),
+      cause: new Error("schema"),
+      commits: [{ sha: "abc" }],
+      branch: "agent/T-1",
+    });
+    const recovered = recoverStructuredOutput(ImplementOutputSchema, {
+      rawMatched: error.rawMatched,
+    });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    expect(recovered.resultFix).toBe("normalized");
+    expect(recovered.output).toMatchObject({
+      decisions: [
+        {
+          kind: "workaround",
+          text: "skipped drizzle generate（ref: 91813f8）",
+        },
+      ],
+    });
+  });
+
+  it("uses the last assistant message when the StructuredOutputError has no result tag", () => {
+    const error = new StructuredOutputError("no tag", {
+      tag: "result",
+      rawMatched: undefined,
+      commits: [{ sha: "abc" }],
+      branch: "agent/T-1",
+    });
+    const recovered = recoverStructuredOutput(ImplementOutputSchema, {
+      rawMatched: error.rawMatched,
+      lastAssistant: JSON.stringify({
+        status: "done",
+        summary: "did it",
+        acceptance: { "returns csv": ["csv test"] },
+        decisions: [],
+      }),
+    });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    expect(recovered.resultFix).toBeUndefined();
+  });
 });
 
 describe("a result Sandcastle could not read", () => {
@@ -544,6 +642,43 @@ describe("a result Sandcastle could not read", () => {
     );
     expect(recovered?.commits).toEqual(["abc", "def"]);
     expect(recovered?.output).toMatchObject({ status: "done" });
+  });
+
+  it("records resultFix normalized when the last message is Run 577's workaround that carried a ref", () => {
+    const last = `<result>
+${JSON.stringify({
+  status: "done",
+  summary: "did it",
+  acceptance: { "returns csv": ["csv test"] },
+  decisions: [
+    {
+      kind: "workaround",
+      text: "skipped drizzle generate",
+      ref: "91813f8",
+    },
+  ],
+})}
+</result>`;
+    const recovered = recoverTaggedOutput(
+      unreadable(["abc"]),
+      last,
+      ImplementOutputSchema,
+    );
+    expect(recovered).toEqual(
+      expect.objectContaining({
+        resultFix: "normalized",
+        commits: ["abc"],
+        output: expect.objectContaining({
+          status: "done",
+          decisions: [
+            {
+              kind: "workaround",
+              text: "skipped drizzle generate（ref: 91813f8）",
+            },
+          ],
+        }),
+      }),
+    );
   });
 
   it("stays unread when the last message's block does not pass the schema either", () => {
