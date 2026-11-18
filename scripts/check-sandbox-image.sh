@@ -107,7 +107,7 @@ awk '"'"'/^setup: /{sub(/^setup: /,""); print "600\t" $0}
      /^    run: /{sub(/^    run: /,""); r=$0}
      /^    timeoutSeconds: /{sub(/^    timeoutSeconds: /,""); print $0 "\t" r}'"'"' .sandcastle/gates.yaml |
 while IFS=$'"'"'\t'"'"' read -r secs cmd; do
-  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"
+  echo "== timeout $secs $cmd"; bash -c "timeout $secs $cmd"  # portable: runs in the container
 done'
 
 if [[ "${SKIP_PLATFORM_GATE:-}" == 1 ]]; then
@@ -121,10 +121,10 @@ fi
 FRONTEND_GATE='set -euo pipefail
 cd /home/agent/workspace
 npm ci
-timeout 300 npm run typecheck
-timeout 120 npm run contract:check
-timeout 600 npm test
-timeout 300 npm run build'
+timeout 300 npm run typecheck  # portable: runs in the container
+timeout 120 npm run contract:check  # portable: runs in the container
+timeout 600 npm test  # portable: runs in the container
+timeout 300 npm run build  # portable: runs in the container'
 
 echo "cloning $FRONTEND_URL"
 if [[ "$FRONTEND_URL" == https://github.com/* ]]; then
