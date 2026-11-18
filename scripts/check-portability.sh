@@ -131,7 +131,14 @@ compat_dir="${AFK_MACOS_COMPAT_DIR:-/opt/macos-compat/bin}"
 compat_failed=0
 compat_real=""
 compat_link=""
+junit_file=""
+junit_backup=""
 cleanup_compat() {
+  if [ -n "$junit_backup" ] && [ -f "$junit_backup" ]; then
+    mkdir -p "$(dirname "$junit_file")"
+    mv "$junit_backup" "$junit_file"
+    junit_backup=""
+  fi
   if [ -n "$compat_link" ]; then
     rm -f "$compat_link"
   fi
@@ -144,6 +151,13 @@ trap cleanup_compat EXIT
 if [ -d "$compat_dir" ]; then
   REPO_ROOT=$(cd "$SCRIPTS_DIR/.." && pwd)
   _tmp_root="${TMPDIR:-/tmp}"
+  junit_file="$REPO_ROOT/reports/junit.xml"
+  if [ -f "$junit_file" ]; then
+    junit_backup=$(mktemp "${_tmp_root%/}/afk-junit.XXXXXX")
+    cp "$junit_file" "$junit_backup"
+  else
+    junit_file=""
+  fi
   compat_real=$(mktemp -d "${_tmp_root%/}/afk-macos-tmp.XXXXXX")
   compat_link="${compat_real}.lnk"
   ln -s "$compat_real" "$compat_link"
@@ -159,6 +173,8 @@ if [ -d "$compat_dir" ]; then
   cleanup_compat
   compat_real=""
   compat_link=""
+  junit_file=""
+  junit_backup=""
 else
   printf 'macos-compat: skipped (no %s in this image)\n' "$compat_dir"
 fi
