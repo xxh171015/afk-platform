@@ -98,6 +98,25 @@ function pgidOf(pid: number): number | undefined {
   }
 }
 
+function processesInGroup(pgid: number): { pid: number; command: string }[] {
+  const stdout = execFileSync(
+    "ps",
+    ["-ax", "-o", "pid=", "-o", "pgid=", "-o", "command="],
+    {
+      encoding: "utf8",
+    },
+  );
+  const rows: { pid: number; command: string }[] = [];
+  for (const line of stdout.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    if (Number(match[2]) === pgid) {
+      rows.push({ pid: Number(match[1]), command: match[3] });
+    }
+  }
+  return rows;
+}
+
 function killProcessGroup(pgid: number, signal: NodeJS.Signals) {
   try {
     process.kill(-pgid, signal);
@@ -398,6 +417,38 @@ esac
       { mode: 0o755 },
     );
     chmodSync(join(bin, "pnpm"), 0o755);
+    writeFileSync(
+      join(bin, "node"),
+      `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "src/main.ts" ]; then
+    case "$PWD" in
+      */packages/api) exec "$AFK_FAKE_API" ;;
+      */packages/worker) exec "$AFK_FAKE_WORKER" ;;
+    esac
+  fi
+done
+bindir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+PATH_WITHOUT_BIN=
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+  if [ "$dir" != "$bindir" ]; then
+    if [ -n "$PATH_WITHOUT_BIN" ]; then
+      PATH_WITHOUT_BIN="$PATH_WITHOUT_BIN:$dir"
+    else
+      PATH_WITHOUT_BIN=$dir
+    fi
+  fi
+done
+IFS=$old_ifs
+PATH=$PATH_WITHOUT_BIN
+export PATH
+exec node "$@"
+`,
+      { mode: 0o755 },
+    );
+    chmodSync(join(bin, "node"), 0o755);
     const fakeApi = join(bin, "fake-api");
     const fakeWorker = join(bin, "fake-worker");
     const fakeWeb = join(bin, "fake-web");
@@ -501,14 +552,25 @@ exit 1`;
     const hold = `echo $$ > "$AFK_HOME/run-live.pid"
 trap 'exit 0' INT TERM
 while true; do sleep 1; done`;
-    const { home, env, output, child } = stack({ api: hold, worker: hold });
+    const apiHold = `echo $$ > "$AFK_HOME/run-live.pid"
+sleep 3600 &
+echo $! > "$AFK_HOME/api-child.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home, env, output, child } = stack({ api: apiHold, worker: hold });
     const workerPid = join(home, "run", "worker.pid");
     const apiPid = join(home, "run", "api.pid");
-    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const apiChild = join(home, "api-child.pid");
+    await waitUntil(
+      "pids",
+      () => existsSync(workerPid) && existsSync(apiPid) && existsSync(apiChild),
+    );
     const worker = readFileSync(workerPid, "utf8").trim();
     const api = readFileSync(apiPid, "utf8").trim();
     expect(worker).toMatch(/^\d+$/);
     expect(api).toMatch(/^\d+$/);
+    const oldApiGroup = pgidOf(Number(api));
+    expect(oldApiGroup).toBeDefined();
     const result = await new Promise<{
       status: number | null;
       text: string;
@@ -535,13 +597,15 @@ while true; do sleep 1; done`;
     expect(readFileSync(workerPid, "utf8").trim()).toBe(worker);
     expect(processAlive(Number(worker))).toBe(true);
     expect(processAlive(Number(api))).toBe(false);
+    await waitUntil(
+      "old api process group empty",
+      () => processesInGroup(oldApiGroup as number).length === 0,
+    );
     expect(child.exitCode).toBeNull();
     expect(output()).not.toMatch(/stopping the rest/);
   });
 
-  // Fails until the follow-up ticket「排空信号送到 worker 本身」makes drain
-  // reach the worker itself; remove it.fails then.
-  it.fails("restart.sh worker starts a new worker, drains the old one with SIGUSR2, and leaves the rest running", async () => {
+  it("restart.sh worker starts a new worker, drains the old one with SIGUSR2, and leaves the rest running", async () => {
     const hold = `echo $$ > "$AFK_HOME/run-live.pid"
 trap 'exit 0' INT TERM
 while true; do sleep 1; done`;
@@ -558,10 +622,17 @@ while true; do sleep 1; done`;
     });
     const workerPid = join(home, "run", "worker.pid");
     const apiPid = join(home, "run", "api.pid");
-    await waitUntil("pids", () => existsSync(workerPid) && existsSync(apiPid));
+    const workerLive = join(home, "worker-live.pid");
+    await waitUntil(
+      "pids",
+      () =>
+        existsSync(workerPid) && existsSync(apiPid) && existsSync(workerLive),
+    );
     const oldWorker = readFileSync(workerPid, "utf8").trim();
+    const oldLive = readFileSync(workerLive, "utf8").trim();
     const api = readFileSync(apiPid, "utf8").trim();
     expect(oldWorker).toMatch(/^\d+$/);
+    expect(oldWorker).toBe(oldLive);
     const result = await new Promise<{
       status: number | null;
       text: string;
@@ -592,10 +663,67 @@ while true; do sleep 1; done`;
       "old worker exited",
       () => !processAlive(Number(oldWorker)),
     );
+    await waitUntil("drained log", () =>
+      new RegExp(`old worker ${oldWorker} drained`).test(output()),
+    );
     expect(readFileSync(apiPid, "utf8").trim()).toBe(api);
     expect(processAlive(Number(api))).toBe(true);
     expect(child.exitCode).toBeNull();
     expect(output()).not.toMatch(/stopping the rest/);
+  });
+
+  it("SIGINT to up.sh during a worker drain reaches the old worker", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const workerHold = `nfile="$AFK_HOME/worker-starts"
+n=$(($(cat "$nfile" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$nfile"
+echo $$ > "$AFK_HOME/worker-live.pid"
+trap 'echo $$ > "$AFK_HOME/worker-int-$$"; exit 0' INT
+trap 'exit 0' TERM
+trap 'echo usr2 > "$AFK_HOME/worker-usr2"' USR2
+while true; do sleep 1; done`;
+    const { home, env } = stack({ api: hold, worker: workerHold });
+    const workerPid = join(home, "run", "worker.pid");
+    const apiPid = join(home, "run", "api.pid");
+    const workerLive = join(home, "worker-live.pid");
+    await waitUntil(
+      "pids",
+      () =>
+        existsSync(workerPid) && existsSync(apiPid) && existsSync(workerLive),
+    );
+    const oldWorker = readFileSync(workerPid, "utf8").trim();
+    expect(oldWorker).toBe(readFileSync(workerLive, "utf8").trim());
+    const result = await new Promise<{
+      status: number | null;
+      text: string;
+    }>((resolve) => {
+      const proc = spawn("bash", [restartSh, "worker"], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+    expect(result.status, result.text).toBe(0);
+    const usr2 = join(home, "worker-usr2");
+    await waitUntil("old worker got SIGUSR2", () => existsSync(usr2));
+    expect(processAlive(Number(oldWorker))).toBe(true);
+    const upPid = Number(
+      readFileSync(join(home, "run", "up.pid"), "utf8").trim(),
+    );
+    expect(upPid).toBeGreaterThan(0);
+    process.kill(upPid, "SIGINT");
+    const intFile = join(home, `worker-int-${oldWorker}`);
+    await waitUntil("old worker got SIGINT", () => existsSync(intFile));
+    expect(readFileSync(intFile, "utf8").trim()).toBe(oldWorker);
   });
 
   it("runs the fake worker as a child of fake pnpm instead of exec", async () => {
@@ -614,8 +742,10 @@ while true; do sleep 1; done`;
     );
     const wrapper = Number(readFileSync(workerPid, "utf8").trim());
     const child = Number(readFileSync(childPid, "utf8").trim());
-    expect(wrapper).not.toBe(child);
-    expect(ppidOf(child)).toBe(wrapper);
+    // Worker no longer starts under pnpm: worker.pid is the process that
+    // handles SIGUSR2 (the fake worker itself), not an outer wrapper.
+    expect(wrapper).toBe(child);
+    expect(ppidOf(child)).toBeGreaterThan(1);
   });
 
   it("does not leave processes whose command line contains the temp AFK_HOME", async () => {
@@ -703,6 +833,10 @@ describe("restart docs", () => {
     expect(section).toMatch(/scripts\/restart\.sh worker/);
     expect(section).toMatch(/Ctrl-C/);
     expect(section).toMatch(/放弃/);
+    expect(section).toMatch(/\bps\b/);
+    expect(section).toMatch(/src\/main\.ts/);
+    expect(section).toMatch(/old worker/);
+    expect(section).toMatch(/drained/);
   });
 
   it("the operations manual restarts the worker with restart.sh, not up.sh", () => {
@@ -727,6 +861,8 @@ describe("restart docs", () => {
     expect(text).toMatch(/SIGUSR2/);
     expect(text).toMatch(/排空/);
     expect(text).toMatch(/滚动重启|scripts\/restart\.sh worker/);
+    expect(text).toMatch(/SIGUSR2.*node 进程|node 进程.*SIGUSR2/);
+    expect(text).toMatch(/Ctrl-C.*排空中的旧 worker|排空中的旧 worker.*Ctrl-C/);
   });
 
   it("CLAUDE.md restarts worker and API with restart.sh, not up.sh", () => {
@@ -740,6 +876,20 @@ describe("restart docs", () => {
     expect(section).not.toMatch(
       /改 `packages\/pipeline\/skills` 或 pipeline 后 \*\*重启 worker\*\*（`scripts\/up\.sh`）/,
     );
+  });
+
+  it("optimization plan 8.17 records leftover workers after restart.sh and S-47 invalid-output", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/optimization-plan.md"),
+      "utf8",
+    );
+    expect(text).toMatch(/### 8\.17/);
+    expect(text).toContain("#343");
+    expect(text).toContain("734");
+    expect(text).toContain("736");
+    expect(text).toContain("737");
+    expect(text).toContain("invalid-output");
+    expect(text).toMatch(/pnpm/);
   });
 
   it("optimization plan 8.15 records the restart waste and what this spec did not do", () => {

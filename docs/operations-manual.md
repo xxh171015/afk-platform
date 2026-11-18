@@ -35,6 +35,7 @@ scripts/restart.sh worker # 新 worker 立刻接活；旧 worker 收到 SIGUSR2�
 ```
 
 - 前提：3000、5173 端口空着（旧的 API/worker 要先停）。`restart.sh` 需要已经有一个 `up.sh` 在跑。
+- `restart.sh worker` 之后，用 `ps` 看旧 worker 是否已退出：`ps -ax -o pid,ppid,command | grep 'src/main.ts'`（worker 的命令行是 `node src/main.ts`，父进程应是这次 `up.sh` 或已退出）。还在跑、父进程是 1 的，是没收到排空信号的孤儿。`up.sh` 日志里出现 `old worker <pid> drained` 这一行，说明旧 worker 已经排空退出。
 - 启动后：API `http://127.0.0.1:3000`，页面 `http://127.0.0.1:5173`。终端里 **Ctrl-C 等于关机**：停全部，并放弃正在跑的作业（worker 会先中止手头的 run，最多等 60 秒；再按一次立即全停）。要不丢活地重启，请用 `scripts/restart.sh`，不要 Ctrl-C。
 - API 或页面崩溃时，`up.sh` 只把它自动拉起（有退避；60 秒内连续崩溃 5 次就不再拉起），worker 和它手上的作业继续跑。worker 自己崩溃仍然会停掉其余进程；被排空后退出不算崩溃。
 - 这个终端要一直开着。平台停了，spec 不会前进，但已有数据都在 Postgres 里，重启后接着做。

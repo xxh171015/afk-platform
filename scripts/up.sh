@@ -268,6 +268,8 @@ names=()
 restart_at=() # unix seconds when to start this one again; 0 means it should be running
 given_up=()   # 1 once a process crashed 5 times in 60s
 backoff=()    # seconds to wait before the next restart
+draining_pgids=() # process groups of workers rolling-restarted and still draining
+draining_pids=()
 
 run_dir="$afk_home/run"
 mkdir -p "$run_dir"
@@ -285,10 +287,12 @@ alive() {
   [ "$1" != gone ] && kill -0 -- "-$1" 2>/dev/null
 }
 
-# start <name> <command...>: run it in the background with every output line prefixed by the name.
+# start <name>: run it in the background with every output line prefixed by the name.
 # The command's pid is written to $run_dir/<name>.pid. Do not wrap this in $() — tee's stdout is
 # the terminal, and a substitution would wait until the process exits.
 # A new sh so $$ is the command, not this script ($$ in a { } pipeline is still up.sh).
+# api and worker exec node from their package dirs so <name>.pid is the node process
+# that handles SIGUSR2. The page still goes through pnpm (vite).
 run_named() {
   local name=$1
   shift
@@ -296,10 +300,28 @@ run_named() {
     sed -u "s/^/[$name] /" | tee -a "$up_log" &
 }
 
+run_named_in() {
+  local name=$1 dir=$2
+  shift 2
+  sh -c 'echo $$ >"$1"; cd "$2" && shift 2 && exec "$@"' sh "$run_dir/$name.pid" "$dir" "$@" 2>&1 |
+    sed -u "s/^/[$name] /" | tee -a "$up_log" &
+}
+
+launch_named() {
+  local name=$1
+  case "$name" in
+    api | worker)
+      run_named_in "$name" "packages/$name" node src/main.ts
+      ;;
+    *)
+      run_named "$name" pnpm "$name"
+      ;;
+  esac
+}
+
 start() {
   local name=$1 g
-  shift
-  run_named "$name" "$@"
+  launch_named "$name"
   g="$(ps -o pgid= -p "$!" 2>/dev/null | tr -d ' ')" || true
   [ -n "$g" ] || g=gone
   pgids+=("$g")
@@ -311,7 +333,7 @@ start() {
 
 restart() {
   local i=$1 g
-  run_named "${names[i]}" pnpm "${names[i]}"
+  launch_named "${names[i]}"
   g="$(ps -o pgid= -p "$!" 2>/dev/null | tr -d ' ')" || true
   [ -n "$g" ] || g=gone
   pgids[i]="$g"
@@ -330,13 +352,23 @@ index_of() {
 }
 
 planned_restart() {
-  local name=$1 i pid n=0
+  local name=$1 i pid n=0 g
   i=$(index_of "$name") || {
     echo "restart.sh: $name is not running" | tee -a "$up_log" >&2
     return 1
   }
+  g="${pgids[i]}"
   pid=$(tr -d ' \n' <"$run_dir/$name.pid" 2>/dev/null || true)
-  if [ -n "$pid" ]; then
+  if [ -n "$g" ] && [ "$g" != gone ]; then
+    kill -TERM -- "-$g" 2>/dev/null || true
+    while kill -0 -- "-$g" 2>/dev/null && [ "$n" -lt 50 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+    if kill -0 -- "-$g" 2>/dev/null; then
+      kill -KILL -- "-$g" 2>/dev/null || true
+    fi
+  elif [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
     while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 50 ]; do
       sleep 0.1
@@ -349,12 +381,13 @@ planned_restart() {
 }
 
 rolling_restart_worker() {
-  local i old_pid new_pid n=0
+  local i old_pid old_pgid new_pid n=0
   i=$(index_of worker) || {
     echo "restart.sh: worker is not running" | tee -a "$up_log" >&2
     return 1
   }
   old_pid=$(tr -d ' \n' <"$run_dir/worker.pid" 2>/dev/null || true)
+  old_pgid="${pgids[i]}"
   given_up[i]=0
   backoff[i]=1
   restart "$i"
@@ -367,7 +400,30 @@ rolling_restart_worker() {
     n=$((n + 1))
   done
   if [ -n "$old_pid" ]; then
+    draining_pgids+=("$old_pgid")
+    draining_pids+=("$old_pid")
     kill -USR2 "$old_pid" 2>/dev/null || true
+  fi
+}
+
+reap_draining() {
+  local j pid g
+  local keep_pgids=() keep_pids=()
+  for j in ${draining_pids[@]+"${!draining_pids[@]}"}; do
+    pid="${draining_pids[j]}"
+    g="${draining_pgids[j]}"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      keep_pgids+=("$g")
+      keep_pids+=("$pid")
+    else
+      echo "old worker $pid drained" | tee -a "$up_log" >&2
+    fi
+  done
+  draining_pgids=()
+  draining_pids=()
+  if [ ${#keep_pids[@]} -gt 0 ]; then
+    draining_pgids=("${keep_pgids[@]}")
+    draining_pids=("${keep_pids[@]}")
   fi
 }
 
@@ -432,6 +488,7 @@ tick() {
       worker) rolling_restart_worker ;;
     esac
   fi
+  reap_draining
   now=$(date +%s)
   for i in "${!pgids[@]}"; do
     if [ "${given_up[i]}" = 1 ]; then
@@ -456,12 +513,16 @@ stop_all() {
   rm -f "$run_dir/up.pid"
   echo "stopping (the worker aborts the runs in hand first; Ctrl-C again stops them at once)..."
   echo "要不丢活地重启，请用 scripts/restart.sh（Ctrl-C 会放弃正在跑的作业）"
-  local i
+  local i g
   # reverse order: worker, then page, then API
   for ((i = ${#pgids[@]} - 1; i >= 0; i--)); do
     alive "${pgids[i]}" && kill -INT -- "-${pgids[i]}" 2>/dev/null || true
     # the worker needs a moment to abort its runs; the others stop at once
     if [ "${names[i]}" = worker ]; then wait_group "${pgids[i]}"; fi
+  done
+  for g in ${draining_pgids[@]+"${draining_pgids[@]}"}; do
+    alive "$g" && kill -INT -- "-$g" 2>/dev/null || true
+    wait_group "$g"
   done
   wait 2>/dev/null || true
 }
@@ -478,7 +539,7 @@ check_signal() { if [ "$sigs" -gt 0 ]; then exit 130; fi; }
 
 force_stop() {
   local g
-  for g in ${pgids[@]+"${pgids[@]}"}; do
+  for g in ${pgids[@]+"${pgids[@]}"} ${draining_pgids[@]+"${draining_pgids[@]}"}; do
     [ "$g" = gone ] && continue
     kill -TERM -- "-$g" 2>/dev/null || true
   done
@@ -501,7 +562,7 @@ if [ "${AFK_UP_SKIP_STACK:-}" != 1 ]; then
   pnpm db:migrate
 fi
 
-start api pnpm api
+start api
 if [ "${AFK_UP_SKIP_STACK:-}" != 1 ]; then
   until curl -s -o /dev/null "$AFK_API_URL/"; do
     check_signal
@@ -514,8 +575,8 @@ if [ "${AFK_UP_SKIP_STACK:-}" != 1 ]; then
   done
 fi
 
-[ "${WEB:-1}" = 0 ] || start web pnpm web
-[ "${WORKER:-1}" = 0 ] || start worker pnpm worker
+[ "${WEB:-1}" = 0 ] || start web
+[ "${WORKER:-1}" = 0 ] || start worker
 
 echo "up: API $AFK_API_URL, page http://127.0.0.1:5173 (Postgres stays up when you stop; docker compose stop postgres to stop it)"
 echo "log: $up_log"
