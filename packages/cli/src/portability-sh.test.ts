@@ -225,6 +225,41 @@ awk 'BEGIN { }'
     expect(readFileSync(awkLog, "utf8")).toContain("called");
   });
 
+  it("compat rerun leaves the full-suite reports/junit.xml in place", async () => {
+    const work = tempDir("afk-compat-junit-");
+    const compat = join(work, "macos-compat", "bin");
+    mkdirSync(compat, { recursive: true });
+    writeFileSync(join(compat, "awk"), "#!/bin/sh\n");
+    chmodSync(join(compat, "awk"), 0o755);
+
+    const pnpmDir = join(work, "pnpm-bin");
+    mkdirSync(pnpmDir);
+    writeFileSync(
+      join(pnpmDir, "pnpm"),
+      `#!/bin/sh
+mkdir -p reports
+printf '<testsuites tests="2"><testsuite name="compat" tests="2" skipped="0"/></testsuites>\\n' > reports/junit.xml
+`,
+    );
+    chmodSync(join(pnpmDir, "pnpm"), 0o755);
+
+    const checker = fakeScripts({});
+    const fakeRoot = join(checker, "..", "..");
+    mkdirSync(join(fakeRoot, "reports"));
+    const fullReport =
+      '<testsuites tests="99"><testsuite name="full" tests="99" skipped="0"/></testsuites>\n';
+    writeFileSync(join(fakeRoot, "reports/junit.xml"), fullReport);
+
+    const result = await runChecker(checker, {
+      AFK_MACOS_COMPAT_DIR: compat,
+      PATH: `${pnpmDir}:${process.env.PATH}`,
+    });
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(fakeRoot, "reports/junit.xml"), "utf8")).toBe(
+      fullReport,
+    );
+  });
+
   it("static-checks the repo scripts/ without findings", async () => {
     const result = await runChecker(checkerSrc, {}, repoRoot);
     const output = `${result.stdout}${result.stderr}`;
