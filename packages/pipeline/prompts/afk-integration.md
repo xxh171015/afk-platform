@@ -36,6 +36,7 @@
 </result>
 ```
 
+`result` 是 `"pass"` 或 `"fail"`。`failingRepo` 是一句字符串或 null。`evidence` 是一句字符串。`failingTests` 是用例名字符串的数组。
 - `result` 为 `fail` 表示 e2e 的失败是真的，`failingRepo` 必填。
 - 复现时 e2e 全部通过了（失败不再出现，比如环境里的时序问题）：`result` 写 `pass`，`failingRepo` 写 null，`evidence` 写你看到的。
 - `failingRepo` 只能是本仓库的名字、环境里的仓库名之一，或 `"unknown"`。

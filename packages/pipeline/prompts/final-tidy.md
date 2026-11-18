@@ -33,4 +33,4 @@
 </result>
 ```
 
-`blockedReason` 只能是 `agent-gave-up` 或 `contract-change-needed`，`detail` 必填。
+`summary` 是一句字符串。`tidied` 是从 0 起的整数的数组。`skipped` 是对象数组，每项 `{ "index", "reason" }`，`reason` 是一句字符串。`decisions` 是对象数组，每项 `{ "kind", "text" }`，只有 `kind` 是 `deferred` 时才带 `ref`（T-n 或 `new`）。`blockedReason` 只能是 `agent-gave-up` 或 `contract-change-needed`，`detail` 是一句字符串。

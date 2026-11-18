@@ -849,6 +849,16 @@ const STAGES_WITH_PROMPTS = [
   "locate-bug",
 ] as const;
 
+function resultExamples(prompt: string): unknown[] {
+  return [...prompt.matchAll(/<result>\s*([\s\S]*?)\s*<\/result>/g)].flatMap(
+    (match) => {
+      const body = match[1].trim();
+      if (!body.startsWith("{")) return [];
+      return [JSON.parse(body) as unknown];
+    },
+  );
+}
+
 describe("the prompts", () => {
   const whole = (stage: (typeof STAGES_WITH_PROMPTS)[number]) =>
     composePrompt(promptFor(stage));
@@ -963,6 +973,37 @@ describe("the prompts", () => {
     expect(section).toContain("缺做下去必需的东西");
     expect(section).toContain("没批准的保护路径");
     expect(section).toContain("契约非改不可");
+  });
+
+  it("tells the overlay that ref is only for deferred, and examples of other kinds omit it", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const section = overlay.slice(
+      overlay.indexOf("## 没有人回答你"),
+      overlay.indexOf("## /context 就是 tracker"),
+    );
+    expect(section).toContain("`{ kind, text }`");
+    expect(section).not.toContain("`{ kind, text, ref? }`");
+    expect(section).toContain("只有 `kind` 是 `deferred` 时才带 `ref`");
+    for (const file of readdirSync(PROMPT_DIR).filter((name) =>
+      name.endsWith(".md"),
+    )) {
+      const examples = resultExamples(
+        readFileSync(join(PROMPT_DIR, file), "utf8"),
+      );
+      for (const example of examples) {
+        if (!example || typeof example !== "object" || Array.isArray(example))
+          continue;
+        const decisions = (example as { decisions?: unknown }).decisions;
+        if (!Array.isArray(decisions)) continue;
+        for (const item of decisions) {
+          if (!item || typeof item !== "object" || Array.isArray(item))
+            continue;
+          const decision = item as { kind?: unknown; ref?: unknown };
+          if (decision.kind !== "deferred")
+            expect(decision, file).not.toHaveProperty("ref");
+        }
+      }
+    }
   });
 
   it("tells the agent to write long gate and full-suite output to a file instead of reading it all", () => {
@@ -1188,6 +1229,152 @@ describe("the prompts", () => {
         "`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串",
       );
     }
+  });
+
+  it("has a <result> example in every stage prompt that the matching schema accepts", () => {
+    const cases = [
+      { file: promptFor("implement"), schema: ImplementOutputSchema },
+      {
+        file: promptFor("implement", { integration: true }),
+        schema: ImplementOutputSchema,
+      },
+      { file: promptFor("gate-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("review-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("merge-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("update-branch"), schema: ImplementOutputSchema },
+      { file: promptFor("final-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("final-tidy"), schema: TidyOutputSchema },
+      {
+        file: promptFor("review", { axis: "spec" }),
+        schema: reviewOutputSchemaFor("spec"),
+      },
+      {
+        file: promptFor("review", { axis: "standards" }),
+        schema: reviewOutputSchemaFor("standards"),
+      },
+      {
+        file: promptFor("final-review", { axis: "spec" }),
+        schema: reviewOutputSchemaFor("spec"),
+      },
+      {
+        file: promptFor("final-review", { axis: "standards" }),
+        schema: reviewOutputSchemaFor("standards"),
+      },
+      {
+        file: promptFor("recheck"),
+        schema: reviewOutputSchemaFor("spec"),
+      },
+      { file: promptFor("diagnose"), schema: DiagnoseOutputSchema },
+      { file: promptFor("locate-bug"), schema: LocateOutputSchema },
+    ];
+    const mapped = new Set(cases.map((row) => row.file));
+    for (const name of readdirSync(PROMPT_DIR).filter(
+      (file) => file.endsWith(".md") && file !== "overlay.md",
+    )) {
+      expect(mapped.has(join(PROMPT_DIR, name)), name).toBe(true);
+    }
+    let sawMustFix = false;
+    for (const { file, schema } of cases) {
+      const examples = resultExamples(readFileSync(file, "utf8"));
+      expect(examples.length, file).toBeGreaterThan(0);
+      for (const example of examples) {
+        expect(schema.safeParse(example).success, file).toBe(true);
+        if (
+          example &&
+          typeof example === "object" &&
+          !Array.isArray(example) &&
+          Array.isArray((example as { mustFix?: unknown }).mustFix)
+        ) {
+          sawMustFix = true;
+          expect(
+            schema.safeParse({ ...example, mustFix: "写成字符串" }).success,
+            file,
+          ).toBe(false);
+        }
+      }
+    }
+    expect(sawMustFix).toBe(true);
+  });
+
+  it("documents the shape of each result field in every stage prompt", () => {
+    const resultSection = (text: string) => {
+      const heading = text.indexOf("## 结果");
+      const last = text.indexOf("## 最后一步");
+      const start = heading >= 0 ? heading : last;
+      expect(start).toBeGreaterThanOrEqual(0);
+      return text.slice(start);
+    };
+    for (const file of [
+      PROMPTS.implement,
+      PROMPTS.integrationImplement,
+      PROMPTS.gateFix,
+      PROMPTS.reviewFix,
+      PROMPTS.mergeFix,
+      PROMPTS.updateBranch,
+      PROMPTS.finalFix,
+      PROMPTS.finalTidy,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`decisions` 是对象数组");
+      expect(section, file).toContain('每项 `{ "kind", "text" }`');
+      expect(section, file).toContain("只有 `kind` 是 `deferred` 时才带 `ref`");
+      expect(section, file).toContain("`detail` 是一句字符串");
+    }
+    for (const file of [
+      PROMPTS.implement,
+      PROMPTS.integrationImplement,
+      PROMPTS.gateFix,
+      PROMPTS.reviewFix,
+      PROMPTS.mergeFix,
+      PROMPTS.updateBranch,
+      PROMPTS.finalFix,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`summary` 是一句字符串");
+      expect(section, file).toContain("`acceptance` 的值是测试名字符串的数组");
+    }
+    const tidy = resultSection(readFileSync(PROMPTS.finalTidy, "utf8"));
+    expect(tidy).toContain("`tidied` 是从 0 起的整数的数组");
+    expect(tidy).toContain("`skipped` 是对象数组");
+    expect(tidy).toContain('每项 `{ "index", "reason" }`');
+    expect(tidy).toContain("`reason` 是一句字符串");
+    for (const file of [
+      PROMPTS.reviewSpec,
+      PROMPTS.reviewStandards,
+      PROMPTS.finalReviewSpec,
+      PROMPTS.finalReviewStandards,
+      PROMPTS.recheck,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain(
+        '`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`',
+      );
+      expect(section, file).toContain(
+        "`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串",
+      );
+    }
+    for (const file of [PROMPTS.reviewSpec, PROMPTS.finalReviewSpec]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`rulings` 是对象数组");
+      expect(section, file).toContain('每项 `{ "id", "verdict" }`');
+    }
+    for (const file of [
+      PROMPTS.reviewStandards,
+      PROMPTS.finalReviewStandards,
+    ]) {
+      const section = resultSection(readFileSync(file, "utf8"));
+      expect(section, file).toContain("`sources` 是路径字符串的数组");
+    }
+    const diagnose = resultSection(readFileSync(PROMPTS.diagnose, "utf8"));
+    expect(diagnose).toContain('`result` 是 `"pass"` 或 `"fail"`');
+    expect(diagnose).toContain("`failingRepo` 是一句字符串或 null");
+    expect(diagnose).toContain("`evidence` 是一句字符串");
+    expect(diagnose).toContain("`failingTests` 是用例名字符串的数组");
+    const locate = resultSection(readFileSync(PROMPTS.locateBug, "utf8"));
+    expect(locate).toContain('`result` 是 `"found"` 或 `"unlocated"`');
+    expect(locate).toContain("`repo` 是一句字符串");
+    expect(locate).toContain("`files` 是路径字符串的数组");
+    expect(locate).toContain("`evidence` 和 `reproduction` 是一句字符串");
   });
 
   it("shows a must-fix item's shape in every review example, and each example is a valid result", () => {
