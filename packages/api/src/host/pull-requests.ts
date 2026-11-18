@@ -120,12 +120,19 @@ const PullFacts = {
   humanComments: z.number().int().nonnegative().optional(),
 };
 
+const HostCheckHitSchema = z.object({
+  run: z.string().min(1),
+  why: z.string().min(1),
+  files: z.array(z.string().min(1)).max(20),
+});
+
 export const OpenPrResultSchema = z.object({
   stage: z.literal("open-pr"),
   outcome: z.literal("opened"),
   number: z.number().int().min(1),
   url: z.string().min(1),
   ...PullFacts,
+  hostChecks: z.array(HostCheckHitSchema).optional().default([]),
 });
 
 export const PrReadyResultSchema = z.object({
@@ -662,8 +669,9 @@ export async function recordOpenPr(
     ],
   );
   await client.query(
-    "UPDATE finalizations SET state = 'done', blocked_reason = NULL WHERE spec_id = $1 AND repo_id = $2",
-    [read.specId, read.repoId],
+    `UPDATE finalizations SET state = 'done', blocked_reason = NULL, host_checks = $3::jsonb
+     WHERE spec_id = $1 AND repo_id = $2`,
+    [read.specId, read.repoId, JSON.stringify(pr.hostChecks)],
   );
   const missing = await client.query(
     `SELECT 1 FROM finalizations f WHERE f.spec_id = $1

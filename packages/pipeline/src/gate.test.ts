@@ -725,6 +725,78 @@ describe("the configuration comes from the trusted commit", () => {
       { paths: ["openapi.json", "schema.d.ts"], run: "pnpm gen:api" },
     ]);
   });
+
+  it("keeps declared hostChecks", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - paths: ["scripts/**", "scripts/review-calibration.ts"]',
+        "    run: pnpm test packages/cli/src/up-sh.test.ts",
+        "    why: host scripts need a Mac run",
+        "",
+      ].join("\n"),
+    });
+    expect(readGateConfig(repo.dir, "main").hostChecks).toEqual([
+      {
+        paths: ["scripts/**", "scripts/review-calibration.ts"],
+        run: "pnpm test packages/cli/src/up-sh.test.ts",
+        why: "host scripts need a Mac run",
+      },
+    ]);
+  });
+
+  it("rejects a hostCheck that is missing paths or run", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        "  - run: pnpm test packages/cli/src/up-sh.test.ts",
+        "    why: host scripts need a Mac run",
+        "",
+      ].join("\n"),
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(
+      /缺少必填字段 paths/,
+    );
+    repo.cleanup();
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - paths: ["scripts/**"]',
+        "    why: host scripts need a Mac run",
+        "",
+      ].join("\n"),
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(/缺少必填字段 run/);
+  });
+
+  it("rejects a hostCheck field it does not know and lists the keys that are allowed", () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "hostChecks:",
+        '  - { paths: ["scripts/**"], run: "pnpm test", why: "mac", extra: 1 }',
+        "",
+      ].join("\n"),
+    });
+    expect(() => readGateConfig(repo.dir, "main")).toThrow(GateConfigError);
+    try {
+      readGateConfig(repo.dir, "main");
+    } catch (error) {
+      expect((error as Error).message).toContain("extra");
+      expect((error as Error).message).toContain(
+        "hostChecks 里允许：paths、run、why",
+      );
+    }
+  });
 });
 
 // What the platform would answer: the outcomes it was told about, looked up as the API does.

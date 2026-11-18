@@ -161,6 +161,15 @@ describe("autoMergeForecast", () => {
     });
   });
 
+  it("will not merge when the acceptance pack has a host-check item", () => {
+    expect(
+      autoMergeForecast(ready({ needsDecision: [{ kind: "host-check" }] })),
+    ).toEqual({
+      willMerge: false,
+      reason: "需要在宿主机上验证",
+    });
+  });
+
   it("will not merge when the spec already had an auto-merge job", () => {
     expect(autoMergeForecast(ready({ hadAutoMergeJob: true }))).toEqual({
       willMerge: false,

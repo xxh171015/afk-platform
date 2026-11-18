@@ -2181,6 +2181,37 @@ describe("the acceptance pack", () => {
     );
   });
 
+  it("puts a host-check from the open-pr result in 合并前要你定的, with the command", async () => {
+    await settledSpec(["backend"]);
+    const job = await claimOf("open-pr");
+    await worker.complete(
+      job.id,
+      job.attempt,
+      opened(7, {
+        hostChecks: [
+          {
+            run: "pnpm test packages/cli/src/up-sh.test.ts",
+            why: "host scripts need a Mac run",
+            files: ["scripts/up.sh"],
+          },
+        ],
+      }),
+    );
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.needsDecision).toEqual([
+      {
+        kind: "host-check",
+        id: "backend#0",
+        source: "backend",
+        text: "在宿主机上跑：pnpm test packages/cli/src/up-sh.test.ts（host scripts need a Mac run；改到了 scripts/up.sh）",
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toMatch(/^## 合并前要你定的\n/);
+    expect(task.section).toContain("pnpm test packages/cli/src/up-sh.test.ts");
+  });
+
   it("reports the gate of the integration branch with its time, and the protected paths a person approved", async () => {
     const { acceptancePack } = await packOf();
     expect(acceptancePack.repos[0].gate).toEqual({

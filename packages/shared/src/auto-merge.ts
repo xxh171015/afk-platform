@@ -136,6 +136,9 @@ export function autoMergeForecast(input: AutoMergeInput): AutoMergeResult {
   if (input.needsDecision.some((item) => item.kind === "deferred")) {
     return fail("验收包有未做掉的 deferred");
   }
+  if (input.needsDecision.some((item) => item.kind === "host-check")) {
+    return fail("需要在宿主机上验证");
+  }
   if (input.hadAutoMergeJob) {
     return fail("已经有过 auto-merge 作业");
   }
