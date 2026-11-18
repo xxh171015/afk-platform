@@ -2,6 +2,7 @@ import {
   DECISION_KIND_LABELS,
   type DecisionKind,
   decisionTally,
+  findingResolutionPhrase,
 } from "@afk/shared";
 import { ShaChip } from "../components/afk/badges.tsx";
 import { hostKindOf, pullAbbrev } from "../host-copy.ts";
@@ -110,7 +111,9 @@ export function PackRepoSection({
         <ul className="pack-findings">
           {list(repo.findings).map((finding) => (
             <li key={`${finding.run}-${finding.kind}-${finding.body}`}>
-              <span className="badge">{finding.resolution}</span>{" "}
+              <span className="badge">
+                {findingResolutionPhrase(finding.resolution)}
+              </span>{" "}
               {finding.axis ? (
                 <span className={`badge axis-${finding.axis}`}>
                   {finding.axis}

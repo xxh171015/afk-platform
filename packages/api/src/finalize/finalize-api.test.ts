@@ -704,6 +704,46 @@ describe("when it goes wrong", () => {
     expect(((await claim()) as Claimed).payload.stage).toBe("final-merge");
   });
 
+  it("approve-recheck marks that wrap-up Recheck's must-fix approved and leaves other runs'", async () => {
+    await toFinalFix();
+    await step("final-fix", {
+      outcome: "done",
+      run: { recheck: RECHECK_HIT },
+    });
+    const rec = (await claim()) as Claimed;
+    expect(rec.payload.stage).toBe("recheck");
+    await worker.complete(rec.id, rec.attempt, {
+      stage: "recheck",
+      outcome: "fix",
+      findings: [
+        { kind: "must-fix", body: "src/a.test.ts weakened" },
+        { kind: "must-fix", body: "src/b.test.ts dropped a case" },
+      ],
+    });
+    const resolutions = async () =>
+      (
+        await db.pool.query<{
+          stage: string;
+          resolution: string;
+          body: string;
+        }>(
+          `SELECT r.stage, f.resolution, f.body FROM findings f JOIN runs r ON r.id = f.run_id
+           WHERE f.kind = 'must-fix' ORDER BY f.id`,
+        )
+      ).rows.map((row) => `${row.stage}:${row.resolution}:${row.body}`);
+    expect(await resolutions()).toEqual([
+      "final-review:fixed:src/a.ts:3 a and b disagree on the name",
+      "recheck:unhandled:src/a.test.ts weakened",
+      "recheck:unhandled:src/b.test.ts dropped a case",
+    ]);
+    expect((await call("POST", "/specs/1/approve-recheck")).status).toBe(200);
+    expect(await resolutions()).toEqual([
+      "final-review:fixed:src/a.ts:3 a and b disagree on the name",
+      "recheck:approved:src/a.test.ts weakened",
+      "recheck:approved:src/b.test.ts dropped a case",
+    ]);
+  });
+
   it("does not Recheck a source-only final-fix", async () => {
     await toFinalFix();
     await step("final-fix", {

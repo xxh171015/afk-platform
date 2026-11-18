@@ -1415,13 +1415,15 @@ describe("a gate whose setup fails", { timeout: 60_000 }, () => {
     const runs = await db.pool.query(
       "SELECT stage, result, output->>'error' AS error FROM runs WHERE ticket_id = 1 ORDER BY id",
     );
-    expect(runs.rows.map((r) => `${r.stage}:${r.result}`)).toEqual([
-      "implement:done",
+    const stages = runs.rows.map((r) => `${r.stage}:${r.result}`);
+    expect(stages[0]).toBe("implement:done");
+    expect(stages.filter((s) => s.startsWith("gate:"))).toEqual([
       "gate:job-failed",
       "gate:job-failed",
       "gate:job-failed",
     ]);
-    expect(runs.rows[1].error).toContain(
+    expect(stages.some((s) => s.startsWith("gate-fix"))).toBe(false);
+    expect(runs.rows.find((r) => r.stage === "gate")?.error).toContain(
       "gate setup failed (exit 1)\ntls handshake eof",
     );
     const stored = await db.pool.query(

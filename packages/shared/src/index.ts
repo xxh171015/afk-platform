@@ -284,6 +284,7 @@ export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
 export { SPEC_STATES, specResumeTarget, specTransition } from "./spec-state.ts";
 export type {
   AutoRetryOutcome,
+  ParallelReviewState,
   Progress,
   Stage,
   StageDecision,
@@ -296,6 +297,7 @@ export {
   advanceStage,
   isAutoRetryOutcome,
   MAX_INTEGRATION_ROUNDS,
+  PARALLEL_REVIEW_STATES,
   STAGES,
 } from "./stage-flow.ts";
 export type { StageModelKey, StageModels } from "./stage-models.ts";

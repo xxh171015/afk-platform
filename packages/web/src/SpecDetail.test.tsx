@@ -345,6 +345,24 @@ describe("the spec page", () => {
     expect(item.textContent).toMatch(/门禁失败/);
   });
 
+  it("shows the ticket view's currentStage on each ticket card", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="tickets" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [
+              ticket(1, "running", { currentStage: "审查 pass，等门禁" }),
+            ],
+            edges: [],
+          }),
+        }),
+      }),
+    );
+    const cards = await screen.findByTestId("ticket-cards");
+    expect(within(cards).getByText("审查 pass，等门禁")).toBeTruthy();
+  });
+
   it("shows the pull requests in merge order and the acceptance pack: what backs each criterion, findings, doubts, gates", async () => {
     const pullRequests = [
       {
@@ -602,6 +620,96 @@ describe("the spec page", () => {
     expect(screen.getByText(/Dropped/).closest("li")?.textContent).toContain(
       "已取消",
     );
+  });
+
+  it("shows every finding resolution as a Chinese phrase on the pack, not the stored English code", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            acceptancePack: {
+              generatedAt: "2026-10-28T10:00:00.000Z",
+              mergeOrder: {
+                ordered: ["backend"],
+                after: {},
+                unordered: [],
+              },
+              orderBroken: [],
+              repos: [
+                {
+                  repo: "backend",
+                  pullRequest: null,
+                  gate: null,
+                  tickets: [],
+                  findings: [
+                    {
+                      ticket: "T-1",
+                      run: "R-2",
+                      stage: "review",
+                      kind: "must-fix",
+                      body: "null check",
+                      resolution: "unhandled",
+                    },
+                    {
+                      ticket: "T-1",
+                      run: "R-3",
+                      stage: "review",
+                      kind: "must-fix",
+                      body: "fixed already",
+                      resolution: "fixed",
+                    },
+                    {
+                      ticket: "T-1",
+                      run: "R-3",
+                      stage: "review",
+                      kind: "suggestion",
+                      body: "rename x",
+                      resolution: "acceptance-pack",
+                    },
+                    {
+                      ticket: null,
+                      run: "R-9",
+                      stage: "final-review",
+                      kind: "suggestion",
+                      body: "extract helper",
+                      resolution: "refactored",
+                    },
+                    {
+                      ticket: "T-1",
+                      run: "R-8",
+                      stage: "recheck",
+                      kind: "must-fix",
+                      body: "let this Recheck stand",
+                      resolution: "approved",
+                    },
+                  ],
+                  scopeCreep: [],
+                  reviewUncertainties: [],
+                  decisions: [],
+                  protectedPathApprovals: [],
+                },
+              ],
+              cancelledTickets: [],
+              agentSeconds: 1,
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("未处理")).toBeTruthy();
+    expect(screen.getByText("已交给 fix 处理")).toBeTruthy();
+    expect(screen.getByText("进验收包，留给你看")).toBeTruthy();
+    expect(screen.getByText("已由 Tidy 整理")).toBeTruthy();
+    expect(screen.getByText("人已批准")).toBeTruthy();
+    expect(screen.queryByText("unhandled")).toBeNull();
+    expect(screen.queryByText("fixed")).toBeNull();
+    expect(screen.queryByText("acceptance-pack")).toBeNull();
+    expect(screen.queryByText("refactored")).toBeNull();
+    expect(screen.queryByText("approved")).toBeNull();
   });
 
   it("renders an incomplete stored acceptance pack without crashing", async () => {
@@ -1669,6 +1777,82 @@ describe("the six-step bar and nested pages", () => {
       expect(screen.getByText("src/foo needs fix")).toBeTruthy(),
     );
     expect(screen.queryByText("other run")).toBeNull();
+  });
+
+  it("shows every review-finding resolution as a Chinese phrase, not the stored English code", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="timeline" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            tickets: [ticket(1, "done")],
+            timeline: [
+              {
+                kind: "review",
+                at: "2026-11-01T10:01:00.000Z",
+                text: "T-1 review 5 条意见",
+                ticketId: 1,
+                runId: 12,
+              },
+            ],
+          }),
+        }),
+        "GET /tickets/1": () => ({
+          json: {
+            ...ticketView(1),
+            findings: [
+              {
+                id: 1,
+                runId: 12,
+                kind: "must-fix",
+                body: "null check",
+                resolution: "unhandled",
+              },
+              {
+                id: 2,
+                runId: 12,
+                kind: "must-fix",
+                body: "fixed already",
+                resolution: "fixed",
+              },
+              {
+                id: 3,
+                runId: 12,
+                kind: "suggestion",
+                body: "rename x",
+                resolution: "acceptance-pack",
+              },
+              {
+                id: 4,
+                runId: 12,
+                kind: "suggestion",
+                body: "extract helper",
+                resolution: "refactored",
+              },
+              {
+                id: 5,
+                runId: 12,
+                kind: "must-fix",
+                body: "let this Recheck stand",
+                resolution: "approved",
+              },
+            ],
+          },
+        }),
+      }),
+    );
+    fireEvent.click(await screen.findByTestId("review-findings-trigger"));
+    await waitFor(() => expect(screen.getByText("null check")).toBeTruthy());
+    expect(screen.getByText("未处理")).toBeTruthy();
+    expect(screen.getByText("已交给 fix 处理")).toBeTruthy();
+    expect(screen.getByText("进验收包，留给你看")).toBeTruthy();
+    expect(screen.getByText("已由 Tidy 整理")).toBeTruthy();
+    expect(screen.getByText("人已批准")).toBeTruthy();
+    expect(screen.queryByText("unhandled")).toBeNull();
+    expect(screen.queryByText("fixed")).toBeNull();
+    expect(screen.queryByText("acceptance-pack")).toBeNull();
+    expect(screen.queryByText("refactored")).toBeNull();
+    expect(screen.queryByText("approved")).toBeNull();
   });
 
   it("shows listed timeline events and drops anything else", async () => {

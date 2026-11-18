@@ -13,6 +13,7 @@ import {
   LINK_KINDS,
   LOCATE_REASONS,
   LOCATE_STATES,
+  PARALLEL_REVIEW_STATES,
   PAUSE_REASONS,
   SPEC_STATES,
   SPEC_TYPES,
@@ -325,6 +326,11 @@ export const tickets = pgTable(
       .notNull()
       .default({ "gate-fix": 0, "review-fix": 0, "merge-fix": 0 }),
     reviewed: boolean("reviewed").notNull().default(false),
+    // Parallel ticket-level review (stage-flow Progress): none / running / pass / fix, the SHA it reviewed,
+    // and the SHA that already passed the gate.
+    parallelReview: text("parallel_review").notNull().default("none"),
+    parallelReviewSha: text("parallel_review_sha"),
+    gatePassedSha: text("gate_passed_sha"),
     // Set by a restart-retry: the next implement run starts from the integration branch, not from the old branch.
     restart: boolean("restart").notNull().default(false),
     // Jobs up to this id were made before the last human retry: their failures no longer count towards blocking.
@@ -357,6 +363,10 @@ export const tickets = pgTable(
     check(
       "tickets_resume_stage_check",
       sql`${t.resumeStage} is null or ${t.resumeStage} in ('e2e', 'gate')`,
+    ),
+    check(
+      "tickets_parallel_review_check",
+      oneOf(t.parallelReview, PARALLEL_REVIEW_STATES),
     ),
     check("tickets_type_check", oneOf(t.type, TICKET_TYPES)),
     check("tickets_state_check", oneOf(t.state, TICKET_STATES)),

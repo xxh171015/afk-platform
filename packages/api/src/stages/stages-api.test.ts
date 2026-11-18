@@ -1599,6 +1599,49 @@ describe("Recheck", () => {
     );
   });
 
+  it("approve-recheck marks that Recheck's must-fix approved and leaves an earlier review's", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", IMPLEMENT_DONE);
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "pass",
+      findings: [{ kind: "must-fix", body: "earlier review leftover" }],
+    });
+    await stage("merge", { outcome: "conflict" });
+    await stage("merge-fix", { outcome: "done", run: { recheck: HIT } });
+    await stage("gate", GATE_PASSED);
+    await stage("recheck", {
+      ...RECHECK_FIX,
+      findings: [
+        { kind: "must-fix", body: "src/a.test.ts:1 weakened the assertion" },
+        { kind: "must-fix", body: "src/b.test.ts dropped a case" },
+      ],
+    });
+    expect(await ticketRow()).toMatchObject({
+      state: "blocked",
+      blocked_reason: "recheck-failed",
+    });
+    const resolutions = async () =>
+      (await fetch(`${api.url}/tickets/1`).then((r) => r.json())).findings.map(
+        (f: { kind: string; resolution: string; body: string }) =>
+          `${f.kind}:${f.resolution}:${f.body}`,
+      );
+    expect(await resolutions()).toEqual([
+      "must-fix:unhandled:earlier review leftover",
+      "must-fix:unhandled:src/a.test.ts:1 weakened the assertion",
+      "must-fix:unhandled:src/b.test.ts dropped a case",
+    ]);
+    expect(
+      (await fetch(`${api.url}/tickets/1/approve-recheck`, { method: "POST" }))
+        .status,
+    ).toBe(200);
+    expect(await resolutions()).toEqual([
+      "must-fix:unhandled:earlier review leftover",
+      "must-fix:approved:src/a.test.ts:1 weakened the assertion",
+      "must-fix:approved:src/b.test.ts dropped a case",
+    ]);
+  });
+
   it("skips Recheck for the same SHA after approve, and runs it for a later SHA", async () => {
     await toReviewFix();
     await stage("review-fix", { outcome: "done", run: { recheck: HIT } });

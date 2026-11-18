@@ -1,4 +1,8 @@
-import { type TicketState, ticketTransition } from "@afk/shared";
+import {
+  findingResolutionPhrase,
+  type TicketState,
+  ticketTransition,
+} from "@afk/shared";
 import {
   keepPreviousData,
   useMutation,
@@ -438,6 +442,9 @@ function TicketContent({
       : undefined;
   return (
     <>
+      {ticket.currentStage ? (
+        <p className="mb-4 text-sm">{ticket.currentStage}</p>
+      ) : null}
       <TicketTakeover ticketId={ticket.id} state={ticket.state} />
       {ticket.structuredBrief ? (
         <section className="mb-6 space-y-3 border-l-2 border-destructive bg-destructive/5 p-4">
@@ -622,7 +629,10 @@ function TicketContent({
               <ul className="findings space-y-3">
                 {findings.map((finding) => (
                   <li key={finding.id} className="space-y-1 text-[13px]">
-                    <StatusBadge kind="pr" code={finding.resolution} />
+                    <StatusBadge
+                      kind="pr"
+                      code={findingResolutionPhrase(finding.resolution)}
+                    />
                     {finding.axis ? (
                       <span
                         className={`ml-2 font-mono text-[11px] axis-${finding.axis}`}

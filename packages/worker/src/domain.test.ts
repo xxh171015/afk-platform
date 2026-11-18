@@ -5,7 +5,7 @@ import { gitOrThrow } from "@afk/pipeline";
 import { bundleFor, makeRepo, type TestRepo } from "@afk/pipeline/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { cutIntegrationBranch, fetchDomain } from "./domain.ts";
-import { pushRef } from "./push.ts";
+import { type PushFn, pushRef } from "./push.ts";
 import { RepoStore } from "./repos.ts";
 
 const cleanups: (() => void)[] = [];
@@ -291,6 +291,95 @@ describe("cutIntegrationBranch", () => {
       expect(
         gitOrThrow(frontend.dir, ["branch", "--list", "spec/1/order-export"]),
       ).toBe("");
+    });
+  });
+
+  describe("when creating the branch loses a race", () => {
+    const BRANCH = "spec/1/order-export";
+    const LOCK_REF =
+      "! [remote rejected] spec/1/order-export (cannot lock ref 'refs/heads/spec/1/order-export')";
+
+    const rejectCreate: PushFn = async (request) => {
+      expect(request.expectedOld).toBe("");
+      return { ok: false, error: LOCK_REF };
+    };
+
+    async function clonedPlanning() {
+      const planning = origin({ "GLOSSARY.md": "# v1\n" });
+      const initial = gitOrThrow(planning.dir, ["rev-parse", "HEAD"]);
+      const sha = planning.commit({ "GLOSSARY.md": "# v2\n" }, "planning");
+      const repos = store();
+      const mainDir = await repos.ensure("backend", planning.dir, "main");
+      const bundle = bundleFor({
+        repo: {
+          id: 1,
+          name: "backend",
+          url: planning.dir,
+          defaultBranch: "main",
+        },
+        integrationBranch: BRANCH,
+        domain: {
+          repo: "backend",
+          url: planning.dir,
+          defaultBranch: "main",
+          sha,
+        },
+      });
+      return { planning, initial, sha, repos, mainDir, bundle };
+    }
+
+    it("returns when creating the branch is rejected and the remote already has it at the start commit", async () => {
+      const { planning, sha, repos, mainDir, bundle } = await clonedPlanning();
+      gitOrThrow(planning.dir, ["update-ref", `refs/heads/${BRANCH}`, sha]);
+      const logs: string[] = [];
+
+      await cutIntegrationBranch(repos, rejectCreate, mainDir, bundle, (line) =>
+        logs.push(line),
+      );
+
+      expect(gitOrThrow(mainDir, ["rev-parse", BRANCH])).toBe(sha);
+      expect(gitOrThrow(planning.dir, ["rev-parse", BRANCH])).toBe(sha);
+      expect(logs).toContain(
+        `integration branch ${BRANCH} was created by another job`,
+      );
+    });
+
+    it("returns when creating the branch is rejected and the remote has moved past the start commit", async () => {
+      const { planning, sha, repos, mainDir, bundle } = await clonedPlanning();
+      gitOrThrow(planning.dir, ["checkout", "--quiet", "-b", BRANCH, sha]);
+      const later = planning.commit({ "GLOSSARY.md": "# v3\n" }, "another job");
+      gitOrThrow(planning.dir, ["checkout", "--quiet", "main"]);
+      const logs: string[] = [];
+
+      await cutIntegrationBranch(repos, rejectCreate, mainDir, bundle, (line) =>
+        logs.push(line),
+      );
+
+      expect(later).not.toBe(sha);
+      expect(gitOrThrow(mainDir, ["rev-parse", BRANCH])).toBe(later);
+      expect(gitOrThrow(planning.dir, ["rev-parse", BRANCH])).toBe(later);
+      expect(logs).toContain(
+        `integration branch ${BRANCH} was created by another job`,
+      );
+    });
+
+    it("throws when creating the branch is rejected and the remote branch does not contain the start commit", async () => {
+      const { planning, initial, sha, repos, mainDir, bundle } =
+        await clonedPlanning();
+      gitOrThrow(planning.dir, ["update-ref", `refs/heads/${BRANCH}`, initial]);
+      expect(initial).not.toBe(sha);
+
+      await expect(
+        cutIntegrationBranch(repos, rejectCreate, mainDir, bundle),
+      ).rejects.toThrow(`could not create ${BRANCH}: ${LOCK_REF}`);
+    });
+
+    it("throws the push error when creating the branch is rejected and the remote has no such branch", async () => {
+      const { repos, mainDir, bundle } = await clonedPlanning();
+
+      await expect(
+        cutIntegrationBranch(repos, rejectCreate, mainDir, bundle),
+      ).rejects.toThrow(`could not create ${BRANCH}: ${LOCK_REF}`);
     });
   });
 });
