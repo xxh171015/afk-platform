@@ -125,7 +125,20 @@ fi
 
 if [ "$node_ok" = 1 ] && [ "$pnpm_ok" = 1 ]; then
   if [ -d node_modules ]; then
-    good "dependencies are installed"
+    if ! cmp -s pnpm-lock.yaml node_modules/.pnpm/lock.yaml 2>/dev/null; then
+      if [ "$check_only" = 1 ]; then
+        problem "依赖和锁文件不一致，运行 pnpm install"
+      else
+        echo "dependencies do not match pnpm-lock.yaml; running pnpm install --frozen-lockfile"
+        if pnpm install --frozen-lockfile; then
+          good "dependencies installed"
+        else
+          problem "Dependencies are not installed. Run: pnpm install"
+        fi
+      fi
+    else
+      good "dependencies are installed"
+    fi
   elif offer "Dependencies are not installed. Run pnpm install now?" pnpm install; then
     good "dependencies installed"
   else

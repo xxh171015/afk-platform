@@ -35,6 +35,7 @@ scripts/restart.sh worker # 新 worker 立刻接活；旧 worker 收到 SIGUSR2�
 ```
 
 - 前提：3000、5173 端口空着（旧的 API/worker 要先停）。`restart.sh` 需要已经有一个 `up.sh` 在跑。
+- `git pull` 之后直接 `scripts/restart.sh api|web|worker` 即可：依赖和锁文件不一致时脚本会先跑 `pnpm install --frozen-lockfile`。装失败则以非 0 退出、不写重启请求，正在跑的进程一个都不动。
 - `restart.sh worker` 之后，用 `ps` 看旧 worker 是否已退出：`ps -ax -o pid,ppid,command | grep 'src/main.ts'`（worker 的命令行是 `node src/main.ts`，父进程应是这次 `up.sh` 或已退出）。还在跑、父进程是 1 的，是没收到排空信号的孤儿。`up.sh` 日志里出现 `old worker <pid> drained` 这一行，说明旧 worker 已经排空退出。
 - 启动后：API `http://127.0.0.1:3000`，页面 `http://127.0.0.1:5173`。终端里 **Ctrl-C 等于关机**：停全部，并放弃正在跑的作业（worker 会先中止手头的 run，最多等 60 秒；再按一次立即全停）。要不丢活地重启，请用 `scripts/restart.sh`，不要 Ctrl-C。
 - API 或页面崩溃时，`up.sh` 只把它自动拉起（有退避；60 秒内连续崩溃 5 次就不再拉起），worker 和它手上的作业继续跑。worker 自己崩溃仍然会停掉其余进程；被排空后退出不算崩溃。
@@ -343,7 +344,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 4. 改覆盖层声明的 SHA，让它和新常量一致。
 5. `pnpm check`：`VENDORED.md` 的 SHA 和常量不一致、提示词引用的 skill 没在挂载目录里时，守卫测试会失败。
 
-合并后，`scripts/restart.sh worker` 让 worker 用上新 skill（旧 worker 排空手上的作业再退出）。规划机器不用操作：平台发出的 plat 变了，规划机器上的 plat 下一条命令就替换自己、重装 skill、重写规划文件（见 1.2 节「以后平台升级了」）。
+合并后 `git pull`，再 `scripts/restart.sh worker` 即可，不必先手跑 `pnpm install`：依赖变了脚本会先装，worker 用上新 skill（旧 worker 排空手上的作业再退出）。装失败时旧进程照常在跑。规划机器不用操作：平台发出的 plat 变了，规划机器上的 plat 下一条命令就替换自己、重装 skill、重写规划文件（见 1.2 节「以后平台升级了」）。
 
 ## 附录 A：场景 A 的票目录
 
