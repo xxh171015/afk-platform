@@ -34,5 +34,6 @@
 </result>
 ```
 
+`result` 是 `"found"` 或 `"unlocated"`。`repo` 是一句字符串。`files` 是路径字符串的数组。`evidence` 和 `reproduction` 是一句字符串。
 - `result` 为 `"found"` 时 `repo` 必填，且只能是一个仓库名。
 - 找不到原需求：`result` 写 `"unlocated"`，`repo` 写 `""`，`files` 写 `[]`，`evidence` 写你查到了什么。

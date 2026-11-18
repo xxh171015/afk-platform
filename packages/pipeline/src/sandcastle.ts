@@ -37,6 +37,7 @@ import {
 import {
   type CursorRunFacts,
   factsFromCursorLine,
+  finalTextFromCursorLine,
   lastAssistantFromCursorLine,
 } from "./cursor-result.ts";
 import { type ExecResult, exec, git } from "./exec.ts";
@@ -46,6 +47,7 @@ import {
   type SandboxSession,
   shellQuote,
 } from "./gate.ts";
+import { resultBlock } from "./result-block.ts";
 
 export interface SandcastleConfig {
   cwd: string; // the slot's clone of the repo: the agent and the gate only ever see this copy
@@ -475,6 +477,29 @@ export function classifyAgentError(error: unknown): {
   return { message, errorKind: timedOut ? "timeout" : "other", commits: [] };
 }
 
+// Sandcastle cuts <result> at the first tag it finds, even one inside the JSON's strings. When it gave up on a
+// result, read the block again from the agent's last message the way the prompts ask for it; a block that then
+// passes the same schema is the run's output, with the commits the run made.
+export function recoverTaggedOutput<Schema extends z.ZodType>(
+  error: unknown,
+  finalText: string | undefined,
+  schema: Schema,
+): { output: z.infer<Schema>; commits: string[] } | undefined {
+  if (!(error instanceof StructuredOutputError) || finalText === undefined)
+    return undefined;
+  const block = resultBlock(finalText, error.tag);
+  if (block === undefined) return undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(block);
+  } catch {
+    return undefined;
+  }
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) return undefined;
+  return { output: parsed.data, commits: error.commits.map((c) => c.sha) };
+}
+
 export class SandcastleAgentRunner implements AgentRunner {
   private readonly config: SandcastleConfig;
 
@@ -513,6 +538,7 @@ export class SandcastleAgentRunner implements AgentRunner {
     const { config } = this;
     let billed: CursorRunFacts = {};
     let lastAssistant: string | undefined;
+    let finalText: string | undefined;
     const logName = options.resultRepair
       ? `${options.stage}-repair`
       : options.stage;
@@ -556,6 +582,7 @@ export class SandcastleAgentRunner implements AgentRunner {
             if (next) billed = next;
             const text = lastAssistantFromCursorLine(event.line);
             if (text) lastAssistant = text;
+            finalText = finalTextFromCursorLine(event.line) ?? finalText;
           },
         },
       });
@@ -566,9 +593,23 @@ export class SandcastleAgentRunner implements AgentRunner {
         ...billed,
       };
     } catch (error) {
+      const message = finalText ?? lastAssistant;
+      const reread = recoverTaggedOutput(error, message, options.schema);
+      if (reread) {
+        config.onNote?.(
+          "read <result> again from the last message: Sandcastle had cut it at a tag inside the JSON",
+        );
+        return {
+          ...reread,
+          durationMs: Date.now() - started,
+          ...billed,
+        };
+      }
       if (error instanceof StructuredOutputError) {
+        const block =
+          message !== undefined ? resultBlock(message, error.tag) : undefined;
         const recovered = recoverStructuredOutput(options.schema, {
-          rawMatched: error.rawMatched,
+          rawMatched: block ?? error.rawMatched,
           lastAssistant,
         });
         const originalCommits = error.commits.map((c) => c.sha);

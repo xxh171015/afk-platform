@@ -13,6 +13,7 @@ import {
   agentRunPlacement,
   classifyAgentError,
   DEPS_CACHE_SANDBOX_PATH,
+  recoverTaggedOutput,
   SANDBOX_SKILLS_DIR,
   type SandboxDocker,
   type SandcastleConfig,
@@ -573,6 +574,69 @@ describe("reading Sandcastle's errors", () => {
     expect(recovered.ok).toBe(true);
     if (!recovered.ok) return;
     expect(recovered.resultFix).toBeUndefined();
+  });
+});
+
+describe("a result Sandcastle could not read", () => {
+  // Run 684's last message: its JSON's strings contain <result>, so Sandcastle cut the block there.
+  const run684 = readFileSync(
+    new URL("./testing/result-block/run-684.txt", import.meta.url),
+    "utf8",
+  );
+  const unreadable = (commits: string[]) =>
+    new StructuredOutputError("bad result", {
+      tag: "result",
+      rawMatched: "` 示例都按对应 schema 校验",
+      cause: new Error("json"),
+      commits: commits.map((sha) => ({ sha })),
+      branch: "agent/T-112",
+    });
+
+  it("is read again from the last message, and keeps the run's commits, when that block passes the schema", () => {
+    const recovered = recoverTaggedOutput(
+      unreadable(["abc", "def"]),
+      run684,
+      ImplementOutputSchema,
+    );
+    expect(recovered?.commits).toEqual(["abc", "def"]);
+    expect(recovered?.output).toMatchObject({ status: "done" });
+  });
+
+  it("stays unread when the last message's block does not pass the schema either", () => {
+    expect(
+      recoverTaggedOutput(
+        unreadable(["abc"]),
+        '<result>\n{ "status": "finished" }\n</result>',
+        ImplementOutputSchema,
+      ),
+    ).toBe(undefined);
+  });
+
+  it("stays unread when the block is not JSON", () => {
+    expect(
+      recoverTaggedOutput(
+        unreadable(["abc"]),
+        "<result>\nnot json\n</result>",
+        ImplementOutputSchema,
+      ),
+    ).toBe(undefined);
+  });
+
+  it("is not tried for an error that is not about the structured output, or without the last message", () => {
+    expect(
+      recoverTaggedOutput(
+        new Error("docker daemon not running"),
+        run684,
+        ImplementOutputSchema,
+      ),
+    ).toBe(undefined);
+    expect(
+      recoverTaggedOutput(
+        unreadable(["abc"]),
+        undefined,
+        ImplementOutputSchema,
+      ),
+    ).toBe(undefined);
   });
 });
 
