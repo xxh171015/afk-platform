@@ -247,6 +247,11 @@ function deps(
       new FakeAgentRunner(slotDir, async (ctx) => {
         const custom = await over.script?.(ctx);
         if (custom) return custom;
+        if (ctx.resultRepair) {
+          return {
+            error: { kind: "invalid-output", message: "no result" },
+          };
+        }
         if (
           ctx.stage === "review" ||
           ctx.stage === "final-review" ||

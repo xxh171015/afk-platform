@@ -2636,6 +2636,28 @@ describe("what a person sees", () => {
     expect((await call("GET", "/runs/99")).status).toBe(404);
   });
 
+  it("records resultFix on the job Run and on extraRuns", async () => {
+    await runningSpec([ticket("a")]);
+    await stage("implement", {
+      outcome: "done",
+      run: { resultFix: "repaired" },
+    });
+    expect((await call("GET", "/runs/1")).body.resultFix).toBe("repaired");
+    await stage("gate", { outcome: "passed" });
+    await stage("review", {
+      outcome: "pass",
+      run: { axis: "standards", resultFix: "normalized" },
+      extraRuns: [{ run: { axis: "spec", resultFix: "repaired" } }],
+    });
+    const runs = await db.pool.query(
+      "SELECT axis, result_fix FROM runs WHERE stage = 'review' ORDER BY id",
+    );
+    expect(runs.rows).toEqual([
+      { axis: "standards", result_fix: "normalized" },
+      { axis: "spec", result_fix: "repaired" },
+    ]);
+  });
+
   it("totals token usage by stage on the spec, and leaves a run without a result line empty", async () => {
     const specId = await runningSpec([ticket("a")]);
     await stage("implement", {

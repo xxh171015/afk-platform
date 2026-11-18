@@ -110,8 +110,101 @@ function normalizeResultInput(raw: unknown): unknown {
   return obj;
 }
 
+const resultSchemaInners = new WeakMap<z.ZodType, z.ZodType>();
+
 function resultSchema<Schema extends z.ZodType>(schema: Schema) {
-  return z.preprocess(normalizeResultInput, schema);
+  const wrapped = z.preprocess(normalizeResultInput, schema);
+  resultSchemaInners.set(wrapped, schema);
+  return wrapped;
+}
+
+export function strictResultSchema<S extends z.ZodType>(schema: S): z.ZodType {
+  return resultSchemaInners.get(schema) ?? schema;
+}
+
+export type ResultFix = "normalized" | "repaired";
+
+export function interpretStructuredOutput<S extends z.ZodType>(
+  schema: S,
+  raw: unknown,
+):
+  | { ok: true; output: z.infer<S>; resultFix?: "normalized" }
+  | { ok: false; issues: { path: string; message: string }[] } {
+  const inner = strictResultSchema(schema);
+  const asIs = inner.safeParse(raw);
+  if (asIs.success) return { ok: true, output: asIs.data as z.infer<S> };
+  const normalized = schema.safeParse(raw);
+  if (normalized.success) {
+    return {
+      ok: true,
+      output: normalized.data as z.infer<S>,
+      resultFix: "normalized",
+    };
+  }
+  return { ok: false, issues: formatResultIssues(normalized.error) };
+}
+
+function parseJsonValue(text: string): unknown {
+  if (text.trim().length === 0) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function rawResultText(input: {
+  rawMatched?: string;
+  lastAssistant?: string;
+  output?: unknown;
+}): string {
+  const tagged = input.rawMatched?.trim() ?? "";
+  if (tagged.length > 0) return tagged;
+  if (input.output !== undefined) {
+    try {
+      return JSON.stringify(input.output);
+    } catch {
+      return String(input.output);
+    }
+  }
+  return input.lastAssistant ?? "";
+}
+
+export function recoverStructuredOutput<S extends z.ZodType>(
+  schema: S,
+  input: {
+    rawMatched?: string;
+    lastAssistant?: string;
+    output?: unknown;
+  },
+):
+  | { ok: true; output: z.infer<S>; resultFix?: "normalized"; rawText: string }
+  | {
+      ok: false;
+      rawText: string;
+      issues: { path: string; message: string }[];
+    } {
+  const rawText = rawResultText(input);
+  const tagged = input.rawMatched?.trim() ?? "";
+  const value =
+    input.output !== undefined && tagged.length === 0
+      ? input.output
+      : parseJsonValue(rawText);
+  if (value === undefined) {
+    return {
+      ok: false,
+      rawText,
+      issues: [
+        {
+          path: "(root)",
+          message: rawText.length > 0 ? "not JSON" : "no result",
+        },
+      ],
+    };
+  }
+  const interpreted = interpretStructuredOutput(schema, value);
+  if (interpreted.ok) return { ...interpreted, rawText };
+  return { ok: false, rawText, issues: interpreted.issues };
 }
 
 export const ImplementOutputSchema = resultSchema(ImplementOutputObject);
@@ -294,6 +387,8 @@ export interface AgentRunOptions<Schema extends z.ZodType> {
   onRawLine?: (line: string) => void; // Cursor's event lines as they come, for the run's log
   // Aborted when the job is lost (the lease was taken back): the run must stop at once.
   signal?: AbortSignal;
+  // A follow-up run that only rewrites <result>; the original commits are kept.
+  resultRepair?: boolean;
 }
 
 export interface AgentRunResult<Output> {
@@ -306,6 +401,7 @@ export interface AgentRunResult<Output> {
   tokenUsage?: unknown;
   durationApiMs?: number;
   cursorCliVersion?: string;
+  resultFix?: ResultFix;
 }
 
 export interface AgentRunner {
@@ -543,7 +639,108 @@ export const PROMPTS = {
   finalFix: join(PROMPT_DIR, "final-fix.md"),
   finalTidy: join(PROMPT_DIR, "final-tidy.md"),
   recheck: join(PROMPT_DIR, "recheck.md"),
+  repairResult: join(PROMPT_DIR, "repair-result.md"),
 } as const;
+
+export const RESULT_REPAIR_WALL_CLOCK_MS = 180_000;
+export const RESULT_REPAIR_IDLE_SECONDS = 180;
+
+export function formatResultIssues(
+  error: z.ZodError,
+): { path: string; message: string }[] {
+  return error.issues.map((issue) => ({
+    path: issue.path.length > 0 ? issue.path.map(String).join(".") : "(root)",
+    message: issue.message,
+  }));
+}
+
+export function resultSectionOf(prompt: string): string {
+  const matches = [...prompt.matchAll(/^## 结果\s*$/gm)];
+  const last = matches.at(-1);
+  if (last?.index === undefined) return prompt;
+  return prompt.slice(last.index).trim();
+}
+
+export function writeRepairPrompt(
+  dir: string,
+  input: {
+    resultSection: string;
+    rawText: string;
+    issues: readonly { path: string; message: string }[];
+  },
+): { promptFile: string; prompt: string } {
+  const template = readFileSync(PROMPTS.repairResult, "utf8").trimEnd();
+  const listed =
+    input.issues.length > 0
+      ? input.issues
+          .map((issue) => `- ${issue.path}：${issue.message}`)
+          .join("\n")
+      : "- （无逐条路径）";
+  const prompt = `${template}
+
+## 这个阶段的结果格式
+
+${input.resultSection}
+
+## 原始文本
+
+${input.rawText.length > 0 ? input.rawText : "（空）"}
+
+## 校验错误
+
+${listed}
+`;
+  mkdirSync(dir, { recursive: true });
+  const promptFile = join(dir, "repair-prompt.md");
+  writeFileSync(promptFile, prompt);
+  return { promptFile, prompt };
+}
+
+export function addTokenUsage(a?: unknown, b?: unknown): unknown | undefined {
+  if (a === undefined && b === undefined) return undefined;
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  if (
+    typeof a !== "object" ||
+    a === null ||
+    Array.isArray(a) ||
+    typeof b !== "object" ||
+    b === null ||
+    Array.isArray(b)
+  ) {
+    return a;
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    const prev = out[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out[key] =
+        (typeof prev === "number" && Number.isFinite(prev) ? prev : 0) + value;
+    } else if (prev === undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+export function repairRunOptions<S extends z.ZodType>(
+  options: AgentRunOptions<S>,
+  promptFile: string,
+  branch: string,
+): AgentRunOptions<S> {
+  const { model: _model, ...rest } = options;
+  return {
+    ...rest,
+    promptFile,
+    branch,
+    baseBranch: options.branch,
+    wallClockMs: RESULT_REPAIR_WALL_CLOCK_MS,
+    idleSeconds: RESULT_REPAIR_IDLE_SECONDS,
+    resultRepair: true,
+  };
+}
 
 // The skills version the overlay was written against, from its first line.
 export function overlaySkillsSha(overlay: string): string | undefined {
