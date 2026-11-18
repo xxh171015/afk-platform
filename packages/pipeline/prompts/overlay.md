@@ -44,4 +44,4 @@
 
 ## 结果
 
-最后一条消息的末尾，按这个阶段规定的格式输出一段 `<result>…</result>`，标签原样保留，里面是一个 JSON 对象，不要加别的字段。
+先把结果 JSON 写进 `/tmp/afk-result.json`，跑 `node /home/agent/afk/check-result.mjs <阶段> /tmp/afk-result.json`（阶段名就是 `/context/run.json` 的阶段），改到通过，再把同样的内容放进最后一条消息末尾的 `<result>…</result>`。标签原样保留，里面是一个 JSON 对象，不要加别的字段。

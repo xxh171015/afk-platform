@@ -85,6 +85,24 @@ describe("the mounts", () => {
       expect(mount.readonly).toBe(true);
     }
   });
+
+  it("mounts the result checker read-only at /home/agent/afk/check-result.mjs", () => {
+    expect(
+      sandboxMounts({
+        ctxDir: "/c",
+        skillsMount: "/s",
+        checkResultMount: "/host/check-result.mjs",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          hostPath: "/host/check-result.mjs",
+          sandboxPath: "/home/agent/afk/check-result.mjs",
+          readonly: true,
+        },
+      ]),
+    );
+  });
 });
 
 describe("the environment", () => {
@@ -368,6 +386,30 @@ describe("the hardened sandbox", () => {
     ).toBe(true);
     expect(
       volumes.some((v) => v.includes(`${SANDBOX_SKILLS_DIR}:/context:ro`)),
+    ).toBe(true);
+  });
+
+  it("puts the result checker on the agent sandbox as a read-only file mount", async () => {
+    const fake = recordingDocker();
+    await startProvider({
+      image: "sandcastle:afk-platform",
+      mounts: sandboxMounts({
+        ctxDir: SANDBOX_SKILLS_DIR,
+        skillsMount: SANDBOX_SKILLS_DIR,
+        checkResultMount: "/host/check-result.mjs",
+      }),
+      kind: "agent",
+      runId: "R-9",
+      docker: fake.docker,
+    });
+    const run = dockerRunOf(fake.calls);
+    const volumes = run.flatMap((arg, i) => (run[i - 1] === "-v" ? [arg] : []));
+    expect(
+      volumes.some((v) =>
+        v.includes(
+          "/host/check-result.mjs:/home/agent/afk/check-result.mjs:ro",
+        ),
+      ),
     ).toBe(true);
   });
 });

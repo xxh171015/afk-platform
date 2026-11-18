@@ -181,6 +181,7 @@ export type {
 export {
   agentEnv,
   agentRunPlacement,
+  CHECK_RESULT_SANDBOX_PATH,
   CONTEXT_SANDBOX_PATH,
   classifyAgentError,
   DEFAULT_SANDBOX_LIMITS,

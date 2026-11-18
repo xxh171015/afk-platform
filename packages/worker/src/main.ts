@@ -33,6 +33,7 @@ import {
   SKILLS_SHA,
 } from "@afk/shared";
 import { createWorkerApi, reportCleanup, reportCodeHosts } from "./api.ts";
+import { writeCheckResultBundle } from "./check-result-bundle.ts";
 import { gitlabCredentialFiles, workerCodeHosts } from "./code-hosts.ts";
 import { ConfigError, loadConfig, type WorkerConfig } from "./config.ts";
 import { depsCacheDirOf } from "./deps-cache.ts";
@@ -148,12 +149,19 @@ const repos = new RepoStore(join(config.home, "repos"));
 const snapshots = new SnapshotStore(join(config.home, "snapshots"));
 const slotsRoot = join(config.home, "slots");
 const depsCacheRoot = join(config.home, "cache", "deps");
+const checkResultFile = join(config.home, "check-result.mjs");
+try {
+  await writeCheckResultBundle(checkResultFile);
+} catch (error) {
+  fail(`could not bundle the result checker: ${reason(error)}`);
+}
 // Each run writes its raw logs to a folder of its own: two slots at once, or one run after another, never share one.
 const sandcastle = (cwd: string, runId?: string): SandcastleConfig => ({
   cwd,
   image: config.image,
   model: config.model,
   skillsMount: SANDBOX_SKILLS_DIR,
+  checkResultMount: checkResultFile,
   cursorApiKey: config.cursorApiKey,
   limits: config.sandboxLimits,
   ...(runId ? { runId } : {}),
