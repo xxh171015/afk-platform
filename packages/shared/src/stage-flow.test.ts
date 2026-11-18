@@ -27,13 +27,38 @@ const enqueue = (stage: string, event?: string) =>
     stage,
     ...(event ? { event: { type: event } } : {}),
   });
+const enqueueBoth = expect.objectContaining({
+  type: "enqueue-both",
+  stages: ["gate", "review"],
+});
+const waiting = expect.objectContaining({ type: "wait" });
 const block = (reason: string) => ({ type: "block", reason });
+const running = (
+  progress: Progress,
+  extra: Partial<Progress> = {},
+): Progress => ({
+  ...progress,
+  parallelReview: "running",
+  ...extra,
+});
+const SHA = "sha-gate";
+const OTHER = "sha-other";
+const gatePassed = (sha?: string) => ({
+  stage: "gate" as const,
+  outcome: "passed" as const,
+  ...(sha ? { commitSha: sha } : {}),
+});
+const reviewAt = (outcome: "pass" | "fix", sha?: string) => ({
+  stage: "review" as const,
+  outcome,
+  ...(sha ? { commitSha: sha } : {}),
+});
 
 describe("the happy path", () => {
   it("implement -> gate -> review -> merge -> done", () => {
     expect(
       advanceStage({ stage: "implement", outcome: "done" }, fresh),
-    ).toEqual(enqueue("gate"));
+    ).toEqual(enqueueBoth);
     expect(advanceStage({ stage: "gate", outcome: "passed" }, fresh)).toEqual(
       enqueue("review"),
     );
@@ -96,7 +121,7 @@ describe("blocking after an agent run", () => {
     }
     it(`${stage} reporting done goes to the gate`, () => {
       expect(advanceStage({ stage, outcome: "done" }, fresh)).toEqual(
-        enqueue("gate"),
+        enqueueBoth,
       );
     });
   }
@@ -248,6 +273,10 @@ describe("a worst-case ticket", () => {
       if (decision.type === "block")
         throw new Error(`blocked: ${decision.reason}`);
       if (decision.type === "await-fix") throw new Error("unexpected fix wait");
+      if (decision.type === "enqueue-both" || decision.type === "wait") {
+        progress = decision.progress;
+        continue;
+      }
       if (decision.type === "done") {
         const next = ticketTransition(state, { type: "merge-succeeded" });
         expect(next).toMatchObject({ ok: true, state: "done" });
@@ -410,6 +439,189 @@ describe("one automatic retry of an agent stage that timed out or gave no result
       expect.objectContaining({
         progress: expect.objectContaining({ autoRetried: true }),
       }),
+    );
+  });
+});
+
+describe("gate and review in parallel", () => {
+  it("implement done dispatches gate and review together and marks review running", () => {
+    const decision = advanceStage(
+      { stage: "implement", outcome: "done" },
+      fresh,
+    );
+    expect(decision).toEqual(enqueueBoth);
+    expect(decision).toMatchObject({ progress: { parallelReview: "running" } });
+  });
+
+  it("gate-fix done also dispatches both while the ticket is unreviewed", () => {
+    expect(
+      advanceStage({ stage: "gate-fix", outcome: "done" }, used("gate-fix")),
+    ).toEqual(enqueueBoth);
+  });
+
+  it("a gate pass while review is still running waits and records the passed commit", () => {
+    const decision = advanceStage(gatePassed(SHA), running(fresh));
+    expect(decision).toEqual(waiting);
+    expect(decision).toMatchObject({
+      progress: { parallelReview: "running", gatePassedSha: SHA },
+    });
+  });
+
+  it("a review pass while the gate is still running waits and records the conclusion", () => {
+    const decision = advanceStage(reviewAt("pass", SHA), running(fresh));
+    expect(decision).toEqual(waiting);
+    expect(decision).toMatchObject({
+      progress: { parallelReview: "pass", parallelReviewSha: SHA },
+    });
+  });
+
+  it("a review fix while the gate is still running waits and records the conclusion", () => {
+    const decision = advanceStage(reviewAt("fix", SHA), running(fresh));
+    expect(decision).toEqual(waiting);
+    expect(decision).toMatchObject({
+      progress: { parallelReview: "fix", parallelReviewSha: SHA },
+    });
+  });
+
+  it("gate pass then review pass of the same commit goes to merge and marks the ticket reviewed", () => {
+    const afterGate = advanceStage(gatePassed(SHA), running(fresh));
+    expect(afterGate.type).toBe("wait");
+    const decision = advanceStage(
+      reviewAt("pass", SHA),
+      (afterGate as { progress: Progress }).progress,
+    );
+    expect(decision).toEqual(enqueue("merge", "checks-passed"));
+    expect(decision).toMatchObject({ progress: { reviewed: true } });
+  });
+
+  it("gate pass then review fix of the same commit spends review-fix", () => {
+    const afterGate = advanceStage(gatePassed(SHA), running(fresh));
+    const decision = advanceStage(
+      reviewAt("fix", SHA),
+      (afterGate as { progress: Progress }).progress,
+    );
+    expect(decision).toEqual(enqueue("review-fix"));
+    expect(decision).toMatchObject({
+      progress: { reviewed: true, fixCounts: { "review-fix": 1 } },
+    });
+  });
+
+  it("review pass then gate pass of the same commit goes to merge and marks the ticket reviewed", () => {
+    const afterReview = advanceStage(reviewAt("pass", SHA), running(fresh));
+    const decision = advanceStage(
+      gatePassed(SHA),
+      (afterReview as { progress: Progress }).progress,
+    );
+    expect(decision).toEqual(enqueue("merge", "checks-passed"));
+    expect(decision).toMatchObject({ progress: { reviewed: true } });
+  });
+
+  it("review fix then gate pass of the same commit spends review-fix", () => {
+    const afterReview = advanceStage(reviewAt("fix", SHA), running(fresh));
+    const decision = advanceStage(
+      gatePassed(SHA),
+      (afterReview as { progress: Progress }).progress,
+    );
+    expect(decision).toEqual(enqueue("review-fix"));
+    expect(decision).toMatchObject({
+      progress: { reviewed: true, fixCounts: { "review-fix": 1 } },
+    });
+  });
+
+  it("a failed gate while review is running clears the parallel review and spends gate-fix", () => {
+    const decision = advanceStage(
+      { stage: "gate", outcome: "failed" },
+      running(fresh),
+    );
+    expect(decision).toEqual(enqueue("gate-fix"));
+    expect(decision).toMatchObject({
+      progress: { fixCounts: { "gate-fix": 1 } },
+    });
+    expect(
+      (decision as { progress: Progress }).progress.parallelReview,
+    ).toBeUndefined();
+  });
+
+  it("a failed gate while review already concluded still clears that conclusion and spends gate-fix", () => {
+    const decision = advanceStage(
+      { stage: "gate", outcome: "failed" },
+      {
+        ...fresh,
+        parallelReview: "pass",
+        parallelReviewSha: SHA,
+      },
+    );
+    expect(decision).toEqual(enqueue("gate-fix"));
+    expect(
+      (decision as { progress: Progress }).progress.parallelReview,
+    ).toBeUndefined();
+  });
+
+  it.each([
+    "protected-path-changed",
+    "contract-copy-mismatch",
+    "tests-removed",
+  ] as const)(
+    "a %s gate while review is running clears the parallel review",
+    (outcome) => {
+      const decision = advanceStage({ stage: "gate", outcome }, running(fresh));
+      expect(decision).toEqual(block(outcome));
+    },
+  );
+
+  it("invalid-output on a parallel review retries only review and keeps it running", () => {
+    const decision = advanceStage(
+      { stage: "review", outcome: "invalid-output" },
+      running(fresh),
+    );
+    expect(decision).toEqual({
+      type: "enqueue",
+      stage: "review",
+      autoRetry: "invalid-output",
+      progress: { ...running(fresh), autoRetried: true },
+    });
+  });
+
+  it("joins when one side did not name a commit", () => {
+    const afterGate = advanceStage(gatePassed(SHA), running(fresh));
+    const decision = advanceStage(
+      { stage: "review", outcome: "pass" },
+      (afterGate as { progress: Progress }).progress,
+    );
+    expect(decision).toEqual(enqueue("merge", "checks-passed"));
+  });
+
+  it("drops a review of a different commit than the one that passed the gate and dispatches review again", () => {
+    const afterGate = advanceStage(gatePassed(SHA), running(fresh));
+    const decision = advanceStage(
+      reviewAt("pass", OTHER),
+      (afterGate as { progress: Progress }).progress,
+    );
+    expect(decision).toEqual(enqueue("review"));
+    expect(decision).toMatchObject({
+      progress: {
+        parallelReview: "running",
+        gatePassedSha: SHA,
+        reviewed: false,
+      },
+    });
+  });
+
+  it("reviewed tickets only dispatch the gate after review-fix or merge-fix", () => {
+    expect(
+      advanceStage(
+        { stage: "review-fix", outcome: "done" },
+        reviewed(used("review-fix")),
+      ),
+    ).toEqual(enqueue("gate"));
+    expect(
+      advanceStage(
+        { stage: "merge-fix", outcome: "done" },
+        reviewed(used("merge-fix")),
+      ),
+    ).toEqual(enqueue("gate"));
+    expect(advanceStage(gatePassed(SHA), reviewed(fresh))).toEqual(
+      enqueue("merge", "checks-passed"),
     );
   });
 });

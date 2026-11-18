@@ -3,6 +3,7 @@ import {
   type AutoMergeStatus,
   autoMergeLine,
   decisionTally,
+  findingResolutionPhrase,
   LOCATE_REASON_LABELS,
   MAX_INTEGRATION_ROUNDS,
   type PullRequestRowView,
@@ -165,6 +166,7 @@ interface TicketLike {
   appended: boolean;
   brief: BriefLike | null;
   structuredBrief?: StructuredBrief | null;
+  currentStage?: string | null;
   waitingSince?: string;
   blocking?: BlockingLike;
 }
@@ -191,6 +193,9 @@ const shaList = (label: string, shas: Record<string, string> | null) =>
 
 const stateOf = (t: Pick<TicketLike, "state" | "blockedReason">) =>
   t.blockedReason ? `${t.state} (${t.blockedReason})` : t.state;
+
+const stageOf = (t: Pick<TicketLike, "currentStage">) =>
+  t.currentStage ? `  ${t.currentStage}` : "";
 
 interface FinalizationLike {
   id?: number;
@@ -366,7 +371,7 @@ function structuredBriefLines(
 
 function ticketLines(t: TicketLike): string[] {
   return [
-    `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}  ${t.title}`,
+    `${t.displayId}  ${t.specDisplayId}  ${stateOf(t)}${stageOf(t)}  ${t.title}`,
     ...waitingLines(t.blocking, t.waitingSince),
     ...structuredBriefLines(t.structuredBrief),
     ...briefLines(t.brief, "    "),
@@ -547,7 +552,7 @@ export function ticketText(view: {
 }): string {
   const { ticket } = view;
   return [
-    `${ticket.displayId}  ${stateOf(ticket)}  ${ticket.title}`,
+    `${ticket.displayId}  ${stateOf(ticket)}${stageOf(ticket)}  ${ticket.title}`,
     `spec ${ticket.specDisplayId}, repo ${ticket.repo}, version ${ticket.contentVersion}`,
     ...(view.versions.length > 1
       ? [
@@ -593,7 +598,7 @@ export function ticketText(view: {
           "findings:",
           ...view.findings.map(
             (f) =>
-              `  [${f.resolution}] ${f.axis ? `${f.axis} ` : ""}${f.kind}: ${f.body}`,
+              `  [${findingResolutionPhrase(f.resolution)}] ${f.axis ? `${f.axis} ` : ""}${f.kind}: ${f.body}`,
           ),
         ]
       : []),
@@ -702,7 +707,7 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           "findings",
           repo.findings.map(
             (f) =>
-              `      [${f.resolution}] ${f.ticket ?? "spec"} ${f.stage}${f.axis ? ` (${f.axis})` : ""} ${f.kind}: ${f.body}`,
+              `      [${findingResolutionPhrase(f.resolution)}] ${f.ticket ?? "spec"} ${f.stage}${f.axis ? ` (${f.axis})` : ""} ${f.kind}: ${f.body}`,
           ),
         ),
         ...section(

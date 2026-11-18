@@ -33,6 +33,8 @@ import {
 import { updateBranchJobFailed } from "../host/update-branch.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
+  CLEAR_PARALLEL_REVIEW_SQL,
+  cancelTicketJobs,
   enqueueFinalJob,
   enqueueStageJob,
   readFinalPayload,
@@ -344,9 +346,11 @@ async function ticketStageFailed(
   const blocked = ticketTransition(from, { type: "block", reason });
   if (!blocked.ok) throw new Error(blocked.reason);
   await client.query(
-    "UPDATE tickets SET state = 'blocked', blocked_reason = $2 WHERE id = $1",
+    `UPDATE tickets SET state = 'blocked', blocked_reason = $2, ${CLEAR_PARALLEL_REVIEW_SQL}
+     WHERE id = $1`,
     [read.ticketId, reason],
   );
+  await cancelTicketJobs(client, read.ticketId, "the ticket was blocked");
   // it no longer holds an agent run
   await schedulePass(client, row.spec_id);
   return { status: "blocked", failures };
