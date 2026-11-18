@@ -27,6 +27,7 @@ import {
   type AgentRunOptions,
   type AgentRunResult,
   addTokenUsage,
+  interpretStructuredOutput,
   RESULT_REPAIR_WALL_CLOCK_MS,
   recoverStructuredOutput,
   repairRunOptions,
@@ -495,13 +496,20 @@ export function classifyAgentError(error: unknown): {
 }
 
 // Sandcastle cuts <result> at the first tag it finds, even one inside the JSON's strings. When it gave up on a
-// result, read the block again from the agent's last message the way the prompts ask for it; a block that then
-// passes the same schema is the run's output, with the commits the run made.
+// result, read the block again from the agent's last message the way the prompts ask for it. interpretStructuredOutput
+// decides as-is vs preprocess; a block that only passes after preprocess records resultFix normalized. The commits
+// are the ones the run made.
 export function recoverTaggedOutput<Schema extends z.ZodType>(
   error: unknown,
   finalText: string | undefined,
   schema: Schema,
-): { output: z.infer<Schema>; commits: string[] } | undefined {
+):
+  | {
+      output: z.infer<Schema>;
+      commits: string[];
+      resultFix?: "normalized";
+    }
+  | undefined {
   if (!(error instanceof StructuredOutputError) || finalText === undefined)
     return undefined;
   const block = resultBlock(finalText, error.tag);
@@ -512,9 +520,13 @@ export function recoverTaggedOutput<Schema extends z.ZodType>(
   } catch {
     return undefined;
   }
-  const parsed = schema.safeParse(json);
-  if (!parsed.success) return undefined;
-  return { output: parsed.data, commits: error.commits.map((c) => c.sha) };
+  const interpreted = interpretStructuredOutput(schema, json);
+  if (!interpreted.ok) return undefined;
+  return {
+    output: interpreted.output,
+    commits: error.commits.map((c) => c.sha),
+    ...(interpreted.resultFix ? { resultFix: interpreted.resultFix } : {}),
+  };
 }
 
 export class SandcastleAgentRunner implements AgentRunner {
