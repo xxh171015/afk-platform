@@ -43,6 +43,15 @@ if [ ! -f "$pidfile" ]; then
 fi
 
 old_pid=$(tr -d ' \n' <"$pidfile")
+
+if ! cmp -s pnpm-lock.yaml node_modules/.pnpm/lock.yaml 2>/dev/null; then
+  echo "dependencies do not match pnpm-lock.yaml; running pnpm install --frozen-lockfile" >&2
+  if ! pnpm install --frozen-lockfile; then
+    echo "pnpm install --frozen-lockfile failed; leaving running processes unchanged" >&2
+    exit 1
+  fi
+fi
+
 printf '%s\n' "$target" >"$run_dir/restart.request"
 n=0
 while [ "$n" -lt 50 ]; do
