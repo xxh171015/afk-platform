@@ -644,6 +644,43 @@ describe("a result Sandcastle could not read", () => {
     expect(recovered?.output).toMatchObject({ status: "done" });
   });
 
+  it("records resultFix normalized when the last message is Run 577's workaround that carried a ref", () => {
+    const last = `<result>
+${JSON.stringify({
+  status: "done",
+  summary: "did it",
+  acceptance: { "returns csv": ["csv test"] },
+  decisions: [
+    {
+      kind: "workaround",
+      text: "skipped drizzle generate",
+      ref: "91813f8",
+    },
+  ],
+})}
+</result>`;
+    const recovered = recoverTaggedOutput(
+      unreadable(["abc"]),
+      last,
+      ImplementOutputSchema,
+    );
+    expect(recovered).toEqual(
+      expect.objectContaining({
+        resultFix: "normalized",
+        commits: ["abc"],
+        output: expect.objectContaining({
+          status: "done",
+          decisions: [
+            {
+              kind: "workaround",
+              text: "skipped drizzle generate（ref: 91813f8）",
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
   it("stays unread when the last message's block does not pass the schema either", () => {
     expect(
       recoverTaggedOutput(
