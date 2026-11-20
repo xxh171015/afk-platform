@@ -33,6 +33,11 @@ export interface StampResult {
   error?: string;
 }
 
+function listOf(value: string | readonly string[] | undefined): string[] {
+  if (value === undefined) return [];
+  return typeof value === "string" ? [value] : [...value];
+}
+
 // Rewrites the ticket's new commits so each carries the trailers. Done with plumbing, commit by commit: same
 // tree, same author, same message plus trailers, parents mapped to the rewritten ones. Unlike a rebase this
 // keeps merge commits and the conflict resolutions in them exactly as the agent made them.
@@ -47,18 +52,8 @@ export function stampTrailers(request: StampRequest): StampResult {
     }
   }
   const tip = gitOrThrow(repoDir, ["rev-parse", branch]);
-  const excluded =
-    request.exclude === undefined
-      ? []
-      : typeof request.exclude === "string"
-        ? [request.exclude]
-        : [...request.exclude];
-  const globs =
-    request.excludeGlobs === undefined
-      ? []
-      : typeof request.excludeGlobs === "string"
-        ? [request.excludeGlobs]
-        : [...request.excludeGlobs];
+  const excluded = listOf(request.exclude);
+  const globs = listOf(request.excludeGlobs);
   const listing = git(repoDir, [
     "rev-list",
     "--reverse",
