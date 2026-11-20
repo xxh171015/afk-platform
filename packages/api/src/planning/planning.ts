@@ -13,7 +13,9 @@ import {
   planImport,
   resolveLimits,
   type SPEC_TYPES,
+  type SpecState,
   type StageModels,
+  specTransition,
   storedMergePolicy,
   type TicketReviewMode,
 } from "@afk/shared";
@@ -21,6 +23,7 @@ import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import { applyOrigin } from "../events/origin.ts";
 import { hostKindOf, mixedHostsWith } from "../host/code-hosts.ts";
+import { enqueuePrDraft } from "../host/host-jobs.ts";
 import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
 import { ensureIntegrationBranches } from "./integration-branches.ts";
@@ -309,11 +312,22 @@ export type ImportResult =
   | { status: "not-importable"; message: string }
   | { status: "invalid"; errors: string[] };
 
-const APPENDABLE_STATES = ["planned", "running", "paused"];
+const APPENDABLE_STATES: readonly SpecState[] = [
+  "planned",
+  "running",
+  "paused",
+  "awaiting-review",
+];
+
+function appendableStatesPhrase(): string {
+  const last = APPENDABLE_STATES[APPENDABLE_STATES.length - 1];
+  return `${APPENDABLE_STATES.slice(0, -1).join(", ")} or ${last}`;
+}
 
 // All or nothing: the file is validated first, then written in one transaction. The spec row is locked, so
 // two imports of the same spec cannot both pass the "no tickets yet" check. With `append` the file is added to a
-// spec that is already confirmed: the new tickets are scheduled at once.
+// spec that is already confirmed (planned, running, paused, or awaiting-review): the new tickets are scheduled
+// at once. Appending to awaiting-review moves the spec to reworking.
 export async function importTickets(
   pool: pg.Pool,
   specId: number,
@@ -343,10 +357,10 @@ export async function importTickets(
           message: `${shownId} is a draft; import its tickets without --append`,
         });
       }
-      if (!APPENDABLE_STATES.includes(specRow.state)) {
+      if (!APPENDABLE_STATES.includes(specRow.state as SpecState)) {
         return await rollback(client, {
           status: "not-importable",
-          message: `${shownId} is ${specRow.state}; tickets can only be appended while it is planned, running or paused`,
+          message: `${shownId} is ${specRow.state}; tickets can only be appended while it is ${appendableStatesPhrase()}`,
         });
       }
     } else {
@@ -492,6 +506,27 @@ export async function importTickets(
     }
 
     if (append) {
+      if (specRow.state === "awaiting-review") {
+        const next = specTransition("awaiting-review", "rework");
+        if (!next.ok) throw new Error(next.reason);
+        await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+          specId,
+          next.state,
+        ]);
+        await client.query(
+          `UPDATE finalizations SET step = 'final-review', state = 'active',
+             blocked_reason = NULL, auto_retried = false, retry_note = NULL,
+             job_floor = (SELECT COALESCE(max(id), 0) FROM jobs)
+           WHERE spec_id = $1`,
+          [specId],
+        );
+        const pulls = await client.query<{ id: number }>(
+          "SELECT id FROM pull_requests WHERE spec_id = $1 AND state = 'open' ORDER BY id",
+          [specId],
+        );
+        for (const pull of pulls.rows)
+          await enqueuePrDraft(client, { pullId: pull.id });
+      }
       await ensureIntegrationBranches(
         client,
         specId,

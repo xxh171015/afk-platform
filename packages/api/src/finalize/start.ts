@@ -1,16 +1,22 @@
-import { type SpecEvent, specTransition } from "@afk/shared";
+import { type SpecEvent, type SpecState, specTransition } from "@afk/shared";
 import type pg from "pg";
 import { enqueueSpecCleanup } from "../host/host-jobs.ts";
 import { dropPotentialConflicts } from "../host/trial-merge.ts";
 import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
 
-// A running spec takes the event; called with the spec locked.
-async function moveRunningSpec(
+// A running or reworking spec takes the event; called with the spec locked.
+async function moveSpec(
   client: pg.PoolClient,
   specId: number,
   event: SpecEvent,
 ): Promise<void> {
-  const next = specTransition("running", event);
+  const spec = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  const from = spec.rows[0]?.state;
+  if (!from) throw new Error(`no spec ${specId}`);
+  const next = specTransition(from, event);
   if (!next.ok) throw new Error(next.reason);
   await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
     specId,
@@ -18,8 +24,9 @@ async function moveRunningSpec(
   ]);
 }
 
-// When the last ticket of a running spec is done, the spec moves to finalizing and every repo it touched gets
-// its overall review queued. Called by the scheduler with the spec locked, so it happens exactly once.
+// When the last ticket of a running or reworking spec is done, the spec moves to finalizing and every repo it
+// touched gets its overall review queued. Called by the scheduler with the spec locked, so it happens exactly once.
+// Rework reuses the spec's existing finalization rows (reset to final-review / active when tickets were appended).
 // Cancelled tickets do not hold it back; blocked, pending, queued, running and merging ones do.
 export async function startFinalization(
   client: pg.PoolClient,
@@ -34,7 +41,7 @@ export async function startFinalization(
   const { open, done } = counts.rows[0] as { open: string; done: string };
   if (Number(open) > 0 || Number(done) === 0) return false;
 
-  await moveRunningSpec(client, specId, "all-tickets-done");
+  await moveSpec(client, specId, "all-tickets-done");
 
   const repos = await client.query<{ repo_id: number }>(
     "SELECT DISTINCT repo_id FROM tickets WHERE spec_id = $1 AND state = 'done' ORDER BY repo_id",
@@ -43,7 +50,8 @@ export async function startFinalization(
   const { holdFinalReviewForUpdate } = await import("../host/update-branch.ts");
   for (const { repo_id: repoId } of repos.rows) {
     await client.query(
-      "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, $2)",
+      `INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, $2)
+       ON CONFLICT (spec_id, repo_id) DO NOTHING`,
       [specId, repoId],
     );
     if (await holdFinalReviewForUpdate(client, specId, repoId)) continue;
@@ -66,12 +74,14 @@ export async function startFinalization(
   ) {
     if (await holdFinalReviewForUpdate(client, specId, planningRepoId)) {
       await client.query(
-        "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, $2)",
+        `INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, $2)
+         ON CONFLICT (spec_id, repo_id) DO NOTHING`,
         [specId, planningRepoId],
       );
     } else {
       await client.query(
-        "INSERT INTO finalizations (spec_id, repo_id, state) VALUES ($1, $2, 'done')",
+        `INSERT INTO finalizations (spec_id, repo_id, state) VALUES ($1, $2, 'done')
+         ON CONFLICT (spec_id, repo_id) DO NOTHING`,
         [specId, planningRepoId],
       );
     }
@@ -97,7 +107,7 @@ export async function cancelIfAllTicketsCancelled(
   };
   if (Number(other) > 0 || Number(cancelled) === 0) return false;
 
-  await moveRunningSpec(client, specId, "cancel");
+  await moveSpec(client, specId, "cancel");
   await dropPotentialConflicts(client, specId);
   // the branches it made, like any cancelled spec's
   await enqueueSpecCleanup(client, { specId });

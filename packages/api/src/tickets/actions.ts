@@ -530,6 +530,10 @@ export async function approveRemovedTestsForSpec(
           [specId],
         )
       ).rows.map((row) => row.state),
+      hasIncompleteAppendedTickets: await hasIncompleteAppendedTickets(
+        client,
+        specId,
+      ),
     });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
@@ -748,6 +752,10 @@ export async function approveRecheckForSpec(
           [specId],
         )
       ).rows.map((row) => row.state),
+      hasIncompleteAppendedTickets: await hasIncompleteAppendedTickets(
+        client,
+        specId,
+      ),
     });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
@@ -1046,6 +1054,17 @@ export async function cancelTicket(
   });
 }
 
+async function hasIncompleteAppendedTickets(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<boolean> {
+  const open = await client.query(
+    "SELECT 1 FROM tickets WHERE spec_id = $1 AND appended AND state NOT IN ('done', 'cancelled') LIMIT 1",
+    [specId],
+  );
+  return (open.rowCount ?? 0) > 0;
+}
+
 // The spec's state once its lock is held, so it cannot change under the caller; undefined for an unknown spec.
 async function lockedSpecState(
   client: pg.PoolClient,
@@ -1085,6 +1104,10 @@ async function unpauseSpec(
     const dest = specResumeTarget({
       hasFinalizations: (finals.rowCount ?? 0) > 0,
       pullStates: pulls.rows.map((row) => row.state),
+      hasIncompleteAppendedTickets: await hasIncompleteAppendedTickets(
+        client,
+        specId,
+      ),
     });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
@@ -1105,6 +1128,7 @@ async function unpauseSpec(
     if (
       row &&
       (row.state === "running" ||
+        row.state === "reworking" ||
         row.state === "finalizing" ||
         row.state === "awaiting-review" ||
         row.state === "partially-merged")

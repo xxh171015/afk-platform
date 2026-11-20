@@ -19,9 +19,23 @@ export type SpecEvent =
   | "pr-opened"
   | "some-prs-merged"
   | "all-prs-merged"
+  | "rework"
   | "pause"
   | "resume"
   | "cancel";
+
+// Specs whose tickets the scheduler may start. Reworking is the same as running for slots and budget.
+export const SCHEDULABLE_SPEC_STATES: readonly SpecState[] = [
+  "running",
+  "reworking",
+];
+
+export function specIsSchedulable(state: SpecState): boolean {
+  return (SCHEDULABLE_SPEC_STATES as readonly string[]).includes(state);
+}
+
+// Why unfinished tickets are cancelled when a person merges the PR during rework.
+export const REWORK_PR_MERGED_REASON = "返工中 PR 被合并";
 
 export type SpecTransition =
   | { ok: true; state: SpecState }
@@ -37,9 +51,15 @@ const TRANSITIONS: Partial<
   "awaiting-review": {
     "some-prs-merged": "partially-merged",
     "all-prs-merged": "merged",
+    rework: "reworking",
     pause: "paused",
   },
   "partially-merged": { "all-prs-merged": "merged", pause: "paused" },
+  reworking: {
+    "all-tickets-done": "finalizing",
+    "all-prs-merged": "merged",
+    pause: "paused",
+  },
   paused: { resume: "running" },
 };
 
@@ -60,12 +80,15 @@ export function specTransition(
 }
 
 // Where a paused spec goes on resume: 收尾 (finalizing) and 验收 (awaiting-review / partially-merged)
-// keep their place; everyone else returns to running.
+// keep their place; unfinished appended tickets of a wrap-up that already opened PRs return to reworking;
+// everyone else to running.
 export function specResumeTarget(input: {
   hasFinalizations: boolean;
   pullStates: readonly ("open" | "closed" | "merged")[];
+  hasIncompleteAppendedTickets?: boolean;
 }): SpecState {
   if (!input.hasFinalizations) return "running";
+  if (input.hasIncompleteAppendedTickets) return "reworking";
   const live = input.pullStates.filter((state) => state !== "closed");
   if (live.length === 0) return "finalizing";
   const merged = live.filter((state) => state === "merged").length;

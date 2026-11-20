@@ -282,7 +282,14 @@ export {
 } from "./slotless-jobs.ts";
 export { isSlowStage, SLOW_STAGE_FACTOR } from "./slow-stage.ts";
 export type { SpecEvent, SpecState, SpecTransition } from "./spec-state.ts";
-export { SPEC_STATES, specResumeTarget, specTransition } from "./spec-state.ts";
+export {
+  REWORK_PR_MERGED_REASON,
+  SCHEDULABLE_SPEC_STATES,
+  SPEC_STATES,
+  specIsSchedulable,
+  specResumeTarget,
+  specTransition,
+} from "./spec-state.ts";
 export type {
   AutoRetryOutcome,
   ParallelReviewState,

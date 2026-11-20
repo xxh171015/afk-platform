@@ -1364,6 +1364,64 @@ describe("following the pull requests", () => {
   });
 });
 
+describe("a pull request merged while the spec is reworking", () => {
+  it("merges the spec, cancels unfinished rework tickets, and records an event", async () => {
+    await settledSpec(["backend"]);
+    const open = await claimOf("open-pr");
+    await worker.complete(open.id, open.attempt, opened(1));
+    const appended = await call(
+      "POST",
+      "/specs/1/tickets/import?append=true",
+      importBody(1, { tickets: [ticket("extra", "backend")] }),
+    );
+    expect(appended.status).toBe(200);
+    expect(await specState()).toBe("reworking");
+
+    clock.advanceSeconds(61);
+    let sync: { id: number; attempt: number } | undefined;
+    for (let i = 0; i < 12; i++) {
+      const job = (await worker.claim()).body.job as {
+        id: number;
+        type: string;
+        attempt: number;
+      } | null;
+      if (!job) break;
+      if (job.type === "host-sync") {
+        sync = job;
+        break;
+      }
+    }
+    if (!sync) throw new Error("no host-sync job");
+    await worker.complete(sync.id, sync.attempt, {
+      stage: "host-sync",
+      pulls: [synced(1, { state: "merged" })],
+    });
+
+    expect(await specState()).toBe("merged");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state FROM tickets WHERE appended ORDER BY id",
+        )
+      ).rows.map((row: { state: string }) => row.state),
+    ).toEqual(["cancelled"]);
+    expect(
+      (
+        await db.pool.query(
+          `SELECT type, from_state, to_state, reason, source FROM events
+           WHERE type = 'spec' AND to_state = 'merged' ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0],
+    ).toEqual({
+      type: "spec",
+      from_state: "reworking",
+      to_state: "merged",
+      reason: "返工中 PR 被合并",
+      source: "host-sync",
+    });
+  });
+});
+
 describe("what waits for a person among the pull requests", () => {
   async function awaitingReview() {
     await settledSpec(["backend"]);

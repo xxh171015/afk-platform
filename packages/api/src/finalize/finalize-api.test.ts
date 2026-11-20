@@ -252,6 +252,48 @@ describe("when the overall review starts", () => {
     expect(await spec()).toBe("cancelled");
     expect(await fin()).toEqual([]);
   });
+
+  it("walks an appended rework ticket through implement, gate, review and merge, then starts final-review", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'final' = 'true' AND state IN ('queued', 'running')",
+    );
+    await db.pool.query("UPDATE finalizations SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha)
+       VALUES ($1, 1, 1, 'https://github.com/me/shop/pull/1', 'sha')`,
+      [specId],
+    );
+    const appended = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, { tickets: [ticket("extra")] }),
+    );
+    expect(appended.status).toBe(200);
+    expect(await spec()).toBe("reworking");
+
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", SUCCESS.review);
+    await step("merge", SUCCESS.merge);
+
+    expect(
+      (await db.pool.query("SELECT state FROM tickets WHERE id = 2")).rows[0]
+        .state,
+    ).toBe("done");
+    expect(await spec()).toBe("finalizing");
+    expect(await jobs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agent-run",
+          state: "queued",
+          stage: "final-review",
+        }),
+      ]),
+    );
+  });
 });
 
 describe("the overall review and the one fix", () => {

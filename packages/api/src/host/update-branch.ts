@@ -59,6 +59,7 @@ const PAUSE_FROM_MERGE: Record<"conflict" | "gate-failed", PauseReason> = {
 
 const SPECS_THAT_WATCH_MAIN: SpecState[] = [
   "running",
+  "reworking",
   "finalizing",
   "awaiting-review",
   "partially-merged",
@@ -890,7 +891,7 @@ export async function projectHasRunningSpecs(
   projectId: number,
 ): Promise<boolean> {
   const found = await pool.query(
-    "SELECT 1 FROM specs WHERE project_id = $1 AND state = 'running' LIMIT 1",
+    "SELECT 1 FROM specs WHERE project_id = $1 AND state IN ('running', 'reworking') LIMIT 1",
     [projectId],
   );
   return (found.rowCount ?? 0) > 0;
