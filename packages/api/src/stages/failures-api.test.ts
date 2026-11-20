@@ -95,6 +95,14 @@ const keys = async () =>
       "SELECT idempotency_key, state FROM jobs WHERE type <> 'host-sync' ORDER BY id",
     )
   ).rows;
+const queuedNotBefore = async () =>
+  (
+    await db.pool.query<{ not_before: Date | null }>(
+      `SELECT not_before FROM jobs
+       WHERE state = 'queued' AND type <> 'host-sync'
+       ORDER BY id DESC LIMIT 1`,
+    )
+  ).rows[0]?.not_before ?? null;
 
 async function failNext(
   error = "docker daemon not running",
@@ -125,6 +133,7 @@ describe("a job the worker could not carry out", () => {
     );
     expect((await state()).state).toBe("running");
     expect((await keys()).map((k) => k.state)).toEqual(["failed", "queued"]);
+    clock.advanceSeconds(10);
     await failNext(
       "Failed to connect to github.com port 443: Connection timed out",
     );
@@ -142,6 +151,41 @@ describe("a job the worker could not carry out", () => {
       "failed",
     ]);
     expect(await claim()).toBeNull();
+  });
+
+  it("waits 10s then 30s before requeueing a ticket stage that failed as an outside service, and blocks at the third", async () => {
+    await runningSpec([ticket("a")]);
+    const firstAt = clock.now();
+    await failNext("Failed to reach the Cursor API");
+    expect((await queuedNotBefore())?.getTime()).toBe(
+      firstAt.getTime() + 10_000,
+    );
+    expect(await claim()).toBeNull();
+    expect((await state()).state).toBe("running");
+
+    clock.advanceSeconds(10);
+    const secondAt = clock.now();
+    await failNext("Failed to reach the Cursor API");
+    expect((await queuedNotBefore())?.getTime()).toBe(
+      secondAt.getTime() + 30_000,
+    );
+    expect(await claim()).toBeNull();
+    expect((await state()).state).toBe("running");
+
+    clock.advanceSeconds(30);
+    await failNext("Failed to reach the Cursor API");
+    expect(await state()).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claim()).toBeNull();
+  });
+
+  it("requeues a platform failure with no not_before", async () => {
+    await runningSpec([ticket("a")]);
+    await failNext("docker daemon not running");
+    expect(await queuedNotBefore()).toBeNull();
+    expect(await claim()).not.toBeNull();
   });
 
   it("is queued again, under a new key, and the ticket stays where it was", async () => {
@@ -854,6 +898,38 @@ describe("a step of the overall review that could not be carried out", () => {
       blockedReason: "sandbox-oom",
       failureSource: "platform",
     });
+  });
+
+  it("waits 10s then 30s before requeueing a wrap-up step that failed as an outside service, and blocks at the third", async () => {
+    await toFinalReview();
+    const firstAt = clock.now();
+    await failNext("Failed to reach the Cursor API");
+    expect((await queuedNotBefore())?.getTime()).toBe(
+      firstAt.getTime() + 10_000,
+    );
+    expect(await claim()).toBeNull();
+    expect(
+      (await db.pool.query("SELECT state FROM finalizations")).rows[0].state,
+    ).toBe("active");
+
+    clock.advanceSeconds(10);
+    const secondAt = clock.now();
+    await failNext("Failed to reach the Cursor API");
+    expect((await queuedNotBefore())?.getTime()).toBe(
+      secondAt.getTime() + 30_000,
+    );
+    expect(await claim()).toBeNull();
+
+    clock.advanceSeconds(30);
+    await failNext("Failed to reach the Cursor API");
+    expect(
+      (await db.pool.query("SELECT state, blocked_reason FROM finalizations"))
+        .rows[0],
+    ).toEqual({
+      state: "blocked",
+      blocked_reason: "job-failed",
+    });
+    expect(await claim()).toBeNull();
   });
 
   it("is queued again, and blocks the finalization after three failures", async () => {

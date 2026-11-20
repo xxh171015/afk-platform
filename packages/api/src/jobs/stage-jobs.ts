@@ -45,6 +45,7 @@ export async function enqueueStageJob(
   stage: Stage,
   // more for the payload: the final e2e's jobs say so, and which round they belong to
   extra: Record<string, unknown> = {},
+  notBefore?: Date,
 ): Promise<Job> {
   const prefix = ticketJobKeyPrefix({
     ticketId: ticket.id,
@@ -81,6 +82,7 @@ export async function enqueueStageJob(
       sequence: Number(earlier.rows[0]?.n) + 1,
     }),
     ...(lockKey ? { lockKey } : {}),
+    ...(notBefore ? { notBefore } : {}),
   });
   return job;
 }
@@ -112,6 +114,7 @@ export async function enqueueFinalJob(
   target: { specId: number; repoId: number },
   step: FinalStep,
   extra: Record<string, unknown> = {},
+  notBefore?: Date,
 ): Promise<Job> {
   const keyParts = { ...target, step };
   const earlier = await client.query<{ n: string }>(
@@ -141,6 +144,7 @@ export async function enqueueFinalJob(
       sequence: Number(earlier.rows[0]?.n) + 1,
     }),
     ...(lockKey ? { lockKey } : {}),
+    ...(notBefore ? { notBefore } : {}),
   });
   return job;
 }

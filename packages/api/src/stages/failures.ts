@@ -2,6 +2,7 @@ import { GATE_CONFIG_BRIEF } from "@afk/pipeline";
 import {
   type BlockedReason,
   blockedReasonForReportedPush,
+  failureSourceOf,
   formatPushFailure,
   isSandboxOomError,
   reportedPushError,
@@ -59,6 +60,23 @@ import {
 // permission refusal as job-failed. Other infrastructure errors are queued again and block after three.
 // Cursor auth, a bad model, a spent quota, and a failed integration image build still skip the requeue.
 export const MAX_JOB_FAILURES = 3;
+
+// External job failures wait before the next attempt so three blips do not burn the three-failure
+// budget in seconds. After the 1st: 10 s, after the 2nd: 30 s; the 3rd blocks. Same 10, 30, 90 s
+// ladder as 4.6's in-place push retries (packages/worker/src/stages/implement.ts waitSeconds
+// 10, 30, 90, 180); job requeue has no 90 s step because the third failure blocks instead of
+// running again.
+export const EXTERNAL_REQUEUE_WAIT_SECONDS = [10, 30] as const;
+
+function notBeforeForExternalRequeue(
+  error: string,
+  failures: number,
+  now: Date,
+): Date | undefined {
+  if (failureSourceOf("job-failed", error) !== "external") return undefined;
+  const seconds = EXTERNAL_REQUEUE_WAIT_SECONDS[failures - 1];
+  return seconds === undefined ? undefined : inSeconds(now, seconds);
+}
 
 const JOB_FAILED: BlockedReason = "job-failed";
 
@@ -252,9 +270,9 @@ export async function recordJobFailure(
   const finalE2e = readFinalE2ePayload(job.payload);
   if (finalE2e) return finalE2eJobFailed(client, finalE2e, error);
   const stage = readStagePayload(job.payload);
-  if (stage) return ticketStageFailed(client, stage, error);
+  if (stage) return ticketStageFailed(client, stage, error, now);
   const final = readFinalPayload(job.payload);
-  if (final) return finalStepFailed(client, final, error);
+  if (final) return finalStepFailed(client, final, error, now);
   const update = await updateBranchJobFailed(client, job, error);
   if (update !== "not-update-branch") {
     return update === "paused"
@@ -280,6 +298,7 @@ async function ticketStageFailed(
   client: pg.PoolClient,
   read: NonNullable<ReturnType<typeof readStagePayload>>,
   error: string,
+  now: Date,
 ): Promise<FailureOutcome> {
   const found = await client.query<{ spec_id: number }>(
     "SELECT spec_id FROM tickets WHERE id = $1",
@@ -326,6 +345,8 @@ async function ticketStageFailed(
         contentVersion: row.content_version,
       },
       read.stage,
+      {},
+      notBeforeForExternalRequeue(error, failures, now),
     );
     return { status: "requeued", failures };
   }
@@ -360,6 +381,7 @@ async function finalStepFailed(
   client: pg.PoolClient,
   read: NonNullable<ReturnType<typeof readFinalPayload>>,
   error: string,
+  now: Date,
 ): Promise<FailureOutcome> {
   await lockSpec(client, read.specId);
   const fin = (
@@ -387,7 +409,13 @@ async function finalStepFailed(
   );
   const immediate = immediateBlockReason(error);
   if (!immediate && failures < MAX_JOB_FAILURES) {
-    await enqueueFinalJob(client, read, read.step);
+    await enqueueFinalJob(
+      client,
+      read,
+      read.step,
+      {},
+      notBeforeForExternalRequeue(error, failures, now),
+    );
     return { status: "requeued", failures };
   }
   await client.query(
