@@ -347,6 +347,25 @@ describe("markReady", () => {
   });
 });
 
+describe("markDraft", () => {
+  it("turns a ready merge request draft by putting Draft: on the title", async () => {
+    await open();
+    const draft = await adapter().markDraft({ repo, number: 1 });
+    expect(draft).toMatchObject({ number: 1, state: "open", draft: true });
+    expect(gitlab.mergeRequests()[0]?.title).toBe("Draft: S-1 add export");
+  });
+
+  it("sends nothing for a pull request that is already a draft", async () => {
+    await open(adapter(), { draft: true });
+    const before = gitlab.requests.length;
+    const result = await adapter().markDraft({ repo, number: 1 });
+    expect(result.draft).toBe(true);
+    expect(
+      gitlab.requests.slice(before).filter((r) => r.startsWith("PUT ")),
+    ).toEqual([]);
+  });
+});
+
 describe("closePullRequest", () => {
   it("closes an open pull request with state_event=close", async () => {
     await open();

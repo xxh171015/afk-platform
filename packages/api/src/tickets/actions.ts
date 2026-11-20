@@ -518,18 +518,19 @@ export async function approveRemovedTestsForSpec(
     }
     const allowed = specTransition(spec.state, "resume");
     if (!allowed.ok) return refused(allowed.reason);
-    const finalsExist = await client.query(
-      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
-      [specId],
-    );
+    const resumeFacts = await finalizationResumeFacts(client, specId);
     const dest = specResumeTarget({
-      hasFinalizations: (finalsExist.rowCount ?? 0) > 0,
+      ...resumeFacts,
       pullStates: (
         await client.query<{ state: "open" | "closed" | "merged" }>(
           "SELECT state FROM pull_requests WHERE spec_id = $1",
           [specId],
         )
       ).rows.map((row) => row.state),
+      hasIncompleteAppendedTickets: await hasIncompleteAppendedTickets(
+        client,
+        specId,
+      ),
     });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
@@ -736,18 +737,19 @@ export async function approveRecheckForSpec(
     );
     const allowedResume = specTransition(spec.state, "resume");
     if (!allowedResume.ok) return refused(allowedResume.reason);
-    const finalsExist = await client.query(
-      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
-      [specId],
-    );
+    const resumeFacts = await finalizationResumeFacts(client, specId);
     const dest = specResumeTarget({
-      hasFinalizations: (finalsExist.rowCount ?? 0) > 0,
+      ...resumeFacts,
       pullStates: (
         await client.query<{ state: "open" | "closed" | "merged" }>(
           "SELECT state FROM pull_requests WHERE spec_id = $1",
           [specId],
         )
       ).rows.map((row) => row.state),
+      hasIncompleteAppendedTickets: await hasIncompleteAppendedTickets(
+        client,
+        specId,
+      ),
     });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL WHERE id = $1",
@@ -1046,6 +1048,34 @@ export async function cancelTicket(
   });
 }
 
+async function hasIncompleteAppendedTickets(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<boolean> {
+  const open = await client.query(
+    "SELECT 1 FROM tickets WHERE spec_id = $1 AND appended AND state NOT IN ('done', 'cancelled') LIMIT 1",
+    [specId],
+  );
+  return (open.rowCount ?? 0) > 0;
+}
+
+async function finalizationResumeFacts(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<{
+  hasFinalizations: boolean;
+  hasIncompleteFinalizations: boolean;
+}> {
+  const finals = await client.query<{ state: string }>(
+    "SELECT state FROM finalizations WHERE spec_id = $1",
+    [specId],
+  );
+  return {
+    hasFinalizations: finals.rows.length > 0,
+    hasIncompleteFinalizations: finals.rows.some((row) => row.state !== "done"),
+  };
+}
+
 // The spec's state once its lock is held, so it cannot change under the caller; undefined for an unknown spec.
 async function lockedSpecState(
   client: pg.PoolClient,
@@ -1075,16 +1105,17 @@ async function unpauseSpec(
     if (!state) return { status: "no-ticket" };
     const allowed = specTransition(state, "resume");
     if (!allowed.ok) return refused(allowed.reason);
-    const finals = await client.query(
-      "SELECT 1 FROM finalizations WHERE spec_id = $1 LIMIT 1",
-      [specId],
-    );
+    const resumeFacts = await finalizationResumeFacts(client, specId);
     const pulls = await client.query<{
       state: "open" | "closed" | "merged";
     }>("SELECT state FROM pull_requests WHERE spec_id = $1", [specId]);
     const dest = specResumeTarget({
-      hasFinalizations: (finals.rowCount ?? 0) > 0,
+      ...resumeFacts,
       pullStates: pulls.rows.map((row) => row.state),
+      hasIncompleteAppendedTickets: await hasIncompleteAppendedTickets(
+        client,
+        specId,
+      ),
     });
     await client.query(
       "UPDATE specs SET state = $2, pause_reason = NULL, budget_extra_seconds = budget_extra_seconds + $3 WHERE id = $1",
@@ -1105,6 +1136,7 @@ async function unpauseSpec(
     if (
       row &&
       (row.state === "running" ||
+        row.state === "reworking" ||
         row.state === "finalizing" ||
         row.state === "awaiting-review" ||
         row.state === "partially-merged")

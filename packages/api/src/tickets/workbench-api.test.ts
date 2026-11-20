@@ -232,6 +232,47 @@ describe("GET /workbench", () => {
     ]);
   });
 
+  it("lists a reworking spec in running, not in awaiting acceptance", async () => {
+    const projectId = await projectAndRepo();
+    const specId = await confirmedSpec(projectId, "now", "Now", [
+      ticketFile("now"),
+    ]);
+    const ticketId = (await call("GET", `/specs/${specId}`)).body.tickets[0]
+      .id as number;
+    await db.pool.query("UPDATE specs SET state = 'reworking' WHERE id = $1", [
+      specId,
+    ]);
+    await db.pool.query("UPDATE tickets SET state = 'running' WHERE id = $1", [
+      ticketId,
+    ]);
+    const started = new Date(clock.now().getTime() - 5 * 60 * 1000);
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, ticket_id, stage, started_at)
+       VALUES ($1, 1, $2, 'implement', $3)`,
+      [specId, ticketId, started],
+    );
+
+    const reply = await call("GET", "/workbench");
+    expect(reply.body.running).toEqual([
+      {
+        spec: expect.objectContaining({
+          id: specId,
+          displayId: `S-${specId}`,
+          title: "Now",
+          state: "reworking",
+        }),
+        tickets: [
+          expect.objectContaining({
+            id: ticketId,
+            state: "running",
+            stage: "implement",
+          }),
+        ],
+      },
+    ]);
+    expect(reply.body.awaitingAcceptance).toEqual([]);
+  });
+
   it("shows 门禁 + 审查 as the running ticket's current stage when gate and review are both out", async () => {
     const projectId = await projectAndRepo();
     const specId = await confirmedSpec(projectId, "now", "Now", [

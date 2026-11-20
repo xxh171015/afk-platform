@@ -39,6 +39,7 @@ interface PendingSpec {
   id: number;
   project_id: number;
   title: string;
+  state: string;
   opened_at: Date | null;
   pulls: { url: string; conflicts: boolean; state: string }[] | null;
   pack: { needsDecision?: { kind?: string }[] } | null;
@@ -60,7 +61,7 @@ export async function maybeSendDailyDigest(
   if (!claimed.rowCount) return;
 
   const pending = await pool.query<PendingSpec>(
-    `SELECT s.id, s.project_id, s.title,
+    `SELECT s.id, s.project_id, s.title, s.state,
             COALESCE(
               (SELECT min(e.at) FROM events e
                 WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'awaiting-review'),
@@ -73,7 +74,7 @@ export async function maybeSendDailyDigest(
               WHERE r.project_id = s.project_id ORDER BY r.id LIMIT 1) AS host_kind
      FROM specs s
      LEFT JOIN acceptance_packs ap ON ap.spec_id = s.id
-     WHERE s.state IN ('awaiting-review', 'partially-merged')
+     WHERE s.state IN ('awaiting-review', 'partially-merged', 'reworking')
      ORDER BY s.project_id, s.id`,
   );
   const byProject = new Map<number, PendingSpec[]>();
@@ -89,6 +90,15 @@ export async function maybeSendDailyDigest(
     const pr = pullAbbrev(hostKind);
     const lines = specs.map((spec) => {
       const pulls = spec.pulls ?? [];
+      const urls = pulls.map((pull) => pull.url).filter(Boolean);
+      if (spec.state === "reworking") {
+        return [
+          formatDisplayId("spec", spec.id),
+          spec.title,
+          ...urls,
+          "返工中",
+        ].join(" ");
+      }
       const items = spec.pack?.needsDecision ?? [];
       const needsHuman = items.filter(
         (item) => item.kind === "needs-human",
@@ -104,7 +114,6 @@ export async function maybeSendDailyDigest(
         !allClosed && openedMs !== null && openedMs > 7 * DAY
           ? `已等 ${Math.round(openedMs / DAY)} 天，合并或取消`
           : null;
-      const urls = pulls.map((pull) => pull.url).filter(Boolean);
       const conflicts = pulls.some((pull) => pull.conflicts);
       return [
         formatDisplayId("spec", spec.id),

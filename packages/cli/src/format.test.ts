@@ -291,6 +291,29 @@ const stuckTicket = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+describe("plat blocked of a pull request that could not be turned draft", () => {
+  it("says it is still ready and to turn it draft, not that it is still a draft", () => {
+    const text = blockedText({
+      ...emptyQueue,
+      readyFailures: [
+        {
+          specDisplayId: "S-1",
+          repo: "backend",
+          number: 1,
+          error: "GitHub answered 403",
+          jobType: "pr-draft",
+        },
+      ],
+    } as never);
+    expect(text).toContain(
+      "S-1  backend #1 could not be turned draft: GitHub answered 403",
+    );
+    expect(text).toContain("it is still ready; turn it draft on the code host");
+    expect(text).not.toContain("could not be turned ready");
+    expect(text).not.toContain("it is still a draft");
+  });
+});
+
 describe("plat blocked of a stuck ticket", () => {
   it("prints the ticket view's currentStage next to the state", () => {
     const text = blockedText({
@@ -768,6 +791,25 @@ const specShow = (
     edges: [],
     autoMerge,
   } as never);
+
+describe("plat spec show reworking", () => {
+  it("prints 返工中 instead of the English state code", () => {
+    expect(
+      specText({
+        spec: {
+          displayId: "S-1",
+          title: "Export",
+          state: "reworking",
+          pauseReason: null,
+          warnings: [],
+        },
+        tickets: [],
+        finalizations: [],
+        edges: [],
+      } as never),
+    ).toContain("S-1  返工中  Export");
+  });
+});
 
 describe("plat spec show auto-merge", () => {
   it("prints the same auto-merge line as the delivery page", async () => {

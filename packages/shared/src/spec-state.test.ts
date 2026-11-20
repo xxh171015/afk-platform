@@ -108,3 +108,58 @@ describe("specTransition: illegal moves", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("specTransition: rework", () => {
+  it("moves awaiting-review to reworking on rework", () => {
+    expect(specTransition("awaiting-review", "rework")).toEqual({
+      ok: true,
+      state: "reworking",
+    });
+  });
+
+  it("rejects rework from partially-merged", () => {
+    const result = specTransition("partially-merged", "rework");
+    expect(result.ok).toBe(false);
+  });
+
+  it("moves reworking to finalizing when all tickets are done", () => {
+    expect(specTransition("reworking", "all-tickets-done")).toEqual({
+      ok: true,
+      state: "finalizing",
+    });
+  });
+
+  it("moves reworking to merged when all prs are merged", () => {
+    expect(specTransition("reworking", "all-prs-merged")).toEqual({
+      ok: true,
+      state: "merged",
+    });
+  });
+
+  it("pauses a reworking spec", () => {
+    expect(specTransition("reworking", "pause")).toEqual({
+      ok: true,
+      state: "paused",
+    });
+  });
+
+  it("resumes a paused spec with unfinished tickets and open pull requests to reworking", () => {
+    expect(
+      specResumeTarget({
+        hasFinalizations: true,
+        pullStates: ["open"],
+        hasIncompleteAppendedTickets: true,
+      }),
+    ).toBe("reworking");
+  });
+
+  it("resumes a paused spec with unfinished wrap-up and open pull requests to 收尾", () => {
+    expect(
+      specResumeTarget({
+        hasFinalizations: true,
+        pullStates: ["open"],
+        hasIncompleteFinalizations: true,
+      }),
+    ).toBe("finalizing");
+  });
+});

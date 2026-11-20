@@ -1433,6 +1433,79 @@ describe("appending tickets to a confirmed spec", () => {
     expect(result.status).toBe(422);
     expect(result.body.errors.join("\n")).toMatch(/T-3 is cancelled/);
   });
+
+  it("appends to an awaiting-review spec, moves it to reworking, and schedules the new ticket", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    const result = await append(specId, {
+      tickets: [ticket("extra", { repo: "payments", modules: ["pay/**"] })],
+    });
+    expect(result.status).toBe(200);
+    const spec = await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+      specId,
+    ]);
+    expect(spec.rows[0].state).toBe("reworking");
+    expect(await states()).toEqual([
+      { id: 1, state: "done", appended: false },
+      { id: 2, state: "done", appended: false },
+      { id: 3, state: "done", appended: false },
+      { id: 4, state: "queued", appended: true },
+    ]);
+  });
+
+  it("resets finalizations to final-review and active, does not dispatch a final job, and queues a pr-draft job", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id, step, state) VALUES ($1, 1, 'final-tidy', 'done')",
+      [specId],
+    );
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha)
+       VALUES ($1, 1, 9, 'https://github.com/me/shop/pull/9', 'sha9')`,
+      [specId],
+    );
+    const beforeFinalJobs = await db.pool.query(
+      "SELECT count(*)::int AS n FROM jobs WHERE payload->>'stage' = 'final-review' AND state IN ('queued', 'running')",
+    );
+    const result = await append(specId, {
+      tickets: [ticket("extra", { repo: "payments", modules: ["pay/**"] })],
+    });
+    expect(result.status).toBe(200);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT step, state, blocked_reason FROM finalizations WHERE spec_id = $1",
+          [specId],
+        )
+      ).rows,
+    ).toEqual([
+      { step: "final-review", state: "active", blocked_reason: null },
+    ]);
+    const afterFinalJobs = await db.pool.query(
+      "SELECT count(*)::int AS n FROM jobs WHERE payload->>'stage' = 'final-review' AND state IN ('queued', 'running')",
+    );
+    expect(afterFinalJobs.rows[0].n).toBe(beforeFinalJobs.rows[0].n);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type, payload FROM jobs WHERE type = 'pr-draft' ORDER BY id",
+        )
+      ).rows,
+    ).toEqual([{ type: "pr-draft", payload: { pullId: 1 } }]);
+  });
+
+  it("refuses to append to a partially-merged spec and names the states that can be appended to", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE specs SET state = 'partially-merged'");
+    const result = await append(specId, { tickets: [ticket("a")] });
+    expect(result.status).toBe(409);
+    expect(JSON.stringify(result.body)).toMatch(/partially-merged/);
+    expect(JSON.stringify(result.body)).toMatch(/awaiting-review/);
+    expect(await count("tickets")).toBe(3);
+  });
 });
 
 describe("repo edit", () => {

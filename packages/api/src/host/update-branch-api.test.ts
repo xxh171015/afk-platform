@@ -1229,6 +1229,38 @@ describe("update-branch during 收尾 and 验收", () => {
     });
   });
 
+  it("resumes a paused rework wrap-up to 收尾 while the original pull request is still open", async () => {
+    const job = await queuedUpdate();
+    await db.pool.query("UPDATE specs SET state = 'finalizing' WHERE id = 1");
+    await db.pool.query(
+      "INSERT INTO finalizations (spec_id, repo_id) VALUES (1, 1)",
+    );
+    await openPull(1);
+    await agent.complete(job.id, job.attempt, {
+      stage: "update-branch",
+      outcome: "conflict",
+    });
+    const fix = (await agent.claim()).body.job as {
+      id: number;
+      attempt: number;
+    };
+    await agent.complete(fix.id, fix.attempt, {
+      stage: "update-branch",
+      outcome: "agent-gave-up",
+    });
+    expect(await specRow()).toEqual({
+      state: "paused",
+      pause_reason: "update-branch-conflict",
+    });
+    expect((await call("POST", "/specs/1/resume", {})).body.state).toBe(
+      "finalizing",
+    );
+    expect(await specRow()).toEqual({
+      state: "finalizing",
+      pause_reason: null,
+    });
+  });
+
   it("coalesces a later SHA onto a finalizing spec's in-flight update-branch", async () => {
     const { repoUrl } = await runningSpecs({ followMain: true });
     await look([{ repoUrl, sha: "aaa111" }]);
@@ -1251,7 +1283,7 @@ describe("update-branch during 收尾 and 验收", () => {
       [specIds[0]],
     );
     await db.pool.query(
-      "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, 1)",
+      "INSERT INTO finalizations (spec_id, repo_id, state) VALUES ($1, 1, 'done')",
       [specIds[0]],
     );
     const pullId = await openPull(specIds[0] as number);
@@ -1299,7 +1331,7 @@ describe("update-branch during 收尾 and 验收", () => {
       [specIds[0]],
     );
     await db.pool.query(
-      "INSERT INTO finalizations (spec_id, repo_id) VALUES ($1, 1)",
+      "INSERT INTO finalizations (spec_id, repo_id, state) VALUES ($1, 1, 'done')",
       [specIds[0]],
     );
     const pullId = await openPull(specIds[0] as number);

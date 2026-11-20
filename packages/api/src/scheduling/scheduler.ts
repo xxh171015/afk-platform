@@ -7,7 +7,9 @@ import {
   MAX_PLANNING_PATCH_BYTES,
   type PlanningState,
   resolveLimits,
+  SCHEDULABLE_SPEC_STATES,
   type SpecState,
+  specIsSchedulable,
   specTransition,
   type TicketState,
   ticketTransition,
@@ -251,7 +253,7 @@ export async function confirmSpec(
   });
 }
 
-// Recomputes which pending tickets of a running spec can start and queues an implement job for each.
+// Recomputes which pending tickets of a running or reworking spec can start and queues an implement job for each.
 // Safe to call at any time and any number of times: the spec row lock serialises passes, and a ticket that was
 // queued is no longer pending.
 export async function scheduleSpec(
@@ -278,8 +280,8 @@ export async function scheduleProject(
   const enqueued: ScheduledTicket[] = [];
   for (let round = 0; round < 10; round++) {
     const specs = await pool.query<{ id: number }>(
-      "SELECT id FROM specs WHERE project_id = $1 AND state = 'running' ORDER BY id",
-      [projectId],
+      "SELECT id FROM specs WHERE project_id = $1 AND state = ANY($2::text[]) ORDER BY id",
+      [projectId, SCHEDULABLE_SPEC_STATES],
     );
     let changed = false;
     for (const { id } of specs.rows) {
@@ -302,7 +304,8 @@ export async function scheduleRunningSpecs(
   );
   await expireUnconfirmedBugDrafts(pool, now);
   const projects = await pool.query<{ project_id: number }>(
-    "SELECT DISTINCT project_id FROM specs WHERE state = 'running' ORDER BY project_id",
+    "SELECT DISTINCT project_id FROM specs WHERE state = ANY($1::text[]) ORDER BY project_id",
+    [SCHEDULABLE_SPEC_STATES],
   );
   const enqueued: ScheduledTicket[] = [];
   for (const { project_id } of projects.rows) {
@@ -347,7 +350,7 @@ async function schedulingPass(
   if (!row) return none;
   // whatever brought this pass about may have freed a slot for another spec of the project
   passProjectAfterCommit(client, row.project_id);
-  if (row.state !== "running") return none;
+  if (!specIsSchedulable(row.state)) return none;
   // Nothing left to run: the spec moves on to its overall review instead of being scheduled, or, when every
   // ticket was cancelled, is cancelled itself.
   if (await cancelIfAllTicketsCancelled(client, specId)) return none;
@@ -573,10 +576,10 @@ async function rivalsFor(
     id: number;
     last_started_at: Date | null;
   }>(
-    `SELECT id, last_started_at FROM specs WHERE project_id = $1 AND id <> $2 AND state = 'running'
+    `SELECT id, last_started_at FROM specs WHERE project_id = $1 AND id <> $2 AND state = ANY($3::text[])
        AND (planning_state IS NULL OR planning_state NOT IN ('pending', 'blocked'))
      ORDER BY id`,
-    [projectId, specId],
+    [projectId, specId, SCHEDULABLE_SPEC_STATES],
   );
   const rivals: (Turn & { repos: number[] })[] = [];
   for (const spec of specs.rows) {

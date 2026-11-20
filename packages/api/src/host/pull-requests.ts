@@ -7,8 +7,11 @@ import {
   MANUAL_MERGE_NOTE,
   parseDisplayId,
   parseMergePolicy,
+  REWORK_PR_MERGED_REASON,
   type SpecState,
   specTransition,
+  type TicketState,
+  ticketTransition,
   wrapMergeNote,
 } from "@afk/shared";
 import type pg from "pg";
@@ -16,6 +19,7 @@ import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
 import { renderPackSection } from "../acceptance/pack-description.ts";
 import { recordAutoMergeEvent } from "../events/auto-merge.ts";
+import { cancelTicketJobs } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
 import { queueDueAutoMerges } from "./auto-merge.ts";
@@ -30,9 +34,11 @@ import {
   type IndexPrLinksPayload,
   type OpenPrPayload,
   type PatchPrBodyPayload,
+  type PrDraftPayload,
   type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
+  stopAutoMergeJobs,
   syncDelaySeconds,
 } from "./host-jobs.ts";
 import { IDLE_TICKET_SQL } from "./idle-tickets.ts";
@@ -74,6 +80,10 @@ export type HostTask =
     }
   | {
       kind: "pr-ready";
+      pull: { id: number; repoUrl: string; number: number };
+    }
+  | {
+      kind: "pr-draft";
       pull: { id: number; repoUrl: string; number: number };
     }
   | {
@@ -137,6 +147,11 @@ export const OpenPrResultSchema = z.object({
 
 export const PrReadyResultSchema = z.object({
   stage: z.literal("pr-ready"),
+  ...PullFacts,
+});
+
+export const PrDraftResultSchema = z.object({
+  stage: z.literal("pr-draft"),
   ...PullFacts,
 });
 
@@ -217,6 +232,68 @@ export async function startOpeningPullRequests(
   );
   for (const { repo_id: repoId } of repos.rows)
     await enqueueOpenPr(client, { specId, repoId });
+  if (repos.rows.length > 0) return;
+  await finishOpeningWithExistingPulls(client, specId, new Date());
+}
+
+// Rework wrap-up: every repo already has a pull request. Update the acceptance pack (and each description),
+// turn drafts ready, and move the spec back to awaiting-review without opening another pull request.
+async function finishOpeningWithExistingPulls(
+  client: pg.PoolClient,
+  specId: number,
+  now: Date,
+): Promise<void> {
+  const spec = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  if (spec.rows[0]?.state !== "finalizing") return;
+  const missing = await client.query(
+    `SELECT 1 FROM finalizations f WHERE f.spec_id = $1
+       AND NOT EXISTS (SELECT 1 FROM pull_requests p WHERE p.spec_id = f.spec_id AND p.repo_id = f.repo_id)`,
+    [specId],
+  );
+  if (missing.rowCount) return;
+  await saveAcceptancePack(client, specId, now);
+  await enqueuePrReadyAfterRework(client, specId);
+  const next = specTransition("finalizing", "pr-opened");
+  if (!next.ok) throw new Error(next.reason);
+  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+    specId,
+    next.state,
+  ]);
+  await markMergedWhenAllAre(client, specId);
+  const projectId = await projectOf(client, specId);
+  if (projectId !== undefined) await enqueueHostSync(client, projectId);
+}
+
+// After rework the pull requests are drafts again. Turn ready those whose merge-order predecessors are merged
+// (or that have none), even if an earlier pr-ready job already ran before the rework.
+async function enqueuePrReadyAfterRework(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
+  const order = await mergeOrderOf(client, specId);
+  const pulls = await client.query<{
+    id: number;
+    name: string;
+    state: string;
+    draft: boolean;
+  }>(
+    `SELECT p.id, r.name, p.state, p.draft FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+     WHERE p.spec_id = $1 ORDER BY p.id`,
+    [specId],
+  );
+  const mergedRepos = new Set(
+    pulls.rows.filter((p) => p.state === "merged").map((p) => p.name),
+  );
+  for (const pull of pulls.rows) {
+    if (pull.state !== "open" || !pull.draft) continue;
+    const before = order.after[pull.name] ?? [];
+    if (before.length > 0 && !before.every((name) => mergedRepos.has(name)))
+      continue;
+    await enqueuePrReady(client, { pullId: pull.id });
+  }
 }
 
 export async function buildHostTask(
@@ -227,27 +304,40 @@ export async function buildHostTask(
     | HostSyncPayload
     | SpecCleanupPayload
     | PrReadyPayload
+    | PrDraftPayload
     | PatchPrBodyPayload
     | IndexPrLinksPayload
     | AutoMergePayload,
 ): Promise<HostTask | undefined> {
   if (job.type === "auto-merge") {
-    const { pullId, expectedHeadSha } = payload as AutoMergePayload;
+    const { pullId, expectedHeadSha, specId } = payload as AutoMergePayload;
     const pull = (
-      await pool.query<{ url: string; number: number }>(
-        `SELECT r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+      await pool.query<{
+        url: string;
+        number: number;
+        draft: boolean;
+        spec_state: string;
+      }>(
+        `SELECT r.url, p.number, p.draft, s.state AS spec_state
+         FROM pull_requests p
+         JOIN repos r ON r.id = p.repo_id
+         JOIN specs s ON s.id = p.spec_id
+         WHERE p.id = $1`,
         [pullId],
       )
     ).rows[0];
-    return pull
-      ? {
-          kind: "auto-merge",
-          repoUrl: pull.url,
-          number: pull.number,
-          expectedHeadSha,
-          section: AUTO_MERGED_SECTION,
-        }
-      : undefined;
+    if (!pull) return undefined;
+    if (pull.spec_state === "reworking" || pull.draft) {
+      await stopAutoMergeJobs(pool, specId, "返工中");
+      return undefined;
+    }
+    return {
+      kind: "auto-merge",
+      repoUrl: pull.url,
+      number: pull.number,
+      expectedHeadSha,
+      section: AUTO_MERGED_SECTION,
+    };
   }
   if (job.type === "index-pr-links") {
     const { pullId, mergeSha, squashSha } = payload as IndexPrLinksPayload;
@@ -297,8 +387,8 @@ export async function buildHostTask(
   }
   if (job.type === "spec-cleanup")
     return specCleanupTask(pool, payload as SpecCleanupPayload);
-  if (job.type === "pr-ready") {
-    const { pullId } = payload as PrReadyPayload;
+  if (job.type === "pr-ready" || job.type === "pr-draft") {
+    const { pullId } = payload as PrReadyPayload | PrDraftPayload;
     const pull = (
       await pool.query<{ id: number; url: string; number: number }>(
         `SELECT p.id, r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
@@ -307,7 +397,7 @@ export async function buildHostTask(
     ).rows[0];
     return pull
       ? {
-          kind: "pr-ready",
+          kind: job.type,
           pull: { id: pull.id, repoUrl: pull.url, number: pull.number },
         }
       : undefined;
@@ -612,6 +702,31 @@ export async function recordPrReady(
   return { status: "applied" };
 }
 
+export async function recordPrDraft(
+  client: pg.PoolClient,
+  read: PrDraftPayload,
+  result: unknown,
+): Promise<RecordHostResult> {
+  const parsed = PrDraftResultSchema.safeParse(result);
+  if (!parsed.success)
+    return { status: "ignored", reason: "pr-draft result is not valid" };
+  const owner = await client.query<{ spec_id: number }>(
+    "SELECT spec_id FROM pull_requests WHERE id = $1",
+    [read.pullId],
+  );
+  const specId = owner.rows[0]?.spec_id;
+  if (specId === undefined)
+    return { status: "ignored", reason: "no such pull request" };
+  await lockSpec(client, specId);
+  const pr = parsed.data;
+  await client.query(
+    `UPDATE pull_requests SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now()
+     WHERE id = $1`,
+    [read.pullId, pr.state, pr.draft, pr.headSha, pr.ci, pr.review],
+  );
+  return { status: "applied" };
+}
+
 export type RecordHostResult =
   | { status: "applied" }
   | { status: "ignored"; reason: string };
@@ -681,6 +796,7 @@ export async function recordOpenPr(
   if (!missing.rowCount) {
     // the pack is ready by the time the spec says it is waiting for a person
     await saveAcceptancePack(client, read.specId, now);
+    await enqueuePrReadyAfterRework(client, read.specId);
     const next = specTransition("finalizing", "pr-opened");
     if (!next.ok) throw new Error(next.reason);
     await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
@@ -714,8 +830,13 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     order_broken: { repo: string; skipped: string[] }[];
   }>("SELECT state, order_broken FROM specs WHERE id = $1", [specId]);
   const spec = state.rows[0];
-  if (!spec || !["awaiting-review", "partially-merged"].includes(spec.state))
+  if (!spec) return;
+  if (spec.state === "reworking") {
+    if (!pulls.rows.some((p) => p.state === "merged")) return;
+    await finishReworkingBecausePrMerged(client, specId);
     return;
+  }
+  if (!["awaiting-review", "partially-merged"].includes(spec.state)) return;
   const merged = new Set(
     pulls.rows.filter((p) => p.state === "merged").map((p) => p.name),
   );
@@ -750,6 +871,41 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     await dropPotentialConflicts(client, specId);
     await enqueueSpecCleanup(client, { specId });
   }
+}
+
+async function finishReworkingBecausePrMerged(
+  client: pg.PoolClient,
+  specId: number,
+) {
+  const next = specTransition("reworking", "all-prs-merged");
+  if (!next.ok) throw new Error(next.reason);
+  await client.query("SELECT set_config('afk.reason', $1, true)", [
+    REWORK_PR_MERGED_REASON,
+  ]);
+  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+    specId,
+    next.state,
+  ]);
+
+  const tickets = await client.query<{ id: number; state: TicketState }>(
+    "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  const cancelled: number[] = [];
+  for (const ticket of tickets.rows) {
+    if (ticketTransition(ticket.state, { type: "spec-cancelled" }).ok)
+      cancelled.push(ticket.id);
+  }
+  if (cancelled.length > 0) {
+    await client.query(
+      "UPDATE tickets SET state = 'cancelled', blocked_reason = NULL WHERE id = ANY($1)",
+      [cancelled],
+    );
+    for (const id of cancelled)
+      await cancelTicketJobs(client, id, REWORK_PR_MERGED_REASON);
+  }
+  await dropPotentialConflicts(client, specId);
+  await enqueueSpecCleanup(client, { specId });
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,

@@ -315,7 +315,9 @@ export class FakeGitHub {
       const query = String(body.query ?? "");
       const id = (body.variables as { id?: string } | undefined)?.id;
       const pull = this.pulls.find((p) => `PR_${p.number}` === id);
-      if (!query.includes("markPullRequestReadyForReview") || !pull)
+      const markReady = query.includes("markPullRequestReadyForReview");
+      const markDraft = query.includes("convertPullRequestToDraft");
+      if ((!markReady && !markDraft) || !pull)
         return this.json(res, 200, {
           errors: [{ message: "Could not resolve" }],
         });
@@ -327,11 +329,17 @@ export class FakeGitHub {
         return this.json(res, 200, {
           errors: [{ message: "Resource not accessible by integration" }],
         });
-      pull.draft = false;
+      pull.draft = markDraft;
       return this.json(res, 200, {
-        data: {
-          markPullRequestReadyForReview: { pullRequest: { isDraft: false } },
-        },
+        data: markDraft
+          ? {
+              convertPullRequestToDraft: { pullRequest: { isDraft: true } },
+            }
+          : {
+              markPullRequestReadyForReview: {
+                pullRequest: { isDraft: false },
+              },
+            },
       });
     }
 

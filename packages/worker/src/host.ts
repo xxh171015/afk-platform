@@ -192,6 +192,25 @@ export async function runHostTask(
       );
     }
   }
+  if (task.kind === "pr-draft") {
+    try {
+      const info = await deps.adapter.markDraft({
+        repo: repoRef(task.pull.repoUrl),
+        number: task.pull.number,
+      });
+      log(
+        `pull request ${task.pull.number} of ${task.pull.repoUrl} is ${info.draft ? "a draft" : "still ready"}`,
+      );
+      return { stage: "pr-draft", ...info };
+    } catch (error) {
+      // the job fails and is tried again a minute later (and, after three failures, a person looks at it)
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not mark the pull request draft: ${String(error)}`,
+      );
+    }
+  }
   if (task.kind === "repo-access") {
     if (!deps.checkAccess)
       throw new InfrastructureError("this worker cannot check repo access");

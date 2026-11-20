@@ -252,6 +252,206 @@ describe("when the overall review starts", () => {
     expect(await spec()).toBe("cancelled");
     expect(await fin()).toEqual([]);
   });
+
+  it("walks an appended rework ticket through implement, gate, review and merge, then starts final-review", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'final' = 'true' AND state IN ('queued', 'running')",
+    );
+    await db.pool.query("UPDATE finalizations SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha)
+       VALUES ($1, 1, 1, 'https://github.com/me/shop/pull/1', 'sha')`,
+      [specId],
+    );
+    const appended = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, { tickets: [ticket("extra")] }),
+    );
+    expect(appended.status).toBe(200);
+    expect(await spec()).toBe("reworking");
+
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", SUCCESS.review);
+    await step("merge", SUCCESS.merge);
+
+    expect(
+      (await db.pool.query("SELECT state FROM tickets WHERE id = 2")).rows[0]
+        .state,
+    ).toBe("done");
+    expect(await spec()).toBe("finalizing");
+    expect(await jobs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agent-run",
+          state: "queued",
+          stage: "final-review",
+        }),
+      ]),
+    );
+  });
+
+  it("marks a planning-only repo done again after rework when its branch already matches main", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:frontend",
+      name: "frontend",
+    });
+    const createdSpec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "s",
+      title: "Spec",
+    });
+    const specId = createdSpec.body.id as number;
+    await call(
+      "POST",
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("a", { repo: "frontend" })],
+      }),
+    );
+    await call("POST", `/specs/${specId}/confirm`);
+    await db.pool.query(
+      `UPDATE specs SET planning_repo_id = (SELECT id FROM repos WHERE name = 'backend'),
+         planning_docs_committed = true WHERE id = $1`,
+      [specId],
+    );
+    await allTicketsDone();
+    const afterFirst = await db.pool.query(
+      `SELECT r.name, f.state FROM finalizations f JOIN repos r ON r.id = f.repo_id ORDER BY r.name`,
+    );
+    expect(afterFirst.rows).toEqual([
+      { name: "backend", state: "done" },
+      { name: "frontend", state: "active" },
+    ]);
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'final' = 'true' AND state IN ('queued', 'running')",
+    );
+    await db.pool.query("UPDATE finalizations SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha)
+       VALUES ($1, 1, 1, 'https://github.com/me/shop/pull/1', 'sha'),
+              ($1, 2, 2, 'https://github.com/me/shop/pull/2', 'sha2')`,
+      [specId],
+    );
+    const appended = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, {
+        tickets: [ticket("extra", { repo: "frontend" })],
+      }),
+    );
+    expect(appended.status).toBe(200);
+    expect(await spec()).toBe("reworking");
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", SUCCESS.review);
+    await step("merge", SUCCESS.merge);
+    expect(await spec()).toBe("finalizing");
+    const afterRework = await db.pool.query(
+      `SELECT r.name, f.state FROM finalizations f JOIN repos r ON r.id = f.repo_id ORDER BY r.name`,
+    );
+    expect(afterRework.rows).toEqual([
+      { name: "backend", state: "done" },
+      { name: "frontend", state: "active" },
+    ]);
+    expect(await jobs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agent-run",
+          state: "queued",
+          stage: "final-review",
+        }),
+      ]),
+    );
+  });
+
+  it("updates the existing pull request and turns it ready instead of opening a new one after rework", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'final' = 'true' AND state IN ('queued', 'running')",
+    );
+    await db.pool.query("UPDATE finalizations SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha, draft, synced_at)
+       VALUES ($1, 1, 9, 'https://github.com/me/shop/pull/9', 'sha', false, now())`,
+      [specId],
+    );
+    const appended = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, { tickets: [ticket("extra")] }),
+    );
+    expect(appended.status).toBe(200);
+    await db.pool.query(
+      "UPDATE pull_requests SET draft = true WHERE spec_id = $1",
+      [specId],
+    );
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", SUCCESS.review);
+    await step("merge", SUCCESS.merge);
+    expect(await spec()).toBe("finalizing");
+    const openPrBefore = (
+      await db.pool.query(
+        "SELECT type FROM jobs WHERE type = 'open-pr' ORDER BY id",
+      )
+    ).rows;
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "standards",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+        },
+      },
+    });
+    expect(await spec()).toBe("awaiting-review");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type FROM jobs WHERE type = 'open-pr' ORDER BY id",
+        )
+      ).rows,
+    ).toHaveLength(openPrBefore.length);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type, payload FROM jobs WHERE type IN ('pr-ready', 'patch-pr-body') ORDER BY type, id",
+        )
+      ).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "pr-ready",
+          payload: { pullId: 1 },
+        }),
+        expect.objectContaining({
+          type: "patch-pr-body",
+        }),
+      ]),
+    );
+    const pack = (await call("GET", `/specs/${specId}`)).body.acceptancePack;
+    expect(pack).toBeTruthy();
+    expect(pack.repos[0].tickets.map((t: Json) => t.displayId)).toEqual(
+      expect.arrayContaining(["T-1", "T-2"]),
+    );
+  });
 });
 
 describe("the overall review and the one fix", () => {

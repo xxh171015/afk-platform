@@ -2260,7 +2260,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2298,6 +2298,15 @@ export interface paths {
               | {
                   /** @enum {string} */
                   kind: "pr-ready";
+                  pull: {
+                    id: number;
+                    repoUrl: string;
+                    number: number;
+                  };
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "pr-draft";
                   pull: {
                     id: number;
                     repoUrl: string;
@@ -4310,6 +4319,8 @@ export interface paths {
                 url: string;
                 error: string;
                 /** @enum {string} */
+                jobType: "pr-ready" | "pr-draft";
+                /** @enum {string} */
                 hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
@@ -4523,6 +4534,8 @@ export interface paths {
                   specDisplayId: string;
                   repo: string;
                   number: number;
+                  /** @enum {string} */
+                  jobType: "pr-ready" | "pr-draft";
                 }[];
                 planning: {
                   specId: number;

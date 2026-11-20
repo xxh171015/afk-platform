@@ -305,6 +305,10 @@ plat spec confirm S-n       # 从这一刻起开始实现
 | 取消了但分支/PR 没清干净                                             | `plat spec cleanup S-n`                                                                                                                                                                                                                                                                      |
 | 整个 spec 不要了                                                     | `plat spec cancel S-n`（没做完的票和作业停掉，随后关 PR、删分支）                                                                                                                                                                                                                            |
 
+### 验收时发现还要补
+
+需求已经开出 PR、还停在 awaiting-review（还没有任何 PR 合并）时，用 `plat tickets import --append <S-n> <目录>`（实际写法是 `plat tickets import <S-n> <目录> --append`）。需求进入返工中：PR 转为 draft，自动合并不再考虑它。新票在原来的集成分支上照常跑；做完后平台从需求级审查重新收尾、更新原 PR 的描述和验收包，再把 PR 转回 ready，需求回到 awaiting-review。已有 PR 合并之后（partially-merged）不能再追加，要另开需求。
+
 ## 7. 正式使用前的清单
 
 - [ ] 场景 A、场景 B 各完整走通一次，PR 都合并过。

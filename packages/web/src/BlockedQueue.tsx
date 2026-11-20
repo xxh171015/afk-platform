@@ -155,13 +155,21 @@ function Spinner({ on }: { on: boolean }) {
   return on ? <Loader2 className="animate-spin" /> : null;
 }
 
-type Category = "ticket" | "final" | "pr" | "ready" | "cleanup" | "paused";
+type Category =
+  | "ticket"
+  | "final"
+  | "pr"
+  | "ready"
+  | "draft"
+  | "cleanup"
+  | "paused";
 
 const barClass: Record<Category, string> = {
   ticket: "bg-state-blocked",
   final: "bg-state-merging",
   pr: "bg-state-review",
   ready: "bg-state-queued",
+  draft: "bg-state-queued",
   cleanup: "bg-state-neutral",
   paused: "bg-state-paused",
 };
@@ -170,6 +178,7 @@ const categoryLabel: Record<Category, string> = {
   final: "停下的收尾",
   pr: "需要看的 PR",
   ready: "没能转为 ready",
+  draft: "没能转为 draft",
   cleanup: "没清理完",
   paused: "暂停的需求",
 };
@@ -907,15 +916,24 @@ function StuckCleanup({ item }: { item: Queue["cleanups"][number] }) {
 
 function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
   const pr = pullAbbrev(hostKindOf(item));
+  const turningDraft = item.jobType === "pr-draft";
   return (
     <Card
-      category="ready"
-      testId={`ready-${item.specDisplayId}-${item.repo}`}
+      category={turningDraft ? "draft" : "ready"}
+      testId={`${turningDraft ? "draft" : "ready"}-${item.specDisplayId}-${item.repo}`}
       title={
         <>
           <IdChip displayId={item.specDisplayId} id={item.specId} />
           <span>
-            <Mono>{item.repo}</Mono> 的 draft {pr} 没能转为 ready
+            {turningDraft ? (
+              <>
+                <Mono>{item.repo}</Mono> 的 {pr} 没能转为 draft
+              </>
+            ) : (
+              <>
+                <Mono>{item.repo}</Mono> 的 draft {pr} 没能转为 ready
+              </>
+            )}
           </span>
         </>
       }
@@ -943,8 +961,17 @@ function StuckReady({ item }: { item: Queue["readyFailures"][number] }) {
       />
       <CollapsibleCode text={item.error} />
       <p className="text-muted-foreground">
-        这个 {pr} 仍是 draft。等排在它前面的 {pr}{" "}
-        合并后，到代码托管上手动把它转为 ready，平台下次同步时会看到。
+        {turningDraft ? (
+          <>
+            这个 {pr} 仍是 ready。到代码托管上手动把它转为
+            draft，平台下次同步时会看到。
+          </>
+        ) : (
+          <>
+            这个 {pr} 仍是 draft。等排在它前面的 {pr}{" "}
+            合并后，到代码托管上手动把它转为 ready，平台下次同步时会看到。
+          </>
+        )}
       </p>
     </Card>
   );

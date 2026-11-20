@@ -2,6 +2,7 @@ import {
   formatDisplayId,
   isSlowStage,
   type ParallelReviewState,
+  SCHEDULABLE_SPEC_STATES,
   type SpecState,
 } from "@afk/shared";
 import type pg from "pg";
@@ -79,6 +80,7 @@ function slimWaiting(queue: RankedQueue) {
       specDisplayId: item.specDisplayId,
       repo: item.repo,
       number: item.number,
+      jobType: item.jobType,
     })),
     planning: queue.planning.map((item) => ({
       specId: item.specId,
@@ -258,8 +260,9 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
        WHERE ticket_id = t.id AND finished_at IS NULL
        ORDER BY id DESC LIMIT 1
      ) run ON true
-     WHERE s.state = 'running' AND t.state IN ('running', 'merging')
+     WHERE s.state = ANY($1::text[]) AND t.state IN ('running', 'merging')
      ORDER BY s.id DESC, t.id`,
+    [SCHEDULABLE_SPEC_STATES],
   );
 
   const ticketsBySpec = new Map<number, RunningTicket[]>();
@@ -293,7 +296,8 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
 
   const runningIds = await specIdsIn(
     pool,
-    "SELECT id FROM specs WHERE state = 'running' ORDER BY created_at DESC, id DESC",
+    "SELECT id FROM specs WHERE state = ANY($1::text[]) ORDER BY created_at DESC, id DESC",
+    [SCHEDULABLE_SPEC_STATES],
   );
   const runningSpecs = await specListItems(pool, runningIds);
   const running = runningSpecs.map((spec) => ({
