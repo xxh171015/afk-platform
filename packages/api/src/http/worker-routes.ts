@@ -410,6 +410,16 @@ const Bundle = z.object({
       paths: z.array(z.string()),
     })
     .nullable(),
+  uncertainties: z
+    .array(
+      z.object({
+        id: z.string(),
+        ticket: z.string(),
+        run: z.string(),
+        body: z.string(),
+      }),
+    )
+    .nullable(),
   handbackResolve: z.boolean().optional(),
 });
 

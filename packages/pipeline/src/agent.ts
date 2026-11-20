@@ -231,6 +231,15 @@ const ReviewObject = z.object({
   uncertainties: z.array(ReviewLine),
   // Spec axis: a Ruling for each conflict and known-gap. Standards leaves this off.
   rulings: z.array(RulingSchema).optional(),
+  // final-review Spec axis: a verdict per ticket-review uncertainty. Missing is open; omitting the field is valid.
+  uncertaintyRulings: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        verdict: z.enum(["resolved", "open"]),
+      }),
+    )
+    .optional(),
   // files this review used as standards sources. Required on the Standards axis.
   sources: z.array(z.string()).optional(),
 });

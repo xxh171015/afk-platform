@@ -112,6 +112,8 @@ const RepoSection = z.object({
   ),
   // Review uncertainties (kind: uncertainty), listed apart like scope creep. Not
   // `uncertainties`: stored packs used that name for the old Decision list.
+  // `reviewUncertainties` is still open; wrap-up `resolved` findings go in
+  // `resolvedUncertainties` and are shown folded.
   reviewUncertainties: z.array(
     z.object({
       ticket: z.string().nullable(),
@@ -121,6 +123,17 @@ const RepoSection = z.object({
       axis: z.enum(REVIEW_AXES).nullable(),
     }),
   ),
+  resolvedUncertainties: z
+    .array(
+      z.object({
+        ticket: z.string().nullable(),
+        run: z.string(),
+        stage: z.string(),
+        body: z.string(),
+        axis: z.enum(REVIEW_AXES).nullable(),
+      }),
+    )
+    .default([]),
   decisions: z.array(
     z.object({
       source: z.string(),
@@ -319,6 +332,12 @@ const strings = (value: unknown): string[] =>
     ? value.filter((v): v is string => typeof v === "string")
     : [];
 
+// Compare acceptance keys to criterion text after dropping backticks and collapsing
+// whitespace. The stored `acceptance` object is left as the agent wrote it.
+function normalizeAcceptanceKey(text: string): string {
+  return text.replaceAll("`", "").replace(/\s+/g, " ").trim();
+}
+
 // Tests named for each criterion, from every implement and fix run of the ticket that finished: the last run to
 // name a criterion decides. (A fix may add a test the implement run did not have.)
 export function namedTests(outputs: readonly unknown[]): Map<string, string[]> {
@@ -327,7 +346,7 @@ export function namedTests(outputs: readonly unknown[]): Map<string, string[]> {
     for (const [text, tests] of Object.entries(
       record(record(output).acceptance),
     ))
-      named.set(text.trim(), strings(tests));
+      named.set(normalizeAcceptanceKey(text), strings(tests));
   return named;
 }
 
@@ -403,6 +422,7 @@ export async function buildAcceptancePack(
         findings: [],
         scopeCreep: [],
         reviewUncertainties: [],
+        resolvedUncertainties: [],
         decisions: [],
         protectedPathApprovals: [],
         standardsSources: [],
@@ -442,7 +462,7 @@ export async function buildAcceptancePack(
         title: ticket.title,
         appended: ticket.appended,
         criteria: ticket.acceptance_criteria.map((text) => {
-          const tests = named.get(text.trim()) ?? [];
+          const tests = named.get(normalizeAcceptanceKey(text)) ?? [];
           return {
             text,
             tests,
@@ -521,13 +541,16 @@ export async function buildAcceptancePack(
       continue;
     }
     if (f.kind === "uncertainty") {
-      sectionOf(f.repo_id, f.repo).reviewUncertainties.push({
+      const item = {
         ticket,
         run,
         stage: f.stage,
         body: f.body,
         axis: f.axis,
-      });
+      };
+      if (f.resolution === "resolved")
+        sectionOf(f.repo_id, f.repo).resolvedUncertainties.push(item);
+      else sectionOf(f.repo_id, f.repo).reviewUncertainties.push(item);
       continue;
     }
     sectionOf(f.repo_id, f.repo).findings.push({
@@ -850,7 +873,7 @@ async function integrationSection(
       refShas: last?.ref_shas ?? null,
       headSha: last?.head_sha ?? null,
       criteria: ticket.acceptance_criteria.map((text) => {
-        const tests = named.get(text.trim()) ?? [];
+        const tests = named.get(normalizeAcceptanceKey(text)) ?? [];
         // the e2e's own JUnit is what verifies an integration ticket, not the repo's unit gate
         return {
           text,
@@ -1031,6 +1054,7 @@ function coerceStoredPack(raw: unknown): AcceptancePack | null {
         findings: asArray(repo.findings as never[]),
         scopeCreep: asArray(repo.scopeCreep as never[]),
         reviewUncertainties: asArray(repo.reviewUncertainties as never[]),
+        resolvedUncertainties: asArray(repo.resolvedUncertainties as never[]),
         decisions: storedDecisions(repo),
         protectedPathApprovals: asArray(repo.protectedPathApprovals as never[]),
         standardsSources: asArray(repo.standardsSources as never[]),

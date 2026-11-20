@@ -95,6 +95,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     criteriaLines(section),
     findingsLines(section),
     reviewUncertaintyLines(section),
+    resolvedUncertaintyLines(section),
     standardsSourceLines(section),
     gateLines(section),
     flakyTestLines(section),
@@ -164,6 +165,27 @@ function reviewUncertaintyLines(
       `- ${axis ? `${axis} ` : ""}${who} ${item.stage} ${item.run}: ${item.body}`,
     );
   }
+  return lines.join("\n");
+}
+
+function resolvedUncertaintyLines(
+  section: AcceptancePack["repos"][number],
+): string {
+  const items = section.resolvedUncertainties ?? [];
+  if (items.length === 0) return "";
+  const lines = [
+    `<details>`,
+    `<summary>已解决的疑点（${items.length} 条）</summary>`,
+    "",
+  ];
+  for (const item of items) {
+    const axis = axisLabel(item.axis);
+    const who = item.ticket ?? "spec";
+    lines.push(
+      `- ${axis ? `${axis} ` : ""}${who} ${item.stage} ${item.run}: ${item.body}`,
+    );
+  }
+  lines.push("", "</details>");
   return lines.join("\n");
 }
 

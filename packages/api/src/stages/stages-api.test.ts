@@ -944,6 +944,80 @@ describe("the bundle", () => {
     ]);
   });
 
+  it("fills wrap-up uncertainties with each ticket review and Recheck uncertainty, and omits them on a ticket stage", async () => {
+    await runningSpec([ticket("a")]);
+    const implement = (await worker.claim()).body.job as Claimed;
+    expect((await bundle(implement)).body.uncertainties).toBeNull();
+    await worker.complete(implement.id, implement.attempt, {
+      stage: "implement",
+      ...IMPLEMENT_DONE,
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: ["the ticket does not say the date format"],
+        },
+      },
+      findings: [
+        {
+          kind: "uncertainty",
+          body: "the ticket does not say the date format",
+        },
+      ],
+    });
+    await stage("merge", { outcome: "conflict" });
+    await stage("merge-fix", {
+      outcome: "done",
+      run: {
+        recheck: {
+          hit: true,
+          paths: ["src/a.test.ts"],
+          fromSha: "aaa111",
+          toSha: "bbb222",
+        },
+      },
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("recheck", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: ["the assertion still looks weak"],
+        },
+      },
+      findings: [
+        { kind: "uncertainty", body: "the assertion still looks weak" },
+      ],
+    });
+    await stage("merge", MERGED);
+    const wrap = (await worker.claim()).body.job as Claimed;
+    expect(wrap.payload.stage).toBe("final-review");
+    expect((await bundle(wrap)).body.uncertainties).toEqual([
+      {
+        id: expect.stringMatching(/^F-\d+$/),
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        body: "the ticket does not say the date format",
+      },
+      {
+        id: expect.stringMatching(/^F-\d+$/),
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        body: "the assertion still looks weak",
+      },
+    ]);
+  });
+
   it("carries the project's run limits and default model, and the defaults when it sets none", async () => {
     await runningSpec([ticket("a")]);
     const claimed = (await worker.claim()).body.job as Claimed;

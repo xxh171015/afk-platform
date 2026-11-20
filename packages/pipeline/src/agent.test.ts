@@ -181,6 +181,34 @@ describe("the structured outputs", () => {
     expect(parsed.uncertainties).toEqual([]);
   });
 
+  it("accepts optional uncertaintyRulings on a review and still accepts a result without them", () => {
+    const base = {
+      verdict: "pass" as const,
+      mustFix: [],
+      suggestions: [],
+      uncertainties: [],
+    };
+    expect(ReviewOutputSchema.parse(base).uncertaintyRulings).toBeUndefined();
+    expect(
+      ReviewOutputSchema.parse({
+        ...base,
+        uncertaintyRulings: [
+          { id: "F-1", verdict: "resolved" },
+          { id: "F-2", verdict: "open" },
+        ],
+      }).uncertaintyRulings,
+    ).toEqual([
+      { id: "F-1", verdict: "resolved" },
+      { id: "F-2", verdict: "open" },
+    ]);
+    expect(
+      ReviewOutputSchema.safeParse({
+        ...base,
+        uncertaintyRulings: [{ id: "F-1", verdict: "fixed" }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("keeps a deferred decision's ref instead of folding it into text", () => {
     expect(
       ImplementOutputSchema.parse({
@@ -714,6 +742,20 @@ describe("the two axes of a review", () => {
     expect(finalSpec).toContain("uncertainties");
   });
 
+  it("tells the wrap-up Spec axis to rule on each ticket-review uncertainty, and that a missing ruling is open not invalid", () => {
+    const prompt = readFileSync(PROMPTS.finalReviewSpec, "utf8");
+    expect(prompt).toContain("/context/uncertainties.json");
+    expect(prompt).toContain("uncertaintyRulings");
+    expect(prompt).toContain("resolved");
+    expect(prompt).toContain("open");
+    const heading = prompt.indexOf("## 结果");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    const result = prompt.slice(heading);
+    expect(result).toContain("`uncertaintyRulings`");
+    expect(result).toMatch(/缺了.*当 `open`/);
+    expect(result).toContain("不判结果无效");
+  });
+
   it("has the Standards axis find standards sources itself and name them in sources", () => {
     for (const file of [
       PROMPTS.reviewStandards,
@@ -1008,6 +1050,16 @@ describe("the prompts", () => {
     expect(design).toMatch(/票的阶段、收尾阶段/);
   });
 
+  it("documents resolved findings and the folded 已解决的疑点 list on the acceptance pack", () => {
+    const design = readFileSync(
+      join(PROMPT_DIR, "../../../docs/design.md"),
+      "utf8",
+    );
+    expect(design).toContain("审查确认已解决");
+    expect(design).toContain("resolved");
+    expect(design).toContain("已解决的疑点");
+  });
+
   it("tells the overlay to write the result file, self-check, fix until it passes, then output it", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const section = overlay.slice(overlay.indexOf("## 结果"));
@@ -1150,6 +1202,15 @@ describe("the prompts", () => {
     expect(implement).toMatch(/记一条 `deferred`/);
     expect(implement).toContain("ref");
     expect(implement).toContain("modules");
+  });
+
+  it("tells implement that acceptance keys copy the criterion text including backticks", () => {
+    const section = readFileSync(PROMPTS.implement, "utf8");
+    const heading = section.indexOf("## 结果");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    const result = section.slice(heading);
+    expect(result).toContain("`acceptance` 的键照抄验收标准原文");
+    expect(result).toContain("反引号");
   });
 
   it("makes implement read the implement skill by its absolute path and skip its code-review step", () => {
