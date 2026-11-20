@@ -519,7 +519,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `project ${data.id} ${data.name}`);
     });
 
-  const projectIdOf = async (project: string): Promise<number> => {
+  const idOfProjectArg = async (project: string): Promise<number> => {
     if (/^[1-9][0-9]*$/.test(project)) return toInt(project);
     const listed = await api().GET("/projects");
     if (!listed.data) throw failureFrom(listed.response, listed.error);
@@ -605,7 +605,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --merge-policy, --limit, --feishu-chat, --ticket-review, --stage-model or --tidy",
         );
       }
-      const projectId = await projectIdOf(id);
+      const projectId = await idOfProjectArg(id);
       const { data, response, error } = await api().PATCH(
         "/projects/{projectId}",
         { params: { path: { projectId } }, body },
@@ -618,7 +618,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .command("show <project>")
     .description("a project and its default agent")
     .action(async (id: string) => {
-      const projectId = await projectIdOf(id);
+      const projectId = await idOfProjectArg(id);
       const { data, response, error } = await api().GET(
         "/projects/{projectId}",
         { params: { path: { projectId } } },
