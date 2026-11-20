@@ -1400,7 +1400,7 @@ describe("a gate whose setup fails", { timeout: 60_000 }, () => {
     );
     git(seed.dir, ["push", "--quiet", origin, "main"]);
     await confirmedSpec([ticket("a")]);
-    await runWorker({
+    const worker = {
       api: workerFor(),
       executor: deps({
         script: (ctx) =>
@@ -1410,7 +1410,12 @@ describe("a gate whose setup fails", { timeout: 60_000 }, () => {
       }),
       stopWhenIdle: true,
       heartbeatMs: 20,
-    });
+    };
+    await runWorker(worker);
+    clock.advanceSeconds(10);
+    await runWorker(worker);
+    clock.advanceSeconds(30);
+    await runWorker(worker);
     expect(await stateOf()).toEqual(["1:blocked/job-failed"]);
     const runs = await db.pool.query(
       "SELECT stage, result, output->>'error' AS error FROM runs WHERE ticket_id = 1 ORDER BY id",

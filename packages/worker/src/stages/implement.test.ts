@@ -237,6 +237,126 @@ describe("agentChange trailers after merging another branch", () => {
     expect(body("agent/T-123")).toContain("Ticket: T-123");
     expect(body("agent/T-123")).toContain("Spec: S-12");
   });
+
+  it("implement: commits merged in from another spec/* branch keep their hashes on origin", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "base.txt": "base\n",
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/aa0001/other", "main"]);
+    const otherTip = repo.commit(
+      { "other.txt": "from other spec\n" },
+      "other spec work\n\nSpec: S-51\nTicket: T-100\nRun: R-800",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "spec/aa0001/other"]);
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "spec/aa0001/other"]);
+      return { files: { "ticket.txt": "ticket work\n" }, output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/T-123"),
+      align,
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(
+      git(origin, ["merge-base", "--is-ancestor", otherTip, "agent/T-123"])
+        .code,
+    ).toBe(0);
+    expect(gitOut(origin, ["log", "-1", "--format=%B", otherTip])).toContain(
+      "Spec: S-51",
+    );
+    expect(gitOut(origin, ["log", "-1", "--format=%B", otherTip])).toContain(
+      "Ticket: T-100",
+    );
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", otherTip]),
+    ).not.toContain("Spec: S-12");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", otherTip]),
+    ).not.toContain("Ticket: T-123");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", "agent/T-123"]),
+    ).toContain("Ticket: T-123");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", "agent/T-123"]),
+    ).toContain("Spec: S-12");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", "agent/T-123"]),
+    ).toContain("Run: R-9");
+  });
+
+  it("final-fix: commits merged in from another spec/* branch keep their hashes on origin", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": GATES,
+      "base.txt": "base\n",
+    });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/S-12-final"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/aa0001/other", "main"]);
+    const otherTip = repo.commit(
+      { "other.txt": "from other spec\n" },
+      "other spec work\n\nSpec: S-51\nTicket: T-100\nRun: R-800",
+    );
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    originAndSlot(["spec/s", "agent/S-12-final", "spec/aa0001/other"]);
+    const remoteTip = gitOut(origin, ["rev-parse", "agent/S-12-final"]);
+
+    const runner = new FakeAgentRunner(slotDir, async (ctx) => {
+      git(ctx.dir, ["merge", "--no-edit", "spec/aa0001/other"]);
+      return { files: { "final.txt": "final work\n" }, output: DONE };
+    });
+    const outcome = await agentChange(
+      deps(runner),
+      context(
+        bundleFor({
+          stage: "final-fix",
+          ticket: null,
+          agentBranch: "agent/S-12-final",
+          integrationBranch: "spec/s",
+        }),
+      ),
+      repo.dir,
+      slot("agent/S-12-final"),
+      { expectedOld: remoteTip, remoteTip },
+    );
+
+    expect(outcome.outcome).toBe("done");
+    expect(
+      git(origin, ["merge-base", "--is-ancestor", otherTip, "agent/S-12-final"])
+        .code,
+    ).toBe(0);
+    expect(gitOut(origin, ["log", "-1", "--format=%B", otherTip])).toContain(
+      "Spec: S-51",
+    );
+    expect(gitOut(origin, ["log", "-1", "--format=%B", otherTip])).toContain(
+      "Ticket: T-100",
+    );
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", otherTip]),
+    ).not.toContain("Spec: S-12");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", "agent/S-12-final"]),
+    ).toContain("Spec: S-12");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", "agent/S-12-final"]),
+    ).toContain("Run: R-9");
+    expect(
+      gitOut(origin, ["log", "-1", "--format=%B", "agent/S-12-final"]),
+    ).not.toContain("Ticket:");
+  });
 });
 
 describe("AFK_GENERATED_UPSTREAM_SHA in the agent sandbox", () => {

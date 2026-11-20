@@ -139,6 +139,7 @@ export const EXTERNAL_ERROR_PATTERNS = [
   "authentication required|not authenticated|cursor-agent login|unauthorized|invalid username or token",
   "rate.?limit|too many requests|usage limit|out of usage|increase limits|http 429",
   "enotfound|eai_again|etimedout|econnreset|could not resolve host|tls handshake",
+  "failed to reach",
   "err_pnpm_meta_fetch_fail|registry\\.npmjs\\.org|registry\\.npmmirror\\.com",
   "invalid model|unknown model|model not found|model does not exist|no such model",
   "quota[ _]?(exceeded|exhausted)|insufficient (quota|credits)|resource.?exhausted",

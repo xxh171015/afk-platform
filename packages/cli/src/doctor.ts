@@ -80,7 +80,7 @@ function fileOnDefaultOrSetup(cwd: string, path: string): boolean {
   return refs.some((ref) => git(cwd, ["cat-file", "-e", `${ref}:${path}`]).ok);
 }
 
-async function projectIdOf(
+async function trackerDocProjectIdOf(
   input: DoctorInput,
   read: (path: string) => Promise<string>,
 ): Promise<number | undefined> {
@@ -98,7 +98,7 @@ export async function collectDoctorReport(
   const cwd = input.cwd;
   const read = (path: string) =>
     input.readFile(isAbsolute(path) ? path : join(cwd, path));
-  const projectId = await projectIdOf(input, read);
+  const projectId = await trackerDocProjectIdOf(input, read);
   const items: DoctorItem[] = [];
 
   const nodeMajor = Number(process.version.slice(1).split(".")[0]);

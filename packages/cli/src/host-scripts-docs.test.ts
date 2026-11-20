@@ -32,4 +32,13 @@ describe("host-script documentation", () => {
     expect(manual).toMatch(/兼容重跑/);
     expect(manual).toMatch(/小需求/);
   });
+
+  it("explains the morning digest hints for stale and closed pull requests", () => {
+    const manual = readFileSync(
+      join(repoRoot, "docs/operations-manual.md"),
+      "utf8",
+    );
+    expect(manual).toContain("已等 N 天，合并或取消");
+    expect(manual).toContain("PR 已全部关闭，可以取消需求");
+  });
 });
