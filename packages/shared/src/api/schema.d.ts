@@ -4319,6 +4319,8 @@ export interface paths {
                 url: string;
                 error: string;
                 /** @enum {string} */
+                jobType: "pr-ready" | "pr-draft";
+                /** @enum {string} */
                 hostKind?: "github" | "gitlab";
                 waitingSince?: string;
                 blocking?: {
@@ -4532,6 +4534,8 @@ export interface paths {
                   specDisplayId: string;
                   repo: string;
                   number: number;
+                  /** @enum {string} */
+                  jobType: "pr-ready" | "pr-draft";
                 }[];
                 planning: {
                   specId: number;

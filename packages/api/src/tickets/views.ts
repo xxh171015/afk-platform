@@ -1397,7 +1397,7 @@ async function cleanupProblems(pool: pg.Pool) {
 // and no later job of the same type is queued, running or done.
 async function readyFailures(pool: pg.Pool) {
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error, r.host_kind
+    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error, j.type, r.host_kind
      FROM jobs j
      JOIN pull_requests p ON p.id = (j.payload->>'pullId')::int
      JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
@@ -1418,6 +1418,7 @@ async function readyFailures(pool: pg.Pool) {
     number: row.number as number,
     url: row.url as string,
     error: (row.error as string | null) ?? "",
+    jobType: row.type as "pr-ready" | "pr-draft",
     hostKind: row.host_kind as HostKind,
   }));
 }

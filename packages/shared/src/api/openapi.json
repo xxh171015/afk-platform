@@ -9220,6 +9220,10 @@
                           "error": {
                             "type": "string"
                           },
+                          "jobType": {
+                            "type": "string",
+                            "enum": ["pr-ready", "pr-draft"]
+                          },
                           "hostKind": {
                             "type": "string",
                             "enum": ["github", "gitlab"]
@@ -9274,7 +9278,8 @@
                           "repo",
                           "number",
                           "url",
-                          "error"
+                          "error",
+                          "jobType"
                         ]
                       }
                     },
@@ -9809,13 +9814,18 @@
                               },
                               "number": {
                                 "type": "integer"
+                              },
+                              "jobType": {
+                                "type": "string",
+                                "enum": ["pr-ready", "pr-draft"]
                               }
                             },
                             "required": [
                               "specId",
                               "specDisplayId",
                               "repo",
-                              "number"
+                              "number",
+                              "jobType"
                             ]
                           }
                         },

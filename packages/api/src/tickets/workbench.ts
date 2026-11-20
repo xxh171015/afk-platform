@@ -79,6 +79,7 @@ function slimWaiting(queue: RankedQueue) {
       specDisplayId: item.specDisplayId,
       repo: item.repo,
       number: item.number,
+      jobType: item.jobType,
     })),
     planning: queue.planning.map((item) => ({
       specId: item.specId,

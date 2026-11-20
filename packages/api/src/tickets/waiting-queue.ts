@@ -167,6 +167,7 @@ export interface RankableQueue {
     repo: string;
     number: number;
     error: string;
+    jobType: "pr-ready" | "pr-draft";
     waitingSince?: string;
     blocking?: Blocking;
   }[];

@@ -611,6 +611,7 @@ describe("turning a draft pull request ready", () => {
         repo: "frontend",
         number: 2,
         error: expect.stringMatching(/403/),
+        jobType: "pr-ready",
       }),
     ]);
     // the next look at the host does not queue it again by itself
@@ -679,6 +680,17 @@ describe("turning a pull request draft", () => {
         repo: "backend",
         number: 1,
         error: expect.stringMatching(/403/),
+        jobType: "pr-draft",
+      }),
+    ]);
+    const workbench = (await call("GET", "/workbench")).body;
+    expect(workbench.waiting.readyFailures).toEqual([
+      expect.objectContaining({
+        specId: 1,
+        specDisplayId: "S-1",
+        repo: "backend",
+        number: 1,
+        jobType: "pr-draft",
       }),
     ]);
   });

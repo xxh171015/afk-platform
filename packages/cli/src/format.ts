@@ -270,6 +270,7 @@ interface ReadyFailureLike {
   repo: string;
   number: number;
   error: string;
+  jobType?: "pr-ready" | "pr-draft";
   waitingSince?: string;
   blocking?: BlockingLike;
 }
@@ -406,6 +407,13 @@ function cleanupLines(c: CleanupLike): string[] {
 }
 
 function readyFailureLines(r: ReadyFailureLike): string[] {
+  if (r.jobType === "pr-draft") {
+    return [
+      `${r.specDisplayId}  ${r.repo} #${r.number} could not be turned draft: ${r.error}`,
+      ...waitingLines(r.blocking, r.waitingSince),
+      "    it is still ready; turn it draft on the code host",
+    ];
+  }
   return [
     `${r.specDisplayId}  ${r.repo} #${r.number} could not be turned ready: ${r.error}`,
     ...waitingLines(r.blocking, r.waitingSince),

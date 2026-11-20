@@ -325,7 +325,7 @@ export function Workbench() {
                     key={`r-${item.specId}-${item.repo}`}
                     href={paths.spec(item.specId)}
                     displayId={item.specDisplayId}
-                    title={`${item.repo} #${item.number} 未能转 ready`}
+                    title={`${item.repo} #${item.number} 未能转 ${item.jobType === "pr-draft" ? "draft" : "ready"}`}
                   />
                 ))}
                 {(data.waiting.planning ?? []).map((item) => (
