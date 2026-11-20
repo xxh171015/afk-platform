@@ -94,6 +94,7 @@ describe("failure source of a failed job", () => {
     "Cursor 额度用完，充值或换模型后再试",
     "联调镜像构建失败，修好 Dockerfile 或基础镜像后再试",
     "gate setup failed (exit 124)\nProgress: resolved 812, reused 790, downloaded 3",
+    "Failed to reach the Cursor API",
   ];
   const platform = [
     "could not push agent/T-4: ! [rejected] agent/T-4 -> agent/T-4 (non-fast-forward)",

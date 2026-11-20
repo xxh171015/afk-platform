@@ -645,6 +645,13 @@
       "when": 1795000000001,
       "tag": "0091_finalization_host_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1795100000000,
+      "tag": "0092_failed_to_reach_external",
+      "breakpoints": true
     }
   ]
 }
