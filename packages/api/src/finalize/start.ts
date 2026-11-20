@@ -81,7 +81,7 @@ export async function startFinalization(
     } else {
       await client.query(
         `INSERT INTO finalizations (spec_id, repo_id, state) VALUES ($1, $2, 'done')
-         ON CONFLICT (spec_id, repo_id) DO NOTHING`,
+         ON CONFLICT (spec_id, repo_id) DO UPDATE SET state = 'done', blocked_reason = NULL`,
         [specId, planningRepoId],
       );
     }
