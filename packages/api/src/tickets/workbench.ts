@@ -258,7 +258,7 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
        WHERE ticket_id = t.id AND finished_at IS NULL
        ORDER BY id DESC LIMIT 1
      ) run ON true
-     WHERE s.state = 'running' AND t.state IN ('running', 'merging')
+     WHERE s.state IN ('running', 'reworking') AND t.state IN ('running', 'merging')
      ORDER BY s.id DESC, t.id`,
   );
 
@@ -293,7 +293,7 @@ export async function workbench(pool: pg.Pool, now: Date): Promise<Workbench> {
 
   const runningIds = await specIdsIn(
     pool,
-    "SELECT id FROM specs WHERE state = 'running' ORDER BY created_at DESC, id DESC",
+    "SELECT id FROM specs WHERE state IN ('running', 'reworking') ORDER BY created_at DESC, id DESC",
   );
   const runningSpecs = await specListItems(pool, runningIds);
   const running = runningSpecs.map((spec) => ({

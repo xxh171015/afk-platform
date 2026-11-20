@@ -402,4 +402,21 @@ describe("the spec list", () => {
     expect(screen.getByText("Order export")).toBeTruthy();
     expect(screen.queryByText(/无法加载需求/)).toBeNull();
   });
+
+  it("shows 返工中 for a reworking spec", async () => {
+    renderWithApp(
+      <SpecList />,
+      fakeServer({
+        "GET /specs": () => ({
+          json: { specs: [spec({ state: "reworking" })] },
+        }),
+      }),
+    );
+    const row = within(
+      (await screen.findAllByRole("row")).find((item) =>
+        item.textContent?.includes("Order export"),
+      ) as HTMLElement,
+    );
+    expect(row.getByTitle("reworking").textContent).toBe("返工中");
+  });
 });

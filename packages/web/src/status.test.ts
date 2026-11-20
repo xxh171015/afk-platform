@@ -11,6 +11,7 @@ describe("status labels", () => {
   it("gives Chinese copy for spec, ticket, blocked-reason and pull-request states", () => {
     expect(specStateLabel("running")).toBe("运行中");
     expect(specStateLabel("awaiting-review")).toBe("待验收");
+    expect(specStateLabel("reworking")).toBe("返工中");
     expect(ticketStateLabel("blocked")).toBe("已卡住");
     expect(ticketStateLabel("taken-over")).toBe("人接手");
     expect(blockedReasonLabel("agent-gave-up")).toBe("模型放弃");

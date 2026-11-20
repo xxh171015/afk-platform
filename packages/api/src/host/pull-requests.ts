@@ -34,6 +34,7 @@ import {
   type IndexPrLinksPayload,
   type OpenPrPayload,
   type PatchPrBodyPayload,
+  type PrDraftPayload,
   type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
@@ -78,6 +79,10 @@ export type HostTask =
     }
   | {
       kind: "pr-ready";
+      pull: { id: number; repoUrl: string; number: number };
+    }
+  | {
+      kind: "pr-draft";
       pull: { id: number; repoUrl: string; number: number };
     }
   | {
@@ -141,6 +146,11 @@ export const OpenPrResultSchema = z.object({
 
 export const PrReadyResultSchema = z.object({
   stage: z.literal("pr-ready"),
+  ...PullFacts,
+});
+
+export const PrDraftResultSchema = z.object({
+  stage: z.literal("pr-draft"),
   ...PullFacts,
 });
 
@@ -221,6 +231,68 @@ export async function startOpeningPullRequests(
   );
   for (const { repo_id: repoId } of repos.rows)
     await enqueueOpenPr(client, { specId, repoId });
+  if (repos.rows.length > 0) return;
+  await finishOpeningWithExistingPulls(client, specId, new Date());
+}
+
+// Rework wrap-up: every repo already has a pull request. Update the acceptance pack (and each description),
+// turn drafts ready, and move the spec back to awaiting-review without opening another pull request.
+async function finishOpeningWithExistingPulls(
+  client: pg.PoolClient,
+  specId: number,
+  now: Date,
+): Promise<void> {
+  const spec = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [specId],
+  );
+  if (spec.rows[0]?.state !== "finalizing") return;
+  const missing = await client.query(
+    `SELECT 1 FROM finalizations f WHERE f.spec_id = $1
+       AND NOT EXISTS (SELECT 1 FROM pull_requests p WHERE p.spec_id = f.spec_id AND p.repo_id = f.repo_id)`,
+    [specId],
+  );
+  if (missing.rowCount) return;
+  await saveAcceptancePack(client, specId, now);
+  await enqueuePrReadyAfterRework(client, specId);
+  const next = specTransition("finalizing", "pr-opened");
+  if (!next.ok) throw new Error(next.reason);
+  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+    specId,
+    next.state,
+  ]);
+  await markMergedWhenAllAre(client, specId);
+  const projectId = await projectOf(client, specId);
+  if (projectId !== undefined) await enqueueHostSync(client, projectId);
+}
+
+// After rework the pull requests are drafts again. Turn ready those whose merge-order predecessors are merged
+// (or that have none), even if an earlier pr-ready job already ran before the rework.
+async function enqueuePrReadyAfterRework(
+  client: pg.PoolClient,
+  specId: number,
+): Promise<void> {
+  const order = await mergeOrderOf(client, specId);
+  const pulls = await client.query<{
+    id: number;
+    name: string;
+    state: string;
+    draft: boolean;
+  }>(
+    `SELECT p.id, r.name, p.state, p.draft FROM pull_requests p JOIN repos r ON r.id = p.repo_id
+     WHERE p.spec_id = $1 ORDER BY p.id`,
+    [specId],
+  );
+  const mergedRepos = new Set(
+    pulls.rows.filter((p) => p.state === "merged").map((p) => p.name),
+  );
+  for (const pull of pulls.rows) {
+    if (pull.state !== "open" || !pull.draft) continue;
+    const before = order.after[pull.name] ?? [];
+    if (before.length > 0 && !before.every((name) => mergedRepos.has(name)))
+      continue;
+    await enqueuePrReady(client, { pullId: pull.id });
+  }
 }
 
 export async function buildHostTask(
@@ -231,6 +303,7 @@ export async function buildHostTask(
     | HostSyncPayload
     | SpecCleanupPayload
     | PrReadyPayload
+    | PrDraftPayload
     | PatchPrBodyPayload
     | IndexPrLinksPayload
     | AutoMergePayload,
@@ -301,8 +374,8 @@ export async function buildHostTask(
   }
   if (job.type === "spec-cleanup")
     return specCleanupTask(pool, payload as SpecCleanupPayload);
-  if (job.type === "pr-ready") {
-    const { pullId } = payload as PrReadyPayload;
+  if (job.type === "pr-ready" || job.type === "pr-draft") {
+    const { pullId } = payload as PrReadyPayload | PrDraftPayload;
     const pull = (
       await pool.query<{ id: number; url: string; number: number }>(
         `SELECT p.id, r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
@@ -311,7 +384,7 @@ export async function buildHostTask(
     ).rows[0];
     return pull
       ? {
-          kind: "pr-ready",
+          kind: job.type,
           pull: { id: pull.id, repoUrl: pull.url, number: pull.number },
         }
       : undefined;
@@ -616,6 +689,31 @@ export async function recordPrReady(
   return { status: "applied" };
 }
 
+export async function recordPrDraft(
+  client: pg.PoolClient,
+  read: PrDraftPayload,
+  result: unknown,
+): Promise<RecordHostResult> {
+  const parsed = PrDraftResultSchema.safeParse(result);
+  if (!parsed.success)
+    return { status: "ignored", reason: "pr-draft result is not valid" };
+  const owner = await client.query<{ spec_id: number }>(
+    "SELECT spec_id FROM pull_requests WHERE id = $1",
+    [read.pullId],
+  );
+  const specId = owner.rows[0]?.spec_id;
+  if (specId === undefined)
+    return { status: "ignored", reason: "no such pull request" };
+  await lockSpec(client, specId);
+  const pr = parsed.data;
+  await client.query(
+    `UPDATE pull_requests SET state = $2, draft = $3, head_sha = $4, ci = $5, review = $6, sync_error = NULL, synced_at = now()
+     WHERE id = $1`,
+    [read.pullId, pr.state, pr.draft, pr.headSha, pr.ci, pr.review],
+  );
+  return { status: "applied" };
+}
+
 export type RecordHostResult =
   | { status: "applied" }
   | { status: "ignored"; reason: string };
@@ -685,6 +783,7 @@ export async function recordOpenPr(
   if (!missing.rowCount) {
     // the pack is ready by the time the spec says it is waiting for a person
     await saveAcceptancePack(client, read.specId, now);
+    await enqueuePrReadyAfterRework(client, read.specId);
     const next = specTransition("finalizing", "pr-opened");
     if (!next.ok) throw new Error(next.reason);
     await client.query("UPDATE specs SET state = $2 WHERE id = $1", [

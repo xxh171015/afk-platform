@@ -375,6 +375,83 @@ describe("when the overall review starts", () => {
       ]),
     );
   });
+
+  it("updates the existing pull request and turns it ready instead of opening a new one after rework", async () => {
+    const specId = await runningSpec([ticket("a")]);
+    await allTicketsDone();
+    await db.pool.query(
+      "UPDATE jobs SET state = 'failed' WHERE payload->>'final' = 'true' AND state IN ('queued', 'running')",
+    );
+    await db.pool.query("UPDATE finalizations SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, head_sha, draft, synced_at)
+       VALUES ($1, 1, 9, 'https://github.com/me/shop/pull/9', 'sha', false, now())`,
+      [specId],
+    );
+    const appended = await call(
+      "POST",
+      `/specs/${specId}/tickets/import?append=true`,
+      importBody(specId, { tickets: [ticket("extra")] }),
+    );
+    expect(appended.status).toBe(200);
+    await db.pool.query(
+      "UPDATE pull_requests SET draft = true WHERE spec_id = $1",
+      [specId],
+    );
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", SUCCESS.review);
+    await step("merge", SUCCESS.merge);
+    expect(await spec()).toBe("finalizing");
+    const openPrBefore = (
+      await db.pool.query(
+        "SELECT type FROM jobs WHERE type = 'open-pr' ORDER BY id",
+      )
+    ).rows;
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "standards",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+        },
+      },
+    });
+    expect(await spec()).toBe("awaiting-review");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type FROM jobs WHERE type = 'open-pr' ORDER BY id",
+        )
+      ).rows,
+    ).toHaveLength(openPrBefore.length);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type, payload FROM jobs WHERE type IN ('pr-ready', 'patch-pr-body') ORDER BY type, id",
+        )
+      ).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "pr-ready",
+          payload: { pullId: 1 },
+        }),
+        expect.objectContaining({
+          type: "patch-pr-body",
+        }),
+      ]),
+    );
+    const pack = (await call("GET", `/specs/${specId}`)).body.acceptancePack;
+    expect(pack).toBeTruthy();
+    expect(pack.repos[0].tickets.map((t: Json) => t.displayId)).toEqual(
+      expect.arrayContaining(["T-1", "T-2"]),
+    );
+  });
 });
 
 describe("the overall review and the one fix", () => {

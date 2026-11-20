@@ -824,8 +824,9 @@ export function specText(view: {
   autoMerge?: AutoMergeStatus | null;
 }): string {
   const mergeLine = autoMergeLine(view.autoMerge, view.spec.state);
+  const state = view.spec.state === "reworking" ? "返工中" : view.spec.state;
   return [
-    `${view.spec.displayId}  ${view.spec.state}  ${view.spec.title}`,
+    `${view.spec.displayId}  ${state}  ${view.spec.title}`,
     ...(mergeLine ? [mergeLine] : []),
     ...(view.spec.pauseReason
       ? [`paused: ${pauseReasonLabel(view.spec.pauseReason)}`]

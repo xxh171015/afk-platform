@@ -105,6 +105,9 @@ export function autoMergeForecast(input: AutoMergeInput): AutoMergeResult {
   if (input.specType !== "improvement") {
     return fail("需求类型不是 improvement");
   }
+  if (input.specState === "reworking") {
+    return fail("返工中");
+  }
   if (input.specState !== "awaiting-review") {
     return fail("需求不在 awaiting-review");
   }
@@ -112,8 +115,11 @@ export function autoMergeForecast(input: AutoMergeInput): AutoMergeResult {
     return fail("需求不是只有一个 PR");
   }
   const pull = input.pullRequests[0];
-  if (pull.state !== "open" || pull.draft) {
+  if (pull.state !== "open") {
     return fail("PR 不是打开的非草稿");
+  }
+  if (pull.draft) {
+    return fail("返工中");
   }
   if (pull.ci === "pending" || pull.ci === "failure") {
     return fail("CI 是 pending 或 failure");

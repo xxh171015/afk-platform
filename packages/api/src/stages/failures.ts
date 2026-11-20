@@ -19,13 +19,17 @@ import {
 import {
   CLEANUP_RETRY_SECONDS,
   enqueueOpenPr,
+  enqueuePrDraft,
   enqueuePrReady,
   enqueueSpecCleanup,
   inSeconds,
   openPrKeyPrefix,
+  type PrDraftPayload,
   type PrReadyPayload,
+  prDraftKeyPrefix,
   prReadyKeyPrefix,
   readOpenPrPayload,
+  readPrDraftPayload,
   readPrReadyPayload,
   readSpecCleanupPayload,
   type SpecCleanupPayload,
@@ -285,6 +289,8 @@ export async function recordJobFailure(
   if (cleanup) return specCleanupFailed(client, cleanup, now);
   const ready = readPrReadyPayload(job);
   if (ready) return prReadyFailed(client, ready, now);
+  const draft = readPrDraftPayload(job);
+  if (draft) return prDraftFailed(client, draft, now);
   const locate = await recordLocateJobFailure(client, job, error);
   if (locate.status !== "not-locate") {
     return locate.status === "ignored"
@@ -484,5 +490,18 @@ async function prReadyFailed(
   const failures = await failuresOf(client, prReadyKeyPrefix(read), 0);
   if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
   await enqueuePrReady(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
+  return { status: "requeued", failures };
+}
+
+// A pull request could not be turned draft: tried again a minute later, three times in all. After that the job
+// stays failed, and plat blocked lists the pull request for a person.
+async function prDraftFailed(
+  client: pg.PoolClient,
+  read: PrDraftPayload,
+  now: Date,
+): Promise<FailureOutcome> {
+  const failures = await failuresOf(client, prDraftKeyPrefix(read), 0);
+  if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
+  await enqueuePrDraft(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
   return { status: "requeued", failures };
 }

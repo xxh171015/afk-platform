@@ -769,6 +769,25 @@ const specShow = (
     autoMerge,
   } as never);
 
+describe("plat spec show reworking", () => {
+  it("prints 返工中 instead of the English state code", () => {
+    expect(
+      specText({
+        spec: {
+          displayId: "S-1",
+          title: "Export",
+          state: "reworking",
+          pauseReason: null,
+          warnings: [],
+        },
+        tickets: [],
+        finalizations: [],
+        edges: [],
+      } as never),
+    ).toContain("S-1  返工中  Export");
+  });
+});
+
 describe("plat spec show auto-merge", () => {
   it("prints the same auto-merge line as the delivery page", async () => {
     expect(
