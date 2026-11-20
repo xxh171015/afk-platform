@@ -17,6 +17,7 @@ export const DIGEST_EVERY_MS = 5 * 60 * 1000;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 function hourInZone(at: Date, timeZone = METRICS_TIME_ZONE): number {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -30,7 +31,8 @@ function hourInZone(at: Date, timeZone = METRICS_TIME_ZONE): number {
 function openedAgo(ms: number): string {
   if (ms < MINUTE) return "不到 1 分钟";
   if (ms < HOUR) return `${Math.round(ms / MINUTE)} 分钟`;
-  return `${Math.round(ms / HOUR)} 小时`;
+  if (ms < 48 * HOUR) return `${Math.round(ms / HOUR)} 小时`;
+  return `${Math.round(ms / DAY)} 天`;
 }
 
 interface PendingSpec {
@@ -38,7 +40,7 @@ interface PendingSpec {
   project_id: number;
   title: string;
   opened_at: Date | null;
-  pulls: { url: string; conflicts: boolean }[] | null;
+  pulls: { url: string; conflicts: boolean; state: string }[] | null;
   pack: { needsDecision?: { kind?: string }[] } | null;
   host_kind: string | null;
 }
@@ -59,10 +61,12 @@ export async function maybeSendDailyDigest(
 
   const pending = await pool.query<PendingSpec>(
     `SELECT s.id, s.project_id, s.title,
-            (SELECT min(e.at) FROM events e
-              WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'awaiting-review'
+            COALESCE(
+              (SELECT min(e.at) FROM events e
+                WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'awaiting-review'),
+              (SELECT min(p.created_at) FROM pull_requests p WHERE p.spec_id = s.id)
             ) AS opened_at,
-            (SELECT json_agg(json_build_object('url', p.url, 'conflicts', p.conflicts_with_default) ORDER BY p.id)
+            (SELECT json_agg(json_build_object('url', p.url, 'conflicts', p.conflicts_with_default, 'state', p.state) ORDER BY p.id)
                FROM pull_requests p WHERE p.spec_id = s.id) AS pulls,
             ap.content AS pack,
             (SELECT r.host_kind FROM repos r
@@ -90,9 +94,16 @@ export async function maybeSendDailyDigest(
         (item) => item.kind === "needs-human",
       ).length;
       const deferred = items.filter((item) => item.kind === "deferred").length;
-      const opened = spec.opened_at
-        ? openedAgo(Math.max(0, now.getTime() - spec.opened_at.getTime()))
-        : "不到 1 分钟";
+      const openedMs = spec.opened_at
+        ? Math.max(0, now.getTime() - spec.opened_at.getTime())
+        : null;
+      const opened = openedMs === null ? "不到 1 分钟" : openedAgo(openedMs);
+      const allClosed =
+        pulls.length > 0 && pulls.every((pull) => pull.state === "closed");
+      const stale =
+        !allClosed && openedMs !== null && openedMs > 7 * DAY
+          ? `已等 ${Math.round(openedMs / DAY)} 天，合并或取消`
+          : null;
       const urls = pulls.map((pull) => pull.url).filter(Boolean);
       const conflicts = pulls.some((pull) => pull.conflicts);
       return [
@@ -100,9 +111,11 @@ export async function maybeSendDailyDigest(
         spec.title,
         ...urls,
         `${pr} 开出 ${opened}`,
-        `needs-human ${needsHuman}`,
-        `deferred ${deferred}`,
+        ...(allClosed
+          ? ["PR 已全部关闭，可以取消需求"]
+          : [`needs-human ${needsHuman}`, `deferred ${deferred}`]),
         ...(conflicts ? ["与默认分支冲突"] : []),
+        ...(stale ? [stale] : []),
       ].join(" ");
     });
     await recordSystemEvent(pool, {
