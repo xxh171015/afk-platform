@@ -200,9 +200,12 @@ export async function agentChange(
       repoDir: mainDir,
       branch: agent,
       before: stampFrom,
-      // Integration commits (merge-fix) and default-branch commits (update-branch)
-      // already exist elsewhere; rewriting them changes hashes and GitHub sees duplicates.
+      // Origin already has these: this spec's integration branch, the default
+      // branch, every other spec/*, and every ticket branch fetched into
+      // refs/afk/origin/agent/*. Rewriting them changes hashes and GitHub sees
+      // duplicates across PRs.
       exclude: [integration, bundle.repo.defaultBranch],
+      excludeGlobs: ["refs/heads/spec/*", "refs/afk/origin/agent/*"],
       ids: {
         spec: bundle.spec.displayId,
         ...(bundle.ticket ? { ticket: bundle.ticket.displayId } : {}),

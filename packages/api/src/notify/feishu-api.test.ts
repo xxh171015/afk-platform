@@ -705,4 +705,55 @@ describe("daily digest of awaiting-review specs", () => {
     );
     expect(fake.requests).toEqual([]);
   });
+
+  it("uses the earliest pull-request created_at when there is no awaiting-review event, writes days after 48 hours, and asks to merge or cancel after 7 days", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const specId = await pendingSpec(shopId, {
+      title: "导出订单",
+      slug: "export",
+    });
+    await db.pool.query(
+      `DELETE FROM events
+        WHERE spec_id = $1 AND type = 'spec' AND to_state = 'awaiting-review'`,
+      [specId],
+    );
+    await db.pool.query(
+      `UPDATE pull_requests SET created_at = $2 WHERE spec_id = $1`,
+      [specId, new Date(BEIJING_9AM.getTime() - 10 * 24 * 3600 * 1000)],
+    );
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const body = (await digestEvents()).rows[0]?.body;
+    expect(body).toContain("开出 10 天");
+    expect(body).toContain("已等 10 天，合并或取消");
+  });
+
+  it("says all pull requests are closed and omits needs-human and deferred counts", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    await pendingSpec(shopId, {
+      title: "导出订单",
+      slug: "export",
+      needsHuman: 2,
+      deferred: 1,
+    });
+    await db.pool.query(`UPDATE pull_requests SET state = 'closed'`);
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const body = (await digestEvents()).rows[0]?.body;
+    expect(body).toContain("PR 已全部关闭，可以取消需求");
+    expect(body).not.toContain("needs-human");
+    expect(body).not.toContain("deferred");
+  });
 });
