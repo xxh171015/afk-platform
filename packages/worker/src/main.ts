@@ -45,6 +45,7 @@ import { retainWorkerFiles } from "./retention.ts";
 import { removeSandboxesUnder } from "./sandboxes.ts";
 import { SlotManager } from "./slots.ts";
 import { SnapshotStore } from "./snapshots.ts";
+import { waitForApi } from "./wait-for-api.ts";
 import { runWorker } from "./worker.ts";
 
 // `pnpm worker`: a worker on this machine, with the real sandbox, the GitHub App and the folders under ~/.afk.
@@ -105,15 +106,14 @@ if (image.status !== 0)
     `the sandbox image ${config.image} is not built: run scripts/verify-sandbox-image.sh, or set AFK_SANDBOX_IMAGE`,
   );
 
-// An API that is not there is the commonest mistake: say so now instead of failing at the first claim.
-try {
-  const response = await fetch(`${config.apiUrl}/specs`);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-} catch (error) {
-  fail(
-    `the API at ${config.apiUrl} does not answer (${reason(error)}); start it with pnpm api`,
-  );
-}
+// An API that is not there is the commonest mistake: say so now, and wait for it instead of failing at the first
+// claim or exiting (which under up.sh stops the whole stack).
+await waitForApi({
+  apiUrl: config.apiUrl,
+  fetch: (url) => fetch(url),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  log,
+});
 
 // The platform registers repos only on the hosts some worker has credentials for.
 await reportCodeHosts(config.apiUrl, config.workerId, codeHosts).catch(
