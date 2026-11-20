@@ -8,10 +8,15 @@ import {
 } from "@afk/shared";
 import type pg from "pg";
 
-function specAxisOutput(result: {
-  run?: { axis?: string; output?: unknown };
-  extraRuns?: { run: { axis?: string; output?: unknown } }[];
-}): unknown {
+export function specAxisOutput(
+  result:
+    | {
+        run?: { axis?: string; output?: unknown };
+        extraRuns?: { run: { axis?: string; output?: unknown } }[];
+      }
+    | undefined,
+): unknown {
+  if (!result) return undefined;
   const runs = [
     result.run,
     ...(result.extraRuns ?? []).map((extra) => extra.run),

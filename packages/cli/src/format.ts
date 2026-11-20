@@ -9,6 +9,7 @@ import {
   type PullRequestRowView,
   pauseReasonLabel,
   pullPhrase,
+  reviewAxisLabel,
   type StageModels,
   type StructuredBrief,
   sameReasonRepeatLine,
@@ -633,6 +634,17 @@ function decisionRows(
   return rows;
 }
 
+function reviewUncertaintyLine(item: {
+  axis?: string | null;
+  ticket?: string | null;
+  stage: string;
+  run: string;
+  body: string;
+}): string {
+  const axis = reviewAxisLabel(item.axis);
+  return `      ${axis ? `${axis} ` : ""}${item.ticket ?? "spec"} ${item.stage} ${item.run}: ${item.body}`;
+}
+
 // What a person reads before merging: the order to merge in, then a section for each repo (its pull request, which
 // criteria are backed by a passing test, what the reviews said and the decisions agents made, its gate, and
 // approved exceptions), and the tickets that were cancelled.
@@ -725,27 +737,11 @@ export function acceptancePackText(pack: AcceptancePackView): string {
         ),
         ...section(
           "审查拿不准的",
-          (repo.reviewUncertainties ?? []).map((item) => {
-            const axis =
-              item.axis === "spec"
-                ? "Spec 轴"
-                : item.axis === "standards"
-                  ? "Standards 轴"
-                  : "";
-            return `      ${axis ? `${axis} ` : ""}${item.ticket ?? "spec"} ${item.stage} ${item.run}: ${item.body}`;
-          }),
+          (repo.reviewUncertainties ?? []).map(reviewUncertaintyLine),
         ),
         ...section(
           `已解决的疑点（${(repo.resolvedUncertainties ?? []).length} 条）`,
-          (repo.resolvedUncertainties ?? []).map((item) => {
-            const axis =
-              item.axis === "spec"
-                ? "Spec 轴"
-                : item.axis === "standards"
-                  ? "Standards 轴"
-                  : "";
-            return `      ${axis ? `${axis} ` : ""}${item.ticket ?? "spec"} ${item.stage} ${item.run}: ${item.body}`;
-          }),
+          (repo.resolvedUncertainties ?? []).map(reviewUncertaintyLine),
         ),
         ...section("decisions", decisionRows(repo.decisions ?? [])),
         ...section(
