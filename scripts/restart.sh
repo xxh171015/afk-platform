@@ -52,12 +52,21 @@ if ! cmp -s pnpm-lock.yaml node_modules/.pnpm/lock.yaml 2>/dev/null; then
   fi
 fi
 
+# up.sh applies migrations before it replaces the API; that can take a while, and when it fails up.sh leaves the
+# old API running and writes why to restart.failed.
+failed="$run_dir/restart.failed"
+rm -f "$failed"
 printf '%s\n' "$target" >"$run_dir/restart.request"
 n=0
-while [ "$n" -lt 50 ]; do
+while [ "$n" -lt 600 ]; do
   new_pid=$(tr -d ' \n' <"$pidfile" 2>/dev/null || true)
   if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && kill -0 "$new_pid" 2>/dev/null; then
     exit 0
+  fi
+  if [ -f "$failed" ]; then
+    cat "$failed" >&2
+    rm -f "$failed"
+    exit 1
   fi
   sleep 0.2
   n=$((n + 1))
