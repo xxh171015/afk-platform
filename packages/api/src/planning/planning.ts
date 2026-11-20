@@ -23,7 +23,7 @@ import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import { applyOrigin } from "../events/origin.ts";
 import { hostKindOf, mixedHostsWith } from "../host/code-hosts.ts";
-import { enqueuePrDraft } from "../host/host-jobs.ts";
+import { enqueuePrDraft, stopAutoMergeJobs } from "../host/host-jobs.ts";
 import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
 import { ensureIntegrationBranches } from "./integration-branches.ts";
@@ -524,6 +524,7 @@ export async function importTickets(
           "SELECT id FROM pull_requests WHERE spec_id = $1 AND state = 'open' ORDER BY id",
           [specId],
         );
+        await stopAutoMergeJobs(client, specId, "返工中");
         for (const pull of pulls.rows)
           await enqueuePrDraft(client, { pullId: pull.id });
       }

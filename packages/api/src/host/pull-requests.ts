@@ -38,6 +38,7 @@ import {
   type PrReadyPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
+  stopAutoMergeJobs,
   syncDelaySeconds,
 } from "./host-jobs.ts";
 import { IDLE_TICKET_SQL } from "./idle-tickets.ts";
@@ -309,22 +310,34 @@ export async function buildHostTask(
     | AutoMergePayload,
 ): Promise<HostTask | undefined> {
   if (job.type === "auto-merge") {
-    const { pullId, expectedHeadSha } = payload as AutoMergePayload;
+    const { pullId, expectedHeadSha, specId } = payload as AutoMergePayload;
     const pull = (
-      await pool.query<{ url: string; number: number }>(
-        `SELECT r.url, p.number FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+      await pool.query<{
+        url: string;
+        number: number;
+        draft: boolean;
+        spec_state: string;
+      }>(
+        `SELECT r.url, p.number, p.draft, s.state AS spec_state
+         FROM pull_requests p
+         JOIN repos r ON r.id = p.repo_id
+         JOIN specs s ON s.id = p.spec_id
+         WHERE p.id = $1`,
         [pullId],
       )
     ).rows[0];
-    return pull
-      ? {
-          kind: "auto-merge",
-          repoUrl: pull.url,
-          number: pull.number,
-          expectedHeadSha,
-          section: AUTO_MERGED_SECTION,
-        }
-      : undefined;
+    if (!pull) return undefined;
+    if (pull.spec_state === "reworking" || pull.draft) {
+      await stopAutoMergeJobs(pool, specId, "返工中");
+      return undefined;
+    }
+    return {
+      kind: "auto-merge",
+      repoUrl: pull.url,
+      number: pull.number,
+      expectedHeadSha,
+      section: AUTO_MERGED_SECTION,
+    };
   }
   if (job.type === "index-pr-links") {
     const { pullId, mergeSha, squashSha } = payload as IndexPrLinksPayload;
@@ -866,18 +879,13 @@ async function finishReworkingBecausePrMerged(
 ) {
   const next = specTransition("reworking", "all-prs-merged");
   if (!next.ok) throw new Error(next.reason);
+  await client.query("SELECT set_config('afk.reason', $1, true)", [
+    REWORK_PR_MERGED_REASON,
+  ]);
   await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
     specId,
     next.state,
   ]);
-  await client.query(
-    `UPDATE events SET reason = $2
-     WHERE id = (
-       SELECT id FROM events WHERE spec_id = $1 AND type = 'spec' AND to_state = 'merged'
-       ORDER BY id DESC LIMIT 1
-     )`,
-    [specId, REWORK_PR_MERGED_REASON],
-  );
 
   const tickets = await client.query<{ id: number; state: TicketState }>(
     "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",

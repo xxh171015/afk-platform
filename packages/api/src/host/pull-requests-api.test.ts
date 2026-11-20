@@ -1497,6 +1497,66 @@ describe("a pull request merged while the spec is reworking", () => {
       source: "host-sync",
     });
   });
+
+  it("records 返工中 PR 被合并 on the trigger-inserted spec event without rewriting it", async () => {
+    await db.pool.query(`
+      CREATE FUNCTION afk_test_events_append_only() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'events are only appended';
+      END $$;
+      CREATE TRIGGER events_append_only BEFORE UPDATE ON events
+        FOR EACH ROW EXECUTE FUNCTION afk_test_events_append_only();
+    `);
+    await settledSpec(["backend"]);
+    const open = await claimOf("open-pr");
+    await worker.complete(open.id, open.attempt, opened(1));
+    const appended = await call(
+      "POST",
+      "/specs/1/tickets/import?append=true",
+      importBody(1, { tickets: [ticket("extra", "backend")] }),
+    );
+    expect(appended.status).toBe(200);
+
+    clock.advanceSeconds(61);
+    let sync: { id: number; attempt: number } | undefined;
+    for (let i = 0; i < 12; i++) {
+      const job = (await worker.claim()).body.job as {
+        id: number;
+        type: string;
+        attempt: number;
+      } | null;
+      if (!job) break;
+      if (job.type === "host-sync") {
+        sync = job;
+        break;
+      }
+    }
+    if (!sync) throw new Error("no host-sync job");
+    expect(
+      (
+        await worker.complete(sync.id, sync.attempt, {
+          stage: "host-sync",
+          pulls: [synced(1, { state: "merged" })],
+        })
+      ).status,
+    ).toBe(200);
+    expect(await specState()).toBe("merged");
+    expect(
+      (
+        await db.pool.query(
+          `SELECT type, from_state, to_state, reason, source FROM events
+           WHERE type = 'spec' AND to_state = 'merged' ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0],
+    ).toEqual({
+      type: "spec",
+      from_state: "reworking",
+      to_state: "merged",
+      reason: "返工中 PR 被合并",
+      source: "host-sync",
+    });
+  });
 });
 
 describe("what waits for a person among the pull requests", () => {
@@ -3738,6 +3798,57 @@ describe("auto-merge jobs after host-sync", () => {
     await flushNotices();
     expect(notices.map((n) => n.title)).toEqual(["需求已合并"]);
     expect(notices[0]?.body).not.toMatch(/平台账号合并了/);
+  });
+
+  it("fails a queued auto-merge when the spec is appended into reworking, and queues pr-draft", async () => {
+    await openImprovement({ minutesAgo: 30 });
+    await look([
+      asOpened(1, { headSha: "head-ready", ci: "success", humanComments: 0 }),
+    ]);
+    expect(await jobsOf("auto-merge")).toMatchObject([{ state: "queued" }]);
+    const appended = await call(
+      "POST",
+      "/specs/1/tickets/import?append=true",
+      importBody(1, { tickets: [ticket("extra", "backend")] }),
+    );
+    expect(appended.status).toBe(200);
+    expect(await specState()).toBe("reworking");
+    expect(await jobsOf("auto-merge")).toMatchObject([
+      { state: "failed", payload: expect.objectContaining({ specId: 1 }) },
+    ]);
+    expect(
+      (await db.pool.query("SELECT error FROM jobs WHERE type = 'auto-merge'"))
+        .rows[0].error,
+    ).toBe("返工中");
+    expect(await jobsOf("pr-draft")).toMatchObject([
+      { state: "queued", payload: { pullId: 1 } },
+    ]);
+  });
+
+  it("does not tell the worker to merge when the spec is reworking", async () => {
+    const job = await dueAutoMerge();
+    await db.pool.query("UPDATE specs SET state = 'reworking'");
+    const task = await taskOf(job);
+    expect(task.status).not.toBe(200);
+    expect(task.body.kind).not.toBe("auto-merge");
+    expect(await jobsOf("auto-merge")).toMatchObject([{ state: "failed" }]);
+    expect(
+      (await db.pool.query("SELECT error FROM jobs WHERE type = 'auto-merge'"))
+        .rows[0].error,
+    ).toBe("返工中");
+  });
+
+  it("does not tell the worker to merge when the pull request is a draft", async () => {
+    const job = await dueAutoMerge();
+    await db.pool.query("UPDATE pull_requests SET draft = true");
+    const task = await taskOf(job);
+    expect(task.status).not.toBe(200);
+    expect(task.body.kind).not.toBe("auto-merge");
+    expect(await jobsOf("auto-merge")).toMatchObject([{ state: "failed" }]);
+    expect(
+      (await db.pool.query("SELECT error FROM jobs WHERE type = 'auto-merge'"))
+        .rows[0].error,
+    ).toBe("返工中");
   });
 
   it("still notifies when the platform token merged a pull request that was not auto-merged", async () => {
