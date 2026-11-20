@@ -1,6 +1,8 @@
 import { GIB } from "@afk/shared";
+import type pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedTestDatabase, type TestDatabase } from "./db/test-db.ts";
+import { refreshDiskStatus } from "./disk.ts";
 import { enqueueJob } from "./jobs/queue.ts";
 import type { Notice } from "./notify/notices.ts";
 import { listen, type RunningApi, testApp } from "./test/fake-worker.ts";
@@ -161,5 +163,37 @@ describe("disk remaining-space alerts", () => {
     workerFree = 20 * GIB;
     expect((await reportWorker()).status).toBe(200);
     expect((await claim()).job).toMatchObject({ type: "agent-run" });
+  });
+
+  it("records one disk-stop event when two refreshDiskStatus calls cross the stop threshold together", async () => {
+    const sample = { freeBytes: 4 * GIB, dirBytes: 4096 };
+    let release!: () => void;
+    const bothRead = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let noticedReads = 0;
+    const racing = {
+      query: async (sql: string, params?: unknown[]) => {
+        const result = await db.pool.query(sql, params);
+        if (
+          typeof sql === "string" &&
+          sql.includes("SELECT disk_noticed FROM instance")
+        ) {
+          noticedReads += 1;
+          if (noticedReads >= 2) release();
+          await bothRead;
+        }
+        return result;
+      },
+    } as Pick<pg.Pool, "query">;
+    await Promise.all([
+      refreshDiskStatus(racing, sample),
+      refreshDiskStatus(racing, sample),
+    ]);
+    const events = await db.pool.query<{ kind: string }>(
+      `SELECT data->>'kind' AS kind FROM events
+        WHERE type = 'system' AND data->>'kind' = 'disk-stop'`,
+    );
+    expect(events.rows).toHaveLength(1);
   });
 });
