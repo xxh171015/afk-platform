@@ -7,8 +7,11 @@ import {
   MANUAL_MERGE_NOTE,
   parseDisplayId,
   parseMergePolicy,
+  REWORK_PR_MERGED_REASON,
   type SpecState,
   specTransition,
+  type TicketState,
+  ticketTransition,
   wrapMergeNote,
 } from "@afk/shared";
 import type pg from "pg";
@@ -16,6 +19,7 @@ import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
 import { renderPackSection } from "../acceptance/pack-description.ts";
 import { recordAutoMergeEvent } from "../events/auto-merge.ts";
+import { cancelTicketJobs } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
 import { queueDueAutoMerges } from "./auto-merge.ts";
@@ -714,8 +718,13 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     order_broken: { repo: string; skipped: string[] }[];
   }>("SELECT state, order_broken FROM specs WHERE id = $1", [specId]);
   const spec = state.rows[0];
-  if (!spec || !["awaiting-review", "partially-merged"].includes(spec.state))
+  if (!spec) return;
+  if (spec.state === "reworking") {
+    if (!pulls.rows.some((p) => p.state === "merged")) return;
+    await finishReworkingBecausePrMerged(client, specId);
     return;
+  }
+  if (!["awaiting-review", "partially-merged"].includes(spec.state)) return;
   const merged = new Set(
     pulls.rows.filter((p) => p.state === "merged").map((p) => p.name),
   );
@@ -750,6 +759,46 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
     await dropPotentialConflicts(client, specId);
     await enqueueSpecCleanup(client, { specId });
   }
+}
+
+async function finishReworkingBecausePrMerged(
+  client: pg.PoolClient,
+  specId: number,
+) {
+  const next = specTransition("reworking", "all-prs-merged");
+  if (!next.ok) throw new Error(next.reason);
+  await client.query("UPDATE specs SET state = $2 WHERE id = $1", [
+    specId,
+    next.state,
+  ]);
+  await client.query(
+    `UPDATE events SET reason = $2
+     WHERE id = (
+       SELECT id FROM events WHERE spec_id = $1 AND type = 'spec' AND to_state = 'merged'
+       ORDER BY id DESC LIMIT 1
+     )`,
+    [specId, REWORK_PR_MERGED_REASON],
+  );
+
+  const tickets = await client.query<{ id: number; state: TicketState }>(
+    "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",
+    [specId],
+  );
+  const cancelled: number[] = [];
+  for (const ticket of tickets.rows) {
+    if (ticketTransition(ticket.state, { type: "spec-cancelled" }).ok)
+      cancelled.push(ticket.id);
+  }
+  if (cancelled.length > 0) {
+    await client.query(
+      "UPDATE tickets SET state = 'cancelled', blocked_reason = NULL WHERE id = ANY($1)",
+      [cancelled],
+    );
+    for (const id of cancelled)
+      await cancelTicketJobs(client, id, REWORK_PR_MERGED_REASON);
+  }
+  await dropPotentialConflicts(client, specId);
+  await enqueueSpecCleanup(client, { specId });
 }
 
 // What the host says about the open pull requests of a project. When a person has merged every one of a spec's,

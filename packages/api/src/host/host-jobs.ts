@@ -5,9 +5,10 @@ import { enqueueJob, requeueJob } from "../jobs/queue.ts";
 // The jobs that talk to the code host. A worker runs them because the host's credentials live there only
 // (docs/design.md「代码托管」): `open-pr` opens one repo's pull request for a spec, `host-sync` follows every
 // pull request of a project that is still worth a look (one row per project, put back in the queue after each
-// look), `patch-pr-body` writes the acceptance pack into a description, `index-pr-links` walks trailers on
-// the default branch after a pull request is first merged, `auto-merge` merges an improvement spec's pull
-// request when ADR 0011's conditions hold. None of them holds a lock key.
+// look), `pr-draft` turns a pull request draft when its spec goes back to reworking, `patch-pr-body` writes
+// the acceptance pack into a description, `index-pr-links` walks trailers on the default branch after a pull
+// request is first merged, `auto-merge` merges an improvement spec's pull request when ADR 0011's conditions
+// hold. None of them holds a lock key.
 
 export const SYNC_INTERVAL_SECONDS = 60;
 
@@ -29,6 +30,10 @@ export interface SpecCleanupPayload {
 }
 
 export interface PrReadyPayload {
+  pullId: number;
+}
+
+export interface PrDraftPayload {
   pullId: number;
 }
 
@@ -55,6 +60,16 @@ export function readPrReadyPayload(job: {
 }): PrReadyPayload | undefined {
   const { pullId } = job.payload;
   return job.type === "pr-ready" && typeof pullId === "number"
+    ? { pullId }
+    : undefined;
+}
+
+export function readPrDraftPayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): PrDraftPayload | undefined {
+  const { pullId } = job.payload;
+  return job.type === "pr-draft" && typeof pullId === "number"
     ? { pullId }
     : undefined;
 }
@@ -228,6 +243,9 @@ export async function enqueueHostSync(
 export const prReadyKeyPrefix = ({ pullId }: PrReadyPayload) =>
   `pull-${pullId}:pr-ready:`;
 
+export const prDraftKeyPrefix = ({ pullId }: PrDraftPayload) =>
+  `pull-${pullId}:pr-draft:`;
+
 // A draft pull request whose prerequisites are merged is to be turned ready by a worker with the host's credentials.
 // A second one (after a failure) gets the next sequence, and waits `notBefore` so that a short outage of the host
 // does not use up all three tries.
@@ -243,6 +261,27 @@ export async function enqueuePrReady(
   );
   return enqueueJob(client, {
     type: "pr-ready",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+    ...(notBefore ? { notBefore } : {}),
+  });
+}
+
+// A pull request of a spec that went back to reworking: turn it draft so it is not merged while the new tickets run.
+// Execution is a later ticket; this only queues. A second one (after a failure) gets the next sequence.
+export async function enqueuePrDraft(
+  client: pg.PoolClient,
+  payload: PrDraftPayload,
+  notBefore?: Date,
+) {
+  const prefix = prDraftKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "pr-draft",
     payload: { ...payload },
     requiredCapabilities: [HOST_CAPABILITY],
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,

@@ -5,6 +5,7 @@ export const HOST_JOB_TYPES = [
   "host-sync",
   "spec-cleanup",
   "pr-ready",
+  "pr-draft",
   "patch-pr-body",
   "repo-access",
   "index-pr-links",
