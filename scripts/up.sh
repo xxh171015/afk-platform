@@ -356,12 +356,35 @@ index_of() {
   return 1
 }
 
+# The API refuses to start on a database with migrations it has not seen, and a git pull before restart.sh api
+# usually brings some. Apply them first, with this script's DATABASE_URL; if that fails, leave the old API running
+# and tell restart.sh why through restart.failed.
+migrate_before_api_restart() {
+  local out="$run_dir/migrate.out"
+  echo "restart.sh api: applying migrations (pnpm db:migrate)" | tee -a "$up_log"
+  if pnpm db:migrate >"$out" 2>&1; then
+    sed "s/^/[migrate] /" "$out" | tee -a "$up_log"
+    rm -f "$out"
+    return 0
+  fi
+  sed "s/^/[migrate] /" "$out" | tee -a "$up_log" >&2
+  {
+    echo "pnpm db:migrate failed; the API was not restarted, the old one keeps running (log: $up_log):"
+    tail -n 20 "$out"
+  } >"$run_dir/restart.failed"
+  rm -f "$out"
+  return 1
+}
+
 planned_restart() {
   local name=$1 i pid n=0 g
   i=$(index_of "$name") || {
     echo "restart.sh: $name is not running" | tee -a "$up_log" >&2
     return 1
   }
+  if [ "$name" = api ] && ! migrate_before_api_restart; then
+    return 1
+  fi
   g="${pgids[i]}"
   pid=$(tr -d ' \n' <"$run_dir/$name.pid" 2>/dev/null || true)
   if [ -n "$g" ] && [ "$g" != gone ]; then
@@ -485,9 +508,10 @@ tick() {
   if [ -f "$run_dir/restart.request" ]; then
     target=$(tr -d ' \n' <"$run_dir/restart.request")
     rm -f "$run_dir/restart.request"
+    # a restart that did not happen leaves the stack as it was; it must not end this script (set -e)
     case "$target" in
-      api | web) planned_restart "$target" ;;
-      worker) rolling_restart_worker ;;
+      api | web) planned_restart "$target" || true ;;
+      worker) rolling_restart_worker || true ;;
     esac
   fi
   reap_draining

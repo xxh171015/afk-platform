@@ -488,6 +488,14 @@ case "$1" in
     fi
     exit 0
     ;;
+  db:migrate)
+    if [ -f "$AFK_HOME/migrate-fails" ]; then
+      echo "migration failed: column resolution is broken" >&2
+      exit 1
+    fi
+    echo "migrations applied"
+    exit 0
+    ;;
   api)
     "$AFK_FAKE_API" &
     wait
@@ -696,6 +704,108 @@ while true; do sleep 1; done`;
     );
     expect(child.exitCode).toBeNull();
     expect(output()).not.toMatch(/stopping the rest/);
+  });
+
+  function restartVia(
+    target: string,
+    env: Record<string, string>,
+    script = restartSh,
+  ): Promise<{ status: number | null; text: string }> {
+    return new Promise((resolve) => {
+      const proc = spawn("bash", [script, target], {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let text = "";
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      proc.on("close", (code) => resolve({ status: code, text }));
+    });
+  }
+
+  it("restart.sh api applies migrations before it replaces the API", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const apiStarts = `pnpm_log="$AFK_HOME/pnpm.log"
+grep -c db:migrate "$pnpm_log" 2>/dev/null >> "$AFK_HOME/api-saw-migrations" || echo 0 >> "$AFK_HOME/api-saw-migrations"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home, env, output, child } = stack({
+      api: apiStarts,
+      worker: hold,
+    });
+    const apiPid = join(home, "run", "api.pid");
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("pids", () => existsSync(apiPid) && existsSync(workerPid));
+    const api = readFileSync(apiPid, "utf8").trim();
+    const worker = readFileSync(workerPid, "utf8").trim();
+    const result = await restartVia("api", env);
+    expect(result.status, `${result.text}\n${output()}`).toBe(0);
+    await waitUntil("api pid changed", () => {
+      const next = readFileSync(apiPid, "utf8").trim();
+      return next !== api && processAlive(Number(next));
+    });
+    expect(pnpmCommands(home)).toContain("db:migrate");
+    // the new API saw the migration already applied when it started
+    const seen = readFileSync(join(home, "api-saw-migrations"), "utf8")
+      .trim()
+      .split("\n");
+    expect(Number(seen.at(-1))).toBeGreaterThanOrEqual(1);
+    expect(output()).toMatch(/migrations applied/);
+    expect(readFileSync(workerPid, "utf8").trim()).toBe(worker);
+    expect(child.exitCode).toBeNull();
+  });
+
+  it("restart.sh api exits non-zero, says why, and keeps the old API when migrations fail", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+while true; do sleep 1; done`;
+    const { home, env, output, child } = stack({ api: hold, worker: hold });
+    const apiPid = join(home, "run", "api.pid");
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("pids", () => existsSync(apiPid) && existsSync(workerPid));
+    const api = readFileSync(apiPid, "utf8").trim();
+    const worker = readFileSync(workerPid, "utf8").trim();
+    writeFileSync(join(home, "migrate-fails"), "");
+    const result = await restartVia("api", env);
+    expect(result.status, `${result.text}\n${output()}`).not.toBe(0);
+    expect(result.text).toMatch(/pnpm db:migrate failed/);
+    expect(result.text).toMatch(
+      /migration failed: column resolution is broken/,
+    );
+    expect(readFileSync(apiPid, "utf8").trim()).toBe(api);
+    expect(processAlive(Number(api))).toBe(true);
+    expect(readFileSync(workerPid, "utf8").trim()).toBe(worker);
+    expect(processAlive(Number(worker))).toBe(true);
+    expect(child.exitCode).toBeNull();
+    expect(output()).not.toMatch(/stopping the rest/);
+
+    // once the migration is fixed, the next restart goes through
+    rmSync(join(home, "migrate-fails"));
+    const again = await restartVia("api", env);
+    expect(again.status, `${again.text}\n${output()}`).toBe(0);
+    await waitUntil("api pid changed", () => {
+      const next = readFileSync(apiPid, "utf8").trim();
+      return next !== api && processAlive(Number(next));
+    });
+  });
+
+  it("restart.sh worker does not run migrations", async () => {
+    const hold = `echo $$ > "$AFK_HOME/run-live.pid"
+trap 'exit 0' INT TERM
+trap 'exit 0' USR2
+while true; do sleep 1; done`;
+    const { home, env, output } = stack({ api: hold, worker: hold });
+    const workerPid = join(home, "run", "worker.pid");
+    await waitUntil("worker pid", () => existsSync(workerPid));
+    const result = await restartVia("worker", env);
+    expect(result.status, `${result.text}\n${output()}`).toBe(0);
+    expect(pnpmCommands(home)).not.toContain("db:migrate");
   });
 
   it("restart.sh worker starts a new worker, drains the old one with SIGUSR2, and leaves the rest running", async () => {
@@ -1106,6 +1216,21 @@ describe("restart docs", () => {
     expect(section9).toMatch(/scripts\/restart\.sh worker/);
     expect(section9).not.toMatch(/scripts\/up\.sh.*重启/);
     expect(text).not.toMatch(/改了 worker 就用 `scripts\/up\.sh` 重启/);
+  });
+
+  it("the operations manual says restart.sh api applies migrations first and a worker waits for the API", () => {
+    const text = readFileSync(
+      join(repoRoot, "docs/operations-manual.md"),
+      "utf8",
+    );
+    const section = text.slice(
+      text.indexOf("### 1.1"),
+      text.indexOf("### 1.2"),
+    );
+    expect(section).toMatch(
+      /`restart\.sh api` 换 API 之前先跑 `pnpm db:migrate`/,
+    );
+    expect(section).toMatch(/worker 启动时连不上 API 不算崩溃/);
   });
 
   it("the operations manual says git pull then restart.sh installs stale dependencies", () => {
