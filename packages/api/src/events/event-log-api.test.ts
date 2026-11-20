@@ -100,6 +100,7 @@ async function failThreeTimes(error: string, ticketId = 1) {
     }
     if (!job) throw new Error(`no job for T-${ticketId}`);
     expect((await worker.fail(job.id, job.attempt, error)).status).toBe(200);
+    clock.advanceSeconds(30);
   }
   return others;
 }
@@ -278,7 +279,16 @@ describe("the failure source the database works out", () => {
     "模型名无效，检查项目的默认模型或 AFK_MODEL",
     "gate setup failed (exit 124)\nProgress: resolved 812",
     "gate setup failed (exit 1)\nERR_PNPM_LOCKFILE",
+    "Failed to reach the Cursor API",
   ];
+
+  it("treats Failed to reach the Cursor API as an outside service", async () => {
+    const { rows } = await db.pool.query(
+      "SELECT afk_failure_source($1, $2) AS source",
+      ["job-failed", "agent run failed: Failed to reach the Cursor API"],
+    );
+    expect(rows[0].source).toBe("external");
+  });
 
   it("agrees with @afk/shared on every reason code and error", async () => {
     for (const reason of [...REASON_CODES, null]) {

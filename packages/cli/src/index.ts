@@ -519,6 +519,22 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       print(data, `project ${data.id} ${data.name}`);
     });
 
+  const idOfProjectArg = async (project: string): Promise<number> => {
+    if (/^[1-9][0-9]*$/.test(project)) return toInt(project);
+    const listed = await api().GET("/projects");
+    if (!listed.data) throw failureFrom(listed.response, listed.error);
+    const match = listed.data.projects.find((row) => row.name === project);
+    if (!match) {
+      const names = listed.data.projects.map((row) => row.name);
+      throw new Failure(
+        names.length > 0
+          ? `没有叫 ${project} 的项目（现有：${names.join("、")}）`
+          : `没有叫 ${project} 的项目`,
+      );
+    }
+    return match.id;
+  };
+
   projectCommands
     .command("edit <project>")
     .description(
@@ -589,7 +605,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           "nothing to change: pass --default-agent, --default-model, --protected-path, --max-concurrency, --budget-limit, --merge-policy, --limit, --feishu-chat, --ticket-review, --stage-model or --tidy",
         );
       }
-      const projectId = toInt(id);
+      const projectId = await idOfProjectArg(id);
       const { data, response, error } = await api().PATCH(
         "/projects/{projectId}",
         { params: { path: { projectId } }, body },
@@ -602,7 +618,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .command("show <project>")
     .description("a project and its default agent")
     .action(async (id: string) => {
-      const projectId = toInt(id);
+      const projectId = await idOfProjectArg(id);
       const { data, response, error } = await api().GET(
         "/projects/{projectId}",
         { params: { path: { projectId } } },
@@ -2639,6 +2655,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     await program.parseAsync(argv, { from: "user" });
     return 0;
   } catch (error) {
+    if (error instanceof InvalidArgumentError) {
+      io.stderr(`error: ${error.message}\n`);
+      return error.exitCode;
+    }
     if (error instanceof CommanderError) return error.exitCode;
     if (error instanceof PlatOutdated) {
       // a plat run from a checkout, or one that just replaced itself, does not try again

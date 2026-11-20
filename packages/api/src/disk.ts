@@ -139,16 +139,24 @@ export async function refreshDiskStatus(
     stopBytes,
   );
   await pool.query(
-    `UPDATE instance SET log_dir_bytes = $1, log_dir_free_bytes = $2, disk_noticed = $3`,
-    [sample.dirBytes, sample.freeBytes, next.noticed],
+    `UPDATE instance SET log_dir_bytes = $1, log_dir_free_bytes = $2`,
+    [sample.dirBytes, sample.freeBytes],
   );
-  for (const kind of next.notices) {
-    await recordSystemEvent(
-      pool,
-      kind === "warn"
-        ? { kind: "disk-warn", warnGib }
-        : { kind: "disk-stop", stopGib },
-    );
+  const advanced = await pool.query(
+    `UPDATE instance SET disk_noticed = $1
+      WHERE disk_noticed = $2
+      RETURNING disk_noticed`,
+    [next.noticed, current.rows[0]?.disk_noticed ?? "none"],
+  );
+  if (advanced.rowCount) {
+    for (const kind of next.notices) {
+      await recordSystemEvent(
+        pool,
+        kind === "warn"
+          ? { kind: "disk-warn", warnGib }
+          : { kind: "disk-stop", stopGib },
+      );
+    }
   }
   const instance = await pool.query<{
     logs_purged_at: Date | null;

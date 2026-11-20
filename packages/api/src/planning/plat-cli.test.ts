@@ -641,6 +641,39 @@ describe("plat", () => {
     expect(shown.stdout).toContain("oc_shop");
   });
 
+  it("shows a project by its name", async () => {
+    await plat("project", "create", "shop");
+    const shown = await plat("project", "show", "shop");
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain("project 1 shop");
+  });
+
+  it("edits a project by its name", async () => {
+    await plat("project", "create", "shop");
+    const edited = await plat(
+      "project",
+      "edit",
+      "shop",
+      "--limit",
+      "repoConcurrency=3",
+    );
+    expect(edited.code).toBe(0);
+    expect(
+      (await db.pool.query("SELECT limits FROM projects WHERE id = 1")).rows[0]
+        .limits,
+    ).toEqual({ repoConcurrency: 3 });
+  });
+
+  it("exits non-zero and lists existing names when project show is given an unknown name", async () => {
+    await plat("project", "create", "shop");
+    await plat("project", "create", "lab");
+    const shown = await plat("project", "show", "missing");
+    expect(shown.code).not.toBe(0);
+    expect(shown.stderr).toContain("没有叫 missing 的项目");
+    expect(shown.stderr).toContain("shop");
+    expect(shown.stderr).toContain("lab");
+  });
+
   it("refuses project create with --default-agent claude-code and says only Cursor is supported", async () => {
     const refused = await plat(
       "project",
