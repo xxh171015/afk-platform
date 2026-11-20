@@ -68,6 +68,14 @@ const FlakyTest = z.object({
   classname: z.string(),
 });
 
+const PackUncertainty = z.object({
+  ticket: z.string().nullable(),
+  run: z.string(),
+  stage: z.string(),
+  body: z.string(),
+  axis: z.enum(REVIEW_AXES).nullable(),
+});
+
 // What one repo of the spec brings to the decision: its pull request, the gate of its integration branch, the
 // tickets done in it with each criterion's verdict, and the decisions agents made on code-changing Runs.
 const RepoSection = z.object({
@@ -114,26 +122,8 @@ const RepoSection = z.object({
   // `uncertainties`: stored packs used that name for the old Decision list.
   // `reviewUncertainties` is still open; wrap-up `resolved` findings go in
   // `resolvedUncertainties` and are shown folded.
-  reviewUncertainties: z.array(
-    z.object({
-      ticket: z.string().nullable(),
-      run: z.string(),
-      stage: z.string(),
-      body: z.string(),
-      axis: z.enum(REVIEW_AXES).nullable(),
-    }),
-  ),
-  resolvedUncertainties: z
-    .array(
-      z.object({
-        ticket: z.string().nullable(),
-        run: z.string(),
-        stage: z.string(),
-        body: z.string(),
-        axis: z.enum(REVIEW_AXES).nullable(),
-      }),
-    )
-    .default([]),
+  reviewUncertainties: z.array(PackUncertainty),
+  resolvedUncertainties: z.array(PackUncertainty).default([]),
   decisions: z.array(
     z.object({
       source: z.string(),

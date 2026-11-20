@@ -7,6 +7,12 @@
 export const REVIEW_AXES = ["standards", "spec"] as const;
 export type ReviewAxis = (typeof REVIEW_AXES)[number];
 
+export function reviewAxisLabel(axis: string | null | undefined): string {
+  if (axis === "spec") return "Spec 轴";
+  if (axis === "standards") return "Standards 轴";
+  return "";
+}
+
 export const TICKET_REVIEW_MODES = ["spec", "both"] as const;
 export type TicketReviewMode = (typeof TICKET_REVIEW_MODES)[number];
 export const DEFAULT_TICKET_REVIEW: TicketReviewMode = "spec";

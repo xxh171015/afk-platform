@@ -33,7 +33,7 @@ import { contractsOf } from "./contracts.ts";
 import { rememberGateTestCases } from "./gate-records.ts";
 import { createFixTicket } from "./integration.ts";
 import { mergeRecheckIntoOutput, recheckTriggerOf } from "./recheck-hit.ts";
-import { reviewOutcomeWithRulings } from "./review-rulings.ts";
+import { reviewOutcomeWithRulings, specAxisOutput } from "./review-rulings.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -834,17 +834,6 @@ async function markTidiedSuggestions(
     `UPDATE findings SET resolution = 'refactored' WHERE id = ANY($1::int[])`,
     [ids],
   );
-}
-
-function specAxisOutput(result: ResultFacts | undefined): unknown {
-  if (!result) return undefined;
-  const runs = [
-    result.run,
-    ...(result.extraRuns ?? []).map((extra) => extra.run),
-  ].filter((run) => run != null);
-  const spec =
-    runs.find((run) => run.axis === "spec") ?? runs.find((run) => !run.axis);
-  return spec?.output;
 }
 
 function uncertaintyRulingsOf(

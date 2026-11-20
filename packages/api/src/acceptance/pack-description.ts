@@ -5,6 +5,7 @@ import {
   HOST_KIND_LABELS,
   type HostKind,
   pullPhrase,
+  reviewAxisLabel,
 } from "@afk/shared";
 import { pageUrl } from "../page-url.ts";
 import type { AcceptancePack } from "./pack.ts";
@@ -147,10 +148,16 @@ function findingsLines(section: AcceptancePack["repos"][number]): string {
   return lines.join("\n");
 }
 
-function axisLabel(axis: "standards" | "spec" | null): string {
-  if (axis === "spec") return "Spec 轴";
-  if (axis === "standards") return "Standards 轴";
-  return "";
+function uncertaintyLine(item: {
+  axis: "standards" | "spec" | null;
+  ticket: string | null;
+  stage: string;
+  run: string;
+  body: string;
+}): string {
+  const axis = reviewAxisLabel(item.axis);
+  const who = item.ticket ?? "spec";
+  return `- ${axis ? `${axis} ` : ""}${who} ${item.stage} ${item.run}: ${item.body}`;
 }
 
 function reviewUncertaintyLines(
@@ -159,11 +166,7 @@ function reviewUncertaintyLines(
   if (section.reviewUncertainties.length === 0) return "";
   const lines = ["### 审查拿不准的"];
   for (const item of section.reviewUncertainties) {
-    const axis = axisLabel(item.axis);
-    const who = item.ticket ?? "spec";
-    lines.push(
-      `- ${axis ? `${axis} ` : ""}${who} ${item.stage} ${item.run}: ${item.body}`,
-    );
+    lines.push(uncertaintyLine(item));
   }
   return lines.join("\n");
 }
@@ -179,11 +182,7 @@ function resolvedUncertaintyLines(
     "",
   ];
   for (const item of items) {
-    const axis = axisLabel(item.axis);
-    const who = item.ticket ?? "spec";
-    lines.push(
-      `- ${axis ? `${axis} ` : ""}${who} ${item.stage} ${item.run}: ${item.body}`,
-    );
+    lines.push(uncertaintyLine(item));
   }
   lines.push("", "</details>");
   return lines.join("\n");

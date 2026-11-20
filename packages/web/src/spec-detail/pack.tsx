@@ -3,6 +3,7 @@ import {
   type DecisionKind,
   decisionTally,
   findingResolutionPhrase,
+  reviewAxisLabel,
 } from "@afk/shared";
 import { ShaChip } from "../components/afk/badges.tsx";
 import { hostKindOf, pullAbbrev } from "../host-copy.ts";
@@ -12,6 +13,18 @@ import { list, type SpecView } from "./view.ts";
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 type PackRepo = NonNullable<SpecView["acceptancePack"]>["repos"][number];
+type PackUncertainty = PackRepo["reviewUncertainties"][number];
+
+function PackUncertaintyItem({ item }: { item: PackUncertainty }) {
+  const axis = reviewAxisLabel(item.axis);
+  return (
+    <li>
+      {axis ? `${axis} ` : ""}
+      {item.ticket ?? "spec"} {item.stage} {item.run}: {item.body}
+    </li>
+  );
+}
+
 type PackDecision = {
   source: string;
   run: string;
@@ -155,20 +168,12 @@ export function PackRepoSection({
         <>
           <p className="note">审查拿不准的</p>
           <ul className="review-uncertainties">
-            {list(repo.reviewUncertainties).map((item) => {
-              const axis =
-                item.axis === "spec"
-                  ? "Spec 轴"
-                  : item.axis === "standards"
-                    ? "Standards 轴"
-                    : "";
-              return (
-                <li key={`${item.run}-${item.body}`}>
-                  {axis ? `${axis} ` : ""}
-                  {item.ticket ?? "spec"} {item.stage} {item.run}: {item.body}
-                </li>
-              );
-            })}
+            {list(repo.reviewUncertainties).map((item) => (
+              <PackUncertaintyItem
+                key={`${item.run}-${item.body}`}
+                item={item}
+              />
+            ))}
           </ul>
         </>
       ) : null}
@@ -176,20 +181,12 @@ export function PackRepoSection({
         <details className="afk-disclosure mt-2 text-sm">
           <summary>{`已解决的疑点（${resolvedUncertainties.length} 条）`}</summary>
           <ul className="resolved-uncertainties mt-1">
-            {resolvedUncertainties.map((item) => {
-              const axis =
-                item.axis === "spec"
-                  ? "Spec 轴"
-                  : item.axis === "standards"
-                    ? "Standards 轴"
-                    : "";
-              return (
-                <li key={`${item.run}-${item.body}`}>
-                  {axis ? `${axis} ` : ""}
-                  {item.ticket ?? "spec"} {item.stage} {item.run}: {item.body}
-                </li>
-              );
-            })}
+            {resolvedUncertainties.map((item) => (
+              <PackUncertaintyItem
+                key={`${item.run}-${item.body}`}
+                item={item}
+              />
+            ))}
           </ul>
         </details>
       ) : null}

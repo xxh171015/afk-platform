@@ -377,32 +377,23 @@ async function specTicketsOf(
     doneOnly?: boolean;
   } = {},
 ): Promise<Bundle["specTickets"]> {
+  type SpecTicketRow = {
+    id: number;
+    title: string;
+    body: string;
+    acceptance_criteria: string[];
+    modules: string[];
+    state: string;
+  };
+  const select = `SELECT id, title, body, acceptance_criteria, modules, state
+           FROM tickets WHERE spec_id = $1`;
   const tickets =
     opts.repoId !== undefined && opts.doneOnly
-      ? await pool.query<{
-          id: number;
-          title: string;
-          body: string;
-          acceptance_criteria: string[];
-          modules: string[];
-          state: string;
-        }>(
-          `SELECT id, title, body, acceptance_criteria, modules, state
-           FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
+      ? await pool.query<SpecTicketRow>(
+          `${select} AND repo_id = $2 AND state = 'done' ORDER BY id`,
           [specId, opts.repoId],
         )
-      : await pool.query<{
-          id: number;
-          title: string;
-          body: string;
-          acceptance_criteria: string[];
-          modules: string[];
-          state: string;
-        }>(
-          `SELECT id, title, body, acceptance_criteria, modules, state
-           FROM tickets WHERE spec_id = $1 ORDER BY id`,
-          [specId],
-        );
+      : await pool.query<SpecTicketRow>(`${select} ORDER BY id`, [specId]);
   const upstreamIds = new Set<number>();
   if (opts.currentTicketId !== undefined) {
     const upstream = await pool.query<{ from_ticket_id: number }>(
