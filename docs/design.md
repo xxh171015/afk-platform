@@ -444,7 +444,7 @@ erDiagram
 
 状态机：
 
-- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 时用 `plat tickets import --append` 追加票进入 reworking（PR 转 draft，自动合并不再考虑它）；返工票做完后重新收尾（从需求级审查开始），更新原 PR 的描述和验收包，PR 转回 ready，需求回到 awaiting-review。返工中人直接合并了 PR 则需求按合并处理。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的票留着，随后由 worker 关掉它还开着的 PR、删掉它的分支；已 merged 的，以及有 PR 已被合并、又还有开着的 PR 的 spec 不能取消，因为合并的东西取消收不回（部分 PR 已合并、其余都已关闭的可以取消，已合并的部分留在 main 上）；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
+- **Spec**：draft → planned（人确认拆分）→ running → finalizing（整体 review 和修复、开 PR）→ awaiting-review（人验收）→ partially-merged（部分仓库的 PR 已合并）→ merged。awaiting-review 时用 `plat tickets import --append` 追加票进入 reworking（PR 转 draft，自动合并不再考虑它）；返工的票做完后重新收尾（从需求级审查开始），更新原 PR 的描述和验收包，PR 转回 ready，需求回到 awaiting-review。返工中人直接合并了 PR 则需求按合并处理。任何时候可以 paused 或 cancelled（`plat spec cancel`：没做完的票一并取消、作业停掉，已合并的票留着，随后由 worker 关掉它还开着的 PR、删掉它的分支；已 merged 的，以及有 PR 已被合并、又还有开着的 PR 的 spec 不能取消，因为合并的东西取消收不回（部分 PR 已合并、其余都已关闭的可以取消，已合并的部分留在 main 上）；所有票都被取消、没有 done 票时自动 cancelled）；update-branch 失败时自动 paused，并进入 blocked 队列。
 - **Ticket**：pending → queued → running → merging → done（已合并进集成分支，且合并后的门禁通过）。任一步失败进 blocked 并附原因码，人处理后回到 pending；也可以 cancelled。人可以从 pending / queued / running / merging / blocked 接手，票进 taken-over，调度停派作业；交回回到 pending。running 内部的阶段（implement、门禁、review、fix，联调票还有 e2e、diagnose）记在 Run 上，不拆成票的状态。done 是终态：做完的票不重开，要改就追加新票。联调票的 e2e 失败、平台建了修复票后，联调票回到 pending，等修复票 done 再从 e2e 阶段开始。
 - **能不能开工实时计算，不存成状态**：只有 pending 是存下来的状态，“可开工”（runnable）由调度器每次算：票是 pending、所有入边都满足、没超并发和预算上限。这样就不会出现“标了可开工、其实还被挡着”的情况。
 
@@ -459,7 +459,7 @@ stateDiagram-v2
     draft --> planned: 人确认拆分
     planned --> running: 建集成分支、派票
     running --> finalizing: 全部票 done
-    reworking --> finalizing: 返工票全部 done
+    reworking --> finalizing: 返工的票全部 done
     finalizing --> awaiting: PR 已开、验收包已生成
     awaiting --> reworking: 追加票
     reworking --> merged: 人合并了 PR

@@ -342,6 +342,21 @@ export async function enqueueAutoMerge(
   });
 }
 
+// A spec that went back to reworking, or whose PR is already draft: do not merge.
+export async function stopAutoMergeJobs(
+  db: Pick<pg.Pool, "query">,
+  specId: number,
+  error: string,
+) {
+  await db.query(
+    `UPDATE jobs SET state = 'failed', error = $2,
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE type = 'auto-merge' AND state IN ('queued', 'running')
+       AND (payload->>'specId')::int = $1`,
+    [specId, error],
+  );
+}
+
 export async function enqueuePackDescriptions(
   client: pg.PoolClient,
   specId: number,
