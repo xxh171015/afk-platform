@@ -3271,13 +3271,29 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "modules": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["done", "running", "other"]
+                          },
+                          "upstream": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "displayId",
                           "title",
                           "body",
-                          "acceptanceCriteria"
+                          "acceptanceCriteria",
+                          "modules",
+                          "status",
+                          "upstream"
                         ]
                       }
                     },

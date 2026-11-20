@@ -886,6 +886,64 @@ describe("the bundle", () => {
     });
   });
 
+  it("fills specTickets for a ticket stage with modules, status, and which tickets are this ticket's upstreams", async () => {
+    await runningSpec([ticket("a"), ticket("b", { blocked_by: ["a"] })]);
+    const first = (await worker.claim()).body.job as Claimed;
+    expect(first.payload.ticketId).toBe(1);
+    const whileFirstRuns = (await bundle(first)).body.specTickets;
+    expect(whileFirstRuns).toEqual([
+      {
+        displayId: "T-1",
+        title: "Ticket a",
+        body: expect.stringContaining("## What to build\n\nDo it.\n"),
+        acceptanceCriteria: ["it works"],
+        modules: ["src/a/**"],
+        status: "running",
+        upstream: false,
+      },
+      {
+        displayId: "T-2",
+        title: "Ticket b",
+        body: expect.stringContaining("## What to build\n\nDo it.\n"),
+        acceptanceCriteria: ["it works"],
+        modules: ["src/b/**"],
+        status: "other",
+        upstream: false,
+      },
+    ]);
+
+    await worker.complete(first.id, first.attempt, {
+      stage: "implement",
+      ...IMPLEMENT_DONE,
+    });
+    await stage("gate", GATE_PASSED);
+    await stage("review", REVIEW_PASS);
+    await stage("merge", MERGED);
+
+    const second = (await worker.claim()).body.job as Claimed;
+    expect(second.payload.ticketId).toBe(2);
+    expect((await bundle(second)).body.specTickets).toEqual([
+      {
+        displayId: "T-1",
+        title: "Ticket a",
+        body: expect.stringContaining("## What to build\n\nDo it.\n"),
+        acceptanceCriteria: ["it works"],
+        modules: ["src/a/**"],
+        status: "done",
+        upstream: true,
+      },
+      {
+        displayId: "T-2",
+        title: "Ticket b",
+        body: expect.stringContaining("## What to build\n\nDo it.\n"),
+        acceptanceCriteria: ["it works"],
+        modules: ["src/b/**"],
+        status: "running",
+        upstream: false,
+      },
+    ]);
+  });
+
   it("carries the project's run limits and default model, and the defaults when it sets none", async () => {
     await runningSpec([ticket("a")]);
     const claimed = (await worker.claim()).body.job as Claimed;

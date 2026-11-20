@@ -488,6 +488,9 @@ describe("the overall review and the one fix", () => {
           "## What to build\n\nA exports orders as CSV.\n",
         ),
         acceptanceCriteria: ["a works"],
+        modules: ["src/a/**"],
+        status: "done",
+        upstream: false,
       },
       {
         displayId: "T-2",
@@ -496,6 +499,9 @@ describe("the overall review and the one fix", () => {
           "## What to build\n\nB adds the header row.\n",
         ),
         acceptanceCriteria: ["b works"],
+        modules: ["src/b/**"],
+        status: "done",
+        upstream: false,
       },
     ]);
 
