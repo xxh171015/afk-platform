@@ -228,3 +228,111 @@ describe("a branch that took in the default branch (update-branch)", () => {
     expect(parents).toEqual([before, mainTip]);
   });
 });
+
+describe("a branch that took in another spec's integration branch", () => {
+  function mergedOtherSpec() {
+    repo = makeRepo({ "base.txt": "base\n" });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    repo.commit({ "ticket.txt": "ticket\n" }, "ticket work");
+    const before = gitOut(repo.dir, ["rev-parse", "HEAD"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/aa0001/other", "main"]);
+    const otherTip = repo.commit(
+      { "other.txt": "from other spec\n" },
+      "other spec work\n\nSpec: S-51\nTicket: T-100\nRun: R-800",
+    );
+    git(repo.dir, ["checkout", "--quiet", "agent/T-123"]);
+    git(repo.dir, ["merge", "--no-edit", "spec/aa0001/other"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    return { before, otherTip };
+  }
+
+  it("leaves the other spec's commits at their hashes and trailers, and stamps the agent's merge", () => {
+    const { before, otherTip } = mergedOtherSpec();
+    const result = stamp(before, {
+      excludeGlobs: ["refs/heads/spec/*"],
+    });
+    expect(result).toEqual({ rewritten: 1 });
+    expect(gitOut(repo.dir, ["rev-parse", "spec/aa0001/other"])).toBe(otherTip);
+    expect(
+      git(repo.dir, ["merge-base", "--is-ancestor", otherTip, "agent/T-123"])
+        .code,
+    ).toBe(0);
+    expect(body(otherTip)).toContain("Spec: S-51");
+    expect(body(otherTip)).toContain("Ticket: T-100");
+    expect(body(otherTip)).toContain("Run: R-800");
+    expect(body(otherTip)).not.toContain("Spec: S-12");
+    expect(body(otherTip)).not.toContain("Ticket: T-123");
+    expect(body("agent/T-123")).toContain("Spec: S-12");
+    expect(body("agent/T-123")).toContain("Ticket: T-123");
+    expect(body("agent/T-123")).toContain("Run: R-456");
+    const parents = gitOut(repo.dir, [
+      "rev-list",
+      "--parents",
+      "-n",
+      "1",
+      "agent/T-123",
+    ])
+      .split(" ")
+      .slice(1);
+    expect(parents).toEqual([before, otherTip]);
+  });
+});
+
+describe("a branch that took in another ticket's origin agent commits", () => {
+  function mergedOriginAgent() {
+    repo = makeRepo({ "base.txt": "base\n" });
+    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+    repo.commit({ "ticket.txt": "ticket\n" }, "ticket work");
+    const before = gitOut(repo.dir, ["rev-parse", "HEAD"]);
+    git(repo.dir, ["checkout", "--quiet", "-b", "agent/aa0001/T-100", "main"]);
+    const otherTip = repo.commit(
+      { "other-ticket.txt": "from other ticket\n" },
+      "other ticket work\n\nSpec: S-51\nTicket: T-100\nRun: R-800",
+    );
+    git(repo.dir, [
+      "update-ref",
+      "refs/afk/origin/agent/aa0001/T-100",
+      otherTip,
+    ]);
+    git(repo.dir, ["checkout", "--quiet", "agent/T-123"]);
+    git(repo.dir, ["branch", "-D", "agent/aa0001/T-100"]);
+    git(repo.dir, ["merge", "--no-edit", "refs/afk/origin/agent/aa0001/T-100"]);
+    git(repo.dir, ["checkout", "--quiet", "main"]);
+    return { before, otherTip };
+  }
+
+  it("leaves the origin agent commits at their hashes and trailers, and stamps the agent's merge", () => {
+    const { before, otherTip } = mergedOriginAgent();
+    const result = stamp(before, {
+      excludeGlobs: ["refs/afk/origin/agent/*"],
+    });
+    expect(result).toEqual({ rewritten: 1 });
+    expect(
+      gitOut(repo.dir, ["rev-parse", "refs/afk/origin/agent/aa0001/T-100"]),
+    ).toBe(otherTip);
+    expect(
+      git(repo.dir, ["merge-base", "--is-ancestor", otherTip, "agent/T-123"])
+        .code,
+    ).toBe(0);
+    expect(body(otherTip)).toContain("Spec: S-51");
+    expect(body(otherTip)).toContain("Ticket: T-100");
+    expect(body(otherTip)).toContain("Run: R-800");
+    expect(body(otherTip)).not.toContain("Spec: S-12");
+    expect(body(otherTip)).not.toContain("Ticket: T-123");
+    expect(body("agent/T-123")).toContain("Spec: S-12");
+    expect(body("agent/T-123")).toContain("Ticket: T-123");
+    expect(body("agent/T-123")).toContain("Run: R-456");
+    const parents = gitOut(repo.dir, [
+      "rev-list",
+      "--parents",
+      "-n",
+      "1",
+      "agent/T-123",
+    ])
+      .split(" ")
+      .slice(1);
+    expect(parents).toEqual([before, otherTip]);
+  });
+});

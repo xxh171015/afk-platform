@@ -23,6 +23,9 @@ export interface StampRequest {
   // Commits that came in from elsewhere, such as the integration branch merged into the ticket's branch by a
   // merge-fix, or the default branch merged in by update-branch, belong to someone else and keep their identity.
   exclude?: string | readonly string[];
+  // rev-list --glob patterns for origin refs the main clone already has (every spec/*, every
+  // refs/afk/origin/agent/*). Commits reachable from those refs are not rewritten.
+  excludeGlobs?: string | readonly string[];
 }
 
 export interface StampResult {
@@ -50,6 +53,12 @@ export function stampTrailers(request: StampRequest): StampResult {
       : typeof request.exclude === "string"
         ? [request.exclude]
         : [...request.exclude];
+  const globs =
+    request.excludeGlobs === undefined
+      ? []
+      : typeof request.excludeGlobs === "string"
+        ? [request.excludeGlobs]
+        : [...request.excludeGlobs];
   const listing = git(repoDir, [
     "rev-list",
     "--reverse",
@@ -57,6 +66,10 @@ export function stampTrailers(request: StampRequest): StampResult {
     tip,
     `^${before}`,
     ...excluded.map((ref) => `^${ref}`),
+    // --not toggles: one --not, then every --glob is an excluded set of refs.
+    ...(globs.length > 0
+      ? ["--not", ...globs.map((glob) => `--glob=${glob}`)]
+      : []),
   ]);
   if (listing.code !== 0) {
     return {
