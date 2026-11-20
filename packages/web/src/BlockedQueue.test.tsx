@@ -1309,6 +1309,64 @@ describe("a draft pull request that could not be turned ready", () => {
   });
 });
 
+describe("a ready pull request that could not be turned draft", () => {
+  it("is listed as still ready and tells a person to turn it draft", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            readyFailures: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "backend",
+                number: 1,
+                url: "https://github.com/me/shop-backend/pull/1",
+                error: "GitHub answered 403",
+                jobType: "pr-draft",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("draft-S-1-backend"));
+    expect(item.getByText(/的 PR 没能转为 draft/)).toBeTruthy();
+    expect(item.getByText(/这个 PR 仍是 ready/)).toBeTruthy();
+    expect(item.getByText(/手动把它转为 draft/)).toBeTruthy();
+    expect(item.queryByText(/没能转为 ready/)).toBeNull();
+    expect(item.queryByText(/仍是 draft/)).toBeNull();
+  });
+
+  it("says MR when the ready merge request is on GitLab", async () => {
+    renderWithApp(
+      <BlockedQueue />,
+      fakeServer({
+        "GET /blocked": () => ({
+          json: queue({
+            readyFailures: [
+              {
+                specId: 1,
+                specDisplayId: "S-1",
+                repo: "backend",
+                number: 1,
+                url: "https://gitlab.example/me/shop-backend/-/merge_requests/1",
+                error: "GitLab refused",
+                hostKind: "gitlab",
+                jobType: "pr-draft",
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+    const item = within(await screen.findByTestId("draft-S-1-backend"));
+    expect(item.getByText(/的 MR 没能转为 draft/)).toBeTruthy();
+    expect(item.getByText(/这个 MR 仍是 ready/)).toBeTruthy();
+  });
+});
+
 describe("planning docs that did not apply", () => {
   it("names the files and gives the two commands: send them again, or start without them", async () => {
     renderWithApp(

@@ -1855,7 +1855,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     )
     .option(
       "--append",
-      "add the directory's tickets to a confirmed spec (planned, running or paused); they take effect at once. Their blocked_by and contract may name existing tickets as T-<n>, and blocks: [T-<n>] makes a new ticket block an existing one",
+      "add the directory's tickets to a confirmed spec (planned, running, paused or awaiting-review); they take effect at once. Their blocked_by and contract may name existing tickets as T-<n>, and blocks: [T-<n>] makes a new ticket block an existing one",
     )
     .action(async (spec: string, directory: string, options) => {
       const specId = specIdOf(spec);

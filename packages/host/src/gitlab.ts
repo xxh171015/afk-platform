@@ -376,6 +376,20 @@ export function createGitLabAdapter(options: GitLabOptions): HostAdapter {
         );
       return info(patched.body as RawMr);
     },
+    async markDraft({ repo, number }) {
+      const raw = await read(repo, number);
+      if (asState(raw) !== "open" || asDraft(raw)) return info(raw);
+      const title = draftTitle(raw.title ?? "", true);
+      const patched = await call(repo, "PUT", `/merge_requests/${number}`, {
+        title,
+      });
+      if (patched.status !== 200)
+        throw new HostError(
+          `GitLab answered ${patched.status} marking pull request ${number} draft`,
+          patched.status,
+        );
+      return info(patched.body as RawMr);
+    },
     async closePullRequest({ repo, number }) {
       const current = info(await read(repo, number));
       if (current.state !== "open") return current;

@@ -48,6 +48,9 @@ const noCleanup = {
   markReady: async (): Promise<PullRequestInfo> => {
     throw new Error("not used");
   },
+  markDraft: async (): Promise<PullRequestInfo> => {
+    throw new Error("not used");
+  },
   closePullRequest: async (): Promise<PullRequestInfo> => {
     throw new Error("not used");
   },
@@ -108,6 +111,46 @@ describe("a pr-ready task", () => {
       markReady: async () => {
         throw new HostError(
           "GitHub refused to mark pull request 9 ready (403)",
+          403,
+        );
+      },
+    };
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, task, log),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+});
+
+describe("a pr-draft task", () => {
+  const task = {
+    kind: "pr-draft" as const,
+    pull: { id: 4, repoUrl: "https://github.com/me/pilot.git", number: 9 },
+  };
+
+  it("turns the pull request draft and reports what the host says now", async () => {
+    const calls: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(1),
+      getPullRequest: async () => info(9),
+      markDraft: async (input) => {
+        calls.push(input);
+        return info(9, { draft: true });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(calls).toEqual([{ repo: ref(), number: 9 }]);
+    expect(result).toEqual({ stage: "pr-draft", ...info(9, { draft: true }) });
+  });
+
+  it("fails as an infrastructure problem when the host refuses, so the job is tried again", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(1),
+      getPullRequest: async () => info(9),
+      markDraft: async () => {
+        throw new HostError(
+          "GitHub refused to mark pull request 9 draft (403)",
           403,
         );
       },
@@ -766,6 +809,7 @@ describe("a spec-cleanup task", () => {
       updatePullRequestBody: async () => {},
       mergePullRequest: async () => info(0),
       markReady: async () => info(0),
+      markDraft: async () => info(0),
       closePullRequest: async ({ number }) => {
         calls.push(`close ${number}`);
         return info(number, { state: "closed" });

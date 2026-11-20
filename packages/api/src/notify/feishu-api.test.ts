@@ -380,7 +380,7 @@ async function pendingSpec(
     conflicts?: boolean;
     needsHuman?: number;
     deferred?: number;
-    state?: "awaiting-review" | "partially-merged";
+    state?: "awaiting-review" | "partially-merged" | "reworking";
   },
 ) {
   const repo = await db.pool.query<{ id: number }>(
@@ -755,5 +755,33 @@ describe("daily digest of awaiting-review specs", () => {
     expect(body).toContain("PR 已全部关闭，可以取消需求");
     expect(body).not.toContain("needs-human");
     expect(body).not.toContain("deferred");
+  });
+
+  it("shows a reworking spec as 返工中 and does not count it as waiting to merge", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    await pendingSpec(shopId, { title: "导出订单", slug: "export" });
+    await pendingSpec(shopId, {
+      title: "入库单",
+      slug: "inbound",
+      state: "reworking",
+      prUrl: "https://github.com/me/shop/pull/8",
+    });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const body = (await digestEvents()).rows[0]?.body;
+    const lines = body?.split("\n") ?? [];
+    const waiting = lines.find((line) => line.includes("导出订单"));
+    const reworking = lines.find((line) => line.includes("入库单"));
+    expect(waiting).toContain("PR 开出");
+    expect(reworking).toContain("返工中");
+    expect(reworking).not.toContain("PR 开出");
+    expect(reworking).not.toContain("已等");
+    expect(reworking).not.toContain("needs-human");
   });
 });

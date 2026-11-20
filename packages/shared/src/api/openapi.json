@@ -3982,7 +3982,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -4090,6 +4090,31 @@
                         "kind": {
                           "type": "string",
                           "enum": ["pr-ready"]
+                        },
+                        "pull": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "repoUrl": {
+                              "type": "string"
+                            },
+                            "number": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["id", "repoUrl", "number"]
+                        }
+                      },
+                      "required": ["kind", "pull"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["pr-draft"]
                         },
                         "pull": {
                           "type": "object",
@@ -9195,6 +9220,10 @@
                           "error": {
                             "type": "string"
                           },
+                          "jobType": {
+                            "type": "string",
+                            "enum": ["pr-ready", "pr-draft"]
+                          },
                           "hostKind": {
                             "type": "string",
                             "enum": ["github", "gitlab"]
@@ -9249,7 +9278,8 @@
                           "repo",
                           "number",
                           "url",
-                          "error"
+                          "error",
+                          "jobType"
                         ]
                       }
                     },
@@ -9784,13 +9814,18 @@
                               },
                               "number": {
                                 "type": "integer"
+                              },
+                              "jobType": {
+                                "type": "string",
+                                "enum": ["pr-ready", "pr-draft"]
                               }
                             },
                             "required": [
                               "specId",
                               "specDisplayId",
                               "repo",
-                              "number"
+                              "number",
+                              "jobType"
                             ]
                           }
                         },

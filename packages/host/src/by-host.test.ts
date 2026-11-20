@@ -29,6 +29,7 @@ function fakeAdapter(name: string): HostAdapter {
     updatePullRequestBody: async () => {},
     mergePullRequest: async () => info(name),
     markReady: async () => info(name),
+    markDraft: async () => info(name),
     closePullRequest: async () => info(name),
     deleteBranch: async () => "deleted",
     getBranchSha: async () => `${name}-sha`,

@@ -1392,18 +1392,22 @@ async function cleanupProblems(pool: pg.Pool) {
   }));
 }
 
-// A draft pull request that could not be turned ready, three times over: it stays a draft until a person turns it
-// ready on the host (a look at the host sees that). A failure only counts while the pull request is still a draft
-// and no later pr-ready of it is queued, running or done.
+// A draft pull request that could not be turned ready, or a ready one that could not be turned draft, three
+// times over. A failure only counts while the pull request is still in the state the job was trying to leave,
+// and no later job of the same type is queued, running or done.
 async function readyFailures(pool: pg.Pool) {
   const { rows } = await pool.query(
-    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error, r.host_kind
+    `SELECT DISTINCT ON (p.id) p.spec_id, r.name AS repo, p.number, p.url, j.error, j.type, r.host_kind
      FROM jobs j
      JOIN pull_requests p ON p.id = (j.payload->>'pullId')::int
      JOIN repos r ON r.id = p.repo_id JOIN specs s ON s.id = p.spec_id
-     WHERE j.type = 'pr-ready' AND j.state = 'failed' AND p.draft AND ${FOLLOWED_PULL_REQUESTS}
+     WHERE j.state = 'failed' AND ${FOLLOWED_PULL_REQUESTS}
+       AND (
+         (j.type = 'pr-ready' AND p.draft)
+         OR (j.type = 'pr-draft' AND NOT p.draft)
+       )
        AND NOT EXISTS (
-         SELECT 1 FROM jobs k WHERE k.type = 'pr-ready' AND (k.payload->>'pullId')::int = p.id
+         SELECT 1 FROM jobs k WHERE k.type = j.type AND (k.payload->>'pullId')::int = p.id
            AND k.id > j.id AND k.state IN ('queued', 'running', 'done'))
      ORDER BY p.id, j.id DESC`,
   );
@@ -1414,6 +1418,7 @@ async function readyFailures(pool: pg.Pool) {
     number: row.number as number,
     url: row.url as string,
     error: (row.error as string | null) ?? "",
+    jobType: row.type as "pr-ready" | "pr-draft",
     hostKind: row.host_kind as HostKind,
   }));
 }

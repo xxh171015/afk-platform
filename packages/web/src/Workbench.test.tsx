@@ -651,4 +651,33 @@ describe("the workbench", () => {
     expect(screen.queryByText("平台在自己跑")).toBeNull();
     expect(screen.getByText("没有在等你的事。先接入一个项目。")).toBeTruthy();
   });
+
+  it("names a pr-draft failure as 未能转 draft, not 未能转 ready", async () => {
+    renderWithApp(
+      <Workbench />,
+      fakeServer({
+        ...onboarding,
+        "GET /workbench": () => ({
+          json: {
+            ...empty,
+            waiting: {
+              ...emptyWaiting,
+              readyFailures: [
+                {
+                  specId: 1,
+                  specDisplayId: "S-1",
+                  repo: "backend",
+                  number: 1,
+                  jobType: "pr-draft",
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+    expect(await screen.findByText("backend #1 未能转 draft")).toBeTruthy();
+    const waiting = within(screen.getByTestId("quadrant-等你处理"));
+    expect(waiting.queryByText(/未能转 ready/)).toBeNull();
+  });
 });

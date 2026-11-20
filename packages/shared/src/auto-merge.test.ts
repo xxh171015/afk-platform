@@ -61,6 +61,13 @@ describe("autoMergeForecast", () => {
     });
   });
 
+  it("will not merge when the spec is reworking, with reason 返工中", () => {
+    expect(autoMergeForecast(ready({ specState: "reworking" }))).toEqual({
+      willMerge: false,
+      reason: "返工中",
+    });
+  });
+
   it("will not merge when the spec does not have exactly one pull request", () => {
     expect(
       autoMergeForecast(ready({ pullRequests: [readyPull(), readyPull()] })),
@@ -75,7 +82,7 @@ describe("autoMergeForecast", () => {
       autoMergeForecast(ready({ pullRequests: [readyPull({ draft: true })] })),
     ).toEqual({
       willMerge: false,
-      reason: "PR 不是打开的非草稿",
+      reason: "返工中",
     });
   });
 

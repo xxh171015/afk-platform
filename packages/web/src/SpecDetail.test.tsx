@@ -1014,6 +1014,24 @@ describe("the spec page", () => {
     expect(screen.getByText(/已暂停: agent 时间用完/)).toBeTruthy();
   });
 
+  it("shows 返工中 on the heading and the flow banner", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({ spec: { state: "reworking" } }),
+        }),
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /S-1/ }),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain(
+      "返工中",
+    );
+    expect(screen.getByTestId("spec-banner").textContent).toContain("返工中");
+  });
+
   it("shows a potential conflict with another spec as a hint, not a block", async () => {
     renderWithApp(
       <SpecDetail specId={1} />,

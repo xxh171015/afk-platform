@@ -85,6 +85,8 @@ export interface HostAdapter {
   // Turns a draft pull request into one that is ready for review. One that is not a draft (a person got there
   // first) is returned as it is, nothing is sent.
   markReady(input: { repo: RepoRef; number: number }): Promise<PullRequestInfo>;
+  // Turns a ready pull request into a draft. One that is already a draft is returned as it is, nothing is sent.
+  markDraft(input: { repo: RepoRef; number: number }): Promise<PullRequestInfo>;
   // Closes the pull request without merging it. One that is not open (already closed, merged) is returned as it
   // is, nothing is sent: closing never undoes a merge.
   closePullRequest(input: {

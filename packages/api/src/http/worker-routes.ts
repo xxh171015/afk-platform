@@ -30,6 +30,7 @@ import {
   readIndexPrLinksPayload,
   readOpenPrPayload,
   readPatchPrBodyPayload,
+  readPrDraftPayload,
   readPrReadyPayload,
   readSpecCleanupPayload,
 } from "../host/host-jobs.ts";
@@ -40,6 +41,7 @@ import {
   recordHostSync,
   recordIndexPrLinks,
   recordOpenPr,
+  recordPrDraft,
   recordPrReady,
   recordSpecCleanup,
 } from "../host/pull-requests.ts";
@@ -490,6 +492,14 @@ const HostTask = z.discriminatedUnion("kind", [
     }),
   }),
   z.object({
+    kind: z.literal("pr-draft"),
+    pull: z.object({
+      id: z.number().int(),
+      repoUrl: z.string(),
+      number: z.number().int(),
+    }),
+  }),
+  z.object({
     kind: z.literal("spec-cleanup"),
     pulls: z.array(
       z.object({
@@ -542,7 +552,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -1012,6 +1022,7 @@ export function registerWorkerRoutes(
                 const sync = readHostSyncPayload(job.rows[0]);
                 const cleanup = readSpecCleanupPayload(job.rows[0]);
                 const ready = readPrReadyPayload(job.rows[0]);
+                const draft = readPrDraftPayload(job.rows[0]);
                 const access = readRepoAccessPayload(job.rows[0]);
                 const indexLinks = readIndexPrLinksPayload(job.rows[0]);
                 const autoMerge = readAutoMergePayload(job.rows[0]);
@@ -1029,6 +1040,7 @@ export function registerWorkerRoutes(
                 else if (cleanup)
                   await recordSpecCleanup(client, cleanup, result);
                 else if (ready) await recordPrReady(client, ready, result);
+                else if (draft) await recordPrDraft(client, draft, result);
                 else if (indexLinks)
                   await recordIndexPrLinks(client, indexLinks, result);
                 else if (autoMerge)
@@ -1099,6 +1111,7 @@ export function registerWorkerRoutes(
       (readOpenPrPayload(row) ??
         readHostSyncPayload(row) ??
         readPrReadyPayload(row) ??
+        readPrDraftPayload(row) ??
         readSpecCleanupPayload(row) ??
         readPatchPrBodyPayload(row) ??
         readIndexPrLinksPayload(row) ??

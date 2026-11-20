@@ -611,11 +611,88 @@ describe("turning a draft pull request ready", () => {
         repo: "frontend",
         number: 2,
         error: expect.stringMatching(/403/),
+        jobType: "pr-ready",
       }),
     ]);
     // the next look at the host does not queue it again by itself
     await sync(BACKEND_MERGED);
     expect(await jobsOf("pr-ready")).toHaveLength(3);
+  });
+});
+
+describe("turning a pull request draft", () => {
+  async function reworkSetup() {
+    await settledSpec(["backend"]);
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(1));
+    expect(await specState()).toBe("awaiting-review");
+    const appended = await call(
+      "POST",
+      "/specs/1/tickets/import?append=true",
+      importBody(1, { tickets: [ticket("extra", "backend")] }),
+    );
+    expect(appended.status).toBe(200);
+    expect(await specState()).toBe("reworking");
+  }
+
+  it("tells the worker which pull request to turn draft, and records it as draft when the worker has", async () => {
+    await reworkSetup();
+    expect(await jobsOf("pr-draft")).toMatchObject([
+      { state: "queued", lock_key: null, payload: { pullId: 1 } },
+    ]);
+    const job = await claimOf("pr-draft");
+    expect((await taskOf(job)).body).toEqual({
+      kind: "pr-draft",
+      pull: {
+        id: 1,
+        repoUrl: "https://github.com/me/shop-backend.git",
+        number: 1,
+      },
+    });
+    await worker.complete(job.id, job.attempt, {
+      stage: "pr-draft",
+      ...synced(1, { draft: true }),
+    });
+    const draft = await db.pool.query(
+      "SELECT draft FROM pull_requests WHERE id = 1",
+    );
+    expect(draft.rows[0].draft).toBe(true);
+  });
+
+  it("tries a failed pr-draft again a minute later, three times in all, and then shows it in plat blocked", async () => {
+    await reworkSetup();
+    for (let n = 1; n <= 3; n++) {
+      const job = await claimOf("pr-draft");
+      await worker.fail(job.id, job.attempt, "GitHub answered 403");
+      if (n < 3) {
+        expect((await worker.claim()).body.job?.type ?? "nothing").not.toBe(
+          "pr-draft",
+        );
+        clock.advanceSeconds(61);
+      }
+    }
+    expect(await jobsOf("pr-draft")).toHaveLength(3);
+
+    const blocked = (await call("GET", "/blocked")).body;
+    expect(blocked.readyFailures).toEqual([
+      expect.objectContaining({
+        specId: 1,
+        repo: "backend",
+        number: 1,
+        error: expect.stringMatching(/403/),
+        jobType: "pr-draft",
+      }),
+    ]);
+    const workbench = (await call("GET", "/workbench")).body;
+    expect(workbench.waiting.readyFailures).toEqual([
+      expect.objectContaining({
+        specId: 1,
+        specDisplayId: "S-1",
+        repo: "backend",
+        number: 1,
+        jobType: "pr-draft",
+      }),
+    ]);
   });
 });
 

@@ -609,6 +609,7 @@ const BlockedQueue = z.object({
         number: z.number().int(),
         url: z.string(),
         error: z.string(),
+        jobType: z.enum(["pr-ready", "pr-draft"]),
         hostKind: z.enum(HOST_KINDS).optional(),
       })
       .merge(WaitingFields),
@@ -697,6 +698,7 @@ const WorkbenchWaiting = z.object({
       specDisplayId: z.string(),
       repo: z.string(),
       number: z.number().int(),
+      jobType: z.enum(["pr-ready", "pr-draft"]),
     }),
   ),
   planning: z.array(

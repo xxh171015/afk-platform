@@ -388,6 +388,43 @@ export function createGitHubAdapter(options: GitHubOptions): HostAdapter {
       }
       return getPullRequest({ repo, number });
     },
+    async markDraft({ repo, number }) {
+      const raw = (await get(repo, `/pulls/${number}`)) as RawPull;
+      if (raw.state !== "open" || raw.merged || raw.draft === true)
+        return info(repo, raw);
+      if (!raw.node_id)
+        throw new HostError(
+          `GitHub gave no node id for pull request ${number}`,
+          502,
+        );
+      const token = await options.tokens.tokenFor({
+        repo,
+        permissions: MARK_READY,
+      });
+      const response = await doFetch(graphqlUrl, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          query:
+            "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }",
+          variables: { id: raw.node_id },
+        }),
+      });
+      const answer = (await response.json().catch(() => ({}))) as {
+        errors?: { message?: string }[];
+      };
+      if (!response.ok || answer.errors?.length) {
+        const why = answer.errors?.map((e) => e.message).join("; ");
+        throw new HostError(
+          `GitHub refused to mark pull request ${number} draft (${response.status})${why ? `: ${why}` : ""}`,
+          response.ok ? 403 : response.status,
+        );
+      }
+      return getPullRequest({ repo, number });
+    },
     async closePullRequest({ repo, number }) {
       const current = await getPullRequest({ repo, number });
       if (current.state !== "open") return current;

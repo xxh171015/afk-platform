@@ -167,6 +167,7 @@ export interface RankableQueue {
     repo: string;
     number: number;
     error: string;
+    jobType: "pr-ready" | "pr-draft";
     waitingSince?: string;
     blocking?: Blocking;
   }[];
@@ -461,7 +462,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
          FROM jobs j
          JOIN pull_requests p ON p.id = (j.payload->>'pullId')::int
          JOIN repos r ON r.id = p.repo_id
-         WHERE j.type = 'pr-ready' AND j.state = 'failed' AND p.spec_id = ANY($1)
+         WHERE j.type IN ('pr-ready', 'pr-draft') AND j.state = 'failed' AND p.spec_id = ANY($1)
          ORDER BY p.id, j.id DESC`,
         [specIds],
       );

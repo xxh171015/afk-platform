@@ -163,3 +163,22 @@ describe("plat tickets import planning-doc filenames", () => {
     }
   });
 });
+
+describe("plat tickets import --append help", () => {
+  it("says tickets can be appended while the spec is awaiting-review", async () => {
+    let stdout = "";
+    const code = await run(["tickets", "import", "--help"], {
+      stdout: (text) => {
+        stdout += text;
+      },
+      stderr: () => {},
+      env: { HOME: "/nonexistent-home" },
+      readFile: async () => {
+        throw new Error("ENOENT");
+      },
+      readDirectory: async () => [],
+    });
+    expect(code).toBe(0);
+    expect(stdout).toMatch(/awaiting-review/);
+  });
+});
