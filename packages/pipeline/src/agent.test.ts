@@ -998,6 +998,16 @@ describe("the prompts", () => {
     expect(design).toContain("node /home/agent/afk/check-result.mjs");
   });
 
+  it("documents that ticket stages also get /context/tickets.md", () => {
+    const design = readFileSync(
+      join(PROMPT_DIR, "../../../docs/design.md"),
+      "utf8",
+    );
+    expect(design).toContain("`/context/tickets.md`");
+    expect(design).toMatch(/票的阶段也有 `\/context\/tickets\.md`/);
+    expect(design).toMatch(/票的阶段、收尾阶段/);
+  });
+
   it("tells the overlay to write the result file, self-check, fix until it passes, then output it", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const section = overlay.slice(overlay.indexOf("## 结果"));
