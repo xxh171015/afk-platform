@@ -269,7 +269,8 @@ export async function enqueuePrReady(
 }
 
 // A pull request of a spec that went back to reworking: turn it draft so it is not merged while the new tickets run.
-// Execution is a later ticket; this only queues. A second one (after a failure) gets the next sequence.
+// A second one (after a failure) gets the next sequence, and waits `notBefore` so that a short outage of the host
+// does not use up all three tries.
 export async function enqueuePrDraft(
   client: pg.PoolClient,
   payload: PrDraftPayload,
