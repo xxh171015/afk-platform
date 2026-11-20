@@ -662,7 +662,7 @@ describe("the two axes of a review", () => {
     const spec = readFileSync(PROMPTS.reviewSpec, "utf8");
     expect(spec).toContain("/context/ticket.md");
     expect(spec).toContain("/context/contract/");
-    expect(spec).toMatch(/spec\.md`? 只是背景，不是审查的对照物/);
+    expect(spec).toMatch(/spec\.md` 的 User Story 是背景/);
     expect(spec).toContain("这张票负责的 User Story");
     expect(spec).toMatch(/「这张票负责的 User Story」一节的原文/);
     expect(spec).toMatch(/也是对照物/);
@@ -681,6 +681,19 @@ describe("the two axes of a review", () => {
     expect(readFileSync(PROMPTS.reviewStandards, "utf8")).toContain(
       "不许删除或跳过测试",
     );
+  });
+
+  it("tells the Spec axis that spec-wide rules are counterparts for the code this ticket touched, and gaps in another ticket's modules go to uncertainties not mustFix", () => {
+    const spec = readFileSync(PROMPTS.reviewSpec, "utf8");
+    expect(spec).toContain("写给整个需求");
+    expect(spec).toContain("不属于某一条 User Story");
+    expect(spec).toContain("Implementation Decisions");
+    expect(spec).toMatch(/同样是对照物/);
+    expect(spec).toContain("/context/tickets.md");
+    expect(spec).toMatch(/不判 `mustFix`/);
+    expect(spec).toContain("uncertainties");
+    expect(spec).toContain("modules");
+    expect(spec).toContain("deferred");
   });
 
   it("treats What to build and the ticket's User Story as equal counterparts to the acceptance criteria, and mustFix when unsure", () => {
@@ -985,6 +998,16 @@ describe("the prompts", () => {
     expect(design).toContain("node /home/agent/afk/check-result.mjs");
   });
 
+  it("documents that ticket stages also get /context/tickets.md", () => {
+    const design = readFileSync(
+      join(PROMPT_DIR, "../../../docs/design.md"),
+      "utf8",
+    );
+    expect(design).toContain("`/context/tickets.md`");
+    expect(design).toMatch(/票的阶段也有 `\/context\/tickets\.md`/);
+    expect(design).toMatch(/票的阶段、收尾阶段/);
+  });
+
   it("tells the overlay to write the result file, self-check, fix until it passes, then output it", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     const section = overlay.slice(overlay.indexOf("## 结果"));
@@ -1117,6 +1140,16 @@ describe("the prompts", () => {
     expect(implement).toContain("What to build");
     expect(implement).toMatch(/每一句都要做到/);
     expect(implement).toContain("known-gap");
+  });
+
+  it("tells implement to follow spec-wide rules, record a known-gap when it cannot, and defer work that belongs in another ticket's modules", () => {
+    const implement = readFileSync(PROMPTS.implement, "utf8");
+    expect(implement).toContain("/context/tickets.md");
+    expect(implement).toContain("写给整个需求");
+    expect(implement).toContain("known-gap");
+    expect(implement).toMatch(/记一条 `deferred`/);
+    expect(implement).toContain("ref");
+    expect(implement).toContain("modules");
   });
 
   it("makes implement read the implement skill by its absolute path and skip its code-review step", () => {

@@ -84,13 +84,18 @@ function whatToBuildOf(body: string): string {
 }
 
 function specTicketsMarkdown(bundle: Bundle): string {
+  const current = bundle.ticket?.displayId;
   return [
     `# Tickets of ${bundle.spec.displayId}`,
     "",
     ...bundle.specTickets.flatMap((t) => {
       const what = whatToBuildOf(t.body);
+      const mark = current && t.displayId === current ? " （本票）" : "";
       return [
-        `## ${t.displayId} ${t.title}`,
+        `## ${t.displayId} ${t.title}${mark}`,
+        "",
+        `modules: ${t.modules.join(", ")}`,
+        `status: ${t.status}`,
         ...(what ? ["", "## What to build", "", what, ""] : []),
         ...t.acceptanceCriteria.map((c) => `- ${c}`),
         "",
@@ -138,8 +143,8 @@ export function renderContext(input: ContextInput): void {
   mkdirSync(dir, { recursive: true });
   if (bundle.ticket) {
     writeFileSync(join(dir, "ticket.md"), bundle.ticket.file);
-  } else {
-    // a finalization has no ticket of its own: it is given what all the tickets set out to do
+  }
+  if (!bundle.ticket || bundle.specTickets.length > 0) {
     writeFileSync(join(dir, "tickets.md"), specTicketsMarkdown(bundle));
   }
   writeFileSync(

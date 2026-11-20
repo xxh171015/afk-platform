@@ -101,6 +101,67 @@ describe("runReview", () => {
     expect(gitOut(repo.dir, ["branch", "--list", "review-*"]).trim()).toBe("");
   });
 
+  it("puts tickets.md in a ticket review's context so the Spec axis sees other tickets' modules and status", async () => {
+    repo = makeRepo({
+      "src/a.ts": "export const n = 1;\n",
+      "AGENTS.md": "Use named exports.\n",
+    });
+    gitOrThrow(repo.dir, ["checkout", "-b", "agent/T-123"]);
+    repo.commit({ "src/a.ts": "export const n = 2;\n" }, "change n");
+    const reviewed = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    let tickets: string | undefined;
+    const runner = new FakeAgentRunner(repo.dir, (ctx) => {
+      if (ctx.prompt.includes("阶段：review，Spec 轴")) {
+        tickets = ctx.context("tickets.md");
+      }
+      return { output: PASS };
+    });
+    await runReview({
+      stage: "review",
+      repoDir: repo.dir,
+      reviewedSha: reviewed,
+      baseBranch: "main",
+      subjectLabel: "T-123",
+      context: {
+        bundle: bundleFor({
+          stage: "review",
+          specTickets: [
+            {
+              displayId: "T-123",
+              title: "Export orders as CSV",
+              body: "## What to build\n\nAdd GET /orders/export.\n",
+              acceptanceCriteria: ["returns text/csv"],
+              modules: ["src/orders/**"],
+              status: "running",
+              upstream: false,
+            },
+            {
+              displayId: "T-124",
+              title: "Header row",
+              body: "## What to build\n\nThe CSV starts with a header row.\n",
+              acceptanceCriteria: ["first line is a header"],
+              modules: ["src/header/**"],
+              status: "other",
+              upstream: false,
+            },
+          ],
+        }),
+        run: {
+          runId: "R-9",
+          baseSha: gitOrThrow(repo.dir, ["rev-parse", "main"]),
+          branch: "agent/T-123",
+        },
+      },
+      runner,
+      idleSeconds: 60,
+      wallClockMs: 60_000,
+    });
+    expect(tickets).toContain("（本票）");
+    expect(tickets).toContain("modules: src/header/**");
+    expect(tickets).toContain("status: other");
+    expect(tickets).toContain("T-124 Header row");
+  });
+
   it("a ticket review with the default spec-only setting runs only the Spec axis", async () => {
     repo = makeRepo({
       "src/a.ts": "export const n = 1;\n",

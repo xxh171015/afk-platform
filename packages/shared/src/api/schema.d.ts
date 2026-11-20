@@ -2021,6 +2021,10 @@ export interface paths {
                 title: string;
                 body: string;
                 acceptanceCriteria: string[];
+                modules: string[];
+                /** @enum {string} */
+                status: "done" | "running" | "other";
+                upstream: boolean;
               }[];
               spec: {
                 id: number;

@@ -223,6 +223,9 @@ describe("renderContext", () => {
               "",
             ].join("\n"),
             acceptanceCriteria: ["returns text/csv"],
+            modules: ["src/orders/**"],
+            status: "done",
+            upstream: false,
           },
           {
             displayId: "T-2",
@@ -242,6 +245,9 @@ describe("renderContext", () => {
               "",
             ].join("\n"),
             acceptanceCriteria: ["first line is a header"],
+            modules: ["src/header/**"],
+            status: "done",
+            upstream: false,
           },
         ],
       }),
@@ -253,6 +259,9 @@ describe("renderContext", () => {
         "",
         "## T-1 Export CSV",
         "",
+        "modules: src/orders/**",
+        "status: done",
+        "",
         "## What to build",
         "",
         "Add GET /orders/export.",
@@ -260,6 +269,75 @@ describe("renderContext", () => {
         "- returns text/csv",
         "",
         "## T-2 Header row",
+        "",
+        "modules: src/header/**",
+        "status: done",
+        "",
+        "## What to build",
+        "",
+        "The CSV starts with a header row.",
+        "",
+        "- first line is a header",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("writes tickets.md for a ticket stage with each ticket's modules and status, and marks this ticket", () => {
+    const dir = ctxDir();
+    renderContext({
+      dir,
+      bundle: bundleFor({
+        specTickets: [
+          {
+            displayId: "T-123",
+            title: "Export orders as CSV",
+            body: ["## What to build", "", "Add GET /orders/export.", ""].join(
+              "\n",
+            ),
+            acceptanceCriteria: ["returns text/csv"],
+            modules: ["src/orders/**"],
+            status: "running",
+            upstream: false,
+          },
+          {
+            displayId: "T-124",
+            title: "Header row",
+            body: [
+              "## What to build",
+              "",
+              "The CSV starts with a header row.",
+              "",
+            ].join("\n"),
+            acceptanceCriteria: ["first line is a header"],
+            modules: ["src/header/**"],
+            status: "other",
+            upstream: false,
+          },
+        ],
+      }),
+      run,
+    });
+    expect(read(dir, "ticket.md")).toContain("Export orders as CSV");
+    expect(read(dir, "tickets.md")).toBe(
+      [
+        "# Tickets of S-12",
+        "",
+        "## T-123 Export orders as CSV （本票）",
+        "",
+        "modules: src/orders/**",
+        "status: running",
+        "",
+        "## What to build",
+        "",
+        "Add GET /orders/export.",
+        "",
+        "- returns text/csv",
+        "",
+        "## T-124 Header row",
+        "",
+        "modules: src/header/**",
+        "status: other",
         "",
         "## What to build",
         "",

@@ -18,6 +18,7 @@
 修订：2026-11-16 worker 收到 SIGUSR2 后排空（不再领作业，手上的交完结果再以 0 退出）；`scripts/restart.sh worker` 滚动重启，新 worker 只按空闲槽位领要占槽的作业。
 修订：2026-11-18 SIGUSR2 送到 worker 的 node 进程；Ctrl-C 也会停掉排空中的旧 worker。
 修订：2026-11-16 结构化输出不合格时先规范化、再修格式，不重跑阶段；Run 记 `resultFix`。
+修订：2026-11-20 票的阶段也有 `/context/tickets.md`；票级 Spec 轴把需求的全局规则当对照物，别票模块里的缺口不判 mustFix。
 
 ## 背景与目标
 
@@ -1162,6 +1163,7 @@ Cursor CLI 无头模式在 2026 年 2 月被报告不加载 skills，Cursor 于 
 | 路径                          | 内容                                                                                                                                                     | 何时有              |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
 | `/context/ticket.md`          | 这张票的文件：front matter（`id`、`version`、标题、仓库、模块…）加导入时的正文原文，与 `plat ticket view --md` 一致                                      | 总是                |
+| `/context/tickets.md`         | 本需求各票的编号、标题、What to build、验收标准、modules、状态；票的阶段标出本票                                                                         | 票的阶段、收尾阶段  |
 | `/context/spec.md`            | spec 正文，包括已确认的 seams 和共享名字                                                                                                                 | 总是                |
 | `/context/run.json`           | 阶段、基准提交（fixed point）、分支名、集成分支名、上限、`allowedProtectedPaths`（这张票已批准可以改的保护路径，没有则为空数组）                         | 总是                |
 | `/context/contract/<仓库名>/` | 固定 SHA 上的契约文件，按提供契约的仓库分开                                                                                                              | 有契约边时          |
@@ -1192,10 +1194,10 @@ skills 挂在 Cursor CLI 的用户级 skills 目录（官方文档列出的自�
 
 - 公共覆盖层写明：没有人回答问题，遇到小事自己决定并写进 `uncertainties`，必须由人决定的输出 `cannot-proceed`；`/context` 就是 tracker，不读 `docs/agents/issue-tracker.md`、不调 `plat`、不运行 setup；不 push、不切换或新建分支、不自己加 `Spec` / `Ticket` / `Run` trailer（worker 事后补）；保护路径一律不改，`/context/run.json` 的 `allowedProtectedPaths` 里列出的除外，没批准却必须改、或契约有问题时输出 `cannot-proceed`，`blockedReason` 写 `contract-change-needed`（契约票和普通票用同一份 prompt，靠 `allowedProtectedPaths` 区分）。有 `/context/note.md` 时读它，当成人对这一次 Run 的指示，不当成改票。
 - 公共覆盖层把 skill 里每个"去问人"的地方写死成答案：implement 的"reference 不明确就问"，票就是 `/context/ticket.md`；tdd 的"和用户确认 seams"，spec 里的 seams 已经确认；code-review 的"问固定点"，是 `run.json` 的 `baseSha`，按 skill 原文用三点 diff；code-review 的"问 spec 在哪"，由阶段 prompt 给出。没列到的提问，能撤回的小事自己决定，需要人决定的输出 `cannot-proceed`。覆盖层第一行写明它对应的 skills SHA，守卫测试要求它等于固定的 `SKILLS_SHA` 和快照的 SHA；升级 SHA 时必须回头核对覆盖层。
-- implement：按绝对路径读 `/home/agent/.cursor/skills/implement/SKILL.md` 照做（它是 `disable-model-invocation: true`，模型不会自己调用；agent 也没有 Skill 工具，所以按文件读），**跳过它最后调用 `code-review` 的那一步**，平台另有 review 阶段。tdd 只做红 → 绿，不在循环里重构；每条验收标准都要有测试，结果里带验收对照表。
+- implement：按绝对路径读 `/home/agent/.cursor/skills/implement/SKILL.md` 照做（它是 `disable-model-invocation: true`，模型不会自己调用；agent 也没有 Skill 工具，所以按文件读），**跳过它最后调用 `code-review` 的那一步**，平台另有 review 阶段。tdd 只做红 → 绿，不在循环里重构；每条验收标准都要有测试，结果里带验收对照表。`spec.md` 里写给整个需求的规则，凡是这张票改到的代码都要遵守，做不到记 `known-gap`；要求的实现落在另一张还没 done 的票的 modules 里时记 `deferred`（`ref` 为那张票）。
 - gate-fix、review-fix、final-fix：读 tdd，先写会失败的测试再修；review-fix 和 final-fix 把两个审查轴的 `mustFix` 一起修；不用 `diagnosing-bugs`。merge-fix 不读 skill，只用覆盖层。
 - final-tidy：不读 tdd。读 `/context/review.json` 里 Standards 轴的建议，只挑改动小、局部、不改变行为的去做；不改已有测试和配置，不改测试名。按 `gate` 跑通后再提交。任何失败都丢掉这次整理。
-- review、final-review：跑 `code-review`，固定点是 `baseSha`，diff 用三点 diff。skill 要求 Standards 和 Spec 两个轴用并行子 agent 互相隔离，平台不让 agent 自己开子 agent，而是按轴各开一次 agent 运行（各开新沙箱、各用一条自己的临时分支，各记一条 Run，Run 上标明审查轴 `axis`），每次运行扮演一个轴的子 agent，prompt 写“第 1–3 步已替你做完；你就是第 4 步里这一轴的子 agent”。**票级审查默认只跑 Spec 轴**（项目设置 `ticketReview: spec`）；`ticketReview: both` 时票级也两轴并行，和现在一样。Standards 轴照常在需求级 final-review 跑，那里看的是整份改动。worker 再按第 5 步把跑过的轴并排拼起来，不合并也不重排；没跑的那一轴不出现在拼好的结果和 review-fix 读到的 `review.json` 里。任一轴 invalid-output 或超时，整个阶段按这个结果处理，重试时把这次该跑的轴一起重跑；任一已跑的轴有 `mustFix` 就判 fix。Spec 轴在单票审查里对照 `/context/ticket.md` 和契约（`spec.md` 只是背景），在 final-review 里对照 `spec.md` 和 `tickets.md`。映射：`mustFix` 收文档写明的硬性违规、Spec 轴的缺失或做了一半、做错了；`suggestions` 收所有坏味道；Spec 轴的 scope creep 另记为 `scopeCreep`（意见 `scope-creep`），只进验收包并单独列出，从不触发修复。每条意见带它那次运行的审查轴；review-fix 和 final-fix 读到的 `review.json` 是已跑轴并排的结果加上带轴的全部 `mustFix`，一次处理完。
+- review、final-review：跑 `code-review`，固定点是 `baseSha`，diff 用三点 diff。skill 要求 Standards 和 Spec 两个轴用并行子 agent 互相隔离，平台不让 agent 自己开子 agent，而是按轴各开一次 agent 运行（各开新沙箱、各用一条自己的临时分支，各记一条 Run，Run 上标明审查轴 `axis`），每次运行扮演一个轴的子 agent，prompt 写“第 1–3 步已替你做完；你就是第 4 步里这一轴的子 agent”。**票级审查默认只跑 Spec 轴**（项目设置 `ticketReview: spec`）；`ticketReview: both` 时票级也两轴并行，和现在一样。Standards 轴照常在需求级 final-review 跑，那里看的是整份改动。worker 再按第 5 步把跑过的轴并排拼起来，不合并也不重排；没跑的那一轴不出现在拼好的结果和 review-fix 读到的 `review.json` 里。任一轴 invalid-output 或超时，整个阶段按这个结果处理，重试时把这次该跑的轴一起重跑；任一已跑的轴有 `mustFix` 就判 fix。Spec 轴在单票审查里对照 `/context/ticket.md` 和契约；`spec.md` 的 User Story 是背景，其中写给整个需求的规则对这张票改到的相关代码同样是对照物；缺的要求落在另一张还没 done 的票的 modules 里时写进 `uncertainties` 而不判 `mustFix`。票的阶段也有 `/context/tickets.md`。在 final-review 里对照 `spec.md` 和 `tickets.md`。映射：`mustFix` 收文档写明的硬性违规、Spec 轴的缺失或做了一半、做错了；`suggestions` 收所有坏味道；Spec 轴的 scope creep 另记为 `scopeCreep`（意见 `scope-creep`），只进验收包并单独列出，从不触发修复。每条意见带它那次运行的审查轴；review-fix 和 final-fix 读到的 `review.json` 是已跑轴并排的结果加上带轴的全部 `mustFix`，一次处理完。
 - 联调票的 implement 和诊断：只接公共覆盖层，不跑 skill，因为 e2e 是对着已经实现好的服务写的，套不上 tdd 的红 → 绿。
 - **rework**（处理 PR 评论）平台还没有实现；实现时按 review-fix 的方式：读 tdd，先写会失败的测试再改，覆盖层照用。
 - 结构化输出的 `<result>` 格式按阶段写在阶段 prompt 里。

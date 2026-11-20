@@ -294,6 +294,10 @@ const Bundle = z.object({
       // The ticket body as stored (Parent / What to build / Acceptance criteria).
       body: z.string(),
       acceptanceCriteria: z.array(z.string()),
+      modules: z.array(z.string()),
+      status: z.enum(["done", "running", "other"]),
+      // True when this ticket is in the current ticket's blocked_by.
+      upstream: z.boolean(),
     }),
   ),
   spec: z.object({
