@@ -81,14 +81,17 @@ export function specTransition(
 
 // Where a paused spec goes on resume: 收尾 (finalizing) and 验收 (awaiting-review / partially-merged)
 // keep their place; unfinished appended tickets of a wrap-up that already opened PRs return to reworking;
+// a second wrap-up after rework still has open PRs, so unfinished finalizations stay in 收尾;
 // everyone else to running.
 export function specResumeTarget(input: {
   hasFinalizations: boolean;
   pullStates: readonly ("open" | "closed" | "merged")[];
   hasIncompleteAppendedTickets?: boolean;
+  hasIncompleteFinalizations?: boolean;
 }): SpecState {
   if (!input.hasFinalizations) return "running";
   if (input.hasIncompleteAppendedTickets) return "reworking";
+  if (input.hasIncompleteFinalizations) return "finalizing";
   const live = input.pullStates.filter((state) => state !== "closed");
   if (live.length === 0) return "finalizing";
   const merged = live.filter((state) => state === "merged").length;

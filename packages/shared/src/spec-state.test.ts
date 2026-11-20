@@ -152,4 +152,14 @@ describe("specTransition: rework", () => {
       }),
     ).toBe("reworking");
   });
+
+  it("resumes a paused spec with unfinished wrap-up and open pull requests to 收尾", () => {
+    expect(
+      specResumeTarget({
+        hasFinalizations: true,
+        pullStates: ["open"],
+        hasIncompleteFinalizations: true,
+      }),
+    ).toBe("finalizing");
+  });
 });
