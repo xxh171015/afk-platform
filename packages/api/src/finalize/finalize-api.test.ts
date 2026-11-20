@@ -261,6 +261,88 @@ describe("the overall review and the one fix", () => {
     return specId;
   }
 
+  it("applies uncertaintyRulings: resolved findings become resolved, open and missing stay as they were", async () => {
+    await runningSpec([ticket("a")]);
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [
+            "already fixed later",
+            "still unsure",
+            "no ruling given",
+          ],
+        },
+      },
+      findings: [
+        { kind: "uncertainty", body: "already fixed later" },
+        { kind: "uncertainty", body: "still unsure" },
+        { kind: "uncertainty", body: "no ruling given" },
+      ],
+    });
+    await step("merge", SUCCESS.merge);
+    const listed = await db.pool.query<{ id: number; body: string }>(
+      "SELECT id, body FROM findings WHERE kind = 'uncertainty' ORDER BY id",
+    );
+    const idOf = (body: string) =>
+      listed.rows.find((row) => row.body === body)?.id as number;
+    await step("final-review", {
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          uncertaintyRulings: [
+            { id: `F-${idOf("already fixed later")}`, verdict: "resolved" },
+            { id: `F-${idOf("still unsure")}`, verdict: "open" },
+          ],
+        },
+      },
+    });
+    const after = await db.pool.query<{ body: string; resolution: string }>(
+      "SELECT body, resolution FROM findings WHERE kind = 'uncertainty' ORDER BY id",
+    );
+    expect(after.rows).toEqual([
+      { body: "already fixed later", resolution: "resolved" },
+      { body: "still unsure", resolution: "acceptance-pack" },
+      { body: "no ruling given", resolution: "acceptance-pack" },
+    ]);
+  });
+
+  it("a wrap-up without uncertaintyRulings stays valid and leaves ticket uncertainties as they were", async () => {
+    await runningSpec([ticket("a")]);
+    await step("implement", SUCCESS.implement);
+    await step("gate", SUCCESS.gate);
+    await step("review", {
+      outcome: "pass",
+      findings: [{ kind: "uncertainty", body: "the date format" }],
+    });
+    await step("merge", SUCCESS.merge);
+    await step("final-review", REVIEW_PASS);
+    expect(await fin()).toEqual([
+      { step: "final-review", state: "done", blocked_reason: null },
+    ]);
+    const findings = await db.pool.query(
+      "SELECT kind, body, resolution FROM findings WHERE kind = 'uncertainty'",
+    );
+    expect(findings.rows).toEqual([
+      {
+        kind: "uncertainty",
+        body: "the date format",
+        resolution: "acceptance-pack",
+      },
+    ]);
+  });
+
   it("an uncertainty does not run a wrap-up fix", async () => {
     await toFinalReview();
     await step("final-review", {
@@ -488,6 +570,9 @@ describe("the overall review and the one fix", () => {
           "## What to build\n\nA exports orders as CSV.\n",
         ),
         acceptanceCriteria: ["a works"],
+        modules: ["src/a/**"],
+        status: "done",
+        upstream: false,
       },
       {
         displayId: "T-2",
@@ -496,6 +581,9 @@ describe("the overall review and the one fix", () => {
           "## What to build\n\nB adds the header row.\n",
         ),
         acceptanceCriteria: ["b works"],
+        modules: ["src/b/**"],
+        status: "done",
+        upstream: false,
       },
     ]);
 

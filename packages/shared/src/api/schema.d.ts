@@ -2021,6 +2021,10 @@ export interface paths {
                 title: string;
                 body: string;
                 acceptanceCriteria: string[];
+                modules: string[];
+                /** @enum {string} */
+                status: "done" | "running" | "other";
+                upstream: boolean;
               }[];
               spec: {
                 id: number;
@@ -2191,6 +2195,14 @@ export interface paths {
                 toSha: string;
                 paths: string[];
               } | null;
+              uncertainties:
+                | {
+                    id: string;
+                    ticket: string;
+                    run: string;
+                    body: string;
+                  }[]
+                | null;
               handbackResolve?: boolean;
             };
           };
@@ -3728,6 +3740,15 @@ export interface paths {
                     body: string;
                   }[];
                   reviewUncertainties: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    body: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
+                  }[];
+                  /** @default [] */
+                  resolvedUncertainties: {
                     ticket: string | null;
                     run: string;
                     stage: string;

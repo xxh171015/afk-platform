@@ -294,6 +294,10 @@ const Bundle = z.object({
       // The ticket body as stored (Parent / What to build / Acceptance criteria).
       body: z.string(),
       acceptanceCriteria: z.array(z.string()),
+      modules: z.array(z.string()),
+      status: z.enum(["done", "running", "other"]),
+      // True when this ticket is in the current ticket's blocked_by.
+      upstream: z.boolean(),
     }),
   ),
   spec: z.object({
@@ -405,6 +409,16 @@ const Bundle = z.object({
       toSha: z.string().min(1),
       paths: z.array(z.string()),
     })
+    .nullable(),
+  uncertainties: z
+    .array(
+      z.object({
+        id: z.string(),
+        ticket: z.string(),
+        run: z.string(),
+        body: z.string(),
+      }),
+    )
     .nullable(),
   handbackResolve: z.boolean().optional(),
 });

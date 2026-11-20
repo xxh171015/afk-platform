@@ -652,6 +652,13 @@
       "when": 1795100000000,
       "tag": "0092_failed_to_reach_external",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1795100000001,
+      "tag": "0093_finding_resolution_resolved",
+      "breakpoints": true
     }
   ]
 }

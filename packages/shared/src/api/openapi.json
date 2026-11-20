@@ -3271,13 +3271,29 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "modules": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["done", "running", "other"]
+                          },
+                          "upstream": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "displayId",
                           "title",
                           "body",
-                          "acceptanceCriteria"
+                          "acceptanceCriteria",
+                          "modules",
+                          "status",
+                          "upstream"
                         ]
                       }
                     },
@@ -3836,6 +3852,27 @@
                       },
                       "required": ["fromSha", "toSha", "paths"]
                     },
+                    "uncertainties": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "ticket": {
+                            "type": "string"
+                          },
+                          "run": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "ticket", "run", "body"]
+                      }
+                    },
                     "handbackResolve": {
                       "type": "boolean"
                     }
@@ -3867,7 +3904,8 @@
                     "model",
                     "ticketReview",
                     "stageModels",
-                    "recheck"
+                    "recheck",
+                    "uncertainties"
                   ]
                 }
               }
@@ -7494,6 +7532,38 @@
                                     "axis"
                                   ]
                                 }
+                              },
+                              "resolvedUncertainties": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ticket": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "run": {
+                                      "type": "string"
+                                    },
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "axis": {
+                                      "type": ["string", "null"],
+                                      "enum": ["standards", "spec", null]
+                                    }
+                                  },
+                                  "required": [
+                                    "ticket",
+                                    "run",
+                                    "stage",
+                                    "body",
+                                    "axis"
+                                  ]
+                                },
+                                "default": []
                               },
                               "decisions": {
                                 "type": "array",

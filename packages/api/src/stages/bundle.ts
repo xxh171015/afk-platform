@@ -71,11 +71,16 @@ export interface Bundle {
     restart: boolean;
   } | null;
   // What the spec's tickets set out to do: the yardstick of an overall review.
+  // Ticket stages get every ticket of the spec; finalization still lists done tickets of this repo.
   specTickets: {
     displayId: string;
     title: string;
     body: string;
     acceptanceCriteria: string[];
+    modules: string[];
+    status: "done" | "running" | "other";
+    // True when this ticket is in the current ticket's blocked_by. Always false on finalization.
+    upstream: boolean;
   }[];
   spec: {
     id: number;
@@ -153,6 +158,15 @@ export interface Bundle {
   stageModels: StageModels;
   // Recheck: the commits and paths this Spec-axis look is about. Null on other stages.
   recheck: { fromSha: string; toSha: string; paths: string[] } | null;
+  // Ticket-review uncertainties for wrap-up `/context/uncertainties.json`. Null on ticket stages.
+  uncertainties:
+    | {
+        id: string;
+        ticket: string;
+        run: string;
+        body: string;
+      }[]
+    | null;
   // After handback, the next implement job resolves the resume stage from the remote tip.
   handbackResolve?: boolean;
 }
@@ -320,6 +334,85 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
   ];
 }
 
+async function uncertaintiesOf(
+  pool: pg.Pool,
+  specId: number,
+): Promise<NonNullable<Bundle["uncertainties"]>> {
+  const { rows } = await pool.query<{
+    id: number;
+    ticket_id: number;
+    run_id: number;
+    body: string;
+  }>(
+    `SELECT f.id, r.ticket_id, r.id AS run_id, f.body
+     FROM findings f
+     JOIN runs r ON r.id = f.run_id
+     JOIN tickets t ON t.id = r.ticket_id
+     WHERE r.spec_id = $1
+       AND f.kind = 'uncertainty'
+       AND r.stage IN ('review', 'recheck')
+       AND t.state <> 'cancelled'
+     ORDER BY f.id`,
+    [specId],
+  );
+  return rows.map((row) => ({
+    id: `F-${row.id}`,
+    ticket: formatDisplayId("ticket", row.ticket_id),
+    run: formatDisplayId("run", row.run_id),
+    body: row.body,
+  }));
+}
+
+function specTicketStatus(state: string): "done" | "running" | "other" {
+  if (state === "done" || state === "running") return state;
+  return "other";
+}
+
+async function specTicketsOf(
+  pool: pg.Pool,
+  specId: number,
+  opts: {
+    currentTicketId?: number;
+    repoId?: number;
+    doneOnly?: boolean;
+  } = {},
+): Promise<Bundle["specTickets"]> {
+  type SpecTicketRow = {
+    id: number;
+    title: string;
+    body: string;
+    acceptance_criteria: string[];
+    modules: string[];
+    state: string;
+  };
+  const select = `SELECT id, title, body, acceptance_criteria, modules, state
+           FROM tickets WHERE spec_id = $1`;
+  const tickets =
+    opts.repoId !== undefined && opts.doneOnly
+      ? await pool.query<SpecTicketRow>(
+          `${select} AND repo_id = $2 AND state = 'done' ORDER BY id`,
+          [specId, opts.repoId],
+        )
+      : await pool.query<SpecTicketRow>(`${select} ORDER BY id`, [specId]);
+  const upstreamIds = new Set<number>();
+  if (opts.currentTicketId !== undefined) {
+    const upstream = await pool.query<{ from_ticket_id: number }>(
+      "SELECT from_ticket_id FROM edges WHERE to_ticket_id = $1 AND kind = 'blocks'",
+      [opts.currentTicketId],
+    );
+    for (const row of upstream.rows) upstreamIds.add(row.from_ticket_id);
+  }
+  return tickets.rows.map((t) => ({
+    displayId: formatDisplayId("ticket", t.id),
+    title: t.title,
+    body: t.body,
+    acceptanceCriteria: t.acceptance_criteria,
+    modules: t.modules ?? [],
+    status: specTicketStatus(t.state),
+    upstream: upstreamIds.has(t.id),
+  }));
+}
+
 async function ticketGateNamesFor(
   pool: pg.Pool,
   ticketId: number,
@@ -460,7 +553,9 @@ export async function buildBundle(
       restart: row.restart,
       file: (await ticketFileOf(pool, row.id)) as string,
     },
-    specTickets: [],
+    specTickets: await specTicketsOf(pool, row.spec_id, {
+      currentTicketId: ticketId,
+    }),
     spec: {
       id: row.spec_id,
       displayId: formatDisplayId("spec", row.spec_id),
@@ -513,6 +608,7 @@ export async function buildBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    uncertainties: null,
     ...(job.payload.handbackResolve === true
       ? { handbackResolve: true as const }
       : {}),
@@ -545,10 +641,10 @@ async function buildFinalBundle(
   );
   const row = found.rows[0];
   if (!row) return undefined;
-  const tickets = await pool.query(
-    `SELECT id, title, body, acceptance_criteria FROM tickets WHERE spec_id = $1 AND repo_id = $2 AND state = 'done' ORDER BY id`,
-    [final.specId, final.repoId],
-  );
+  const specTickets = await specTicketsOf(pool, final.specId, {
+    repoId: final.repoId,
+    doneOnly: true,
+  });
   const run = await pool.query<{ id: number; retry_note: string | null }>(
     "SELECT id, retry_note FROM runs WHERE job_id = $1",
     [job.id],
@@ -573,12 +669,7 @@ async function buildFinalBundle(
         }
       : null,
     ticket: null,
-    specTickets: tickets.rows.map((t) => ({
-      displayId: formatDisplayId("ticket", t.id),
-      title: t.title as string,
-      body: t.body as string,
-      acceptanceCriteria: t.acceptance_criteria as string[],
-    })),
+    specTickets,
     spec: {
       id: row.spec_id,
       displayId: formatDisplayId("spec", row.spec_id),
@@ -634,6 +725,7 @@ async function buildFinalBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    uncertainties: await uncertaintiesOf(pool, final.specId),
   };
 }
 
@@ -743,6 +835,7 @@ async function buildUpdateBranchBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    uncertainties: null,
   };
 }
 
@@ -842,5 +935,6 @@ async function buildLocateBundle(
       row.stage_models,
     ),
     recheck: null,
+    uncertainties: null,
   };
 }

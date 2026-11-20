@@ -33,7 +33,7 @@ import { contractsOf } from "./contracts.ts";
 import { rememberGateTestCases } from "./gate-records.ts";
 import { createFixTicket } from "./integration.ts";
 import { mergeRecheckIntoOutput, recheckTriggerOf } from "./recheck-hit.ts";
-import { reviewOutcomeWithRulings } from "./review-rulings.ts";
+import { reviewOutcomeWithRulings, specAxisOutput } from "./review-rulings.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -721,6 +721,7 @@ export async function writeFacts(
     await recordTicketLinks(client, owner, stage);
   }
   await insertFindings(client, runId, result?.findings ?? []);
+  await applyUncertaintyRulings(client, owner.spec_id, stage, result);
   // the other axes of a review: a Run each, which belongs to no job of its own
   for (const extra of result?.extraRuns ?? []) {
     const extraTries = await client.query<{ n: string }>(
@@ -832,6 +833,49 @@ async function markTidiedSuggestions(
   await client.query(
     `UPDATE findings SET resolution = 'refactored' WHERE id = ANY($1::int[])`,
     [ids],
+  );
+}
+
+function uncertaintyRulingsOf(
+  output: unknown,
+): { id: string; verdict: string }[] {
+  if (!output || typeof output !== "object") return [];
+  const raw = (output as { uncertaintyRulings?: unknown }).uncertaintyRulings;
+  if (!Array.isArray(raw)) return [];
+  const listed: { id: string; verdict: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const id = (item as { id?: unknown }).id;
+    const verdict = (item as { verdict?: unknown }).verdict;
+    if (typeof id === "string" && typeof verdict === "string")
+      listed.push({ id, verdict });
+  }
+  return listed;
+}
+
+async function applyUncertaintyRulings(
+  client: pg.PoolClient,
+  specId: number,
+  stage: string,
+  result: ResultFacts | undefined,
+): Promise<void> {
+  if (stage !== "final-review") return;
+  const ids: number[] = [];
+  for (const ruling of uncertaintyRulingsOf(specAxisOutput(result))) {
+    if (ruling.verdict !== "resolved") continue;
+    const match = /^F-([1-9][0-9]*)$/.exec(ruling.id);
+    if (!match) continue;
+    ids.push(Number(match[1]));
+  }
+  if (ids.length === 0) return;
+  await client.query(
+    `UPDATE findings f SET resolution = 'resolved'
+     FROM runs r
+     WHERE f.id = ANY($1::int[])
+       AND f.run_id = r.id
+       AND r.spec_id = $2
+       AND f.kind = 'uncertainty'`,
+    [ids, specId],
   );
 }
 

@@ -242,6 +242,7 @@ export {
   DEFAULT_TICKET_REVIEW,
   REVIEW_AXES,
   reviewAxesFor,
+  reviewAxisLabel,
   TICKET_REVIEW_MODES,
 } from "./review-axes.ts";
 export type { NeedsDecisionItem, Ruling, RulingVerdict } from "./rulings.ts";

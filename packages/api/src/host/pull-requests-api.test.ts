@@ -1707,6 +1707,68 @@ describe("the acceptance pack", () => {
     });
   });
 
+  it("verifies a criterion when the acceptance key matches after dropping backticks and collapsing spaces, and stays unverified when the key is different", async () => {
+    await settledSpec(["backend"], undefined, {
+      tickets: [
+        ticket("a", "backend", [
+          "`POST /api/x` 缺字段返回 4xx",
+          "returns  `csv`",
+          "really different",
+        ]),
+      ],
+      stages: {
+        implement: {
+          outcome: "done",
+          run: {
+            output: {
+              status: "done",
+              summary: "did it",
+              acceptance: {
+                "POST /api/x 缺字段返回 4xx": ["exports a csv"],
+                "returns csv": ["has a header"],
+                "other thing": ["exports a csv"],
+              },
+            },
+          },
+        },
+        merge: {
+          outcome: "merged",
+          headSha: "head",
+          run: { headSha: "head" },
+          gate: {
+            commitSha: "head",
+            configSha: "cfg",
+            commandResults: [{ name: "test", exitCode: 0, ms: 10 }],
+            testsTotal: 2,
+            testsSkipped: 0,
+            testCases: [
+              { name: "exports a csv", classname: "orders", status: "passed" },
+              { name: "has a header", classname: "orders", status: "passed" },
+            ],
+          },
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    const byText = Object.fromEntries(
+      acceptancePack.repos[0].tickets[0].criteria.map((c: Json) => [c.text, c]),
+    );
+    expect(byText["`POST /api/x` 缺字段返回 4xx"]).toMatchObject({
+      status: "verified",
+      tests: ["exports a csv"],
+    });
+    expect(byText["returns  `csv`"]).toMatchObject({
+      status: "verified",
+      tests: ["has a header"],
+    });
+    expect(byText["really different"]).toMatchObject({
+      status: "unverified",
+      reason: "the agent named no test",
+    });
+  });
+
   it("lists tests that failed then passed on the same commit, not as findings", async () => {
     const { acceptancePack } = await packOf();
     expect(acceptancePack.repos[0].flakyTests).toEqual([
@@ -1863,6 +1925,84 @@ describe("the acceptance pack", () => {
     expect(task.section).toContain("### 审查拿不准的");
     expect(task.section).toContain("- Spec 轴 T-1 review");
     expect(task.section).toContain("the ticket does not say the date format");
+  });
+
+  it("keeps resolved ticket-review uncertainties out of 审查拿不准的 and folds them as 已解决的疑点", async () => {
+    const { held } = await settledSpec(["backend"], 1, {
+      stages: {
+        review: {
+          outcome: "pass",
+          run: {
+            axis: "spec",
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              uncertainties: ["already fixed later", "still open"],
+            },
+          },
+          findings: [
+            { kind: "uncertainty", body: "already fixed later" },
+            { kind: "uncertainty", body: "still open" },
+          ],
+        },
+      },
+    });
+    const listed = await db.pool.query<{ id: number; body: string }>(
+      "SELECT id, body FROM findings WHERE kind = 'uncertainty' ORDER BY id",
+    );
+    const idOf = (body: string) =>
+      listed.rows.find((row) => row.body === body)?.id as number;
+    const review = held as { id: number; attempt: number };
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          uncertaintyRulings: [
+            { id: `F-${idOf("already fixed later")}`, verdict: "resolved" },
+            { id: `F-${idOf("still open")}`, verdict: "open" },
+          ],
+        },
+      },
+    });
+    const job = await claimOf("open-pr");
+    await worker.complete(job.id, job.attempt, opened(7));
+    const { acceptancePack } = (await call("GET", "/specs/1")).body;
+    expect(acceptancePack.repos[0].reviewUncertainties).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "review",
+        body: "still open",
+        axis: "spec",
+      },
+    ]);
+    expect(acceptancePack.repos[0].resolvedUncertainties).toEqual([
+      {
+        ticket: "T-1",
+        run: expect.stringMatching(/^R-\d+$/),
+        stage: "review",
+        body: "already fixed later",
+        axis: "spec",
+      },
+    ]);
+    const patch = await claimOf("patch-pr-body");
+    const task = (await taskOf(patch)).body;
+    expect(task.section).toContain("### 审查拿不准的");
+    expect(task.section).toContain("still open");
+    expect(task.section).toMatch(/已解决的疑点（1 条）/);
+    const openHeading = task.section.indexOf("### 审查拿不准的");
+    const foldHeading = task.section.indexOf("已解决的疑点");
+    expect(task.section.slice(openHeading, foldHeading)).not.toContain(
+      "already fixed later",
+    );
+    expect(task.section.slice(foldHeading)).toContain("already fixed later");
   });
 
   it("carries the review's findings with what became of them, and every uncertainty", async () => {
