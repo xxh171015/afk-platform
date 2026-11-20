@@ -31,4 +31,4 @@
 </result>
 ```
 
-`summary` 是一句字符串。`acceptance` 的值是测试名字符串的数组。`decisions` 是对象数组，每项 `{ "kind", "text" }`，只有 `kind` 是 `deferred` 时才带 `ref`（T-n 或 `new`）。`blockedReason` 只能是 `agent-gave-up` 或 `contract-change-needed`，`detail` 是一句字符串。
+`summary` 是一句字符串。`acceptance` 的键照抄验收标准原文，包括反引号。`acceptance` 的值是测试名字符串的数组。`decisions` 是对象数组，每项 `{ "kind", "text" }`，只有 `kind` 是 `deferred` 时才带 `ref`（T-n 或 `new`）。`blockedReason` 只能是 `agent-gave-up` 或 `contract-change-needed`，`detail` 是一句字符串。

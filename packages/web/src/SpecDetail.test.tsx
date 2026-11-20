@@ -821,6 +821,65 @@ describe("the spec page", () => {
     expect(screen.getByText(/Spec 轴/)).toBeTruthy();
   });
 
+  it("folds resolved review uncertainties as 已解决的疑点 and leaves open ones in 审查拿不准的", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            tickets: [ticket(1, "done")],
+            edges: [],
+            acceptancePack: {
+              generatedAt: "2026-10-28T10:00:00.000Z",
+              mergeOrder: {
+                ordered: ["backend"],
+                after: {},
+                unordered: [],
+              },
+              repos: [
+                {
+                  repo: "backend",
+                  tickets: [],
+                  findings: [],
+                  scopeCreep: [],
+                  reviewUncertainties: [
+                    {
+                      ticket: "T-1",
+                      run: "R-2",
+                      stage: "review",
+                      body: "still open",
+                      axis: "spec",
+                    },
+                  ],
+                  resolvedUncertainties: [
+                    {
+                      ticket: "T-1",
+                      run: "R-3",
+                      stage: "review",
+                      body: "already fixed later",
+                      axis: "spec",
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("审查拿不准的")).toBeTruthy();
+    expect(screen.getByText(/still open/).closest("ul")?.className).toBe(
+      "review-uncertainties",
+    );
+    const fold = screen.getByText("已解决的疑点（1 条）").closest("details");
+    expect(fold).toBeTruthy();
+    expect(fold?.textContent).toContain("already fixed later");
+    expect(
+      screen.getByText(/still open/).closest("ul")?.textContent,
+    ).not.toContain("already fixed later");
+  });
+
   it("says a pull request closed on the host was closed without merge", async () => {
     const pullRequests = [
       {

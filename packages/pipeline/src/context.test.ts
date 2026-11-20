@@ -124,6 +124,30 @@ describe("renderContext", () => {
     });
   });
 
+  it("writes uncertainties.json for wrap-up with each ticket review uncertainty, and omits it on a ticket stage", () => {
+    const dir = ctxDir();
+    const listed = [
+      {
+        id: "F-3",
+        ticket: "T-1",
+        run: "R-2",
+        body: "the ticket does not say the date format",
+      },
+    ];
+    renderContext({
+      dir,
+      bundle: bundleFor({
+        ticket: null,
+        uncertainties: listed,
+      }),
+      run,
+    });
+    expect(JSON.parse(read(dir, "uncertainties.json"))).toEqual(listed);
+    const ticketDir = ctxDir();
+    renderContext({ dir: ticketDir, bundle: bundleFor(), run });
+    expect(existsSync(join(ticketDir, "uncertainties.json"))).toBe(false);
+  });
+
   it("writes spec.md without an assigned-stories section when the ticket has no stories", () => {
     const dir = ctxDir();
     renderContext({ dir, bundle: bundleFor(), run });

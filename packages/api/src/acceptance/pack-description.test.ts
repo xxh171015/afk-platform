@@ -60,6 +60,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       ],
       scopeCreep: [],
       reviewUncertainties: [],
+      resolvedUncertainties: [],
       decisions: [
         {
           source: "T-1 implement",
@@ -112,6 +113,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       findings: [],
       scopeCreep: [],
       reviewUncertainties: [],
+      resolvedUncertainties: [],
       decisions: [],
       protectedPathApprovals: [],
       flakyTests: [],

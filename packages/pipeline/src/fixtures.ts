@@ -2,7 +2,9 @@ import { type Bundle, DEFAULT_LIMITS } from "@afk/shared";
 
 // A bundle as GET /worker/jobs/:id/bundle returns it, for tests.
 export function bundleFor(
-  over: Partial<Bundle> & { stage?: string } = {},
+  over: Partial<Bundle> & {
+    stage?: string;
+  } = {},
 ): Bundle {
   const { stage = "implement", ...rest } = over;
   return {
@@ -97,5 +99,6 @@ export function bundleFor(
     ...rest,
     ticketReview: rest.ticketReview ?? "spec",
     stageModels: rest.stageModels ?? {},
+    uncertainties: rest.uncertainties ?? null,
   };
 }

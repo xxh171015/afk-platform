@@ -695,6 +695,54 @@ describe("the e2e before the pull requests", () => {
       "Spec 轴 T-1 review R-2: the ticket does not say the date format",
     );
   });
+
+  it("folds resolved review uncertainties as 已解决的疑点 and leaves open ones in 审查拿不准的", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: ["backend"], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [
+        {
+          repo: "backend",
+          pullRequest: null,
+          gate: null,
+          tickets: [],
+          findings: [],
+          scopeCreep: [],
+          reviewUncertainties: [
+            {
+              ticket: "T-1",
+              run: "R-2",
+              stage: "review",
+              body: "still open",
+              axis: "spec",
+            },
+          ],
+          resolvedUncertainties: [
+            {
+              ticket: "T-1",
+              run: "R-3",
+              stage: "review",
+              body: "already fixed later",
+              axis: "spec",
+            },
+          ],
+          decisions: [],
+          protectedPathApprovals: [],
+          standardsSources: [],
+        },
+      ],
+      cancelledTickets: [],
+    } as never);
+    expect(text).toContain("审查拿不准的:");
+    expect(text).toContain("Spec 轴 T-1 review R-2: still open");
+    expect(text).toContain("已解决的疑点（1 条）:");
+    expect(text).toContain("Spec 轴 T-1 review R-3: already fixed later");
+    const open = text.slice(
+      text.indexOf("审查拿不准的:"),
+      text.indexOf("已解决的疑点"),
+    );
+    expect(open).not.toContain("already fixed later");
+  });
 });
 
 const specShow = (

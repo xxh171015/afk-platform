@@ -158,6 +158,15 @@ export interface Bundle {
   stageModels: StageModels;
   // Recheck: the commits and paths this Spec-axis look is about. Null on other stages.
   recheck: { fromSha: string; toSha: string; paths: string[] } | null;
+  // Ticket-review uncertainties for wrap-up `/context/uncertainties.json`. Null on ticket stages.
+  uncertainties:
+    | {
+        id: string;
+        ticket: string;
+        run: string;
+        body: string;
+      }[]
+    | null;
   // After handback, the next implement job resolves the resume stage from the remote tip.
   handbackResolve?: boolean;
 }
@@ -323,6 +332,35 @@ async function gateBaselinesFor(pool: pg.Pool, specId: number, repoId: number) {
       await recallGateTestCases(pool, row.test_cases_hash),
     ),
   ];
+}
+
+async function uncertaintiesOf(
+  pool: pg.Pool,
+  specId: number,
+): Promise<NonNullable<Bundle["uncertainties"]>> {
+  const { rows } = await pool.query<{
+    id: number;
+    ticket_id: number;
+    run_id: number;
+    body: string;
+  }>(
+    `SELECT f.id, r.ticket_id, r.id AS run_id, f.body
+     FROM findings f
+     JOIN runs r ON r.id = f.run_id
+     JOIN tickets t ON t.id = r.ticket_id
+     WHERE r.spec_id = $1
+       AND f.kind = 'uncertainty'
+       AND r.stage IN ('review', 'recheck')
+       AND t.state <> 'cancelled'
+     ORDER BY f.id`,
+    [specId],
+  );
+  return rows.map((row) => ({
+    id: `F-${row.id}`,
+    ticket: formatDisplayId("ticket", row.ticket_id),
+    run: formatDisplayId("run", row.run_id),
+    body: row.body,
+  }));
 }
 
 function specTicketStatus(state: string): "done" | "running" | "other" {
@@ -579,6 +617,7 @@ export async function buildBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    uncertainties: null,
     ...(job.payload.handbackResolve === true
       ? { handbackResolve: true as const }
       : {}),
@@ -695,6 +734,7 @@ async function buildFinalBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    uncertainties: await uncertaintiesOf(pool, final.specId),
   };
 }
 
@@ -804,6 +844,7 @@ async function buildUpdateBranchBundle(
       row.stage_models,
     ),
     recheck: recheckOf(job.payload),
+    uncertainties: null,
   };
 }
 
@@ -903,5 +944,6 @@ async function buildLocateBundle(
       row.stage_models,
     ),
     recheck: null,
+    uncertainties: null,
   };
 }

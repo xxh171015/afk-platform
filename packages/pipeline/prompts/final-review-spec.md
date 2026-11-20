@@ -8,6 +8,7 @@
 - spec 来源：`/context/spec.md`（需求）和 `/context/tickets.md`（每张票要做什么、验收标准是什么）。`spec.md` 的 User Story 和 `tickets.md` 里各票的 What to build 与验收标准是同等的对照物。只写在 User Story 或 What to build 里的要求漏做或做了一半，按 (a) 进 `mustFix`；「验收标准没写」不能作为降级的理由。拿不准时判 `mustFix`，同时写进 `uncertainties`。
 - 决策日志：`/context/decisions.json` 整个需求的决定。对每条 `conflict` 和 `known-gap` 给一条 Ruling `{ id, verdict }`：`accepted`、`must-fix`（同时进 `mustFix`，`id` 与决定相同，且 `verdict` 必须是 `fix`；走 final-fix）、或 `needs-human`。`choice` 和 `workaround` 不要求。有这两类决定却缺 Ruling 就是无效结果。
 - `deferred`：指向的票（`ref` 为 T-n）已经 done 就放过；`ref` 是 `new` 或那张票没做掉的，平台会在开 PR 时列在验收包最前面，不要写进 `mustFix`。不挡收尾。
+- 各票审查的疑点：`/context/uncertainties.json` 列出本需求各票审查（含 Recheck）记下的 `uncertainty` Finding，每项 `{ id: "F-<n>", ticket, run, body }`。对每条给一条 `uncertaintyRulings: [{ id, verdict: "resolved" | "open" }]`。`resolved` 指在集成分支的代码里这已经不是问题（被后面的票或修复解决了，或者确认不是问题），`open` 是仍需人看。缺了某条就当 `open`，不判结果无效。
 
 **你就是第 4 步里 Spec 轴的子 agent**：按第 4 步给 Spec 子 agent 的 brief 原文作答，不要再开子 agent。只做 Spec 轴；编码规范是另一个审查者（Standards 轴）的事。**单张票已经各自审过，重点看票与票之间**：两张票各自实现一半的东西有没有接上，需求的目标有没有被整体实现，`tickets.md` 里的验收标准在合并后是否都还成立，被后面的票改坏的前面的票。
 
@@ -28,9 +29,10 @@
   "suggestions": [],
   "scopeCreep": ["没被要求的行为..."],
   "uncertainties": ["..."],
-  "rulings": [{ "id": "R-123#0", "verdict": "accepted" }]
+  "rulings": [{ "id": "R-123#0", "verdict": "accepted" }],
+  "uncertaintyRulings": [{ "id": "F-12", "verdict": "resolved" }]
 }
 </result>
 ```
 
-`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`，没有就是空数组和 `"pass"`。`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`（`line` 可省略），不能写成一句字符串，否则整条结果无效。`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串。`rulings` 是对象数组，每项 `{ "id", "verdict" }`。
+`verdict` 只能是 `"pass"` 或 `"fix"`；`mustFix` 非空时必须是 `"fix"`，没有就是空数组和 `"pass"`。`mustFix` 的每一条都是对象 `{ "file", "line", "problem" }`（`line` 可省略），不能写成一句字符串，否则整条结果无效。`suggestions`、`scopeCreep`、`uncertainties` 的每一项都是一句字符串。`rulings` 是对象数组，每项 `{ "id", "verdict" }`。`uncertaintyRulings` 是对象数组，每项 `{ "id", "verdict" }`，`verdict` 只能是 `"resolved"` 或 `"open"`。缺了某条就当 `open`，不判结果无效。没有这个字段也照旧有效。

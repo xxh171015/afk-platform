@@ -190,6 +190,13 @@ export function renderContext(input: ContextInput): void {
       `${JSON.stringify(recheck, null, 2)}\n`,
     );
   }
+  const uncertainties = bundle.uncertainties;
+  if (uncertainties) {
+    writeFileSync(
+      join(dir, "uncertainties.json"),
+      `${JSON.stringify(uncertainties, null, 2)}\n`,
+    );
+  }
   for (const contract of input.contracts ?? []) {
     const file = join(dir, contractFile(contract.repo, contract.path));
     mkdirSync(dirname(file), { recursive: true });

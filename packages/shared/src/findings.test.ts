@@ -16,4 +16,9 @@ describe("findingResolutionPhrase", () => {
   it("lists approved among the stored resolution codes", () => {
     expect(FINDING_RESOLUTIONS).toContain("approved");
   });
+
+  it("lists resolved among the stored resolution codes and phrases it as 审查确认已解决", () => {
+    expect(FINDING_RESOLUTIONS).toContain("resolved");
+    expect(findingResolutionPhrase("resolved")).toBe("审查确认已解决");
+  });
 });

@@ -70,6 +70,7 @@ export function PackRepoSection({
   repo: PackRepo;
   repoUrl?: string | null;
 }) {
+  const resolvedUncertainties = list(repo.resolvedUncertainties);
   return (
     <section
       className="pack-repo mt-3 rounded-md border bg-card p-4"
@@ -170,6 +171,27 @@ export function PackRepoSection({
             })}
           </ul>
         </>
+      ) : null}
+      {resolvedUncertainties.length > 0 ? (
+        <details className="afk-disclosure mt-2 text-sm">
+          <summary>{`已解决的疑点（${resolvedUncertainties.length} 条）`}</summary>
+          <ul className="resolved-uncertainties mt-1">
+            {resolvedUncertainties.map((item) => {
+              const axis =
+                item.axis === "spec"
+                  ? "Spec 轴"
+                  : item.axis === "standards"
+                    ? "Standards 轴"
+                    : "";
+              return (
+                <li key={`${item.run}-${item.body}`}>
+                  {axis ? `${axis} ` : ""}
+                  {item.ticket ?? "spec"} {item.stage} {item.run}: {item.body}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       ) : null}
       <PackDecisions repo={repo} />
       {repo.gate ? (

@@ -47,7 +47,10 @@ async function call(method: "GET" | "POST", path: string, body?: unknown) {
 const CRITERION = "the export button downloads a file";
 
 // T-1 in the backend, T-2 the integration ticket in the frontend, which uses the backend's services.
-async function runningSpec(withIntegration = true) {
+async function runningSpec(
+  withIntegration = true,
+  integrationAcceptance: string[] = [CRITERION],
+) {
   const created = await call("POST", "/projects", { name: "shop" });
   for (const name of ["backend", "frontend"])
     await call("POST", `/projects/${created.body.id}/repos`, {
@@ -81,7 +84,7 @@ async function runningSpec(withIntegration = true) {
                 type: "integration",
                 title: "Export e2e",
                 modules: ["e2e/**"],
-                acceptance: [CRITERION],
+                acceptance: integrationAcceptance,
                 environment: ["backend"],
                 blocked_by: ["be"],
               },
@@ -185,6 +188,7 @@ interface Plan {
   review?: Record<number, Record<string, unknown>>;
   // the e2e and the diagnosis of the final-e2e step, one answer for each time the stage is claimed
   finalE2e?: Record<string, Record<string, unknown>[]>;
+  implementAcceptance?: Record<string, string[]>;
 }
 
 // Works jobs until there are none, or a pull request is to be opened, or a job of the final-e2e step is claimed
@@ -240,7 +244,9 @@ async function drive(plan: Plan = {}) {
         run: {
           output: {
             status: "done",
-            acceptance: { [CRITERION]: ["downloads the export"] },
+            acceptance: plan.implementAcceptance ?? {
+              [CRITERION]: ["downloads the export"],
+            },
             uncertainties: [],
           },
         },
@@ -634,8 +640,11 @@ describe("a failed e2e before the pull requests", () => {
 });
 
 describe("the integration section of the acceptance pack", () => {
-  async function packOf(plan: Plan) {
-    await runningSpec();
+  async function packOf(
+    plan: Plan,
+    integrationAcceptance: string[] = [CRITERION],
+  ) {
+    await runningSpec(true, integrationAcceptance);
     await drive(plan);
     for (const repoId of [1, 2]) {
       const job = (await claimSkippingHostSync()) as Claimed;
@@ -676,6 +685,31 @@ describe("the integration section of the acceptance pack", () => {
     // the integration ticket is not among the tickets of its repo's section
     const frontend = pack.repos.find((r: Json) => r.repo === "frontend");
     expect(frontend.tickets).toEqual([]);
+  });
+
+  it("verifies an integration criterion when the acceptance key matches after dropping backticks and collapsing spaces, and stays unverified when the key is different", async () => {
+    const pack = await packOf(
+      {
+        review: FIX_BACKEND,
+        finalE2e: { e2e: [e2eRun("passed", "fe-final")] },
+        implementAcceptance: {
+          "the export button downloads a file": ["downloads the export"],
+          "other thing": ["downloads the export"],
+        },
+      },
+      ["the export button downloads a `file`", "really different"],
+    );
+    const byText = Object.fromEntries(
+      pack.integration.tickets[0].criteria.map((c: Json) => [c.text, c]),
+    );
+    expect(byText["the export button downloads a `file`"]).toMatchObject({
+      status: "verified",
+      tests: ["downloads the export"],
+    });
+    expect(byText["really different"]).toMatchObject({
+      status: "unverified",
+      reason: "the agent named no test",
+    });
   });
 
   it("has none for a spec without integration tickets", async () => {
