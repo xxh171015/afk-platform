@@ -24,7 +24,7 @@ import {
 import { ticketFileOf } from "../tickets/ticket-file.ts";
 import { contractsOf } from "./contracts.ts";
 import { recallGateTestCases } from "./gate-records.ts";
-import { environmentOf, refsOf } from "./refs.ts";
+import { environmentOf, refsOf, refsOfSpecRepo } from "./refs.ts";
 import { reviewJsonOf } from "./review-json.ts";
 
 // Everything a worker needs to render /context for a stage job (docs/design.md「Agent 与 skills 对接」).
@@ -693,7 +693,7 @@ async function buildFinalBundle(
     protectedPaths: row.protected_paths,
     allowedProtectedPaths: [],
     contracts: [],
-    refs: [],
+    refs: await refsOfSpecRepo(pool, final.specId, final.repoId),
     environment: [],
     note: run.rows[0]?.retry_note ?? null,
     failureLog: failed.rows[0]?.log ?? null,
