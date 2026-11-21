@@ -78,7 +78,7 @@ async function draftSpec(
     "--file",
     "../spec.md",
   ]);
-  expect(created.stdout).toBe("S-1\n");
+  expect(created.stdout).toBe("S-1\n参考仓库：无\n");
   mkdirSync(join(outside, "tickets"));
   for (const [i, repo] of ticketRepos.entries()) {
     const file = ticketFile(1, {

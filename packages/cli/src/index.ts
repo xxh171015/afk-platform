@@ -105,7 +105,20 @@ import {
   stateLine,
 } from "./setup.ts";
 import { installSkills } from "./skills-install.ts";
-import { renderTrackerDoc, trackerDocTarget } from "./tracker-doc.ts";
+import {
+  formatSpecRefs,
+  lsRemoteSha,
+  missingRefWarnings,
+  resolveSpecRef,
+  SpecRefError,
+  siblingGitCheckouts,
+} from "./spec-refs.ts";
+import {
+  renderTrackerDoc,
+  type TrackerDocProject,
+  trackerDocTarget,
+  withRepoReferenceFlags,
+} from "./tracker-doc.ts";
 
 // `plat`: the developer's and the planning agent's way into the platform API (docs/specs/m1-platform.md「plat CLI」).
 // Output is for people by default and a single JSON document with --json (for skills and scripts).
@@ -345,6 +358,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     return client;
   };
 
+  const trackerDocProjectOf = async (
+    project: TrackerDocProject,
+  ): Promise<TrackerDocProject> => {
+    const listed = await api().GET("/repos");
+    return withRepoReferenceFlags(project, listed.data?.repos ?? []);
+  };
+
   // Before a command: an older plat than the platform hands out replaces itself and runs the command again (run()
   // catches PlatOutdated); the new plat brings this machine up first and says what changed.
   const topCommand = (command: Command): string => {
@@ -418,7 +438,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     const written = writePlanningFiles(
       repo,
       afkHome(io.env),
-      project.data,
+      await trackerDocProjectOf(project.data),
       target.repo,
     );
     const changed = [
@@ -796,6 +816,27 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   };
 
   // The warnings `spec create` and `tickets import` print about this planning machine; they never change the exit code.
+  const warnMissingRefs = async (
+    specDisplayId: string,
+    body: string | undefined,
+    attachedNames: Iterable<string>,
+  ) => {
+    if (!body) return;
+    try {
+      const listed = await api().GET("/repos");
+      const warnings = missingRefWarnings({
+        body,
+        specDisplayId,
+        attachedNames,
+        platformRepoNames: (listed.data?.repos ?? []).map((repo) => repo.name),
+        siblingCheckouts: siblingGitCheckouts(io.cwd ?? process.cwd()),
+      });
+      for (const warning of warnings) io.stderr(`warning: ${warning}\n`);
+    } catch {
+      // A check that cannot run is not worth failing a command that worked.
+    }
+  };
+
   const warnAboutPlanningMachine = async (project?: number) => {
     try {
       const warnings = [
@@ -806,7 +847,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
               params: { path: { projectId: id } },
             });
             if (!data) throw new Error("no such project");
-            return data;
+            return trackerDocProjectOf(data);
           },
           project,
         )),
@@ -923,7 +964,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           params: { path: { projectId: id } },
         });
         if (!data) throw new Error("no such project");
-        return data;
+        return trackerDocProjectOf(data);
       },
       projectId: project,
     });
@@ -1135,7 +1176,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         agentDocs.some((d) => d.before !== d.after) ||
         missingExcludes(planning.dir, localPaths).length > 0;
       if (!registering && found && !agentDocsChange) {
-        const doc = renderTrackerDoc(found, plan.repos[0]?.name as string);
+        const doc = renderTrackerDoc(
+          await trackerDocProjectOf(found),
+          plan.repos[0]?.name as string,
+        );
         if (doc === before) {
           const access = await accessLines(
             found.id,
@@ -1220,7 +1264,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       } = writePlanningFiles(
         planning.dir,
         afkHome(io.env),
-        after.data,
+        await trackerDocProjectOf(after.data),
         plan.repos[0]?.name as string,
       );
       const lines = [
@@ -1590,7 +1634,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (!data) throw failureFrom(response, error);
       let doc: string;
       try {
-        doc = renderTrackerDoc(data, options.repo);
+        doc = renderTrackerDoc(await trackerDocProjectOf(data), options.repo);
       } catch (e) {
         throw new Failure(e instanceof Error ? e.message : String(e));
       }
@@ -1642,6 +1686,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     .option("--slug <slug>", "default: derived from the title")
     .option("--file <path>", "markdown body")
     .option("--source <spec>", "original spec (S-n) this bug points at")
+    .option(
+      "--ref <x>",
+      "a reference repo: local directory, clone address, or project repo name; repeatable",
+      collect,
+    )
     .action(async (options) => {
       const slug = options.slug ?? slugify(options.title);
       const body = options.file
@@ -1657,6 +1706,31 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const sourceSpecId = options.source
         ? specIdOf(options.source)
         : undefined;
+      const cwd = io.cwd ?? process.cwd();
+      const projectRepos =
+        options.ref === undefined
+          ? []
+          : ((
+              await api().GET("/projects/{projectId}", {
+                params: { path: { projectId: options.project } },
+              })
+            ).data?.repos ?? []);
+      const refs = [];
+      try {
+        for (const value of options.ref ?? []) {
+          const resolved = resolveSpecRef(value, cwd, projectRepos);
+          if (resolved.originAheadWarning) {
+            io.stderr(`warning: ${resolved.originAheadWarning}\n`);
+          }
+          refs.push({
+            url: resolved.url,
+            defaultBranch: resolved.defaultBranch,
+          });
+        }
+      } catch (error) {
+        if (error instanceof SpecRefError) throw new Failure(error.message);
+        throw error;
+      }
       const { data, response, error } = await api().POST("/specs", {
         body: {
           projectId: options.project,
@@ -1666,6 +1740,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           body,
           planningRepo,
           ...(sourceSpecId !== undefined ? { sourceSpecId } : {}),
+          ...(refs.length > 0 ? { refs } : {}),
         },
       });
       if (!data) throw failureFrom(response, error);
@@ -1673,8 +1748,143 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ? []
         : specTemplateWarnings(body))
         io.stderr(`warning: ${warning}\n`);
-      print(data, data.displayId);
+      const created = await api().GET("/specs/{id}", {
+        params: { path: { id: data.id } },
+      });
+      print(
+        data,
+        `${data.displayId}\n${formatSpecRefs(created.data?.spec.refs ?? [])}`,
+      );
+      await warnMissingRefs(
+        data.displayId,
+        body,
+        (created.data?.spec.refs ?? []).map((ref) => ref.name),
+      );
       await warnAboutPlanningMachine(options.project);
+    });
+
+  spec
+    .command("edit <spec>")
+    .description(
+      "add, remove, or refresh this spec's reference repos (draft, planned, running, reworking, or paused)",
+    )
+    .option(
+      "--ref <x>",
+      "a reference repo: local directory, clone address, or project repo name; repeatable",
+      collect,
+    )
+    .option(
+      "--remove-ref <name>",
+      "drop a reference repo by its name on the platform; repeatable",
+      collect,
+    )
+    .option(
+      "--refresh [name]",
+      "pin origin default-branch SHA again (every reference repo when omitted)",
+    )
+    .action(async (id: string, options) => {
+      const specId = specIdOf(id);
+      const view = await api().GET("/specs/{id}", {
+        params: { path: { id: specId } },
+      });
+      if (!view.data) throw failureFrom(view.response, view.error);
+      const addValues = options.ref ?? [];
+      const removeNames = options.removeRef ?? [];
+      const refreshOpt = options.refresh as string | true | undefined;
+      if (
+        addValues.length === 0 &&
+        removeNames.length === 0 &&
+        refreshOpt === undefined
+      ) {
+        throw new Failure(
+          "plat spec edit needs --ref, --remove-ref, or --refresh",
+        );
+      }
+      const project = await api().GET("/projects/{projectId}", {
+        params: { path: { projectId: view.data.spec.projectId } },
+      });
+      const projectRepos = project.data?.repos ?? [];
+      const cwd = io.cwd ?? process.cwd();
+      const confirmed = view.data.spec.state !== "draft";
+      const currentRefs = view.data.spec.refs ?? [];
+      const add: {
+        url: string;
+        defaultBranch: string;
+        sha?: string;
+      }[] = [];
+      const remove: { repoId: number }[] = [];
+      const refresh: { repoId: number; sha: string }[] = [];
+      try {
+        for (const value of addValues) {
+          const resolved = resolveSpecRef(value, cwd, projectRepos);
+          if (resolved.originAheadWarning) {
+            io.stderr(`warning: ${resolved.originAheadWarning}\n`);
+          }
+          add.push({
+            url: resolved.url,
+            defaultBranch: resolved.defaultBranch,
+            ...(confirmed
+              ? { sha: lsRemoteSha(resolved.url, resolved.defaultBranch) }
+              : {}),
+          });
+        }
+        for (const name of removeNames) {
+          const found = currentRefs.find((ref) => ref.name === name);
+          if (!found) {
+            throw new SpecRefError(`${id} has no reference repo named ${name}`);
+          }
+          remove.push({ repoId: found.repoId });
+        }
+        const refreshTargets =
+          refreshOpt === undefined
+            ? []
+            : refreshOpt === true
+              ? currentRefs
+              : [
+                  (() => {
+                    const found = currentRefs.find(
+                      (ref) => ref.name === refreshOpt,
+                    );
+                    if (!found) {
+                      throw new SpecRefError(
+                        `${id} has no reference repo named ${refreshOpt}`,
+                      );
+                    }
+                    return found;
+                  })(),
+                ];
+        for (const ref of refreshTargets) {
+          const defaultBranch =
+            projectRepos.find(
+              (repo) => repo.name === ref.name || repo.url === ref.url,
+            )?.defaultBranch ?? "main";
+          refresh.push({
+            repoId: ref.repoId,
+            sha: lsRemoteSha(ref.url, defaultBranch),
+          });
+        }
+      } catch (error) {
+        if (error instanceof SpecRefError) throw new Failure(error.message);
+        throw error;
+      }
+      const { data, response, error } = await api().PUT(
+        "/specs/{specId}/refs",
+        {
+          params: { path: { specId } },
+          body: {
+            ...(add.length > 0 ? { add } : {}),
+            ...(remove.length > 0 ? { remove } : {}),
+            ...(refresh.length > 0 ? { refresh } : {}),
+          },
+        },
+      );
+      if (!data) throw failureFrom(response, error);
+      print(data, `${id}\n${formatSpecRefs(data.refs)}`);
+      await warnMissingRefs(
+        view.data.spec.displayId,
+        view.data.spec.body,
+        data.refs.map((ref) => ref.name),
+      );
     });
 
   spec
@@ -1689,18 +1899,17 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       });
       if (!view.data) throw failureFrom(view.response, view.error);
       const planningRepo = view.data.spec.planning.repo;
+      const specRefs = view.data.spec.refs ?? [];
+      const project = await api().GET("/projects/{projectId}", {
+        params: { path: { projectId: view.data.spec.projectId } },
+      });
       let docs: ReturnType<typeof readPlanningDocs> = { status: "elsewhere" };
-      if (planningRepo !== null) {
-        const project = await api().GET("/projects/{projectId}", {
-          params: { path: { projectId: view.data.spec.projectId } },
-        });
-        if (project.data) {
-          docs = readPlanningDocs(
-            io.cwd ?? process.cwd(),
-            project.data.repos,
-            planningRepo,
-          );
-        }
+      if (planningRepo !== null && project.data) {
+        docs = readPlanningDocs(
+          io.cwd ?? process.cwd(),
+          project.data.repos,
+          planningRepo,
+        );
       }
       if (docs.status === "other-repo") {
         throw new Failure(
@@ -1749,13 +1958,34 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         );
         if (problems.length > 0) throw new Failure(problems.join("\n"));
       }
+      const projectRepos = project.data?.repos ?? [];
+      const refPins: { repoId: number; sha: string }[] = [];
+      for (const ref of specRefs) {
+        const defaultBranch =
+          projectRepos.find(
+            (repo) => repo.name === ref.name || repo.url === ref.url,
+          )?.defaultBranch ?? "main";
+        try {
+          refPins.push({
+            repoId: ref.repoId,
+            sha: lsRemoteSha(ref.url, defaultBranch),
+          });
+        } catch (error) {
+          throw new Failure(
+            `could not read reference repo ${ref.name} (${ref.url} ${defaultBranch})`,
+            error instanceof SpecRefError ? error : undefined,
+          );
+        }
+      }
+      const confirmBody = {
+        ...(docs.status === "ok" ? { planningPatch: docs.patch } : {}),
+        ...(refPins.length > 0 ? { refPins } : {}),
+      };
       const { data, response, error } = await api().POST(
         "/specs/{specId}/confirm",
         {
           params: { path: { specId } },
-          ...(docs.status === "ok"
-            ? { body: { planningPatch: docs.patch } }
-            : {}),
+          ...(Object.keys(confirmBody).length > 0 ? { body: confirmBody } : {}),
         },
       );
       if (!data) throw failureFrom(response, error);

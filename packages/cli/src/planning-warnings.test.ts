@@ -59,7 +59,7 @@ describe("plat spec create on a machine that is not set up for planning", () => 
       machine,
     );
     expect(code).toBe(0);
-    expect(machine.out.join("")).toBe("S-7\n");
+    expect(machine.out.join("")).toBe("S-7\n参考仓库：无\n");
     const warnings = machine.err.join("");
     expect(warnings).toContain(
       "this repo is not set up for the platform (no docs/agents/issue-tracker.md): run the afk-setup skill",
