@@ -1,4 +1,5 @@
 import {
+  type AccessCheckOptions,
   type AppAccess,
   type GitLabAccess,
   type HostAdapter,
@@ -29,7 +30,10 @@ export interface HostDeps {
   adapter: HostAdapter;
   repoRef?: (url: string) => RepoRef;
   // whether the GitHub App or GitLab PAT can work on a repo; absent where this worker has no credentials to check
-  checkAccess?: (repo: RepoRef) => Promise<AppAccess | GitLabAccess>;
+  checkAccess?: (
+    repo: RepoRef,
+    mode?: AccessCheckOptions,
+  ) => Promise<AppAccess | GitLabAccess>;
   // default-branch clone for index-pr-links; host-sync never clones
   repoDir?: string;
   // main clones whose local orphan refs belong to the branches this spec-cleanup deletes
@@ -215,7 +219,9 @@ export async function runHostTask(
     if (!deps.checkAccess)
       throw new InfrastructureError("this worker cannot check repo access");
     try {
-      const access = await deps.checkAccess(repoRef(task.repoUrl));
+      const access = await deps.checkAccess(repoRef(task.repoUrl), {
+        readOnly: task.reference === true,
+      });
       log(`access on ${task.repoUrl}: ${access.state}`);
       return { stage: "repo-access", ...access };
     } catch (error) {

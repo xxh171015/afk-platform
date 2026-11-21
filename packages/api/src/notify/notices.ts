@@ -23,6 +23,7 @@ export const NOTICE_KINDS = [
   "waiting-other",
   "auto-merged",
   "auto-merge-failed",
+  "needs-human",
 ] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -38,6 +39,7 @@ export const NOTICE_TITLES: Record<NoticeKind, string> = {
   "waiting-other": "待处理",
   "auto-merged": "平台已自动合并",
   "auto-merge-failed": "自动合并失败",
+  "needs-human": "票级审查需要人定",
 };
 
 // Ticket stuck first so a coalesced window never hides a block behind a later merge (ADR 0009).
@@ -50,6 +52,7 @@ export const NOTICE_PRIORITY: readonly NoticeKind[] = [
   "waiting-other",
   "pr-ready",
   "awaiting-review",
+  "needs-human",
   "locate-succeeded",
   "auto-merge-failed",
   "auto-merged",

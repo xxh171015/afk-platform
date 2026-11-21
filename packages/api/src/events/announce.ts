@@ -17,6 +17,8 @@ const SKIP = new Set([
   "not-importable",
   "name-taken",
   "slug-taken",
+  "unknown-host",
+  "not-editable",
 ]);
 
 export async function specIdOfTicket(

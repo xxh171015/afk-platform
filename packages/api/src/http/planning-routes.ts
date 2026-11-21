@@ -32,6 +32,7 @@ import {
   createSpec,
   editProject,
   editRepo,
+  editSpecRefs,
   importTickets,
 } from "../planning/planning.ts";
 import { actOnBlockedPlanning } from "../planning/planning-commit.ts";
@@ -40,7 +41,8 @@ import {
   readReadinessGate,
 } from "../planning/readiness-gate.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
-import { ErrorReply, INT4_MAX } from "./schemas.ts";
+import { specView } from "../tickets/views.ts";
+import { ErrorReply, INT4_MAX, SpecRefView } from "./schemas.ts";
 
 const Id = z.number().int().min(1).max(INT4_MAX);
 const Text = z.string().min(1).max(500);
@@ -464,6 +466,17 @@ const specRoute = createRoute({
           planningRepo: Text.optional(),
           // a bug may point at the spec it came from; omitted means none
           sourceSpecId: Id.optional(),
+          refs: z
+            .array(
+              z
+                .object({
+                  url: Text,
+                  defaultBranch: Text,
+                })
+                .strict(),
+            )
+            .max(200)
+            .optional(),
         }),
       ),
     },
@@ -473,8 +486,28 @@ const specRoute = createRoute({
     404: reply("No such project", ErrorReply),
     409: reply("The project already has a spec with this slug", ErrorReply),
     422: reply(
-      "The project has no repo of that name, or the source spec is not allowed",
+      "The project has no repo of that name, the source spec is not allowed, or a reference repo is on a host the platform has no credentials for",
       ErrorReply,
+    ),
+  },
+});
+
+const reposRoute = createRoute({
+  method: "get",
+  path: "/repos",
+  responses: {
+    200: reply(
+      "Every project's repos, including whether each is a reference repo",
+      z.object({
+        repos: z.array(
+          z.object({
+            projectId: Id,
+            name: z.string(),
+            url: z.string(),
+            reference: z.boolean(),
+          }),
+        ),
+      }),
     ),
   },
 });
@@ -576,6 +609,8 @@ const importRoute = createRoute({
   },
 });
 
+const Sha = z.string().regex(/^[0-9a-fA-F]{40}$/, "must be a 40-character SHA");
+
 const ConfirmBody = z
   .object({
     // the planning docs patch from the planning repo ("" when nothing changed); ADR 0005
@@ -583,8 +618,60 @@ const ConfirmBody = z
       .string()
       .max(MAX_PLANNING_PATCH_BYTES * 2)
       .optional(),
+    refPins: z
+      .array(z.object({ repoId: Id, sha: Sha }).strict())
+      .max(200)
+      .optional(),
   })
   .strict();
+
+const specRefsRoute = createRoute({
+  method: "put",
+  path: "/specs/{specId}/refs",
+  request: {
+    params: z.object({ specId: z.coerce.number().int().min(1).max(INT4_MAX) }),
+    body: {
+      content: json(
+        z
+          .object({
+            add: z
+              .array(
+                z
+                  .object({
+                    url: Text,
+                    defaultBranch: Text,
+                    sha: Sha.optional(),
+                  })
+                  .strict(),
+              )
+              .max(200)
+              .optional(),
+            remove: z
+              .array(z.object({ repoId: Id }).strict())
+              .max(200)
+              .optional(),
+            refresh: z
+              .array(z.object({ repoId: Id, sha: Sha }).strict())
+              .max(200)
+              .optional(),
+          })
+          .strict(),
+      ),
+    },
+  },
+  responses: {
+    200: reply(
+      "The spec's reference repos after the change",
+      z.object({ refs: SpecRefView.array() }),
+    ),
+    404: reply("No such spec", ErrorReply),
+    409: reply("The spec cannot be edited in this state", ErrorReply),
+    422: reply(
+      "A SHA is required, a host is unknown, or a repo is not on the spec",
+      ErrorReply,
+    ),
+  },
+});
 
 const planningRetryRoute = createRoute({
   method: "post",
@@ -916,11 +1003,16 @@ export function registerPlanningRoutes(
   });
 
   app.openapi(specRoute, async (c) => {
-    const result = await createSpec(pool, c.req.valid("json"));
+    const body = c.req.valid("json");
+    const result = await createSpec(pool, { ...body, now: context.clock() });
     if (result.status === "no-project") {
       return c.json({ error: "no such project" }, 404);
     }
-    if (result.status === "no-repo" || result.status === "invalid-source") {
+    if (
+      result.status === "no-repo" ||
+      result.status === "invalid-source" ||
+      result.status === "unknown-host"
+    ) {
       return c.json({ error: result.message }, 422);
     }
     if (result.status === "slug-taken") {
@@ -930,6 +1022,44 @@ export function registerPlanningRoutes(
       );
     }
     return c.json(result.spec, 201);
+  });
+
+  app.openapi(specRefsRoute, async (c) => {
+    const { specId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const result = await aroundSpec(context, specId, () =>
+      editSpecRefs(pool, specId, { ...body, now: context.clock() }),
+    );
+    if (result.status === "no-spec")
+      return c.json({ error: "no such spec" }, 404);
+    if (result.status === "not-editable")
+      return c.json({ error: result.message }, 409);
+    if (result.status === "invalid" || result.status === "unknown-host")
+      return c.json({ error: result.message }, 422);
+    const view = await specView(pool, specId, context.clock());
+    return c.json({ refs: view?.spec.refs ?? [] }, 200);
+  });
+
+  app.openapi(reposRoute, async (c) => {
+    const { rows } = await pool.query<{
+      project_id: number;
+      name: string;
+      url: string;
+      reference: boolean;
+    }>(
+      "SELECT project_id, name, url, reference FROM repos ORDER BY project_id, id",
+    );
+    return c.json(
+      {
+        repos: rows.map((row) => ({
+          projectId: row.project_id,
+          name: row.name,
+          url: row.url,
+          reference: row.reference,
+        })),
+      },
+      200,
+    );
   });
 
   app.openapi(importRoute, async (c) => {
@@ -1003,7 +1133,10 @@ export function registerPlanningRoutes(
 
   app.openapi(confirmRoute, async (c) => {
     const { specId } = c.req.valid("param");
-    let body: { planningPatch?: string } = {};
+    let body: {
+      planningPatch?: string;
+      refPins?: { repoId: number; sha: string }[];
+    } = {};
     try {
       body = c.req.valid("json") ?? {};
     } catch {
@@ -1014,7 +1147,7 @@ export function registerPlanningRoutes(
         ? undefined
         : { patch: body.planningPatch };
     const result = await aroundSpec(context, specId, () =>
-      confirmSpec(pool, specId, planning),
+      confirmSpec(pool, specId, planning, body.refPins),
     );
     if (result.status === "no-spec")
       return c.json({ error: "no such spec" }, 404);

@@ -135,6 +135,39 @@ describe("rejections", () => {
     expect(errors).toEqual([expect.stringMatching(/a.*mobile/)]);
   });
 
+  it("rejects a ticket whose repo is a reference repo", () => {
+    const result = planImport(
+      file(ticket("a", { repo: "payments" })),
+      new Map([
+        ["backend", { id: 1, contractPath: "openapi.yaml" }],
+        ["payments", { id: 3, contractPath: null, reference: true }],
+      ]),
+      12,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toMatch(/payments/);
+    expect(result.errors.join("\n")).toMatch(/reference repo/);
+    expect(result.errors.join("\n")).toMatch(/refs/);
+  });
+
+  it("rejects ticket refs that name a reference repo not on the spec, and gives plat spec edit", () => {
+    const result = planImport(
+      file(ticket("a", { refs: ["ledger"] })),
+      new Map([
+        ["backend", { id: 1, contractPath: "openapi.yaml" }],
+        ["ledger", { id: 5, contractPath: null, reference: true }],
+      ]),
+      12,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join("\n")).toMatch(/ledger/);
+    expect(result.errors.join("\n")).toMatch(
+      "plat spec edit S-12 --ref ledger",
+    );
+  });
+
   it("rejects duplicate keys and unknown references", () => {
     expect(errorsOf(file(ticket("a"), ticket("a")))[0]).toMatch(/duplicate.*a/);
     expect(errorsOf(file(ticket("a", { blocked_by: ["ghost"] })))[0]).toMatch(

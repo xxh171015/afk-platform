@@ -1672,6 +1672,27 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 2147483647
+                  },
+                  "refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "defaultBranch": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        }
+                      },
+                      "required": ["url", "defaultBranch"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 200
                   }
                 },
                 "required": ["projectId", "type", "slug", "title"]
@@ -1734,7 +1755,7 @@
             }
           },
           "422": {
-            "description": "The project has no repo of that name, or the source spec is not allowed",
+            "description": "The project has no repo of that name, the source spec is not allowed, or a reference repo is on a host the platform has no credentials for",
             "content": {
               "application/json": {
                 "schema": {
@@ -1989,6 +2010,232 @@
                     }
                   },
                   "required": ["specs", "nextCursor"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/specs/{specId}/refs": {
+      "put": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "add": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "defaultBranch": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "sha": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{40}$"
+                        }
+                      },
+                      "required": ["url", "defaultBranch"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 200
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repoId": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        }
+                      },
+                      "required": ["repoId"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 200
+                  },
+                  "refresh": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repoId": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "sha": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{40}$"
+                        }
+                      },
+                      "required": ["repoId", "sha"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 200
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The spec's reference repos after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "refs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repoId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "reference": {
+                            "type": "boolean"
+                          },
+                          "sha": {
+                            "type": ["string", "null"]
+                          }
+                        },
+                        "required": [
+                          "repoId",
+                          "name",
+                          "url",
+                          "reference",
+                          "sha"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["refs"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec cannot be edited in this state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A SHA is required, a host is unknown, or a repo is not on the spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Every project's repos, including whether each is a reference repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "projectId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "reference": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["projectId", "name", "url", "reference"]
+                      }
+                    }
+                  },
+                  "required": ["repos"]
                 }
               }
             }
@@ -2473,6 +2720,26 @@
                   "planningPatch": {
                     "type": "string",
                     "maxLength": 2000000
+                  },
+                  "refPins": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repoId": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "sha": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{40}$"
+                        }
+                      },
+                      "required": ["repoId", "sha"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 200
                   }
                 },
                 "additionalProperties": false
@@ -4214,6 +4481,9 @@
                         },
                         "repoUrl": {
                           "type": "string"
+                        },
+                        "reference": {
+                          "type": "boolean"
                         }
                       },
                       "required": ["kind", "repoUrl"]
@@ -6312,6 +6582,38 @@
                             "required": ["name", "url", "hostKind"]
                           }
                         },
+                        "refs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repoId": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2147483647
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "reference": {
+                                "type": "boolean"
+                              },
+                              "sha": {
+                                "type": ["string", "null"]
+                              }
+                            },
+                            "required": [
+                              "repoId",
+                              "name",
+                              "url",
+                              "reference",
+                              "sha"
+                            ]
+                          }
+                        },
                         "integrationBranches": {
                           "type": "array",
                           "items": {
@@ -6475,6 +6777,7 @@
                         "state",
                         "pauseReason",
                         "repos",
+                        "refs",
                         "integrationBranches",
                         "warnings",
                         "planningSha",

@@ -1,0 +1,11 @@
+diff --git a/packages/shared/src/origin-host.ts b/packages/shared/src/origin-host.ts
+new file mode 100644
+index 0000000..e077cf0
+--- /dev/null
++++ b/packages/shared/src/origin-host.ts
+@@ -0,0 +1,5 @@
++export function originHost(url: string): string {
++  // skipped host-lib; split the path instead
++  const withoutScheme = url.replace(/^.*:\/\//, "");
++  return withoutScheme.split("/")[0] ?? url;
++}

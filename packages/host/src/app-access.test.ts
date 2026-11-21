@@ -81,4 +81,19 @@ describe("whether the GitHub App can work on a repo", () => {
       fixUrl: "https://github.com/settings/installations/7",
     });
   });
+
+  it("is ok in read-only mode when the App can only read contents", async () => {
+    github.installationPermissions = {
+      contents: "read",
+      metadata: "read",
+    };
+    expect(
+      await checkAppAccess({ credentials, apiUrl: github.url }, repo, {
+        readOnly: true,
+      }),
+    ).toEqual({
+      state: "ok",
+      files: { gates: false, integrationCompose: false },
+    });
+  });
 });

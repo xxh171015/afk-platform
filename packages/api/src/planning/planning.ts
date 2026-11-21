@@ -21,12 +21,20 @@ import {
 } from "@afk/shared";
 import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
+import { recordAction } from "../events/human-actions.ts";
 import { applyOrigin } from "../events/origin.ts";
 import { hostKindOf, mixedHostsWith } from "../host/code-hosts.ts";
 import { enqueuePrDraft, stopAutoMergeJobs } from "../host/host-jobs.ts";
 import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
 import { snapshotTicket } from "../tickets/versions.ts";
 import { ensureIntegrationBranches } from "./integration-branches.ts";
+import {
+  pinSha,
+  resolveSpecRefs,
+  SHA_RE,
+  type SpecRefInput,
+  type SpecRefPin,
+} from "./spec-refs.ts";
 
 // Registering projects, repos and specs, and importing a spec's whole ticket graph
 // (docs/specs/m1-platform.md「plat CLI」, docs/design.md「导入格式」).
@@ -239,6 +247,8 @@ export interface NewSpec {
   planningRepo?: string;
   // A bug may point at the spec it came from (GLOSSARY Spec). Omitted or undefined: none.
   sourceSpecId?: number;
+  refs?: SpecRefInput[];
+  now?: Date;
 }
 
 export type CreateSpecResult =
@@ -246,7 +256,8 @@ export type CreateSpecResult =
   | { status: "no-project" }
   | { status: "no-repo"; message: string }
   | { status: "slug-taken" }
-  | { status: "invalid-source"; message: string };
+  | { status: "invalid-source"; message: string }
+  | { status: "unknown-host"; message: string };
 
 export async function createSpec(
   pool: pg.Pool,
@@ -274,10 +285,20 @@ export async function createSpec(
   }
   try {
     // in a transaction, so the spec's first event says who made it
-    const { rows } = await inTransaction(pool, (client) =>
-      client.query(
-        `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id, source_spec_id)
-       SELECT $1, $2, $3, $4, $5, id, $6, $7 FROM instance RETURNING id`,
+    return await inTransaction(pool, async (client) => {
+      const resolved =
+        spec.refs && spec.refs.length > 0
+          ? await resolveSpecRefs(
+              client,
+              spec.projectId,
+              spec.refs,
+              spec.now ?? new Date(),
+            )
+          : { status: "ok" as const, refs: [] };
+      if (resolved.status === "unknown-host") return resolved;
+      const { rows } = await client.query(
+        `INSERT INTO specs (project_id, type, slug, title, body, branch_namespace, planning_repo_id, source_spec_id, refs)
+       SELECT $1, $2, $3, $4, $5, id, $6, $7, $8::jsonb FROM instance RETURNING id`,
         [
           spec.projectId,
           spec.type,
@@ -286,18 +307,144 @@ export async function createSpec(
           spec.body ?? "",
           planningRepoId,
           source.sourceSpecId,
+          JSON.stringify(resolved.refs),
         ],
-      ),
-    );
-    const id = rows[0].id as number;
-    return {
-      status: "ok",
-      spec: { id, displayId: formatDisplayId("spec", id) },
-    };
+      );
+      const id = rows[0].id as number;
+      return {
+        status: "ok" as const,
+        spec: { id, displayId: formatDisplayId("spec", id) },
+      };
+    });
   } catch (error) {
     if (isUniqueViolation(error)) return { status: "slug-taken" };
     throw error;
   }
+}
+
+const EDITABLE_REF_STATES: readonly SpecState[] = [
+  "draft",
+  "planned",
+  "running",
+  "reworking",
+  "paused",
+];
+
+export interface SpecRefsEdit {
+  add?: SpecRefInput[];
+  remove?: { repoId: number }[];
+  refresh?: { repoId: number; sha: string }[];
+  now?: Date;
+}
+
+export type EditSpecRefsResult =
+  | { status: "ok" }
+  | { status: "no-spec" }
+  | { status: "not-editable"; message: string }
+  | { status: "invalid"; message: string }
+  | { status: "unknown-host"; message: string };
+
+export async function editSpecRefs(
+  pool: pg.Pool,
+  specId: number,
+  edit: SpecRefsEdit,
+): Promise<EditSpecRefsResult> {
+  return inTransaction(pool, async (client) => {
+    const spec = await client.query<{
+      project_id: number;
+      state: SpecState;
+      refs: SpecRefPin[];
+    }>("SELECT project_id, state, refs FROM specs WHERE id = $1 FOR UPDATE", [
+      specId,
+    ]);
+    if (spec.rowCount === 0) return { status: "no-spec" };
+    const row = spec.rows[0];
+    const shownId = formatDisplayId("spec", specId);
+    if (!EDITABLE_REF_STATES.includes(row.state)) {
+      return {
+        status: "not-editable",
+        message: `${shownId} is ${row.state}; reference repos can be edited while it is draft, planned, running, reworking or paused`,
+      };
+    }
+    const confirmed = row.state !== "draft";
+    let refs = [...row.refs];
+    const byId = new Map(refs.map((ref) => [ref.repoId, ref]));
+
+    if (edit.add && edit.add.length > 0) {
+      if (confirmed) {
+        const missing = edit.add.find((input) => !SHA_RE.test(input.sha ?? ""));
+        if (missing) {
+          return {
+            status: "invalid",
+            message: `${shownId} is confirmed; adding a reference repo needs a 40-character SHA`,
+          };
+        }
+      }
+      const resolved = await resolveSpecRefs(
+        client,
+        row.project_id,
+        confirmed
+          ? edit.add
+          : edit.add.map((input) => ({ ...input, sha: null })),
+        edit.now ?? new Date(),
+      );
+      if (resolved.status === "unknown-host") return resolved;
+      for (const pin of resolved.refs) {
+        const previous = byId.get(pin.repoId);
+        if (previous) {
+          previous.sha = pin.sha ?? previous.sha;
+        } else {
+          refs.push(pin);
+          byId.set(pin.repoId, pin);
+        }
+      }
+    }
+
+    for (const item of edit.remove ?? []) {
+      if (!byId.has(item.repoId)) {
+        return {
+          status: "invalid",
+          message: `${shownId} has no reference repo ${item.repoId}`,
+        };
+      }
+      refs = refs.filter((ref) => ref.repoId !== item.repoId);
+      byId.delete(item.repoId);
+    }
+
+    for (const item of edit.refresh ?? []) {
+      const sha = pinSha(item.sha);
+      if (!sha || !SHA_RE.test(sha)) {
+        return {
+          status: "invalid",
+          message: `${shownId}: refreshing a reference repo needs a 40-character SHA`,
+        };
+      }
+      const current = byId.get(item.repoId);
+      if (!current) {
+        return {
+          status: "invalid",
+          message: `${shownId} has no reference repo ${item.repoId}`,
+        };
+      }
+      current.sha = sha;
+    }
+
+    await client.query("UPDATE specs SET refs = $2::jsonb WHERE id = $1", [
+      specId,
+      JSON.stringify(refs),
+    ]);
+    await recordAction(
+      client,
+      "edit-refs",
+      { specId },
+      {
+        add: edit.add,
+        remove: edit.remove,
+        refresh: edit.refresh,
+      },
+    );
+    return { status: "ok" };
+  });
 }
 
 export interface ImportedTicket {
@@ -343,7 +490,7 @@ export async function importTickets(
     await client.query("BEGIN");
     await applyOrigin(client);
     const spec = await client.query(
-      "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings, body FROM specs WHERE id = $1 FOR UPDATE",
+      "SELECT project_id, state, slug, branch_namespace, integration_branches, import_warnings, body, refs FROM specs WHERE id = $1 FOR UPDATE",
       [specId],
     );
     if (spec.rowCount === 0)
@@ -382,8 +529,13 @@ export async function importTickets(
       }
     }
 
+    const specRefIds = new Set(
+      ((specRow.refs as { repoId: number }[] | null) ?? []).map(
+        (ref) => ref.repoId,
+      ),
+    );
     const repos = await client.query(
-      "SELECT name, id, contract_path FROM repos WHERE project_id = $1",
+      "SELECT name, id, contract_path, reference FROM repos WHERE project_id = $1",
       [specRow.project_id],
     );
     const project = await client.query(
@@ -407,6 +559,7 @@ export async function importTickets(
                 {
                   id: row.id as number,
                   contractPath: row.contract_path as string | null,
+                  reference: row.reference === true,
                 },
               ]),
             ),
@@ -414,6 +567,11 @@ export async function importTickets(
             append ? await existingGraph(client, specId) : undefined,
             specRow.body as string,
             limits.projectConcurrency,
+            new Set(
+              repos.rows
+                .filter((row) => specRefIds.has(row.id as number))
+                .map((row) => row.name as string),
+            ),
           );
     if (!read.ok) {
       // The files that could be read are checked as a graph too, so every problem comes back at once. What only

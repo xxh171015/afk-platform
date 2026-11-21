@@ -69,7 +69,23 @@ describe("the committed tiny sample", () => {
     const answers = loadAnswers(join(fixtureRoot, "answers.yaml"));
     expect(
       answers.filter((row) => row.sample === "tiny").map((row) => row.id),
-    ).toEqual(["us-1", "st-1", "miss-1"]);
+    ).toEqual(["us-1", "st-1", "miss-1", "ru-1"]);
+  });
+
+  it("ships a ruling answer with decisions.json and a refs directory", () => {
+    const samples = loadSamples(fixtureRoot);
+    const tiny = samples.find((sample) => sample.name === "tiny");
+    expect(tiny?.decisionLog?.ticket?.decisions[0]).toMatchObject({
+      id: "R-1#0",
+      kind: "known-gap",
+    });
+    expect(tiny?.refs?.map((ref) => ref.name)).toEqual(["arith"]);
+    const answers = loadAnswers(join(fixtureRoot, "answers.yaml"));
+    expect(answers.find((row) => row.id === "ru-1")).toMatchObject({
+      type: "ruling",
+      decision: "R-1#0",
+      expect: "must-fix",
+    });
   });
 });
 
@@ -82,9 +98,11 @@ describe("the committed real samples", () => {
       "s15-frontend-note-search",
       "s23-push-retry",
       "s28-sandbox-oom",
+      "s60-missing-address",
+      "s60-substituted-approach",
     ]);
     const answers = loadAnswers(join(docsRoot, "answers.yaml"));
-    expect(answers).toHaveLength(10);
+    expect(answers).toHaveLength(12);
     expect(answers.map((row) => row.sample)).not.toContain("tiny");
   });
 
@@ -94,6 +112,43 @@ describe("the committed real samples", () => {
       "packages/pipeline/src/testing/review-calibration",
     );
     expect(readme).toContain("docs/review-calibration/samples");
+  });
+
+  it("documents decisions.json, refs mounts, ruling answers, and the two S-60 samples", () => {
+    const readme = readFileSync(join(docsRoot, "README.md"), "utf8");
+    const samplesMd = readFileSync(join(docsRoot, "SAMPLES.md"), "utf8");
+    for (const text of [readme, samplesMd]) {
+      expect(text).toContain("decisions.json");
+      expect(text).toContain("/refs/");
+      expect(text).toContain("type: ruling");
+      expect(text).toContain("s60-substituted-approach");
+      expect(text).toContain("s60-missing-address");
+    }
+  });
+
+  it("has a substituted-approach sample with refs and a missing-address sample that is not must-fix", () => {
+    const samples = loadSamples(docsRoot);
+    const substituted = samples.find(
+      (sample) => sample.name === "s60-substituted-approach",
+    );
+    const missing = samples.find(
+      (sample) => sample.name === "s60-missing-address",
+    );
+    expect(substituted?.kind).toBe("ticket");
+    expect(substituted?.repo).toContain("afk-platform");
+    expect(substituted?.decisionLog?.ticket?.decisions[0]?.kind).toBe(
+      "known-gap",
+    );
+    expect(substituted?.refs?.map((ref) => ref.name)).toEqual(["host-lib"]);
+    expect(missing?.kind).toBe("ticket");
+    expect(missing?.decisionLog?.ticket?.decisions[0]?.kind).toBe("known-gap");
+    const answers = loadAnswers(join(docsRoot, "answers.yaml"));
+    expect(
+      answers.find((row) => row.sample === "s60-substituted-approach"),
+    ).toMatchObject({ type: "ruling", expect: "must-fix" });
+    expect(
+      answers.find((row) => row.sample === "s60-missing-address"),
+    ).toMatchObject({ type: "ruling", not: "must-fix" });
   });
 });
 
@@ -374,6 +429,189 @@ function writeTinySample(root: string, repo: string, base: string): void {
     readFileSync(join(fixtureRoot, "answers.yaml")),
   );
 }
+
+const TINY_DECISION_LOG = {
+  ticket: {
+    displayId: "T-cal",
+    decisions: [
+      {
+        id: "R-1#0",
+        run: "R-1",
+        stage: "implement",
+        kind: "known-gap" as const,
+        text: "used a + b instead of rejectNegatives in /refs/arith",
+      },
+    ],
+    rulings: [],
+  },
+  doneTickets: [],
+  spec: null,
+};
+
+function writeTinyRulingContext(root: string): string {
+  const sampleDir = join(root, "samples", "tiny");
+  writeFileSync(
+    join(sampleDir, "decisions.json"),
+    `${JSON.stringify(TINY_DECISION_LOG, null, 2)}\n`,
+  );
+  const arithDir = join(sampleDir, "refs", "arith");
+  mkdirSync(arithDir, { recursive: true });
+  writeFileSync(
+    join(arithDir, "reject-negatives.ts"),
+    "export function rejectNegatives(a: number, b: number): void {}\n",
+  );
+  return arithDir;
+}
+
+describe("runReviewCalibration with sample decisions.json and refs/", () => {
+  it("puts decisions.json in /context and mounts refs/<name>/ for the stub runner", async () => {
+    origin = makeRepo({ "src/app.ts": BASE_APP, "AGENTS.md": "x\n" });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-decisions-refs-"));
+    dirs.push(root);
+    writeTinySample(root, origin.dir, base);
+    const arithDir = writeTinyRulingContext(root);
+
+    const seenDecisions: string[] = [];
+    const runners: FakeAgentRunner[] = [];
+    await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) => {
+        const runner = new FakeAgentRunner(repoDir, (ctx) => {
+          seenDecisions.push(ctx.context("decisions.json") ?? "");
+          return {
+            output: {
+              verdict: "pass",
+              mustFix: [],
+              suggestions: [],
+              uncertainties: [],
+              sources: ["AGENTS.md"],
+            },
+          };
+        });
+        runners.push(runner);
+        return runner;
+      },
+    });
+
+    expect(seenDecisions.length).toBeGreaterThan(0);
+    expect(seenDecisions[0]).toContain("R-1#0");
+    expect(seenDecisions[0]).toContain("known-gap");
+    expect(seenDecisions[0]).toContain("/refs/arith");
+    expect(runners[0]?.calls[0]?.refs).toEqual([
+      { name: "arith", dir: arithDir },
+    ]);
+    expect(
+      readFileSync(join(arithDir, "reject-negatives.ts"), "utf8"),
+    ).toContain("rejectNegatives");
+  });
+});
+
+function writeRulingAnswers(
+  root: string,
+  extra: { not?: string; expect?: string },
+): void {
+  const constraint =
+    extra.not !== undefined
+      ? `  not: ${extra.not}`
+      : `  expect: ${extra.expect}`;
+  writeFileSync(
+    join(root, "answers.yaml"),
+    [
+      "- sample: tiny",
+      "  id: ru-1",
+      "  type: ruling",
+      "  decision: R-1#0",
+      constraint,
+      "  description: substituted rejectNegatives from /refs/arith",
+      "",
+    ].join("\n"),
+  );
+}
+
+const rulingPass = {
+  verdict: "pass" as const,
+  mustFix: [] as {
+    file: string;
+    line?: number;
+    problem: string;
+    id?: string;
+  }[],
+  suggestions: [] as string[],
+  uncertainties: [] as string[],
+  sources: ["AGENTS.md"],
+};
+
+describe("type: ruling answers", () => {
+  it("records a miss when the Spec axis returns the disallowed ruling", async () => {
+    origin = makeRepo({ "src/app.ts": BASE_APP, "AGENTS.md": "x\n" });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-ruling-miss-"));
+    dirs.push(root);
+    writeTinySample(root, origin.dir, base);
+    writeTinyRulingContext(root);
+    writeRulingAnswers(root, { not: "accepted" });
+
+    const table = await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) =>
+        new FakeAgentRunner(repoDir, (ctx) => {
+          if (ctx.prompt.includes("阶段：review，Spec 轴")) {
+            return {
+              output: {
+                ...rulingPass,
+                sources: undefined,
+                rulings: [{ id: "R-1#0", verdict: "accepted" }],
+              },
+            };
+          }
+          return { output: rulingPass };
+        }),
+    });
+
+    const row = table.split("\n").find((line) => line.includes("tiny/ru-1"));
+    expect(row).toMatch(/\| tiny\/ru-1 \| ruling \| 未发现 \|/);
+  });
+
+  it("records a hit when the Spec axis returns the expected ruling", async () => {
+    origin = makeRepo({ "src/app.ts": BASE_APP, "AGENTS.md": "x\n" });
+    const base = gitOrThrow(origin.dir, ["rev-parse", "HEAD"]);
+    const root = mkdtempSync(join(tmpdir(), "afk-cal-ruling-hit-"));
+    dirs.push(root);
+    writeTinySample(root, origin.dir, base);
+    writeTinyRulingContext(root);
+    writeRulingAnswers(root, { expect: "must-fix" });
+
+    const table = await runReviewCalibration({
+      root,
+      makeRunner: (repoDir) =>
+        new FakeAgentRunner(repoDir, (ctx) => {
+          if (ctx.prompt.includes("阶段：review，Spec 轴")) {
+            return {
+              output: {
+                verdict: "fix",
+                mustFix: [
+                  {
+                    file: "src/app.ts",
+                    line: 6,
+                    problem: "substituted rejectNegatives",
+                    id: "R-1#0",
+                  },
+                ],
+                suggestions: [],
+                uncertainties: [],
+                rulings: [{ id: "R-1#0", verdict: "must-fix" }],
+              },
+            };
+          }
+          return { output: rulingPass };
+        }),
+    });
+
+    const row = table.split("\n").find((line) => line.includes("tiny/ru-1"));
+    expect(row).toMatch(/\| tiny\/ru-1 \| ruling \| 命中 \|/);
+  });
+});
 
 describe("runReviewCalibration on a temp dir behind a symlink", () => {
   const savedTmp = process.env.TMPDIR;

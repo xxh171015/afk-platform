@@ -15,6 +15,7 @@ import {
   sameReasonRepeatLine,
   type TicketReviewMode,
 } from "@afk/shared";
+import { formatSpecRefs, type SpecRefView } from "./spec-refs.ts";
 
 // Plain-text views for people. The JSON is the API's answer, untouched (--json); these only lay it out.
 
@@ -822,6 +823,7 @@ export function specText(view: {
       conflict: string[];
     };
     prechecks?: { code: string; level: string; message: string }[];
+    refs?: SpecRefView[];
   };
   tickets: TicketLike[];
   finalizations: FinalizationLike[];
@@ -847,6 +849,7 @@ export function specText(view: {
     ...(view.spec.prechecks?.length
       ? view.spec.prechecks.map((p) => `yellow: ${p.message}`)
       : []),
+    formatSpecRefs(view.spec.refs ?? []),
     ...(view.spec.body?.trim() ? ["", view.spec.body.trimEnd(), ""] : []),
     "tickets:",
     ...view.tickets.flatMap((t) => [

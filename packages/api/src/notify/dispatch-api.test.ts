@@ -669,3 +669,285 @@ describe("notifications from events", () => {
     }
   });
 });
+
+describe("ticket-level needs-human notifications", () => {
+  const knownGap = {
+    outcome: "done",
+    run: {
+      output: {
+        status: "done",
+        summary: "did it",
+        acceptance: {},
+        decisions: [
+          {
+            kind: "known-gap",
+            text: "reload still skips the note filter",
+          },
+        ],
+      },
+    },
+  };
+
+  async function stage(expected: string, result: Record<string, unknown>) {
+    const claimed = (await worker.claim()).body.job as Claimed | null;
+    expect(claimed?.payload.stage).toBe(expected);
+    const job = claimed as Claimed;
+    const reply = await worker.complete(job.id, job.attempt, {
+      stage: expected,
+      ...result,
+    });
+    expect(reply.status).toBe(200);
+    return job;
+  }
+
+  async function decisionIdOf(job: Claimed): Promise<string> {
+    const bundle = (await fetch(
+      `${api.url}/worker/jobs/${job.id}/bundle?workerId=w1&attempt=${job.attempt}`,
+    ).then((r) => r.json())) as {
+      decisionLog: { ticket: { decisions: { id: string }[] } };
+    };
+    return bundle.decisionLog.ticket.decisions[0]?.id as string;
+  }
+
+  async function passReviewWithNeedsHuman() {
+    await stage("implement", knownGap);
+    await stage("gate", { outcome: "passed" });
+    const review = (await worker.claim()).body.job as Claimed;
+    expect(review.payload.stage).toBe("review");
+    const id = await decisionIdOf(review);
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "needs-human" }],
+        },
+      },
+    });
+    return { review, id };
+  }
+
+  async function flushNeedsHumanWindow() {
+    clock.advanceSeconds(5 * 60);
+    await clock.flush();
+  }
+
+  it("ticket-level review with needs-human records an event and notifies, without changing spec state or blocking the next stage", async () => {
+    const specId = await runningSpec();
+    const stream = await openEvents();
+    try {
+      await stream.drainInvalidates();
+      const { id, review } = await passReviewWithNeedsHuman();
+      const spec = await db.pool.query<{ state: string }>(
+        "SELECT state FROM specs WHERE id = $1",
+        [specId],
+      );
+      expect(spec.rows[0]?.state).toBe("running");
+      const ticket = await db.pool.query<{ state: string }>(
+        "SELECT state FROM tickets WHERE spec_id = $1",
+        [specId],
+      );
+      expect(ticket.rows[0]?.state).toBe("merging");
+      const blocked = (await fetch(`${api.url}/blocked`).then((r) =>
+        r.json(),
+      )) as { tickets: unknown[] };
+      expect(blocked.tickets).toEqual([]);
+      const next = (await worker.claim()).body.job as Claimed | null;
+      expect(next?.payload.stage).toBe("merge");
+      const runId = (
+        await db.pool.query<{ id: number }>(
+          "SELECT id FROM runs WHERE job_id = $1",
+          [review.id],
+        )
+      ).rows[0]?.id;
+      const events = await db.pool.query<{
+        type: string;
+        ticket_id: number | null;
+        run_id: number | null;
+        kind: string | null;
+        decision_id: string | null;
+        decision_text: string | null;
+      }>(
+        `SELECT type, ticket_id, run_id, data->>'kind' AS kind,
+                data->'decisions'->0->>'id' AS decision_id,
+                data->'decisions'->0->>'text' AS decision_text
+         FROM events WHERE data->>'kind' = 'needs-human'`,
+      );
+      expect(events.rows).toEqual([
+        {
+          type: "ticket",
+          ticket_id: 1,
+          run_id: runId,
+          kind: "needs-human",
+          decision_id: id,
+          decision_text: "reload still skips the note filter",
+        },
+      ]);
+      await stream.drainInvalidates();
+      expect(notices).toEqual([]);
+      await flushNeedsHumanWindow();
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.title).toBe("票级审查需要人定");
+      expect(notices[0]?.body).toContain("T-1 写 CSV");
+      expect(notices[0]?.body).toContain(`R-${runId}`);
+      expect(notices[0]?.body).toContain(id);
+      expect(notices[0]?.body).toContain("reload still skips the note filter");
+      expect(notices[0]?.body).toContain("plat tickets import --append");
+      expect(notices[0]?.body).toContain("plat spec edit --ref");
+      expect(notices[0]?.body).toContain("plat ticket retry");
+    } finally {
+      await stream.close();
+    }
+  });
+
+  it("does not record a needs-human event or notify when ticket-level review has no needs-human ruling", async () => {
+    await runningSpec();
+    await stage("implement", knownGap);
+    await stage("gate", { outcome: "passed" });
+    const review = (await worker.claim()).body.job as Claimed;
+    expect(review.payload.stage).toBe("review");
+    const id = await decisionIdOf(review);
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "accepted" }],
+        },
+      },
+    });
+    const events = await db.pool.query(
+      "SELECT 1 FROM events WHERE data->>'kind' = 'needs-human'",
+    );
+    expect(events.rows).toEqual([]);
+    await flushNeedsHumanWindow();
+    expect(notices).toEqual([]);
+  });
+
+  it("does not send the ticket-level needs-human notice when final-review returns needs-human", async () => {
+    await runningSpec();
+    await stage("implement", knownGap);
+    await stage("gate", { outcome: "passed" });
+    const review = (await worker.claim()).body.job as Claimed;
+    expect(review.payload.stage).toBe("review");
+    const id = await decisionIdOf(review);
+    await worker.complete(review.id, review.attempt, {
+      stage: "review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "accepted" }],
+        },
+      },
+    });
+    await stage("merge", { outcome: "merged", headSha: "head-1" });
+    const finalReview = (await worker.claim()).body.job as Claimed;
+    expect(finalReview.payload.stage).toBe("final-review");
+    await worker.complete(finalReview.id, finalReview.attempt, {
+      stage: "final-review",
+      outcome: "pass",
+      run: {
+        axis: "spec",
+        output: {
+          verdict: "pass",
+          mustFix: [],
+          suggestions: [],
+          uncertainties: [],
+          rulings: [{ id, verdict: "needs-human" }],
+        },
+      },
+    });
+    const events = await db.pool.query(
+      "SELECT 1 FROM events WHERE data->>'kind' = 'needs-human'",
+    );
+    expect(events.rows).toEqual([]);
+    await flushNeedsHumanWindow();
+    expect(
+      notices.filter((notice) => notice.title === "票级审查需要人定"),
+    ).toEqual([]);
+  });
+
+  it("coalesces two tickets' needs-human on the same spec within 5 minutes into one notice", async () => {
+    const created = await call("POST", "/projects", { name: "shop" });
+    await call("POST", `/projects/${created.body.id}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: created.body.id,
+      type: "feature",
+      slug: "s",
+      title: "导出订单",
+    });
+    expect(
+      (
+        await call(
+          "POST",
+          `/specs/${spec.body.id}/tickets/import`,
+          importBody(spec.body.id, {
+            tickets: [
+              {
+                key: "a",
+                repo: "backend",
+                type: "implementation",
+                title: "写 CSV",
+                modules: ["src/a/**"],
+                acceptance: ["it works"],
+              },
+              {
+                key: "b",
+                repo: "backend",
+                type: "implementation",
+                title: "写 UI",
+                modules: ["src/b/**"],
+                acceptance: ["it works"],
+                blocked_by: ["a"],
+              },
+            ],
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect((await call("POST", `/specs/${spec.body.id}/confirm`)).status).toBe(
+      200,
+    );
+    const stream = await openEvents();
+    try {
+      await stream.drainInvalidates();
+      const first = await passReviewWithNeedsHuman();
+      await stream.drainInvalidates();
+      clock.advanceSeconds(60);
+      await clock.flush();
+      expect(notices).toEqual([]);
+      await stage("merge", { outcome: "merged", headSha: "head-1" });
+      await stream.drainInvalidates();
+      const second = await passReviewWithNeedsHuman();
+      await stream.drainInvalidates();
+      clock.advanceSeconds(4 * 60);
+      await clock.flush();
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.title).toBe("票级审查需要人定");
+      expect(notices[0]?.body).toContain("T-1 写 CSV");
+      expect(notices[0]?.body).toContain(first.id);
+      expect(notices[0]?.body).toContain("T-2 写 UI");
+      expect(notices[0]?.body).toContain(second.id);
+    } finally {
+      await stream.close();
+    }
+  });
+});

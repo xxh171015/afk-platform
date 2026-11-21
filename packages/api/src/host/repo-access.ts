@@ -119,13 +119,22 @@ async function scheduleNextRepoAccess(
 export async function repoAccessTask(
   pool: pg.Pool,
   { repoId }: RepoAccessPayload,
-): Promise<{ kind: "repo-access"; repoUrl: string } | undefined> {
+): Promise<
+  { kind: "repo-access"; repoUrl: string; reference?: boolean } | undefined
+> {
   const repo = (
-    await pool.query<{ url: string }>("SELECT url FROM repos WHERE id = $1", [
-      repoId,
-    ])
+    await pool.query<{ url: string; reference: boolean }>(
+      "SELECT url, reference FROM repos WHERE id = $1",
+      [repoId],
+    )
   ).rows[0];
-  return repo ? { kind: "repo-access", repoUrl: repo.url } : undefined;
+  return repo
+    ? {
+        kind: "repo-access",
+        repoUrl: repo.url,
+        ...(repo.reference ? { reference: true } : {}),
+      }
+    : undefined;
 }
 
 const keep = (db: Queryable, repoId: number, last: Record<string, unknown>) =>

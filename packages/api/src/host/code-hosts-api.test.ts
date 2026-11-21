@@ -114,4 +114,41 @@ describe("a repo's host kind", () => {
     expect(mixed.body.error).toContain("搬到同一种托管，或为它单独建项目");
     expect(await kinds()).toEqual([["backend", "github"]]);
   });
+
+  it("lets a reference repo live on another host than the project's tickets", async () => {
+    await report("mac", [
+      { host: "github.com", kind: "github" },
+      { host: "git.corp.example", kind: "gitlab" },
+    ]);
+    const id = await project();
+    await call("POST", `/projects/${id}/repos`, {
+      url: "https://github.com/me/shop-backend.git",
+      name: "backend",
+    });
+    const spec = await call("POST", "/specs", {
+      projectId: id,
+      type: "feature",
+      slug: "with-gitlab-ref",
+      title: "With gitlab ref",
+      refs: [
+        {
+          url: "https://git.corp.example/other/payments.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+    expect(spec.status).toBe(201);
+    expect(await kinds()).toEqual([
+      ["backend", "github"],
+      ["payments", "gitlab"],
+    ]);
+    const mixed = await call("POST", `/projects/${id}/repos`, {
+      url: "https://git.corp.example/me/shop-frontend.git",
+      name: "frontend",
+    });
+    expect(mixed.status).toBe(409);
+    expect(mixed.body.error).toContain("backend 在 GitHub");
+    expect(mixed.body.error).toContain("frontend 在 GitLab");
+    expect(mixed.body.error).not.toContain("payments");
+  });
 });

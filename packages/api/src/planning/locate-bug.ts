@@ -100,13 +100,13 @@ async function workspaceRepo(
 ): Promise<{ id: number } | undefined> {
   if (planningRepo !== undefined) {
     const named = await pool.query<{ id: number }>(
-      "SELECT id FROM repos WHERE project_id = $1 AND name = $2",
+      "SELECT id FROM repos WHERE project_id = $1 AND name = $2 AND NOT reference",
       [projectId, planningRepo],
     );
     if (named.rows[0]) return named.rows[0];
   }
   const first = await pool.query<{ id: number }>(
-    "SELECT id FROM repos WHERE project_id = $1 ORDER BY id LIMIT 1",
+    "SELECT id FROM repos WHERE project_id = $1 AND NOT reference ORDER BY id LIMIT 1",
     [projectId],
   );
   return first.rows[0];
@@ -154,7 +154,10 @@ export async function submitBug(
     });
     if (created.status === "no-project") return created;
     if (created.status === "no-repo") return created;
-    if (created.status === "invalid-source") {
+    if (
+      created.status === "invalid-source" ||
+      created.status === "unknown-host"
+    ) {
       return { status: "invalid", message: created.message };
     }
     if (created.status === "slug-taken") continue;

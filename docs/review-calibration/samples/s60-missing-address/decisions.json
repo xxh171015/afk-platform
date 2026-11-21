@@ -1,0 +1,17 @@
+{
+  "ticket": {
+    "displayId": "T-cal",
+    "decisions": [
+      {
+        "id": "R-1#0",
+        "run": "R-1",
+        "stage": "implement",
+        "kind": "known-gap",
+        "text": "the project's Feishu webhook URL is an external address not available in this repository; left webhookUrl empty"
+      }
+    ],
+    "rulings": []
+  },
+  "doneTickets": [],
+  "spec": null
+}

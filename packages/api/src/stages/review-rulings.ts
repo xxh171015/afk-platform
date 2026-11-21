@@ -1,8 +1,10 @@
 import {
   CODE_CHANGING_STAGES,
   checkReviewRulings,
+  type DecisionLogItem,
   decisionLogFromRuns,
   formatDisplayId,
+  isListedForRuling,
   listedDecisionsForReview,
   rulingsOf,
 } from "@afk/shared";
@@ -39,21 +41,15 @@ function mustFixOf(output: unknown): { id?: string }[] {
   return items;
 }
 
-export async function reviewOutcomeWithRulings(
+async function listedDecisionsForJob(
   client: Pick<pg.Pool, "query">,
   input: {
     specId: number;
     ticketId: number | null;
     jobId: number;
     stage: string;
-    outcome: string;
-    run?: { axis?: string; output?: unknown };
-    extraRuns?: { run: { axis?: string; output?: unknown } }[];
   },
-): Promise<string> {
-  if (input.stage !== "review" && input.stage !== "final-review")
-    return input.outcome;
-  if (input.outcome !== "pass" && input.outcome !== "fix") return input.outcome;
+): Promise<DecisionLogItem[]> {
   const current = await client.query<{ id: number }>(
     "SELECT id FROM runs WHERE job_id = $1",
     [input.jobId],
@@ -92,10 +88,60 @@ export async function reviewOutcomeWithRulings(
       output: row.output,
     })),
   });
-  const listed = listedDecisionsForReview(
+  return listedDecisionsForReview(
     log,
     input.stage === "final-review" ? "spec" : "ticket",
   );
+}
+
+export type NeedsHumanDecision = {
+  id: string;
+  text: string;
+  run: string;
+};
+
+export async function needsHumanDecisionsOf(
+  client: Pick<pg.Pool, "query">,
+  input: {
+    specId: number;
+    ticketId: number;
+    jobId: number;
+    run?: { axis?: string; output?: unknown };
+    extraRuns?: { run: { axis?: string; output?: unknown } }[];
+  },
+): Promise<NeedsHumanDecision[]> {
+  const listed = await listedDecisionsForJob(client, {
+    specId: input.specId,
+    ticketId: input.ticketId,
+    jobId: input.jobId,
+    stage: "review",
+  });
+  const byId = new Map(
+    rulingsOf(specAxisOutput(input)).map((ruling) => [ruling.id, ruling]),
+  );
+  return listed.flatMap((decision) => {
+    if (!isListedForRuling(decision.kind)) return [];
+    if (byId.get(decision.id)?.verdict !== "needs-human") return [];
+    return [{ id: decision.id, text: decision.text, run: decision.run }];
+  });
+}
+
+export async function reviewOutcomeWithRulings(
+  client: Pick<pg.Pool, "query">,
+  input: {
+    specId: number;
+    ticketId: number | null;
+    jobId: number;
+    stage: string;
+    outcome: string;
+    run?: { axis?: string; output?: unknown };
+    extraRuns?: { run: { axis?: string; output?: unknown } }[];
+  },
+): Promise<string> {
+  if (input.stage !== "review" && input.stage !== "final-review")
+    return input.outcome;
+  if (input.outcome !== "pass" && input.outcome !== "fix") return input.outcome;
+  const listed = await listedDecisionsForJob(client, input);
   const output = specAxisOutput(input);
   const check = checkReviewRulings({
     decisions: listed,

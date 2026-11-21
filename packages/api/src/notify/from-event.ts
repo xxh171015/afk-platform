@@ -85,6 +85,57 @@ function mapped(
   };
 }
 
+function needsHumanReason(
+  event: EventRow,
+  data: Record<string, unknown>,
+): string | undefined {
+  const raw = data.decisions;
+  if (!Array.isArray(raw)) return undefined;
+  const parts: string[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const id = typeof rec.id === "string" ? rec.id : "";
+    const text = typeof rec.text === "string" ? rec.text : "";
+    if (!id) continue;
+    parts.push(text ? `${id}「${text}」` : id);
+  }
+  if (parts.length === 0) return undefined;
+  const listed = parts.join("、");
+  const run =
+    event.runId != null ? `${formatDisplayId("run", event.runId)} 的 ` : "";
+  return `${run}Decision ${listed}。可 plat tickets import --append 追加票、plat spec edit --ref 补参考仓库、plat ticket retry 写重试说明，或留到合并时再定。`;
+}
+
+async function needsHumanNotice(
+  pool: pg.Pool,
+  event: EventRow,
+  data: Record<string, unknown>,
+): Promise<MappedNotice | undefined> {
+  if (event.specId == null || event.ticketId == null) return undefined;
+  const spec = await specContext(pool, event.specId);
+  if (!spec) return undefined;
+  const ticket = await pool.query<{ title: string }>(
+    "SELECT title FROM tickets WHERE id = $1",
+    [event.ticketId],
+  );
+  const title = ticket.rows[0]?.title;
+  const reason = needsHumanReason(event, data);
+  if (!title || !reason) return undefined;
+  return mapped(
+    {
+      kind: "needs-human",
+      displayId: formatDisplayId("ticket", event.ticketId),
+      title,
+      reason,
+      path: `/tickets/${event.ticketId}`,
+    },
+    spec.hostKind,
+    spec.projectId,
+    event.specId,
+  );
+}
+
 async function takenOverNotice(
   pool: pg.Pool,
   event: EventRow,
@@ -161,6 +212,8 @@ export async function noticeFromEvent(
   }
 
   if (event.type === "ticket") {
+    const data = asRecord(event.data);
+    if (data.kind === "needs-human") return needsHumanNotice(pool, event, data);
     if (event.toState === "taken-over") return takenOverNotice(pool, event);
     if (event.toState !== "blocked" || event.fromState === "blocked")
       return undefined;

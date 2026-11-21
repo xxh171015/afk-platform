@@ -44,6 +44,18 @@ export function repoHost(url: string): string | null {
   return readAddress(url)?.host ?? null;
 }
 
+// A repo on a host no worker has credentials for: what to tell the person; null when a worker has, or when the
+// address names no host (a local path, in tests).
+export function unknownHostProblem(
+  name: string,
+  url: string,
+  known: readonly { host: string }[],
+): string | null {
+  const host = repoHost(url);
+  if (!host || known.some((k) => k.host === host)) return null;
+  return `${name} 在 ${host}，平台没有这台主机的凭据：GitHub 上的仓库要装 GitHub App（\`~/.afk/secrets/github-app\`）；GitLab 上的，把 GitLab 的 PAT 放到 \`~/.afk/secrets/gitlab/${host}\`，重启 worker 后再跑 /afk-setup。`;
+}
+
 export function tryParseRepoUrl(url: string): RepoRef | null {
   try {
     return parseRepoUrl(url);

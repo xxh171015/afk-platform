@@ -14,6 +14,16 @@ This repo is the project's `{{REPO}}` repo (`repo: {{REPO}}` in a ticket file); 
 
 The platform has no labels and no comments. A draft spec is what a skill means by `ready-for-agent`: apply no label.
 
+### Reference repos
+
+The sandbox agent only sees this project's ticket repos and this spec's **reference repos** (read-only snapshots at
+`/refs/<name>/`). A reference repo cannot be a ticket's `repo`, does not make the project "several repos", and is not
+the place to file a bug. When creating a spec, pass `--ref` (repeatable) for every workspace repo this planning read
+and that the spec says to stay consistent with or follow; do not ask the person. `plat spec create` and
+`plat spec edit` warn when the spec body mentions a registered repo name or a sibling checkout in backticks that is
+not attached; run the `plat spec edit S-n --ref …` command they print. If you cannot attach it (not in the workspace,
+no access), write the concrete behaviour into the spec body. Refresh a pinned SHA with `plat spec edit S-n --refresh`.
+
 ### Conventions
 
 - **Publish a spec** (what a skill means by "publish to the issue tracker" for a spec):

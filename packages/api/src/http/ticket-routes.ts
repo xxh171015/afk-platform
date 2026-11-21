@@ -51,7 +51,7 @@ import {
 } from "../tickets/views.ts";
 import { staleSpecs, workbench } from "../tickets/workbench.ts";
 import { LinkRow } from "./link-routes.ts";
-import { ErrorReply, INT4_MAX } from "./schemas.ts";
+import { ErrorReply, INT4_MAX, SpecRefView } from "./schemas.ts";
 
 const Id = z.number().int();
 const PathId = z.coerce.number().int().min(1).max(INT4_MAX);
@@ -354,6 +354,7 @@ const specRoute = createRoute({
           state: z.enum(SPEC_STATES),
           pauseReason: z.string().nullable(),
           repos: z.array(RepoIdentity),
+          refs: z.array(SpecRefView),
           integrationBranches: z.array(
             z.object({
               repoId: Id,

@@ -61,3 +61,15 @@
   file: packages/pipeline/src/sandcastle.ts
   lines: 112-114
   description: 新增 enum SandboxFailure，违反「不用 enum、namespace」。
+- sample: s60-substituted-approach
+  id: s60s-1
+  type: ruling
+  decision: R-1#0
+  expect: must-fix
+  description: implement 用路径切分顶替了 spec 写明的 /refs/host-lib/origin-host.ts，并记 known-gap；refs 里有原做法。
+- sample: s60-missing-address
+  id: s60m-1
+  type: ruling
+  decision: R-1#0
+  not: must-fix
+  description: implement 按 spec 写了 POST JSON，只缺项目飞书 webhook 这个外部地址，记 known-gap；期望不是 must-fix。

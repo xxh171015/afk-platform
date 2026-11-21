@@ -174,6 +174,7 @@ scripts/canary.sh --project <id>
 
 - 不会再采访你，只汇总刚才的对话；**它会让你确认「测试 seams」**，认真看：无人值守的 agent 不能再问你，seams 在这里定死。
 - 发布时它调用 `plat spec create`，打印 `S-n`。spec 缺了 to-spec 模板的某一节、或节名被改，以及 `## Testing Decisions` 里既无 `seam`/`seams` 也无「缝」时，会在 stderr 告警（不拒绝，正文照存，只统一换行符和末尾换行）。标题没有英文单词时必须带 `--slug <english-slug>`（中文标题生成不了 slug）。
+- **参考仓库**：规划时读过、spec 里说要「一致」「照着做」的工作区仓库，用 `--ref` 带上（可多次；本地目录、克隆地址或项目里的仓库名）。不用先 `plat repo add`。`plat spec create` / `edit` / `show` 会列出参考仓库（没有就写「参考仓库：无」）。正文反引号里写了已登记仓库名或工作区兄弟目录名、却没带上时，只提醒并给出 `plat spec edit S-n --ref …`，不改退出码。本地 HEAD 不是 origin 默认分支头（有未推送的提交）时也会提醒一句：agent 看到的是 origin 上的版本。
 - spec 此时是 draft，什么都还没开始跑。
 
 ### 第 3 步 to-tickets（拆票并导入）
@@ -204,6 +205,7 @@ plat spec show S-n          # spec 正文、票、依赖边、导入告警
 plat spec confirm S-n       # 从这一刻起开始实现
 ```
 
+- 它用 `git ls-remote` 读每个参考仓库默认分支的 SHA，作为 `refPins` 发给平台，整个需求都钉在这个版本；读不了会报错并写出是哪个仓库。之后要换版本或补漏：`plat spec edit S-n --ref <x>` 增加、`--remove-ref <名字>` 去掉、`--refresh [名字]` 重新钉（省略名字则全部刷新）。已确认的需求增加或刷新时 CLI 会带上 SHA。
 - 它把规划文档（`GLOSSARY.md`、`docs/adr/`、`AGENTS.md`；多上下文的仓库还有 `GLOSSARY-MAP.md` 和它列出的各上下文下的 `GLOSSARY.md`、`docs/adr/`）相对远端默认分支的改动——提交了没推送的、没提交的都算——作为补丁发给平台（tracker 文档、`docs/agents` 和本机规则文件不在里面：它们不进仓库）。平台收下后，plat 把这些路径上没提交的改动从 checkout 里收走：新建的删掉，改过的还原成 HEAD 的样子，不用 stash；补丁备份在仓库外的 `~/.afk/planning/S-n/`。这样 PR 合并后 `git pull` 不会和它冲突。你已经提交的、以及规划文档以外的改动，一律不动；confirm 被拒时什么都不收走。需求合入或取消后，下一条 plat 命令会顺手删掉这个备份目录。
 - 平台先做**规划提交**：把补丁三方合并到规划仓库的设置提交（没有 `afk/setup` 要叠时就是默认分支的最新提交）上，作为集成分支的开头；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
 - 在页面上确认、或在规划仓库以外的地方 confirm，带不上本地的规划文档（预检标黄）；规划提交就是默认分支当时的最新提交。在项目的另一个仓库里 confirm 会被拒绝。
@@ -212,6 +214,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 ### 第 5 步 等待和验收
 
 - 页面 `http://127.0.0.1:5173` 先看工作台（等你处理 / 正在运行 / 等你验收 / 最近完成）；终端里 `plat spec show S-n`。票卡住时本机也会发一条 macOS 通知（点开打不开页面，去待处理或通知里的链接）。
+- **票级审查 needs-human**：票级 Spec 轴给出 `needs-human` 时，平台记一条事件并发一条飞书通知（按项目群；没有飞书则本机通知）。写明哪张票、哪条 Decision（id 和原文摘要）、Run 编号。你可以趁需求还在跑时 `plat tickets import --append` 追加票、`plat spec edit --ref` 补参考仓库、`plat ticket retry` 写重试说明，也可以不理，留到合并时再定。同一个需求 5 分钟内的几条合成一条，按票列出。这条通知不改需求和票的状态，不进待处理，不需要回复；不理它也不影响流程。需求级（final-review）的 `needs-human` 不另发，开 PR 时验收包里会列。
 - 全部票 done 后平台做整体 review 和修复，然后开 PR（`spec/<id>/<slug>` → `main`），并生成验收包（`plat spec show S-n` 里能看）。
 - **你**读验收包，在 GitHub 上看 diff、合并 PR。合并后平台自动清理分支，spec 变 `merged`。
 - 验收包或 PR 描述「合并前要你定的」里如果有宿主机检查（`host-check`，文字是「在宿主机上跑：…」）：在这台 Mac 上跑那条命令，通过后再**手动**合并该 PR。有宿主机检查时平台不会自动合并。
@@ -550,6 +553,9 @@ plat repo add --project <P> --name backend  --url https://github.com/<owner>/<�
 plat repo edit backend --project <P> --contract-path openapi/openapi.yaml    # 契约属于后端
 plat repo add --project <P> --name frontend --url https://github.com/<owner>/<前端仓库>.git
 plat tracker-doc --project <P> --repo backend > docs/agents/issue-tracker.md   # 在规划仓库里
+plat spec create --project <P> --type feature --title "…" --slug … --file spec.md --ref ../other-system
+plat spec edit S-n --ref ../other-system          # 补一个参考仓库
+plat spec edit S-n --refresh                      # 重新钉所有参考仓库的 SHA
 ```
 
 - **代码托管类型**：`--host-kind github|gitlab`（`plat repo add` 和 `plat repo edit` 都可以）。不写时按地址推断一次（地址里有 `gitlab` 就是 GitLab，否则 GitHub）并存下来；自建 GitLab 的地址不含 `gitlab` 时要显式写 `--host-kind gitlab`。`plat tracker-doc` 按它选 GitHub 或 GitLab 的种子模板。

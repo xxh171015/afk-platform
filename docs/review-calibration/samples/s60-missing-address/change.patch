@@ -1,0 +1,15 @@
+diff --git a/packages/api/src/notify/project-webhook.ts b/packages/api/src/notify/project-webhook.ts
+new file mode 100644
+index 0000000..2e13e03
+--- /dev/null
++++ b/packages/api/src/notify/project-webhook.ts
+@@ -0,0 +1,9 @@
++export async function notifyProject(body: unknown): Promise<void> {
++  const webhookUrl = "";
++  if (!webhookUrl) return;
++  await fetch(webhookUrl, {
++    method: "POST",
++    headers: { "content-type": "application/json" },
++    body: JSON.stringify(body),
++  });
++}
