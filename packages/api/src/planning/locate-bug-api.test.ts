@@ -175,6 +175,51 @@ describe("POST /bugs", () => {
     ]);
     expect(bundle.agentBranch).toMatch(/S-\d+-locate$/);
   });
+
+  it("locates in a non-reference repo when a reference repo was registered first", async () => {
+    await fetch(`${api.url}/worker/hosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workerId: "w1",
+        hosts: [{ host: "github.com", kind: "github" }],
+      }),
+    });
+    const created = await call("POST", "/projects", { name: "shop" });
+    const projectId = created.body.id as number;
+    expect(
+      (
+        await call("POST", "/specs", {
+          projectId,
+          type: "feature",
+          slug: "with-ref",
+          title: "With ref",
+          refs: [
+            {
+              url: "https://github.com/acme/payments.git",
+              defaultBranch: "main",
+            },
+          ],
+        })
+      ).status,
+    ).toBe(201);
+    await call("POST", `/projects/${projectId}/repos`, {
+      url: "git@x:backend",
+      name: "backend",
+    });
+    await submitBug(projectId);
+    const job = await claim();
+    expect(job?.payload.stage).toBe("locate-bug");
+    const response = await fetch(
+      `${api.url}/worker/jobs/${(job as Claimed).id}/bundle?workerId=w1&attempt=${(job as Claimed).attempt}`,
+    );
+    expect(response.status).toBe(200);
+    const bundle = (await response.json()) as Json;
+    expect(bundle.repo).toMatchObject({ name: "backend" });
+    expect(bundle.refs).toEqual([
+      expect.objectContaining({ name: "payments" }),
+    ]);
+  });
 });
 
 const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
