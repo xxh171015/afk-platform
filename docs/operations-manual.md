@@ -212,6 +212,7 @@ plat spec confirm S-n       # 从这一刻起开始实现
 ### 第 5 步 等待和验收
 
 - 页面 `http://127.0.0.1:5173` 先看工作台（等你处理 / 正在运行 / 等你验收 / 最近完成）；终端里 `plat spec show S-n`。票卡住时本机也会发一条 macOS 通知（点开打不开页面，去待处理或通知里的链接）。
+- **票级审查 needs-human**：票级 Spec 轴给出 `needs-human` 时，平台记一条事件并发一条飞书通知（按项目群；没有飞书则本机通知）。写明哪张票、哪条 Decision（id 和原文摘要）、Run 编号。你可以趁需求还在跑时 `plat tickets import --append` 追加票、`plat spec edit --ref` 补参考仓库、`plat ticket retry` 写重试说明，也可以不理，留到合并时再定。同一个需求 5 分钟内的几条合成一条，按票列出。这条通知不改需求和票的状态，不进待处理，不需要回复；不理它也不影响流程。需求级（final-review）的 `needs-human` 不另发，开 PR 时验收包里会列。
 - 全部票 done 后平台做整体 review 和修复，然后开 PR（`spec/<id>/<slug>` → `main`），并生成验收包（`plat spec show S-n` 里能看）。
 - **你**读验收包，在 GitHub 上看 diff、合并 PR。合并后平台自动清理分支，spec 变 `merged`。
 - 验收包或 PR 描述「合并前要你定的」里如果有宿主机检查（`host-check`，文字是「在宿主机上跑：…」）：在这台 Mac 上跑那条命令，通过后再**手动**合并该 PR。有宿主机检查时平台不会自动合并。

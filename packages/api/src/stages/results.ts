@@ -33,7 +33,11 @@ import { contractsOf } from "./contracts.ts";
 import { rememberGateTestCases } from "./gate-records.ts";
 import { createFixTicket } from "./integration.ts";
 import { mergeRecheckIntoOutput, recheckTriggerOf } from "./recheck-hit.ts";
-import { reviewOutcomeWithRulings, specAxisOutput } from "./review-rulings.ts";
+import {
+  needsHumanDecisionsOf,
+  reviewOutcomeWithRulings,
+  specAxisOutput,
+} from "./review-rulings.ts";
 
 // What a worker hands back when it completes a stage job, and what the API does with it: write the Run,
 // GateResult and Findings, ask the shared state machine for the next step, then apply it.
@@ -383,6 +387,12 @@ export async function recordStageResult(
     valid,
     result,
   );
+  if (
+    valid?.stage === "review" &&
+    (valid.outcome === "pass" || valid.outcome === "fix")
+  ) {
+    await recordNeedsHumanEvent(client, ticket, job, valid);
+  }
   // The restart (if one was asked for) has been carried out by this implement run, whatever came of it.
   if (stage === "implement")
     await client.query("UPDATE tickets SET restart = false WHERE id = $1", [
@@ -531,6 +541,33 @@ export async function recordOrphanEvent(
       owner.repo_id,
       state,
       JSON.stringify({ orphanRef: run.orphanRef, orphanSha: run.orphanSha }),
+    ],
+  );
+}
+
+async function recordNeedsHumanEvent(
+  client: pg.PoolClient,
+  ticket: TicketRow,
+  job: StageJob,
+  result: ResultFacts,
+): Promise<void> {
+  const decisions = await needsHumanDecisionsOf(client, {
+    specId: ticket.spec_id,
+    ticketId: ticket.id,
+    jobId: job.id,
+    run: result.run,
+    extraRuns: result.extraRuns,
+  });
+  if (decisions.length === 0) return;
+  await client.query(
+    `SELECT afk_record_event($1, $2, $3, $4, $5, NULL, NULL, NULL, NULL, $6::jsonb)`,
+    [
+      "ticket",
+      ticket.spec_id,
+      ticket.id,
+      job.id,
+      ticket.repo_id,
+      JSON.stringify({ kind: "needs-human", decisions }),
     ],
   );
 }

@@ -5,6 +5,7 @@ import { type MappedNotice, noticeFromEvent } from "./from-event.ts";
 import { composeWindow, type NoticeDraft } from "./notices.ts";
 
 export const NOTICE_WINDOW_MS = 30_000;
+export const NEEDS_HUMAN_WINDOW_MS = 5 * 60 * 1000;
 
 const dispatchers = new WeakMap<object, NotificationDispatcher>();
 
@@ -40,6 +41,7 @@ export class NotificationDispatcher {
   private ready: Promise<void> = Promise.resolve();
   private unsubscribe: (() => void) | undefined;
   private readonly windows = new Map<number, Window>();
+  private readonly needsHumanWindows = new Map<number, Window>();
   private chain: Promise<void> = Promise.resolve();
   private readonly queuedLive: EventRow[] = [];
   private readonly options: DispatcherOptions;
@@ -60,6 +62,8 @@ export class NotificationDispatcher {
     this.unsubscribe = undefined;
     for (const window of this.windows.values()) window.cancel();
     this.windows.clear();
+    for (const window of this.needsHumanWindows.values()) window.cancel();
+    this.needsHumanWindows.clear();
     try {
       await this.ready;
     } catch {
@@ -147,7 +151,9 @@ export class NotificationDispatcher {
     mapped: MappedNotice,
     eventId: number,
   ): void {
-    const existing = this.windows.get(specId);
+    const needsHuman = mapped.draft?.kind === "needs-human";
+    const map = needsHuman ? this.needsHumanWindows : this.windows;
+    const existing = map.get(specId);
     if (existing) {
       existing.items.push(mapped);
       return;
@@ -156,17 +162,21 @@ export class NotificationDispatcher {
       items: [mapped],
       firstEventId: eventId,
       specId,
-      cancel: this.options.schedule(NOTICE_WINDOW_MS, () =>
-        this.enqueue(() => this.flush(specId)),
+      cancel: this.options.schedule(
+        needsHuman ? NEEDS_HUMAN_WINDOW_MS : NOTICE_WINDOW_MS,
+        () => this.enqueue(() => this.flushMap(map, specId)),
       ),
     };
-    this.windows.set(specId, window);
+    map.set(specId, window);
   }
 
-  private async flush(specId: number): Promise<void> {
-    const window = this.windows.get(specId);
+  private async flushMap(
+    map: Map<number, Window>,
+    specId: number,
+  ): Promise<void> {
+    const window = map.get(specId);
     if (!window) return;
-    this.windows.delete(specId);
+    map.delete(specId);
     window.cancel();
     const drafts: NoticeDraft[] = window.items.flatMap((item) =>
       item.draft ? [item.draft] : [],
