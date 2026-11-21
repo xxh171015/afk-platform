@@ -1719,8 +1719,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       try {
         for (const value of options.ref ?? []) {
           const resolved = resolveSpecRef(value, cwd, projectRepos);
-          if (resolved.originAheadWarning) {
-            io.stderr(`warning: ${resolved.originAheadWarning}\n`);
+          if (resolved.originMismatchWarning) {
+            io.stderr(`warning: ${resolved.originMismatchWarning}\n`);
           }
           refs.push({
             url: resolved.url,
@@ -1817,8 +1817,8 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       try {
         for (const value of addValues) {
           const resolved = resolveSpecRef(value, cwd, projectRepos);
-          if (resolved.originAheadWarning) {
-            io.stderr(`warning: ${resolved.originAheadWarning}\n`);
+          if (resolved.originMismatchWarning) {
+            io.stderr(`warning: ${resolved.originMismatchWarning}\n`);
           }
           add.push({
             url: resolved.url,

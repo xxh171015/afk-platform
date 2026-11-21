@@ -14,8 +14,8 @@ export interface SpecRefInput {
 }
 
 export interface ResolvedSpecRef extends SpecRefInput {
-  // Local HEAD is not origin's default-branch tip (unpushed commits or another branch).
-  originAheadWarning?: string;
+  // Local HEAD is not origin's default-branch tip: ahead (unpushed), behind (stale checkout), or diverged.
+  originMismatchWarning?: string;
 }
 
 function git(cwd: string, args: string[]): { ok: boolean; out: string } {
@@ -69,18 +69,33 @@ function originDefaultBranchOf(dir: string): string {
   return "main";
 }
 
-function originAheadWarning(
+function originMismatchWarning(
   dir: string,
   defaultBranch: string,
 ): string | undefined {
+  const originRef = `refs/remotes/origin/${defaultBranch}`;
   const head = git(dir, ["rev-parse", "HEAD"]);
-  const origin = git(dir, [
-    "rev-parse",
-    `refs/remotes/origin/${defaultBranch}`,
-  ]);
+  const origin = git(dir, ["rev-parse", originRef]);
   if (!head.ok || !origin.ok) return undefined;
   if (head.out === origin.out) return undefined;
-  return `HEAD is not origin/${defaultBranch} (unpushed local commits); the agent will see origin, not this checkout`;
+  const counts = git(dir, [
+    "rev-list",
+    "--left-right",
+    "--count",
+    `HEAD...${originRef}`,
+  ]);
+  const [ahead, behind] = counts.out.split(/\s+/).map(Number);
+  const seen = "the agent will see origin, not this checkout";
+  if (!counts.ok || !Number.isInteger(ahead) || !Number.isInteger(behind)) {
+    return `HEAD is not origin/${defaultBranch}; ${seen}`;
+  }
+  if (behind === 0) {
+    return `HEAD is ${ahead} commit(s) ahead of origin/${defaultBranch} (unpushed local commits); ${seen}`;
+  }
+  if (ahead === 0) {
+    return `HEAD is ${behind} commit(s) behind origin/${defaultBranch} (this checkout is older than origin); ${seen}`;
+  }
+  return `HEAD has diverged from origin/${defaultBranch} (${ahead} local, ${behind} on origin; another branch or unpushed commits); ${seen}`;
 }
 
 function fromDirectory(dir: string): ResolvedSpecRef {
@@ -91,7 +106,7 @@ function fromDirectory(dir: string): ResolvedSpecRef {
   return {
     url: canonicalUrl(originUrlOf(checkout)),
     defaultBranch,
-    originAheadWarning: originAheadWarning(checkout, defaultBranch),
+    originMismatchWarning: originMismatchWarning(checkout, defaultBranch),
   };
 }
 

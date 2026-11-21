@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Io, run } from "./index.ts";
+import { resolveSpecRef } from "./spec-refs.ts";
 
 function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, {
@@ -138,6 +139,9 @@ describe("plat spec create --ref a local directory", () => {
       }),
     ]);
     expect(machine.err.join("")).toContain("the agent will see origin");
+    expect(machine.err.join("")).toContain(
+      "1 commit(s) ahead of origin/main (unpushed local commits)",
+    );
   });
 });
 
@@ -788,5 +792,64 @@ describe("plat tracker-doc with a reference repo", () => {
     expect(doc).not.toContain("Integration tickets");
     expect(doc).not.toContain("Several repos");
     expect(doc).toMatch(/reference repo/i);
+  });
+});
+
+describe("--ref a local directory that is not at origin's default branch", () => {
+  const temps: string[] = [];
+
+  afterEach(() => {
+    for (const dir of temps.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function pushFromSecondClone(root: string, bare: string, file: string) {
+    const other = join(root, `other-${file}`);
+    git(root, ["clone", bare, other]);
+    writeFileSync(join(other, file), "origin\n");
+    git(other, ["add", file]);
+    git(other, ["commit", "-m", `origin ${file}`]);
+    git(other, ["push", "origin", "HEAD:main"]);
+  }
+
+  it("says a checkout behind origin is older than origin, not that it has unpushed commits", () => {
+    const { root, bare, clone } = bareAndClone();
+    temps.push(root);
+    pushFromSecondClone(root, bare, "a.txt");
+    pushFromSecondClone(root, bare, "b.txt");
+    git(clone, ["fetch", "origin"]);
+
+    const resolved = resolveSpecRef(clone, root, []);
+
+    expect(resolved.originMismatchWarning).toContain(
+      "2 commit(s) behind origin/main (this checkout is older than origin)",
+    );
+    expect(resolved.originMismatchWarning).not.toContain("unpushed");
+  });
+
+  it("says a checkout with local commits and newer origin commits has diverged", () => {
+    const { root, bare, clone } = bareAndClone();
+    temps.push(root);
+    pushFromSecondClone(root, bare, "a.txt");
+    git(clone, ["fetch", "origin"]);
+    writeFileSync(join(clone, "local.txt"), "local\n");
+    git(clone, ["add", "local.txt"]);
+    git(clone, ["commit", "-m", "local"]);
+
+    const resolved = resolveSpecRef(clone, root, []);
+
+    expect(resolved.originMismatchWarning).toContain(
+      "diverged from origin/main (1 local, 1 on origin",
+    );
+  });
+
+  it("gives no warning when HEAD is origin's default branch", () => {
+    const { root, clone } = bareAndClone();
+    temps.push(root);
+
+    expect(
+      resolveSpecRef(clone, root, []).originMismatchWarning,
+    ).toBeUndefined();
   });
 });
