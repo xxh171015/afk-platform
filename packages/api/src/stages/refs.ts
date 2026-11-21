@@ -20,6 +20,11 @@ function unionRefsByName(first: BundleRef[], extra: BundleRef[]): BundleRef[] {
   return [...first, ...extra.filter((ref) => !seen.has(ref.name))];
 }
 
+// Latest merged head in this spec+repo; aliases `t` (tickets) and `r` (repos).
+const MERGE_HEAD_SHA = `(SELECT m.head_sha FROM runs m
+             WHERE m.spec_id = t.spec_id AND m.repo_id = r.id AND m.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND m.result = 'merged'
+             ORDER BY m.id DESC LIMIT 1)`;
+
 // Spec-level reference repos, snapshotted at the SHA pinned on confirm or refresh — not the
 // default branch head. Empty when the spec named none.
 async function specLevelRefs(
@@ -58,9 +63,7 @@ async function reposNamed(
     sha: string | null;
   }>(
     `SELECT r.name, r.url, r.default_branch,
-            (SELECT m.head_sha FROM runs m
-             WHERE m.spec_id = t.spec_id AND m.repo_id = r.id AND m.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND m.result = 'merged'
-             ORDER BY m.id DESC LIMIT 1) AS sha
+            ${MERGE_HEAD_SHA} AS sha
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.project_id = s.project_id AND r.name = ANY(t.${column})
@@ -103,9 +106,7 @@ export async function refsOfSpecRepo(
     sha: string | null;
   }>(
     `SELECT r.name, r.url, r.default_branch,
-            (SELECT m.head_sha FROM runs m
-             WHERE m.spec_id = t.spec_id AND m.repo_id = r.id AND m.stage IN ('merge', 'final-merge', 'tidy-merge', 'update-branch') AND m.result = 'merged'
-             ORDER BY m.id DESC LIMIT 1) AS sha
+            ${MERGE_HEAD_SHA} AS sha
      FROM tickets t
      JOIN specs s ON s.id = t.spec_id
      JOIN repos r ON r.project_id = s.project_id AND r.name = ANY(t.refs)

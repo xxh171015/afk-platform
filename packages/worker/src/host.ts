@@ -219,11 +219,8 @@ export async function runHostTask(
     if (!deps.checkAccess)
       throw new InfrastructureError("this worker cannot check repo access");
     try {
-      const reference =
-        "reference" in task &&
-        (task as { reference?: boolean }).reference === true;
       const access = await deps.checkAccess(repoRef(task.repoUrl), {
-        readOnly: reference,
+        readOnly: task.reference === true,
       });
       log(`access on ${task.repoUrl}: ${access.state}`);
       return { stage: "repo-access", ...access };

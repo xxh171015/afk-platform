@@ -24,6 +24,7 @@ import {
   type StageModels,
   TICKET_REVIEW_MODES,
   type TicketReviewMode,
+  unknownHostProblem,
 } from "@afk/shared";
 import { PLATFORM_VERSION } from "@afk/shared/platform-version";
 import {
@@ -58,7 +59,6 @@ import {
   planInit,
   planText,
   TRACKER_DOC_PATH,
-  unknownHostProblem,
   withKnownHostKind,
 } from "./init.ts";
 import {
