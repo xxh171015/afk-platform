@@ -42,7 +42,7 @@ import {
 } from "../planning/readiness-gate.ts";
 import { confirmSpec } from "../scheduling/scheduler.ts";
 import { specView } from "../tickets/views.ts";
-import { ErrorReply, INT4_MAX } from "./schemas.ts";
+import { ErrorReply, INT4_MAX, SpecRefView } from "./schemas.ts";
 
 const Id = z.number().int().min(1).max(INT4_MAX);
 const Text = z.string().min(1).max(500);
@@ -624,14 +624,6 @@ const ConfirmBody = z
       .optional(),
   })
   .strict();
-
-const SpecRefView = z.object({
-  repoId: Id,
-  name: z.string(),
-  url: z.string(),
-  reference: z.boolean(),
-  sha: z.string().nullable(),
-});
 
 const specRefsRoute = createRoute({
   method: "put",

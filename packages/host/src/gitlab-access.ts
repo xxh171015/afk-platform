@@ -51,6 +51,40 @@ function notMemberFix(username: string): string {
   return `请项目 Maintainer 把〈${username}〉加为 Developer`;
 }
 
+function defaultBranchOf(body: unknown): string {
+  return typeof (body as { default_branch?: unknown }).default_branch ===
+    "string"
+    ? (body as { default_branch: string }).default_branch
+    : "master";
+}
+
+type GitLabGet = (path: string) => Promise<{ status: number; body: unknown }>;
+
+async function setupFilesOn(
+  get: GitLabGet,
+  repo: RepoRef,
+  defaultBranch: string,
+): Promise<SetupFiles> {
+  const on = async (path: string, ref: string) => {
+    const response = await get(
+      `/projects/${projectId(repo)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`,
+    );
+    if (response.status === 404) return false;
+    if (response.status !== 200)
+      throw new HostError(
+        `GitLab did not say whether ${repo.owner}/${repo.name} has ${path}: HTTP ${response.status}`,
+        response.status,
+      );
+    return true;
+  };
+  const present = async (path: string) =>
+    (await on(path, defaultBranch)) || (await on(path, SETUP_BRANCH));
+  return {
+    gates: await present(SETUP_FILES.gates),
+    integrationCompose: await present(SETUP_FILES.integrationCompose),
+  };
+}
+
 function gitlabGet(apiUrl: string, token: string, doFetch: typeof fetch) {
   return async (path: string) => {
     const response = await doFetch(`${apiUrl}${path}`, {
@@ -128,33 +162,11 @@ export async function checkGitLabAccess(
         `GitLab did not describe ${repo.owner}/${repo.name}: HTTP ${project.status}`,
         project.status,
       );
-    const defaultBranch =
-      typeof (project.body as { default_branch?: unknown }).default_branch ===
-      "string"
-        ? (project.body as { default_branch: string }).default_branch
-        : "master";
-    const on = async (path: string, ref: string) => {
-      const response = await get(
-        `/projects/${projectId(repo)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`,
-      );
-      if (response.status === 404) return false;
-      if (response.status !== 200)
-        throw new HostError(
-          `GitLab did not say whether ${repo.owner}/${repo.name} has ${path}: HTTP ${response.status}`,
-          response.status,
-        );
-      return true;
-    };
-    const present = async (path: string) =>
-      (await on(path, defaultBranch)) || (await on(path, SETUP_BRANCH));
     return {
       state: "ok",
       username,
       hints: [],
-      files: {
-        gates: await present(SETUP_FILES.gates),
-        integrationCompose: await present(SETUP_FILES.integrationCompose),
-      },
+      files: await setupFilesOn(get, repo, defaultBranchOf(project.body)),
       ...(tokenExpiresAt !== undefined ? { tokenExpiresAt } : {}),
     };
   }
@@ -182,11 +194,7 @@ export async function checkGitLabAccess(
       `GitLab did not describe ${repo.owner}/${repo.name}: HTTP ${project.status}`,
       project.status,
     );
-  const defaultBranch =
-    typeof (project.body as { default_branch?: unknown }).default_branch ===
-    "string"
-      ? (project.body as { default_branch: string }).default_branch
-      : "master";
+  const defaultBranch = defaultBranchOf(project.body);
 
   const branch = await get(
     `/projects/${projectId(repo)}/repository/branches/${encodeURIComponent(defaultBranch)}`,
@@ -232,29 +240,11 @@ export async function checkGitLabAccess(
     ...(developersCanMerge ? (["developers-can-merge"] as const) : []),
   ];
 
-  const on = async (path: string, ref: string) => {
-    const response = await get(
-      `/projects/${projectId(repo)}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`,
-    );
-    if (response.status === 404) return false;
-    if (response.status !== 200)
-      throw new HostError(
-        `GitLab did not say whether ${repo.owner}/${repo.name} has ${path}: HTTP ${response.status}`,
-        response.status,
-      );
-    return true;
-  };
-  const present = async (path: string) =>
-    (await on(path, defaultBranch)) || (await on(path, SETUP_BRANCH));
-
   return {
     state: "ok",
     username,
     hints,
-    files: {
-      gates: await present(SETUP_FILES.gates),
-      integrationCompose: await present(SETUP_FILES.integrationCompose),
-    },
+    files: await setupFilesOn(get, repo, defaultBranch),
     ...(tokenExpiresAt !== undefined ? { tokenExpiresAt } : {}),
   };
 }

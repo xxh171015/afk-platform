@@ -6588,7 +6588,9 @@
                             "type": "object",
                             "properties": {
                               "repoId": {
-                                "type": "integer"
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2147483647
                               },
                               "name": {
                                 "type": "string"
