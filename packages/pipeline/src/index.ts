@@ -174,6 +174,7 @@ export {
   loadAnswers,
   loadSamples,
   runReviewCalibration,
+  scoreAnswer,
   scoreDefect,
 } from "./review-calibration.ts";
 export type {

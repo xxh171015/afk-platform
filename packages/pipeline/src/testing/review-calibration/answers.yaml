@@ -17,3 +17,9 @@
   file: src/app.ts
   lines: "2-2"
   description: unused greet path
+- sample: tiny
+  id: ru-1
+  type: ruling
+  decision: R-1#0
+  expect: must-fix
+  description: known-gap skipped rejectNegatives from /refs/arith

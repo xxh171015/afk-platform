@@ -12,6 +12,8 @@ import { join } from "node:path";
 import {
   type Bundle,
   DEFAULT_LIMITS,
+  type DecisionLog,
+  listedDecisionsForReview,
   REVIEW_AXES,
   type ReviewAxis,
 } from "@afk/shared";
@@ -31,14 +33,33 @@ const SampleYaml = z.object({
   kind: z.enum(["ticket", "final"]),
 });
 
-const AnswerYaml = z.object({
+const linesField = z
+  .union([z.string(), z.number()])
+  .transform((value) => String(value));
+
+const defectFields = {
   sample: z.string().min(1),
   id: z.string().min(1),
-  type: z.enum(["user-story", "standards"]),
   file: z.string().min(1),
-  lines: z.union([z.string(), z.number()]).transform((value) => String(value)),
+  lines: linesField,
   description: z.string().min(1),
-});
+};
+
+const RulingVerdictYaml = z.enum(["accepted", "must-fix", "needs-human"]);
+
+const AnswerYaml = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("user-story"), ...defectFields }),
+  z.object({ type: z.literal("standards"), ...defectFields }),
+  z.object({
+    sample: z.string().min(1),
+    id: z.string().min(1),
+    type: z.literal("ruling"),
+    decision: z.string().min(1),
+    not: RulingVerdictYaml.optional(),
+    expect: RulingVerdictYaml.optional(),
+    description: z.string().min(1),
+  }),
+]);
 
 export type CalibrationSample = {
   name: string;
@@ -48,11 +69,18 @@ export type CalibrationSample = {
   specMd: string;
   ticketMd?: string;
   patch: string;
+  decisionLog?: DecisionLog;
+  refs?: { name: string; dir: string }[];
 };
 
 export type CalibrationAnswer = z.infer<typeof AnswerYaml>;
 
-export type CalibrationHit = "must-fix" | "suggestion" | "未发现" | "运行失败";
+export type CalibrationHit =
+  | "must-fix"
+  | "suggestion"
+  | "命中"
+  | "未发现"
+  | "运行失败";
 
 export interface RunReviewCalibrationInput {
   root: string;
@@ -95,6 +123,17 @@ export function loadSamples(root: string): CalibrationSample[] {
     }
     const parsed = SampleYaml.parse(parseYaml(readFileSync(yamlPath, "utf8")));
     const ticketPath = join(sampleDir, "ticket.md");
+    const decisionsPath = join(sampleDir, "decisions.json");
+    const refsRoot = join(sampleDir, "refs");
+    const refs = existsSync(refsRoot)
+      ? readdirSync(refsRoot, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({
+            name: entry.name,
+            dir: join(refsRoot, entry.name),
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name))
+      : [];
     return [
       {
         name,
@@ -106,6 +145,14 @@ export function loadSamples(root: string): CalibrationSample[] {
         ...(existsSync(ticketPath)
           ? { ticketMd: readFileSync(ticketPath, "utf8") }
           : {}),
+        ...(existsSync(decisionsPath)
+          ? {
+              decisionLog: JSON.parse(
+                readFileSync(decisionsPath, "utf8"),
+              ) as DecisionLog,
+            }
+          : {}),
+        ...(refs.length > 0 ? { refs } : {}),
       },
     ];
   });
@@ -155,8 +202,32 @@ function suggestionHits(
   return false;
 }
 
+function scoreRuling(
+  answer: Extract<CalibrationAnswer, { type: "ruling" }>,
+  output: ReviewOutput | undefined,
+): CalibrationHit {
+  if (!output) return "未发现";
+  const ruling = output.rulings?.find((row) => row.id === answer.decision);
+  if (!ruling) return "未发现";
+  if (answer.not !== undefined) {
+    return ruling.verdict === answer.not ? "未发现" : "命中";
+  }
+  if (answer.expect !== undefined) {
+    return ruling.verdict === answer.expect ? "命中" : "未发现";
+  }
+  return "未发现";
+}
+
+export function scoreAnswer(
+  answer: CalibrationAnswer,
+  output: ReviewOutput | undefined,
+): CalibrationHit {
+  if (answer.type === "ruling") return scoreRuling(answer, output);
+  return scoreDefect(answer, output);
+}
+
 export function scoreDefect(
-  defect: Pick<CalibrationAnswer, "file" | "lines">,
+  defect: { file: string; lines: string },
   output: ReviewOutput | undefined,
 ): CalibrationHit {
   if (!output) return "未发现";
@@ -246,6 +317,7 @@ function bundleForSample(
     integrationBranch: defaultBranch,
     agentBranch,
     ticketReview: "both",
+    ...(sample.decisionLog ? { decisionLog: sample.decisionLog } : {}),
   };
 }
 
@@ -304,6 +376,7 @@ async function reviewSample(
     const agentBranch = `calibration/${sample.name}`;
     const reviewedSha = gitOrThrow(dest, ["rev-parse", "HEAD"]);
     const stage = sample.kind === "final" ? "final-review" : "review";
+    const bundle = bundleForSample(sample, dest, defaultBranch, agentBranch);
     const assembled = await runReview({
       stage,
       ticketReview: "both",
@@ -312,7 +385,7 @@ async function reviewSample(
       baseBranch: defaultBranch,
       subjectLabel: sample.name,
       context: {
-        bundle: bundleForSample(sample, dest, defaultBranch, agentBranch),
+        bundle,
         run: {
           runId: "R-cal",
           baseSha: sample.base,
@@ -323,6 +396,11 @@ async function reviewSample(
       idleSeconds: DEFAULT_LIMITS.runIdleSeconds,
       wallClockMs: DEFAULT_LIMITS.runWallclockSeconds * 1000,
       ...(input.models ? { models: input.models } : {}),
+      ...(sample.refs?.length ? { refs: sample.refs } : {}),
+      listedDecisions: listedDecisionsForReview(
+        bundle.decisionLog,
+        sample.kind === "final" ? "spec" : "ticket",
+      ),
     });
     return {
       sample,
@@ -362,7 +440,7 @@ export function formatCalibrationTable(
     const spec = run?.axes.find((row) => row.axis === "spec");
     const standards = run?.axes.find((row) => row.axis === "standards");
     const cell = (row: AxisOutput | undefined): CalibrationHit =>
-      row?.error && !row.output ? "运行失败" : scoreDefect(answer, row?.output);
+      row?.error && !row.output ? "运行失败" : scoreAnswer(answer, row?.output);
     hits.push(
       `| ${answer.sample}/${answer.id} | ${answer.type} | ${cell(spec)} | ${cell(standards)} |`,
     );

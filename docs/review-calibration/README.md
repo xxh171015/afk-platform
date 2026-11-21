@@ -5,7 +5,7 @@
 要 Docker、沙箱镜像（默认 `sandcastle:afk-platform`）和 Cursor 密钥。
 
 - 真样本放在 `docs/review-calibration/samples/`，人工答案在同目录上一级的 `answers.yaml`。
-- 测试夹具在 `packages/pipeline/src/testing/review-calibration/`（`samples/tiny/` 和它的 3 条答案）。校准脚本只读真样本目录，不会跑夹具。
+- 测试夹具在 `packages/pipeline/src/testing/review-calibration/`（`samples/tiny/` 和它的 4 条答案，含一条 `type: ruling`）。校准脚本只读真样本目录，不会跑夹具。
 
 ## 运行
 
@@ -32,6 +32,8 @@ node scripts/review-calibration.ts --dir docs/review-calibration
 - `change.patch`：相对 `base` 的 unified diff（`git diff`），脚本只取该提交、不留远端引用，然后 apply 并提交
 - `spec.md`：需求正文，写成审查 agent 在 `/context/spec.md` 里读到的那样
 - `ticket.md`：可选。`kind: ticket` 时写成 `/context/ticket.md`；`kind: final` 可以没有
+- `decisions.json`：可选。写成审查沙箱里的 `/context/decisions.json`（决策日志）
+- `refs/<名字>/`：可选。每个子目录挂成审查沙箱里的 `/refs/<名字>/`
 
 测试夹具 `tiny` 的起始树在 `packages/pipeline/src/testing/review-calibration/samples/tiny/`：`AGENTS.md`（一句 `Do not skip tests.`）和 `src/app.ts`：
 
@@ -56,6 +58,14 @@ export function add(a: number, b: number): number {
   file: src/app.ts
   lines: "6-7"          # 含两端；单行写成 "10-10"
   description: skipped the negative check the story asked for
+- sample: tiny
+  id: ru-1
+  type: ruling          # 按审查交回的 rulings 打分
+  decision: R-1#0       # Decision 的 id
+  expect: must-fix      # 或 not: accepted / not: must-fix
+  description: known-gap skipped rejectNegatives from /refs/arith
 ```
 
-打分按文件和行范围对齐发现：must-fix 命中、suggestion 命中（建议文本以 `file:line` 开头）、否则 未发现。同一条缺陷两个轴、每个模型各记一格。
+`type: user-story` / `standards` 按文件和行范围对齐发现：must-fix 命中、suggestion 命中（建议文本以 `file:line` 开头）、否则 未发现。`type: ruling` 看 Spec 轴交回的 `rulings`：`expect:` 命中该结论、或 `not:` 交回的不是那个结论时记 **命中**，否则 **未发现**。同一条缺陷两个轴、每个模型各记一格。
+
+S-60 两条真样本：`s60-substituted-approach`（顶替 `/refs/host-lib/` 的做法，`expect: must-fix`）、`s60-missing-address`（只缺外部地址，`not: must-fix`）。说明见 `SAMPLES.md`。
