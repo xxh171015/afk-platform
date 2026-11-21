@@ -1,0 +1,17 @@
+{
+  "ticket": {
+    "displayId": "T-cal",
+    "decisions": [
+      {
+        "id": "R-1#0",
+        "run": "R-1",
+        "stage": "implement",
+        "kind": "known-gap",
+        "text": "did not copy /refs/host-lib/origin-host.ts; split the path after the scheme instead"
+      }
+    ],
+    "rulings": []
+  },
+  "doneTickets": [],
+  "spec": null
+}

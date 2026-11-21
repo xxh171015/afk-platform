@@ -1,0 +1,17 @@
+{
+  "ticket": {
+    "displayId": "T-cal",
+    "decisions": [
+      {
+        "id": "R-1#0",
+        "run": "R-1",
+        "stage": "implement",
+        "kind": "known-gap",
+        "text": "used a + b instead of rejectNegatives in /refs/arith"
+      }
+    ],
+    "rulings": []
+  },
+  "doneTickets": [],
+  "spec": null
+}
