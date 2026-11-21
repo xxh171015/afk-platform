@@ -104,4 +104,22 @@ describe("whether a GitLab PAT can work on a repo", () => {
     gitlab.canPush = false;
     expect(await check()).not.toHaveProperty("tokenExpiresAt");
   });
+
+  it("is ok in read-only mode when the token can read the repo without being a Developer", async () => {
+    gitlab.member = false;
+    gitlab.username = "alice";
+    expect(
+      await checkGitLabAccess(
+        {
+          apiUrl: gitlab.url,
+          tokens: { tokenFor: async () => token },
+        },
+        repo,
+        { readOnly: true },
+      ),
+    ).toMatchObject({
+      state: "ok",
+      username: "alice",
+    });
+  });
 });

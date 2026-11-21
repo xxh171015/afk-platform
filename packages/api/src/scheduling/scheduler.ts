@@ -26,6 +26,7 @@ import { redAccessProblem } from "../host/repo-access.ts";
 import { enqueueStageJob } from "../jobs/stage-jobs.ts";
 import { integrationBranch } from "../planning/integration-branches.ts";
 import { enqueuePlanningCommit } from "../planning/planning-commit.ts";
+import { pinSha, SHA_RE, type SpecRefPin } from "../planning/spec-refs.ts";
 
 // Confirming a split and deciding which tickets may start (docs/design.md「依赖边什么时候算满足」,
 // docs/specs/m1-platform.md「并发与预算默认值」). The scheduler is the only thing that moves a ticket from
@@ -125,10 +126,11 @@ export async function confirmSpec(
   pool: pg.Pool,
   specId: number,
   planning?: ConfirmPlanning,
+  refPins?: { repoId: number; sha: string }[],
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, s.project_id, r.name AS planning_repo
+      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, s.project_id, s.refs, r.name AS planning_repo
        FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1 FOR UPDATE OF s`,
       [specId],
     );
@@ -140,6 +142,7 @@ export async function confirmSpec(
       planning_repo_id,
       planning_repo,
       project_id,
+      refs: storedRefs,
     } = spec.rows[0] as {
       slug: string;
       state: SpecState;
@@ -147,6 +150,7 @@ export async function confirmSpec(
       planning_repo_id: number | null;
       planning_repo: string | null;
       project_id: number;
+      refs: SpecRefPin[];
     };
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
@@ -177,6 +181,28 @@ export async function confirmSpec(
         message: `${formatDisplayId("spec", specId)} has no tickets to run`,
       };
     }
+    const specRefs = storedRefs ?? [];
+    const pinById = new Map(
+      (refPins ?? []).map((pin) => [pin.repoId, pinSha(pin.sha)]),
+    );
+    const unpinned = specRefs.filter(
+      (ref) => !SHA_RE.test(pinById.get(ref.repoId) ?? ""),
+    );
+    if (unpinned.length > 0) {
+      const names = await client.query<{ name: string }>(
+        "SELECT name FROM repos WHERE id = ANY($1::int[]) ORDER BY name",
+        [unpinned.map((ref) => ref.repoId)],
+      );
+      const listed = names.rows.map((row) => row.name).join("、");
+      return {
+        status: "invalid",
+        message: `确认时要带上参考仓库 ${listed} 的 SHA`,
+      };
+    }
+    const pinnedRefs = specRefs.map((ref) => ({
+      repoId: ref.repoId,
+      sha: pinById.get(ref.repoId) ?? ref.sha,
+    }));
     const access = await client.query<{
       name: string;
       host_kind: string;
@@ -189,8 +215,14 @@ export async function confirmSpec(
         };
       } | null;
     }>(
-      `SELECT DISTINCT r.name, r.host_kind, r.access FROM tickets t JOIN repos r ON r.id = t.repo_id
-       WHERE t.spec_id = $1 ORDER BY r.name`,
+      `SELECT r.name, r.host_kind, r.access FROM repos r
+       WHERE r.id IN (
+         SELECT t.repo_id FROM tickets t WHERE t.spec_id = $1
+         UNION
+         SELECT (ref->>'repoId')::int FROM specs s, jsonb_array_elements(s.refs) AS ref
+         WHERE s.id = $1
+       )
+       ORDER BY r.name`,
       [specId],
     );
     const red = access.rows
@@ -230,12 +262,13 @@ export async function confirmSpec(
       branch,
     }));
     await client.query(
-      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4 WHERE id = $1",
+      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4, refs = $5::jsonb WHERE id = $1",
       [
         specId,
         running.state,
         JSON.stringify(storedBranches),
         planning?.patch ? planning.patch : null,
+        JSON.stringify(pinnedRefs),
       ],
     );
     if (planning_repo_id !== null) await enqueuePlanningCommit(client, specId);

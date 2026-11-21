@@ -237,7 +237,7 @@ await runWorker({
   host: {
     adapter: hostAdapter,
     repoRef: hostRepoRef,
-    checkAccess: async (repo: RepoRef) => {
+    checkAccess: async (repo: RepoRef, mode) => {
       const host = repo.host;
       if (host && gitlabHosts.has(host)) {
         const file = gitlabFiles.find((row) => row.host === host);
@@ -248,11 +248,12 @@ await runWorker({
             apiUrl: `https://${host}/api/v4`,
           },
           repo,
+          mode,
         );
       }
       if (!credentials)
         throw new Error("this worker has no GitHub App credentials");
-      return checkAppAccess({ credentials }, repo);
+      return checkAppAccess({ credentials }, repo, mode);
     },
   },
   executor: {

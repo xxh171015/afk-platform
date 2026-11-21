@@ -1,4 +1,8 @@
-export type { AppAccess, SetupFiles } from "./app-access.ts";
+export type {
+  AccessCheckOptions,
+  AppAccess,
+  SetupFiles,
+} from "./app-access.ts";
 export { checkAppAccess, SETUP_FILES } from "./app-access.ts";
 export { adapterByHost, hostRepoRef, tokensByHost } from "./by-host.ts";
 export { defaultCredentialsDir, loadAppCredentials } from "./credentials.ts";

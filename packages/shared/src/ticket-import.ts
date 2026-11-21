@@ -63,6 +63,7 @@ export interface PlannedTicket {
 export interface ImportRepo {
   id: number;
   contractPath: string | null;
+  reference?: boolean;
 }
 
 // Both ends are the file's local keys; the caller swaps them for ticket ids.
@@ -138,6 +139,7 @@ export function planImport(
   existing?: ExistingGraph,
   specBody = "",
   concurrency?: number,
+  specRefNames: ReadonlySet<string> = new Set(),
 ): ImportPlan {
   const parsed = ImportFileSchema.safeParse(input);
   if (!parsed.success) {
@@ -246,6 +248,10 @@ export function planImport(
       errors.push(
         `${where}: repo ${ticket.repo} does not belong to the project (its repos: ${[...repos.keys()].join(", ")}); if it is another repo, set it up with the afk-setup skill (its checkout is a workspace folder), then import again`,
       );
+    } else if (repos.get(ticket.repo)?.reference) {
+      errors.push(
+        `${where}: repo ${ticket.repo} is a reference repo; tickets can only name it in refs`,
+      );
     }
     for (const key of ticket.blocked_by)
       addEdge(key, ticket.key, "blocks", where);
@@ -257,6 +263,10 @@ export function planImport(
     for (const name of ticket.refs) {
       if (!repos.has(name)) {
         errors.push(`${where}: refs ${name} does not belong to the project`);
+      } else if (repos.get(name)?.reference && !specRefNames.has(name)) {
+        errors.push(
+          `${where}: refs ${name} is a reference repo not on this spec; add it with plat spec edit ${formatDisplayId("spec", specId)} --ref ${name}`,
+        );
       }
     }
     const unknownStories = [...new Set(ticket.stories)].filter(

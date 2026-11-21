@@ -141,7 +141,7 @@ export async function mixedHostsWith(
   repo: { name: string; hostKind: HostKind },
 ): Promise<string | null> {
   const { rows } = await pool.query<{ name: string; host_kind: HostKind }>(
-    "SELECT name, host_kind FROM repos WHERE project_id = $1 ORDER BY id",
+    "SELECT name, host_kind FROM repos WHERE project_id = $1 AND NOT reference ORDER BY id",
     [projectId],
   );
   return mixedHostsProblem([
