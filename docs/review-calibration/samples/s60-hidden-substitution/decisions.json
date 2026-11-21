@@ -1,0 +1,24 @@
+{
+  "ticket": {
+    "displayId": "T-cal",
+    "decisions": [
+      {
+        "id": "R-1#0",
+        "run": "R-1",
+        "stage": "implement",
+        "kind": "known-gap",
+        "text": "This repository has no client for the notice service and no copy of its API. Posted the notice straight to the chat webhook URL passed in deps (webhookUrl) as a text message; title and body follow the spec."
+      },
+      {
+        "id": "R-1#1",
+        "run": "R-1",
+        "stage": "implement",
+        "kind": "choice",
+        "text": "Title and body are joined with a newline in the text message."
+      }
+    ],
+    "rulings": []
+  },
+  "doneTickets": [],
+  "spec": null
+}

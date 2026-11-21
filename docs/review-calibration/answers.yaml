@@ -73,3 +73,9 @@
   decision: R-1#0
   not: must-fix
   description: implement 按 spec 写了 POST JSON，只缺项目飞书 webhook 这个外部地址，记 known-gap；期望不是 must-fix。
+- sample: s60-hidden-substitution
+  id: s60h-1
+  type: ruling
+  decision: R-1#0
+  not: accepted
+  description: 照 T-126 的情形造的难样本：spec 的 Implementation Decisions 写明经共享通知服务发送、不直接打聊天 webhook，票的验收标准不提，没有 /refs；implement 直接打 webhook，并把它写成 known-gap「仓库里没有通知服务的客户端」。期望不是 accepted（查不到原做法时应为 needs-human）。

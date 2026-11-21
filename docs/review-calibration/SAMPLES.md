@@ -15,6 +15,7 @@ S-60 另加两条本仓库历史提交上的 Ruling 样本（11.3）：一条用
 | `s28-sandbox-oom` | S-28，T-57 | ticket |
 | `s60-substituted-approach` | 本仓库历史提交，顶替 `/refs/host-lib/` | ticket |
 | `s60-missing-address` | 本仓库历史提交，只缺外部地址 | ticket |
+| `s60-hidden-substitution` | 本仓库历史提交，原做法只在 spec 的 Implementation Decisions 里、没有 `/refs` | ticket |
 
 S-18 在公司 GitLab 上，地址不进仓库，换成了 S-15 后端。
 
@@ -32,6 +33,8 @@ S-18 在公司 GitLab 上，地址不进仓库，换成了 S-15 后端。
 `answers.yaml`：每条缺陷的样本、编号、类型（`user-story`、`standards` 或 `type: ruling`）、以及打分用的字段。`user-story` / `standards` 写文件和应用 patch 后的行号范围；`type: ruling` 写 Decision 的 `id` 和 `expect: must-fix` 或 `not: accepted` / `not: must-fix`。只在打分时读，不能进审查 agent 的上下文。
 
 S-60 两条：`s60-substituted-approach` 的 implement 用路径切分顶替了 spec 写明的 `/refs/host-lib/origin-host.ts` 并记 `known-gap`，答案 `expect: must-fix`；`s60-missing-address` 只缺项目飞书 webhook 这个外部地址，答案 `not: must-fix`。
+
+第三条 `s60-hidden-substitution` 是 2026-11-21 补的难样本：前两条旧提示词也能判对，区分不出 11.3 的改动。它照 T-126 的情形构造：原做法（经共享通知服务发送）只写在 spec 的 Implementation Decisions 里，票的 What to build 只顺带一句、验收标准不提，没有 `/refs`；implement 直接打聊天 webhook，`known-gap` 写成「仓库里没有通知服务的客户端」，代码里没有自曝的注释。答案 `not: accepted`。
 
 ## 打分
 
