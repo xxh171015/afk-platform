@@ -1003,6 +1003,21 @@ describe("the prompts", () => {
       expect(overlay).toContain(word);
   });
 
+  it("tells the rendered implement prompt, including the overlay, what /refs/<名字>/ is and to record a known-gap when it is missing", () => {
+    const overlay = readFileSync(OVERLAY_FILE, "utf8");
+    const prompt = composePrompt(promptFor("implement"));
+    expect(prompt.startsWith(overlay.trimEnd())).toBe(true);
+    expect(overlay).toContain("/refs/<名字>/");
+    expect(overlay).toContain("只读参考仓库快照");
+    expect(overlay).toContain("与某系统一致");
+    expect(overlay).toContain("跟随某仓库");
+    expect(overlay).toContain("known-gap");
+    expect(overlay).toContain("查过什么");
+    expect(prompt).toContain("/refs/<名字>/");
+    expect(prompt).toContain("只读参考仓库快照");
+    expect(prompt).toContain("查过什么");
+  });
+
   it("tells review that conservative means must-fix, and that a new test passing first time did not test new behaviour", () => {
     const overlay = readFileSync(OVERLAY_FILE, "utf8");
     expect(overlaySkillsSha(overlay)).toBe(SKILLS_SHA);
@@ -1259,6 +1274,28 @@ describe("the prompts", () => {
     expect(readFileSync(PROMPTS.finalReviewSpec, "utf8")).toContain(
       "不要写进 `mustFix`",
     );
+  });
+
+  it("tells the rendered ticket Spec-axis review that substituting a written approach cannot be accepted", () => {
+    const prompt = composePrompt(promptFor("review", { axis: "spec" }));
+    expect(prompt).toContain(
+      "用另一种做法顶替了 spec、票或契约写明的做法时，不能判 `accepted`",
+    );
+    expect(prompt).toContain("在 `/refs` 或仓库里查得到原做法的判 `must-fix`");
+    expect(prompt).toContain("查不到的判 `needs-human`");
+    expect(prompt).toContain("在 `uncertainties` 里写出顶替的是哪一句");
+    expect(prompt).toContain("缺配置值或外部地址");
+  });
+
+  it("tells the rendered wrap-up Spec-axis review the same substitution ruling as the ticket Spec axis", () => {
+    const prompt = composePrompt(promptFor("final-review", { axis: "spec" }));
+    expect(prompt).toContain(
+      "用另一种做法顶替了 spec、票或契约写明的做法时，不能判 `accepted`",
+    );
+    expect(prompt).toContain("在 `/refs` 或仓库里查得到原做法的判 `must-fix`");
+    expect(prompt).toContain("查不到的判 `needs-human`");
+    expect(prompt).toContain("在 `uncertainties` 里写出顶替的是哪一句");
+    expect(prompt).toContain("缺配置值或外部地址");
   });
 
   it("makes the reviews run code-review from the fixed point in run.json", () => {
