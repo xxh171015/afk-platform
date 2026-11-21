@@ -1537,6 +1537,32 @@ describe("the tickets page", () => {
 });
 
 describe("confirming the split", () => {
+  it("shows reference repos and their pinned SHAs", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: {
+              refs: [
+                {
+                  repoId: 9,
+                  name: "payments",
+                  url: "https://github.com/acme/payments.git",
+                  reference: true,
+                  sha: "abcdef1234567890abcdef1234567890abcdef12",
+                },
+              ],
+            },
+          }),
+        }),
+      }),
+    );
+    expect(await screen.findByText("参考仓库")).toBeTruthy();
+    expect(screen.getByText("payments")).toBeTruthy();
+    expect(screen.getByText("abcdef1")).toBeTruthy();
+  });
+
   // a spec that goes from draft to running when confirmed, like the real API
   function confirmable() {
     let confirmed = false;

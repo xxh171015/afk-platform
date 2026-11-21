@@ -167,6 +167,28 @@ describe("renderTrackerDoc", () => {
     expect(noContract).not.toContain("Several repos");
   });
 
+  it("does not treat a reference repo as making the project multi-repo, and the platform part explains reference repos", () => {
+    const doc = renderTrackerDoc(
+      {
+        id: 3,
+        name: "shop",
+        repos: [
+          repo("backend", "https://github.com/acme/backend.git"),
+          {
+            ...repo("payments", "https://github.com/acme/payments.git"),
+            reference: true,
+          },
+        ],
+      },
+      "backend",
+    );
+    expect(doc).not.toContain("Integration tickets");
+    expect(doc).not.toContain("Several repos");
+    expect(doc).toMatch(/## On the platform/);
+    expect(doc).toContain("--ref");
+    expect(doc).toMatch(/reference repo/i);
+  });
+
   it("adds the integration rules for any project of several repos, contract or not", () => {
     const noContract = renderTrackerDoc(
       {

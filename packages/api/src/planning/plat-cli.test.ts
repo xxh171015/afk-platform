@@ -314,7 +314,7 @@ describe("plat", () => {
     );
     const created = await createSpecFrom(body);
     expect(created.code).toBe(0);
-    expect(created.stdout).toBe("S-1\n");
+    expect(created.stdout).toBe("S-1\n参考仓库：无\n");
     expect(created.stderr).toContain("warning: the spec has no ## Solution");
     expect(created.stderr).toContain(
       "warning: the spec has no ## Out of Scope",
@@ -395,7 +395,11 @@ describe("plat", () => {
 
   it("walks project create, repo add, spec create and tickets import", async () => {
     const spec = await register();
-    expect(spec).toEqual({ code: 0, stdout: "S-1\n", stderr: "" });
+    expect(spec).toEqual({
+      code: 0,
+      stdout: "S-1\n参考仓库：无\n",
+      stderr: "",
+    });
     const stored = await db.pool.query("SELECT slug, body FROM specs");
     expect(stored.rows[0]).toEqual({ slug: "order-export", body: SPEC_BODY });
 
@@ -1798,7 +1802,7 @@ describe("plat spec create --source", () => {
       "S-1",
     );
     expect(created.code).toBe(0);
-    expect(created.stdout).toBe("S-2\n");
+    expect(created.stdout).toBe("S-2\n参考仓库：无\n");
     const view = (await (await fetch(`${api.url}/specs/2`)).json()) as {
       spec: { sourceSpec: { displayId: string } | null };
     };

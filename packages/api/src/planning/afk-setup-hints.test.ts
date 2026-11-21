@@ -46,7 +46,7 @@ describe("a repo not set up for the platform", () => {
     const created = await createSpec(backend.dir);
 
     expect(created.code).toBe(0);
-    expect(created.stdout).toBe("S-1\n");
+    expect(created.stdout).toBe("S-1\n参考仓库：无\n");
     expect(created.stderr).toContain(
       "this repo is not set up for the platform (no docs/agents/issue-tracker.md): run the afk-setup skill",
     );

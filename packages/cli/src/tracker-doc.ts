@@ -20,6 +20,7 @@ export interface TrackerDocProject {
     defaultBranch: string;
     contractPath: string | null;
     hostKind: HostKind;
+    reference?: boolean;
   }[];
 }
 
@@ -66,6 +67,24 @@ const fill = (text: string, values: Record<string, string>): string =>
     return value;
   });
 
+export function withRepoReferenceFlags(
+  project: TrackerDocProject,
+  repos: { projectId: number; name: string; reference: boolean }[],
+): TrackerDocProject {
+  const flags = new Map(
+    repos
+      .filter((repo) => repo.projectId === project.id)
+      .map((repo) => [repo.name, repo.reference]),
+  );
+  return {
+    ...project,
+    repos: project.repos.map((repo) => ({
+      ...repo,
+      reference: repo.reference ?? flags.get(repo.name) ?? false,
+    })),
+  };
+}
+
 export function renderTrackerDoc(
   project: TrackerDocProject,
   repoName: string,
@@ -78,11 +97,12 @@ export function renderTrackerDoc(
     );
   }
   const host = HOSTS[repo.hostKind];
+  const ticketRepos = project.repos.filter((r) => r.reference !== true);
   const values = {
     PROJECT: String(project.id),
     REPO: repo.name,
-    REPOS: names(project.repos),
-    CONTRACT_REPOS: names(project.repos.filter((r) => r.contractPath)),
+    REPOS: names(ticketRepos),
+    CONTRACT_REPOS: names(ticketRepos.filter((r) => r.contractPath)),
     HOST_NAME: host.name,
     HOST_CLI: host.cli,
     HOST_PR: pullPhrase(repo.hostKind),
@@ -91,13 +111,13 @@ export function renderTrackerDoc(
     PROTECTED_EXAMPLE: host.protectedExample,
   };
   const crossRepo =
-    project.repos.length > 1 && project.repos.some((r) => r.contractPath);
+    ticketRepos.length > 1 && ticketRepos.some((r) => r.contractPath);
   const parts = [
     `<!-- plat tracker-doc ${PLATFORM_VERSION} skills mattpocock/skills@${SKILLS_SHA} project ${project.id} repo ${repo.name} -->`,
     fill(template("routing"), values).trim(),
     fill(template("platform"), values).trim(),
     ...(crossRepo ? [fill(template("multi-repo"), values).trim()] : []),
-    ...(project.repos.length > 1
+    ...(ticketRepos.length > 1
       ? [fill(template("integration"), values).trim()]
       : []),
     `## On ${host.name} (\`${host.cli}\`)\n\n${readSkillSnapshot(host.seed).trim()}`,

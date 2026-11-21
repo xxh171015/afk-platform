@@ -160,6 +160,33 @@ export function Overview({
             )}
           </dd>
         </div>
+        <div data-testid="spec-refs">
+          <dt className="text-xs text-muted-foreground">参考仓库</dt>
+          <dd className="mt-1 flex flex-col gap-1">
+            {(spec.refs ?? []).length === 0 ? (
+              <span className="text-muted-foreground">无</span>
+            ) : (
+              (spec.refs ?? []).map((ref) => (
+                <span
+                  key={ref.repoId}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span className="font-mono text-[11px]">{ref.name}</span>
+                  {ref.sha ? (
+                    <ShaChip
+                      sha={ref.sha}
+                      href={commitHtmlUrl(ref.url, ref.sha)}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      确认时钉住
+                    </span>
+                  )}
+                </span>
+              ))
+            )}
+          </dd>
+        </div>
         <div
           id={draft ? undefined : "flow-confirm"}
           className={draft ? undefined : "scroll-mt-6"}

@@ -4,5 +4,6 @@
 - One spec can change several repos; every ticket's `repo:` is the repo's name on the platform ({{REPOS}}).
 - The contract belongs to the repo that provides it ({{CONTRACT_REPOS}}); a ticket that uses it writes
   `contract: <key of the contract ticket>`, and may do so across repos.
-- To read another repo's code without changing it, a ticket writes `refs: [<repo>]`.
+- To read another repo's code without changing it, see **Reference repos** in the platform part above; a ticket may
+  still write `refs: [<repo>]` for a project repo.
 - Each repo's tickets only change that repo's `modules`; field names and interface shapes that cross repos go in the spec.
