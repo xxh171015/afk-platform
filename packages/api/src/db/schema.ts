@@ -104,6 +104,8 @@ export const repos = pgTable(
     hostKind: text("host_kind").notNull().default("github"),
     // The last check of the bot's access to the repo, and when a new one was asked for (host/repo-access.ts).
     access: jsonb("access"),
+    // A reference repo is read-only: it cannot be a ticket's repo, and does not count toward mixed-host rules.
+    reference: boolean("reference").notNull().default(false),
     createdAt: createdAt(),
   },
   // The name (backend, frontend) is how a ticket file names a repo (its `repo` field), so it is unique within a project.
@@ -228,6 +230,8 @@ export const specs = pgTable(
     // failed when a person has to retry or fill the source by hand. Null on specs that never located.
     locateState: text("locate_state"),
     locateReason: text("locate_reason"),
+    // Spec-level reference repos: [{ repoId, sha }]. sha is null until confirm or refresh.
+    refs: jsonb("refs").notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [

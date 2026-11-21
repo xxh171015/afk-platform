@@ -234,5 +234,6 @@ export const HUMAN_ACTIONS = [
   "retry-locate",
   "takeover",
   "handback",
+  "edit-refs",
 ] as const;
 export type HumanAction = (typeof HUMAN_ACTIONS)[number];

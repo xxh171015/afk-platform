@@ -520,6 +520,7 @@ const HostTask = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("repo-access"),
     repoUrl: z.string(),
+    reference: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal("index-pr-links"),

@@ -96,6 +96,8 @@ function actionText(
       return ticket ? `人接手 ${ticket}` : "人接手";
     case "handback":
       return ticket ? `交回 ${ticket}` : "交回";
+    case "edit-refs":
+      return "改参考仓库";
     default:
       return action;
   }

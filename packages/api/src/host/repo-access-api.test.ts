@@ -124,6 +124,45 @@ describe("the GitHub App's access to a repo", () => {
     expect((await worker.claim()).body.job).toBeNull();
   });
 
+  it("tells the worker a reference repo only needs read access", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+    );
+    await ws.plat(backend.dir, ["init", "--yes"]);
+    const first = await claimAccessJob();
+    await worker.complete(first.job.id, first.job.attempt, {
+      stage: "repo-access",
+      state: "ok",
+    });
+
+    const project = await fetch(`${ws.api.url}/projects`).then((r) => r.json());
+    const spec = await fetch(`${ws.api.url}/specs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: project.projects[0].id,
+        type: "feature",
+        slug: "with-ref",
+        title: "With ref",
+        refs: [
+          {
+            url: "https://github.com/acme/payments.git",
+            defaultBranch: "main",
+          },
+        ],
+      }),
+    }).then(async (r) => ({ status: r.status, body: await r.json() }));
+    expect(spec.status).toBe(201);
+
+    const { task } = await claimAccessJob();
+    expect(task).toEqual({
+      kind: "repo-access",
+      repoUrl: "https://github.com/acme/payments.git",
+      reference: true,
+    });
+  });
+
   it("says when no worker has answered yet", async () => {
     const backend = ws.checkout(
       "backend",

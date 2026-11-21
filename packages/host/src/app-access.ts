@@ -14,6 +14,12 @@ const NEEDED: Required<TokenPermissions> = {
   statuses: "read",
 };
 
+const NEEDED_READ: TokenPermissions = {
+  contents: "read",
+};
+
+export type AccessCheckOptions = { readOnly?: boolean };
+
 // The files of a repo's setup that the platform reads from its default branch or afk/setup.
 export const SETUP_FILES = {
   gates: ".sandcastle/gates.yaml",
@@ -30,6 +36,7 @@ export type AppAccess =
 export async function checkAppAccess(
   options: AppTokenOptions,
   repo: RepoRef,
+  access: AccessCheckOptions = {},
 ): Promise<AppAccess> {
   const apiUrl = options.apiUrl ?? "https://api.github.com";
   const doFetch = options.fetch ?? fetch;
@@ -87,7 +94,8 @@ export async function checkAppAccess(
       token.status,
     );
 
-  const missing = Object.entries(NEEDED)
+  const needed = access.readOnly ? NEEDED_READ : NEEDED;
+  const missing = Object.entries(needed)
     .filter(([name, level]) => {
       const granted = permissions[name];
       return level === "write" ? granted !== "write" : !granted;

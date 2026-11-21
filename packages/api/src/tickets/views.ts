@@ -847,7 +847,7 @@ export async function specView(
   const spec = await pool.query(
     `SELECT s.id, s.project_id, s.slug, s.title, s.type, s.state, s.pause_reason, s.integration_branches,
             s.import_warnings, s.order_broken, s.body, s.planning_sha, r.name AS planning_repo,
-            s.planning_state, s.planning_conflict, s.token_merged, s.planning_docs_at_import,
+            s.planning_state, s.planning_conflict, s.token_merged, s.planning_docs_at_import, s.refs,
             src.id AS source_id, src.title AS source_title, src.type AS source_type
      FROM specs s
      LEFT JOIN repos r ON r.id = s.planning_repo_id
@@ -879,9 +879,11 @@ export async function specView(
     name: string;
     url: string;
     host_kind: string;
-  }>("SELECT id, name, url, host_kind FROM repos WHERE project_id = $1", [
-    row.project_id,
-  ]);
+    reference: boolean;
+  }>(
+    "SELECT id, name, url, host_kind, reference FROM repos WHERE project_id = $1",
+    [row.project_id],
+  );
   const reposById = new Map(projectRepos.rows.map((repo) => [repo.id, repo]));
   const storedBranches = row.integration_branches as {
     repoId: number;
@@ -909,6 +911,18 @@ export async function specView(
       state: row.state as SpecState,
       pauseReason: (row.pause_reason as string | null) ?? null,
       repos,
+      refs: (
+        (row.refs as { repoId: number; sha: string | null }[] | null) ?? []
+      ).map((ref) => {
+        const repo = reposById.get(ref.repoId);
+        return {
+          repoId: ref.repoId,
+          name: repo?.name ?? "",
+          url: repo?.url ?? "",
+          reference: repo?.reference ?? false,
+          sha: ref.sha ?? null,
+        };
+      }),
       integrationBranches: storedBranches.map((branch) => {
         const repo = reposById.get(branch.repoId);
         return {

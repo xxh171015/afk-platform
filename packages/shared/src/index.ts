@@ -229,6 +229,7 @@ export {
   sameRepoUrl,
   treeHtmlUrl,
   tryParseRepoUrl,
+  unknownHostProblem,
 } from "./repo-url.ts";
 export type {
   AxisReview,

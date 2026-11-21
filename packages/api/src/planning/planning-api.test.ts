@@ -27,6 +27,28 @@ interface Reply {
   warnings: { type: string; tickets: string[] }[];
   errors: string[];
   error?: string;
+  spec?: {
+    refs?: {
+      repoId: number;
+      name: string;
+      url: string;
+      reference: boolean;
+      sha: string | null;
+    }[];
+  };
+  repos?: {
+    projectId: number;
+    name: string;
+    url: string;
+    reference: boolean;
+  }[];
+  refs?: {
+    repoId: number;
+    name: string;
+    url: string;
+    reference: boolean;
+    sha: string | null;
+  }[];
 }
 
 async function post(path: string, body: unknown) {
@@ -1771,6 +1793,390 @@ describe("bug specs and the spec they came from", () => {
           pullRequestNumber: 12,
         }),
       ]),
+    );
+  });
+});
+
+async function get(path: string) {
+  const response = await fetch(`${api.url}${path}`);
+  return { status: response.status, body: (await response.json()) as Reply };
+}
+
+async function put(path: string, body: unknown) {
+  const response = await fetch(`${api.url}${path}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: (await response.json()) as Reply };
+}
+
+async function reportHosts(
+  hosts: { host: string; kind: "github" | "gitlab" }[],
+) {
+  await fetch(`${api.url}/worker/hosts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workerId: "w1", hosts }),
+  });
+}
+
+describe("spec reference repos", () => {
+  it("registers a new reference repo and reuses one already in the project, with null SHAs", async () => {
+    await reportHosts([{ host: "github.com", kind: "github" }]);
+    const project = await post("/projects", { name: "shop" });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    const created = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "with-refs",
+      title: "With refs",
+      refs: [
+        { url: "git@github.com:acme/backend.git", defaultBranch: "main" },
+        {
+          url: "https://github.com/acme/payments.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+    expect(created.status).toBe(201);
+
+    const view = await get(`/specs/${created.body.id}`);
+    expect(view.status).toBe(200);
+    expect(view.body.spec?.refs).toEqual([
+      {
+        repoId: expect.any(Number),
+        name: "backend",
+        url: "git@github.com:acme/backend.git",
+        reference: false,
+        sha: null,
+      },
+      {
+        repoId: expect.any(Number),
+        name: "payments",
+        url: "https://github.com/acme/payments.git",
+        reference: true,
+        sha: null,
+      },
+    ]);
+
+    const accessJobs = await db.pool.query<{
+      name: string;
+      reference: boolean;
+    }>(
+      `SELECT r.name, r.reference
+       FROM jobs j
+       JOIN repos r ON r.id = (j.payload->>'repoId')::int
+       WHERE j.type = 'repo-access'
+       ORDER BY r.id`,
+    );
+    expect(accessJobs.rows).toEqual([{ name: "payments", reference: true }]);
+
+    const listed = await get("/repos");
+    expect(listed.status).toBe(200);
+    expect(listed.body.repos).toEqual([
+      {
+        projectId,
+        name: "backend",
+        url: "git@github.com:acme/backend.git",
+        reference: false,
+      },
+      {
+        projectId,
+        name: "payments",
+        url: "https://github.com/acme/payments.git",
+        reference: true,
+      },
+    ]);
+  });
+
+  it("names a colliding reference repo <owner>-<name> and refuses an unregistered host", async () => {
+    await reportHosts([{ host: "github.com", kind: "github" }]);
+    const project = await post("/projects", { name: "shop" });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/shop.git",
+      name: "payments",
+    });
+    const created = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "renamed-ref",
+      title: "Renamed",
+      refs: [
+        {
+          url: "https://github.com/acme/payments.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const view = await get(`/specs/${created.body.id}`);
+    expect(view.body.spec?.refs).toEqual([
+      expect.objectContaining({
+        name: "acme-payments",
+        url: "https://github.com/acme/payments.git",
+        reference: true,
+        sha: null,
+      }),
+    ]);
+
+    const refused = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "unknown-host",
+      title: "Unknown host",
+      refs: [
+        {
+          url: "https://gitlab.example/acme/other.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/gitlab\.example/);
+    expect(refused.body.error).toMatch(/没有这台主机的凭据/);
+    expect(
+      (await db.pool.query("SELECT count(*)::int AS n FROM specs")).rows[0].n,
+    ).toBe(1);
+  });
+
+  const PIN = "0123456789abcdef0123456789abcdef01234567";
+
+  async function specWithRef() {
+    await reportHosts([{ host: "github.com", kind: "github" }]);
+    const project = await post("/projects", { name: "shop" });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    const created = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "edit-refs",
+      title: "Edit refs",
+      refs: [
+        { url: "https://github.com/acme/payments.git", defaultBranch: "main" },
+      ],
+    });
+    return {
+      projectId,
+      specId: created.body.id as number,
+      paymentsId: (await get(`/specs/${created.body.id}`)).body.spec?.refs?.[0]
+        ?.repoId as number,
+    };
+  }
+
+  it("adds a spec reference repo", async () => {
+    const { specId } = await specWithRef();
+    const added = await put(`/specs/${specId}/refs`, {
+      add: [
+        { url: "https://github.com/acme/ledger.git", defaultBranch: "main" },
+      ],
+    });
+    expect(added.status).toBe(200);
+    expect(added.body.refs?.map((r) => r.name)).toEqual(["payments", "ledger"]);
+    expect(added.body.refs?.every((r) => r.sha === null)).toBe(true);
+    const events = await db.pool.query<{
+      type: string;
+      data: { action?: string };
+    }>(
+      "SELECT type, data FROM events WHERE spec_id = $1 AND type = 'action' ORDER BY id",
+      [specId],
+    );
+    expect(events.rows.at(-1)).toMatchObject({
+      type: "action",
+      data: { action: "edit-refs" },
+    });
+  });
+
+  it("removes a spec reference repo", async () => {
+    const { specId, paymentsId } = await specWithRef();
+    const removed = await put(`/specs/${specId}/refs`, {
+      remove: [{ repoId: paymentsId }],
+    });
+    expect(removed.status).toBe(200);
+    expect(removed.body.refs).toEqual([]);
+  });
+
+  it("refreshes a spec reference repo SHA", async () => {
+    const { specId, paymentsId } = await specWithRef();
+    const refreshed = await put(`/specs/${specId}/refs`, {
+      refresh: [{ repoId: paymentsId, sha: PIN }],
+    });
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.refs).toEqual([
+      expect.objectContaining({ name: "payments", sha: PIN }),
+    ]);
+  });
+
+  it("refuses to add a reference repo without a SHA on a confirmed spec", async () => {
+    const { projectId, specId, paymentsId } = await specWithRef();
+    await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, { tickets: [ticket("a")] }),
+    );
+    expect(
+      (
+        await post(`/specs/${specId}/confirm`, {
+          refPins: [{ repoId: paymentsId, sha: PIN }],
+        })
+      ).status,
+    ).toBe(200);
+    const refused = await put(`/specs/${specId}/refs`, {
+      add: [
+        { url: "https://github.com/acme/ledger.git", defaultBranch: "main" },
+      ],
+    });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/SHA/);
+    expect(
+      (await get(`/specs/${specId}`)).body.spec?.refs?.map((r) => r.name),
+    ).toEqual(["payments"]);
+    expect(projectId).toBeGreaterThan(0);
+  });
+
+  async function confirmableSpecWithRef() {
+    const created = await specWithRef();
+    await post(
+      `/specs/${created.specId}/tickets/import`,
+      importBody(created.specId, { tickets: [ticket("a")] }),
+    );
+    return created;
+  }
+
+  it("refuses confirm when a reference repo has no SHA", async () => {
+    const { specId, paymentsId } = await confirmableSpecWithRef();
+    const refused = await post(`/specs/${specId}/confirm`, {
+      refPins: [{ repoId: paymentsId, sha: `${PIN.slice(0, 39)}g` }],
+    });
+    // invalid SHA is a 400 from the schema; missing pin is 422
+    const missing = await post(`/specs/${specId}/confirm`, { refPins: [] });
+    expect(missing.status).toBe(422);
+    expect(missing.body.error).toMatch(/SHA/);
+    expect(refused.status).toBe(400);
+    expect(
+      (await get(`/specs/${specId}`)).body.spec?.refs?.[0]?.sha,
+    ).toBeNull();
+  });
+
+  it("refuses confirm when a reference repo's read access is red", async () => {
+    const { specId, paymentsId } = await confirmableSpecWithRef();
+    await db.pool.query(`UPDATE repos SET access = $2::jsonb WHERE id = $1`, [
+      paymentsId,
+      JSON.stringify({
+        last: {
+          state: "not-member",
+          fix: "请项目 Maintainer 把〈alice〉加为 Developer",
+          username: "alice",
+        },
+      }),
+    ]);
+    const refused = await post(`/specs/${specId}/confirm`, {
+      refPins: [{ repoId: paymentsId, sha: PIN }],
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/payments/);
+    expect(refused.body.error).toMatch(/alice/);
+  });
+
+  it("pins reference repo SHAs on confirm", async () => {
+    const { specId, paymentsId } = await confirmableSpecWithRef();
+    const confirmed = await post(`/specs/${specId}/confirm`, {
+      refPins: [{ repoId: paymentsId, sha: PIN }],
+    });
+    expect(confirmed.status).toBe(200);
+    expect((await get(`/specs/${specId}`)).body.spec?.refs).toEqual([
+      expect.objectContaining({ name: "payments", sha: PIN }),
+    ]);
+  });
+
+  it("lists every project's repos and whether they are reference repos", async () => {
+    await reportHosts([{ host: "github.com", kind: "github" }]);
+    const shop = (await post("/projects", { name: "shop" })).body.id as number;
+    const other = (await post("/projects", { name: "other" })).body
+      .id as number;
+    await post(`/projects/${shop}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    await post("/specs", {
+      projectId: other,
+      type: "feature",
+      slug: "ref-only",
+      title: "Ref only",
+      refs: [
+        { url: "https://github.com/acme/payments.git", defaultBranch: "main" },
+      ],
+    });
+    const listed = await get("/repos");
+    expect(listed.status).toBe(200);
+    expect(listed.body.repos).toEqual([
+      {
+        projectId: shop,
+        name: "backend",
+        url: "git@github.com:acme/backend.git",
+        reference: false,
+      },
+      {
+        projectId: other,
+        name: "payments",
+        url: "https://github.com/acme/payments.git",
+        reference: true,
+      },
+    ]);
+  });
+
+  it("imports a ticket whose refs name a reference repo that is on the spec", async () => {
+    const { specId } = await specWithRef();
+    const imported = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, { tickets: [ticket("a", { refs: ["payments"] })] }),
+    );
+    expect(imported.status).toBe(200);
+    expect(imported.body.tickets?.map((t) => t.key)).toEqual(["a"]);
+  });
+
+  it("refuses to import a ticket whose repo is a reference repo", async () => {
+    const { specId } = await specWithRef();
+    const refused = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("a", { repo: "payments" })],
+      }),
+    );
+    expect(refused.status).toBe(422);
+    expect(refused.body.errors.join("\n")).toMatch(/payments/);
+    expect(refused.body.errors.join("\n")).toMatch(/reference repo/);
+    expect(refused.body.errors.join("\n")).toMatch(/refs/);
+  });
+
+  it("refuses ticket refs that name a reference repo not on the spec, and gives plat spec edit", async () => {
+    const { projectId, specId } = await specWithRef();
+    await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "other-spec",
+      title: "Other",
+      refs: [
+        { url: "https://github.com/acme/ledger.git", defaultBranch: "main" },
+      ],
+    });
+    const refused = await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, {
+        tickets: [ticket("a", { refs: ["ledger"] })],
+      }),
+    );
+    expect(refused.status).toBe(422);
+    expect(refused.body.errors.join("\n")).toMatch(/ledger/);
+    expect(refused.body.errors.join("\n")).toMatch(
+      `plat spec edit S-${specId} --ref ledger`,
     );
   });
 });

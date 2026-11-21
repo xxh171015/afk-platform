@@ -133,6 +133,14 @@ const RepoIdentity = z.object({
   hostKind: z.enum(HOST_KINDS),
 });
 
+const SpecRefView = z.object({
+  repoId: Id,
+  name: z.string(),
+  url: z.string(),
+  reference: z.boolean(),
+  sha: z.string().nullable(),
+});
+
 const Blocking = z.object({
   downstream: z.array(z.string()),
   finalization: z.boolean(),
@@ -354,6 +362,7 @@ const specRoute = createRoute({
           state: z.enum(SPEC_STATES),
           pauseReason: z.string().nullable(),
           repos: z.array(RepoIdentity),
+          refs: z.array(SpecRefView),
           integrationBranches: z.array(
             z.object({
               repoId: Id,

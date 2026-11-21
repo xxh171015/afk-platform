@@ -154,7 +154,10 @@ export async function submitBug(
     });
     if (created.status === "no-project") return created;
     if (created.status === "no-repo") return created;
-    if (created.status === "invalid-source") {
+    if (
+      created.status === "invalid-source" ||
+      created.status === "unknown-host"
+    ) {
       return { status: "invalid", message: created.message };
     }
     if (created.status === "slug-taken") continue;

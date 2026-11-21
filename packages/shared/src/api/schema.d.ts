@@ -1089,6 +1089,10 @@ export interface paths {
             body?: string;
             planningRepo?: string;
             sourceSpecId?: number;
+            refs?: {
+              url: string;
+              defaultBranch: string;
+            }[];
           };
         };
       };
@@ -1127,7 +1131,7 @@ export interface paths {
             };
           };
         };
-        /** @description The project has no repo of that name, or the source spec is not allowed */
+        /** @description The project has no repo of that name, the source spec is not allowed, or a reference repo is on a host the platform has no credentials for */
         422: {
           headers: {
             [name: string]: unknown;
@@ -1140,6 +1144,143 @@ export interface paths {
         };
       };
     };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/specs/{specId}/refs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          specId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            add?: {
+              url: string;
+              defaultBranch: string;
+              sha?: string;
+            }[];
+            remove?: {
+              repoId: number;
+            }[];
+            refresh?: {
+              repoId: number;
+              sha: string;
+            }[];
+          };
+        };
+      };
+      responses: {
+        /** @description The spec's reference repos after the change */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              refs: {
+                repoId: number;
+                name: string;
+                url: string;
+                reference: boolean;
+                sha: string | null;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec cannot be edited in this state */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description A SHA is required, a host is unknown, or a repo is not on the spec */
+        422: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/repos": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Every project's repos, including whether each is a reference repo */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              repos: {
+                projectId: number;
+                name: string;
+                url: string;
+                reference: boolean;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1483,6 +1624,10 @@ export interface paths {
         content: {
           "application/json": {
             planningPatch?: string;
+            refPins?: {
+              repoId: number;
+              sha: string;
+            }[];
           };
         };
       };
@@ -2338,6 +2483,7 @@ export interface paths {
                   /** @enum {string} */
                   kind: "repo-access";
                   repoUrl: string;
+                  reference?: boolean;
                 }
               | {
                   /** @enum {string} */
@@ -3394,6 +3540,13 @@ export interface paths {
                   url: string;
                   /** @enum {string} */
                   hostKind: "github" | "gitlab";
+                }[];
+                refs: {
+                  repoId: number;
+                  name: string;
+                  url: string;
+                  reference: boolean;
+                  sha: string | null;
                 }[];
                 integrationBranches: {
                   repoId: number;

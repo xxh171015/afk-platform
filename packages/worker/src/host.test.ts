@@ -1032,6 +1032,31 @@ describe("a repo-access task", () => {
     });
   });
 
+  it("asks for read-only access when the repo is a reference repo", async () => {
+    const asked: unknown[] = [];
+    const result = await runHostTask(
+      {
+        adapter,
+        checkAccess: async (repo, mode) => {
+          asked.push({ repo, mode });
+          return {
+            state: "ok",
+            files: { gates: false, integrationCompose: false },
+          };
+        },
+      },
+      { ...task, reference: true },
+      log,
+    );
+    expect(asked).toEqual([
+      {
+        repo: { owner: "me", name: "pilot" },
+        mode: { readOnly: true },
+      },
+    ]);
+    expect(result).toMatchObject({ stage: "repo-access", state: "ok" });
+  });
+
   it("fails the job when GitHub cannot be asked", async () => {
     const failing = runHostTask(
       {
