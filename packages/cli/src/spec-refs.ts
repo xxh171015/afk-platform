@@ -138,17 +138,36 @@ export function resolveSpecRef(
   return { url: named.url, defaultBranch: named.defaultBranch };
 }
 
-export function lsRemoteSha(url: string, defaultBranch: string): string {
-  const result = git(process.cwd(), [
-    "ls-remote",
-    url,
-    `refs/heads/${defaultBranch}`,
-  ]);
-  const sha = /^([0-9a-f]{40})\b/i.exec(result.out)?.[1];
-  if (!result.ok || !sha) {
-    throw new SpecRefError(`could not read ${url} refs/heads/${defaultBranch}`);
+function shaOf(result: { ok: boolean; out: string }): string | undefined {
+  if (!result.ok) return undefined;
+  return /^([0-9a-f]{40})\b/i.exec(result.out)?.[1]?.toLowerCase();
+}
+
+// The tip of `url`'s default branch on the remote. When this machine cannot read `url` itself (an https address whose
+// credentials live in a keychain that a remote shell cannot open, say), a checkout of the same repo next to the
+// planning repo is asked instead: `git ls-remote origin` there reads the same remote through that checkout's own
+// address (often ssh), not the checkout's possibly stale local branch.
+export function lsRemoteSha(
+  url: string,
+  defaultBranch: string,
+  cwd: string = process.cwd(),
+): string {
+  const branch = `refs/heads/${defaultBranch}`;
+  const direct = shaOf(git(cwd, ["ls-remote", url, branch]));
+  if (direct) return direct;
+  const wanted = canonicalUrl(url).toLowerCase();
+  for (const checkout of siblingGitCheckouts(cwd)) {
+    // The address as configured, before any insteadOf rewrite, is what the platform registered.
+    const origin = git(checkout.dir, ["config", "--get", "remote.origin.url"]);
+    if (!origin.ok || canonicalUrl(origin.out).toLowerCase() !== wanted) {
+      continue;
+    }
+    const viaOrigin = shaOf(git(checkout.dir, ["ls-remote", "origin", branch]));
+    if (viaOrigin) return viaOrigin;
   }
-  return sha.toLowerCase();
+  throw new SpecRefError(
+    `could not read ${url} ${branch}, directly or through the origin of a checkout of it next to the planning repo`,
+  );
 }
 
 export type SpecRefView = {

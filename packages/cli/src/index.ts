@@ -1824,7 +1824,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             url: resolved.url,
             defaultBranch: resolved.defaultBranch,
             ...(confirmed
-              ? { sha: lsRemoteSha(resolved.url, resolved.defaultBranch) }
+              ? {
+                  sha: lsRemoteSha(resolved.url, resolved.defaultBranch, cwd),
+                }
               : {}),
           });
         }
@@ -1860,7 +1862,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             )?.defaultBranch ?? "main";
           refresh.push({
             repoId: ref.repoId,
-            sha: lsRemoteSha(ref.url, defaultBranch),
+            sha: lsRemoteSha(ref.url, defaultBranch, cwd),
           });
         }
       } catch (error) {
@@ -1900,16 +1902,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (!view.data) throw failureFrom(view.response, view.error);
       const planningRepo = view.data.spec.planning.repo;
       const specRefs = view.data.spec.refs ?? [];
+      const cwd = io.cwd ?? process.cwd();
       const project = await api().GET("/projects/{projectId}", {
         params: { path: { projectId: view.data.spec.projectId } },
       });
       let docs: ReturnType<typeof readPlanningDocs> = { status: "elsewhere" };
       if (planningRepo !== null && project.data) {
-        docs = readPlanningDocs(
-          io.cwd ?? process.cwd(),
-          project.data.repos,
-          planningRepo,
-        );
+        docs = readPlanningDocs(cwd, project.data.repos, planningRepo);
       }
       if (docs.status === "other-repo") {
         throw new Failure(
@@ -1968,7 +1967,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         try {
           refPins.push({
             repoId: ref.repoId,
-            sha: lsRemoteSha(ref.url, defaultBranch),
+            sha: lsRemoteSha(ref.url, defaultBranch, cwd),
           });
         } catch (error) {
           throw new Failure(
