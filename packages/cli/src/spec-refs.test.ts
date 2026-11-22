@@ -254,6 +254,95 @@ describe("plat spec confirm refPins", () => {
     ]);
   });
 
+  it("pins through the origin of a sibling checkout when the registered address cannot be read", async () => {
+    const { root, bare } = bareAndClone();
+    temps.push(root);
+    const sha = git(bare, ["rev-parse", "HEAD"]);
+    // The planning repo, and next to it a checkout of the reference repo whose origin is an ssh address that only
+    // this checkout can reach (insteadOf stands in for the person's ssh key).
+    const planning = join(root, "planning");
+    git(root, ["init", "-b", "main", "planning"]);
+    const sibling = join(root, "web-ui");
+    git(root, ["clone", bare, sibling]);
+    const sshOrigin = "git@example.invalid:team/web-ui.git";
+    git(sibling, ["remote", "set-url", "origin", sshOrigin]);
+    git(sibling, ["config", `url.${bare}.insteadOf`, sshOrigin]);
+    const registered = "https://example.invalid/team/web-ui.git";
+    const confirmed: unknown[] = [];
+    server = createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      void (async () => {
+        const body = await captureBody(req);
+        if (req.method === "GET" && req.url === "/specs/7") {
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify(
+              specView({
+                refs: [
+                  {
+                    repoId: 9,
+                    name: "web-ui",
+                    url: registered,
+                    reference: true,
+                    sha: null,
+                  },
+                ],
+              }),
+            ),
+          );
+          return;
+        }
+        if (req.method === "GET" && req.url === "/projects/3") {
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify({
+              id: 3,
+              name: "shop",
+              repos: [
+                {
+                  name: "web-ui",
+                  url: registered,
+                  defaultBranch: "main",
+                  contractPath: null,
+                  hostKind: "gitlab",
+                },
+              ],
+            }),
+          );
+          return;
+        }
+        if (req.method === "POST" && req.url === "/specs/7/confirm") {
+          confirmed.push(body);
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify({
+              state: "running",
+              integrationBranches: [],
+              enqueued: [],
+            }),
+          );
+          return;
+        }
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "no" }));
+      })();
+    });
+    await new Promise<void>((done) => server?.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const machine = ioOf({ cwd: planning });
+    const code = await run(
+      ["--api-url", url, "spec", "confirm", "S-7"],
+      machine,
+    );
+    expect(machine.err.join("")).toBe("");
+    expect(code).toBe(0);
+    expect(confirmed).toEqual([
+      expect.objectContaining({
+        refPins: [{ repoId: 9, sha }],
+      }),
+    ]);
+  });
+
   it("fails and names the reference repo when git ls-remote cannot read it", async () => {
     server = createServer((req, res) => {
       res.setHeader("content-type", "application/json");
