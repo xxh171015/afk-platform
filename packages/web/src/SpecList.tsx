@@ -66,7 +66,7 @@ function nextSort(prev: Sort, key: SortKey): Sort {
 }
 
 const GRID =
-  "grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[4.5rem_minmax(0,16rem)_9rem_5.5rem_7rem_minmax(0,1fr)_8rem_8rem]";
+  "grid-cols-[4rem_minmax(0,1fr)] md:grid-cols-[4rem_minmax(10rem,1.6fr)_7.5rem_5.5rem_6rem_minmax(7rem,1fr)_6.5rem_6.5rem]";
 
 function SortHeader({
   label,
@@ -232,20 +232,20 @@ export function SpecList() {
         />
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
+          <div className="flex flex-wrap items-center gap-2 border-y py-2.5">
             <div className="relative max-sm:w-full">
               <Search className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="搜索标题或编号…"
-                className="h-8 w-52 pl-7 text-[12px] max-sm:w-full"
+                className="h-8 w-52 border-transparent bg-surface/60 pl-7 text-[12px] shadow-none focus-visible:border-input max-sm:w-full"
                 aria-label="搜索标题或编号"
               />
             </div>
             <Select value={project} onValueChange={setProject}>
               <SelectTrigger
-                className="h-8 w-auto gap-1.5 text-[12px]"
+                className="h-8 w-auto gap-1.5 border-transparent bg-transparent text-[12px] shadow-none hover:bg-accent"
                 aria-label="按项目筛选"
               >
                 <SelectValue placeholder="项目" />
@@ -281,8 +281,11 @@ export function SpecList() {
                 <option value="progress:desc">进度降序</option>
               </select>
             </label>
+            <span className="ml-auto text-[11px] text-muted-foreground tabular">
+              已加载 {all.length} 个需求
+            </span>
             <fieldset
-              className="flex flex-wrap items-center gap-1 border-0 p-0"
+              className="order-last flex w-full flex-wrap items-center gap-1 border-0 p-0 pt-1"
               aria-label="按状态筛选"
             >
               {STATE_ORDER.map((st) => {
@@ -302,10 +305,10 @@ export function SpecList() {
                     }
                     title={st}
                     className={cn(
-                      "inline-flex h-6 items-center gap-1.5 rounded-sm border px-1.5 font-mono text-[11px] transition-colors",
+                      "inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors",
                       on
-                        ? "border-border-strong bg-accent text-foreground"
-                        : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                        ? "border-primary/25 bg-primary/10 text-primary"
+                        : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                     )}
                   >
                     {specStateLabel(st)}
@@ -353,17 +356,14 @@ export function SpecList() {
             />
           ) : (
             // biome-ignore lint/a11y/useSemanticElements: keep CSS grid + role=table
-            <div
-              className="overflow-x-auto rounded-md border bg-card text-[13px]"
-              role="table"
-            >
-              <div className="md:min-w-[1200px]">
+            <div className="overflow-x-auto text-[13px]" role="table">
+              <div className="md:min-w-[976px]">
                 {/* biome-ignore lint/a11y/useSemanticElements: keep CSS grid + role=row */}
                 {/* biome-ignore lint/a11y/useFocusableInteractive: header is not a control */}
                 <div
                   role="row"
                   className={cn(
-                    "grid items-center gap-3 border-b bg-surface px-3 py-2 text-[11px] font-medium text-muted-foreground",
+                    "grid items-center gap-3 border-b bg-surface/50 px-3 py-2 text-[11px] font-medium text-muted-foreground",
                     GRID,
                   )}
                 >

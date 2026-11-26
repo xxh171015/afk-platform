@@ -71,12 +71,12 @@ function Quadrant({
             ? "running"
             : "standard"
       }
-      className="afk-quadrant min-w-0 rounded-lg border bg-card p-4 lg:p-5"
+      className="afk-quadrant min-w-0 overflow-hidden rounded-lg border bg-card px-4 pb-2"
     >
-      <h2 className="flex h-11 items-center gap-2 border-b text-sm font-semibold">
+      <h2 className="flex h-11 items-center gap-2 border-b text-[13px] font-medium">
         {icon}
         {title}
-        <span className="ml-auto font-mono text-xs text-muted-foreground tabular">
+        <span className="ml-auto rounded-sm bg-surface px-1.5 py-0.5 text-[11px] text-muted-foreground tabular">
           {count ?? "—"}
         </span>
       </h2>
@@ -122,7 +122,7 @@ function ItemLink({
     <a
       href={href}
       {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
-      className="group block min-w-0 border-b px-2 py-3 transition-[background-color,transform] duration-150 hover:translate-x-0.5 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+      className="group block min-w-0 border-b px-2 py-3 transition-colors duration-120 last:border-b-0 hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
     >
       <div className="flex min-w-0 items-start gap-2 text-[13px]">
         <span className="max-w-[45%] shrink-0 break-all font-mono text-xs text-muted-foreground">

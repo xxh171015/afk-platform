@@ -7,9 +7,11 @@ import {
 } from "@tanstack/react-router";
 import {
   BarChart3,
+  CircleHelp,
   FileText,
   Inbox,
   LayoutDashboard,
+  Menu,
   Moon,
   PanelLeft,
   Search,
@@ -20,6 +22,13 @@ import { useEffect, useState } from "react";
 import { AgentsPausedBanner } from "./AgentsPausedBanner.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { Button } from "./components/ui/button.tsx";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from "./components/ui/sheet.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import { DiskBanner } from "./DiskBanner.tsx";
@@ -42,19 +51,23 @@ const nav = [
   { to: "/runtime", label: "运行实例", icon: Server, exact: false },
 ] as const;
 
-function ThemeToggle({ collapsed }: { collapsed: boolean }) {
-  const [theme, setTheme] = useState<Theme>("dark");
-  useEffect(() => setTheme(currentTheme()), []);
+function ThemeToggle({
+  collapsed,
+  theme,
+  onThemeChange,
+}: {
+  collapsed: boolean;
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
+}) {
   const next = theme === "dark" ? "light" : "dark";
   return (
     <button
       type="button"
-      onClick={() => {
-        applyTheme(next);
-        setTheme(next);
-      }}
+      onClick={() => onThemeChange(next)}
       className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       aria-label={theme === "dark" ? "切换到亮色" : "切换到暗色"}
+      title={theme === "dark" ? "切换到亮色" : "切换到暗色"}
     >
       {theme === "dark" ? (
         <Sun className="size-4 shrink-0" />
@@ -70,34 +83,52 @@ function Sidebar({
   collapsed,
   onToggle,
   waiting,
+  onHelp,
+  onNavigate,
+  theme,
+  onThemeChange,
+  mobile = false,
 }: {
   collapsed: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
   waiting: number;
+  onHelp: () => void;
+  onNavigate?: () => void;
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
+  mobile?: boolean;
 }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const countIncreased = useChangeFlash(waiting, true);
   return (
     <aside
       className={cn(
-        "afk-sidebar sticky top-0 flex h-screen shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-150",
-        collapsed ? "w-[56px]" : "w-[224px]",
+        "afk-sidebar shrink-0 flex-col bg-sidebar transition-[width] duration-150",
+        mobile
+          ? "flex h-full w-full"
+          : "sticky top-0 hidden h-dvh border-r border-sidebar-border sm:flex",
+        !mobile && (collapsed ? "w-[56px]" : "w-[216px]"),
       )}
     >
-      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-        <img src="/icon.png" alt="" className="size-8 shrink-0 rounded-sm" />
+      <div className="flex h-14 shrink-0 items-center gap-2.5 px-4">
+        <img src="/icon.png" alt="" className="size-6 shrink-0 rounded-md" />
         {!collapsed && (
           <span className="min-w-0">
-            <strong className="block truncate text-[15px] leading-tight tracking-[0.08em]">
+            <strong className="block truncate text-[13px] font-semibold leading-tight">
               AFK
             </strong>
-            <span className="block text-[10px] tracking-[0.16em] text-muted-foreground">
-              CONTROL TOWER
+            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+              研发工作区
             </span>
           </span>
         )}
       </div>
-      <nav className="flex-1 space-y-1 p-3" aria-label="主导航">
+      <nav className="flex-1 space-y-0.5 px-2 py-3" aria-label="主导航">
+        {!collapsed && (
+          <p className="mb-2 px-2 text-[11px] font-medium text-muted-foreground">
+            工作区
+          </p>
+        )}
         {nav.map((item) => {
           const active = item.exact
             ? path === item.to
@@ -109,14 +140,16 @@ function Sidebar({
               key={item.to}
               to={item.to}
               title={item.label}
+              aria-current={active ? "page" : undefined}
               aria-label={"badge" in item ? countLabel : item.label}
+              onClick={onNavigate}
               className={cn(
-                "relative flex h-10 items-center gap-3 rounded-md px-2.5 text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                "relative flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 active &&
-                  "afk-nav-active bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
+                  "afk-nav-active bg-sidebar-accent font-medium text-sidebar-accent-foreground",
               )}
             >
-              <Icon className="size-4 shrink-0" />
+              <Icon className="size-[15px] shrink-0" />
               {!collapsed && (
                 <span className="flex-1 truncate">{item.label}</span>
               )}
@@ -125,7 +158,7 @@ function Sidebar({
                   role="status"
                   aria-label={`${waiting} 项待处理`}
                   className={cn(
-                    "grid h-4 min-w-4 place-items-center rounded-full bg-state-blocked px-1 font-mono text-[10px] font-semibold text-background tabular",
+                    "grid h-[18px] min-w-[18px] place-items-center rounded-sm bg-state-blocked/12 px-1 text-[10px] font-medium text-state-blocked tabular",
                     countIncreased && "afk-count-bounce",
                     collapsed && "absolute -top-0.5 right-0.5",
                   )}
@@ -138,16 +171,39 @@ function Sidebar({
         })}
       </nav>
       <div className="space-y-0.5 border-t border-sidebar-border p-2">
-        <ThemeToggle collapsed={collapsed} />
         <button
           type="button"
-          onClick={onToggle}
-          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent"
-          aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+          onClick={onHelp}
+          title="快捷键帮助 (?)"
+          aria-label="快捷键帮助"
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
-          <PanelLeft className="size-4 shrink-0" />
-          {!collapsed && <span>收起</span>}
+          <CircleHelp className="size-4 shrink-0" />
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left">快捷键帮助</span>
+              <kbd className="afk-kbd">?</kbd>
+            </>
+          )}
         </button>
+        <ThemeToggle
+          collapsed={collapsed}
+          theme={theme}
+          onThemeChange={onThemeChange}
+        />
+        {!mobile && (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground hover:bg-sidebar-accent"
+            aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+            title={collapsed ? "展开侧边栏" : "收起侧边栏"}
+            aria-expanded={!collapsed}
+          >
+            <PanelLeft className="size-4 shrink-0" />
+            {!collapsed && <span>收起</span>}
+          </button>
+        )}
       </div>
     </aside>
   );
@@ -155,23 +211,29 @@ function Sidebar({
 
 function Topbar({ onSearch }: { onSearch: () => void }) {
   return (
-    <header className="afk-topbar sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/90 px-6 backdrop-blur lg:px-10">
+    <header className="afk-topbar sticky top-0 z-20 flex h-12 shrink-0 items-center gap-3 border-b bg-background px-4 lg:px-7">
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0 sm:hidden"
+          aria-label="打开导航"
+        >
+          <Menu />
+        </Button>
+      </SheetTrigger>
       <EntityCrumbs />
-      <span className="ml-auto hidden text-xs tracking-wide text-muted-foreground lg:block">
-        让实现阶段无人值守
-      </span>
       <Button
         type="button"
         variant="ghost"
         aria-label="搜索需求与票"
         onClick={onSearch}
-        className="afk-search flex h-8 w-64 items-center gap-2 rounded-md border bg-surface px-2 text-[12px] text-muted-foreground hover:border-border-strong lg:ml-3"
+        aria-keyshortcuts="Meta+k Control+k"
+        className="afk-search ml-auto flex h-7 w-56 shrink-0 items-center gap-2 rounded-md border border-transparent px-2 text-[12px] text-muted-foreground hover:border-border hover:bg-surface"
       >
         <Search className="size-3.5" />
         <span className="flex-1 text-left">搜索需求、票、运行…</span>
-        <kbd className="rounded-sm border bg-background px-1 font-mono text-[10px]">
-          ⌘K
-        </kbd>
+        <kbd className="afk-kbd">⌘K</kbd>
       </Button>
     </header>
   );
@@ -192,6 +254,12 @@ function Chrome() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+  const changeTheme = (next: Theme) => {
+    applyTheme(next);
+    setTheme(next);
+  };
   const waiting = board.data ? waitingCount(board.data.waiting) : 0;
 
   useEffect(() => {
@@ -271,25 +339,58 @@ function Chrome() {
 
   return (
     <TooltipProvider>
-      <div className="flex min-h-screen w-full">
-        <Sidebar
-          collapsed={collapsed}
-          onToggle={() => setCollapsed((c) => !c)}
-          waiting={waiting}
-        />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar onSearch={() => setSearchOpen(true)} />
-          <TokenExpiryBanner />
-          <AgentsPausedBanner />
-          <DiskBanner />
-          <main className="flex-1">
-            <Outlet />
-          </main>
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <a href="#main-content" className="afk-skip-link">
+          跳到主要内容
+        </a>
+        <div className="flex min-h-dvh w-full">
+          <Sidebar
+            collapsed={collapsed}
+            onToggle={() => setCollapsed((c) => !c)}
+            waiting={waiting}
+            onHelp={() => setHelpOpen(true)}
+            theme={theme}
+            onThemeChange={changeTheme}
+          />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Topbar onSearch={() => setSearchOpen(true)} />
+            <TokenExpiryBanner />
+            <AgentsPausedBanner />
+            <DiskBanner />
+            <main
+              id="main-content"
+              tabIndex={-1}
+              className="min-w-0 flex-1 outline-none"
+            >
+              <Outlet />
+            </main>
+          </div>
+          <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+          <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+          <Toaster />
         </div>
-        <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-        <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
-        <Toaster />
-      </div>
+        <SheetContent
+          side="left"
+          className="w-[272px] max-w-[85vw] bg-sidebar p-0"
+        >
+          <SheetTitle className="sr-only">工作区导航</SheetTitle>
+          <SheetDescription className="sr-only">
+            选择要打开的页面，按 Escape 关闭导航。
+          </SheetDescription>
+          <Sidebar
+            collapsed={false}
+            waiting={waiting}
+            theme={theme}
+            onThemeChange={changeTheme}
+            mobile
+            onNavigate={() => setMobileOpen(false)}
+            onHelp={() => {
+              setMobileOpen(false);
+              setHelpOpen(true);
+            }}
+          />
+        </SheetContent>
+      </Sheet>
     </TooltipProvider>
   );
 }

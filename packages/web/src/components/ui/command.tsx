@@ -8,7 +8,12 @@ import {
   type HTMLAttributes,
 } from "react";
 import { cn } from "../../lib/utils.ts";
-import { Dialog, DialogContent } from "./dialog.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./dialog.tsx";
 
 const Command = forwardRef<
   ElementRef<typeof CommandPrimitive>,
@@ -27,9 +32,24 @@ Command.displayName = CommandPrimitive.displayName;
 
 const CommandDialog = ({ children, ...props }: DialogProps) => (
   <Dialog {...props}>
-    <DialogContent className="overflow-hidden p-0">
-      <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3">
+    <DialogContent className="overflow-hidden p-0 sm:max-w-xl">
+      <DialogTitle className="sr-only">搜索需求与票</DialogTitle>
+      <DialogDescription className="sr-only">
+        输入编号或关键词，使用方向键选择结果，按回车打开。
+      </DialogDescription>
+      <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-input]]:h-12 [&_[cmdk-input]]:pr-8 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-2.5">
         {children}
+        <div className="flex items-center gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground">
+          <span>
+            <kbd className="afk-kbd">↑ ↓</kbd> 选择
+          </span>
+          <span>
+            <kbd className="afk-kbd">↵</kbd> 打开
+          </span>
+          <span className="ml-auto">
+            <kbd className="afk-kbd">Esc</kbd> 关闭
+          </span>
+        </div>
       </Command>
     </DialogContent>
   </Dialog>

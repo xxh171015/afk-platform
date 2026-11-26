@@ -336,7 +336,7 @@ export function SpecDetail({
 
       <nav
         aria-label="需求页"
-        className="spec-sections mb-6 flex gap-5 overflow-x-auto border-b"
+        className="spec-sections mb-5 flex gap-1 overflow-x-auto border-b pb-2"
       >
         {SECTIONS.map((item) => (
           <a
@@ -344,10 +344,10 @@ export function SpecDetail({
             href={item.href(specId)}
             aria-current={section === item.id ? "page" : undefined}
             className={cn(
-              "shrink-0 border-b-2 px-1 py-3 text-[13px] hover:text-foreground",
+              "shrink-0 rounded-md px-3 py-1.5 text-[12px] transition-colors hover:bg-accent/60 hover:text-foreground",
               section === item.id
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground",
+                ? "bg-accent font-medium text-foreground"
+                : "text-muted-foreground",
             )}
           >
             {item.label}
