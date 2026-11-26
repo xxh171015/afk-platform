@@ -44,6 +44,7 @@ import { collectDoctorReport, formatDoctorText } from "./doctor.ts";
 import {
   blockedText,
   contextText,
+  planningChangesNeedChoice,
   projectText,
   specText,
   ticketText,
@@ -76,11 +77,16 @@ import {
   versionWarnings,
 } from "./planning-checks.ts";
 import {
+  buildPlanningPatch,
+  isSecretPlanningPath,
+  listPlanningChanges,
   matchProjectRepo,
   type PlanningDocs,
+  pathsInPlanningPatch,
   putPlanningDocsAside,
   putPlanningDocsBack,
   readPlanningDocs,
+  selectPlanningChanges,
   uncommittedPlanningDocs,
   unresolvedPlanningDocs,
 } from "./planning-docs.ts";
@@ -1904,139 +1910,225 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   spec
     .command("confirm <spec>")
     .description(
-      "confirm the split: the spec runs. Run in the spec's planning repo, it also sends the planning docs (GLOSSARY.md, docs/adr, AGENTS.md, and a multi-context repo's GLOSSARY-MAP.md with each context's GLOSSARY.md and docs/adr) as they are, committed or not, for the platform to commit before any ticket starts",
+      "confirm the split: the spec runs. In the spec's planning repo, lists every local change against the remote default branch; --send / --keep-local (repeatable, directories allowed) or --send-all / --keep-local-all must cover each listed file. Selected files go as a patch for the platform to commit before any ticket starts",
     )
-    .action(async (id: string) => {
-      const specId = specIdOf(id);
-      const view = await api().GET("/specs/{id}", {
-        params: { path: { id: specId } },
-      });
-      if (!view.data) throw failureFrom(view.response, view.error);
-      let planningRepo = view.data.spec.planning.repo;
-      const specRefs = view.data.spec.refs ?? [];
-      const cwd = io.cwd ?? process.cwd();
-      const project = await api().GET("/projects/{projectId}", {
-        params: { path: { projectId: view.data.spec.projectId } },
-      });
-      const matched =
-        planningRepo === null && project.data
-          ? matchProjectRepo(cwd, project.data.repos)
-          : undefined;
-      const registerPlanningRepo = matched?.name;
-      if (planningRepo === null && matched) planningRepo = matched.name;
-      let docs: ReturnType<typeof readPlanningDocs> = { status: "elsewhere" };
-      if (planningRepo !== null && project.data) {
-        docs = readPlanningDocs(cwd, project.data.repos, planningRepo);
-      }
-      if (docs.status === "other-repo") {
-        throw new Failure(
-          `${id}'s planning docs are in ${planningRepo}, not ${docs.repo}: run plat spec confirm in a checkout of ${planningRepo}`,
-        );
-      }
-      if (docs.status === "ok")
-        refuseUnresolved(docs, `plat spec confirm ${id}`);
-      if (
-        docs.status === "ok" &&
-        Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
-      ) {
-        throw new Failure(
-          `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes; only the glossaries, ADRs and AGENTS.md belong in it`,
-        );
-      }
-      // Stray checkout: no docs sent, even when import was clean (no page-confirm precheck).
-      if (docs.status === "elsewhere" && docs.checkout) {
-        io.stderr(
-          `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill\n`,
-        );
-      }
-      if (planningRepo === null) {
-        io.stderr(
-          "这个需求没有规划仓库，没有带任何本地改动；要带上，在规划仓库的 checkout 里运行 plat spec confirm\n",
-        );
-      }
-      for (const check of view.data.spec.prechecks) {
-        if (check.code === "page-confirm-without-planning-docs") {
-          if (docs.status === "ok") continue;
-          if (docs.status === "elsewhere" && docs.checkout) continue;
+    .option(
+      "--send <path>",
+      "hand this local change (file or directory) to the platform; repeatable",
+      collect,
+    )
+    .option(
+      "--keep-local <path>",
+      "leave this local change (file or directory) on this machine; repeatable",
+      collect,
+    )
+    .option(
+      "--send-all",
+      "hand every listed file not named by --send / --keep-local to the platform",
+    )
+    .option(
+      "--keep-local-all",
+      "leave every listed file not named by --send / --keep-local on this machine",
+    )
+    .action(
+      async (
+        id: string,
+        options: {
+          send?: string[];
+          keepLocal?: string[];
+          sendAll?: boolean;
+          keepLocalAll?: boolean;
+        },
+      ) => {
+        const specId = specIdOf(id);
+        const view = await api().GET("/specs/{id}", {
+          params: { path: { id: specId } },
+        });
+        if (!view.data) throw failureFrom(view.response, view.error);
+        let planningRepo = view.data.spec.planning.repo;
+        const specRefs = view.data.spec.refs ?? [];
+        const cwd = io.cwd ?? process.cwd();
+        const project = await api().GET("/projects/{projectId}", {
+          params: { path: { projectId: view.data.spec.projectId } },
+        });
+        const matched =
+          planningRepo === null && project.data
+            ? matchProjectRepo(cwd, project.data.repos)
+            : undefined;
+        const registerPlanningRepo = matched?.name;
+        if (planningRepo === null && matched) planningRepo = matched.name;
+        let docs: ReturnType<typeof readPlanningDocs> = { status: "elsewhere" };
+        if (planningRepo !== null && project.data) {
+          docs = readPlanningDocs(cwd, project.data.repos, planningRepo);
         }
-        io.stderr(`yellow: ${check.message}\n`);
-      }
-      // A repo without its gate on the default branch would fail every ticket it has: say so before anything starts.
-      // Only when plat waits for the workers' answers (AFK_ACCESS_WAIT_SECONDS above 0), and only on a definite one.
-      const ticketRepos = [
-        ...new Map(view.data.tickets.map((t) => [t.repo, t.repoUrl])),
-      ];
-      if (accessWaitSeconds() > 0 && ticketRepos.length > 0) {
-        const checked = await checkRepos(
-          view.data.spec.projectId,
-          ticketRepos.map(([name]) => name),
-        );
-        const problems = unreadyRepos(
-          checked.map(({ name, access }) => ({
-            name,
-            url: ticketRepos.find(([repo]) => repo === name)?.[1] ?? "",
-            access,
-          })),
-        );
-        if (problems.length > 0) throw new Failure(problems.join("\n"));
-      }
-      const projectRepos = project.data?.repos ?? [];
-      const refPins: { repoId: number; sha: string }[] = [];
-      for (const ref of specRefs) {
-        const defaultBranch =
-          projectRepos.find(
-            (repo) => repo.name === ref.name || repo.url === ref.url,
-          )?.defaultBranch ?? "main";
-        try {
-          refPins.push({
-            repoId: ref.repoId,
-            sha: lsRemoteSha(ref.url, defaultBranch, cwd),
-          });
-        } catch (error) {
+        if (docs.status === "other-repo") {
           throw new Failure(
-            `could not read reference repo ${ref.name} (${ref.url} ${defaultBranch})`,
-            error instanceof SpecRefError ? error : undefined,
+            `${id}'s planning docs are in ${planningRepo}, not ${docs.repo}: run plat spec confirm in a checkout of ${planningRepo}`,
           );
         }
-      }
-      const confirmBody = {
-        ...(docs.status === "ok" ? { planningPatch: docs.patch } : {}),
-        ...(registerPlanningRepo ? { planningRepo: registerPlanningRepo } : {}),
-        ...(refPins.length > 0 ? { refPins } : {}),
-      };
-      const { data, response, error } = await api().POST(
-        "/specs/{specId}/confirm",
-        {
-          params: { path: { specId } },
-          ...(Object.keys(confirmBody).length > 0 ? { body: confirmBody } : {}),
-        },
-      );
-      if (!data) throw failureFrom(response, error);
-      const branch = data.integrationBranches[0]?.branch ?? "";
-      const lines = [
-        `${id} is ${data.state}`,
-        ...(docs.status === "ok" && docs.files.length > 0
-          ? [
-              `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
-              ...putAside(
-                formatDisplayId("spec", specId),
-                docs,
-                planningRepo ?? "",
-              ),
-            ]
-          : []),
-        ...(data.planningState
-          ? [
-              `  planning commit: ${data.planningState} (no ticket starts before it is made)`,
-            ]
-          : []),
-        ...data.integrationBranches.map(
-          (b) => `  repo ${b.repoId}: ${b.branch}`,
-        ),
-        ...data.enqueued.map((t) => `  queued ${t.displayId}`),
-      ];
-      print(data, lines.join("\n"));
-    });
+        const planningRepoMeta = project.data?.repos.find(
+          (repo) => repo.name === planningRepo,
+        );
+        const localChanges =
+          docs.status === "ok" && planningRepoMeta
+            ? listPlanningChanges(docs.dir, planningRepoMeta.defaultBranch)
+            : [];
+        if (docs.status === "ok") {
+          const conflictPaths =
+            localChanges.length > 0
+              ? localChanges.map((change) => change.path)
+              : docs.paths;
+          const unresolved = unresolvedPlanningDocs(docs.dir, conflictPaths);
+          if (unresolved.length > 0)
+            throw new Failure(
+              `resolve the conflicts in ${unresolved.join(", ")} first, then run plat spec confirm ${id} again`,
+            );
+        }
+        const selection = selectPlanningChanges(
+          localChanges,
+          {
+            send: options.send ?? [],
+            keepLocal: options.keepLocal ?? [],
+            sendAll: Boolean(options.sendAll),
+            keepLocalAll: Boolean(options.keepLocalAll),
+          },
+          docs.status === "ok" ? docs.dir : cwd,
+          cwd,
+        );
+        if (!selection.ok) {
+          if (selection.kind === "unknown-path") {
+            throw new Failure(
+              `${selection.path} is not in the local-change list`,
+            );
+          }
+          if (selection.kind === "both") {
+            throw new Failure(
+              `${selection.path} cannot be both --send and --keep-local`,
+            );
+          }
+          throw new Failure(planningChangesNeedChoice(id, selection.changes));
+        }
+        const secret = selection.send.find(isSecretPlanningPath);
+        if (secret) {
+          throw new Failure(
+            `${secret} looks like a secret; add it to .gitignore or pass --keep-local`,
+          );
+        }
+        if (docs.status === "ok" && planningRepoMeta) {
+          const built = buildPlanningPatch(
+            docs.dir,
+            planningRepoMeta.defaultBranch,
+            selection.send,
+          );
+          docs = { ...docs, ...built, paths: selection.send };
+        }
+        if (
+          docs.status === "ok" &&
+          Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
+        ) {
+          throw new Failure(
+            `the planning docs patch (${docs.files.length} files) is over ${MAX_PLANNING_PATCH_BYTES} bytes`,
+          );
+        }
+        // Stray checkout: no docs sent, even when import was clean (no page-confirm precheck).
+        if (docs.status === "elsewhere" && docs.checkout) {
+          io.stderr(
+            `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill\n`,
+          );
+        }
+        if (planningRepo === null) {
+          io.stderr(
+            "这个需求没有规划仓库，没有带任何本地改动；要带上，在规划仓库的 checkout 里运行 plat spec confirm\n",
+          );
+        }
+        for (const check of view.data.spec.prechecks) {
+          if (check.code === "page-confirm-without-planning-docs") {
+            if (docs.status === "ok") continue;
+            if (docs.status === "elsewhere" && docs.checkout) continue;
+          }
+          io.stderr(`yellow: ${check.message}\n`);
+        }
+        // A repo without its gate on the default branch would fail every ticket it has: say so before anything starts.
+        // Only when plat waits for the workers' answers (AFK_ACCESS_WAIT_SECONDS above 0), and only on a definite one.
+        const ticketRepos = [
+          ...new Map(view.data.tickets.map((t) => [t.repo, t.repoUrl])),
+        ];
+        if (accessWaitSeconds() > 0 && ticketRepos.length > 0) {
+          const checked = await checkRepos(
+            view.data.spec.projectId,
+            ticketRepos.map(([name]) => name),
+          );
+          const problems = unreadyRepos(
+            checked.map(({ name, access }) => ({
+              name,
+              url: ticketRepos.find(([repo]) => repo === name)?.[1] ?? "",
+              access,
+            })),
+          );
+          if (problems.length > 0) throw new Failure(problems.join("\n"));
+        }
+        const projectRepos = project.data?.repos ?? [];
+        const refPins: { repoId: number; sha: string }[] = [];
+        for (const ref of specRefs) {
+          const defaultBranch =
+            projectRepos.find(
+              (repo) => repo.name === ref.name || repo.url === ref.url,
+            )?.defaultBranch ?? "main";
+          try {
+            refPins.push({
+              repoId: ref.repoId,
+              sha: lsRemoteSha(ref.url, defaultBranch, cwd),
+            });
+          } catch (error) {
+            throw new Failure(
+              `could not read reference repo ${ref.name} (${ref.url} ${defaultBranch})`,
+              error instanceof SpecRefError ? error : undefined,
+            );
+          }
+        }
+        const confirmBody = {
+          ...(docs.status === "ok" ? { planningPatch: docs.patch } : {}),
+          ...(registerPlanningRepo
+            ? { planningRepo: registerPlanningRepo }
+            : {}),
+          ...(refPins.length > 0 ? { refPins } : {}),
+        };
+        const { data, response, error } = await api().POST(
+          "/specs/{specId}/confirm",
+          {
+            params: { path: { specId } },
+            ...(Object.keys(confirmBody).length > 0
+              ? { body: confirmBody }
+              : {}),
+          },
+        );
+        if (!data) throw failureFrom(response, error);
+        const branch = data.integrationBranches[0]?.branch ?? "";
+        const lines = [
+          `${id} is ${data.state}`,
+          ...(docs.status === "ok" && docs.files.length > 0
+            ? [
+                `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
+                ...putAside(
+                  formatDisplayId("spec", specId),
+                  docs,
+                  planningRepo ?? "",
+                ),
+              ]
+            : []),
+          ...(data.planningState
+            ? [
+                `  planning commit: ${data.planningState} (no ticket starts before it is made)`,
+              ]
+            : []),
+          ...data.integrationBranches.map(
+            (b) => `  repo ${b.repoId}: ${b.branch}`,
+          ),
+          ...data.enqueued.map((t) => `  queued ${t.displayId}`),
+        ];
+        print(data, lines.join("\n"));
+      },
+    );
 
   // An integration ticket's environment repos need their compose files; the spec can add them, or they are on the
   // default branch already. Only when plat waits for the workers' answers (AFK_ACCESS_WAIT_SECONDS above 0).
@@ -2161,13 +2253,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
 
   // Once the platform has the planning docs, the copies not committed here go to the spec's folder outside the
   // checkout, so that pulling the spec's pull request later finds nothing in the way. The lines that say so.
-  // Nothing is kept when every planning doc is committed here: there is nothing to take out.
+  // The patch is kept even when every selected file is already committed, so retry-planning can take its paths
+  // from the backup; committed files themselves stay in the checkout.
   const putAside = (
     spec: string,
     docs: Extract<PlanningDocs, { status: "ok" }>,
     repo: string,
   ): string[] => {
-    if (uncommittedPlanningDocs(docs.dir, docs.paths).length === 0) return [];
     let kept: string;
     try {
       kept = saveBackup(afkHome(io.env), spec, {
@@ -2181,6 +2273,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         `  your copies here stay where they are: they could not be kept outside the checkout (${(error as Error).message})`,
       ];
     }
+    if (uncommittedPlanningDocs(docs.dir, docs.paths).length === 0) return [];
     const taken = putPlanningDocsAside(docs.dir, docs.paths);
     return [
       `  taken out of this checkout (back to HEAD): ${taken.join(", ")}; kept in ${kept}`,
@@ -2191,8 +2284,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
   const refuseUnresolved = (
     docs: Extract<PlanningDocs, { status: "ok" }>,
     rerun: string,
+    paths = docs.paths,
   ) => {
-    const unresolved = unresolvedPlanningDocs(docs.dir, docs.paths);
+    const unresolved = unresolvedPlanningDocs(docs.dir, paths);
     if (unresolved.length > 0)
       throw new Failure(
         `resolve the conflicts in ${unresolved.join(", ")} first, then run ${rerun} again`,
@@ -2228,12 +2322,16 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           `run plat spec retry-planning in a checkout of ${planningRepo}, where ${id}'s planning docs are`,
         );
       }
+      const defaultBranch =
+        project.data.repos.find((repo) => repo.name === planningRepo)
+          ?.defaultBranch ?? "main";
       const home = afkHome(io.env);
       const spec = formatDisplayId("spec", specId);
-      const local = uncommittedPlanningDocs(docs.dir, docs.paths);
       const backup = readBackup(home, spec);
+      const patchPaths = backup ? pathsInPlanningPatch(backup.patch) : [];
+      const local = uncommittedPlanningDocs(docs.dir, patchPaths);
       if (local.length === 0 && backup) {
-        const back = putPlanningDocsBack(docs.dir, backup.patch, docs.paths);
+        const back = putPlanningDocsBack(docs.dir, backup.patch, patchPaths);
         if (!back.ok)
           throw new Failure(
             `could not put ${id}'s planning docs back from ${specPlanningDir(home, spec)}: ${back.error}`,
@@ -2243,9 +2341,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (
         local.length === 0 &&
         backup &&
-        uncommittedPlanningDocs(docs.dir, docs.paths).length > 0
+        uncommittedPlanningDocs(docs.dir, patchPaths).length > 0
       ) {
-        const conflicts = unresolvedPlanningDocs(docs.dir, docs.paths);
+        const conflicts = unresolvedPlanningDocs(docs.dir, patchPaths);
         print(
           { putBack: backup.files, conflicts },
           [
@@ -2258,20 +2356,22 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         );
         return;
       }
-      refuseUnresolved(docs, `plat spec retry-planning ${id}`);
+      refuseUnresolved(docs, `plat spec retry-planning ${id}`, patchPaths);
+      const built = buildPlanningPatch(docs.dir, defaultBranch, patchPaths);
+      const sent = { ...docs, ...built, paths: patchPaths };
       const { data, response, error } = await api().POST(
         "/specs/{specId}/planning/retry",
         {
           params: { path: { specId } },
-          body: { planningPatch: docs.patch },
+          body: { planningPatch: sent.patch },
         },
       );
       if (!data) throw failureFrom(response, error);
       print(
         data,
         [
-          `${id}: planning docs ${docs.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
-          ...(docs.files.length > 0 ? putAside(spec, docs, planningRepo) : []),
+          `${id}: planning docs ${sent.files.join(", ") || "(none)"} sent again; the planning commit is queued`,
+          ...(sent.files.length > 0 ? putAside(spec, sent, planningRepo) : []),
         ].join("\n"),
       );
     });

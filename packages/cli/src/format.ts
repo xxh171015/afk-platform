@@ -896,6 +896,19 @@ export function specText(view: {
   ].join("\n");
 }
 
+// plat spec confirm when the planning repo has local changes the person has not covered with --send / --keep-local.
+export function planningChangesNeedChoice(
+  spec: string,
+  changes: { status: string; path: string }[],
+): string {
+  return [
+    `${spec}: 规划仓库里有这些本地改动，要说明哪些交给 worker：`,
+    ...changes.map((change) => `  ${change.status}  ${change.path}`),
+    "这次规划改的用 --send <路径> 交给平台，其余用 --keep-local <路径> 留在本机",
+    "（也可以 --send-all / --keep-local-all）。没交出的文件 worker 读不到。",
+  ].join("\n");
+}
+
 export function contextText(data: {
   files: {
     path: string;
