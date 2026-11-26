@@ -151,6 +151,18 @@ describe("renderTrackerDoc", () => {
     expect(doc).not.toContain("A skill never confirms");
   });
 
+  it("has the planning agent show confirm's local-change list to the person and pick with --send / --keep-local", () => {
+    const doc = renderTrackerDoc(single, "backend");
+    expect(doc).toContain(
+      "show the person the list and ask which\n     files this planning changed; do not guess",
+    );
+    expect(doc).toContain("`--send <path>`");
+    expect(doc).toContain("`--keep-local <path>`");
+    expect(doc).not.toContain(
+      "(`GLOSSARY.md`, `docs/adr/`, `AGENTS.md` in this repo",
+    );
+  });
+
   it("adds the cross-repo rules for several repos with a contract path, and not for one repo", () => {
     const many = renderTrackerDoc(several, "frontend");
     expect(many).toContain("### Several repos");
