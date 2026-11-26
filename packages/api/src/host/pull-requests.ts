@@ -19,10 +19,14 @@ import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
 import { renderPackSection } from "../acceptance/pack-description.ts";
 import { recordAutoMergeEvent } from "../events/auto-merge.ts";
-import { cancelTicketJobs } from "../jobs/stage-jobs.ts";
+import { cancelFinalJobs, cancelTicketJobs } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
 import { queueDueAutoMerges } from "./auto-merge.ts";
+import {
+  markActiveChangeRequestsDone,
+  supersedeActiveChangeRequests,
+} from "./change-requests.ts";
 import {
   type AutoMergePayload,
   enqueueHostSync,
@@ -273,6 +277,7 @@ async function finishOpeningWithExistingPulls(
     specId,
     next.state,
   ]);
+  await markActiveChangeRequestsDone(client, specId);
   await markMergedWhenAllAre(client, specId);
   await enqueueReviewRevisionsForSpec(client, specId);
   const projectId = await projectOf(client, specId);
@@ -842,6 +847,7 @@ export async function recordOpenPr(
       read.specId,
       next.state,
     ]);
+    await markActiveChangeRequestsDone(client, read.specId);
     // a pull request that was already merged when it was found (opened by an earlier try) may be the last one
     await markMergedWhenAllAre(client, read.specId);
     await enqueueReviewRevisionsForSpec(client, read.specId);
@@ -873,7 +879,13 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
   if (!spec) return;
   if (spec.state === "reworking") {
     if (!pulls.rows.some((p) => p.state === "merged")) return;
-    await finishReworkingBecausePrMerged(client, specId);
+    await finishBecausePersonMergedDuringRework(client, specId, "reworking");
+    return;
+  }
+  if (spec.state === "finalizing") {
+    if (!(await everAwaitingReview(client, specId))) return;
+    if (!pulls.rows.some((p) => p.state === "merged")) return;
+    await finishBecausePersonMergedDuringRework(client, specId, "finalizing");
     return;
   }
   if (!["awaiting-review", "partially-merged"].includes(spec.state)) return;
@@ -913,11 +925,25 @@ async function markMergedWhenAllAre(client: pg.PoolClient, specId: number) {
   }
 }
 
-async function finishReworkingBecausePrMerged(
+async function everAwaitingReview(
   client: pg.PoolClient,
   specId: number,
+): Promise<boolean> {
+  const found = await client.query(
+    `SELECT 1 FROM events
+     WHERE spec_id = $1 AND type = 'spec' AND to_state = 'awaiting-review'
+     LIMIT 1`,
+    [specId],
+  );
+  return (found.rowCount ?? 0) > 0;
+}
+
+async function finishBecausePersonMergedDuringRework(
+  client: pg.PoolClient,
+  specId: number,
+  from: SpecState,
 ) {
-  const next = specTransition("reworking", "all-prs-merged");
+  const next = specTransition(from, "all-prs-merged");
   if (!next.ok) throw new Error(next.reason);
   await client.query("SELECT set_config('afk.reason', $1, true)", [
     REWORK_PR_MERGED_REASON,
@@ -944,6 +970,19 @@ async function finishReworkingBecausePrMerged(
     for (const id of cancelled)
       await cancelTicketJobs(client, id, REWORK_PR_MERGED_REASON);
   }
+  await cancelFinalJobs(client, specId, REWORK_PR_MERGED_REASON);
+  await client.query(
+    `UPDATE jobs SET state = 'failed', error = $2,
+       lease_owner = NULL, lease_expires_at = NULL
+     WHERE state IN ('queued', 'running')
+       AND type IN ('pr-draft', 'pr-ready', 'open-pr', 'patch-pr-body')
+       AND (
+         (payload->>'specId')::int = $1
+         OR (payload->>'pullId')::int IN (SELECT id FROM pull_requests WHERE spec_id = $1)
+       )`,
+    [specId, REWORK_PR_MERGED_REASON],
+  );
+  await supersedeActiveChangeRequests(client, specId);
   await dropPotentialConflicts(client, specId);
   await enqueueSpecCleanup(client, { specId });
 }

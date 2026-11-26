@@ -48,6 +48,20 @@ export {
   SETUP_BRANCH,
 } from "./branches.ts";
 export type {
+  ChangeRequestState,
+  StaleReviewDraft,
+} from "./change-requests.ts";
+export {
+  CHANGE_REQUEST_IN_REWORK,
+  CHANGE_REQUEST_NO_DRAFTS,
+  CHANGE_REQUEST_NOT_AWAITING,
+  CHANGE_REQUEST_PR_NOT_OPEN,
+  CHANGE_REQUEST_STATES,
+  changeRequestBlockedMessage,
+  changeRequestPartiallyMergedMessage,
+  staleChangeRequestPrompt,
+} from "./change-requests.ts";
+export type {
   DecisionLog,
   DecisionLogGroup,
   DecisionLogItem,

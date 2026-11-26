@@ -163,3 +163,31 @@ describe("specTransition: rework", () => {
     ).toBe("finalizing");
   });
 });
+
+describe("specTransition: request-changes", () => {
+  it("moves awaiting-review to finalizing on request-changes, not reworking", () => {
+    expect(specTransition("awaiting-review", "request-changes")).toEqual({
+      ok: true,
+      state: "finalizing",
+    });
+    expect(specTransition("awaiting-review", "rework")).toEqual({
+      ok: true,
+      state: "reworking",
+    });
+  });
+
+  it("rejects request-changes from finalizing, reworking, and partially-merged", () => {
+    expect(specTransition("finalizing", "request-changes").ok).toBe(false);
+    expect(specTransition("reworking", "request-changes").ok).toBe(false);
+    expect(specTransition("partially-merged", "request-changes").ok).toBe(
+      false,
+    );
+  });
+
+  it("moves finalizing to merged on all-prs-merged", () => {
+    expect(specTransition("finalizing", "all-prs-merged")).toEqual({
+      ok: true,
+      state: "merged",
+    });
+  });
+});

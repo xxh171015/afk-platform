@@ -38,6 +38,11 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
     ...commonFields,
   }),
   z.object({
+    stage: z.literal("rework"),
+    outcome: z.enum(["done", ...AGENT_FAILURES]),
+    ...commonFields,
+  }),
+  z.object({
     stage: z.literal("recheck"),
     outcome: z.enum(["pass", "fix", "invalid-output", "timeout"]),
     ...commonFields,
@@ -60,6 +65,22 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
     ...commonFields,
   }),
 ]);
+
+async function wrapUpWentThroughRework(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<boolean> {
+  const found = await client.query(
+    `SELECT 1 FROM runs r
+     JOIN finalizations f ON f.spec_id = r.spec_id AND f.repo_id = r.repo_id
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.ticket_id IS NULL
+       AND r.stage = 'rework' AND r.job_id > f.job_floor
+     LIMIT 1`,
+    [specId, repoId],
+  );
+  return (found.rowCount ?? 0) > 0;
+}
 
 async function tidyWantedOf(
   client: pg.PoolClient,
@@ -169,6 +190,9 @@ export async function recordFinalResult(
     valid,
     result,
   );
+  const fromRework =
+    valid?.stage === "rework" ||
+    (await wrapUpWentThroughRework(client, read.specId, read.repoId));
   let decision: FinalDecision = valid
     ? advanceFinalization(
         {
@@ -177,11 +201,12 @@ export async function recordFinalResult(
         } as FinalReport,
         fin.auto_retried,
         await tidyWantedOf(client, read.specId, read.repoId),
+        fromRework,
       )
     : { type: "block", reason: "invalid-output" };
   const trigger = recheckTriggerOf(valid?.run);
   if (
-    valid?.stage === "final-fix" &&
+    (valid?.stage === "final-fix" || valid?.stage === "rework") &&
     valid.outcome === "done" &&
     trigger?.hit
   ) {

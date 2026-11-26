@@ -20,6 +20,7 @@ export type SpecEvent =
   | "some-prs-merged"
   | "all-prs-merged"
   | "rework"
+  | "request-changes"
   | "pause"
   | "resume"
   | "cancel";
@@ -47,11 +48,16 @@ const TRANSITIONS: Partial<
   draft: { "confirm-plan": "planned" },
   planned: { start: "running" },
   running: { "all-tickets-done": "finalizing", pause: "paused" },
-  finalizing: { "pr-opened": "awaiting-review", pause: "paused" },
+  finalizing: {
+    "pr-opened": "awaiting-review",
+    "all-prs-merged": "merged",
+    pause: "paused",
+  },
   "awaiting-review": {
     "some-prs-merged": "partially-merged",
     "all-prs-merged": "merged",
     rework: "reworking",
+    "request-changes": "finalizing",
     pause: "paused",
   },
   "partially-merged": { "all-prs-merged": "merged", pause: "paused" },

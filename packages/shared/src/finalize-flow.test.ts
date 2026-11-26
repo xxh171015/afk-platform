@@ -80,6 +80,7 @@ describe("finalization of a spec's integration branch", () => {
     expect([...FINAL_STEPS]).toEqual([
       "final-review",
       "final-fix",
+      "rework",
       "recheck",
       "final-merge",
       "final-tidy",
@@ -182,6 +183,8 @@ describe("finalization of a spec's integration branch", () => {
     ["final-review", "invalid-output"],
     ["final-fix", "timeout"],
     ["final-fix", "invalid-output"],
+    ["rework", "timeout"],
+    ["rework", "invalid-output"],
     ["recheck", "timeout"],
     ["recheck", "invalid-output"],
   ] as const)(
@@ -205,6 +208,31 @@ describe("finalization of a spec's integration branch", () => {
     "does not retry a final-fix that reports %s",
     (outcome) => {
       expect(advanceFinalization({ step: "final-fix", outcome })).toEqual({
+        type: "block",
+        reason: outcome,
+      });
+    },
+  );
+
+  it("rework that is done goes to final-merge, then ends without Tidy even when tidyWanted", () => {
+    expect(advanceFinalization({ step: "rework", outcome: "done" })).toEqual({
+      type: "enqueue",
+      step: "final-merge",
+    });
+    expect(
+      advanceFinalization(
+        { step: "final-merge", outcome: "merged" },
+        false,
+        true,
+        true,
+      ),
+    ).toEqual({ type: "done" });
+  });
+
+  it.each(["no-commits", "agent-gave-up", "contract-change-needed"] as const)(
+    "does not retry a rework that reports %s",
+    (outcome) => {
+      expect(advanceFinalization({ step: "rework", outcome })).toEqual({
         type: "block",
         reason: outcome,
       });

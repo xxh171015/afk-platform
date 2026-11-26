@@ -6075,6 +6075,82 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/specs/{id}/change-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            acknowledgeStale?: boolean;
+          };
+        };
+      };
+      responses: {
+        /** @description The drafts are one Change request; repos with comments start Rework */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              number: number;
+              /** @enum {string} */
+              state: "active" | "done" | "superseded";
+              comments: string[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec cannot take a Change request, or drafts were written on an older Review revision */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+              stale?: {
+                displayId: string;
+                writtenOn: string;
+                currentHead: string;
+              }[];
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs/{id}/cleanup": {
     parameters: {
       query?: never;

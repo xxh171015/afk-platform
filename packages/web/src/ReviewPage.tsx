@@ -1,5 +1,10 @@
 import type { paths } from "@afk/shared";
 import {
+  changeRequestBlockedMessage,
+  type StaleReviewDraft,
+  staleChangeRequestPrompt,
+} from "@afk/shared";
+import {
   keepPreviousData,
   useMutation,
   useQueries,
@@ -349,6 +354,33 @@ export function ReviewPage({ specId }: { specId: number }) {
     },
   });
 
+  const submitChangeRequest = useMutation({
+    mutationFn: async (acknowledgeStale: boolean) => {
+      const { data, error } = await api.POST("/specs/{id}/change-requests", {
+        params: { path: { id: specId } },
+        body: { acknowledgeStale },
+      });
+      if (data) return { ok: true as const };
+      const stale = staleDraftsOf(error);
+      if (!acknowledgeStale && stale) return { ok: false as const, stale };
+      throw new Error(describeError(error));
+    },
+    onSuccess: (result) => {
+      if (!result.ok) {
+        if (window.confirm(staleChangeRequestPrompt(result.stale))) {
+          submitChangeRequest.mutate(true);
+        }
+        return;
+      }
+      setNote(null);
+      invalidateComments();
+      void queryClient.invalidateQueries({ queryKey: ["spec", specId] });
+    },
+    onError: (err) => {
+      setNote(err instanceof Error ? err.message : describeError(err));
+    },
+  });
+
   const openLineCompose = (input: {
     path: string;
     side: "old" | "new";
@@ -465,6 +497,10 @@ export function ReviewPage({ specId }: { specId: number }) {
   }
   const review = specReview.data;
   if (!review) return null;
+  const blocked = changeRequestBlockedMessage(
+    review.spec.state,
+    review.spec.displayId,
+  );
   if (pulls.length === 0) {
     return (
       <div data-testid="review-page">
@@ -586,10 +622,17 @@ export function ReviewPage({ specId }: { specId: number }) {
         <button
           type="button"
           className="rounded-md px-2 py-1 text-xs"
-          onClick={() => setNote("提交修改要求下一张再接上")}
+          disabled={submitChangeRequest.isPending}
+          onClick={() => submitChangeRequest.mutate(false)}
         >
           {draftCount > 0 ? `提交修改要求（${draftCount}）` : "提交修改要求"}
         </button>
+        {blocked ? <span className="error text-xs">{blocked}</span> : null}
+        {note ? (
+          <span role="status" className="error text-xs">
+            {note}
+          </span>
+        ) : null}
         {canWrite ? (
           <button
             type="button"
@@ -912,13 +955,16 @@ export function ReviewPage({ specId }: { specId: number }) {
           onDeleteComment={(item) => removeComment.mutate(item.id)}
         />
       </div>
-      {note ? (
-        <p role="status" className="sr-only">
-          {note}
-        </p>
-      ) : null}
     </div>
   );
+}
+
+function staleDraftsOf(error: unknown): StaleReviewDraft[] | undefined {
+  if (!error || typeof error !== "object" || !("stale" in error))
+    return undefined;
+  const stale = (error as { stale?: unknown }).stale;
+  if (!Array.isArray(stale) || stale.length === 0) return undefined;
+  return stale as StaleReviewDraft[];
 }
 
 function formatCommentId(id: number, comments: ReviewComment[]): string {

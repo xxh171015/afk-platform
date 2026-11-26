@@ -13,6 +13,7 @@ import type { BlockedReason } from "./ticket-state.ts";
 export const FINAL_STEPS = [
   "final-review",
   "final-fix",
+  "rework",
   "recheck",
   "final-merge",
   "final-tidy",
@@ -26,6 +27,7 @@ export type FinalReport =
       outcome: "pass" | "fix" | "invalid-output" | "timeout";
     }
   | { step: "final-fix"; outcome: "done" | (typeof AGENT_FAILURES)[number] }
+  | { step: "rework"; outcome: "done" | (typeof AGENT_FAILURES)[number] }
   | {
       step: "recheck";
       outcome: "pass" | "fix" | "invalid-output" | "timeout";
@@ -55,6 +57,7 @@ export function advanceFinalization(
   report: FinalReport,
   autoRetried = false,
   tidyWanted = false,
+  fromRework = false,
 ): FinalDecision {
   if (
     !MERGE_STEPS.has(report.step) &&
@@ -76,13 +79,17 @@ export function advanceFinalization(
       return report.outcome === "done"
         ? { type: "enqueue", step: "final-merge" }
         : { type: "block", reason: report.outcome };
+    case "rework":
+      return report.outcome === "done"
+        ? { type: "enqueue", step: "final-merge" }
+        : { type: "block", reason: report.outcome };
     case "recheck":
       if (report.outcome === "pass")
         return { type: "enqueue", step: "final-merge" };
       return { type: "block", reason: "recheck-failed" };
     case "final-merge":
       if (report.outcome === "merged")
-        return tidyWanted
+        return tidyWanted && !fromRework
           ? { type: "enqueue", step: "final-tidy" }
           : { type: "done" };
       if (report.outcome === "tests-removed")

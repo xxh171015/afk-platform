@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import {
+  CHANGE_REQUEST_IN_REWORK,
+  changeRequestPartiallyMergedMessage,
+  staleChangeRequestPrompt,
+} from "@afk/shared";
+import {
   cleanup,
   fireEvent,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   emptyWorkbench,
   fakeServer,
@@ -14,7 +19,10 @@ import {
   renderApp,
 } from "./test-utils.tsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const SHA = "a".repeat(40);
 const SHA2 = "b".repeat(40);
@@ -421,6 +429,34 @@ function reviewServer(
       return { json: { ...revision, headSha: head ?? SHA } };
     },
     "GET /pull-requests/7/review-comments": () => ({ json: { comments } }),
+    "POST /specs/1/change-requests": ({ body }) => {
+      const input = (body ?? {}) as { acknowledgeStale?: boolean };
+      const drafts = comments.filter((row) => row.state === "draft");
+      const stale = drafts
+        .filter((row) => row.writtenOn !== SHA)
+        .map((row) => ({
+          displayId: row.displayId,
+          writtenOn: row.writtenOn,
+          currentHead: SHA,
+        }));
+      if (stale.length > 0 && !input.acknowledgeStale) {
+        return {
+          status: 409,
+          json: { error: "有意见写在旧的审查版本上", stale },
+        };
+      }
+      comments = comments.map((row) =>
+        row.state === "draft" ? { ...row, state: "submitted" } : row,
+      );
+      return {
+        json: {
+          id: 1,
+          number: 1,
+          state: "active",
+          comments: drafts.map((row) => row.displayId),
+        },
+      };
+    },
     "POST /pull-requests/7/review-comments": ({ body }) => {
       const input = body as Record<string, unknown>;
       const created = aComment({
@@ -907,8 +943,67 @@ describe("the spec review page", () => {
       await screen.findByRole("button", { name: "提交修改要求（2）" }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "提交修改要求（2）" }));
-    expect(server.calls.some((call) => call.includes("/change-requests"))).toBe(
-      false,
+    await waitFor(() =>
+      expect(
+        server.calls.some((call) => call === "POST /specs/1/change-requests"),
+      ).toBe(true),
+    );
+  });
+
+  it("asks to confirm stale drafts before submitting a Change request", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const server = reviewServer({
+      comments: [aComment({ writtenOn: SHA2 })],
+    });
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "提交修改要求（1）" }),
+    );
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(confirm.mock.calls[0]?.[0]).toBe(
+      staleChangeRequestPrompt([
+        { displayId: "C-1", writtenOn: SHA2, currentHead: SHA },
+      ]),
+    );
+    await waitFor(() =>
+      expect(
+        server.calls.filter((call) => call === "POST /specs/1/change-requests"),
+      ).toHaveLength(2),
+    );
+  });
+
+  it("shows the partially-merged sentence next to 提交修改要求", async () => {
+    renderApp(
+      reviewServer({
+        review: { spec: { state: "partially-merged", displayId: "S-1" } },
+        comments: [aComment()],
+      }),
+      "/specs/1/review?view=all&file=src/a.ts",
+    );
+    expect(
+      await screen.findByRole("button", { name: "提交修改要求（1）" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(changeRequestPartiallyMergedMessage("S-1")),
+    ).toBeTruthy();
+  });
+
+  it("shows why a Change request was refused", async () => {
+    const server = reviewServer({
+      comments: [aComment()],
+      routes: {
+        "POST /specs/1/change-requests": () => ({
+          status: 409,
+          json: { error: CHANGE_REQUEST_IN_REWORK },
+        }),
+      },
+    });
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "提交修改要求（1）" }),
+    );
+    expect((await screen.findByRole("status")).textContent).toBe(
+      CHANGE_REQUEST_IN_REWORK,
     );
   });
 

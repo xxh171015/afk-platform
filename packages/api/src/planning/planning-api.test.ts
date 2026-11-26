@@ -1522,6 +1522,26 @@ describe("appending tickets to a confirmed spec", () => {
     ).toEqual([{ type: "pr-draft", payload: { pullId: 1 } }]);
   });
 
+  it("deletes the final e2e row when appending to an awaiting-review spec", async () => {
+    const { specId } = await confirmed();
+    await db.pool.query("UPDATE tickets SET state = 'done'");
+    await db.pool.query("UPDATE specs SET state = 'awaiting-review'");
+    await db.pool.query(
+      "INSERT INTO final_e2e (spec_id, state) VALUES ($1, 'done')",
+      [specId],
+    );
+    expect((await append(specId, { tickets: [ticket("extra")] })).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await db.pool.query("SELECT 1 FROM final_e2e WHERE spec_id = $1", [
+          specId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+
   it("refuses to append to a partially-merged spec and names the states that can be appended to", async () => {
     const { specId } = await confirmed();
     await db.pool.query("UPDATE specs SET state = 'partially-merged'");

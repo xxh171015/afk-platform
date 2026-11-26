@@ -23,6 +23,7 @@ import { readTicketFiles, type TicketFile } from "@afk/shared/ticket-files";
 import type pg from "pg";
 import { recordAction } from "../events/human-actions.ts";
 import { applyOrigin } from "../events/origin.ts";
+import { deleteFinalE2e } from "../finalize/final-e2e.ts";
 import { hostKindOf, mixedHostsWith } from "../host/code-hosts.ts";
 import { enqueuePrDraft, stopAutoMergeJobs } from "../host/host-jobs.ts";
 import { inTransaction, schedulePass } from "../scheduling/scheduler.ts";
@@ -682,6 +683,7 @@ export async function importTickets(
           "SELECT id FROM pull_requests WHERE spec_id = $1 AND state = 'open' ORDER BY id",
           [specId],
         );
+        await deleteFinalE2e(client, specId);
         await stopAutoMergeJobs(client, specId, "返工中");
         for (const pull of pulls.rows)
           await enqueuePrDraft(client, { pullId: pull.id });

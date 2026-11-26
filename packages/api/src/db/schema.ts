@@ -1,5 +1,6 @@
 import {
   BLOCKED_REASONS,
+  CHANGE_REQUEST_STATES,
   DISK_NOTICED,
   EDGE_KINDS,
   EVENT_SOURCES,
@@ -693,8 +694,28 @@ export const reviewFileViews = pgTable(
   ],
 );
 
+// A Change request: one submit of a spec's Review comment drafts (GLOSSARY Change request).
+export const changeRequests = pgTable(
+  "change_requests",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    number: integer("number").notNull(),
+    state: text("state").notNull().default("active"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("change_requests_spec_number_unique").on(t.specId, t.number),
+    index("change_requests_spec_idx").on(t.specId),
+    check("change_requests_state_check", oneOf(t.state, CHANGE_REQUEST_STATES)),
+    check("change_requests_number_check", sql`${t.number} >= 1`),
+  ],
+);
+
 // A Review comment: a person's note on one Review revision (GLOSSARY Review comment). Not a Finding.
-// change_request_id is filled when a Change request is submitted (#374); drafts leave it null.
+// change_request_id is filled when a Change request is submitted; drafts leave it null.
 export const reviewComments = pgTable(
   "review_comments",
   {
@@ -715,7 +736,9 @@ export const reviewComments = pgTable(
     excerpt: text("excerpt"),
     body: text("body").notNull(),
     state: text("state").notNull().default("draft"),
-    changeRequestId: integer("change_request_id"),
+    changeRequestId: integer("change_request_id").references(
+      () => changeRequests.id,
+    ),
     reply: text("reply"),
     reworkRunId: integer("rework_run_id").references(() => runs.id),
     createdAt: createdAt(),

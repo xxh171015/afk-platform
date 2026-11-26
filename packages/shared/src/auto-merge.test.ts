@@ -28,6 +28,7 @@ const ready = (extra: Partial<AutoMergeInput> = {}): AutoMergeInput => ({
   awaitingReviewAt: ENTERED,
   hadAutoMergeJob: false,
   now: DUE_AT,
+  reviewComments: 0,
   ...extra,
 });
 
@@ -129,6 +130,13 @@ describe("autoMergeForecast", () => {
     ).toEqual({
       willMerge: false,
       reason: "PR 上有人写过评论",
+    });
+  });
+
+  it("will not merge when the spec has submitted Review comments, then or later", () => {
+    expect(autoMergeForecast(ready({ reviewComments: 1 }))).toEqual({
+      willMerge: false,
+      reason: "平台上有人审意见",
     });
   });
 
