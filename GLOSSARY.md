@@ -40,7 +40,8 @@ _Avoid_: setup PR、接入 PR
 平台在规划仓库的集成分支上提交本 Spec 规划文档改动得到的那个提交，叠在 Setup commit 之上；没有规划文档改动时，是 Setup commit，两者都没有时，是规划仓库默认分支当时的最新提交。所有票开工前它就要存在，其他仓库的票按它读规划文档。身份是 SHA，不是分支名。
 _Avoid_: 规划 SHA、文档提交、规划分支
 
-\**Spec（需求）*一个要交付的需求（feature / bug / improvement），是拆票的来源。bug 类型可以指向它所修的原 Spec，也可以没有原 Spec。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
+**Spec（需求）**：
+一个要交付的需求（feature / bug / improvement），是拆票的来源。bug 类型可以指向它所修的原 Spec，也可以没有原 Spec。可以整个取消（`plat spec cancel`）：没做完的票和作业一并停掉，已合并的票留着；随后由带代码托管凭据的 worker 关掉它还开着的 PR、删掉它的 `spec/*` 和 `agent/*` 分支（spec merged 之后也删分支）。有 PR 已被合并、又还有开着的 PR 时不能取消（部分合并、其余 PR 都已关闭的可以取消，已合并的部分留在 main 上）。所有票都被取消、没有一张 done 时自动取消。
 _Avoid_: 父票、epic、story
 
 **User Story（用户故事）**：
@@ -90,7 +91,7 @@ _Avoid_: 测试环境、staging
 _Avoid_: 依赖关系、blocked_by
 
 **Append（追加）**：
-往一个已确认的 Spec 里再导入一批 Ticket 和 Edge，立即生效、不再确认拆分。还没进入收尾时可以追加；已经开了 PR、人还没合并（awaiting-review）时也可以，追加后 Spec 进入 reworking。每条新边至少连着一张新票；已经开工或做完的票不能再被新票挡住。改契约、拆票都靠追加，做完的票不重开，要改就追加适配票。
+往一个已确认的 Spec 里再导入一批 Ticket 和 Edge，立即生效、不再确认拆分。还没进入收尾时可以追加；已经开了 PR、人还没合并（awaiting-review）时也可以，追加后 Spec 进入 reworking。已经开了 PR 时也可以提交修改要求，那是 Rework，需求进入 finalizing，不是追加。每条新边至少连着一张新票；已经开工或做完的票不能再被新票挡住。改契约、拆票都靠追加，做完的票不重开，要改就追加适配票。
 _Avoid_: 补票、重开
 
 **Serial ID（序号）**：
@@ -98,7 +99,7 @@ _Avoid_: 补票、重开
 _Avoid_: 编号（容易和显示编号混）
 
 **Display ID（显示编号）**：
-给人看和写进 commit trailer 的编号：前缀加序号，Spec 是 `S-12`，Ticket 是 `T-123`，Run 是 `R-456`。不存库，由 Serial ID 现算。
+给人看和写进 commit trailer 的编号：前缀加序号，Spec 是 `S-12`，Ticket 是 `T-123`，Run 是 `R-456`，人审意见是 `C-12`。不存库，由 Serial ID 现算。
 _Avoid_: 票号、工单号
 
 **Contract（契约）**：
@@ -138,7 +139,7 @@ _Avoid_: 输出、结果
 _Avoid_: uncertainty、不确定点（旧字段名）、Implementation Decisions（那是 Spec 正文里规划时写下的节）、待确认的决定（不是待处理队列里的新类别）
 
 **Ruling（结论）**：
-Spec 轴对一条 `conflict` 或 `known-gap` 的判定：允许这样做、必须改、或必须人来定。票级和需求级各判一次；有这类决定却缺结论，该次审查为 `invalid-output`。必须人来定的不挡流程、不叫人，和没被做掉的 `deferred` 一起，在开 PR 时列在验收包和 PR 描述的最前面，由人在合并时定。
+Spec 轴对一条 `conflict` 或 `known-gap` 的判定：允许这样做、必须改、或必须人来定。票级和需求级各判一次；有这类决定却缺结论，该次审查为 `invalid-output`。必须人来定的不挡流程、不叫人，和没被做掉的 `deferred` 一起，在开 PR 时列在验收包和 PR 描述的最前面，由人在合并时定。Rework 记下的 `conflict` / `known-gap` 不经裁定，直接作为待人定的事列进验收包（ADR 0012）。
 _Avoid_: 裁决、批注
 
 **Decision log（决策日志）**：
@@ -150,7 +151,7 @@ _Avoid_: decisions.json、上下文
 _Avoid_: 补丁、包装 prompt、fork
 
 **Integration branch（集成分支）**：
-一个 Spec 在一个 Repo 里的分支 `spec/<id>/<slug>`（`<id>` 是数据库的标识，六位十六进制；标识出现之前建的 spec 是 `spec/<slug>`），票合并到这里，最后以 PR 的形式合进 main。票的分支是 `agent/<id>/T-<n>`，总览修复的是 `agent/<id>/S-<n>-final`。
+一个 Spec 在一个 Repo 里的分支 `spec/<id>/<slug>`（`<id>` 是数据库的标识，六位十六进制；标识出现之前建的 spec 是 `spec/<slug>`），票合并到这里，最后以 PR 的形式合进 main。票的分支是 `agent/<id>/T-<n>`，总览修复的是 `agent/<id>/S-<n>-final`，修改要求的 Rework 是 `agent/<id>/S-<n>-rework-<k>`。
 _Avoid_: 特性分支、feature branch
 
 **Update-branch（更新集成分支）**：
@@ -196,15 +197,15 @@ _Avoid_: 测试白名单、基准调整
 _Avoid_: 暂停票、checkout
 
 **Waiting queue（待处理队列）**：
-需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。taken-over 的票不在其中。
-_Avoid_: pending 队列、待处理项、待确认的决定
+需要人回来处理的事项的集合：blocked 的 Ticket、卡住的收尾、PR 问题、清理失败、规划 blocked、暂停的 Spec、定位失败的 bug 草稿。不是 Ticket 状态 pending。taken-over 的票不在其中。不是 Review queue。
+_Avoid_: pending 队列、待处理项、待确认的决定、待审
 
 **Notification（通知）**：
 平台在需要人回来、或流程可以往下走时，发到人眼前的一条短消息。标题是事件类型，正文是显示编号、标题和一句原因，并带对应页面的链接。不是票卡住时页面上那份结构化说明，也不是验收包。
 _Avoid_: 推送、提醒
 
 **Finding（意见）**：
-review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）、「建议」（写进验收包；需求级 Standards 轴的建议可能被 Tidy 处理）和「拿不准」（审查写下但没下结论的疑点；收尾 Spec 轴判 `resolved` 的折叠为「已解决的疑点」，其余写进验收包由人看）。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，`refactored` 只表示 Tidy 说它处理了、并且已经合并，两者都不表示已有人或复审验证过。`approved`（人已批准）只表示人看过 Recheck 的结论后放行，不表示问题被修了。`resolved`（审查确认已解决）只表示收尾 Spec 轴确认这条票级疑点在集成分支的代码里已经不成问题。审查只跑一次；门禁不过时被丢掉的那次不算。之后的改动只经过 Recheck。
+review 意见或门禁失败，以及它的处理结果。review 意见分「必须修」（交给 fix 阶段处理）、「建议」（写进验收包；需求级 Standards 轴的建议可能被 Tidy 处理）和「拿不准」（审查写下但没下结论的疑点；收尾 Spec 轴判 `resolved` 的折叠为「已解决的疑点」，其余写进验收包由人看）。处理结果 `fixed` 只表示 fix 阶段结束且报 done、门禁通过，`refactored` 只表示 Tidy 说它处理了、并且已经合并，两者都不表示已有人或复审验证过。`approved`（人已批准）只表示人看过 Recheck 的结论后放行，不表示问题被修了。`resolved`（审查确认已解决）只表示收尾 Spec 轴确认这条票级疑点在集成分支的代码里已经不成问题。审查只跑一次；门禁不过时被丢掉的那次不算。之后的改动只经过 Recheck。人审意见不是 review 意见，不进 Finding 的处理结果。
 _Avoid_: 评论、issue
 
 **Tidy（整理）**：
@@ -212,7 +213,7 @@ _Avoid_: 评论、issue
 _Avoid_: 重构阶段、refactor、cleanup
 
 **Recheck（复查）**：
-审查之后的修复或 Update-branch 删改了已有测试、或改了测试和构建配置时，合并前那次只看这次改动的 Spec 轴，只问有没有改变已有行为或放松检查。由确定性检查触发，没命中就不跑。不是 pass 就叫人批准这次改动，不派 fix。Update-branch 和 merge-fix 时，这次改动从自动合并结果算起，合进来的默认分支或集成分支自己的改动不算；解冲突时删改任何一边已有的测试行仍算。review-fix、final-fix、final-tidy 仍从运行前的分支头算。
+审查之后的修复、Rework 或 Update-branch 删改了已有测试、或改了测试和构建配置时，合并前那次只看这次改动的 Spec 轴，只问有没有改变已有行为或放松检查。由确定性检查触发，没命中就不跑。不是 pass 就叫人批准这次改动，不派 fix。Update-branch 和 merge-fix 时，这次改动从自动合并结果算起，合进来的默认分支或集成分支自己的改动不算；解冲突时删改任何一边已有的测试行仍算。review-fix、final-fix、final-tidy、rework 仍从运行前的分支头算。
 _Avoid_: 二次审查、re-review
 
 **Review axis（审查轴）**：
@@ -227,12 +228,35 @@ _Avoid_: 缺陷、追溯表、关联
 Spec 收尾时给人看的简报，人据此决定是否合并。出现在平台上，并写入各仓库 PR 的描述（该仓库那一节，外加合并顺序和联调）。
 _Avoid_: 报告、总结
 
+**Review comment（人审意见）**：
+人在控制塔审查页写下的一条意见，属于一个 PR，钉在某个审查版本的一行、几行、一个文件或整个 PR 上。由 Rework 处理；不是 Finding。
+_Avoid_: 评论（托管上的评论是另一回事）、review 意见（那是 Finding）
+
+**Change request（修改要求）**：
+人一次提交的一组人审意见，每个有意见的仓库因此跑一次 Rework。同一需求可以有多次，按顺序编号。
+_Avoid_: 返工单、打回
+
+**Rework（返工运行）**：
+按一次修改要求改一个仓库集成分支的收尾步骤。不是 Ticket，也不是需求状态 reworking。
+_Avoid_: 返工票、re-fix
+
+**Review revision（审查版本）**：
+平台为 PR 的一个 head 提交算出的一份 diff 和逐行归属，不随 PR 再变。已看标记、人审意见和导读都挂在某个审查版本上。
+
+**Review guide（导读）**：
+一个审查版本的阅读顺序：按需求、User Story、票的依赖序、收尾和修改要求分节，用平台已有记录说明改动并指向对应 hunk。由记录拼出，不跑 agent。
+_Avoid_: walkthrough、总结
+
+**Review queue（待审列表）**：
+等人验收、正在返工、或看完等合并的需求。不是 Waiting queue。
+_Avoid_: 收件箱、inbox、待处理
+
 **Merge order（合并顺序）**：
 一个 Spec 的各仓库 PR 应当按什么先后合进 main：由这个 Spec 里的 contract 边推出，提供契约的仓库先合，使用它的仓库的 PR 在那之前保持 draft；没有契约关系的仓库之间没有顺序。人违反顺序时（先合了还在等别的 PR 的那个）只记录，不阻止：Spec 上标「合并顺序被打破」，状态照常推进，不进 `plat blocked`。
 _Avoid_: 发布顺序、上线顺序
 
 **Auto-merge（自动合并）**：
-项目合并策略为 `auto-improvement` 时，平台自己把一个 Spec 的 PR 合进默认分支：只对 improvement 类型、只有一个 PR、验收包没有 `needs-human`、没做掉的 `deferred` 和 `host-check`、CI 不是 pending 或 failure、不冲突、PR 上没人评论的 Spec，在进入 awaiting-review 30 分钟后做。人在这 30 分钟里在 PR 上写评论就不做。默认策略是 `manual`，全部由人合并（ADR 0011）。
+项目合并策略为 `auto-improvement` 时，平台自己把一个 Spec 的 PR 合进默认分支：只对 improvement 类型、只有一个 PR、验收包没有 `needs-human`、没做掉的 `deferred` 和 `host-check`、CI 不是 pending 或 failure、不冲突、PR 上没人评论、平台上也没有已提交人审意见的 Spec，在进入 awaiting-review 30 分钟后做。人在这 30 分钟里在 PR 上写评论、或在平台提交人审意见，就不做，这个需求以后也不再自动合并。默认策略是 `manual`，全部由人合并（ADR 0011）。
 _Avoid_: 机器人合并、auto merge（GitHub 的同名功能是另一回事）
 
 ## 度量

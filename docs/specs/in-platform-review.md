@@ -1,18 +1,20 @@
 # 在控制塔里审代码
 
-**技术方案 · 待评审 · 2026-11-26**
+**技术方案 · 已定 · 2026-11-26**
+
+共同理解见 grilling：人审意见以平台为准（[ADR 0012](../adr/0012-review-comments-are-platform-authoritative.md)）。下面按该理解写成实现方案。
 
 现在人要验收一个需求，得从控制塔跳到 GitHub / GitLab 看 diff、写评论，平台读不到评论的内容，改动只能靠在规划机器上追加票。这份方案让人在控制塔里找到等着审的需求，按导读看完全部代码改动，在代码上写意见，一次提交给平台，由 agent 在集成分支上改完、过门禁、更新 PR，需求回到等人验收。合并仍在代码托管上做（或者按 ADR 0011 自动合并）。
 
 本次实现的范围：
 
-| 部分 | 内容 |
-| --- | --- |
-| A · 审查页 | worker 用 git 算 PR 的 diff 和逐行归属；页面按目录或按票看改动，搜索和过滤文件，展开上下文，标已看，看「上次审后又改了什么」；右栏是合并前清单、需求与票、Finding |
-| B · 导读 | 按需求 → User Story → 票（依赖顺序）→ 改动组织成章节，用 agent 当时写的说明和决定解释每一段，点进去跳到对应的 hunk |
-| C · 待审列表 | 跨项目列出等人审、审到一半、返工中、看完待合并的需求，组内按风险排序 |
-| D · 人审意见与 Rework | 在 diff 上写意见，提交一次修改要求；每个有意见的仓库跑一次 Rework，合回集成分支，更新验收包和 PR，需求回到 awaiting-review |
-| E · 两处小修 | 交付页「平台从不合入」的旧文案；worker 自动合并前重读 PR |
+| 部分                  | 内容                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A · 审查页            | worker 用 git 算 PR 的 diff 和逐行归属；页面按目录或按票看改动，搜索和过滤文件，展开上下文，标已看，看「上次审后又改了什么」；右栏是合并前清单、需求与票、Finding |
+| B · 导读              | 按需求 → User Story → 票（依赖顺序）→ 改动组织成章节，用 agent 当时写的说明和决定解释每一段，点进去跳到对应的 hunk                                                |
+| C · 待审列表          | 跨项目列出等人审、审到一半、返工中、看完待合并的需求，组内按风险排序                                                                                              |
+| D · 人审意见与 Rework | 在 diff 上写意见，提交一次修改要求；每个有意见的仓库跑一次 Rework，合回集成分支，更新验收包和 PR，需求回到 awaiting-review                                        |
+| E · 两处小修          | 交付页「平台从不合入」的旧文案；worker 自动合并前重读 PR                                                                                                          |
 
 不在本次范围：在平台里合并、用人自己的身份在托管上提交正式 Review、拉托管上评论的正文、并排对照和语法高亮、给 Finding 加文件和行号、只留记录不交给 agent 的「纯评论」。理由见第 12 节。
 
@@ -44,9 +46,9 @@
 - **Review guide（导读）**：一个审查版本的阅读顺序：按需求、User Story、票的依赖顺序、收尾和修改要求分节，每节用平台已有的记录说明这段改动为什么这样做，并指向对应的 hunk。由平台按记录拼出，不跑 agent。_Avoid_：walkthrough、总结。
 - **Review queue（待审列表）**：所有等人审、正在返工、看完等合并的需求。不是待处理（待处理是 blocked 的票和收尾）。_Avoid_：收件箱、inbox。
 
-GLOSSARY 里「review 意见」一条补一句：人审意见不是 review 意见。Spec 一条里「已经开了 PR、人还没合并时也可以追加」后面补：也可以提交修改要求，需求进入 finalizing。
+GLOSSARY 里「review 意见」一条补一句：人审意见不是 review 意见。Append 一条里「已经开了 PR、人还没合并时也可以追加」后面补：也可以提交修改要求，需求进入 finalizing。这些已写入根目录 `GLOSSARY.md`。
 
-**ADR 0012：人审意见以平台为准，由 Rework 修改。** 要点：
+**ADR 0012：人审意见以平台为准，由 Rework 修改。** 已写入 `docs/adr/0012-review-comments-are-platform-authoritative.md`。要点：
 
 - 人在平台写意见，平台是这些意见的权威来源；托管上只放一条平台维护的汇总评论存档。不逐条同步成托管的行内讨论，不接个人 OAuth。
 - 修改要求不触发审查：Rework 只经过门禁和 Recheck（由确定性条件触发），不重跑 final-review。审它的人就是写意见的人，「审查只跑一次」不变。
@@ -55,10 +57,10 @@ GLOSSARY 里「review 意见」一条补一句：人审意见不是 review 意�
 - 导读只用平台已有的记录（运行的 summary、决定、验收标准、Finding、逐行归属）拼出，不为它跑 agent：解释来自当时做这件事的 agent，位置来自 git，都可以核对。
 - 放弃的方案：意见以托管为准（要个人身份和逐条同步，单人使用时收益小）；意见自动生成追加票（要多一种写票的 agent 运行，小意见也要跑完整个票流水线和重新收尾）；修改要求重跑 final-review（等于第二次审查）；用 LLM 生成导读（多一次花钱的运行，要校验它说的位置是否存在，解释也不比当时的 agent 更可信）。
 
-**design.md 改动**：
+**design.md 改动**（已写入）：
 
 - 「平台与代码托管的分工」表：平台「内容」加人审意见和修改要求，「能看到」加各 PR 的代码差异和导读，「能操作」加写人审意见、提交修改要求；托管侧「内容」的「人写的 review 评论」改成「人直接在托管上写的评论」。
-- 第 1055 行「PR 上人写的评论可以拉回来返工」那段改成本方案：意见在平台写，分支名改成 `agent/<id>/S-<n>-rework-<k>`（推送出口只允许 `agent/*`、`spec/*`），状态走 finalizing 而不是 reworking。
+- 原「PR 上人写的评论可以拉回来返工」那段改成本方案：意见在平台写，分支名是 `agent/<id>/S-<n>-rework-<k>`（推送出口只允许 `agent/*`、`spec/*`），状态走 finalizing 而不是 reworking。
 - 需求状态图加 `awaiting-review → finalizing：提交修改要求`、`finalizing → merged：返工中人合并了 PR`。
 - 「以后」列表里删掉「PR 评论返工」。
 
@@ -75,15 +77,16 @@ GLOSSARY 里「review 意见」一条补一句：人审意见不是 review 意�
   repoUrl: string;
   repoName: string;
   defaultBranch: string;
-  headSha: string;           // pull_requests.head_sha，host-sync 最近一次读到的
+  headSha: string; // pull_requests.head_sha，host-sync 最近一次读到的
   previousHeadSha: string | null; // 人上次审的版本，见 3.4
-  generatedPaths: string[];  // 这个仓库 gates.yaml 的 generated 路径
 }
 ```
 
+生成文件名单不放在任务上：worker 在 `headSha` 上自己 `readGateConfig(repoDir, headSha)`，和现有门禁同一条路。
+
 worker 的做法：
 
-1. `repos.ensure(repoName, repoUrl, defaultBranch)`，再 `fetchObject(headSha)`，确保 head 在本地，即使 `spec/*` 已经又前进了。
+1. `repos.ensure(repoName, repoUrl, defaultBranch)`，再 `fetchObject(headSha)`，确保 head 在本地，即使 `spec/*` 已经又前进了。生成文件名单用 `readGateConfig(repoDir, headSha)` 的 `generated`，不从任务参数带。
 2. `mergeBase = git merge-base origin/<default> <headSha>`，记下当时的默认分支 SHA 作为 `baseSha`。
 3. `git -c diff.external= diff --no-ext-diff --no-textconv -M --raw -z --numstat mergeBase headSha` 得到文件清单（状态、改名、权限、增删行数、新旧 blob），再按文件取 patch。不读人的工作区，不执行仓库里的任何东西。
 4. **文件级归属**：`git log --format=%H%x00%B%x00 --name-only mergeBase..headSha`，用 `parseTrailers` 读每个提交的 `Ticket:`、`Run:` trailer，累加到它改过的文件上。`links` 表要等 PR 合并后由 `index-pr-links` 写入，PR 还开着时用不上，所以这里现算。没有 `Ticket:` 的提交按 `Run:` 交给 API 查阶段（收尾修复、Tidy、Rework、Update-branch），两样都没有的是设置提交或规划提交。
@@ -92,7 +95,7 @@ worker 的做法：
 7. **文件内容**：清单里每个文本文件的新旧两个 blob，各自不超过 512 KiB 的，内容一起交回，供展开上下文用（3.3）。
 8. 上限：单文件 patch 256 KiB，整份 patch 4 MiB，文件 3000 个，逐行归属只对前 300 个文件做，blob 内容整份 16 MiB。超了的文件只给清单和行数，标 `patch: "omitted"` 和原因（`too-large`、`binary`、`over-total`）；文件数超了标整份 `partial`；没做逐行归属的文件退回文件级归属，页面上注明。上限放在 `packages/shared` 的常量里，API 的结果 schema 也按它校验。
 
-结果 `ReviewRevisionResultSchema` 由 API 写入下面几张表。作业的幂等键是 `(pullId, headSha)`：同一个 head 只算一次，页面重复打开不会重复排队。结果超过 API 单次请求的大小时，worker 分块交回（按文件分批，最后一块带完成标记），API 收齐才算这个版本 `ready`。
+结果 `ReviewRevisionResultSchema` 由 API 写入下面几张表。作业键按 `open-pr` 的办法带序号：`pull-{id}:review-revision:{headSha}:{seq}`。同一个 head 已经 `ready` 就不再排；`failed` 时下一次 GET 或进入 awaiting-review 的预先排会再排一记，写回同一行审查版本。结果超过 API 单次请求的大小时，worker 分块交回（按文件分批，最后一块带完成标记），API 收齐才算这个版本 `ready`。
 
 ### 3.1 表
 
@@ -128,7 +131,7 @@ review_file_views
 
 ### 3.2 什么时候算
 
-- 页面或待审列表需要某个 PR 的审查版本，而 `pull_requests.head_sha` 还没有时，API 排 `review-revision`，先返回 `pending`。worker 交回结果后，按 ADR 0008 由触发器写一条事件，页面经 SSE 失效查询、自动刷新。
+- 页面或待审列表需要某个 PR 的审查版本，而这个 head 还没有 `ready` 的审查版本时，API 排 `review-revision`，先返回 `pending`（已有 `failed` 则再排一记）。worker 交回结果后，按 ADR 0008 由触发器写一条事件，页面经 SSE 失效查询、自动刷新。
 - 需求进入 awaiting-review 时（第一次开 PR，或返工结束）就预先排一次，人打开时通常已经算好。
 - 人正看着时 host-sync 发现 head 变了，页面只显示横幅「PR 有新提交：切换到 `e4f5a6b`」，不自动替换内容和行号。
 - 不为所有 PR 定时算 diff。
@@ -182,11 +185,11 @@ hunk 上下各有「展开 20 行」和「展开到下一个 hunk」，文件末
 
 顶栏新增「待审」（`/review`），和「待处理」（`/waiting`，blocked 的票和收尾）分开。列出所有项目里下面四组需求，每组内按风险排序：
 
-| 组 | 条件 |
-| --- | --- |
-| 等你审 | awaiting-review，当前审查版本上一个文件都没看过，也没有草稿 |
-| 审到一半 | awaiting-review，看过一部分或有草稿；或返工结束后有文件「上次审后改过」还没看 |
-| 返工中 | finalizing，且有 active 的修改要求；或 reworking（追加票返工） |
+| 组         | 条件                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 等你审     | awaiting-review，当前审查版本上一个文件都没看过，也没有草稿                                                                |
+| 审到一半   | awaiting-review，看过一部分或有草稿；或返工结束后有文件「上次审后改过」还没看                                              |
+| 返工中     | finalizing，且有 active 的修改要求；或 reworking（追加票返工）                                                             |
 | 看完待合并 | awaiting-review 或 partially-merged，所有 PR 当前版本的文件都看过、没有草稿；partially-merged 也放在这里（还有 PR 没合并） |
 
 每行显示：需求编号和标题、项目、类型、仓库和 PR 数、在这一组里等了多久（从进入 awaiting-review 或返工结束算起）、改动行数、已看进度、CI 和冲突、自动合并预告，以及风险标签。点行进入那个需求的审查页（默认导读）。
@@ -217,7 +220,7 @@ review_comments
   rework_run_id → runs (nullable), created_at, updated_at
 ```
 
-- 只在需求 awaiting-review 时能写、改、删草稿，其他状态只读。
+- 只在需求 awaiting-review 时能写、改、删草稿，其他状态只读。需求 cancelled 时删掉草稿；已经提交的意见留下。
 - 意见永远显示在它写下时的审查版本上，带 `excerpt`。新版本里不重新定位，只在列表里标「写于 `a1b2c3d`」。
 - `addressed` 只表示 Rework 说处理了、门禁通过、已经合回，不表示人确认过；人不满意就再写一条。和 Finding 的 `fixed` 是同一种保证程度。
 - 显示编号 `C-<n>`（`formatDisplayId` 加一种），Rework 的上下文、汇总评论和导读都用它。
@@ -236,8 +239,9 @@ review_comments
 3. 新建 `change_requests`（`id, spec_id, number, created_at, state ('active' | 'done' | 'superseded')`），本需求的草稿全部改成 `submitted` 并挂上它。
 4. 需求按新事件 `request-changes` 从 awaiting-review 进入 finalizing（`spec-state.ts` 加事件和转移）。事件原因记「提交修改要求 C-1…C-3」，算人的操作（`recordAction`）。
 5. 有意见的仓库，把它的 finalization 行改成 `step = 'rework', state = 'active'`，清掉 `blocked_reason`、`auto_retried`、`retry_note`，`job_floor` 取当前最大作业号，然后排 `rework` 作业。没有意见的仓库，finalization 保持 done。
-6. 停掉这个需求的自动合并作业（`stopAutoMergeJobs`，原因「提交了修改要求」），所有 open 的 PR 排 `pr-draft`。和追加票的做法一样（`planning.ts:665-681`）。
-7. 排一次 `review-note`（8.6），在 PR 上写汇总评论。
+6. 作废这个需求的 `final_e2e` 行（删或重置）。在 awaiting-review 追加时同样作废。否则第一次收尾留下的 `done`/`waived` 会让第二次收尾跳过「分支被改过再跑 e2e」。
+7. 停掉这个需求的自动合并作业（`stopAutoMergeJobs`，原因「提交了修改要求」），所有 open 的 PR 排 `pr-draft`。和追加票的做法一样（`planning.ts:665-681`）。
+8. 排一次 `review-note`（8.6），在 PR 上写汇总评论。
 
 同一个修改要求重复提交（双击、重试）：第二次时需求已经不是 awaiting-review，按第 1 步拒绝，不会建出两次。
 
@@ -245,14 +249,14 @@ review_comments
 
 `FINAL_STEPS` 加 `rework`（`packages/shared/src/finalize-flow.ts`），`advanceFinalization` 的规则：
 
-| 报告 | 决定 |
-| --- | --- |
-| `rework` done | 排 `final-merge`；命中 Recheck 触发条件、SHA 又不在 `allowed_recheck_shas` 里时先排 `recheck` |
-| `rework` 没有结果或超时 | 和 final-fix 一样，自动重试一次 |
-| `rework` cannot-proceed | blocked，原因照 final-fix |
-| 之后的 `recheck`、`final-merge` | 规则不变；`final-merge` merged 后不再进 Tidy（这次修改要求没有新的 Standards 建议） |
+| 报告                            | 决定                                                                                                                                                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rework` done                   | 排 `final-merge`；命中 Recheck 触发条件、SHA 又不在 `allowed_recheck_shas` 里时先排 `recheck`                                                                                                                        |
+| `rework` 没有结果或超时         | 和 final-fix 一样，自动重试一次                                                                                                                                                                                      |
+| `rework` cannot-proceed         | blocked，原因照 final-fix                                                                                                                                                                                            |
+| 之后的 `recheck`、`final-merge` | `rework` 这条路上 `final-merge` merged 之后结束，不进 Tidy。后继写死为 done，即使 `tidyWantedOf` 仍为真也不排 `final-tidy`（修改要求没有新的 Standards 建议；只靠「曾经跑过 Tidy」挡不住第一次收尾没跑 Tidy 的仓库） |
 
-`recordFinalResult`（`packages/api/src/finalize/finalize.ts:103`）里，只对 `final-fix` 判 Recheck 触发的那段，扩展到 `rework`。`settleFinalization`（`packages/api/src/finalize/final-e2e.ts:151`）里「收尾改过分支，联调票要再跑 e2e」的查询加上 `stage = 'rework' AND result = 'done'`。全部仓库 done 后走已有的 `finishOpeningWithExistingPulls`（`pull-requests.ts:241`）：重建验收包，更新 PR 描述，按合并顺序把 PR 转回 ready，需求回到 awaiting-review。这条路追加票返工本来就在用，不用改。
+`recordFinalResult`（`packages/api/src/finalize/finalize.ts:103`）里，只对 `final-fix` 判 Recheck 触发的那段，扩展到 `rework`。`settleFinalization`（`packages/api/src/finalize/final-e2e.ts:151`）里「收尾改过分支，联调票要再跑 e2e」的查询加上 `stage = 'rework' AND result = 'done'`。只加这一句不够：今天 `final_e2e` 每需求一行，第一次收尾已经 `done`/`waived` 时后面不再看「分支被改过」。提交修改要求、以及在 awaiting-review 追加时，都作废（删或重置）这行，让检查重新生效。全部仓库 done 后走已有的 `finishOpeningWithExistingPulls`（`pull-requests.ts:241`）：重建验收包，更新 PR 描述、按合并顺序把 PR 转回 ready，需求回到 awaiting-review。
 
 流程收尾时把这次的 `change_requests` 标成 done。Rework 进行中需求不是 awaiting-review，写不了新草稿，所以同一时刻最多一次 active 的修改要求。
 
@@ -266,7 +270,7 @@ review_comments
 
 **分支**：`branchNames` 加 `rework(specDisplayId, k)`，得到 `agent/<id>/S-<n>-rework-<k>`，`k` 是修改要求的编号。`branches.ts` 的 `TICKET` 正则加上 `rework-[1-9][0-9]*`，`isPlatformBranch` 和清理就会认它；`spec-cleanup` 要删的分支列表（`pull-requests.ts:552` 附近）加上这个需求所有修改要求的 rework 分支。每次修改要求都用新名字，不复用旧分支，避免 `agentChange` 把已经合回的旧提交当成要救回的工作。
 
-**worker**：`agentChange`（`packages/worker/src/stages/implement.ts`）的阶段列表和 `RECHECK_TRIGGER_STAGES` 加 `rework`，其余和 final-fix 相同：从集成分支切出、跑 agent、补 trailer、推送、交回。保护路径按需求已批准的那份；按 agent 运行计入工期。
+**worker**：`agentChange`（`packages/worker/src/stages/implement.ts`）的阶段列表和 `RECHECK_TRIGGER_STAGES` 加 `rework`，其余和 final-fix 相同：从集成分支切出、跑 agent、补 trailer、推送、交回。保护路径和 final-fix 一样：项目保护路径生效，`allowedProtectedPaths` 为空（没有票级豁免）。按 agent 运行计入工期。意见要求改保护路径或删测试名时，Rework `cannot-proceed` 或 `declined`+`conflict`，人用追加票并批准。
 
 **bundle**：`packages/api/src/stages/bundle.ts` 里收尾那支（约 640-730 行）加 `rework`：`agentBranch` 用上面的名字，`review` 换成这次修改要求里本仓库的意见，worker 渲染成 `/context/review-comments.json`：
 
@@ -284,7 +288,12 @@ review_comments
       "excerpt": "…写意见时的那几行…",
       "body": "这里空列表要返回 200 和 []，不是 404"
     },
-    { "id": "C-14", "writtenOn": "e4f5a6b…", "path": null, "body": "迁移脚本要能重复跑" }
+    {
+      "id": "C-14",
+      "writtenOn": "e4f5a6b…",
+      "path": null,
+      "body": "迁移脚本要能重复跑"
+    }
   ]
 }
 ```
@@ -348,18 +357,18 @@ GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- 
 
 都按 `packages/api/src/http/*` 的 `createRoute` 写，`pnpm gen:api` 更新 OpenAPI 和客户端。
 
-| 方法和路径 | 作用 |
-| --- | --- |
-| `GET /review-queue?project=` | 待审列表（第 6 节） |
-| `GET /specs/{id}/review` | 本需求每个 PR：当前 head、审查版本状态（`ready` / `pending` / `failed`）、已看数、意见数；合并前清单；需求与票、Finding 的数据；修改要求历史 |
-| `GET /pull-requests/{id}/review-revision?head=<sha>` | 审查版本的文件清单、文件级和逐行归属、已看状态；缺了就排 `review-revision`，返回 `pending` |
-| `GET /review-revisions/{id}/guide` | 导读（第 5 节） |
-| `GET /review-files/{id}?view=all\|since` | 一个文件的 patch 或「上次审后」的 patch |
-| `GET /review-blobs/{sha}?from=&to=` | 展开上下文用的行（3.3），只返回属于本平台某个审查版本的 blob |
-| `PUT` / `DELETE /pull-requests/{id}/viewed-files/{path}` | 标已看、取消已看（带 `newBlob`） |
-| `POST /pull-requests/{id}/review-comments` | 写草稿（版本、位置、excerpt、正文） |
-| `PATCH` / `DELETE /review-comments/{id}` | 改、删草稿 |
-| `POST /specs/{id}/change-requests` | 提交修改要求（8.1），可带 `acknowledgeStale` |
+| 方法和路径                                               | 作用                                                                                                                                         |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /review-queue?project=`                             | 待审列表（第 6 节）                                                                                                                          |
+| `GET /specs/{id}/review`                                 | 本需求每个 PR：当前 head、审查版本状态（`ready` / `pending` / `failed`）、已看数、意见数；合并前清单；需求与票、Finding 的数据；修改要求历史 |
+| `GET /pull-requests/{id}/review-revision?head=<sha>`     | 审查版本的文件清单、文件级和逐行归属、已看状态；缺了就排 `review-revision`，返回 `pending`                                                   |
+| `GET /review-revisions/{id}/guide`                       | 导读（第 5 节）                                                                                                                              |
+| `GET /review-files/{id}?view=all\|since`                 | 一个文件的 patch 或「上次审后」的 patch                                                                                                      |
+| `GET /review-blobs/{sha}?from=&to=`                      | 展开上下文用的行（3.3），只返回属于本平台某个审查版本的 blob                                                                                 |
+| `PUT` / `DELETE /pull-requests/{id}/viewed-files/{path}` | 标已看、取消已看（带 `newBlob`）                                                                                                             |
+| `POST /pull-requests/{id}/review-comments`               | 写草稿（版本、位置、excerpt、正文）                                                                                                          |
+| `PATCH` / `DELETE /review-comments/{id}`                 | 改、删草稿                                                                                                                                   |
+| `POST /specs/{id}/change-requests`                       | 提交修改要求（8.1），可带 `acknowledgeStale`                                                                                                 |
 
 `plat spec show` 加一行：人审意见 `n` 条（待处理 / 已处理 / 没处理），最近一次修改要求的状态。`plat` 不加待审列表命令，待审只在页面上看。
 
@@ -367,13 +376,13 @@ GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- 
 
 下面是要实测的目标，不是已经达到的指标。实现时在 Mac 上用一个典型 PR（约 30 个文件、1000 行改动）和一个大 PR（约 300 个文件、2 万行）各量一次，把冷启动、worker 排队、git 计算、传输、渲染分开记，结果写回本文档：
 
-| 场景 | 目标 |
-| --- | --- |
-| 审查版本已算好，打开审查页到文件树和第一个文件出来 | 1 秒内 |
-| 已加载的版本里切换文件、展开上下文 | 200ms 内 |
-| 待审列表打开 | 1 秒内（20 个需求以内） |
-| 导读打开（版本已算好） | 1 秒内 |
-| `review-revision` 在 worker 上的计算（不含排队） | 典型 PR 10 秒内，大 PR 60 秒内 |
+| 场景                                               | 目标                           |
+| -------------------------------------------------- | ------------------------------ |
+| 审查版本已算好，打开审查页到文件树和第一个文件出来 | 1 秒内                         |
+| 已加载的版本里切换文件、展开上下文                 | 200ms 内                       |
+| 待审列表打开                                       | 1 秒内（20 个需求以内）        |
+| 导读打开（版本已算好）                             | 1 秒内                         |
+| `review-revision` 在 worker 上的计算（不含排队）   | 典型 PR 10 秒内，大 PR 60 秒内 |
 
 托管任务和 agent 运行共用 worker 的领取循环：循环数等于沙箱槽位数（`packages/worker/src/worker.ts:172`），每个循环一次只做一个作业。槽位全被 agent 运行占着时，托管任务（现在的 host-sync 也一样）要等某个运行结束才有循环去领。`review-revision` 本身不占槽位（加进 `packages/shared/src/slotless-jobs.ts` 的列表），但人打开审查页时如果正好两个需求在跑，要等几十分钟，1 秒的目标就达不到。所以 T4 给 worker 多开一个循环，它只领不占槽位的作业（`claim(false)`），槽位满时托管任务和 `review-revision` 也有人领。实测时记下排队时间。
 
@@ -390,21 +399,21 @@ GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- 
 
 项目 4（afk-platform）一个需求，下面是建议的票和依赖。改 `schema.ts` 的票都要 `db:generate` 并提交 SQL；改路由的票都要 `pnpm gen:api`。
 
-| 票 | 内容 | 依赖 |
-| --- | --- | --- |
-| T1 文档 | GLOSSARY 六个新词和两处补充、ADR 0012、design.md 四处改动 | — |
-| T2 交付页文案 | 第 9 节第 1 条 | — |
-| T3 合并前重读 | 第 9 节第 2 条 | — |
-| T4 审查版本 | `review_revisions` / `review_files` / `review_blobs` / `review_file_views` 表；`review-revision` 托管任务（shared 类型、api 排队和分块落库、worker 用 git 算 diff、文件级和逐行归属、blob 内容）；上限常量；进入 awaiting-review 时预先排；保留期；worker 多一个只领不占槽位作业的循环（第 11 节） | T1 |
-| T5 审查接口 | 第 10 节里审查版本、文件、blob、已看、`/specs/{id}/review` 五个接口；事件和 SSE 刷新 | T4 |
-| T6 审查页 | 路由、标签、文件树（目录 / 票）、逐票高亮 hunk、搜索和过滤、diff renderer、展开上下文、已看、切换横幅、右栏三个标签、「上次审后」视图、快捷键 | T5 |
-| T7 导读 | 导读接口（拓扑排序、summary 和决定、hunk 清单、各节进度）和页面视图 | T5、T6 |
-| T8 待审列表 | 待审接口（分组、风险排序、标签）和 `/review` 页面、顶栏入口 | T5 |
-| T9 人审意见 | `review_comments` 表、草稿接口、页面上写和列意见 | T5、T6 |
-| T10 修改要求 | `change_requests` 表、提交接口（含旧版本确认和拒绝说明）、`request-changes` 事件、收尾加 `rework` 步、finalizing 时合并 PR 的处理（8.3）、自动合并否决（8.7） | T9 |
-| T11 Rework 运行 | 分支名、bundle 和 `/context/review-comments.json`、`rework.md`、结果 schema、worker 阶段、Recheck 触发、意见落库、各阶段列表 | T10 |
-| T12 验收包和 PR | 验收包「人审意见」、PR 描述、`upsertPlatformComment`（GitHub / GitLab）和 `review-note` 任务、页面显示结果、导读第 4 节、待审列表「返工中」、`plat spec show` | T11、T7、T8 |
-| T13 演练和测量 | 第 14 节末尾的两次演练、第 11 节的测量，结果写回本文档 | T12 |
+| 票              | 内容                                                                                                                                                                                                                                                                                                                                                     | 依赖        |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| T1 文档         | GLOSSARY 六个新词和两处补充、ADR 0012、design.md（grilling 已写入；实现时核对仍与共同理解一致）                                                                                                                                                                                                                                                          | —           |
+| T2 交付页文案   | 第 9 节第 1 条                                                                                                                                                                                                                                                                                                                                           | —           |
+| T3 合并前重读   | 第 9 节第 2 条                                                                                                                                                                                                                                                                                                                                           | —           |
+| T4 审查版本     | `review_revisions` / `review_files` / `review_blobs` / `review_file_views` 表；`review-revision` 托管任务（shared 类型、api 排队和分块落库、worker 用 git 算 diff、文件级和逐行归属、blob 内容；生成文件从该 head 的 `gates.yaml` 读；失败按序号重排）；上限常量；进入 awaiting-review 时预先排；保留期；worker 多一个只领不占槽位作业的循环（第 11 节） | T1          |
+| T5 审查接口     | 第 10 节里审查版本、文件、blob、已看、`/specs/{id}/review` 五个接口；事件和 SSE 刷新                                                                                                                                                                                                                                                                     | T4          |
+| T6 审查页       | 路由、标签、文件树（目录 / 票）、逐票高亮 hunk、搜索和过滤、diff renderer、展开上下文、已看、切换横幅、右栏三个标签、「上次审后」视图、快捷键                                                                                                                                                                                                            | T5          |
+| T7 导读         | 导读接口（拓扑排序、summary 和决定、hunk 清单、各节进度）和页面视图                                                                                                                                                                                                                                                                                      | T5、T6      |
+| T8 待审列表     | 待审接口（分组、风险排序、标签）和 `/review` 页面、顶栏入口                                                                                                                                                                                                                                                                                              | T5          |
+| T9 人审意见     | `review_comments` 表、草稿接口、页面上写和列意见                                                                                                                                                                                                                                                                                                         | T5、T6      |
+| T10 修改要求    | `change_requests` 表、提交接口（含旧版本确认和拒绝说明）、`request-changes` 事件、收尾加 `rework` 步、finalizing 时合并 PR 的处理（8.3）、自动合并否决（8.7）                                                                                                                                                                                            | T9          |
+| T11 Rework 运行 | 分支名、bundle 和 `/context/review-comments.json`、`rework.md`、结果 schema、worker 阶段、Recheck 触发、意见落库、各阶段列表                                                                                                                                                                                                                             | T10         |
+| T12 验收包和 PR | 验收包「人审意见」、PR 描述、`upsertPlatformComment`（GitHub / GitLab）和 `review-note` 任务、页面显示结果、导读第 4 节、待审列表「返工中」、`plat spec show`                                                                                                                                                                                            | T11、T7、T8 |
+| T13 演练和测量  | 第 14 节末尾的两次演练、第 11 节的测量，结果写回本文档                                                                                                                                                                                                                                                                                                   | T12         |
 
 ## 14. 验收
 
@@ -413,7 +422,7 @@ GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- 
 **审查版本**
 
 - 一个有改名、删除、二进制、权限变化、无换行结尾、超大文件的临时仓库，`review-revision` 交回的清单和 `git diff --raw` 一致；超上限的文件标对原因，整份超上限时 `complete = false`，页面不显示「全部看完」。
-- 同一个 head 打开两次只排一次作业；head 变了才排新的；进入 awaiting-review 时预先排了一次。
+- 同一个 head 已经 `ready` 时打开两次只排一次作业；`failed` 时再打开会再排一记，写回同一行；head 变了才排新版本；进入 awaiting-review 时预先排了一次。
 - 文件级归属：带 `Ticket:` 的提交归到票，只有 `Run:` 的按阶段归，两样都没有的归设置或规划；一个文件被两张票改过时两张票下都有它。
 - 逐行归属：同一文件里两张票各加的行分到各自的 hunk 归属里；`mergeBase` 之前就有的行不算；超过 300 个文件后的文件退回文件级归属并标明。
 - 文件内容没变时「已看」跨版本保留，内容变了失效。
@@ -449,12 +458,13 @@ GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- 
 - `comments` 缺 id、多 id 或 id 不认识时是 `invalid-output`。
 - Rework 删改已有测试或改测试和构建配置时走 Recheck，和 final-fix 一样。
 - 第二次修改要求用新的分支名，`spec-cleanup` 删掉所有 rework 分支。
-- 联调需求里 Rework 改了分支，收尾结束前重跑 e2e。
+- 联调需求里 Rework 改了分支，收尾结束前重跑 e2e（提交时作废了旧的 `final_e2e` 行，不是只改 SQL）。
 
 **两条返工路都要成立的行为**（追加票之后的重新收尾，和修改要求的 Rework）：
 
 - 返工中人在托管上合并了 PR，两条路下需求都进 merged，剩下的作业都停掉、Run 都关掉，并排清理。追加票这条路在 reworking 和之后的 finalizing 都要测。
 - 返工结束后，两条路都重建验收包、更新 PR 描述、按合并顺序转回 ready，并预先排新版本的 `review-revision`。
+- 两条路都作废旧的 `final_e2e` 行；联调需求第二次收尾会再跑 e2e。
 - 两条路下自动合并都不会在返工中或返工后发生：追加票靠 reworking 和草稿，修改要求靠「平台上有人审意见」。
 - 两条路下需求都出现在待审列表的「返工中」，结束后回到「审到一半」或「看完待合并」。
 
@@ -478,14 +488,14 @@ GitHub 用 issue comments 接口，GitLab 用 MR notes 接口。标记是 `<!-- 
 
 参考的是 Linear 桌面端 1.32.8。它的 `app.asar` 只是外壳，审查界面是从网页加载的，本地浏览器缓存里有打包后的前端代码（`PullRequest*`、`Review*`、`Diff*` 等约 150 个模块）。用 REA 做了静态分析（Evidence `ev_8cb6299b6c09b9e9735d66b3d41a932146640a95b0ed89d64417b371a2f9dabe`，部分覆盖），下面的结论来自这些代码里的字面文案和字段名，没有运行它们。
 
-| Linear | 这次借鉴到哪里 |
-| --- | --- |
-| Reviews 收件箱：请你审的、可以合并的、所有打开的；可以暂缓到有人评论或再次请你审 | 待审列表的四组（第 6 节）；不做暂缓，单人使用 |
-| Guide：把改动组织成带说明的章节，可以跳到代码 | 导读（第 5 节），说明来自平台已有的记录而不是新生成 |
-| 风险分级（Low 到 Very High） | 风险排序用看得到来源的标签，不给单一分数 |
-| `All commits` / `Since last review` / `Latest agent changes` | 「上次审后」视图（3.4），导读的「修改要求」一节 |
+| Linear                                                                                                                 | 这次借鉴到哪里                                                             |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Reviews 收件箱：请你审的、可以合并的、所有打开的；可以暂缓到有人评论或再次请你审                                       | 待审列表的四组（第 6 节）；不做暂缓，单人使用                              |
+| Guide：把改动组织成带说明的章节，可以跳到代码                                                                          | 导读（第 5 节），说明来自平台已有的记录而不是新生成                        |
+| 风险分级（Low 到 Very High）                                                                                           | 风险排序用看得到来源的标签，不给单一分数                                   |
+| `All commits` / `Since last review` / `Latest agent changes`                                                           | 「上次审后」视图（3.4），导读的「修改要求」一节                            |
 | 标文件已看，之后被改了提示 `Modified after review`；按文件类型分组、过滤未看和有评论的文件；生成文件、测试文件可以折叠 | `review_file_views` 按 blob 失效；搜索和过滤；生成文件折叠，测试文件不折叠 |
-| 合并面板列出还差什么：修失败的检查、解决冲突、处理要求的修改、处理 agent 意见、解决讨论 | 右栏合并前清单，数据用验收包 |
-| 把未解决的评论复制成提示词、交给 agent | 修改要求和 Rework |
-| AI 审查意见有类别、`canWait`（不挡合并）、`preExisting`、修过又被改回去（resurfaced） | 这次不做；以后给 Finding 加位置时参考 |
-| 用人的托管账号评论和回复 | 这次不做（第 12 节） |
+| 合并面板列出还差什么：修失败的检查、解决冲突、处理要求的修改、处理 agent 意见、解决讨论                                | 右栏合并前清单，数据用验收包                                               |
+| 把未解决的评论复制成提示词、交给 agent                                                                                 | 修改要求和 Rework                                                          |
+| AI 审查意见有类别、`canWait`（不挡合并）、`preExisting`、修过又被改回去（resurfaced）                                  | 这次不做；以后给 Finding 加位置时参考                                      |
+| 用人的托管账号评论和回复                                                                                               | 这次不做（第 12 节）                                                       |
