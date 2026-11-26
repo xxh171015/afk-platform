@@ -220,6 +220,8 @@ export const AcceptancePack = z.object({
     .object({
       repo: z.string(),
       state: z.enum(["committed", "unchanged", "waived"]),
+      // files import recorded that confirm left behind (leavePlanningChanges)
+      leftOut: z.array(z.string()).optional(),
     })
     .nullable()
     .optional(),
@@ -905,8 +907,14 @@ async function withLiveFacts(
     planning_docs_committed: boolean;
     planning_repo: string | null;
     host_kind: HostKind | null;
+    planning_docs_at_import: {
+      status?: string;
+      files?: string[];
+      leftBehind?: boolean;
+    } | null;
   }>(
     `SELECT s.order_broken, s.planning_state, s.planning_docs_committed, r.name AS planning_repo,
+            s.planning_docs_at_import,
             (SELECT repo.host_kind FROM repos repo WHERE repo.project_id = s.project_id ORDER BY repo.id LIMIT 1) AS host_kind
      FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1`,
     [specId],
@@ -914,6 +922,11 @@ async function withLiveFacts(
   const planning = spec.rows[0];
   const rank = (repo: string) =>
     pulls.find((p) => p.repo === repo)?.order ?? Number.MAX_SAFE_INTEGER;
+  const leftOut =
+    planning?.planning_docs_at_import?.leftBehind === true &&
+    planning.planning_docs_at_import.status === "changed"
+      ? planning.planning_docs_at_import.files
+      : undefined;
   return {
     ...pack,
     hostKind: planning?.host_kind ?? "github",
@@ -931,6 +944,7 @@ async function withLiveFacts(
                 : planning.planning_docs_committed
                   ? "committed"
                   : "unchanged",
+            ...(leftOut && leftOut.length > 0 ? { leftOut } : {}),
           }
         : null,
     repos: pack.repos

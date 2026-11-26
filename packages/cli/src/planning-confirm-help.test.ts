@@ -20,6 +20,7 @@ describe("plat spec confirm --help", () => {
     expect(stdout).toContain("--keep-local");
     expect(stdout).toContain("--send-all");
     expect(stdout).toContain("--keep-local-all");
+    expect(stdout).toContain("--leave-planning-changes");
     expect(stdout).not.toContain("GLOSSARY.md, docs/adr, AGENTS.md");
   });
 });

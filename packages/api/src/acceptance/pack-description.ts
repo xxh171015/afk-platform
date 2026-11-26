@@ -59,6 +59,9 @@ function planningDocsLines(
   const docs = pack.planningDocs;
   if (!docs || docs.repo !== repo || docs.state === "unchanged") return "";
   const phrase = pullPhrase(kind);
+  if (docs.leftOut && docs.leftOut.length > 0) {
+    return `## Planning docs\n\n规划改动未带上：${docs.leftOut.join("、")}`;
+  }
   return docs.state === "waived"
     ? `## Planning docs\n\n**Left out**: the planning docs did not apply to the default branch and were given up, so this ${phrase} does not carry them.`
     : `## Planning docs\n\nThe first commit of this ${phrase} is the planning docs (glossary, ADRs) the spec was planned with, committed by the platform.`;

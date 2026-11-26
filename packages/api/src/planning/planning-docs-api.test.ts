@@ -46,6 +46,7 @@ const SPEC_BODY =
 // spec S-1 made in backend with one ticket in each repo.
 async function draftSpec(
   ticketRepos = ["backend", "frontend"],
+  prepare?: (backend: Checkout) => void,
 ): Promise<{ backend: Checkout; frontend: Checkout }> {
   const backend = ws.checkout(
     "backend",
@@ -81,6 +82,7 @@ async function draftSpec(
     "../spec.md",
   ]);
   expect(created.stdout).toBe("S-1\n参考仓库：无\n");
+  prepare?.(backend);
   mkdirSync(join(outside, "tickets"));
   for (const [i, repo] of ticketRepos.entries()) {
     const file = ticketFile(1, {
@@ -958,6 +960,123 @@ describe("what plat spec confirm sends", () => {
     expect(confirmed.stderr).toContain(
       "S-1's planning docs are in backend, not frontend: run plat spec confirm in a checkout of backend",
     );
+  });
+
+  it("returns 409 listing the imported local changes when confirm is outside the planning repo", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(dirname(backend.dir), [
+      "spec",
+      "confirm",
+      "S-1",
+    ]);
+
+    expect(confirmed.code).not.toBe(0);
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "docs/design.md",
+    );
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "plat spec confirm",
+    );
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "--leave-planning-changes",
+    );
+  });
+
+  it("in the planning repo still sends files recorded at import and puts them aside", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "docs/design.md",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(false);
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${job.id}/planning-task?workerId=w1&attempt=${job.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+  });
+
+  it("in the planning repo --leave-planning-changes confirms and leaves the files in the checkout", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--leave-planning-changes",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(true);
+    expect(confirmed.stdout).not.toContain("planning docs");
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "unchanged",
+      sha: "d".repeat(40),
+    });
+    expect((await get("/specs/1")).spec.planning.state).toBe("waived");
+  });
+
+  it("confirms from outside the planning repo with --leave-planning-changes", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(dirname(backend.dir), [
+      "spec",
+      "confirm",
+      "S-1",
+      "--leave-planning-changes",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect((await get("/specs/1")).spec.state).not.toBe("draft");
+  });
+
+  it("keep-local-all in the planning repo does not note files as left behind", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--keep-local-all",
+    ]);
+    expect(confirmed.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(true);
+
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "unchanged",
+      sha: "c".repeat(40),
+    });
+    expect((await get("/specs/1")).spec.planning.state).toBe("done");
+    expect((await get("/specs/1")).spec.planning.state).not.toBe("waived");
   });
 
   it("outside the project's repos sends nothing, like the page: the planning commit is the default branch's head", async () => {

@@ -1930,6 +1930,10 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       "--keep-local-all",
       "leave every listed file not named by --send / --keep-local on this machine",
     )
+    .option(
+      "--leave-planning-changes",
+      "confirm without sending local changes import recorded; the acceptance pack will name those files",
+    )
     .action(
       async (
         id: string,
@@ -1938,6 +1942,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           keepLocal?: string[];
           sendAll?: boolean;
           keepLocalAll?: boolean;
+          leavePlanningChanges?: boolean;
         },
       ) => {
         const specId = specIdOf(id);
@@ -1984,17 +1989,24 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
               `resolve the conflicts in ${unresolved.join(", ")} first, then run plat spec confirm ${id} again`,
             );
         }
-        const selection = selectPlanningChanges(
-          localChanges,
-          {
-            send: options.send ?? [],
-            keepLocal: options.keepLocal ?? [],
-            sendAll: Boolean(options.sendAll),
-            keepLocalAll: Boolean(options.keepLocalAll),
-          },
-          docs.status === "ok" ? docs.dir : cwd,
-          cwd,
-        );
+        const leavePlanningChanges = Boolean(options.leavePlanningChanges);
+        const selection = leavePlanningChanges
+          ? {
+              ok: true as const,
+              send: [] as string[],
+              keepLocal: localChanges.map((change) => change.path),
+            }
+          : selectPlanningChanges(
+              localChanges,
+              {
+                send: options.send ?? [],
+                keepLocal: options.keepLocal ?? [],
+                sendAll: Boolean(options.sendAll),
+                keepLocalAll: Boolean(options.keepLocalAll),
+              },
+              docs.status === "ok" ? docs.dir : cwd,
+              cwd,
+            );
         if (!selection.ok) {
           if (selection.kind === "unknown-path") {
             throw new Failure(
@@ -2014,7 +2026,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
             `${secret} looks like a secret; add it to .gitignore or pass --keep-local`,
           );
         }
-        if (docs.status === "ok" && planningRepoMeta) {
+        if (docs.status === "ok" && planningRepoMeta && !leavePlanningChanges) {
           const built = buildPlanningPatch(
             docs.dir,
             planningRepoMeta.defaultBranch,
@@ -2024,6 +2036,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         }
         if (
           docs.status === "ok" &&
+          !leavePlanningChanges &&
           Buffer.byteLength(docs.patch) > MAX_PLANNING_PATCH_BYTES
         ) {
           throw new Failure(
@@ -2087,10 +2100,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
           }
         }
         const confirmBody = {
-          ...(docs.status === "ok" ? { planningPatch: docs.patch } : {}),
+          ...(docs.status === "ok" && !leavePlanningChanges
+            ? { planningPatch: docs.patch }
+            : {}),
           ...(registerPlanningRepo
             ? { planningRepo: registerPlanningRepo }
             : {}),
+          ...(leavePlanningChanges ? { leavePlanningChanges: true } : {}),
           ...(refPins.length > 0 ? { refPins } : {}),
         };
         const { data, response, error } = await api().POST(
@@ -2106,7 +2122,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         const branch = data.integrationBranches[0]?.branch ?? "";
         const lines = [
           `${id} is ${data.state}`,
-          ...(docs.status === "ok" && docs.files.length > 0
+          ...(docs.status === "ok" &&
+          docs.files.length > 0 &&
+          !leavePlanningChanges
             ? [
                 `  planning docs ${docs.files.join(", ")} go to the platform, which commits them onto ${branch} in ${planningRepo} before any ticket starts; they reach ${planningRepo}'s default branch with that pull request`,
                 ...putAside(
@@ -2169,23 +2187,30 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const view = await api().GET("/specs/{id}", {
         params: { path: { id: specId } },
       });
-      if (!view.data?.spec.planning.repo) {
-        return { status: "unknown" as const };
-      }
-      const planningRepo = view.data.spec.planning.repo;
+      if (!view.data) return { status: "unknown" as const };
+      const cwd = io.cwd ?? process.cwd();
       const project = await api().GET("/projects/{projectId}", {
         params: { path: { projectId: view.data.spec.projectId } },
       });
       if (!project.data) return { status: "unknown" as const };
-      const docs = readPlanningDocs(
-        io.cwd ?? process.cwd(),
-        project.data.repos,
-        planningRepo,
-      );
+      const planningRepo =
+        view.data.spec.planning.repo ??
+        matchProjectRepo(cwd, project.data.repos)?.name ??
+        null;
+      if (!planningRepo) return { status: "unknown" as const };
+      const docs = readPlanningDocs(cwd, project.data.repos, planningRepo);
       if (docs.status !== "ok") return { status: "unknown" as const };
-      return docs.files.length === 0
+      const planningRepoMeta = project.data.repos.find(
+        (repo) => repo.name === planningRepo,
+      );
+      if (!planningRepoMeta) return { status: "unknown" as const };
+      const files = listPlanningChanges(
+        docs.dir,
+        planningRepoMeta.defaultBranch,
+      ).map((change) => change.path);
+      return files.length === 0
         ? { status: "clean" as const }
-        : { status: "changed" as const, files: docs.files };
+        : { status: "changed" as const, files };
     } catch {
       return { status: "unknown" as const };
     }

@@ -693,15 +693,17 @@ export function acceptancePackText(pack: AcceptancePackView): string {
           ]),
         ]
       : []),
-    ...(pack.planningDocs?.state === "waived"
-      ? [
-          `  !! the planning docs were left out: they did not apply to ${pack.planningDocs.repo}'s default branch and were given up`,
-        ]
-      : pack.planningDocs?.state === "committed"
+    ...(pack.planningDocs?.leftOut && pack.planningDocs.leftOut.length > 0
+      ? [`  规划改动未带上：${pack.planningDocs.leftOut.join("、")}`]
+      : pack.planningDocs?.state === "waived"
         ? [
-            `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s ${phrase}`,
+            `  !! the planning docs were left out: they did not apply to ${pack.planningDocs.repo}'s default branch and were given up`,
           ]
-        : []),
+        : pack.planningDocs?.state === "committed"
+          ? [
+              `  planning docs: committed by the platform as the first commit of ${pack.planningDocs.repo}'s ${phrase}`,
+            ]
+          : []),
     ...pack.orderBroken.map((b) => `  ${brokenOrderLine(b)}`),
     order.ordered.length > 0
       ? `  merge order: ${order.ordered.join(" -> ")}${order.unordered.length ? `  (no order: ${order.unordered.join(", ")})` : ""}`
