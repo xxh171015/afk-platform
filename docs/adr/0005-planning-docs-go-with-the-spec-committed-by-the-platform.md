@@ -1,5 +1,7 @@
 # 规划文档随需求进 PR，由平台提交
 
+> 规划文档的范围被 [ADR 0013](0013-planning-docs-are-picked-at-confirm-not-by-path.md) 取代。
+
 grill 改的术语表、ADR 和 `AGENTS.md`（规划文档）不由人提交、也不由人推送：`plat spec confirm` 在规划仓库里把它们相对远端默认分支的改动作为补丁发给平台，平台在任何票开工前把补丁三方合并到规划仓库默认分支的最新提交上，作为这个 Spec 集成分支的第一个提交（规划提交），文档跟着代码在同一个 PR 里进默认分支。替代 [ADR 0003](0003-pointers-not-copies-include-sandbox-mounts.md) 里「规划提交由人在规划仓库里做、推到远端、confirm 核 SHA」的部分；0003 的「存指针、不复制，沙箱挂载不是第二份正文」不变。
 
 ## Considered Options

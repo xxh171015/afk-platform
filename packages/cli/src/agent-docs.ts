@@ -46,8 +46,8 @@ function agentSkillsSection(multiContext: boolean): string {
 }
 
 // Planning starts from the platform's plat, skills and files (`plat sync`, self-update.ts); research and prototypes
-// leave nothing in the person's checkout (GLOSSARY「Scratch files」); the planning docs grilling writes wait for
-// `plat spec confirm` (ADR 0005).
+// leave nothing in the person's checkout (GLOSSARY「Scratch files」); files grilling / to-spec / to-tickets change
+// wait for `plat spec confirm`, and the person picks which (ADR 0005, ADR 0013).
 function planningSection(afkHome: string): string {
   const worktrees = join(afkHome, "planning");
   return [
@@ -57,7 +57,8 @@ function planningSection(afkHome: string): string {
     `- Do research and prototypes in a temporary git worktree under \`${worktrees}\` (for example \`${join(worktrees, "research-<name>")}\`), never in this checkout: do not write files here for them or switch this checkout's branch.`,
     "- Push what they found to a `research/<name>` or `prototype/<name>` branch and keep that branch: the decision it informs links to it. Then remove the temporary worktree (`git worktree remove`).",
     "- Keep no notes of them on this machine.",
-    "- When grilling changes `GLOSSARY.md` or `docs/adr/`, leave those changes uncommitted and unpushed: `plat spec confirm` sends them with the next spec. The step after grilling is `/to-spec`, not a commit, unless the person asks for one.",
+    "- grilling、to-spec、to-tickets 在这个仓库里改的文件都不提交、不推送。",
+    "- `plat spec confirm` 列出本地改动要你选时，把清单给人看，问哪些是这次规划改的，再用 `--send` / `--keep-local` 重跑；不要自己猜。",
     "",
   ].join("\n");
 }
