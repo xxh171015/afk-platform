@@ -522,6 +522,54 @@ describe("local changes plat spec confirm lists", () => {
     expect(task.patch).toContain("+# theirs and mine");
     expect(task.patch).not.toContain("src.ts");
   });
+
+  it("retry-planning resends only selected committed files and leaves keep-local files", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+    gitOrThrow(backend.dir, ["add", "docs/design.md"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "design"]);
+    writeFileSync(join(backend.dir, "src.ts"), "export {}\n");
+    expect(
+      (
+        await ws.plat(backend.dir, [
+          "spec",
+          "confirm",
+          "S-1",
+          "--send",
+          "docs/design.md",
+          "--keep-local",
+          "src.ts",
+        ])
+      ).code,
+    ).toBe(0);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export {}\n",
+    );
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "conflict",
+      files: ["docs/design.md"],
+    });
+    writeFileSync(join(backend.dir, "src.ts"), "export { keep }\n");
+
+    const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
+
+    expect(sent.code).toBe(0);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export { keep }\n",
+    );
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toContain(
+      "src.ts",
+    );
+    const [again] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${again.id}/planning-task?workerId=w1&attempt=${again.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+    expect(task.patch).not.toContain("src.ts");
+  });
 });
 
 describe("plat spec confirm in the planning repo", () => {
@@ -1099,7 +1147,12 @@ describe("a planning docs patch that does not apply", () => {
       outcome: "conflict",
       files: ["GLOSSARY.md"],
     });
-    expect(existsSync(join(ws.afkHome, "planning/S-1"))).toBe(false);
+    expect(
+      readFileSync(
+        join(ws.afkHome, "planning/S-1/planning-docs.patch"),
+        "utf8",
+      ),
+    ).toContain("GLOSSARY.md");
 
     const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
 

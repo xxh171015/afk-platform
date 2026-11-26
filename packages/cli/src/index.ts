@@ -2253,13 +2253,13 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
 
   // Once the platform has the planning docs, the copies not committed here go to the spec's folder outside the
   // checkout, so that pulling the spec's pull request later finds nothing in the way. The lines that say so.
-  // Nothing is kept when every planning doc is committed here: there is nothing to take out.
+  // The patch is kept even when every selected file is already committed, so retry-planning can take its paths
+  // from the backup; committed files themselves stay in the checkout.
   const putAside = (
     spec: string,
     docs: Extract<PlanningDocs, { status: "ok" }>,
     repo: string,
   ): string[] => {
-    if (uncommittedPlanningDocs(docs.dir, docs.paths).length === 0) return [];
     let kept: string;
     try {
       kept = saveBackup(afkHome(io.env), spec, {
@@ -2273,6 +2273,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         `  your copies here stay where they are: they could not be kept outside the checkout (${(error as Error).message})`,
       ];
     }
+    if (uncommittedPlanningDocs(docs.dir, docs.paths).length === 0) return [];
     const taken = putPlanningDocsAside(docs.dir, docs.paths);
     return [
       `  taken out of this checkout (back to HEAD): ${taken.join(", ")}; kept in ${kept}`,
@@ -2327,11 +2328,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       const home = afkHome(io.env);
       const spec = formatDisplayId("spec", specId);
       const backup = readBackup(home, spec);
-      const patchPaths = backup
-        ? pathsInPlanningPatch(backup.patch)
-        : listPlanningChanges(docs.dir, defaultBranch).map(
-            (change) => change.path,
-          );
+      const patchPaths = backup ? pathsInPlanningPatch(backup.patch) : [];
       const local = uncommittedPlanningDocs(docs.dir, patchPaths);
       if (local.length === 0 && backup) {
         const back = putPlanningDocsBack(docs.dir, backup.patch, patchPaths);
