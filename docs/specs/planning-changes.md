@@ -1,6 +1,6 @@
 # 规划时改的文件交给 worker
 
-**技术方案 · 待审 · 2026-11-26**
+**技术方案 · 已实现（S-63，PR #362）· 2026-11-26**
 
 规划时（grill-with-docs、to-spec、to-tickets）在规划仓库里改的文件，执行票的 worker 都要能读到。规划前就有的未提交改动不交出去。哪些是这次规划改的，由人在 confirm 时选，平台不猜；没选就不放行，不能悄悄留在本机。
 
@@ -188,3 +188,18 @@ checkout 里没有本地改动时，confirm 和现在一样直接执行，不用
 - 放回时按备份补丁里的文件三方合并，冲突标在文件里；重发后再次收走，没选中的文件始终不动。
 
 **演练**（Mac 上 3000 端口的平台，演练项目，一次）：重放 S-62 的情形。在一个 tracker 文档是 GitHub 版的 checkout 里，先留一处无关的未提交改动，再规划：改 `GLOSSARY.md`、`docs/design.md`、`docs/specs/*.md`，新建一个 ADR，导入两张票后让 agent confirm。期望 agent 把清单拿给人选；规划提交里正好是这 4 处改动，无关的改动留在本机；第一张票的 agent 在集成分支上读到新版文件。结果写回本文档。
+
+## 10. 演练结果（2026-11-26）
+
+在 Mac 3000 端口的平台上做（项目 afk-platform，需求 S-64，部署版本 `103b525`）。用的是单独 clone 的 checkout，它的 tracker 文档是提交的 GitHub 版。先改了 `packages/cli/src/format.ts` 作为无关改动，再做 4 处规划改动，每处带一个标记：`GLOSSARY.md` 加一个词、`docs/design.md` 和 `docs/specs/planning-changes.md` 各加一行、新建 `docs/adr/0014-drill-planning-replay.md`。
+
+| 期望 | 结果 |
+| --- | --- |
+| tracker 文档读不出时也认出规划仓库 | 通过：`plat spec create` 用 origin 认出 afk-platform；导入时记下 5 个文件 |
+| 有改动又没选时拒绝 | 通过：列出 5 个文件，以 1 退出，需求仍是 draft，checkout 没变 |
+| 只选一部分、路径打错、两边都选、选中 `.env.local` | 通过：只列没覆盖到的；「不在清单里」；「不能既 --send 又 --keep-local」；「像密钥」 |
+| 规划提交里正好是这 4 处改动 | 通过：集成分支第一个提交只有这 4 个文件；它们从 checkout 收走，`format.ts` 留在本机 |
+| 第一张票的 agent 读到新版文件 | 通过：T-180 把 4 个标记原样写出；它读到的 `format.ts` 第一行是原文，无关改动没带过去 |
+| agent 把清单拿给人选 | 没测：Mac 上的 Claude Code 和 Cursor CLI 都要用登录钥匙串，从 ssh 进去时钥匙串锁着，跑不起来。这一步由操作的 agent 按 `CLAUDE.md` 的规则做；规则文本在 `CLAUDE.md`、`agent-docs.ts` 生成的本机规则和 tracker 文档模板里都有 |
+
+T-180 做完后取消了 S-64，没有开 PR。
