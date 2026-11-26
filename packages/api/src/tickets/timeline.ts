@@ -48,6 +48,8 @@ export interface TimelineItem {
 const FINAL_STAGES = new Set([
   "final-review",
   "final-fix",
+  "rework",
+  "recheck",
   "final-merge",
   "final-tidy",
   "tidy-merge",

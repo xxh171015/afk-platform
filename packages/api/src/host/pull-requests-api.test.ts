@@ -3031,6 +3031,28 @@ describe("cleaning up after a cancelled or merged spec", () => {
     });
   });
 
+  it("deletes every Rework branch of the spec's Change requests", async () => {
+    await awaitingReview(["backend"]);
+    const id = await instanceId();
+    await db.pool.query(
+      `INSERT INTO change_requests (spec_id, number, state)
+       VALUES (1, 1, 'done'), (1, 2, 'active')`,
+    );
+    await call("POST", "/specs/1/cancel");
+    const branches = (await taskOf(await claimCleanup())).body.branches as {
+      repoUrl: string;
+      branch: string;
+    }[];
+    expect(branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: `agent/${id}/S-1-rework-1`,
+    });
+    expect(branches).toContainEqual({
+      repoUrl: BACKEND,
+      branch: `agent/${id}/S-1-rework-2`,
+    });
+  });
+
   it("deletes the flat names of a spec that was made before the databases had ids, and nothing that carries an id", async () => {
     await awaitingReview(["backend"]);
     await db.pool.query("UPDATE specs SET branch_namespace = NULL");

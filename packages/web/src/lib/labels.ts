@@ -13,6 +13,7 @@ export const stageLabel: Record<string, string> = {
   "final-e2e": "收尾 e2e",
   "final-review": "终审",
   "final-fix": "终审修复",
+  rework: "返工",
   "final-merge": "最终合并",
   "final-tidy": "Tidy",
   "tidy-merge": "Tidy 合并",

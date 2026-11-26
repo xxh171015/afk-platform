@@ -95,6 +95,7 @@ const AGENT_RUN_STAGES = new Set([
   "diagnose",
   "final-review",
   "final-fix",
+  "rework",
   "final-tidy",
   "recheck",
 ]);

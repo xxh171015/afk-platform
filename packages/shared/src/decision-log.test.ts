@@ -114,7 +114,7 @@ describe("decisionLogFromRuns", () => {
       specDisplayId: "S-1",
       ticketId: null,
       ticketDisplayId: null,
-      currentRunId: 40,
+      currentRunId: 50,
       tickets: [
         { id: 1, state: "done" },
         { id: 2, state: "done" },
@@ -125,6 +125,9 @@ describe("decisionLogFromRuns", () => {
         ]),
         run(30, "final-fix", null, [
           { kind: "workaround", text: "skipped drizzle" },
+        ]),
+        run(40, "rework", null, [
+          { kind: "conflict", text: "comment asked to edit a protected path" },
         ]),
       ],
     });
@@ -139,6 +142,13 @@ describe("decisionLogFromRuns", () => {
           stage: "final-fix",
           kind: "workaround",
           text: "skipped drizzle",
+        },
+        {
+          id: "R-40#0",
+          run: "R-40",
+          stage: "rework",
+          kind: "conflict",
+          text: "comment asked to edit a protected path",
         },
       ],
       rulings: [],

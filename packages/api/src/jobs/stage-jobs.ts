@@ -107,7 +107,7 @@ export function readFinalPayload(
   return { specId, repoId, step: stage as FinalStep };
 }
 
-// final-review, final-fix and final-tidy are agent runs; final-merge and tidy-merge put the branch
+// final-review, final-fix, rework and final-tidy are agent runs; final-merge and tidy-merge put the branch
 // under the same lock a ticket's merge does.
 export async function enqueueFinalJob(
   client: pg.PoolClient,

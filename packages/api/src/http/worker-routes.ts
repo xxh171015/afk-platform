@@ -425,6 +425,24 @@ const Bundle = z.object({
       }),
     )
     .nullable(),
+  // rework: this repo's submitted Review comments for the active Change request
+  reviewComments: z
+    .object({
+      changeRequest: z.number().int(),
+      currentHead: z.string(),
+      comments: z.array(
+        z.object({
+          id: z.string(),
+          writtenOn: z.string(),
+          path: z.string().nullable(),
+          side: z.enum(["old", "new"]).nullable().optional(),
+          lines: z.array(z.number().int()).optional(),
+          excerpt: z.string().optional(),
+          body: z.string(),
+        }),
+      ),
+    })
+    .nullable(),
   handbackResolve: z.boolean().optional(),
 });
 

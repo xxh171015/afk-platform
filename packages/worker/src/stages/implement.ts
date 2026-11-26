@@ -12,6 +12,7 @@ import {
   RECHECK_REF_PREFIX,
   readGateConfig,
   recheckHit,
+  reworkOutputSchema,
   type SandboxPlacement,
   stampTrailers,
   TidyOutputSchema,
@@ -47,9 +48,29 @@ const RECHECK_TRIGGER_STAGES = new Set([
   "review-fix",
   "merge-fix",
   "final-fix",
+  "rework",
   "final-tidy",
   "update-branch",
 ]);
+
+function reworkCommentIds(bundle: { reviewComments?: unknown }): string[] {
+  const raw = bundle.reviewComments;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const comments = (raw as { comments?: unknown }).comments;
+  if (!Array.isArray(comments)) return [];
+  return comments.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const id = (item as { id?: unknown }).id;
+    return typeof id === "string" && id.length > 0 ? [id] : [];
+  });
+}
+
+function commentsOf(output: unknown): unknown[] | undefined {
+  if (!output || typeof output !== "object" || Array.isArray(output))
+    return undefined;
+  const comments = (output as { comments?: unknown }).comments;
+  return Array.isArray(comments) ? comments : undefined;
+}
 
 function extraRecheckConfig(repoDir: string, sha: string): string[] {
   try {
@@ -90,6 +111,7 @@ export async function agentChange(
     | "merge-fix"
     | "update-branch"
     | "final-fix"
+    | "rework"
     | "final-tidy";
   const agent = bundle.agentBranch;
   const integration = bundle.integrationBranch as string;
@@ -143,7 +165,11 @@ export async function agentChange(
         ctxDir,
         refs,
         schema:
-          stage === "final-tidy" ? TidyOutputSchema : ImplementOutputSchema,
+          stage === "final-tidy"
+            ? TidyOutputSchema
+            : stage === "rework"
+              ? reworkOutputSchema(reworkCommentIds(bundle))
+              : ImplementOutputSchema,
         ...(placement ? { placement } : {}),
         ...(generatedEnv ? { env: generatedEnv } : {}),
         ...options,
@@ -162,6 +188,7 @@ export async function agentChange(
       stage === "implement" && before !== baseSha && run.commits.length === 0;
     const verdict = classifyAgentRun(
       inherited ? { ...run, commits: [before] } : run,
+      { requireCommit: stage !== "rework" },
     );
     if (verdict.kind === "infrastructure-failure")
       throw new InfrastructureError(verdict.error, billedFacts(run));
@@ -181,6 +208,7 @@ export async function agentChange(
     };
     if (verdict.outcome !== "done")
       return { stage, outcome: verdict.outcome, run: facts };
+    const comments = commentsOf(run.output);
 
     // Take the commits back from the slot, stamp them, and publish the branch.
     const taken = retrieveResult({
@@ -296,7 +324,12 @@ export async function agentChange(
         extraConfigPaths: extraRecheckConfig(mainDir, facts.headSha),
       });
     }
-    return { stage, outcome: "done", run: facts };
+    return {
+      stage,
+      outcome: "done",
+      run: facts,
+      ...(comments ? { comments } : {}),
+    };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

@@ -82,7 +82,7 @@ export function ensureRecheckFromSha(
   }
 }
 
-// Deterministic Recheck trigger (GLOSSARY Recheck): review-fix / merge-fix / final-fix / update-branch
+// Deterministic Recheck trigger (GLOSSARY Recheck): review-fix / merge-fix / final-fix / rework / update-branch
 // changed existing test lines or test/build config. No agent. gates.yaml `recheckConfig` adds paths.
 
 export const DEFAULT_RECHECK_CONFIG_PATHS = [

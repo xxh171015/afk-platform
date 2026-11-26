@@ -16,13 +16,16 @@ const TICKET_CODE_STAGES = new Set([
   "merge-fix",
 ]);
 
-const WRAP_UP_STAGES = ["final-fix", "final-tidy", "update-branch"] as const;
+const WRAP_UP_STAGES = [
+  "final-fix",
+  "rework",
+  "final-tidy",
+  "update-branch",
+] as const;
 export type WrapUpStage = (typeof WRAP_UP_STAGES)[number];
 
 function isWrapUpStage(stage: string | undefined): stage is WrapUpStage {
-  return (
-    stage === "final-fix" || stage === "final-tidy" || stage === "update-branch"
-  );
+  return (WRAP_UP_STAGES as readonly string[]).includes(stage ?? "");
 }
 
 export type ReviewGuideHunk = {

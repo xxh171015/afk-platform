@@ -90,6 +90,7 @@ export function collectNeedsDecision(input: {
     text: string;
     ref?: string;
     source: string;
+    unruled?: boolean;
   }[];
   ticketRulings: Iterable<Ruling>;
   specRulings: Iterable<Ruling>;
@@ -106,7 +107,10 @@ export function collectNeedsDecision(input: {
     if (isListedForRuling(decision.kind)) {
       const effective =
         specById.get(decision.id) ?? ticketById.get(decision.id);
-      if (effective?.verdict === "needs-human") {
+      if (
+        effective?.verdict === "needs-human" ||
+        (decision.unruled && !effective)
+      ) {
         items.push({
           kind: "needs-human",
           id: decision.id,

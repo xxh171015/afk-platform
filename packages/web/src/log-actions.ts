@@ -88,7 +88,7 @@ export function emptyLogCheckpoint(): LogCheckpoint {
 }
 
 const WORKER_PREFIX =
-  /^(gate-fix|review-fix|merge-fix|recheck|final-review|final-fix|final-tidy|final-e2e|update-branch|gate|implement|e2e|merge|environment|result|review|restart|failed|diagnose):/;
+  /^(gate-fix|review-fix|merge-fix|recheck|final-review|final-fix|rework|final-tidy|final-e2e|update-branch|gate|implement|e2e|merge|environment|result|review|restart|failed|diagnose):/;
 
 const DUMP_HEADER = /^--- (.+) ---$/;
 

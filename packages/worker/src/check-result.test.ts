@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,6 +148,13 @@ describe("the result self-check command", () => {
         acceptance: {},
         decisions: [],
       },
+      rework: {
+        status: "done",
+        summary: "did it",
+        comments: [{ id: "C-12", outcome: "addressed", reply: "fixed" }],
+        acceptance: {},
+        decisions: [],
+      },
       "update-branch": {
         status: "done",
         summary: "did it",
@@ -196,6 +209,40 @@ describe("the result self-check command", () => {
     for (const stage of Object.keys(valid)) {
       expect(listed).toContain(stage);
     }
+  });
+
+  it("rejects a rework result that does not cover every comment id in the context", () => {
+    const dir = mkdtempSync(join(tmpdir(), "afk-rework-ctx-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, "context"));
+    writeFileSync(
+      join(dir, "context", "review-comments.json"),
+      `${JSON.stringify({
+        changeRequest: 1,
+        currentHead: "abc",
+        comments: [
+          { id: "C-12", body: "empty list" },
+          { id: "C-14", body: "repeatable" },
+        ],
+      })}\n`,
+    );
+    const file = join(dir, "result.json");
+    writeFileSync(
+      file,
+      `${JSON.stringify({
+        status: "done",
+        summary: "did it",
+        comments: [{ id: "C-12", outcome: "addressed", reply: "fixed" }],
+        acceptance: {},
+        decisions: [],
+      })}\n`,
+    );
+    const result = spawnSync(process.execPath, [checker, "rework", file], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain("C-14");
   });
 
   it("is a single file that does not import platform packages", () => {

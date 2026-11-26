@@ -546,6 +546,53 @@ describe("GET /review-revisions/{id}/guide", () => {
     expect(got.body.tickets).toHaveLength(1);
   });
 
+  it("lists Rework in wrap-up when that run left a summary", async () => {
+    const { projectId, backendId } = await shop();
+    const specId = await specRow({ projectId });
+    await addTicket({ specId, repoId: backendId, title: "Export API" });
+    const pullId = await addPull(specId, backendId, 7);
+    const wrapRun = await addRun({
+      specId,
+      repoId: backendId,
+      ticketId: null,
+      stage: "rework",
+      result: "done",
+      output: { summary: "addressed empty-list comment" },
+      finishedAt: new Date("2026-01-05T00:00:00.000Z"),
+    });
+    const { revisionId } = await addReadyRevision(pullId, [
+      {
+        path: "src/a.ts",
+        attributions: [{ run: formatDisplayId("run", wrapRun) }],
+        hunks: [
+          hunk(null, {
+            owners: [
+              {
+                run: formatDisplayId("run", wrapRun),
+                stage: "rework",
+                lines: 1,
+              },
+            ],
+          }),
+        ],
+      },
+    ]);
+    const got = await call("GET", `/review-revisions/${revisionId}/guide`);
+    expect(got.status).toBe(200);
+    expect(got.body.wrapUp).toEqual([
+      expect.objectContaining({
+        stage: "rework",
+        summaries: [
+          {
+            run: formatDisplayId("run", wrapRun),
+            stage: "rework",
+            summary: "addressed empty-list comment",
+          },
+        ],
+      }),
+    ]);
+  });
+
   it("lists only this repo's tickets and names the others", async () => {
     const { projectId, backendId, frontendId } = await shop();
     const specId = await specRow({ projectId });

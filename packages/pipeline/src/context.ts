@@ -28,6 +28,8 @@ export interface ContextInput {
     message?: string;
   }[];
   review?: unknown; // review-fix: the review's structured result
+  // rework: this repo's Review comments for this Change request
+  reviewComments?: unknown;
   contracts?: { repo: string; path: string; content: string }[]; // each contract file at its recorded SHA
   // Planning commit files (GLOSSARY.md, docs/adr/**). Omit for the planning repo's own tickets.
   domain?: { path: string; content: string }[];
@@ -177,6 +179,12 @@ export function renderContext(input: ContextInput): void {
     writeFileSync(
       join(dir, "review.json"),
       JSON.stringify(input.review, null, 2),
+    );
+  }
+  if (input.reviewComments !== undefined) {
+    writeFileSync(
+      join(dir, "review-comments.json"),
+      JSON.stringify(input.reviewComments, null, 2),
     );
   }
   const recheck = (

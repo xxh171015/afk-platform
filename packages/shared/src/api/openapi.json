@@ -4148,6 +4148,52 @@
                         "required": ["id", "ticket", "run", "body"]
                       }
                     },
+                    "reviewComments": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "changeRequest": {
+                          "type": "integer"
+                        },
+                        "currentHead": {
+                          "type": "string"
+                        },
+                        "comments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "writtenOn": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": ["string", "null"]
+                              },
+                              "side": {
+                                "type": ["string", "null"],
+                                "enum": ["old", "new", null]
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "integer"
+                                }
+                              },
+                              "excerpt": {
+                                "type": "string"
+                              },
+                              "body": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["id", "writtenOn", "path", "body"]
+                          }
+                        }
+                      },
+                      "required": ["changeRequest", "currentHead", "comments"]
+                    },
                     "handbackResolve": {
                       "type": "boolean"
                     }
@@ -4180,7 +4226,8 @@
                     "ticketReview",
                     "stageModels",
                     "recheck",
-                    "uncertainties"
+                    "uncertainties",
+                    "reviewComments"
                   ]
                 }
               }
@@ -14235,7 +14282,12 @@
                         "properties": {
                           "stage": {
                             "type": "string",
-                            "enum": ["final-fix", "final-tidy", "update-branch"]
+                            "enum": [
+                              "final-fix",
+                              "rework",
+                              "final-tidy",
+                              "update-branch"
+                            ]
                           },
                           "summaries": {
                             "type": "array",

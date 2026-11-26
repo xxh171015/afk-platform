@@ -679,6 +679,7 @@ async function needsDecisionOf(
     items.map((item) => ({
       ...item,
       source: `${displayId} ${item.stage}`,
+      ...(item.stage === "rework" ? { unruled: true as const } : {}),
     }));
   const decisions = [
     ...log.doneTickets.flatMap((group) =>
@@ -750,7 +751,7 @@ async function recheckNeedsDecisionOf(
   }>(
     `SELECT id, stage, ticket_id, repo_id, result, output FROM runs
      WHERE spec_id = $1 AND (
-       (stage IN ('review-fix', 'merge-fix', 'final-fix', 'update-branch')
+       (stage IN ('review-fix', 'merge-fix', 'final-fix', 'rework', 'update-branch')
          AND output->'recheck'->>'hit' = 'true')
        OR stage = 'recheck'
      )

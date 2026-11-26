@@ -1,5 +1,6 @@
 import {
   formatDisplayId,
+  parseDisplayId,
   type ReviewCommentSide,
   type ReviewCommentState,
   type SpecState,
@@ -255,4 +256,41 @@ export async function deleteDraftReviewComments(
     "DELETE FROM review_comments WHERE spec_id = $1 AND state = 'draft'",
     [specId],
   );
+}
+
+export async function applyReworkComments(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<void> {
+  const run = await client.query<{ id: number; output: unknown }>(
+    `SELECT r.id, r.output FROM runs r
+     JOIN finalizations f ON f.spec_id = r.spec_id AND f.repo_id = r.repo_id
+     WHERE r.spec_id = $1 AND r.repo_id = $2 AND r.ticket_id IS NULL
+       AND r.stage = 'rework' AND r.result = 'done' AND r.job_id > f.job_floor
+     ORDER BY r.id DESC LIMIT 1`,
+    [specId, repoId],
+  );
+  const reworkRunId = run.rows[0]?.id;
+  const output = run.rows[0]?.output;
+  if (reworkRunId == null || !output || typeof output !== "object") return;
+  const comments = (output as { comments?: unknown }).comments;
+  if (!Array.isArray(comments)) return;
+  for (const item of comments) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as { id?: unknown; outcome?: unknown; reply?: unknown };
+    if (typeof rec.id !== "string") continue;
+    const parsed = parseDisplayId(rec.id);
+    if (parsed?.kind !== "comment") continue;
+    if (rec.outcome !== "addressed" && rec.outcome !== "declined") continue;
+    const reply = typeof rec.reply === "string" ? rec.reply : null;
+    await client.query(
+      `UPDATE review_comments c
+       SET state = $2, reply = $3, rework_run_id = $4, updated_at = now()
+       FROM pull_requests p
+       WHERE c.id = $1 AND c.spec_id = $5 AND c.state = 'submitted'
+         AND c.pull_request_id = p.id AND p.repo_id = $6`,
+      [parsed.id, rec.outcome, reply, reworkRunId, specId, repoId],
+    );
+  }
 }

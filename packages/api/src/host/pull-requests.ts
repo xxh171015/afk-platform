@@ -582,6 +582,10 @@ async function specCleanupTask(
     "SELECT id, repo_id FROM tickets WHERE spec_id = $1 ORDER BY id",
     [specId],
   );
+  const requests = await pool.query<{ number: number }>(
+    "SELECT number FROM change_requests WHERE spec_id = $1 ORDER BY number",
+    [specId],
+  );
   const names = branchNames(spec.branch_namespace);
   const branches = repos.rows.flatMap((repo) => [
     { repoUrl: repo.url, branch: names.integration(spec.slug) },
@@ -599,6 +603,10 @@ async function specCleanupTask(
       repoUrl: repo.url,
       branch: names.update(formatDisplayId("spec", specId)),
     },
+    ...requests.rows.map((request) => ({
+      repoUrl: repo.url,
+      branch: names.rework(formatDisplayId("spec", specId), request.number),
+    })),
   ]);
   return {
     kind: "spec-cleanup",

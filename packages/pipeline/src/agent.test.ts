@@ -30,9 +30,11 @@ import {
   RESULT_REPAIR_WALL_CLOCK_MS,
   type ReviewOutput,
   ReviewOutputSchema,
+  ReworkOutputSchema,
   reviewFindings,
   reviewOutputSchemaFor,
   reviewSources,
+  reworkOutputSchema,
   StandardsReviewOutputSchema,
   TidyOutputSchema,
   writePrompt,
@@ -253,6 +255,67 @@ describe("the structured outputs", () => {
     ).toBe(false);
   });
 
+  it("accepts a rework result that covers every comment id, and rejects missing, extra, or unknown ids", () => {
+    const schema = reworkOutputSchema(["C-12", "C-14"]);
+    const done = {
+      status: "done" as const,
+      summary: "empty list returns 200",
+      comments: [
+        {
+          id: "C-12",
+          outcome: "addressed" as const,
+          reply: "empty list returns 200 and []",
+        },
+        {
+          id: "C-14",
+          outcome: "declined" as const,
+          reply: "migration already uses IF NOT EXISTS",
+        },
+      ],
+      acceptance: {},
+      decisions: [],
+    };
+    expect(schema.safeParse(done).success).toBe(true);
+    expect(
+      schema.safeParse({ ...done, comments: done.comments.slice(0, 1) })
+        .success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...done,
+        comments: [
+          ...done.comments,
+          { id: "C-99", outcome: "addressed", reply: "extra" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...done,
+        comments: [
+          { id: "C-12", outcome: "addressed", reply: "a" },
+          { id: "C-99", outcome: "addressed", reply: "b" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...done,
+        comments: [
+          { id: "C-12", outcome: "fixed", reply: "a" },
+          { id: "C-14", outcome: "addressed", reply: "b" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        status: "cannot-proceed",
+        blockedReason: "agent-gave-up",
+        detail: "stuck",
+      }).success,
+    ).toBe(true);
+  });
+
   it("a review with must-fix items cannot pass", () => {
     const review = {
       verdict: "pass",
@@ -368,6 +431,12 @@ describe("classifying an implement or fix run", () => {
   ];
   it.each(cases)("%s -> %s", (_name, run, outcome) => {
     expect(classifyAgentRun(run)).toMatchObject({ kind: "outcome", outcome });
+  });
+
+  it("treats a rework that is done with no commits as done", () => {
+    expect(
+      classifyAgentRun(result({ output: DONE }), { requireCommit: false }),
+    ).toMatchObject({ kind: "outcome", outcome: "done" });
   });
 
   it("keeps the agent's detail for the blocked brief", () => {
@@ -899,6 +968,7 @@ const STAGES_WITH_PROMPTS = [
   "update-branch",
   "final-review",
   "final-fix",
+  "rework",
   "final-tidy",
   "recheck",
   "diagnose",
@@ -929,6 +999,7 @@ describe("the prompts", () => {
       "merge-fix",
       "update-branch",
       "final-fix",
+      "rework",
       "final-tidy",
     ] as const) {
       const prompt = whole(stage);
@@ -1244,6 +1315,20 @@ describe("the prompts", () => {
     }
     expect(whole("review-fix")).toContain("Standards 或 Spec");
     expect(whole("final-fix")).toContain("不论来自哪一轴");
+    expect(whole("rework")).toContain("/context/review-comments.json");
+    expect(whole("rework")).toContain("writtenOn");
+    expect(whole("rework")).toContain("currentHead");
+    expect(whole("rework")).toContain("declined");
+    expect(whole("rework")).toContain(
+      "/home/agent/.cursor/skills/tdd/SKILL.md",
+    );
+    expect(whole("rework")).toContain("会失败的测试");
+    expect(whole("rework")).toContain("命名、注释、文档");
+    expect(whole("rework")).toContain("conflict");
+    expect(whole("rework")).toContain("保护路径");
+    expect(whole("rework")).toContain("删测试名");
+    expect(whole("rework")).toContain("不要 `cannot-proceed`");
+
     for (const file of [
       PROMPTS.mergeFix,
       PROMPTS.updateBranch,
@@ -1325,7 +1410,12 @@ describe("the prompts", () => {
   });
 
   it("tells gate-fix, merge-fix and final-fix to run the files in cases.json first when that file exists", () => {
-    for (const file of [PROMPTS.gateFix, PROMPTS.mergeFix, PROMPTS.finalFix]) {
+    for (const file of [
+      PROMPTS.gateFix,
+      PROMPTS.mergeFix,
+      PROMPTS.finalFix,
+      PROMPTS.rework,
+    ]) {
       const prompt = readFileSync(file, "utf8");
       expect(prompt).toContain("/context/failure/cases.json");
       expect(prompt).toMatch(/先只跑/);
@@ -1341,6 +1431,7 @@ describe("the prompts", () => {
     expect(promptFor("update-branch")).toBe(PROMPTS.updateBranch);
     expect(promptFor("recheck")).toBe(PROMPTS.recheck);
     expect(promptFor("final-tidy")).toBe(PROMPTS.finalTidy);
+    expect(promptFor("rework")).toBe(PROMPTS.rework);
   });
 
   const CODE_CHANGING_PROMPTS = [
@@ -1350,13 +1441,14 @@ describe("the prompts", () => {
     PROMPTS.reviewFix,
     PROMPTS.mergeFix,
     PROMPTS.finalFix,
+    PROMPTS.rework,
     PROMPTS.finalTidy,
     PROMPTS.updateBranch,
     PROMPTS.diagnose,
   ] as const;
 
   it("tells every code-changing stage to run the named commands in run.json's gate", () => {
-    expect(CODE_CHANGING_PROMPTS).toHaveLength(9);
+    expect(CODE_CHANGING_PROMPTS).toHaveLength(10);
     for (const file of CODE_CHANGING_PROMPTS) {
       const prompt = readFileSync(file, "utf8");
       expect(prompt).toContain("/context/run.json");
@@ -1394,6 +1486,7 @@ describe("the prompts", () => {
       { file: promptFor("merge-fix"), schema: ImplementOutputSchema },
       { file: promptFor("update-branch"), schema: ImplementOutputSchema },
       { file: promptFor("final-fix"), schema: ImplementOutputSchema },
+      { file: promptFor("rework"), schema: ReworkOutputSchema },
       { file: promptFor("final-tidy"), schema: TidyOutputSchema },
       {
         file: promptFor("review", { axis: "spec" }),
@@ -1466,6 +1559,7 @@ describe("the prompts", () => {
       PROMPTS.mergeFix,
       PROMPTS.updateBranch,
       PROMPTS.finalFix,
+      PROMPTS.rework,
       PROMPTS.finalTidy,
     ]) {
       const section = resultSection(readFileSync(file, "utf8"));
@@ -1482,12 +1576,16 @@ describe("the prompts", () => {
       PROMPTS.mergeFix,
       PROMPTS.updateBranch,
       PROMPTS.finalFix,
+      PROMPTS.rework,
     ]) {
       const section = resultSection(readFileSync(file, "utf8"));
       expect(section, file).toContain("`summary` 是一句字符串");
       expect(section, file).toContain("`acceptance` 的值是测试名字符串的数组");
     }
     const tidy = resultSection(readFileSync(PROMPTS.finalTidy, "utf8"));
+    const rework = resultSection(readFileSync(PROMPTS.rework, "utf8"));
+    expect(rework).toContain("`comments` 必须正好覆盖");
+    expect(rework).toContain("`outcome` 只能是 `addressed` 或 `declined`");
     expect(tidy).toContain("`tidied` 是从 0 起的整数的数组");
     expect(tidy).toContain("`skipped` 是对象数组");
     expect(tidy).toContain('每项 `{ "index", "reason" }`');

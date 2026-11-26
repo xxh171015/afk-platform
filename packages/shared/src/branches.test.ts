@@ -14,6 +14,8 @@ describe("branch names", () => {
     expect(a.final("S-2")).toBe("agent/a1b2c3/S-2-final");
     expect(a.update("S-2")).toBe("agent/a1b2c3/S-2-update");
     expect(a.locate("S-2")).toBe("agent/a1b2c3/S-2-locate");
+    expect(a.rework("S-2", 1)).toBe("agent/a1b2c3/S-2-rework-1");
+    expect(a.rework("S-2", 12)).toBe("agent/a1b2c3/S-2-rework-12");
     expect(b.ticket("T-5")).not.toBe(a.ticket("T-5"));
     expect(b.integration("export")).not.toBe(a.integration("export"));
   });
@@ -25,6 +27,7 @@ describe("branch names", () => {
     expect(old.final("S-2")).toBe("agent/S-2-final");
     expect(old.update("S-2")).toBe("agent/S-2-update");
     expect(old.locate("S-2")).toBe("agent/S-2-locate");
+    expect(old.rework("S-2", 3)).toBe("agent/S-2-rework-3");
   });
 });
 
@@ -37,10 +40,12 @@ describe("isPlatformBranch", () => {
     "agent/S-2-final",
     "agent/S-2-update",
     "agent/S-2-locate",
+    "agent/S-2-rework-1",
     "agent/a1b2c3/T-5",
     "agent/a1b2c3/S-2-final",
     "agent/a1b2c3/S-2-update",
     "agent/a1b2c3/S-2-locate",
+    "agent/a1b2c3/S-2-rework-12",
   ])("accepts %s", (name) => {
     expect(isPlatformBranch(name)).toBe(true);
   });
@@ -55,6 +60,8 @@ describe("isPlatformBranch", () => {
     "spec/a1b2c3/a/b",
     "agent/T-0",
     "agent/T-05",
+    "agent/S-2-rework-0",
+    "agent/S-2-rework-01",
     "agent/a1b2c/T-5", // an id is six hex digits
     "agent/a1b2c3d/T-5",
     "agent/A1B2C3/T-5",
@@ -77,6 +84,8 @@ describe("parseTicketBranch", () => {
     expect(parseTicketBranch("agent/a1b2c3/S-3-update")).toBe("S-3-update");
     expect(parseTicketBranch("agent/S-3-locate")).toBe("S-3-locate");
     expect(parseTicketBranch("agent/a1b2c3/S-3-locate")).toBe("S-3-locate");
+    expect(parseTicketBranch("agent/S-3-rework-2")).toBe("S-3-rework-2");
+    expect(parseTicketBranch("agent/a1b2c3/S-3-rework-2")).toBe("S-3-rework-2");
   });
 
   it("is undefined for anything else", () => {

@@ -180,6 +180,7 @@ async function runStage(
         case "review-fix":
         case "merge-fix":
         case "final-fix":
+        case "rework":
         case "final-tidy":
           body = await agentChange(deps, context, mainDir, slot, align);
           break;

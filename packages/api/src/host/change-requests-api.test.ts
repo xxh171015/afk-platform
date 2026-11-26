@@ -793,3 +793,696 @@ describe("a pull request merged while wrap-up is a second pass", () => {
     ).toBe("finalizing");
   });
 });
+
+const NEW_HEAD = "e".repeat(40);
+
+async function claimStage(stage: string) {
+  for (let i = 0; i < 24; i++) {
+    const job = (await worker.claim()).body.job as {
+      id: number;
+      type: string;
+      attempt: number;
+      payload: Json;
+    } | null;
+    if (!job) break;
+    if (job.payload?.stage === stage) return job;
+    if (job.type === "host-sync") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "host-sync",
+        pulls: [],
+      });
+      continue;
+    }
+    if (job.type === "pr-draft") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "pr-draft",
+        state: "open",
+        draft: true,
+        headSha: SHA,
+        ci: "none",
+        review: "none",
+      });
+      continue;
+    }
+    if (job.type === "pr-ready") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "pr-ready",
+        state: "open",
+        draft: false,
+        headSha: NEW_HEAD,
+        ci: "none",
+        review: "none",
+      });
+      continue;
+    }
+    if (job.type === "patch-pr-body") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "patch-pr-body",
+        outcome: "patched",
+      });
+      continue;
+    }
+    if (job.type === "review-revision") {
+      await worker.complete(job.id, job.attempt, {});
+    }
+  }
+  throw new Error(`no ${stage} job`);
+}
+
+async function bundleOf(job: { id: number; attempt: number }) {
+  const response = await fetch(
+    `${api.url}/worker/jobs/${job.id}/bundle?workerId=${worker.id}&attempt=${job.attempt}`,
+  );
+  return { status: response.status, body: (await response.json()) as Json };
+}
+
+async function drainHost() {
+  for (let i = 0; i < 24; i++) {
+    const state = (
+      await db.pool.query<{ state: string }>("SELECT state FROM specs")
+    ).rows[0]?.state;
+    if (state === "awaiting-review") return;
+    const job = (await worker.claim()).body.job as {
+      id: number;
+      type: string;
+      attempt: number;
+      payload: Json;
+    } | null;
+    if (!job) return;
+    if (job.type === "host-sync") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "host-sync",
+        pulls: [],
+      });
+      continue;
+    }
+    if (job.type === "pr-draft") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "pr-draft",
+        state: "open",
+        draft: true,
+        headSha: SHA,
+        ci: "none",
+        review: "none",
+      });
+      continue;
+    }
+    if (job.type === "pr-ready") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "pr-ready",
+        state: "open",
+        draft: false,
+        headSha: NEW_HEAD,
+        ci: "none",
+        review: "none",
+      });
+      continue;
+    }
+    if (job.type === "patch-pr-body") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "patch-pr-body",
+        outcome: "patched",
+      });
+      continue;
+    }
+    if (job.type === "review-revision") {
+      await worker.complete(job.id, job.attempt, {});
+      continue;
+    }
+    if (job.payload?.finalE2e) {
+      await worker.complete(job.id, job.attempt, {
+        stage: job.payload.stage,
+        outcome: "passed",
+        run: { headSha: "fe", testsTotal: 1, testsFailed: 0 },
+        gate: {
+          kind: "e2e",
+          commitSha: "fe",
+          configSha: "cfg",
+          testsTotal: 1,
+          testsSkipped: 0,
+        },
+      });
+    }
+  }
+}
+
+describe("Rework wrap-up after a Change request", () => {
+  it("hands the agent the rework branch and review-comments, persists them after merge, and returns to awaiting-review with a new Review revision", async () => {
+    const opened = await readyRevision();
+    const created = await draftOn(opened);
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const ns = (
+      await db.pool.query<{ branch_namespace: string }>(
+        "SELECT branch_namespace FROM specs WHERE id = $1",
+        [opened.specId],
+      )
+    ).rows[0]?.branch_namespace;
+    const rework = await claimStage("rework");
+    const bundle = await bundleOf(rework);
+    expect(bundle.status).toBe(200);
+    expect(bundle.body.agentBranch).toBe(
+      `agent/${ns}/S-${opened.specId}-rework-1`,
+    );
+    expect(bundle.body.allowedProtectedPaths).toEqual([]);
+    expect(bundle.body.reviewComments).toEqual({
+      changeRequest: 1,
+      currentHead: opened.headSha,
+      comments: [
+        expect.objectContaining({
+          id: created.body.displayId,
+          writtenOn: opened.headSha,
+          path: "src/a.ts",
+          side: "new",
+          lines: [1],
+          excerpt: "b",
+          body: "empty list should return 200",
+        }),
+      ],
+    });
+    await worker.complete(rework.id, rework.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [
+        {
+          id: created.body.displayId,
+          outcome: "addressed",
+          reply: "empty list now returns 200",
+        },
+      ],
+      run: {
+        output: {
+          status: "done",
+          summary: "handled comments",
+          comments: [
+            {
+              id: created.body.displayId,
+              outcome: "addressed",
+              reply: "empty list now returns 200",
+            },
+          ],
+          acceptance: {},
+          decisions: [],
+        },
+        commits: ["f".repeat(40)],
+      },
+    });
+    expect(
+      (await call("GET", `/pull-requests/${opened.pullId}/review-comments`))
+        .body.comments[0].state,
+    ).toBe("submitted");
+    const merge = await claimStage("final-merge");
+    expect((await bundleOf(merge)).body.agentBranch).toBe(
+      `agent/${ns}/S-${opened.specId}-rework-1`,
+    );
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "merged",
+      headSha: NEW_HEAD,
+    });
+    const comments = await call(
+      "GET",
+      `/pull-requests/${opened.pullId}/review-comments`,
+    );
+    expect(comments.body.comments[0]).toMatchObject({
+      state: "addressed",
+      reply: "empty list now returns 200",
+      reworkRunId: expect.any(Number),
+    });
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state FROM change_requests WHERE spec_id = $1",
+          [opened.specId],
+        )
+      ).rows[0].state,
+    ).toBe("done");
+    await drainHost();
+    expect(
+      (
+        await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("awaiting-review");
+    expect(
+      (
+        await db.pool.query(
+          `SELECT payload->>'headSha' AS head FROM jobs
+           WHERE type = 'review-revision' AND state = 'queued'
+           ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0].head,
+    ).toBe(NEW_HEAD);
+    const links = await call("GET", `/links?sha=${"f".repeat(40)}`);
+    expect(links.body.links).toEqual([
+      expect.objectContaining({
+        kind: "ticket",
+        specId: opened.specId,
+        ticketId: null,
+        sha: "f".repeat(40),
+      }),
+    ]);
+  });
+
+  it("keeps comments submitted when wrap-up merge fails", async () => {
+    const opened = await readyRevision();
+    const created = await draftOn(opened);
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const rework = await claimStage("rework");
+    await worker.complete(rework.id, rework.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [
+        {
+          id: created.body.displayId,
+          outcome: "addressed",
+          reply: "would have fixed",
+        },
+      ],
+      run: {
+        output: {
+          status: "done",
+          summary: "handled",
+          comments: [
+            {
+              id: created.body.displayId,
+              outcome: "addressed",
+              reply: "would have fixed",
+            },
+          ],
+          acceptance: {},
+          decisions: [],
+        },
+      },
+    });
+    const merge = await claimStage("final-merge");
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "conflict",
+    });
+    expect(
+      (await call("GET", `/pull-requests/${opened.pullId}/review-comments`))
+        .body.comments[0].state,
+    ).toBe("submitted");
+    expect(
+      (
+        await db.pool.query(
+          "SELECT state, blocked_reason FROM finalizations WHERE spec_id = $1",
+          [opened.specId],
+        )
+      ).rows[0],
+    ).toEqual({ state: "blocked", blocked_reason: "merge-conflict" });
+  });
+
+  it("declines a protected-path comment with conflict, finishes wrap-up, and does not block", async () => {
+    const opened = await readyRevision();
+    const created = await draftOn({
+      ...opened,
+      body: "always run the protected workflow",
+    });
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const rework = await claimStage("rework");
+    await worker.complete(rework.id, rework.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [
+        {
+          id: created.body.displayId,
+          outcome: "declined",
+          reply: "protected path; append a ticket and approve it",
+        },
+      ],
+      run: {
+        output: {
+          status: "done",
+          summary: "left protected path alone",
+          comments: [
+            {
+              id: created.body.displayId,
+              outcome: "declined",
+              reply: "protected path; append a ticket and approve it",
+            },
+          ],
+          acceptance: {},
+          decisions: [
+            {
+              kind: "conflict",
+              text: "comment asked to edit a protected path",
+            },
+          ],
+        },
+      },
+    });
+    const merge = await claimStage("final-merge");
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "merged",
+      headSha: NEW_HEAD,
+    });
+    expect(
+      (await call("GET", `/pull-requests/${opened.pullId}/review-comments`))
+        .body.comments[0],
+    ).toMatchObject({
+      state: "declined",
+      reply: "protected path; append a ticket and approve it",
+    });
+    await drainHost();
+    expect(
+      (
+        await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("awaiting-review");
+    const pack = await call("GET", `/specs/${opened.specId}`);
+    expect(pack.body.acceptancePack.needsDecision).toEqual([
+      expect.objectContaining({
+        kind: "needs-human",
+        text: "comment asked to edit a protected path",
+        source: expect.stringMatching(/rework$/),
+      }),
+    ]);
+  });
+
+  it("Rechecks a Rework that hit existing tests, then merges from the rework branch", async () => {
+    const opened = await readyRevision();
+    await draftOn(opened);
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const ns = (
+      await db.pool.query<{ branch_namespace: string }>(
+        "SELECT branch_namespace FROM specs WHERE id = $1",
+        [opened.specId],
+      )
+    ).rows[0]?.branch_namespace;
+    const rework = await claimStage("rework");
+    await worker.complete(rework.id, rework.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [
+        {
+          id: "C-1",
+          outcome: "addressed",
+          reply: "flipped the assertion",
+        },
+      ],
+      run: {
+        output: {
+          status: "done",
+          summary: "flipped",
+          comments: [
+            {
+              id: "C-1",
+              outcome: "addressed",
+              reply: "flipped the assertion",
+            },
+          ],
+          acceptance: {},
+          decisions: [],
+        },
+        recheck: {
+          hit: true,
+          paths: ["src/a.test.ts"],
+          fromSha: "a".repeat(40),
+          toSha: "b".repeat(40),
+        },
+      },
+    });
+    const rec = await claimStage("recheck");
+    expect((await bundleOf(rec)).body.agentBranch).toBe(
+      `agent/${ns}/S-${opened.specId}-rework-1`,
+    );
+    await worker.complete(rec.id, rec.attempt, {
+      stage: "recheck",
+      outcome: "pass",
+      run: { output: { verdict: "pass" } },
+    });
+    const merge = await claimStage("final-merge");
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "merged",
+      headSha: NEW_HEAD,
+    });
+    await drainHost();
+    expect(
+      (
+        await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("awaiting-review");
+  });
+
+  it("runs e2e again when Rework changed the integration branch of a spec with an integration ticket", async () => {
+    const opened = await readyRevision();
+    await draftOn(opened);
+    const extra = await db.pool.query<{ id: number }>(
+      `INSERT INTO repos (project_id, url, name)
+       SELECT project_id, 'https://github.com/me/shop-frontend.git', 'frontend'
+       FROM specs WHERE id = $1 RETURNING id`,
+      [opened.specId],
+    );
+    const repoId = extra.rows[0]?.id as number;
+    await db.pool.query(
+      `INSERT INTO tickets (
+         spec_id, repo_id, title, type, state, content_version, modules, acceptance_criteria
+       ) VALUES ($1, $2, 'e2e', 'integration', 'done', 1, '{}', '{}')`,
+      [opened.specId, repoId],
+    );
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const rework = await claimStage("rework");
+    await worker.complete(rework.id, rework.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [{ id: "C-1", outcome: "addressed", reply: "ok" }],
+      run: {
+        output: {
+          status: "done",
+          summary: "ok",
+          comments: [{ id: "C-1", outcome: "addressed", reply: "ok" }],
+          acceptance: {},
+          decisions: [],
+        },
+      },
+    });
+    const merge = await claimStage("final-merge");
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "merged",
+      headSha: NEW_HEAD,
+    });
+    expect(
+      (
+        await db.pool.query("SELECT state FROM final_e2e WHERE spec_id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("active");
+    expect(
+      (
+        await db.pool.query(
+          `SELECT 1 FROM jobs WHERE payload->>'finalE2e' = 'true' AND state = 'queued'`,
+        )
+      ).rowCount,
+    ).toBe(1);
+  });
+
+  it("uses a new rework branch for a second Change request", async () => {
+    const opened = await readyRevision();
+    const first = await draftOn(opened);
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const ns = (
+      await db.pool.query<{ branch_namespace: string }>(
+        "SELECT branch_namespace FROM specs WHERE id = $1",
+        [opened.specId],
+      )
+    ).rows[0]?.branch_namespace;
+    const rework = await claimStage("rework");
+    await worker.complete(rework.id, rework.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [
+        {
+          id: first.body.displayId,
+          outcome: "addressed",
+          reply: "done",
+        },
+      ],
+      run: {
+        output: {
+          status: "done",
+          summary: "done",
+          comments: [
+            {
+              id: first.body.displayId,
+              outcome: "addressed",
+              reply: "done",
+            },
+          ],
+          acceptance: {},
+          decisions: [],
+        },
+      },
+    });
+    const merge = await claimStage("final-merge");
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "merged",
+      headSha: NEW_HEAD,
+    });
+    await drainHost();
+    const revision = await claimOf("review-revision");
+    expect(
+      (
+        await worker.complete(
+          revision.id,
+          revision.attempt,
+          revisionResult({
+            headSha: NEW_HEAD,
+            filesCount: 1,
+            additions: 1,
+            files: [aFile()],
+            blobs: [{ sha: SHA2, content: "b\n", bytes: 2 }],
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    const ready = await call(
+      "GET",
+      `/pull-requests/${opened.pullId}/review-revision?head=${NEW_HEAD}`,
+    );
+    const second = await draftOn({
+      pullId: opened.pullId,
+      revisionId: ready.body.id as number,
+      body: "name the helper",
+    });
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const again = await claimStage("rework");
+    expect((await bundleOf(again)).body.agentBranch).toBe(
+      `agent/${ns}/S-${opened.specId}-rework-2`,
+    );
+    await worker.complete(again.id, again.attempt, {
+      stage: "rework",
+      outcome: "done",
+      comments: [
+        {
+          id: second.body.displayId,
+          outcome: "addressed",
+          reply: "named",
+        },
+      ],
+      run: {
+        output: {
+          status: "done",
+          summary: "named",
+          comments: [
+            {
+              id: second.body.displayId,
+              outcome: "addressed",
+              reply: "named",
+            },
+          ],
+          acceptance: {},
+          decisions: [],
+        },
+      },
+    });
+  });
+});
+
+describe("append-ticket wrap-up after awaiting-review", () => {
+  it("returns to awaiting-review and enqueues a Review revision for the new head", async () => {
+    const opened = await readyRevision();
+    const appended = await call(
+      "POST",
+      `/specs/${opened.specId}/tickets/import?append=true`,
+      importBody(opened.specId, {
+        tickets: [ticket("extra", "backend")],
+      }),
+    );
+    expect(appended.status).toBe(200);
+    expect(
+      (
+        await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("reworking");
+    for (const stage of ["implement", "gate", "review", "merge"] as const) {
+      const job = await claimStage(stage);
+      await worker.complete(job.id, job.attempt, {
+        stage,
+        outcome:
+          stage === "gate"
+            ? "passed"
+            : stage === "review"
+              ? "pass"
+              : stage === "merge"
+                ? "merged"
+                : "done",
+        ...(stage === "merge" ? { headSha: NEW_HEAD } : {}),
+        ...(stage === "review"
+          ? {
+              run: {
+                output: { verdict: "pass", mustFix: [], suggestions: [] },
+              },
+            }
+          : {}),
+      });
+    }
+    const review = await claimStage("final-review");
+    await worker.complete(review.id, review.attempt, {
+      stage: "final-review",
+      outcome: "fix",
+      run: {
+        output: {
+          verdict: "fix",
+          mustFix: [{ file: "src/a.ts", line: 1, problem: "rename" }],
+          suggestions: [],
+        },
+      },
+      findings: [{ kind: "must-fix", body: "src/a.ts:1 rename" }],
+    });
+    const fix = await claimStage("final-fix");
+    await worker.complete(fix.id, fix.attempt, {
+      stage: "final-fix",
+      outcome: "done",
+    });
+    const merge = await claimStage("final-merge");
+    await worker.complete(merge.id, merge.attempt, {
+      stage: "final-merge",
+      outcome: "merged",
+      headSha: NEW_HEAD,
+    });
+    await drainHost();
+    expect(
+      (
+        await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("awaiting-review");
+    expect(
+      (
+        await db.pool.query(
+          `SELECT payload->>'headSha' AS head FROM jobs
+           WHERE type = 'review-revision' AND state = 'queued'
+           ORDER BY id DESC LIMIT 1`,
+        )
+      ).rows[0].head,
+    ).toBe(NEW_HEAD);
+  });
+});

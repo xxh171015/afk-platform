@@ -12,6 +12,7 @@ import type pg from "pg";
 import { z } from "zod";
 import { recordAction } from "../events/human-actions.ts";
 import { enqueueOpenPr } from "../host/host-jobs.ts";
+import { applyReworkComments } from "../host/review-comments.ts";
 import { enqueueTrialMerge } from "../host/trial-merge.ts";
 import { enqueueFinalJob, readFinalPayload } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
@@ -40,6 +41,15 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
   z.object({
     stage: z.literal("rework"),
     outcome: z.enum(["done", ...AGENT_FAILURES]),
+    comments: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          outcome: z.enum(["addressed", "declined"]),
+          reply: z.string().min(1),
+        }),
+      )
+      .optional(),
     ...commonFields,
   }),
   z.object({
@@ -65,6 +75,37 @@ export const FinalResultSchema = z.discriminatedUnion("stage", [
     ...commonFields,
   }),
 ]);
+
+function withReworkCommentsOnOutput<
+  T extends {
+    comments?: {
+      id: string;
+      outcome: "addressed" | "declined";
+      reply: string;
+    }[];
+    run?: { output?: unknown };
+  },
+>(valid: T): T {
+  const fromOutput =
+    valid.run?.output &&
+    typeof valid.run.output === "object" &&
+    !Array.isArray(valid.run.output)
+      ? (valid.run.output as { comments?: unknown }).comments
+      : undefined;
+  const comments = valid.comments ?? fromOutput;
+  if (!Array.isArray(comments)) return valid;
+  const output =
+    valid.run?.output &&
+    typeof valid.run.output === "object" &&
+    !Array.isArray(valid.run.output)
+      ? { ...(valid.run.output as object), comments }
+      : { comments };
+  return {
+    ...valid,
+    comments: comments as T["comments"],
+    run: { ...(valid.run ?? {}), output },
+  };
+}
 
 async function wrapUpWentThroughRework(
   client: pg.PoolClient,
@@ -177,6 +218,9 @@ export async function recordFinalResult(
       };
     }
   }
+  if (valid?.stage === "rework") {
+    valid = withReworkCommentsOnOutput(valid);
+  }
   await writeFacts(
     client,
     {
@@ -235,6 +279,13 @@ export async function recordFinalResult(
       repoId: read.repoId,
       headSha: valid.headSha,
     });
+    if (valid.headSha) {
+      await client.query(
+        `UPDATE pull_requests SET head_sha = $3
+         WHERE spec_id = $1 AND repo_id = $2 AND state = 'open'`,
+        [read.specId, read.repoId, valid.headSha],
+      );
+    }
   }
 
   if (decision.type === "enqueue") {
@@ -268,6 +319,7 @@ export async function recordFinalResult(
       "UPDATE finalizations SET state = 'done' WHERE id = $1",
       [fin.id],
     );
+    if (fromRework) await applyReworkComments(client, read.specId, read.repoId);
     // the last repo to settle sends all of the spec's pull requests out, after the e2e that comes first when a
     // final fix or a tidy-merge changed a branch
     await settleFinalization(client, read.specId);

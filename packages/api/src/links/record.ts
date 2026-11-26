@@ -5,7 +5,7 @@ const SHA = /^[0-9a-f]{40}$/;
 
 const STAGES_FOR = {
   merge: AGENT_STAGES,
-  "final-merge": ["final-fix"],
+  "final-merge": ["final-fix", "rework"],
   "tidy-merge": ["final-tidy"],
 } as const;
 

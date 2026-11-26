@@ -2350,6 +2350,20 @@ export interface paths {
                     body: string;
                   }[]
                 | null;
+              reviewComments: {
+                changeRequest: number;
+                currentHead: string;
+                comments: {
+                  id: string;
+                  writtenOn: string;
+                  path: string | null;
+                  /** @enum {string|null} */
+                  side?: "old" | "new" | null;
+                  lines?: number[];
+                  excerpt?: string;
+                  body: string;
+                }[];
+              } | null;
               handbackResolve?: boolean;
             };
           };
@@ -6807,7 +6821,7 @@ export interface paths {
               }[];
               wrapUp: {
                 /** @enum {string} */
-                stage: "final-fix" | "final-tidy" | "update-branch";
+                stage: "final-fix" | "rework" | "final-tidy" | "update-branch";
                 summaries: {
                   run: string;
                   stage: string;
