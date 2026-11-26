@@ -219,6 +219,7 @@ export {
   MERGE_NOTE_MARK_START,
   PACK_MARK_END,
   PACK_MARK_START,
+  REVIEW_NOTE_MARKER,
   spliceMergeNote,
   splicePackSection,
   wrapMergeNote,

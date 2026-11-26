@@ -5,6 +5,7 @@ import {
   HOST_KIND_LABELS,
   type HostKind,
   pullPhrase,
+  REVIEW_NOTE_MARKER,
   reviewAxisLabel,
 } from "@afk/shared";
 import { pageUrl } from "../page-url.ts";
@@ -96,6 +97,7 @@ function repoLines(pack: AcceptancePack, repo: string): string {
   if (!section) return `## ${repo}\n\nNo section for this repo.`;
   const blocks = [
     `## ${repo}`,
+    reviewCommentLines(section),
     criteriaLines(section),
     findingsLines(section),
     reviewUncertaintyLines(section),
@@ -106,6 +108,100 @@ function repoLines(pack: AcceptancePack, repo: string): string {
     decisionLines(section),
   ].filter(Boolean);
   return blocks.join("\n\n");
+}
+
+function locationOf(
+  comment: AcceptancePack["repos"][number]["reviewComments"][number],
+): string {
+  if (comment.path == null) return "";
+  const lines =
+    comment.lineStart == null
+      ? ""
+      : comment.lineEnd != null && comment.lineEnd !== comment.lineStart
+        ? `${comment.lineStart}–${comment.lineEnd}`
+        : String(comment.lineStart);
+  const side = comment.side ? ` ${comment.side}` : "";
+  const at = lines ? `${side}:${lines}` : side;
+  return ` \`${comment.path}\`${at}`;
+}
+
+function reviewCommentStatus(
+  state: AcceptancePack["repos"][number]["reviewComments"][number]["state"],
+): string {
+  if (state === "addressed") return "已处理";
+  if (state === "declined") return "没处理";
+  return "待处理";
+}
+
+export type ReviewNoteComment =
+  AcceptancePack["repos"][number]["reviewComments"][number];
+
+function reviewNoteHeading(comments: ReviewNoteComment[]): string {
+  const submitted = comments.filter((c) => c.state === "submitted");
+  const addressed = comments.filter((c) => c.state === "addressed");
+  const declined = comments.filter((c) => c.state === "declined");
+  if (submitted.length > 0 && addressed.length === 0 && declined.length === 0) {
+    return `人审意见：${submitted.length} 条处理中`;
+  }
+  const reasons = declined
+    .map((c) => `${c.displayId}：${c.reply ?? c.body}`)
+    .join("；");
+  const parts = [
+    `${addressed.length} 条已处理`,
+    `${declined.length} 条没处理${reasons ? `（${reasons}）` : ""}`,
+  ];
+  if (submitted.length > 0) parts.unshift(`${submitted.length} 条处理中`);
+  return `人审意见：${parts.join("，")}`;
+}
+
+function reviewNoteDetail(comment: ReviewNoteComment): string {
+  const status =
+    comment.state === "submitted"
+      ? "处理中"
+      : reviewCommentStatus(comment.state);
+  const reply = comment.reply ? `：${comment.reply}` : "";
+  return `- ${comment.displayId} 修改要求 #${comment.changeRequest}${locationOf(comment)} ${status}${reply}`;
+}
+
+export function renderReviewNoteBody(
+  comments: ReviewNoteComment[],
+  marker = REVIEW_NOTE_MARKER,
+): string {
+  if (comments.length === 0) {
+    return `${marker}\n人审意见：0 条`;
+  }
+  return [
+    marker,
+    reviewNoteHeading(comments),
+    "",
+    ...comments.map(reviewNoteDetail),
+  ].join("\n");
+}
+
+function reviewCommentLines(section: AcceptancePack["repos"][number]): string {
+  const comments = section.reviewComments ?? [];
+  if (comments.length === 0) return "";
+  const addressed = comments.filter((c) => c.state === "addressed");
+  const declined = comments.filter((c) => c.state === "declined");
+  const reasons = declined
+    .map((c) => `${c.displayId}：${c.reply ?? c.body}`)
+    .join("；");
+  const heading = `人审意见：${addressed.length} 条已处理，${declined.length} 条没处理${
+    reasons ? `（${reasons}）` : ""
+  }`;
+  const details = comments.map((c) => {
+    const reply = c.reply ? `：${c.reply}` : "";
+    return `- ${c.displayId} 修改要求 #${c.changeRequest}${locationOf(c)} ${reviewCommentStatus(c.state)}${reply}`;
+  });
+  return [
+    heading,
+    "<details>",
+    `<summary>明细（${comments.length} 条）</summary>`,
+    "",
+    ...details,
+    "",
+    "</details>",
+  ].join("\n");
 }
 
 function criteriaLines(section: AcceptancePack["repos"][number]): string {

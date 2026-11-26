@@ -7,6 +7,7 @@ import {
   MANUAL_MERGE_NOTE,
   parseDisplayId,
   parseMergePolicy,
+  REVIEW_NOTE_MARKER,
   REWORK_PR_MERGED_REASON,
   type SpecState,
   specTransition,
@@ -17,7 +18,10 @@ import {
 import type pg from "pg";
 import { z } from "zod";
 import { readAcceptancePack, saveAcceptancePack } from "../acceptance/pack.ts";
-import { renderPackSection } from "../acceptance/pack-description.ts";
+import {
+  renderPackSection,
+  renderReviewNoteBody,
+} from "../acceptance/pack-description.ts";
 import { recordAutoMergeEvent } from "../events/auto-merge.ts";
 import { cancelFinalJobs, cancelTicketJobs } from "../jobs/stage-jobs.ts";
 import { lockSpec } from "../scheduling/scheduler.ts";
@@ -40,6 +44,7 @@ import {
   type PatchPrBodyPayload,
   type PrDraftPayload,
   type PrReadyPayload,
+  type ReviewNotePayload,
   type ReviewRevisionPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
@@ -48,6 +53,7 @@ import {
 } from "./host-jobs.ts";
 import { IDLE_TICKET_SQL } from "./idle-tickets.ts";
 import { mergeOrderOf } from "./merge-order.ts";
+import { enqueueReviewNotesForSpec } from "./review-note.ts";
 import { enqueueReviewRevisionsForSpec } from "./review-revision.ts";
 import { dropPotentialConflicts } from "./trial-merge.ts";
 import {
@@ -128,6 +134,13 @@ export type HostTask =
       defaultBranch: string;
       headSha: string;
       previousHeadSha: string | null;
+    }
+  | {
+      kind: "review-note";
+      repoUrl: string;
+      number: number;
+      marker: string;
+      body: string;
     };
 
 const PullFacts = {
@@ -280,6 +293,7 @@ async function finishOpeningWithExistingPulls(
   await markActiveChangeRequestsDone(client, specId);
   await markMergedWhenAllAre(client, specId);
   await enqueueReviewRevisionsForSpec(client, specId);
+  await enqueueReviewNotesForSpec(client, specId);
   const projectId = await projectOf(client, specId);
   if (projectId !== undefined) await enqueueHostSync(client, projectId);
 }
@@ -325,8 +339,58 @@ export async function buildHostTask(
     | PatchPrBodyPayload
     | IndexPrLinksPayload
     | AutoMergePayload
-    | ReviewRevisionPayload,
+    | ReviewRevisionPayload
+    | ReviewNotePayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "review-note") {
+    const { pullId } = payload as ReviewNotePayload;
+    const pull = (
+      await pool.query<{ url: string; number: number }>(
+        `SELECT r.url, p.number
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    if (!pull) return undefined;
+    const comments = await pool.query<{
+      id: number;
+      change_request: number;
+      path: string | null;
+      side: "old" | "new" | null;
+      line_start: number | null;
+      line_end: number | null;
+      body: string;
+      state: "submitted" | "addressed" | "declined";
+      reply: string | null;
+    }>(
+      `SELECT c.id, cr.number AS change_request, c.path, c.side, c.line_start,
+              c.line_end, c.body, c.state, c.reply
+       FROM review_comments c
+       JOIN change_requests cr ON cr.id = c.change_request_id
+       WHERE c.pull_request_id = $1 AND c.state <> 'draft'
+       ORDER BY c.id`,
+      [pullId],
+    );
+    return {
+      kind: "review-note",
+      repoUrl: pull.url,
+      number: pull.number,
+      marker: REVIEW_NOTE_MARKER,
+      body: renderReviewNoteBody(
+        comments.rows.map((row) => ({
+          displayId: formatDisplayId("comment", row.id),
+          changeRequest: row.change_request,
+          path: row.path,
+          side: row.side,
+          lineStart: row.line_start,
+          lineEnd: row.line_end,
+          body: row.body,
+          state: row.state,
+          reply: row.reply,
+        })),
+      ),
+    };
+  }
   if (job.type === "review-revision") {
     const { pullId, headSha, previousHeadSha } =
       payload as ReviewRevisionPayload;

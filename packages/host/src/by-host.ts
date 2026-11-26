@@ -41,6 +41,8 @@ export function adapterByHost(
     closePullRequest: async (input) => of(input.repo).closePullRequest(input),
     deleteBranch: async (input) => of(input.repo).deleteBranch(input),
     getBranchSha: async (input) => of(input.repo).getBranchSha(input),
+    upsertPlatformComment: async (input) =>
+      of(input.repo).upsertPlatformComment(input),
   };
 }
 

@@ -2421,7 +2421,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge or review-revision job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge, review-revision or review-note job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2528,6 +2528,14 @@ export interface paths {
                   defaultBranch: string;
                   headSha: string;
                   previousHeadSha: string | null;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "review-note";
+                  repoUrl: string;
+                  number: number;
+                  marker: string;
+                  body: string;
                 };
           };
         };
@@ -3968,6 +3976,20 @@ export interface paths {
                     stage: string;
                     sources: string[];
                   }[];
+                  /** @default [] */
+                  reviewComments: {
+                    displayId: string;
+                    changeRequest: number;
+                    path: string | null;
+                    /** @enum {string|null} */
+                    side: "old" | "new" | null;
+                    lineStart: number | null;
+                    lineEnd: number | null;
+                    body: string;
+                    /** @enum {string} */
+                    state: "submitted" | "addressed" | "declined";
+                    reply: string | null;
+                  }[];
                 }[];
                 integration?: {
                   failedBeforePullRequest: {
@@ -4023,7 +4045,12 @@ export interface paths {
                 /** @default [] */
                 needsDecision: {
                   /** @enum {string} */
-                  kind: "recheck" | "needs-human" | "deferred" | "host-check";
+                  kind:
+                    | "recheck"
+                    | "needs-human"
+                    | "deferred"
+                    | "host-check"
+                    | "review-comment";
                   id: string;
                   source: string;
                   text: string;
@@ -4126,6 +4153,16 @@ export interface paths {
                   reason: string | null;
                 } | null;
               };
+              reviewComments: {
+                submitted: number;
+                addressed: number;
+                declined: number;
+              };
+              latestChangeRequest: {
+                number: number;
+                /** @enum {string} */
+                state: "active" | "done" | "superseded";
+              } | null;
             };
           };
         };
@@ -6467,6 +6504,7 @@ export interface paths {
                 headSha: string;
                 conflictsWithDefault: boolean;
                 humanComments: number | null;
+                reviewNoteError: string | null;
                 revision: {
                   id: number | null;
                   /** @enum {string} */
@@ -6599,6 +6637,20 @@ export interface paths {
                     stage: string;
                     sources: string[];
                   }[];
+                  /** @default [] */
+                  reviewComments: {
+                    displayId: string;
+                    changeRequest: number;
+                    path: string | null;
+                    /** @enum {string|null} */
+                    side: "old" | "new" | null;
+                    lineStart: number | null;
+                    lineEnd: number | null;
+                    body: string;
+                    /** @enum {string} */
+                    state: "submitted" | "addressed" | "declined";
+                    reply: string | null;
+                  }[];
                 }[];
                 integration?: {
                   failedBeforePullRequest: {
@@ -6654,7 +6706,12 @@ export interface paths {
                 /** @default [] */
                 needsDecision: {
                   /** @enum {string} */
-                  kind: "recheck" | "needs-human" | "deferred" | "host-check";
+                  kind:
+                    | "recheck"
+                    | "needs-human"
+                    | "deferred"
+                    | "host-check"
+                    | "review-comment";
                   id: string;
                   source: string;
                   text: string;

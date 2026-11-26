@@ -33,6 +33,7 @@ function fakeAdapter(name: string): HostAdapter {
     closePullRequest: async () => info(name),
     deleteBranch: async () => "deleted",
     getBranchSha: async () => `${name}-sha`,
+    upsertPlatformComment: async () => ({ id: `${name}-1` }),
   };
 }
 

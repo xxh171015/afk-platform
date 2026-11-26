@@ -1,6 +1,7 @@
+import { REVIEW_NOTE_MARKER } from "@afk/shared";
 import { describe, expect, it } from "vitest";
 import type { AcceptancePack } from "./pack.ts";
-import { renderPackSection } from "./pack-description.ts";
+import { renderPackSection, renderReviewNoteBody } from "./pack-description.ts";
 
 const criterion = (
   text: string,
@@ -88,6 +89,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
         },
       ],
       protectedPathApprovals: [],
+      reviewComments: [],
       flakyTests: [{ name: "flakes then passes", classname: "orders" }],
       standardsSources: [
         {
@@ -116,6 +118,7 @@ const pack = (over: Partial<AcceptancePack> = {}): AcceptancePack => ({
       resolvedUncertainties: [],
       decisions: [],
       protectedPathApprovals: [],
+      reviewComments: [],
       flakyTests: [],
       standardsSources: [],
     },
@@ -324,6 +327,73 @@ describe("renderPackSection", () => {
     expect(renderPackSection(unchanged, "backend", 1).section).not.toContain(
       "规划改动未带上",
     );
+  });
+
+  it("puts 人审意见 at the front of the repo section, with addressed and declined counts", () => {
+    const withComments = pack();
+    withComments.repos[0].reviewComments = [
+      {
+        displayId: "C-12",
+        changeRequest: 2,
+        path: "src/orders/list.ts",
+        side: "new",
+        lineStart: 41,
+        lineEnd: 44,
+        body: "empty list should return 200",
+        state: "addressed",
+        reply: "returns 200 and []",
+      },
+      {
+        displayId: "C-14",
+        changeRequest: 2,
+        path: null,
+        side: null,
+        lineStart: null,
+        lineEnd: null,
+        body: "migrations must be repeatable",
+        state: "declined",
+        reply: "already uses IF NOT EXISTS",
+      },
+    ];
+    const { section } = renderPackSection(withComments, "backend", 1);
+    const repo = section.slice(section.indexOf("## backend"));
+    expect(repo.indexOf("人审意见")).toBeLessThan(
+      repo.indexOf("Acceptance criteria"),
+    );
+    expect(repo).toContain(
+      "人审意见：1 条已处理，1 条没处理（C-14：already uses IF NOT EXISTS）",
+    );
+    expect(repo).toContain("C-12");
+    expect(repo).toContain("returns 200 and []");
+    expect(repo).toContain("C-14");
+    expect(renderPackSection(pack(), "backend", 1).section).not.toContain(
+      "人审意见",
+    );
+  });
+
+  it("writes a review-note body as 处理中 while comments are submitted, then 已处理 after wrap-up", () => {
+    const comments = [
+      {
+        displayId: "C-12",
+        changeRequest: 1,
+        path: "src/a.ts",
+        side: "new" as const,
+        lineStart: 1,
+        lineEnd: 1,
+        body: "empty list should return 200",
+        state: "submitted" as const,
+        reply: null,
+      },
+    ];
+    const submitted = renderReviewNoteBody(comments);
+    expect(submitted.startsWith(REVIEW_NOTE_MARKER)).toBe(true);
+    expect(submitted).toContain("人审意见：1 条处理中");
+    expect(submitted).toContain("C-12 修改要求 #1 `src/a.ts` new:1 处理中");
+    expect(
+      renderReviewNoteBody([
+        { ...comments[0], state: "addressed", reply: "returns 200" },
+      ]),
+    ).toContain("人审意见：1 条已处理，0 条没处理");
   });
 
   it("puts unverified criteria before verified ones and leaves the other repo's criteria out", () => {

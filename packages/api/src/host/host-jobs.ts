@@ -60,6 +60,10 @@ export interface ReviewRevisionPayload {
   previousHeadSha: string | null;
 }
 
+export interface ReviewNotePayload {
+  pullId: number;
+}
+
 export function readPrReadyPayload(job: {
   type?: string;
   payload: Record<string, unknown>;
@@ -165,6 +169,16 @@ export function readReviewRevisionPayload(job: {
         headSha,
         previousHeadSha: previousHeadSha ?? null,
       }
+    : undefined;
+}
+
+export function readReviewNotePayload(job: {
+  type?: string;
+  payload: Record<string, unknown>;
+}): ReviewNotePayload | undefined {
+  const { pullId } = job.payload;
+  return job.type === "review-note" && typeof pullId === "number"
+    ? { pullId }
     : undefined;
 }
 
@@ -401,6 +415,28 @@ export async function enqueueReviewRevisionJob(
     payload: { ...payload },
     requiredCapabilities: [HOST_CAPABILITY],
     idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+  });
+}
+
+export const reviewNoteKeyPrefix = ({ pullId }: ReviewNotePayload) =>
+  `pull-${pullId}:review-note:`;
+
+export async function enqueueReviewNote(
+  client: pg.PoolClient,
+  payload: ReviewNotePayload,
+  notBefore?: Date,
+) {
+  const prefix = reviewNoteKeyPrefix(payload);
+  const earlier = await client.query<{ n: string }>(
+    "SELECT count(*) AS n FROM jobs WHERE idempotency_key LIKE $1",
+    [`${prefix}%`],
+  );
+  return enqueueJob(client, {
+    type: "review-note",
+    payload: { ...payload },
+    requiredCapabilities: [HOST_CAPABILITY],
+    idempotencyKey: `${prefix}${Number(earlier.rows[0]?.n) + 1}`,
+    ...(notBefore ? { notBefore } : {}),
   });
 }
 

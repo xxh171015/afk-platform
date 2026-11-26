@@ -4,6 +4,7 @@ import {
   CHANGE_REQUEST_NOT_AWAITING,
   CHANGE_REQUEST_PR_NOT_OPEN,
   changeRequestPartiallyMergedMessage,
+  REVIEW_NOTE_MARKER,
 } from "@afk/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -183,6 +184,13 @@ async function claimOf(type: string) {
     }
     if (job.type === "review-revision" && type !== "review-revision") {
       await worker.complete(job.id, job.attempt, {});
+      continue;
+    }
+    if (job.type === "review-note" && type !== "review-note") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "review-note",
+        outcome: "upserted",
+      });
       continue;
     }
     if (job.type === "pr-draft" || job.type === "agent-run") continue;
@@ -403,6 +411,33 @@ describe("POST /specs/{id}/change-requests", () => {
         ])
       ).rowCount,
     ).toBe(0);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT type, payload, state FROM jobs WHERE type = 'review-note'",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        type: "review-note",
+        payload: { pullId: opened.pullId },
+        state: "queued",
+      },
+    ]);
+    const view = await call("GET", `/specs/${opened.specId}`);
+    expect(view.body.reviewComments).toEqual({
+      submitted: 1,
+      addressed: 0,
+      declined: 0,
+    });
+    expect(view.body.latestChangeRequest).toEqual({
+      number: 1,
+      state: "active",
+    });
+    expect(
+      (await call("GET", `/specs/${opened.specId}/review`)).body.pullRequests[0]
+        .reviewNoteError,
+    ).toBeNull();
 
     const again = await call("POST", `/specs/${opened.specId}/change-requests`);
     expect(again.status).toBe(409);
@@ -844,6 +879,13 @@ async function claimStage(stage: string) {
     }
     if (job.type === "review-revision") {
       await worker.complete(job.id, job.attempt, {});
+      continue;
+    }
+    if (job.type === "review-note") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "review-note",
+        outcome: "upserted",
+      });
     }
   }
   throw new Error(`no ${stage} job`);
@@ -907,6 +949,13 @@ async function drainHost() {
     }
     if (job.type === "review-revision") {
       await worker.complete(job.id, job.attempt, {});
+      continue;
+    }
+    if (job.type === "review-note") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "review-note",
+        outcome: "upserted",
+      });
       continue;
     }
     if (job.payload?.finalE2e) {
@@ -1044,6 +1093,36 @@ describe("Rework wrap-up after a Change request", () => {
         sha: "f".repeat(40),
       }),
     ]);
+    const spec = await call("GET", `/specs/${opened.specId}`);
+    expect(spec.body.reviewComments).toEqual({
+      submitted: 0,
+      addressed: 1,
+      declined: 0,
+    });
+    expect(spec.body.latestChangeRequest).toEqual({
+      number: 1,
+      state: "done",
+    });
+    expect(spec.body.acceptancePack.repos[0].reviewComments).toEqual([
+      expect.objectContaining({
+        displayId: created.body.displayId,
+        changeRequest: 1,
+        path: "src/a.ts",
+        side: "new",
+        lineStart: 1,
+        lineEnd: 1,
+        body: "empty list should return 200",
+        state: "addressed",
+        reply: "empty list now returns 200",
+      }),
+    ]);
+    expect(
+      (
+        await db.pool.query(
+          "SELECT count(*)::int AS n FROM jobs WHERE type = 'review-note'",
+        )
+      ).rows[0].n,
+    ).toBe(2);
   });
 
   it("keeps comments submitted when wrap-up merge fails", async () => {
@@ -1166,6 +1245,20 @@ describe("Rework wrap-up after a Change request", () => {
         kind: "needs-human",
         text: "comment asked to edit a protected path",
         source: expect.stringMatching(/rework$/),
+      }),
+      expect.objectContaining({
+        kind: "review-comment",
+        id: created.body.displayId,
+        source: "backend",
+        text: "protected path; append a ticket and approve it",
+      }),
+    ]);
+    expect(pack.body.acceptancePack.repos[0].reviewComments).toEqual([
+      expect.objectContaining({
+        displayId: created.body.displayId,
+        changeRequest: 1,
+        state: "declined",
+        reply: "protected path; append a ticket and approve it",
       }),
     ]);
   });
@@ -1484,5 +1577,106 @@ describe("append-ticket wrap-up after awaiting-review", () => {
         )
       ).rows[0].head,
     ).toBe(NEW_HEAD);
+  });
+});
+
+async function claimHost(type: string) {
+  for (let i = 0; i < 16; i++) {
+    const job = (await worker.claim({ takeSlot: false })).body.job as {
+      id: number;
+      type: string;
+      attempt: number;
+      payload: Json;
+    } | null;
+    if (!job) break;
+    if (job.type === type) return job;
+  }
+  throw new Error(`no ${type} job`);
+}
+
+async function taskOf(job: { id: number; attempt: number }) {
+  const response = await fetch(
+    `${api.url}/worker/jobs/${job.id}/host-task?workerId=w1&attempt=${job.attempt}`,
+  );
+  return { status: response.status, body: (await response.json()) as Json };
+}
+
+async function dueReviewNotes() {
+  return Number(
+    (
+      await db.pool.query<{ n: string }>(
+        `SELECT count(*) AS n FROM jobs
+         WHERE type = 'review-note' AND state = 'queued'
+           AND (not_before IS NULL OR not_before <= $1)`,
+        [clock.now()],
+      )
+    ).rows[0]?.n,
+  );
+}
+
+describe("review-note jobs", () => {
+  it("builds the review-note body from the comments at fetch time", async () => {
+    const opened = await readyRevision();
+    const created = await draftOn(opened);
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    const job = await claimHost("review-note");
+    const task = await taskOf(job);
+    expect(task.status).toBe(200);
+    expect(task.body).toMatchObject({
+      kind: "review-note",
+      number: 7,
+      marker: REVIEW_NOTE_MARKER,
+    });
+    expect(task.body.body).toContain(REVIEW_NOTE_MARKER);
+    expect(task.body.body).toContain("人审意见：1 条处理中");
+    expect(task.body.body).toContain(
+      `${created.body.displayId} 修改要求 #1 \`src/a.ts\` new:1 处理中`,
+    );
+    await db.pool.query(
+      `UPDATE review_comments SET state = 'addressed', reply = 'fixed' WHERE id = $1`,
+      [created.body.id],
+    );
+    const again = await taskOf(job);
+    expect(again.body.body).toContain("人审意见：1 条已处理，0 条没处理");
+    expect(again.body.body).toContain("fixed");
+  });
+
+  it("retries a failed review-note a minute later, three times, without blocking Rework", async () => {
+    const opened = await readyRevision();
+    await draftOn(opened);
+    expect(
+      (await call("POST", `/specs/${opened.specId}/change-requests`)).status,
+    ).toBe(200);
+    for (const n of [1, 2, 3]) {
+      const job = await claimHost("review-note");
+      expect(
+        (await worker.fail(job.id, job.attempt, `GitHub answered 403`)).status,
+      ).toBe(200);
+      expect(await dueReviewNotes()).toBe(0);
+      if (n < 3) {
+        clock.advanceSeconds(59);
+        expect(await dueReviewNotes()).toBe(0);
+        clock.advanceSeconds(2);
+        expect(await dueReviewNotes()).toBe(1);
+      }
+    }
+    clock.advanceSeconds(61);
+    expect(await dueReviewNotes()).toBe(0);
+    expect(
+      (await call("GET", `/specs/${opened.specId}/review`)).body.pullRequests[0]
+        .reviewNoteError,
+    ).toMatch(/403/);
+    expect((await call("GET", "/blocked")).body.cleanups).toEqual([]);
+    expect(
+      (
+        await db.pool.query("SELECT state FROM specs WHERE id = $1", [
+          opened.specId,
+        ])
+      ).rows[0].state,
+    ).toBe("finalizing");
+    const rework = await claimStage("rework");
+    expect(rework.payload.stage).toBe("rework");
   });
 });

@@ -13,6 +13,7 @@ import { recordAction } from "../events/human-actions.ts";
 import { enqueueFinalJob } from "../jobs/stage-jobs.ts";
 import { inTransaction, lockSpec } from "../scheduling/scheduler.ts";
 import { enqueuePrDraft, stopAutoMergeJobs } from "./host-jobs.ts";
+import { enqueueReviewNoteForPull } from "./review-note.ts";
 
 export type SubmitChangeRequestResult =
   | {
@@ -147,6 +148,8 @@ export async function submitChangeRequest(
     );
     for (const pull of pulls.rows)
       await enqueuePrDraft(client, { pullId: pull.id });
+    const noted = [...new Set(drafts.rows.map((row) => row.pull_id))];
+    for (const pullId of noted) await enqueueReviewNoteForPull(client, pullId);
 
     return {
       status: "ok",

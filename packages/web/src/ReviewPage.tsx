@@ -549,6 +549,11 @@ export function ReviewPage({ specId }: { specId: number }) {
           这份 diff 不完整
         </p>
       ) : null}
+      {pull?.reviewNoteError ? (
+        <p role="status" className="error">
+          PR 上的汇总评论没写上：{pull.reviewNoteError}
+        </p>
+      ) : null}
       {newer ? (
         <p
           role="status"

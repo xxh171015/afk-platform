@@ -2108,6 +2108,28 @@ describe("spec reference repos", () => {
     expect(refused.body.error).toMatch(/alice/);
   });
 
+  it("refuses confirm when the GitHub App lacks issues write", async () => {
+    const { specId, paymentsId } = await confirmableSpecWithRef();
+    await db.pool.query(
+      `UPDATE repos SET access = $1::jsonb WHERE name = 'backend'`,
+      [
+        JSON.stringify({
+          last: {
+            state: "missing-permissions",
+            missing: ["issues: write"],
+            fixUrl: "https://github.com/settings/installations/7",
+          },
+        }),
+      ],
+    );
+    const refused = await post(`/specs/${specId}/confirm`, {
+      refPins: [{ repoId: paymentsId, sha: PIN }],
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/issues: write/);
+    expect(refused.body.error).toMatch(/installations\/7/);
+  });
+
   it("pins reference repo SHAs on confirm", async () => {
     const { specId, paymentsId } = await confirmableSpecWithRef();
     const confirmed = await post(`/specs/${specId}/confirm`, {

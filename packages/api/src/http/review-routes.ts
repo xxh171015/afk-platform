@@ -108,6 +108,7 @@ const SpecReview = z.object({
       headSha: z.string(),
       conflictsWithDefault: z.boolean(),
       humanComments: Id.nullable(),
+      reviewNoteError: z.string().nullable(),
       revision: RevisionSummary,
     }),
   ),

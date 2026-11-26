@@ -4304,7 +4304,7 @@
         ],
         "responses": {
           "200": {
-            "description": "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge or review-revision job has to do on the code host",
+            "description": "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge, review-revision or review-note job has to do on the code host",
             "content": {
               "application/json": {
                 "schema": {
@@ -4641,6 +4641,34 @@
                         "defaultBranch",
                         "headSha",
                         "previousHeadSha"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["review-note"]
+                        },
+                        "repoUrl": {
+                          "type": "string"
+                        },
+                        "number": {
+                          "type": "integer"
+                        },
+                        "marker": {
+                          "type": "string"
+                        },
+                        "body": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "repoUrl",
+                        "number",
+                        "marker",
+                        "body"
                       ]
                     }
                   ]
@@ -8062,6 +8090,59 @@
                                   ]
                                 },
                                 "default": []
+                              },
+                              "reviewComments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "changeRequest": {
+                                      "type": "integer"
+                                    },
+                                    "path": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "side": {
+                                      "type": ["string", "null"],
+                                      "enum": ["old", "new", null]
+                                    },
+                                    "lineStart": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "lineEnd": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": [
+                                        "submitted",
+                                        "addressed",
+                                        "declined"
+                                      ]
+                                    },
+                                    "reply": {
+                                      "type": ["string", "null"]
+                                    }
+                                  },
+                                  "required": [
+                                    "displayId",
+                                    "changeRequest",
+                                    "path",
+                                    "side",
+                                    "lineStart",
+                                    "lineEnd",
+                                    "body",
+                                    "state",
+                                    "reply"
+                                  ]
+                                },
+                                "default": []
                               }
                             },
                             "required": [
@@ -8282,7 +8363,8 @@
                                   "recheck",
                                   "needs-human",
                                   "deferred",
-                                  "host-check"
+                                  "host-check",
+                                  "review-comment"
                                 ]
                               },
                               "id": {
@@ -8625,6 +8707,34 @@
                         "reason",
                         "event"
                       ]
+                    },
+                    "reviewComments": {
+                      "type": "object",
+                      "properties": {
+                        "submitted": {
+                          "type": "integer"
+                        },
+                        "addressed": {
+                          "type": "integer"
+                        },
+                        "declined": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["submitted", "addressed", "declined"]
+                    },
+                    "latestChangeRequest": {
+                      "type": ["object", "null"],
+                      "properties": {
+                        "number": {
+                          "type": "integer"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": ["active", "done", "superseded"]
+                        }
+                      },
+                      "required": ["number", "state"]
                     }
                   },
                   "required": [
@@ -8644,7 +8754,9 @@
                     "links",
                     "usageByStage",
                     "cleanup",
-                    "autoMerge"
+                    "autoMerge",
+                    "reviewComments",
+                    "latestChangeRequest"
                   ]
                 }
               }
@@ -13066,6 +13178,9 @@
                           "humanComments": {
                             "type": ["integer", "null"]
                           },
+                          "reviewNoteError": {
+                            "type": ["string", "null"]
+                          },
                           "revision": {
                             "type": "object",
                             "properties": {
@@ -13123,6 +13238,7 @@
                           "headSha",
                           "conflictsWithDefault",
                           "humanComments",
+                          "reviewNoteError",
                           "revision"
                         ]
                       }
@@ -13565,6 +13681,59 @@
                                   ]
                                 },
                                 "default": []
+                              },
+                              "reviewComments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "displayId": {
+                                      "type": "string"
+                                    },
+                                    "changeRequest": {
+                                      "type": "integer"
+                                    },
+                                    "path": {
+                                      "type": ["string", "null"]
+                                    },
+                                    "side": {
+                                      "type": ["string", "null"],
+                                      "enum": ["old", "new", null]
+                                    },
+                                    "lineStart": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "lineEnd": {
+                                      "type": ["integer", "null"]
+                                    },
+                                    "body": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": [
+                                        "submitted",
+                                        "addressed",
+                                        "declined"
+                                      ]
+                                    },
+                                    "reply": {
+                                      "type": ["string", "null"]
+                                    }
+                                  },
+                                  "required": [
+                                    "displayId",
+                                    "changeRequest",
+                                    "path",
+                                    "side",
+                                    "lineStart",
+                                    "lineEnd",
+                                    "body",
+                                    "state",
+                                    "reply"
+                                  ]
+                                },
+                                "default": []
                               }
                             },
                             "required": [
@@ -13785,7 +13954,8 @@
                                   "recheck",
                                   "needs-human",
                                   "deferred",
-                                  "host-check"
+                                  "host-check",
+                                  "review-comment"
                                 ]
                               },
                               "id": {

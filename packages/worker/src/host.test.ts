@@ -18,6 +18,7 @@ import {
   AUTO_MERGED_NOTE,
   AUTO_MERGED_SECTION,
   type HostTask,
+  REVIEW_NOTE_MARKER,
   wrapMergeNote,
 } from "@afk/shared";
 import { afterEach, describe, expect, it } from "vitest";
@@ -69,6 +70,9 @@ const noCleanup = {
     throw new Error("not used");
   },
   getBranchSha: async () => {
+    throw new Error("not used");
+  },
+  upsertPlatformComment: async () => {
     throw new Error("not used");
   },
 };
@@ -990,6 +994,9 @@ describe("a spec-cleanup task", () => {
       getBranchSha: async () => {
         throw new Error("not used");
       },
+      upsertPlatformComment: async () => {
+        throw new Error("not used");
+      },
       ...over,
     };
   }
@@ -1637,5 +1644,166 @@ describe("a review-revision task", () => {
     ).find((item) => item.path === "src/a.ts");
     expect(file?.sincePatch).toMatch(/-b\n\+c/);
     expect(file?.patch).toMatch(/-a\n\+c/);
+  });
+});
+
+describe("a review-note task", () => {
+  const task = (body: string): HostTask => ({
+    kind: "review-note",
+    repoUrl: "https://github.com/me/pilot.git",
+    number: 1,
+    marker: REVIEW_NOTE_MARKER,
+    body,
+  });
+
+  it("writes the platform comment and reports the id", async () => {
+    const calls: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(1),
+      getPullRequest: async () => info(1),
+      upsertPlatformComment: async (input) => {
+        calls.push(input);
+        return { id: "42" };
+      },
+    };
+    const result = await runHostTask(
+      { adapter, repoRef: ref },
+      task("note"),
+      log,
+    );
+    expect(calls).toEqual([
+      {
+        repo: ref(),
+        number: 1,
+        marker: REVIEW_NOTE_MARKER,
+        body: "note",
+      },
+    ]);
+    expect(result).toEqual({
+      stage: "review-note",
+      outcome: "upserted",
+      id: "42",
+    });
+  });
+
+  it("fails as an infrastructure problem when the host refuses", async () => {
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(1),
+      getPullRequest: async () => info(1),
+      upsertPlatformComment: async () => {
+        throw new HostError(
+          "GitHub answered 403 creating the review-notes comment",
+          403,
+        );
+      },
+    };
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, task("note"), log),
+    ).rejects.toBeInstanceOf(InfrastructureError);
+  });
+
+  it("updates the marked GitHub issue comment instead of creating a second", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    const github = new FakeGitHub({
+      appId: "1",
+      installationId: "2",
+      publicKey,
+      owner: "me",
+      repo: "pilot",
+    });
+    await github.start();
+    try {
+      const adapter = createGitHubAdapter({
+        apiUrl: github.url,
+        tokens: createAppTokenSource({
+          credentials: { appId: "1", installationId: "2", privateKey },
+          apiUrl: github.url,
+        }),
+      });
+      await adapter.openPullRequest({
+        repo: ref(),
+        head: "spec/s-1",
+        base: "main",
+        title: "S-1",
+        body: "Spec: S-1",
+      });
+      await runHostTask(
+        { adapter, repoRef: ref },
+        task(`${REVIEW_NOTE_MARKER}\n处理中`),
+        log,
+      );
+      await runHostTask(
+        { adapter, repoRef: ref },
+        task(`${REVIEW_NOTE_MARKER}\n已处理`),
+        log,
+      );
+      expect(github.issueCommentsOf(1)).toEqual([
+        expect.objectContaining({
+          body: `${REVIEW_NOTE_MARKER}\n已处理`,
+        }),
+      ]);
+      expect(
+        (await adapter.getPullRequest({ repo: ref(), number: 1 }))
+          .humanComments,
+      ).toBe(0);
+    } finally {
+      await github.stop();
+    }
+  });
+
+  it("updates the marked GitLab note instead of creating a second", async () => {
+    const gitlab = new FakeGitLab({
+      owner: "me",
+      repo: "pilot",
+      token: "glpat-test",
+    });
+    await gitlab.start();
+    try {
+      const adapter = createGitLabAdapter({
+        apiUrl: gitlab.url,
+        tokens: { tokenFor: async () => "glpat-test" },
+      });
+      const repo = { owner: "me", name: "pilot", host: "gitlab.example" };
+      await adapter.openPullRequest({
+        repo,
+        head: "spec/s-1",
+        base: "master",
+        title: "S-1",
+        body: "Spec: S-1",
+      });
+      const noteTask = (body: string): HostTask => ({
+        kind: "review-note",
+        repoUrl: "https://gitlab.example/me/pilot.git",
+        number: 1,
+        marker: REVIEW_NOTE_MARKER,
+        body,
+      });
+      await runHostTask(
+        { adapter, repoRef: () => repo },
+        noteTask(`${REVIEW_NOTE_MARKER}\n处理中`),
+        log,
+      );
+      await runHostTask(
+        { adapter, repoRef: () => repo },
+        noteTask(`${REVIEW_NOTE_MARKER}\n已处理`),
+        log,
+      );
+      expect(gitlab.notesOf(1)).toEqual([
+        expect.objectContaining({
+          body: `${REVIEW_NOTE_MARKER}\n已处理`,
+        }),
+      ]);
+      expect(
+        (await adapter.getPullRequest({ repo, number: 1 })).humanComments,
+      ).toBe(0);
+    } finally {
+      await gitlab.stop();
+    }
   });
 });

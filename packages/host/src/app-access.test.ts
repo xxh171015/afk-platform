@@ -77,7 +77,27 @@ describe("whether the GitHub App can work on a repo", () => {
     };
     expect(await check()).toEqual({
       state: "missing-permissions",
-      missing: ["contents: write", "checks: read", "statuses: read"],
+      missing: [
+        "contents: write",
+        "checks: read",
+        "statuses: read",
+        "issues: write",
+      ],
+      fixUrl: "https://github.com/settings/installations/7",
+    });
+  });
+
+  it("treats issues write as required, with the installation settings page as the fix", async () => {
+    github.installationPermissions = {
+      contents: "write",
+      pull_requests: "write",
+      checks: "read",
+      statuses: "read",
+      metadata: "read",
+    };
+    expect(await check()).toEqual({
+      state: "missing-permissions",
+      missing: ["issues: write"],
       fixUrl: "https://github.com/settings/installations/7",
     });
   });

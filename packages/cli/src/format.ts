@@ -810,6 +810,34 @@ export function acceptancePackText(pack: AcceptancePackView): string {
   ].join("\n");
 }
 
+function changeRequestStateLabel(state: string): string {
+  if (state === "active") return "进行中";
+  if (state === "done") return "已完成";
+  if (state === "superseded") return "已取代";
+  return state;
+}
+
+function reviewCommentsLine(view: {
+  reviewComments?: {
+    submitted: number;
+    addressed: number;
+    declined: number;
+  };
+  latestChangeRequest?: { number: number; state: string } | null;
+}): string | undefined {
+  const counts = view.reviewComments;
+  const latest = view.latestChangeRequest ?? null;
+  const submitted = counts?.submitted ?? 0;
+  const addressed = counts?.addressed ?? 0;
+  const declined = counts?.declined ?? 0;
+  const total = submitted + addressed + declined;
+  if (total === 0 && !latest) return undefined;
+  const line = `人审意见 ${total} 条（待处理 ${submitted} / 已处理 ${addressed} / 没处理 ${declined}）`;
+  return latest
+    ? `${line}，最近一次修改要求 #${latest.number} ${changeRequestStateLabel(latest.state)}`
+    : line;
+}
+
 export function specText(view: {
   spec: {
     displayId: string;
@@ -834,12 +862,20 @@ export function specText(view: {
   pullRequests?: PullRequestRowView[];
   acceptancePack?: AcceptancePackView | null;
   autoMerge?: AutoMergeStatus | null;
+  reviewComments?: {
+    submitted: number;
+    addressed: number;
+    declined: number;
+  };
+  latestChangeRequest?: { number: number; state: string } | null;
 }): string {
   const mergeLine = autoMergeLine(view.autoMerge, view.spec.state);
+  const commentsLine = reviewCommentsLine(view);
   const state = view.spec.state === "reworking" ? "返工中" : view.spec.state;
   return [
     `${view.spec.displayId}  ${state}  ${view.spec.title}`,
     ...(mergeLine ? [mergeLine] : []),
+    ...(commentsLine ? [commentsLine] : []),
     ...(view.spec.pauseReason
       ? [`paused: ${pauseReasonLabel(view.spec.pauseReason)}`]
       : []),

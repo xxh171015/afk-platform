@@ -274,6 +274,13 @@ async function completeIfPatch(job: {
     await worker.complete(job.id, job.attempt, {});
     return true;
   }
+  if (job.type === "review-note") {
+    await worker.complete(job.id, job.attempt, {
+      stage: "review-note",
+      outcome: "upserted",
+    });
+    return true;
+  }
   if (job.type !== "patch-pr-body") return false;
   await worker.complete(job.id, job.attempt, PATCHED);
   return true;

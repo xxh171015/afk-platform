@@ -179,6 +179,13 @@ async function claimOf(type: string) {
     }
     if (job.type === "review-revision" && type !== "review-revision") {
       await worker.complete(job.id, job.attempt, {});
+      continue;
+    }
+    if (job.type === "review-note" && type !== "review-note") {
+      await worker.complete(job.id, job.attempt, {
+        stage: "review-note",
+        outcome: "upserted",
+      });
     }
   }
   throw new Error(`no ${type} job`);
@@ -293,6 +300,7 @@ describe("GET /specs/{id}/review", () => {
         repo: "backend",
         number: 7,
         headSha,
+        reviewNoteError: null,
         revision: {
           state: "pending",
           viewedCount: 0,

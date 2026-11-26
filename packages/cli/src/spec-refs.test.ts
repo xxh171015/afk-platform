@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -799,7 +799,7 @@ describe("plat spec create missing-ref reminder", () => {
     expect(code).toBe(0);
     const err = machine.err.join("");
     expect(err).toContain("plat spec edit S-7 --ref payments");
-    expect(err).toContain(`plat spec edit S-7 --ref ${sibling}`);
+    expect(err).toContain(`plat spec edit S-7 --ref ${realpathSync(sibling)}`);
     expect(err).not.toMatch(/--ref secret/);
   });
 });

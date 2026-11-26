@@ -8,7 +8,10 @@ export type { RepoRef };
 
 // GitHub's permission names; the access level a token is asked for. A token is asked for what one job needs.
 export type TokenPermissions = Partial<
-  Record<"contents" | "pull_requests" | "checks" | "statuses", "read" | "write">
+  Record<
+    "contents" | "pull_requests" | "checks" | "statuses" | "issues",
+    "read" | "write"
+  >
 >;
 
 export interface TokenRequest {
@@ -100,6 +103,15 @@ export interface HostAdapter {
   }): Promise<"deleted" | "gone">;
   // The commit SHA the default branch (or any other) is at. Used by host-sync to notice main moving.
   getBranchSha(input: { repo: RepoRef; branch: string }): Promise<string>;
+  // Creates or updates the one comment the platform keeps on this pull request. It is found by
+  // marker among the token user's own comments, so a lost response does not leave two.
+  // GitHub: issue comments (issues:write). GitLab: MR notes.
+  upsertPlatformComment(input: {
+    repo: RepoRef;
+    number: number;
+    marker: string;
+    body: string;
+  }): Promise<{ id: string }>;
 }
 
 // A call the host refused or could not answer. The message never holds a token. 429 carries Retry-After so

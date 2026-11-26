@@ -11,6 +11,7 @@ export const HOST_JOB_TYPES = [
   "index-pr-links",
   "auto-merge",
   "review-revision",
+  "review-note",
 ] as const;
 export const HOST_CAPABILITY = "host";
 

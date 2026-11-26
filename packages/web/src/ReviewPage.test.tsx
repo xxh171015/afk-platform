@@ -128,6 +128,8 @@ function specReview(over: Record<string, unknown> = {}) {
         headSha: SHA,
         conflictsWithDefault: false,
         humanComments: 0,
+        reviewNoteError:
+          (over.reviewNoteError as string | null | undefined) ?? null,
         revision: {
           id: 3,
           state: "ready",
@@ -912,6 +914,18 @@ describe("the spec review page", () => {
     expect(
       screen.getByRole("link", { name: "到托管上看" }).getAttribute("href"),
     ).toBe("https://github.com/me/shop/pull/12");
+  });
+
+  it("says the platform summary comment was not written", async () => {
+    renderApp(
+      reviewServer({
+        review: { reviewNoteError: "GitHub answered 403" },
+      }),
+      "/specs/1/review",
+    );
+    expect(
+      await screen.findByText("PR 上的汇总评论没写上：GitHub answered 403"),
+    ).toBeTruthy();
   });
 
   it("fills the right rail from the pack, the current file's tickets, and Findings", async () => {

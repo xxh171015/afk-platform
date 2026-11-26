@@ -21,6 +21,7 @@ import {
   enqueueOpenPr,
   enqueuePrDraft,
   enqueuePrReady,
+  enqueueReviewNote,
   enqueueSpecCleanup,
   inSeconds,
   openPrKeyPrefix,
@@ -28,11 +29,14 @@ import {
   type PrReadyPayload,
   prDraftKeyPrefix,
   prReadyKeyPrefix,
+  type ReviewNotePayload,
   readOpenPrPayload,
   readPrDraftPayload,
   readPrReadyPayload,
+  readReviewNotePayload,
   readReviewRevisionPayload,
   readSpecCleanupPayload,
+  reviewNoteKeyPrefix,
   type SpecCleanupPayload,
   specCleanupKeyPrefix,
 } from "../host/host-jobs.ts";
@@ -298,6 +302,8 @@ export async function recordJobFailure(
     await reviewRevisionFailed(client, review, error);
     return { status: "ignored" };
   }
+  const reviewNote = readReviewNotePayload(job);
+  if (reviewNote) return reviewNoteFailed(client, reviewNote, now);
   const locate = await recordLocateJobFailure(client, job, error);
   if (locate.status !== "not-locate") {
     return locate.status === "ignored"
@@ -510,5 +516,18 @@ async function prDraftFailed(
   const failures = await failuresOf(client, prDraftKeyPrefix(read), 0);
   if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
   await enqueuePrDraft(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
+  return { status: "requeued", failures };
+}
+
+// Writing the review-notes comment failed. Tried again a minute later, three times in all.
+// After that the job stays failed; wrap-up is not blocked (the review page shows the miss).
+async function reviewNoteFailed(
+  client: pg.PoolClient,
+  read: ReviewNotePayload,
+  now: Date,
+): Promise<FailureOutcome> {
+  const failures = await failuresOf(client, reviewNoteKeyPrefix(read), 0);
+  if (failures >= MAX_JOB_FAILURES) return { status: "blocked", failures };
+  await enqueueReviewNote(client, read, inSeconds(now, CLEANUP_RETRY_SECONDS));
   return { status: "requeued", failures };
 }

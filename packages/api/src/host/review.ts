@@ -10,6 +10,7 @@ import { userStoriesOf } from "@afk/shared/user-stories";
 import type pg from "pg";
 import { readAcceptancePack } from "../acceptance/pack.ts";
 import { type AutoMergeView, autoMergeViewOf } from "./auto-merge.ts";
+import { reviewNoteErrorsOf } from "./review-note.ts";
 import {
   enqueueReviewRevision,
   markReviewFileViewed,
@@ -30,6 +31,7 @@ export interface SpecReviewPull {
   headSha: string;
   conflictsWithDefault: boolean;
   humanComments: number | null;
+  reviewNoteError: string | null;
   revision: {
     id: number | null;
     state: ReviewRevisionState;
@@ -212,6 +214,10 @@ export async function specReviewOf(
      ORDER BY p.id`,
     [specId],
   );
+  const noteErrors = await reviewNoteErrorsOf(
+    pool,
+    pulls.rows.map((pull) => pull.id),
+  );
   const criteriaByTicket = new Map<string, SpecReviewTicket["criteria"]>();
   const findings: SpecReviewFinding[] = [];
   for (const repo of pack?.repos ?? []) {
@@ -258,6 +264,7 @@ export async function specReviewOf(
       headSha: pull.head_sha,
       conflictsWithDefault: pull.conflicts_with_default,
       humanComments: pull.human_comments,
+      reviewNoteError: noteErrors.get(pull.id) ?? null,
       revision: {
         id: pull.revision_id,
         state: (pull.revision_state ?? "pending") as ReviewRevisionState,

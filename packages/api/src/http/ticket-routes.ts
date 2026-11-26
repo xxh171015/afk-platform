@@ -483,6 +483,17 @@ const specRoute = createRoute({
             })
             .nullable(),
         }),
+        reviewComments: z.object({
+          submitted: Id,
+          addressed: Id,
+          declined: Id,
+        }),
+        latestChangeRequest: z
+          .object({
+            number: Id,
+            state: z.enum(CHANGE_REQUEST_STATES),
+          })
+          .nullable(),
       }),
     ),
     404: reply("No such spec", ErrorReply),

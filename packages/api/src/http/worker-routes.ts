@@ -33,6 +33,7 @@ import {
   readPatchPrBodyPayload,
   readPrDraftPayload,
   readPrReadyPayload,
+  readReviewNotePayload,
   readReviewRevisionPayload,
   readSpecCleanupPayload,
 } from "../host/host-jobs.ts";
@@ -568,6 +569,13 @@ const HostTask = z.discriminatedUnion("kind", [
     headSha: z.string(),
     previousHeadSha: z.string().nullable(),
   }),
+  z.object({
+    kind: z.literal("review-note"),
+    repoUrl: z.string(),
+    number: z.number().int(),
+    marker: z.string(),
+    body: z.string(),
+  }),
 ]);
 
 const hostTaskRoute = createRoute({
@@ -583,7 +591,7 @@ const hostTaskRoute = createRoute({
   responses: {
     200: {
       description:
-        "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge or review-revision job has to do on the code host",
+        "What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge, review-revision or review-note job has to do on the code host",
       content: { "application/json": { schema: HostTask } },
     },
     404: {
@@ -1178,7 +1186,8 @@ export function registerWorkerRoutes(
         readPatchPrBodyPayload(row) ??
         readIndexPrLinksPayload(row) ??
         readAutoMergePayload(row) ??
-        readReviewRevisionPayload(row));
+        readReviewRevisionPayload(row) ??
+        readReviewNotePayload(row));
     const task =
       row && payload && (await buildHostTask(context.pool, row, payload));
     if (!task)

@@ -341,6 +341,26 @@ export async function runHostTask(
     log(`indexed ${links.length} pr Link(s) for pull request ${task.number}`);
     return { stage: "index-pr-links", links };
   }
+  if (task.kind === "review-note") {
+    try {
+      const written = await deps.adapter.upsertPlatformComment({
+        repo: repoRef(task.repoUrl),
+        number: task.number,
+        marker: task.marker,
+        body: task.body,
+      });
+      log(
+        `upserted review-notes comment ${written.id} on pull request ${task.number}`,
+      );
+      return { stage: "review-note", outcome: "upserted", id: written.id };
+    } catch (error) {
+      throw new InfrastructureError(
+        error instanceof HostError || error instanceof RangeError
+          ? error.message
+          : `could not write the review-notes comment: ${String(error)}`,
+      );
+    }
+  }
   if (task.kind === "review-revision") {
     if (!deps.repoDir)
       throw new InfrastructureError(
