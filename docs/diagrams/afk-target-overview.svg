@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1130" viewBox="0 0 1320 1130" role="img" aria-labelledby="title desc">
+<title id="title">AFK 目标架构：规划、执行、证据、交付与持续改进</title>
+<desc id="desc">平台保留确定性调度与隔离执行，增强独立验证和交付，新增与代码版本对应的验证证据及失败改进闭环。已有、增强、新增以文字和不同线型区分。学习结果经确认、评测和授权后以固定版本用于后续运行。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#536274"/></marker></defs>
+<style>text{font-family:"PingFang SC","Microsoft YaHei",Arial,sans-serif;fill:#172638} .heading{font-size:29px;font-weight:600}.section{font-size:21px;font-weight:600}.label{font-size:20px;font-weight:500}.small{font-size:15px;fill:#526176}.status{font-size:14px;font-weight:600}.edge{fill:none;stroke:#536274;stroke-width:1.8;marker-end:url(#arrow)}.feedback{stroke-dasharray:6 5}.edgeLabel{font-size:14px;fill:#526176;paint-order:stroke;stroke:#fff;stroke-width:5px;stroke-linejoin:round}</style>
+<rect width="1320" height="1130" fill="#fff"/>
+<text x="40" y="49" class="heading" text-anchor="start">AFK 目标架构</text>
+<text x="40" y="79" class="small" text-anchor="start">结合现有平台与 pstack 工程方法 · 建议目标，尚未实施</text>
+<rect x="967" y="30" width="80" height="32" rx="6" fill="#f4f6f9" stroke="#9aa8b9" stroke-width="1.3"/>
+<text x="1007" y="52" class="status" text-anchor="middle" style="fill:#42536a">已有</text>
+<rect x="1064" y="30" width="80" height="32" rx="6" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="1104" y="52" class="status" text-anchor="middle" style="fill:#2d5d9a">增强</text>
+<rect x="1161" y="30" width="80" height="32" rx="6" fill="#fff6e8" stroke="#c58a35" stroke-width="1.3" stroke-dasharray="5 3"/>
+<text x="1201" y="52" class="status" text-anchor="middle" style="fill:#966314">新增</text>
+<rect x="40" y="108" width="1220" height="58" rx="10" fill="#f4f6f9" stroke="#dce3eb" stroke-width="1.3"/>
+<text x="63" y="144" class="label" text-anchor="start">人：确认目标、关键取舍与授权；最终裁决；必要的例外处理</text>
+<rect x="40" y="215" width="300" height="490" rx="10" fill="#fcfdff" stroke="#dce3eb" stroke-width="1.3"/>
+<rect x="400" y="215" width="440" height="490" rx="10" fill="#fcfdff" stroke="#dce3eb" stroke-width="1.3"/>
+<rect x="900" y="215" width="360" height="490" rx="10" fill="#fcfdff" stroke="#dce3eb" stroke-width="1.3"/>
+<text x="64" y="249" class="section" text-anchor="start">01 规划</text>
+<text x="424" y="249" class="section" text-anchor="start">02 平台控制与执行</text>
+<text x="924" y="249" class="section" text-anchor="start">03 验证后的交付</text>
+<g id="planning">
+<rect x="64" y="280" width="252" height="94" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="79" y="303" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="79" y="332" class="label" text-anchor="start">设计与原型比较</text>
+<text x="79" y="359" class="small" text-anchor="start">按需探索多个方案</text>
+</g>
+<g id="specification">
+<rect x="64" y="420" width="252" height="116" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="79" y="443" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="79" y="472" class="label" text-anchor="start">需求、契约与依赖</text>
+<text x="79" y="498" class="label" text-anchor="start">完成条件与验证办法</text>
+</g>
+<text x="64" y="610" class="small" text-anchor="start">规划确定做什么，</text>
+<text x="64" y="634" class="small" text-anchor="start">同时确定怎样证明完成。</text>
+<g id="control">
+<rect x="426" y="280" width="388" height="90" rx="8" fill="#f4f6f9" stroke="#9aa8b9" stroke-width="1.3"/>
+<text x="441" y="303" class="status" text-anchor="start" style="fill:#42536a">已有</text>
+<text x="441" y="332" class="label" text-anchor="start">确定性控制面</text>
+<text x="441" y="355" class="small" text-anchor="start">状态机 / DAG / 租约 / 预算</text>
+</g>
+<g id="execution">
+<rect x="426" y="425" width="180" height="103" rx="8" fill="#f4f6f9" stroke="#9aa8b9" stroke-width="1.3"/>
+<text x="441" y="448" class="status" text-anchor="start" style="fill:#42536a">已有</text>
+<text x="441" y="477" class="label" text-anchor="start">隔离实现</text>
+<text x="441" y="503" class="label" text-anchor="start">与有限修复</text>
+</g>
+<g id="validation">
+<rect x="634" y="425" width="180" height="103" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="649" y="448" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="649" y="477" class="label" text-anchor="start">独立审查</text>
+<text x="649" y="503" class="label" text-anchor="start">与行为验证</text>
+</g>
+<g id="evidence">
+<rect x="426" y="584" width="388" height="90" rx="8" fill="#fff6e8" stroke="#c58a35" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text x="441" y="607" class="status" text-anchor="start" style="fill:#966314">新增</text>
+<text x="441" y="636" class="label" text-anchor="start">版本化验证证据</text>
+<text x="441" y="659" class="small" text-anchor="start">验收条款 → 断言 → 产物 → SHA</text>
+</g>
+<g id="finalization">
+<rect x="926" y="280" width="308" height="110" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="941" y="303" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="941" y="332" class="label" text-anchor="start">需求收尾与最终验证</text>
+<text x="941" y="354" class="small" text-anchor="start">整体审查 / 最终 e2e</text>
+<text x="941" y="375" class="small" text-anchor="start">证据是否对应交付版本</text>
+</g>
+<g id="delivery">
+<rect x="926" y="440" width="308" height="102" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="941" y="463" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="941" y="492" class="label" text-anchor="start">验收包与合并策略</text>
+<text x="941" y="527" class="small" text-anchor="start">待人决定和未验证事项优先</text>
+</g>
+<g id="forge">
+<rect x="926" y="592" width="308" height="94" rx="8" fill="#f4f6f9" stroke="#9aa8b9" stroke-width="1.3"/>
+<text x="941" y="615" class="status" text-anchor="start" style="fill:#42536a">已有</text>
+<text x="941" y="644" class="label" text-anchor="start">合入默认分支</text>
+<text x="941" y="671" class="small" text-anchor="start">人工合并或预先授权的自动合并</text>
+</g>
+<path d="M 190 166 V 280" class="edge"/>
+<path d="M 190 374 V 420" class="edge"/>
+<path d="M 316 478 H 366 V 325 H 426" class="edge"/>
+<text x="348" y="397" class="edgeLabel" text-anchor="start">确认后派票</text>
+<path d="M 516 370 V 425" class="edge"/>
+<path d="M 606 477 H 634" class="edge"/>
+<path d="M 724 425 V 397 H 724 V 370" class="edge"/>
+<text x="731" y="405" class="edgeLabel" text-anchor="start">失败事实</text>
+<path d="M 724 528 V 557 H 620 V 584" class="edge"/>
+<text x="728" y="560" class="edgeLabel" text-anchor="start">保存证据</text>
+<path d="M 814 629 H 869 V 335 H 926" class="edge"/>
+<text x="847" y="568" class="edgeLabel" text-anchor="start">当前版本</text>
+<path d="M 1080 390 V 440" class="edge"/>
+<path d="M 1080 542 V 592" class="edge"/>
+<path d="M 926 305 H 870 V 191 H 620 V 280" class="edge feedback"/>
+<text x="688" y="183" class="edgeLabel" text-anchor="start">证据过期后重验</text>
+<rect x="40" y="812" width="1220" height="250" rx="10" fill="#fcfdff" stroke="#dce3eb" stroke-width="1.3"/>
+<text x="64" y="847" class="section" text-anchor="start">04 事实驱动的持续改进</text>
+<text x="1240" y="847" class="small" text-anchor="end">学习结果只影响获准启用后的运行</text>
+<g id="capabilities">
+<rect x="64" y="884" width="260" height="112" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="79" y="907" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="79" y="936" class="label" text-anchor="start">固定版本的规则与工具</text>
+<text x="79" y="981" class="small" text-anchor="start">skills / Overlay / 验证驱动</text>
+</g>
+<g id="evaluation">
+<rect x="360" y="884" width="260" height="112" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="375" y="907" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="375" y="936" class="label" text-anchor="start">盲测与交付成本评估</text>
+<text x="375" y="960" class="small" text-anchor="start">漏报 / 误报 / 稳定性</text>
+<text x="375" y="981" class="small" text-anchor="start">评测通过并获准启用</text>
+</g>
+<g id="improvement">
+<rect x="656" y="884" width="260" height="112" rx="8" fill="#fff6e8" stroke="#c58a35" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text x="671" y="907" class="status" text-anchor="start" style="fill:#966314">新增</text>
+<text x="671" y="936" class="label" text-anchor="start">失败归类与改进 Spec</text>
+<text x="671" y="960" class="small" text-anchor="start">优先改架构、类型和检查</text>
+<text x="671" y="981" class="small" text-anchor="start">确认后走同一交付流程</text>
+</g>
+<g id="records">
+<rect x="952" y="884" width="260" height="112" rx="8" fill="#eef5ff" stroke="#8eadd8" stroke-width="1.3"/>
+<text x="967" y="907" class="status" text-anchor="start" style="fill:#2d5d9a">增强</text>
+<text x="967" y="936" class="label" text-anchor="start">运行事实与决策记录</text>
+<text x="967" y="960" class="small" text-anchor="start">Run / Decision / Ruling</text>
+<text x="967" y="981" class="small" text-anchor="start">检查产物 / 交付与回归记录</text>
+</g>
+<path d="M 1080 686 V 759 H 1280 V 940 H 1212" class="edge feedback"/>
+<text x="1090" y="773" class="edgeLabel" text-anchor="start">交付与后续问题</text>
+<path d="M 620 674 V 759 H 938 V 917 H 952" class="edge feedback"/>
+<text x="667" y="751" class="edgeLabel" text-anchor="start">运行事实与证据</text>
+<path d="M 952 940 H 916" class="edge"/>
+<path d="M 656 940 H 620" class="edge"/>
+<path d="M 360 940 H 324" class="edge"/>
+<path d="M 64 940 H 17 V 327 H 64" class="edge feedback"/>
+<text x="64" y="1032" class="small" text-anchor="start">后续规划与 Run 使用固定版本；agent 不自行放松当前验收、门禁或权限。</text>
+<text x="40" y="1101" class="small" text-anchor="start">边界：平台管理状态和权限；agent 产出代码与决定；独立验证产出可重放证据。</text>
+<text x="1260" y="1101" class="small" text-anchor="end">2026-11-17 · 架构建议草案</text>
+</svg>
