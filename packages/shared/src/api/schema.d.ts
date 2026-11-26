@@ -1624,6 +1624,7 @@ export interface paths {
         content: {
           "application/json": {
             planningPatch?: string;
+            planningRepo?: string;
             refPins?: {
               repoId: number;
               sha: string;

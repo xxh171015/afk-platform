@@ -2721,6 +2721,11 @@
                     "type": "string",
                     "maxLength": 2000000
                   },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
                   "refPins": {
                     "type": "array",
                     "items": {

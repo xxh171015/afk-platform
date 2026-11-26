@@ -13,7 +13,7 @@ import {
   CONTEXT_DOC_PATHS,
   GLOSSARY_MAP_PATH,
   PLANNING_DOC_PATHS,
-  tryParseRepoUrl,
+  sameRepoUrl,
 } from "@afk/shared";
 
 // What `plat spec confirm` sends from the planning repo (ADR 0005): the planning docs as they are in the work tree,
@@ -65,13 +65,20 @@ function git(
 // Paths from a glossary map are taken as they are, not as patterns.
 const LITERAL_PATHSPECS = { GIT_LITERAL_PATHSPECS: "1" };
 
-const sameRepo = (a: string, b: string) => {
-  const left = tryParseRepoUrl(a);
-  const right = tryParseRepoUrl(b);
-  return left && right
-    ? left.owner === right.owner && left.name === right.name
-    : a.trim() === b.trim();
-};
+// The project's repo this checkout is, when origin matches a registered URL (https/ssh/.git spellings included).
+export function matchProjectRepo(
+  cwd: string,
+  repos: RegisteredRepo[],
+): RegisteredRepo | undefined {
+  const top = git(cwd, ["rev-parse", "--show-toplevel"]);
+  if (top.code !== 0) return undefined;
+  const origin = git(top.out.trim(), [
+    "config",
+    "--get",
+    "remote.origin.url",
+  ]).out.trim();
+  return origin ? repos.find((r) => sameRepoUrl(r.url, origin)) : undefined;
+}
 
 // The glossary map as the work tree, HEAD and the patch's base have it, those that do: a context added or removed
 // since the base is a planning docs change too.
@@ -131,7 +138,9 @@ export function readPlanningDocs(
   if (top.code !== 0) return { status: "elsewhere" };
   const dir = top.out.trim();
   const origin = git(dir, ["config", "--get", "remote.origin.url"]).out.trim();
-  const repo = origin ? repos.find((r) => sameRepo(r.url, origin)) : undefined;
+  const repo = origin
+    ? repos.find((r) => sameRepoUrl(r.url, origin))
+    : undefined;
   if (!repo) return { status: "elsewhere", checkout: dir };
   if (repo.name !== planningRepo)
     return { status: "other-repo", repo: repo.name };

@@ -35,7 +35,9 @@ interface Reply {
       reference: boolean;
       sha: string | null;
     }[];
+    planning?: { repo: string | null };
   };
+  planningRepo?: string | null;
   repos?: {
     projectId: number;
     name: string;
@@ -2178,5 +2180,64 @@ describe("spec reference repos", () => {
     expect(refused.body.errors.join("\n")).toMatch(
       `plat spec edit S-${specId} --ref ledger`,
     );
+  });
+});
+
+describe("confirm planningRepo", () => {
+  async function confirmableSpec(planningRepo?: string) {
+    const project = await post("/projects", { name: "shop" });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/frontend.git",
+      name: "frontend",
+    });
+    const spec = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "order-export",
+      title: "Order export",
+      ...(planningRepo !== undefined ? { planningRepo } : {}),
+    });
+    const specId = spec.body.id as number;
+    await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, { tickets: [ticket("a")] }),
+    );
+    return { specId };
+  }
+
+  it("returns 409 when the spec already has a different planning repo", async () => {
+    const { specId } = await confirmableSpec("backend");
+    const refused = await post(`/specs/${specId}/confirm`, {
+      planningRepo: "frontend",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/backend/);
+    expect(refused.body.error).toMatch(/confirm/);
+  });
+
+  it("registers planningRepo when the spec has none", async () => {
+    const { specId } = await confirmableSpec();
+    const confirmed = await post(`/specs/${specId}/confirm`, {
+      planningRepo: "backend",
+    });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.planningRepo).toBe("backend");
+    expect((await get(`/specs/${specId}`)).body.spec?.planning?.repo).toBe(
+      "backend",
+    );
+  });
+
+  it("confirms when the request repeats the spec's planning repo", async () => {
+    const { specId } = await confirmableSpec("backend");
+    const confirmed = await post(`/specs/${specId}/confirm`, {
+      planningRepo: "backend",
+    });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.planningRepo).toBe("backend");
   });
 });

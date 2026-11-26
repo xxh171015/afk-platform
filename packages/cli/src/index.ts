@@ -76,6 +76,7 @@ import {
   versionWarnings,
 } from "./planning-checks.ts";
 import {
+  matchProjectRepo,
   type PlanningDocs,
   putPlanningDocsAside,
   putPlanningDocsBack,
@@ -835,6 +836,23 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
     } catch {
       // A check that cannot run is not worth failing a command that worked.
     }
+  };
+
+  // Tracker doc first; if it has no plat version line or names another project, this checkout's origin.
+  const planningRepoFromTrackerOrOrigin = async (
+    projectId: number,
+  ): Promise<string | undefined> => {
+    const target = await io
+      .readFile(TRACKER_DOC_PATH)
+      .then(trackerDocTarget)
+      .catch(() => null);
+    if (target && target.project === projectId) return target.repo;
+    const project = await api().GET("/projects/{projectId}", {
+      params: { path: { projectId } },
+    });
+    return project.data
+      ? matchProjectRepo(io.cwd ?? process.cwd(), project.data.repos)?.name
+      : undefined;
   };
 
   const warnAboutPlanningMachine = async (project?: number) => {
@@ -1656,12 +1674,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (body.trim().length === 0) {
         throw new Failure("the report file is empty");
       }
-      const target = await io
-        .readFile(TRACKER_DOC_PATH)
-        .then(trackerDocTarget)
-        .catch(() => null);
-      const planningRepo =
-        target && target.project === options.project ? target.repo : undefined;
+      const planningRepo = await planningRepoFromTrackerOrOrigin(
+        options.project,
+      );
       const { data, response, error } = await api().POST("/bugs", {
         body: {
           projectId: options.project,
@@ -1697,12 +1712,9 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         ? normalizeSpecBody(await io.readFile(options.file))
         : undefined;
       // Run in the planning repo, its tracker doc names it: the spec's planning docs live there (ADR 0005).
-      const target = await io
-        .readFile(TRACKER_DOC_PATH)
-        .then(trackerDocTarget)
-        .catch(() => null);
-      const planningRepo =
-        target && target.project === options.project ? target.repo : undefined;
+      const planningRepo = await planningRepoFromTrackerOrOrigin(
+        options.project,
+      );
       const sourceSpecId = options.source
         ? specIdOf(options.source)
         : undefined;
@@ -1900,12 +1912,18 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
         params: { path: { id: specId } },
       });
       if (!view.data) throw failureFrom(view.response, view.error);
-      const planningRepo = view.data.spec.planning.repo;
+      let planningRepo = view.data.spec.planning.repo;
       const specRefs = view.data.spec.refs ?? [];
       const cwd = io.cwd ?? process.cwd();
       const project = await api().GET("/projects/{projectId}", {
         params: { path: { projectId: view.data.spec.projectId } },
       });
+      const matched =
+        planningRepo === null && project.data
+          ? matchProjectRepo(cwd, project.data.repos)
+          : undefined;
+      const registerPlanningRepo = matched?.name;
+      if (planningRepo === null && matched) planningRepo = matched.name;
       let docs: ReturnType<typeof readPlanningDocs> = { status: "elsewhere" };
       if (planningRepo !== null && project.data) {
         docs = readPlanningDocs(cwd, project.data.repos, planningRepo);
@@ -1929,6 +1947,11 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       if (docs.status === "elsewhere" && docs.checkout) {
         io.stderr(
           `yellow: ${docs.checkout} is not a repo of this project, so no planning docs were sent; if it should be, set it up with the afk-setup skill\n`,
+        );
+      }
+      if (planningRepo === null) {
+        io.stderr(
+          "这个需求没有规划仓库，没有带任何本地改动；要带上，在规划仓库的 checkout 里运行 plat spec confirm\n",
         );
       }
       for (const check of view.data.spec.prechecks) {
@@ -1978,6 +2001,7 @@ export async function run(argv: string[], io: Io = defaultIo): Promise<number> {
       }
       const confirmBody = {
         ...(docs.status === "ok" ? { planningPatch: docs.patch } : {}),
+        ...(registerPlanningRepo ? { planningRepo: registerPlanningRepo } : {}),
         ...(refPins.length > 0 ? { refPins } : {}),
       };
       const { data, response, error } = await api().POST(

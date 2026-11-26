@@ -127,6 +127,7 @@ export async function confirmSpec(
   specId: number,
   planning?: ConfirmPlanning,
   refPins?: { repoId: number; sha: string }[],
+  planningRepoName?: string,
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
@@ -152,11 +153,33 @@ export async function confirmSpec(
       project_id: number;
       refs: SpecRefPin[];
     };
+    let planningRepoId = planning_repo_id;
+    let planningRepo = planning_repo;
     const planned = specTransition(state, "confirm-plan");
     if (!planned.ok) {
       return { status: "not-confirmable", message: planned.reason };
     }
-    if (planning !== undefined && planning_repo_id === null) {
+    if (planningRepoName !== undefined) {
+      const named = await client.query<{ id: number; name: string }>(
+        "SELECT id, name FROM repos WHERE project_id = $1 AND name = $2",
+        [project_id, planningRepoName],
+      );
+      if (!named.rows[0]) {
+        return {
+          status: "invalid",
+          message: `the project has no repo named ${planningRepoName}`,
+        };
+      }
+      if (planningRepoId !== null && named.rows[0].id !== planningRepoId) {
+        return {
+          status: "not-confirmable",
+          message: `${formatDisplayId("spec", specId)}'s planning repo is ${planningRepo}; confirm in a checkout of ${planningRepo}`,
+        };
+      }
+      planningRepoId = named.rows[0].id;
+      planningRepo = named.rows[0].name;
+    }
+    if (planning !== undefined && planningRepoId === null) {
       return {
         status: "invalid",
         message: `${formatDisplayId("spec", specId)} has no planning repo to send planning docs to`,
@@ -240,7 +263,7 @@ export async function confirmSpec(
     const repoIds = [
       ...new Set([
         ...repos.rows.map((row) => row.repo_id),
-        ...(planning_repo_id === null ? [] : [planning_repo_id]),
+        ...(planningRepoId === null ? [] : [planningRepoId]),
       ]),
     ].sort((a, b) => a - b);
     const shas = await client.query<{
@@ -262,16 +285,17 @@ export async function confirmSpec(
       branch,
     }));
     await client.query(
-      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4, refs = $5::jsonb WHERE id = $1",
+      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4, refs = $5::jsonb, planning_repo_id = $6 WHERE id = $1",
       [
         specId,
         running.state,
         JSON.stringify(storedBranches),
         planning?.patch ? planning.patch : null,
         JSON.stringify(pinnedRefs),
+        planningRepoId,
       ],
     );
-    if (planning_repo_id !== null) await enqueuePlanningCommit(client, specId);
+    if (planningRepoId !== null) await enqueuePlanningCommit(client, specId);
     await recordAction(client, "confirm", { specId });
     const scheduled = await schedulePass(client, specId);
     if (!scheduled.paused) await enqueueHostSync(client, project_id);
@@ -280,8 +304,8 @@ export async function confirmSpec(
       state: scheduled.paused ? "paused" : running.state,
       integrationBranches,
       enqueued: scheduled.enqueued,
-      planningRepo: planning_repo,
-      planningState: planning_repo_id === null ? null : "pending",
+      planningRepo,
+      planningState: planningRepoId === null ? null : "pending",
     };
   });
 }

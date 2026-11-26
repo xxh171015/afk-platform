@@ -98,11 +98,12 @@ describe("the committed real samples", () => {
       "s15-frontend-note-search",
       "s23-push-retry",
       "s28-sandbox-oom",
+      "s60-hidden-substitution",
       "s60-missing-address",
       "s60-substituted-approach",
     ]);
     const answers = loadAnswers(join(docsRoot, "answers.yaml"));
-    expect(answers).toHaveLength(12);
+    expect(answers).toHaveLength(13);
     expect(answers.map((row) => row.sample)).not.toContain("tiny");
   });
 
