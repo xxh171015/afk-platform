@@ -15,6 +15,9 @@ import {
   LOCATE_STATES,
   PARALLEL_REVIEW_STATES,
   PAUSE_REASONS,
+  REVIEW_FILE_STATUSES,
+  REVIEW_PATCH_OMITTED_REASONS,
+  REVIEW_REVISION_STATES,
   SPEC_STATES,
   SPEC_TYPES,
   TICKET_REVIEW_MODES,
@@ -593,6 +596,98 @@ export const pullRequests = pgTable(
       "pull_requests_review_check",
       oneOf(t.review, ["none", "approved", "changes-requested"]),
     ),
+  ],
+);
+
+// A Review revision: the diff and attribution for one PR head (GLOSSARY Review revision).
+export const reviewRevisions = pgTable(
+  "review_revisions",
+  {
+    id: serial("id").primaryKey(),
+    pullRequestId: integer("pull_request_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    headSha: text("head_sha").notNull(),
+    baseSha: text("base_sha"),
+    mergeBaseSha: text("merge_base_sha"),
+    previousHeadSha: text("previous_head_sha"),
+    state: text("state").notNull().default("pending"),
+    error: text("error"),
+    complete: boolean("complete").notNull().default(false),
+    omittedReason: text("omitted_reason"),
+    filesCount: integer("files_count").notNull().default(0),
+    additions: integer("additions").notNull().default(0),
+    deletions: integer("deletions").notNull().default(0),
+    createdAt: createdAt(),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("review_revisions_pull_head_unique").on(t.pullRequestId, t.headSha),
+    check(
+      "review_revisions_state_check",
+      oneOf(t.state, REVIEW_REVISION_STATES),
+    ),
+  ],
+);
+
+export const reviewFiles = pgTable(
+  "review_files",
+  {
+    id: serial("id").primaryKey(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => reviewRevisions.id),
+    path: text("path").notNull(),
+    oldPath: text("old_path"),
+    status: text("status").notNull(),
+    oldBlob: text("old_blob").notNull(),
+    newBlob: text("new_blob").notNull(),
+    additions: integer("additions").notNull().default(0),
+    deletions: integer("deletions").notNull().default(0),
+    binary: boolean("binary").notNull().default(false),
+    generated: boolean("generated").notNull().default(false),
+    test: boolean("test").notNull().default(false),
+    lockfile: boolean("lockfile").notNull().default(false),
+    patch: text("patch"),
+    patchOmitted: text("patch_omitted"),
+    sincePatch: text("since_patch"),
+    attributions: jsonb("attributions").notNull().default([]),
+    hunks: jsonb("hunks"),
+  },
+  (t) => [
+    unique("review_files_revision_path_unique").on(t.revisionId, t.path),
+    check("review_files_status_check", oneOf(t.status, REVIEW_FILE_STATUSES)),
+    check(
+      "review_files_patch_omitted_check",
+      sql`${t.patchOmitted} is null or ${oneOf(t.patchOmitted, REVIEW_PATCH_OMITTED_REASONS)}`,
+    ),
+  ],
+);
+
+export const reviewBlobs = pgTable(
+  "review_blobs",
+  {
+    sha: text("sha").primaryKey(),
+    content: text("content").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [check("review_blobs_sha_check", sql`${t.sha} ~ '^[0-9a-f]{40}$'`)],
+);
+
+export const reviewFileViews = pgTable(
+  "review_file_views",
+  {
+    pullRequestId: integer("pull_request_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    path: text("path").notNull(),
+    newBlob: text("new_blob").notNull(),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pullRequestId, t.path] }),
+    check("review_file_views_blob_check", sql`${t.newBlob} ~ '^[0-9a-f]{40}$'`),
   ],
 );
 

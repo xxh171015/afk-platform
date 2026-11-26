@@ -82,3 +82,47 @@ describe("the worker's bare clones", () => {
     expect(repos.findByUrl("/no/such/origin")).toBeUndefined();
   });
 });
+
+describe("fetchObject", () => {
+  it("fetches a commit that lives only on a branch ensure does not follow", async () => {
+    const origin = makeRepo({ "src/a.ts": "a\n" });
+    const root = mkdtempSync(join(tmpdir(), "afk-repos-"));
+    cleanups.push(
+      () => origin.cleanup(),
+      () => rmSync(root, { recursive: true, force: true }),
+    );
+    const repos = new RepoStore(root);
+    const dir = await repos.ensure("backend", origin.dir, "main");
+    gitOrThrow(origin.dir, ["checkout", "--quiet", "-b", "topic"]);
+    const sha = origin.commit({ "src/a.ts": "topic\n" }, "on topic");
+    expect(repos.hasObject(dir, sha)).toBe(false);
+
+    await repos.fetchObject(dir, origin.dir, sha);
+
+    expect(repos.hasObject(dir, sha)).toBe(true);
+  });
+
+  it("fetches a blob by SHA and does not call a missing object a planning commit", async () => {
+    const origin = makeRepo({ "src/a.ts": "a\n" });
+    const root = mkdtempSync(join(tmpdir(), "afk-repos-"));
+    cleanups.push(
+      () => origin.cleanup(),
+      () => rmSync(root, { recursive: true, force: true }),
+    );
+    const repos = new RepoStore(root);
+    const dir = await repos.ensure("backend", origin.dir, "main");
+    gitOrThrow(origin.dir, ["checkout", "--quiet", "-b", "topic"]);
+    origin.commit({ "src/a.ts": "blob-side\n" }, "on topic");
+    const blob = gitOrThrow(origin.dir, ["rev-parse", "HEAD:src/a.ts"]);
+
+    await repos.fetchObject(dir, origin.dir, blob);
+    expect(repos.hasObject(dir, blob)).toBe(true);
+
+    await expect(
+      repos.fetchObject(dir, origin.dir, "a".repeat(40)),
+    ).rejects.toThrow(/object a{40} is not on origin/);
+    await expect(
+      repos.fetchObject(dir, origin.dir, "a".repeat(40)),
+    ).rejects.not.toThrow(/planning commit/);
+  });
+});

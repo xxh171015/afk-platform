@@ -36,6 +36,7 @@ import {
   type PatchPrBodyPayload,
   type PrDraftPayload,
   type PrReadyPayload,
+  type ReviewRevisionPayload,
   type SpecCleanupPayload,
   SYNC_INTERVAL_SECONDS,
   stopAutoMergeJobs,
@@ -43,6 +44,7 @@ import {
 } from "./host-jobs.ts";
 import { IDLE_TICKET_SQL } from "./idle-tickets.ts";
 import { mergeOrderOf } from "./merge-order.ts";
+import { enqueueReviewRevisionsForSpec } from "./review-revision.ts";
 import { dropPotentialConflicts } from "./trial-merge.ts";
 import {
   applyDefaultShas,
@@ -113,6 +115,15 @@ export type HostTask =
       number: number;
       expectedHeadSha: string;
       section: string;
+    }
+  | {
+      kind: "review-revision";
+      pullId: number;
+      repoUrl: string;
+      repoName: string;
+      defaultBranch: string;
+      headSha: string;
+      previousHeadSha: string | null;
     };
 
 const PullFacts = {
@@ -263,6 +274,7 @@ async function finishOpeningWithExistingPulls(
     next.state,
   ]);
   await markMergedWhenAllAre(client, specId);
+  await enqueueReviewRevisionsForSpec(client, specId);
   const projectId = await projectOf(client, specId);
   if (projectId !== undefined) await enqueueHostSync(client, projectId);
 }
@@ -307,8 +319,35 @@ export async function buildHostTask(
     | PrDraftPayload
     | PatchPrBodyPayload
     | IndexPrLinksPayload
-    | AutoMergePayload,
+    | AutoMergePayload
+    | ReviewRevisionPayload,
 ): Promise<HostTask | undefined> {
+  if (job.type === "review-revision") {
+    const { pullId, headSha, previousHeadSha } =
+      payload as ReviewRevisionPayload;
+    const pull = (
+      await pool.query<{
+        url: string;
+        name: string;
+        default_branch: string;
+      }>(
+        `SELECT r.url, r.name, r.default_branch
+         FROM pull_requests p JOIN repos r ON r.id = p.repo_id WHERE p.id = $1`,
+        [pullId],
+      )
+    ).rows[0];
+    return pull
+      ? {
+          kind: "review-revision",
+          pullId,
+          repoUrl: pull.url,
+          repoName: pull.name,
+          defaultBranch: pull.default_branch,
+          headSha,
+          previousHeadSha,
+        }
+      : undefined;
+  }
   if (job.type === "auto-merge") {
     const { pullId, expectedHeadSha, specId } = payload as AutoMergePayload;
     const pull = (
@@ -805,6 +844,7 @@ export async function recordOpenPr(
     ]);
     // a pull request that was already merged when it was found (opened by an earlier try) may be the last one
     await markMergedWhenAllAre(client, read.specId);
+    await enqueueReviewRevisionsForSpec(client, read.specId);
   }
   if (pr.state === "merged")
     await enqueueIndexPrLinksIfMerged(client, {

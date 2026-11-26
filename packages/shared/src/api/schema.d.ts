@@ -2407,7 +2407,7 @@ export interface paths {
       };
       requestBody?: never;
       responses: {
-        /** @description What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links or auto-merge job has to do on the code host */
+        /** @description What an open-pr, host-sync, pr-ready, pr-draft, spec-cleanup, patch-pr-body, repo-access, index-pr-links, auto-merge or review-revision job has to do on the code host */
         200: {
           headers: {
             [name: string]: unknown;
@@ -2504,6 +2504,16 @@ export interface paths {
                   number: number;
                   expectedHeadSha: string;
                   section: string;
+                }
+              | {
+                  /** @enum {string} */
+                  kind: "review-revision";
+                  pullId: number;
+                  repoUrl: string;
+                  repoName: string;
+                  defaultBranch: string;
+                  headSha: string;
+                  previousHeadSha: string | null;
                 };
           };
         };

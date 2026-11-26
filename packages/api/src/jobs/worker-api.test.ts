@@ -73,6 +73,19 @@ describe("claiming", () => {
     expect(reply.status).toBe(200);
     expect(reply.body.job?.type).toBe("host-sync");
   });
+
+  it("claims a review-revision job when takeSlot is false", async () => {
+    await enqueue("slot-job");
+    await enqueueJob(db.pool, {
+      type: "review-revision",
+      idempotencyKey: "pull-1:review-revision:abc:1",
+      requiredCapabilities: ["host"],
+      payload: { pullId: 1, headSha: "a".repeat(40), previousHeadSha: null },
+    });
+    const reply = await worker("w1", ["host"]).claim({ takeSlot: false });
+    expect(reply.status).toBe(200);
+    expect(reply.body.job?.type).toBe("review-revision");
+  });
 });
 
 describe("working a claimed job", () => {

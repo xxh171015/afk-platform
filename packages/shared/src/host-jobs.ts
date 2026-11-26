@@ -10,6 +10,7 @@ export const HOST_JOB_TYPES = [
   "repo-access",
   "index-pr-links",
   "auto-merge",
+  "review-revision",
 ] as const;
 export const HOST_CAPABILITY = "host";
 

@@ -24,6 +24,7 @@ import {
 } from "@afk/shared";
 import { deleteOrphanRefs } from "./align-ticket-branch.ts";
 import { InfrastructureError } from "./executor.ts";
+import { computeReviewRevision } from "./review-revision.ts";
 
 // The jobs that talk to the code host. The worker does them because the host's credentials are only here.
 export interface HostDeps {
@@ -339,6 +340,17 @@ export async function runHostTask(
     });
     log(`indexed ${links.length} pr Link(s) for pull request ${task.number}`);
     return { stage: "index-pr-links", links };
+  }
+  if (task.kind === "review-revision") {
+    if (!deps.repoDir)
+      throw new InfrastructureError(
+        "review-revision needs a clone of the default branch",
+      );
+    const result = computeReviewRevision(deps.repoDir, task);
+    log(
+      `review revision ${task.headSha.slice(0, 7)}: ${result.filesCount} files`,
+    );
+    return { ...result };
   }
   const pulls = [];
   for (const pull of task.pulls ?? []) {

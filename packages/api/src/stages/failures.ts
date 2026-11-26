@@ -31,10 +31,12 @@ import {
   readOpenPrPayload,
   readPrDraftPayload,
   readPrReadyPayload,
+  readReviewRevisionPayload,
   readSpecCleanupPayload,
   type SpecCleanupPayload,
   specCleanupKeyPrefix,
 } from "../host/host-jobs.ts";
+import { reviewRevisionFailed } from "../host/review-revision.ts";
 import { updateBranchJobFailed } from "../host/update-branch.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
@@ -291,6 +293,11 @@ export async function recordJobFailure(
   if (ready) return prReadyFailed(client, ready, now);
   const draft = readPrDraftPayload(job);
   if (draft) return prDraftFailed(client, draft, now);
+  const review = readReviewRevisionPayload(job);
+  if (review) {
+    await reviewRevisionFailed(client, review, error);
+    return { status: "ignored" };
+  }
   const locate = await recordLocateJobFailure(client, job, error);
   if (locate.status !== "not-locate") {
     return locate.status === "ignored"

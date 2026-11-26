@@ -1,4 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
+import { chmodSync, existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { HostAdapter, PullRequestInfo } from "@afk/host";
 import {
   createAppTokenSource,
@@ -1330,5 +1332,310 @@ describe("an index-pr-links task", () => {
       stage: "index-pr-links",
       links: [{ sha: squashSha, spec: "S-1", ticket: null, run: null }],
     });
+  });
+});
+
+describe("a review-revision task", () => {
+  let repo: TestRepo | undefined;
+  afterEach(() => repo?.cleanup());
+
+  const adapter: HostAdapter = {
+    ...noCleanup,
+    openPullRequest: async () => info(1),
+    getPullRequest: async () => info(1),
+  };
+
+  const reviewTask = (
+    headSha: string,
+    extra: { previousHeadSha?: string | null } = {},
+  ): HostTask => ({
+    kind: "review-revision",
+    pullId: 1,
+    repoUrl: "https://github.com/me/pilot.git",
+    repoName: "pilot",
+    defaultBranch: "main",
+    headSha,
+    previousHeadSha: extra.previousHeadSha ?? null,
+  });
+
+  function rawPaths(dir: string, mergeBase: string, head: string): string[] {
+    const out = gitOrThrow(dir, [
+      "-c",
+      "diff.external=",
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "-M",
+      "--raw",
+      "--abbrev=40",
+      mergeBase,
+      head,
+    ]);
+    return out
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const tab = line.split("\t");
+        return tab[tab.length - 1] as string;
+      });
+  }
+
+  it("needs a clone of the default branch", async () => {
+    await expect(
+      runHostTask({ adapter, repoRef: ref }, reviewTask("a".repeat(40)), log),
+    ).rejects.toThrow("review-revision needs a clone of the default branch");
+  });
+
+  it("lists the same paths as git diff --raw for rename, delete, binary, mode, and a missing newline", async () => {
+    repo = makeRepo({
+      "keep.ts": "keep\n",
+      "gone.ts": "gone\n",
+      "run.sh": "echo hi\n",
+      "nonewline.txt": "plain",
+    });
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    gitOrThrow(repo.dir, ["mv", "keep.ts", "kept.ts"]);
+    gitOrThrow(repo.dir, ["rm", "-f", "gone.ts"]);
+    writeFileSync(join(repo.dir, "pic.bin"), Buffer.from([0, 1, 2, 0, 3]));
+    chmodSync(join(repo.dir, "run.sh"), 0o755);
+    writeFileSync(join(repo.dir, "nonewline.txt"), "plain!");
+    gitOrThrow(repo.dir, ["add", "-A"]);
+    gitOrThrow(repo.dir, [
+      "commit",
+      "--quiet",
+      "-m",
+      "changes\n\nSpec: S-1\nTicket: T-1\nRun: R-10",
+    ]);
+    const head = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const mergeBase = gitOrThrow(repo.dir, ["merge-base", "main", head]);
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head),
+      log,
+    );
+    expect(result.stage).toBe("review-revision");
+    expect(result.headSha).toBe(head);
+    expect(result.mergeBaseSha).toBe(mergeBase);
+    expect(result.complete).toBe(true);
+    const files = result.files as {
+      path: string;
+      status: string;
+      binary: boolean;
+      patchOmitted: string | null;
+      patch: string | null;
+    }[];
+    expect(files.map((file) => file.path)).toEqual(
+      rawPaths(repo.dir, mergeBase, head),
+    );
+    expect(files.find((file) => file.path === "kept.ts")?.status).toBe(
+      "renamed",
+    );
+    expect(files.find((file) => file.path === "gone.ts")?.status).toBe(
+      "deleted",
+    );
+    expect(files.find((file) => file.path === "pic.bin")).toMatchObject({
+      binary: true,
+      patchOmitted: "binary",
+      patch: null,
+    });
+    expect(files.find((file) => file.path === "run.sh")?.status).toBe("mode");
+    expect(files.find((file) => file.path === "nonewline.txt")?.patch).toMatch(
+      /No newline at end of file/,
+    );
+  });
+
+  it("does not run diff.external or textconv from the repo config", async () => {
+    repo = makeRepo({ "a.ts": "a\n" });
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    repo.commit({ "a.ts": "b\n" }, "edit\n\nTicket: T-1");
+    const sentinel = join(repo.dir, "..", "external-ran");
+    writeFileSync(
+      join(repo.dir, "..", "external.sh"),
+      `#!/bin/sh\necho ran > "${sentinel}"\nexit 1\n`,
+    );
+    chmodSync(join(repo.dir, "..", "external.sh"), 0o755);
+    gitOrThrow(repo.dir, [
+      "config",
+      "diff.external",
+      join(repo.dir, "..", "external.sh"),
+    ]);
+    gitOrThrow(repo.dir, ["config", "diff.ts.textconv", "rev"]);
+    writeFileSync(join(repo.dir, ".gitattributes"), "*.ts diff=ts\n");
+    const head = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head),
+      log,
+    );
+    expect(result.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "a.ts",
+          patch: expect.stringContaining("+b"),
+        }),
+      ]),
+    );
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  it("marks tests, lockfiles, and generated files, and treats a test that is also generated as a test", async () => {
+    repo = makeRepo({
+      ".sandcastle/gates.yaml": [
+        "commands:",
+        '  - { name: test, run: "true", timeoutSeconds: 30 }',
+        "generated:",
+        "  - paths: [dist/**, src/foo.test.ts]",
+        "    run: echo",
+        "",
+      ].join("\n"),
+      "src/app.ts": "app\n",
+    });
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    repo.commit(
+      {
+        "src/foo.test.ts": "test\n",
+        "dist/out.js": "out\n",
+        "pnpm-lock.yaml": "lockfileVersion: 9\n",
+      },
+      "files\n\nTicket: T-1",
+    );
+    const head = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head),
+      log,
+    );
+    const byPath = Object.fromEntries(
+      (
+        result.files as {
+          path: string;
+          test: boolean;
+          generated: boolean;
+          lockfile: boolean;
+        }[]
+      ).map((file) => [file.path, file]),
+    );
+    expect(byPath["src/foo.test.ts"]).toMatchObject({
+      test: true,
+      generated: false,
+    });
+    expect(byPath["dist/out.js"]).toMatchObject({
+      test: false,
+      generated: true,
+    });
+    expect(byPath["pnpm-lock.yaml"]).toMatchObject({ lockfile: true });
+  });
+
+  it("attributes a file to every ticket that changed it, and run-only commits by run", async () => {
+    repo = makeRepo({ "src/a.ts": "a\n" });
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    repo.commit(
+      { "src/a.ts": "one\n" },
+      "one\n\nSpec: S-1\nTicket: T-1\nRun: R-10",
+    );
+    repo.commit(
+      { "src/a.ts": "two\n" },
+      "two\n\nSpec: S-1\nTicket: T-2\nRun: R-11",
+    );
+    repo.commit({ "src/a.ts": "tidy\n" }, "tidy\n\nRun: R-88");
+    const head = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head),
+      log,
+    );
+    const file = (
+      result.files as { path: string; attributions: unknown[] }[]
+    ).find((item) => item.path === "src/a.ts");
+    expect(file?.attributions).toHaveLength(3);
+    expect(file?.attributions).toEqual(
+      expect.arrayContaining([
+        { ticket: "T-1" },
+        { ticket: "T-2" },
+        { run: "R-88" },
+      ]),
+    );
+  });
+
+  it("splits added lines in one file across tickets and leaves pre-merge-base lines unowned", async () => {
+    repo = makeRepo({ "src/a.ts": "keep\n" });
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    repo.commit({ "src/a.ts": "keep\none\n" }, "one\n\nTicket: T-1\nRun: R-10");
+    repo.commit(
+      { "src/a.ts": "keep\none\ntwo\n" },
+      "two\n\nTicket: T-2\nRun: R-11",
+    );
+    const head = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head),
+      log,
+    );
+    const file = (
+      result.files as {
+        path: string;
+        hunks: {
+          owners: { ticket?: string; lines: number }[];
+        }[];
+      }[]
+    ).find((item) => item.path === "src/a.ts");
+    const owners = file?.hunks?.flatMap((hunk) => hunk.owners) ?? [];
+    expect(owners).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ticket: "T-1", lines: 1 }),
+        expect.objectContaining({ ticket: "T-2", lines: 1 }),
+      ]),
+    );
+    expect(owners.every((owner) => owner.ticket !== undefined)).toBe(true);
+  });
+
+  it("omits a patch over 256 KiB as too-large and stores text blobs under 512 KiB", async () => {
+    repo = makeRepo();
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    const big = `${"x".repeat(256 * 1024 + 8)}\n`;
+    repo.commit({ "big.ts": big, "small.ts": "ok\n" }, "big\n\nTicket: T-1");
+    const head = gitOrThrow(repo.dir, ["rev-parse", "HEAD"]);
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head),
+      log,
+    );
+    const files = result.files as {
+      path: string;
+      patch: string | null;
+      patchOmitted: string | null;
+      newBlob: string;
+    }[];
+    expect(files.find((file) => file.path === "big.ts")).toMatchObject({
+      patch: null,
+      patchOmitted: "too-large",
+    });
+    const small = files.find((file) => file.path === "small.ts");
+    const blobs = result.blobs as { sha: string; content: string }[];
+    expect(blobs.some((blob) => blob.sha === small?.newBlob)).toBe(true);
+    expect(blobs.find((blob) => blob.sha === small?.newBlob)?.content).toBe(
+      "ok\n",
+    );
+  });
+
+  it("adds a since-patch when previousHeadSha's blob for the path changed", async () => {
+    repo = makeRepo({ "src/a.ts": "a\n" });
+    gitOrThrow(repo.dir, ["checkout", "--quiet", "-b", "pr"]);
+    const previous = repo.commit({ "src/a.ts": "b\n" }, "first\n\nTicket: T-1");
+    const head = repo.commit({ "src/a.ts": "c\n" }, "second\n\nTicket: T-1");
+    const result = await runHostTask(
+      { adapter, repoRef: ref, repoDir: repo.dir },
+      reviewTask(head, { previousHeadSha: previous }),
+      log,
+    );
+    const file = (
+      result.files as {
+        path: string;
+        sincePatch: string | null;
+        patch: string | null;
+      }[]
+    ).find((item) => item.path === "src/a.ts");
+    expect(file?.sincePatch).toMatch(/-b\n\+c/);
+    expect(file?.patch).toMatch(/-a\n\+c/);
   });
 });

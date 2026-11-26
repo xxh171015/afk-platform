@@ -1,4 +1,5 @@
 import {
+  chunkReviewRevisionResult,
   DEFAULT_DISK_WARN_GIB,
   type DiskLevel,
   diskLevel,
@@ -9,6 +10,7 @@ import {
   MAX_LOG_CHUNK_BYTES,
   occupiesSlot,
   PLANNING_COMMIT_JOB,
+  ReviewRevisionResultSchema,
   TRIAL_MERGE_JOB,
   tryParseRepoUrl,
 } from "@afk/shared";
@@ -372,6 +374,18 @@ export async function processJob(
           }
         }
         host = { ...options.host, repoDir };
+      } else if (task.kind === "review-revision") {
+        const parsed = tryParseRepoUrl(task.repoUrl);
+        const creds = parsed
+          ? await withCredentials({ ...executor, api }, task.repoUrl)
+          : { repos: options.executor.repos };
+        const repoDir = await creds.repos.ensure(
+          task.repoName,
+          task.repoUrl,
+          task.defaultBranch,
+        );
+        await creds.repos.fetchObject(repoDir, task.repoUrl, task.headSha);
+        host = { ...options.host, repoDir };
       } else if (task.kind === "spec-cleanup") {
         host = {
           ...options.host,
@@ -386,8 +400,14 @@ export async function processJob(
       }
       const body = await runHostTask(host, task, log);
       if (lost.signal.aborted) return "abandoned";
-      if ((await handOver(options, job, body, log)) !== "held")
-        return "abandoned";
+      const payloads =
+        task.kind === "review-revision"
+          ? chunkReviewRevisionResult(ReviewRevisionResultSchema.parse(body))
+          : [body];
+      for (const payload of payloads) {
+        if ((await handOver(options, job, payload, log)) !== "held")
+          return "abandoned";
+      }
       log(`${job.type} ok`);
       return "completed";
     }

@@ -35,7 +35,12 @@ export {
   parseMergePolicy,
   storedMergePolicy,
 } from "./auto-merge.ts";
-export { committedShasFromBlame, UNCOMMITTED_SHA } from "./blame.ts";
+export type { BlameLine } from "./blame.ts";
+export {
+  blameLinesFromPorcelain,
+  committedShasFromBlame,
+  UNCOMMITTED_SHA,
+} from "./blame.ts";
 export {
   branchNames,
   isPlatformBranch,
@@ -246,6 +251,31 @@ export {
   reviewAxisLabel,
   TICKET_REVIEW_MODES,
 } from "./review-axes.ts";
+export type {
+  ReviewAttribution,
+  ReviewBlob,
+  ReviewFile,
+  ReviewFileStatus,
+  ReviewHunk,
+  ReviewPatchOmittedReason,
+  ReviewRevisionOmittedReason,
+  ReviewRevisionResult,
+  ReviewRevisionState,
+} from "./review-revision.ts";
+export {
+  applyReviewRevisionLimits,
+  chunkReviewRevisionResult,
+  isLockfilePath,
+  isTestPath,
+  LOCKFILE_NAMES,
+  MAX_REVIEW_REVISION_COMPLETE_BYTES,
+  REVIEW_FILE_STATUSES,
+  REVIEW_PATCH_OMITTED_REASONS,
+  REVIEW_REVISION_LIMITS,
+  REVIEW_REVISION_OMITTED_REASONS,
+  REVIEW_REVISION_STATES,
+  ReviewRevisionResultSchema,
+} from "./review-revision.ts";
 export type { NeedsDecisionItem, Ruling, RulingVerdict } from "./rulings.ts";
 export {
   checkReviewRulings,
