@@ -439,10 +439,23 @@ describe("plat init", () => {
       expect(rules).toContain(join(ws.afkHome, "planning"));
       expect(rules).toContain("`research/<name>`");
       expect(rules).toContain("`prototype/<name>`");
-      expect(rules).toMatch(
-        /GLOSSARY\.md[^\n]*uncommitted[^\n]*plat spec confirm/,
+      expect(rules).toContain(
+        "grilling、to-spec、to-tickets 在这个仓库里改的文件都不提交、不推送",
       );
       expect(rules).toContain("run `plat sync`");
+    }
+  });
+
+  it("tells the planning agent to show confirm's local-change list to the person and ask which files this planning changed", async () => {
+    const backend = checkout("backend", "https://github.com/acme/backend.git");
+
+    await plat(backend.dir, ["init", "--yes"]);
+
+    for (const path of ["CLAUDE.local.md", ".cursor/rules/afk-platform.mdc"]) {
+      const rules = readFileSync(join(backend.dir, path), "utf8");
+      expect(rules).toContain("把清单给人看，问哪些是这次规划改的");
+      expect(rules).toContain("--send");
+      expect(rules).toContain("--keep-local");
     }
   });
 
