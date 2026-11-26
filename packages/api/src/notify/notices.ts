@@ -228,7 +228,7 @@ export function noticesFromTransition(before: Shot, after: Shot): Notice[] {
         displayId: spec,
         title: after.specTitle,
         reason: `验收包和 ${pr} 已齐`,
-        path: `/specs/${after.specId}/delivery`,
+        path: `/specs/${after.specId}/review`,
       }),
     );
   }

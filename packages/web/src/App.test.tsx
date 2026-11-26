@@ -30,9 +30,17 @@ const emptyWorkbench = {
   recentlyCompleted: [],
 };
 
+const emptyReviewQueue = {
+  waitingForYou: [] as unknown[],
+  inProgress: [] as unknown[],
+  inRework: [] as unknown[],
+  readyToMerge: [] as unknown[],
+};
+
 const server = () =>
   fakeServer({
     "GET /workbench": () => ({ json: emptyWorkbench }),
+    "GET /review-queue": () => ({ json: emptyReviewQueue }),
     "GET /blocked": () => ({ json: emptyWaiting }),
     "GET /runtime": () => ({ json: emptyRuntime }),
     "GET /metrics": () => ({
@@ -474,6 +482,14 @@ describe("the app", () => {
   it("says so for an address it does not know", async () => {
     renderApp(server(), "/nope");
     expect(await screen.findByText("没有这个页面")).toBeTruthy();
+  });
+
+  it("goes to the review queue with g r", async () => {
+    const { router } = renderApp(server(), "/specs");
+    expect(await screen.findByRole("link", { name: "S-3" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "r" });
+    await waitFor(() => expect(router.state.location.pathname).toBe("/review"));
   });
 
   it("goes home, to waiting, specs and metrics with g h / g b / g s / g m", async () => {

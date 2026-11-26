@@ -784,4 +784,61 @@ describe("daily digest of awaiting-review specs", () => {
     expect(reworking).not.toContain("已等");
     expect(reworking).not.toContain("needs-human");
   });
+
+  it("links the morning digest to the review queue", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    await pendingSpec(shopId, { title: "导出订单", slug: "export" });
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    await waitForFeishu(1);
+    expect(JSON.stringify(fake.messages[0]?.content)).toContain(
+      "http://127.0.0.1:5173/review",
+    );
+  });
+
+  it("shows a finalizing spec that once awaited review as 返工中 and omits a first wrap-up", async () => {
+    await start({ defaultChatId: "oc_default" });
+    const shop = await call("POST", "/projects", { name: "shop" });
+    const shopId = shop.body.id as number;
+    await call("POST", `/projects/${shopId}/repos`, {
+      url: "git@x:backend",
+      role: "backend",
+    });
+    const changeId = await pendingSpec(shopId, {
+      title: "修改要求",
+      slug: "change",
+    });
+    await db.pool.query("UPDATE specs SET state = 'finalizing' WHERE id = $1", [
+      changeId,
+    ]);
+    const repo = await db.pool.query<{ id: number }>(
+      "SELECT id FROM repos WHERE project_id = $1",
+      [shopId],
+    );
+    await db.pool.query(
+      `INSERT INTO specs (project_id, type, slug, title, state)
+       VALUES ($1, 'feature', 'first', '第一次收尾', 'finalizing')`,
+      [shopId],
+    );
+    const first = await db.pool.query<{ id: number }>(
+      "SELECT id FROM specs WHERE slug = 'first'",
+    );
+    await db.pool.query(
+      `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha)
+       VALUES ($1, $2, 9, 'https://github.com/me/shop/pull/9', 'open', 'abc')`,
+      [first.rows[0].id, repo.rows[0].id],
+    );
+
+    await maybeSendDailyDigest(db.pool, BEIJING_9AM);
+    const body = (await digestEvents()).rows[0]?.body ?? "";
+    expect(body).toContain("修改要求");
+    expect(body).toContain("返工中");
+    expect(body).not.toContain("第一次收尾");
+  });
 });

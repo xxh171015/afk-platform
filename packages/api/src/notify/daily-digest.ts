@@ -8,7 +8,8 @@ import {
 import type pg from "pg";
 import { recordSystemEvent } from "../events/system.ts";
 
-// Morning report of awaiting-review / partially-merged specs, one system event per project
+// Morning report of the Review queue (awaiting-review, partially-merged, reworking,
+// and finalizing that once was awaiting-review). First wrap-up stays out. One system event per project
 // (docs/optimization-plan.md 8.6). Claimed on instance.digest_sent_on so a pass and a restart
 // send at most once per Beijing calendar day.
 
@@ -75,6 +76,13 @@ export async function maybeSendDailyDigest(
      FROM specs s
      LEFT JOIN acceptance_packs ap ON ap.spec_id = s.id
      WHERE s.state IN ('awaiting-review', 'partially-merged', 'reworking')
+        OR (
+          s.state = 'finalizing'
+          AND EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.spec_id = s.id AND e.type = 'spec' AND e.to_state = 'awaiting-review'
+          )
+        )
      ORDER BY s.project_id, s.id`,
   );
   const byProject = new Map<number, PendingSpec[]>();
@@ -91,7 +99,7 @@ export async function maybeSendDailyDigest(
     const lines = specs.map((spec) => {
       const pulls = spec.pulls ?? [];
       const urls = pulls.map((pull) => pull.url).filter(Boolean);
-      if (spec.state === "reworking") {
+      if (spec.state === "reworking" || spec.state === "finalizing") {
         return [
           formatDisplayId("spec", spec.id),
           spec.title,

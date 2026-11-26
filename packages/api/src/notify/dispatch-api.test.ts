@@ -364,7 +364,7 @@ describe("notifications from events", () => {
       await flushWindow();
       expect(notices.at(-1)).toEqual({
         title: "可以来验收了",
-        body: "S-1 导出订单：验收包和 PR 已齐\nhttp://127.0.0.1:5173/specs/1/delivery",
+        body: "S-1 导出订单：验收包和 PR 已齐\nhttp://127.0.0.1:5173/specs/1/review",
       });
 
       notices.length = 0;

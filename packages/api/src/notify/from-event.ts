@@ -324,7 +324,7 @@ export async function noticeFromEvent(
           displayId: formatDisplayId("spec", event.specId),
           title: spec.title,
           reason: `验收包和 ${pr} 已齐`,
-          path: `/specs/${event.specId}/delivery`,
+          path: `/specs/${event.specId}/review`,
         },
         spec.hostKind,
         spec.projectId,
@@ -600,7 +600,7 @@ function systemNotice(data: Record<string, unknown>): MappedNotice | undefined {
     return {
       notice: {
         title: `待合并 ${pullAbbrev(hostKind)}`,
-        body: `${body}\n${pageUrl("/")}`,
+        body: `${body}\n${pageUrl("/review")}`,
       },
       hostKind,
       projectId: Number.isFinite(projectId) ? projectId : undefined,

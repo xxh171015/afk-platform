@@ -8,6 +8,7 @@ import {
 import {
   BarChart3,
   CircleHelp,
+  ClipboardCheck,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -38,6 +39,7 @@ import { HelpDialog } from "./HelpDialog.tsx";
 import { useChangeFlash } from "./hooks/use-change-flash.ts";
 import { applyTheme, currentTheme, type Theme } from "./lib/theme.ts";
 import { cn } from "./lib/utils.ts";
+import { reviewBadgeCount, useReviewQueue } from "./ReviewQueue.tsx";
 import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
 import { TokenExpiryBanner } from "./TokenExpiryBanner.tsx";
 import { useWorkbench } from "./Workbench.tsx";
@@ -46,7 +48,20 @@ import { waitingCount } from "./waiting.ts";
 const nav = [
   { to: "/", label: "工作台", icon: LayoutDashboard, exact: true },
   { to: "/specs", label: "需求", icon: FileText, exact: false },
-  { to: "/waiting", label: "待处理", icon: Inbox, exact: false, badge: true },
+  {
+    to: "/review",
+    label: "待审",
+    icon: ClipboardCheck,
+    exact: true,
+    badge: "review" as const,
+  },
+  {
+    to: "/waiting",
+    label: "待处理",
+    icon: Inbox,
+    exact: false,
+    badge: "waiting" as const,
+  },
   { to: "/metrics", label: "度量", icon: BarChart3, exact: false },
   { to: "/runtime", label: "运行实例", icon: Server, exact: false },
 ] as const;
@@ -83,6 +98,7 @@ function Sidebar({
   collapsed,
   onToggle,
   waiting,
+  review,
   onHelp,
   onNavigate,
   theme,
@@ -92,6 +108,7 @@ function Sidebar({
   collapsed: boolean;
   onToggle?: () => void;
   waiting: number;
+  review: number;
   onHelp: () => void;
   onNavigate?: () => void;
   theme: Theme;
@@ -99,7 +116,8 @@ function Sidebar({
   mobile?: boolean;
 }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const countIncreased = useChangeFlash(waiting, true);
+  const waitingIncreased = useChangeFlash(waiting, true);
+  const reviewIncreased = useChangeFlash(review, true);
   return (
     <aside
       className={cn(
@@ -134,14 +152,18 @@ function Sidebar({
             ? path === item.to
             : path === item.to || path.startsWith(`${item.to}/`);
           const Icon = item.icon;
-          const countLabel = waiting > 0 ? `待处理 (${waiting})` : item.label;
+          const badge = "badge" in item ? item.badge : undefined;
+          const count =
+            badge === "review" ? review : badge === "waiting" ? waiting : 0;
+          const countLabel =
+            count > 0 ? `${item.label} (${count})` : item.label;
           return (
             <Link
               key={item.to}
               to={item.to}
               title={item.label}
               aria-current={active ? "page" : undefined}
-              aria-label={"badge" in item ? countLabel : item.label}
+              aria-label={badge ? countLabel : item.label}
               onClick={onNavigate}
               className={cn(
                 "relative flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -153,17 +175,20 @@ function Sidebar({
               {!collapsed && (
                 <span className="flex-1 truncate">{item.label}</span>
               )}
-              {"badge" in item && waiting > 0 ? (
+              {badge && count > 0 ? (
                 <span
                   role="status"
-                  aria-label={`${waiting} 项待处理`}
+                  aria-label={
+                    badge === "review" ? `${count} 项待审` : `${count} 项待处理`
+                  }
                   className={cn(
                     "grid h-[18px] min-w-[18px] place-items-center rounded-sm bg-state-blocked/12 px-1 text-[10px] font-medium text-state-blocked tabular",
-                    countIncreased && "afk-count-bounce",
+                    (badge === "review" ? reviewIncreased : waitingIncreased) &&
+                      "afk-count-bounce",
                     collapsed && "absolute -top-0.5 right-0.5",
                   )}
                 >
-                  {waiting}
+                  {count}
                 </span>
               ) : null}
             </Link>
@@ -249,6 +274,7 @@ export function Layout() {
 
 function Chrome() {
   const board = useWorkbench();
+  const reviewQueue = useReviewQueue();
   const navigate = useNavigate();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -261,6 +287,7 @@ function Chrome() {
     setTheme(next);
   };
   const waiting = board.data ? waitingCount(board.data.waiting) : 0;
+  const review = reviewQueue.data ? reviewBadgeCount(reviewQueue.data) : 0;
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
@@ -348,6 +375,7 @@ function Chrome() {
             collapsed={collapsed}
             onToggle={() => setCollapsed((c) => !c)}
             waiting={waiting}
+            review={review}
             onHelp={() => setHelpOpen(true)}
             theme={theme}
             onThemeChange={changeTheme}
@@ -380,6 +408,7 @@ function Chrome() {
           <Sidebar
             collapsed={false}
             waiting={waiting}
+            review={review}
             theme={theme}
             onThemeChange={changeTheme}
             mobile

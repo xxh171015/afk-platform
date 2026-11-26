@@ -3,6 +3,7 @@
 export const PAGE_PATHS = [
   "/",
   "/waiting",
+  "/review",
   "/metrics",
   "/runtime",
   "/specs",
@@ -19,6 +20,7 @@ export const PAGE_PATHS = [
 export const paths = {
   home: "/",
   waiting: "/waiting",
+  review: "/review",
   metrics: "/metrics",
   specs: "/specs",
   spec: (id: number | string) => `/specs/${id}`,

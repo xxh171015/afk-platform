@@ -1,4 +1,5 @@
 import {
+  HOST_KINDS,
   MERGE_POLICIES,
   REVIEW_AXES,
   REVIEW_FILE_STATUSES,
@@ -18,6 +19,7 @@ import {
   specReviewOf,
 } from "../host/review.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
+import { reviewQueue } from "../tickets/review-queue.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
 
 const Id = z.number().int();
@@ -194,6 +196,52 @@ const BlobSlice = z.object({
 const ViewedBody = z.object({ newBlob: GitSha });
 const ViewedReply = z.object({ viewed: z.boolean() });
 
+const ReviewQueueRow = z.object({
+  spec: z.object({
+    id: Id,
+    displayId: z.string(),
+    title: z.string(),
+    type: z.string(),
+    state: z.enum(SPEC_STATES),
+    project: z.string(),
+  }),
+  repos: z.array(z.string()),
+  hostKind: z.enum(HOST_KINDS),
+  pullRequestCount: Id,
+  waitingSince: z.string(),
+  additions: Id,
+  deletions: Id,
+  viewedCount: Id.nullable(),
+  filesCount: Id.nullable(),
+  ci: z.enum(["none", "pending", "success", "failure"]),
+  conflictsWithDefault: z.boolean(),
+  autoMergeLine: z.string().nullable(),
+  riskTags: z.array(z.string()),
+});
+
+const ReviewQueue = z.object({
+  waitingForYou: z.array(ReviewQueueRow),
+  inProgress: z.array(ReviewQueueRow),
+  inRework: z.array(ReviewQueueRow),
+  readyToMerge: z.array(ReviewQueueRow),
+});
+
+const queueRoute = createRoute({
+  method: "get",
+  path: "/review-queue",
+  request: {
+    query: z.object({
+      project: z.coerce.number().int().min(1).max(INT4_MAX).optional(),
+    }),
+  },
+  responses: {
+    200: reply(
+      "Specs waiting for review, grouped and ordered by risk tags",
+      ReviewQueue,
+    ),
+  },
+});
+
 const specReviewRoute = createRoute({
   method: "get",
   path: "/specs/{id}/review",
@@ -305,6 +353,15 @@ export function registerReviewRoutes(
   context: AppContext,
 ): void {
   const { pool } = context;
+
+  app.openapi(queueRoute, async (c) => {
+    const queue = await reviewQueue(
+      pool,
+      context.clock(),
+      c.req.valid("query").project,
+    );
+    return c.json(queue, 200);
+  });
 
   app.openapi(specReviewRoute, async (c) => {
     const view = await specReviewOf(

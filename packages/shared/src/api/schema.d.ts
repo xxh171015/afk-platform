@@ -6137,6 +6137,184 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/review-queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: {
+          project?: number;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Specs waiting for review, grouped and ordered by risk tags */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              waitingForYou: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  project: string;
+                };
+                repos: string[];
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
+                pullRequestCount: number;
+                waitingSince: string;
+                additions: number;
+                deletions: number;
+                viewedCount: number | null;
+                filesCount: number | null;
+                /** @enum {string} */
+                ci: "none" | "pending" | "success" | "failure";
+                conflictsWithDefault: boolean;
+                autoMergeLine: string | null;
+                riskTags: string[];
+              }[];
+              inProgress: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  project: string;
+                };
+                repos: string[];
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
+                pullRequestCount: number;
+                waitingSince: string;
+                additions: number;
+                deletions: number;
+                viewedCount: number | null;
+                filesCount: number | null;
+                /** @enum {string} */
+                ci: "none" | "pending" | "success" | "failure";
+                conflictsWithDefault: boolean;
+                autoMergeLine: string | null;
+                riskTags: string[];
+              }[];
+              inRework: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  project: string;
+                };
+                repos: string[];
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
+                pullRequestCount: number;
+                waitingSince: string;
+                additions: number;
+                deletions: number;
+                viewedCount: number | null;
+                filesCount: number | null;
+                /** @enum {string} */
+                ci: "none" | "pending" | "success" | "failure";
+                conflictsWithDefault: boolean;
+                autoMergeLine: string | null;
+                riskTags: string[];
+              }[];
+              readyToMerge: {
+                spec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                  type: string;
+                  /** @enum {string} */
+                  state:
+                    | "draft"
+                    | "planned"
+                    | "running"
+                    | "finalizing"
+                    | "awaiting-review"
+                    | "partially-merged"
+                    | "reworking"
+                    | "merged"
+                    | "paused"
+                    | "cancelled";
+                  project: string;
+                };
+                repos: string[];
+                /** @enum {string} */
+                hostKind: "github" | "gitlab";
+                pullRequestCount: number;
+                waitingSince: string;
+                additions: number;
+                deletions: number;
+                viewedCount: number | null;
+                filesCount: number | null;
+                /** @enum {string} */
+                ci: "none" | "pending" | "success" | "failure";
+                conflictsWithDefault: boolean;
+                autoMergeLine: string | null;
+                riskTags: string[];
+              }[];
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/specs/{id}/review": {
     parameters: {
       query?: never;
