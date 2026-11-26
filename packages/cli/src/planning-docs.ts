@@ -139,16 +139,32 @@ export interface PlanningChange {
   path: string;
 }
 
+function gitHead(dir: string): string {
+  return git(dir, ["rev-parse", "--verify", "--quiet", "HEAD"]).out.trim();
+}
+
 export function planningMergeBase(dir: string, defaultBranch: string): string {
   const remote = `refs/remotes/origin/${defaultBranch}`;
-  const head = git(dir, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "HEAD",
-  ]).out.trim();
+  const head = gitHead(dir);
   const merged = git(dir, ["merge-base", "HEAD", remote]);
   return (merged.code === 0 ? merged.out.trim() : head) || head;
+}
+
+// Isolated index: HEAD's tree, then the caller stages and diffs. The person's index is left alone.
+function withScratchIndex<T>(
+  dir: string,
+  extraEnv: Record<string, string>,
+  run: (env: Record<string, string>) => T,
+): T {
+  const head = gitHead(dir);
+  const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
+  try {
+    const env = { GIT_INDEX_FILE: join(scratch, "index"), ...extraEnv };
+    git(dir, ["read-tree", head || "--empty"], env);
+    return run(env);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 // Local changes against the patch base: uncommitted (staged and not), new unignored files, files in unpushed
@@ -157,18 +173,9 @@ export function listPlanningChanges(
   dir: string,
   defaultBranch: string,
 ): PlanningChange[] {
-  const head = git(dir, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "HEAD",
-  ]).out.trim();
   const base = planningMergeBase(dir, defaultBranch);
   if (!base) return [];
-  const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
-  try {
-    const env = { GIT_INDEX_FILE: join(scratch, "index") };
-    git(dir, ["read-tree", head || "--empty"], env);
+  return withScratchIndex(dir, {}, (env) => {
     git(dir, ["add", "-A"], env);
     const parts = git(
       dir,
@@ -185,9 +192,7 @@ export function listPlanningChanges(
       changes.push({ status, path });
     }
     return changes.sort((a, b) => a.path.localeCompare(b.path));
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
+  });
 }
 
 function repoRelativePath(repoDir: string, cwd: string, raw: string): string {
@@ -301,20 +306,8 @@ export function buildPlanningPatch(
   paths: string[],
 ): { patch: string; files: string[] } {
   if (paths.length === 0) return { patch: "", files: [] };
-  const head = git(dir, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "HEAD",
-  ]).out.trim();
   const base = planningMergeBase(dir, defaultBranch);
-  const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
-  try {
-    const env = {
-      GIT_INDEX_FILE: join(scratch, "index"),
-      ...LITERAL_PATHSPECS,
-    };
-    git(dir, ["read-tree", head || "--empty"], env);
+  return withScratchIndex(dir, LITERAL_PATHSPECS, (env) => {
     const tracked = git(dir, ["ls-files", "-z", "--", ...paths], env)
       .out.split("\0")
       .filter(Boolean);
@@ -330,9 +323,7 @@ export function buildPlanningPatch(
       patch: diff(["--binary", "--full-index"]),
       files: diff(["--name-only"]).split("\n").filter(Boolean),
     };
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
+  });
 }
 
 // Confirm no longer uses this for the patch; import records listPlanningChanges instead.
@@ -363,22 +354,12 @@ export function readPlanningDocs(
   if (repo.name !== planningRepo)
     return { status: "other-repo", repo: repo.name };
 
-  // The base is where this checkout and the remote's default branch part: the patch carries the commits made
-  // here and not pushed as well as the files not committed, and nothing someone else put on the default branch.
-  const remote = `refs/remotes/origin/${repo.defaultBranch}`;
-  const head = git(dir, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "HEAD",
-  ]).out.trim();
-  const merged = git(dir, ["merge-base", "HEAD", remote]);
-  const fork = merged.code === 0 ? merged.out.trim() : undefined;
-  const base = fork ?? head;
-
+  // Locate the checkout and the old path table (conflict fallback). Confirm and import list
+  // local changes separately and build the patch from the files the person selected.
+  const head = gitHead(dir);
+  const base = planningMergeBase(dir, repo.defaultBranch);
   const paths = planningDocPaths(dir, [head, base]);
-  const built = buildPlanningPatch(dir, repo.defaultBranch, paths);
-  return { status: "ok", ...built, dir, paths };
+  return { status: "ok", patch: "", files: [], dir, paths };
 }
 
 // The planning docs this checkout has and HEAD does not: changed, new or removed, staged or not.
