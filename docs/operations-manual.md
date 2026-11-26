@@ -63,12 +63,14 @@ scripts/restart.sh worker # 新 worker 立刻接活；旧 worker 收到 SIGUSR2�
 2. 在 Cursor 或 Claude Code 里打开这个仓库（多仓库项目把各仓库都加进工作区），输入 `/afk-setup`。
 
 **skill 只在规划仓库里，只在这台机器上。**
+
 - plat 自己带着平台的 skill 包（仓库的 `skills/`），写成和 `npx skills add -a cursor -a claude-code` 相同的布局：文件放在 `.agents/skills/<名字>`，`.claude/skills/<名字>` 是指向它的链接。
 - 这些路径写进这个仓库的 `.git/info/exclude`，`git status` 里看不到，也不会被提交。
 - 平台从不往全局装 skill，也不改你全局已有的 skill。以前平台往全局装过的副本，plat 会用一行提示怎么删，不替你删。
 - 规划仓库已经提交了同名 skill 的，plat 不覆盖，`plat doctor` 标红，由你决定怎么处理。
 
 **以后平台升级了，规划机器自己跟上，不用人操作：**
+
 - plat 每条命令开始前，会问平台 `GET /version` 的 `platFingerprint`（平台发出的 plat 文件的 sha256）。和自己不同时，下载平台的 plat 替换自己，再用新 plat 重跑同一条命令。
 - 新 plat 先把本机带上来：在已经装着 skill 的仓库里重写 skill，重新生成规划仓库里 plat 写的文件（tracker 文档、`CLAUDE.local.md`、Cursor 规则）。然后在 stderr 用几行说明改了什么。
 - 平台不收旧 plat 发布的东西：`plat spec create`、`plat tickets import`、`plat spec confirm` 带的指纹和平台的不一致时，API 回 409 `plat-outdated`，plat 收到后同样替换自己、重跑命令。从平台仓库 checkout 跑的 plat（`pnpm plat`）带 `dev`，不检查。
@@ -90,6 +92,7 @@ Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx
    - 最后跑 `plat doctor`：本机缺什么、怎么修，写进控制塔接入入口的「本机」列。
 
 **登记写了哪些文件**：
+
 - tracker 文档 `docs/agents/issue-tracker.md`。
 - `docs/agents/domain.md`、`docs/agents/triage-labels.md`（原本由 `setup-matt-pocock-skills` 写，**不用再跑它**）。
 - 两个本机规则文件：`CLAUDE.local.md`（Claude Code 读）和 `.cursor/rules/afk-platform.mdc`（Cursor 读）。`CLAUDE.local.md` 含 `## Agent skills` 和规划约定；仓库已跟踪 `AGENTS.md` 时，Cursor 规则只指向 `AGENTS.md` 和 `docs/agents/`，不重复技能路由。
@@ -102,14 +105,14 @@ Matt 的其他 skill（tdd、diagnosing-bugs 等）需要的话，自己用 `npx
 
 ### 1.3 每个仓库要满足的条件
 
-| 条件                                                                                                                          | 怎么满足、怎么检查                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。                                                                                                                                  |
-| 默认分支是远端 HEAD 所指的分支（常见是 `main`），代码推到了远端                                                               | 平台只 clone 远端。规划时改的文件是例外：**不用提交也不用推**，`plat spec confirm` 列出本地改动由人选哪些交给平台（见第 1 步、第 4 步）。                                                                                                                                                                                                                                  |
-| `.sandcastle/gates.yaml`                                                                                                      | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。                                                                                                                               |
-| `AGENTS.md` / 编码规范                                                                                                        | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。                                                                                                                                                                                                                                        |
-| （场景 B 的前端）契约副本                                                                                                     | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。                                                                                                                                                                                                           |
-| （有联调票时）联调环境                                                                                                        | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加**它已经在跑的**联调命令，把 JUnit 写到 `reports/e2e-junit.xml`）。不是每个仓库都要 `npm run e2e`。`plat tickets import` 发现缺了又没有票补时会警告。 |
+| 条件                                                                                                                                     | 怎么满足、怎么检查                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 托管：GitHub App 已装到这个仓库并有 Contents 写、Pull requests 写、Issues 写、Checks 读、Commit statuses 读；GitLab 上令牌用户是项目成员 | 开 PR / MR、转 ready、删分支、在平台开出的 PR 上写人审意见汇总评论都靠它。`plat init` 每次都让持有凭据的 worker 检查一遍，之后每天再查；没装、权限不够或不是成员时给出修复说明。令牌用户能直推默认分支、Developers 能合并，M3 只提示。剩 30 天到期时页面和 macOS 通知提醒一次。                                                                                            |
+| 默认分支是远端 HEAD 所指的分支（常见是 `main`），代码推到了远端                                                                          | 平台只 clone 远端。规划时改的文件是例外：**不用提交也不用推**，`plat spec confirm` 列出本地改动由人选哪些交给平台（见第 1 步、第 4 步）。                                                                                                                                                                                                                                  |
+| `.sandcastle/gates.yaml`                                                                                                                 | 门禁：`setup` 加若干条命令（typecheck、test、lint……），其中一条写 JUnit 并在 `junit` 里给出路径。`plat repo check <仓库名> --branch <分支>` 让平台在沙箱里对推上去的分支跑一遍，打印哪条失败和输出结尾。格式见 `skills/afk-setup/gates.md`。                                                                                                                               |
+| `AGENTS.md` / 编码规范                                                                                                                   | 无人值守的 agent 会读它，前后端仓库都要有。要写明怎么跑测试，以及「无人值守运行」：遇到只有人能定的事，输出 `cannot-proceed` 结束。                                                                                                                                                                                                                                        |
+| （场景 B 的前端）契约副本                                                                                                                | 前端有 `contract/openapi.yaml`，并由它生成 client（试点是 `src/api/schema.d.ts`）；票里写 `contract:` 时，平台会把后端契约送到前端票，agent 要把副本更新成一致。                                                                                                                                                                                                           |
+| （有联调票时）联调环境                                                                                                                   | 不在接入时配：需求要联调时，`/to-tickets` 按 tracker 文档的「Integration tickets」把缺的东西拆成票，放在同一个需求里（被依赖的仓库加 `.sandcastle/integration/compose.yaml`、`seed-<仓库名>` 种子服务；e2e 所在仓库加**它已经在跑的**联调命令，把 JUnit 写到 `reports/e2e-junit.xml`）。不是每个仓库都要 `npm run e2e`。`plat tickets import` 发现缺了又没有票补时会警告。 |
 
 沙箱镜像不是仓库的条件：所有仓库的票都在平台的同一个镜像里跑（平台仓库的 `.sandcastle/Dockerfile`：Node 22、npm、pnpm、PostgreSQL、Playwright Chromium，Cursor CLI 版本锁在 `ARG CURSOR_CLI_VERSION`）。仓库需要镜像里没有的工具链时，`plat repo check` 会失败在那条命令上，要由运行平台的人往镜像里加。
 
@@ -146,11 +149,11 @@ scripts/canary.sh --project <id>
 
 停下后逐项打印三项检查，任一项 `fail` 都以非零退出：
 
-| 检查 | 含义 |
-| --- | --- |
+| 检查          | 含义                                                                   |
+| ------------- | ---------------------------------------------------------------------- |
 | `token usage` | 这次 Run 上记下了 token 用量（`tokenUsage` / 需求上的 `usageByStage`） |
-| `decisions` | implement 的结构化输出里有 `decisions` 数组（可以为空，但字段必须在） |
-| `test names` | 门禁结果里有用例名（`gateResults.testCases`） |
+| `decisions`   | implement 的结构化输出里有 `decisions` 数组（可以为空，但字段必须在）  |
+| `test names`  | 门禁结果里有用例名（`gateResults.testCases`）                          |
 
 票 `blocked` 或需求 `paused` 时打印原因码，取消需求，以非零退出。取消后按需求的清理作业状态等待（默认最多 10 分钟，`CANARY_CLEANUP_SECONDS`），完成后再用 `git ls-remote` 确认没有这个需求自己的需求分支和票分支，也没有开着的 PR；别的需求的 `spec/*`、`agent/*` 分支不算残留。超过上限仍有残留就打印 `leftover:` 并以非零退出。
 
@@ -213,18 +216,19 @@ plat spec confirm S-n       # 从这一刻起开始实现
   ```
 
   补丁只含选中的文件。平台收下后，plat 把选中文件里没提交的改动从 checkout 里收走：新建的删掉，改过的还原成 HEAD 的样子，不用 stash；已经提交的和没选中的不动。补丁备份在仓库外的 `~/.afk/planning/S-n/`。这样 PR 合并后 `git pull` 不会和它冲突。confirm 被拒时什么都不收走。需求合入或取消后，下一条 plat 命令会顺手删掉这个备份目录。选中的文件名像密钥（`.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、`*.p12`）时会被拒绝，提示加进 `.gitignore` 或改用 `--keep-local`。
+
 - 平台先做**规划提交**：把补丁三方合并到规划仓库的设置提交（没有 `afk/setup` 要叠时就是默认分支的最新提交）上，作为集成分支的开头；做好之前一张票都不开工。规划仓库里没有这个需求的票时，收尾会给它单独开一个只有文档的 PR。
 - 在页面上确认、或在规划仓库以外的地方 confirm，请求不带补丁：导入时记下有本地改动则返回 409 并列出文件，说明去规划仓库里运行 `plat spec confirm`。人确实不要这些改动时，CLI 用 `plat spec confirm --leave-planning-changes`，页面用确认按钮旁的「不带这些改动，照样确认」；规划提交是默认分支当时的最新提交，验收包和 PR 描述注明未带上的文件。在项目的另一个仓库里 confirm 会被拒绝。规划仓库认不出时会说明没有带任何本地改动。
 - 补丁超过 1 MB 会被拒绝。
 
 ### 第 5 步 等待和验收
 
-- 页面 `http://127.0.0.1:5173` 先看工作台（等你处理 / 正在运行 / 等你验收 / 最近完成）；终端里 `plat spec show S-n`。票卡住时本机也会发一条 macOS 通知（点开打不开页面，去待处理或通知里的链接）。
+- 页面 `http://127.0.0.1:5173` 先看工作台（等你处理 / 正在运行 / 等你验收入口 / 最近完成），验收入口是侧栏「待审」（`/review`，快捷键 `g r`）；终端里 `plat spec show S-n`。票卡住时本机也会发一条 macOS 通知（点开打不开页面，去待处理或通知里的链接）。
 - **票级审查 needs-human**：票级 Spec 轴给出 `needs-human` 时，平台记一条事件并发一条飞书通知（按项目群；没有飞书则本机通知）。写明哪张票、哪条 Decision（id 和原文摘要）、Run 编号。你可以趁需求还在跑时 `plat tickets import --append` 追加票、`plat spec edit --ref` 补参考仓库、`plat ticket retry` 写重试说明，也可以不理，留到合并时再定。同一个需求 5 分钟内的几条合成一条，按票列出。这条通知不改需求和票的状态，不进待处理，不需要回复；不理它也不影响流程。需求级（final-review）的 `needs-human` 不另发，开 PR 时验收包里会列。
 - 全部票 done 后平台做整体 review 和修复，然后开 PR（`spec/<id>/<slug>` → `main`），并生成验收包（`plat spec show S-n` 里能看）。
-- **你**读验收包，在 GitHub 上看 diff、合并 PR。合并后平台自动清理分支，spec 变 `merged`。
+- **你**在控制塔待审列表和审查页看导读与 diff，满意后到 GitHub / GitLab 上合并 PR（或等自动合并）。合并后平台自动清理分支，spec 变 `merged`。有意见就在审查页提交修改要求，不要只在托管上写评论。
 - 验收包或 PR 描述「合并前要你定的」里如果有宿主机检查（`host-check`，文字是「在宿主机上跑：…」）：在这台 Mac 上跑那条命令，通过后再**手动**合并该 PR。有宿主机检查时平台不会自动合并。
-- **早报**：北京时间每天 9 点之后，平台给每个还有待合并需求的项目发一条（飞书群，没有则本机通知）。「开出」是这个需求的 PR 真实开出多久（先看进入 awaiting-review 的时间，没有就用最早那条 PR 的创建时间；1 小时内按分钟、48 小时内按小时、之后按天）。行尾「已等 N 天，合并或取消」表示已经超过 7 天，该合并或关掉需求；「PR 已全部关闭，可以取消需求」表示这个需求的 PR 都已经关掉、没有还开着或已合并的，可以用 `plat spec cancel S-n`。
+- **早报**：北京时间每天 9 点之后，平台给每个还有待合并或返工中需求的项目发一条（飞书群，没有则本机通知），文末链到控制塔 `/review`。包含 awaiting-review、partially-merged、reworking，以及曾经进入过 awaiting-review、此刻在 finalizing 的需求（追加后的第二次收尾、修改要求的 Rework）；第一次收尾还没验收过的不算。「开出」是这个需求的 PR 真实开出多久（先看进入 awaiting-review 的时间，没有就用最早那条 PR 的创建时间；1 小时内按分钟、48 小时内按小时、之后按天）。行尾「已等 N 天，合并或取消」表示已经超过 7 天，该合并或关掉需求；「PR 已全部关闭，可以取消需求」表示这个需求的 PR 都已经关掉、没有还开着或已合并的，可以用 `plat spec cancel S-n`。
 
 ## 3. 场景 B：前后端各一个
 
@@ -348,11 +352,11 @@ plat spec confirm S-n       # 从这一刻起开始实现
 
 平台从 mattpocock/skills 取的东西都原样复制在本仓库里，是唯一来源，运行时不再需要 Matt 仓库的 checkout：
 
-| 位置                               | 内容                                                            | 谁用                                                                            |
-| ---------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 位置                               | 内容                                                            | 谁用                                                           |
+| ---------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | `skills/`                          | grill-with-docs、grilling、domain-modeling、to-spec、to-tickets | 规划机器：plat 自带，`plat sync` 和 afk-setup 一起写进规划仓库 |
-| `packages/pipeline/skills/`        | implement、tdd、code-review、codebase-design                    | worker 只读挂进沙箱                                                             |
-| `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板                             | `plat init`、`plat tracker-doc`                                                 |
+| `packages/pipeline/skills/`        | implement、tdd、code-review、codebase-design                    | worker 只读挂进沙箱                                            |
+| `packages/shared/skills-snapshot/` | setup-matt-pocock-skills 的种子模板                             | `plat init`、`plat tracker-doc`                                |
 
 固定的 SHA 只写在 `packages/shared/src/skills-sha.ts`（常量 `SKILLS_SHA`），每个目录的 `VENDORED.md` 记下复制时的 SHA 和每个复制文件的 sha256，守卫测试保证 SHA 一致、文件没被改过。**副本不手改**（编辑器的格式化也算）：平台自己的规划规则写进平台的文件——通用的写进 tracker 文档模板（`packages/cli/templates/`）或 `plat init` 写的规划约定（`packages/cli/src/agent-docs.ts`），只对本仓库成立的写进 `CLAUDE.md`（`AGENTS.md` 也给 worker 读，不放规划规则）。唯一的例外是 to-spec、to-tickets 里把 `/setup-matt-pocock-skills` 换成 `/afk-setup`，由刷新脚本做。升级时在**一个提交**里做完下面几步：
 

@@ -16,3 +16,5 @@
 - 自动合并的否决从「PR 上有人评论」扩到「平台上有已提交的人审意见」，以后也不再自动合并（[ADR 0011](0011-the-platform-may-merge-through-one-exit.md) 的条件加一条）。
 - 推送出口不变：Rework 分支是 `agent/<id>/S-<n>-rework-<k>`，只允许 `agent/*`、`spec/*`。
 - 在平台里合并、用人的身份在托管上提交正式 Review、拉托管上评论的正文，都留到有第二个审查人或分支保护时再做。
+- GitHub App 增加 Issues: write，汇总评论用 issue comments（`POST /issues/{n}/comments`），按标记更新同一条。不改用 Pull Request Reviews API：那会留下一条 bot review，和「一条普通汇总评论」不同。`design.md` 原先「不给 Issues」作废这一条。GitLab 仍用 MR notes。
+- 意见要求改保护路径或删测试名时，Rework 写成 `declined` + `conflict`，不 `cannot-proceed`。批准只挂在 Ticket 上，Rework 没有票可批准；人看见没处理的意见后再追加票。
