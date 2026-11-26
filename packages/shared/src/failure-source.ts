@@ -189,7 +189,8 @@ export const EVENT_SOURCES = [
 export type EventSource = (typeof EVENT_SOURCES)[number];
 
 // What an event is about: the state of a spec, its planning commit, a ticket, a job, an overall review step, the
-// final e2e, or a pull request (its state, draft, CI, review, and whether host-sync can read it).
+// final e2e, or a pull request (its state, draft, CI, review, head, conflicts, human comments, and whether
+// host-sync can read it), or a Review revision / viewed-file change.
 export const EVENT_TYPES = [
   "spec",
   "planning",
@@ -202,6 +203,11 @@ export const EVENT_TYPES = [
   "pull-request-ci",
   "pull-request-review",
   "pull-request-sync",
+  "pull-request-head",
+  "pull-request-conflicts",
+  "pull-request-human-comments",
+  "review-revision",
+  "review-file-view",
   // a person's action (HUMAN_ACTIONS), written by the action's code
   "action",
   // disk, agent pause, token expiry: inserted on the edge, not by a state trigger (ADR 0009)

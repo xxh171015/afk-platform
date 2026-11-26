@@ -680,6 +680,13 @@
       "when": 1795400000000,
       "tag": "0096_review_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1795500000000,
+      "tag": "0097_review_http_events",
+      "breakpoints": true
     }
   ]
 }

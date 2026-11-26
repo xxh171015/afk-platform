@@ -6137,6 +6137,670 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/specs/{id}/review": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description This spec's pull requests, Review revisions, merge checklist, tickets and Findings */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              spec: {
+                id: number;
+                displayId: string;
+                title: string;
+                type: string;
+                /** @enum {string} */
+                state:
+                  | "draft"
+                  | "planned"
+                  | "running"
+                  | "finalizing"
+                  | "awaiting-review"
+                  | "partially-merged"
+                  | "reworking"
+                  | "merged"
+                  | "paused"
+                  | "cancelled";
+              };
+              userStories: {
+                number: number;
+                text: string;
+              }[];
+              pullRequests: {
+                id: number;
+                repo: string;
+                number: number;
+                url: string;
+                /** @enum {string} */
+                state: "open" | "closed" | "merged";
+                draft: boolean;
+                /** @enum {string} */
+                ci: "none" | "pending" | "success" | "failure";
+                /** @enum {string} */
+                review: "none" | "approved" | "changes-requested";
+                headSha: string;
+                conflictsWithDefault: boolean;
+                humanComments: number | null;
+                revision: {
+                  id: number | null;
+                  /** @enum {string} */
+                  state: "pending" | "ready" | "failed";
+                  complete: boolean;
+                  filesCount: number;
+                  additions: number;
+                  deletions: number;
+                  viewedCount: number;
+                  commentCount: number;
+                  error: string | null;
+                };
+              }[];
+              acceptancePack: {
+                generatedAt: string;
+                mergeOrder: {
+                  ordered: string[];
+                  after: {
+                    [key: string]: string[];
+                  };
+                  unordered: string[];
+                };
+                orderBroken: {
+                  repo: string;
+                  skipped: string[];
+                }[];
+                /** @enum {string} */
+                hostKind?: "github" | "gitlab";
+                repos: {
+                  repo: string;
+                  pullRequest: {
+                    order: number;
+                    /** @default [] */
+                    waitsFor: string[];
+                    repo: string;
+                    number: number;
+                    url: string;
+                    /** @enum {string} */
+                    state: "open" | "closed" | "merged";
+                    draft: boolean;
+                    /** @enum {string} */
+                    ci: "none" | "pending" | "success" | "failure";
+                    /** @enum {string} */
+                    review: "none" | "approved" | "changes-requested";
+                    syncError: string | null;
+                    /** @enum {string} */
+                    hostKind?: "github" | "gitlab";
+                  } | null;
+                  gate: {
+                    commitSha: string;
+                    testsTotal: number | null;
+                    testsSkipped: number | null;
+                    durationMs: number;
+                    steps: {
+                      name: string;
+                      exitCode: number;
+                      ms: number;
+                    }[];
+                  } | null;
+                  /** @default [] */
+                  flakyTests: {
+                    name: string;
+                    classname: string;
+                  }[];
+                  tickets: {
+                    displayId: string;
+                    title: string;
+                    appended: boolean;
+                    criteria: {
+                      text: string;
+                      tests: string[];
+                      /** @enum {string} */
+                      status: "verified" | "unverified";
+                      reason: string | null;
+                    }[];
+                  }[];
+                  findings: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    kind: string;
+                    body: string;
+                    resolution: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
+                  }[];
+                  scopeCreep: {
+                    ticket: string | null;
+                    run: string;
+                    body: string;
+                  }[];
+                  reviewUncertainties: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    body: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
+                  }[];
+                  /** @default [] */
+                  resolvedUncertainties: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    body: string;
+                    /** @enum {string|null} */
+                    axis: "standards" | "spec" | null;
+                  }[];
+                  decisions: {
+                    source: string;
+                    run: string;
+                    /** @enum {string} */
+                    kind:
+                      | "choice"
+                      | "conflict"
+                      | "known-gap"
+                      | "deferred"
+                      | "workaround";
+                    text: string;
+                    ref?: string;
+                  }[];
+                  protectedPathApprovals: {
+                    ticket: string;
+                    paths: string[];
+                  }[];
+                  /** @default [] */
+                  standardsSources: {
+                    ticket: string | null;
+                    run: string;
+                    stage: string;
+                    sources: string[];
+                  }[];
+                }[];
+                integration?: {
+                  failedBeforePullRequest: {
+                    tickets: {
+                      displayId: string;
+                      title: string;
+                      e2e: {
+                        displayId: string;
+                        result: string | null;
+                      };
+                      diagnosis: {
+                        failingRepo: string | null;
+                        evidence: string;
+                        failingTests: string[];
+                      } | null;
+                    }[];
+                  } | null;
+                  tickets: {
+                    displayId: string;
+                    title: string;
+                    repo: string;
+                    appended: boolean;
+                    result: string | null;
+                    runDisplayId: string | null;
+                    testsTotal: number | null;
+                    testsFailed: number | null;
+                    envUpMs: number | null;
+                    refShas: {
+                      [key: string]: string;
+                    } | null;
+                    headSha: string | null;
+                    criteria: {
+                      text: string;
+                      tests: string[];
+                      /** @enum {string} */
+                      status: "verified" | "unverified";
+                      reason: string | null;
+                    }[];
+                  }[];
+                } | null;
+                cancelledTickets: {
+                  displayId: string;
+                  title: string;
+                  repo: string;
+                }[];
+                planningDocs?: {
+                  repo: string;
+                  /** @enum {string} */
+                  state: "committed" | "unchanged" | "waived";
+                  leftOut?: string[];
+                } | null;
+                agentSeconds: number;
+                /** @default [] */
+                needsDecision: {
+                  /** @enum {string} */
+                  kind: "recheck" | "needs-human" | "deferred" | "host-check";
+                  id: string;
+                  source: string;
+                  text: string;
+                  ref?: string;
+                }[];
+              } | null;
+              autoMerge: {
+                /** @enum {string} */
+                policy: "manual" | "auto-improvement";
+                willMerge: boolean;
+                mergeAt: string | null;
+                reason: string | null;
+                event: {
+                  /** @enum {string} */
+                  type: "auto-merged" | "auto-merge-failed";
+                  reason: string | null;
+                } | null;
+              };
+              tickets: {
+                id: number;
+                displayId: string;
+                title: string;
+                stories: number[];
+                criteria: {
+                  text: string;
+                  tests: string[];
+                  /** @enum {string} */
+                  status: "verified" | "unverified";
+                  reason: string | null;
+                }[];
+              }[];
+              findings: {
+                ticket: string | null;
+                run: string;
+                stage: string;
+                kind: string;
+                body: string;
+                resolution: string;
+                /** @enum {string|null} */
+                axis: "standards" | "spec" | null;
+              }[];
+            };
+          };
+        };
+        /** @description No such spec */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/pull-requests/{id}/review-revision": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          head: string;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The Review revision for this pull request head; pending if it is still being computed */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json":
+              | {
+                  /** @enum {string} */
+                  state: "pending";
+                  id: number | null;
+                  headSha: string;
+                }
+              | {
+                  /** @enum {string} */
+                  state: "failed";
+                  id: number;
+                  headSha: string;
+                  error: string | null;
+                }
+              | {
+                  /** @enum {string} */
+                  state: "ready";
+                  id: number;
+                  headSha: string;
+                  baseSha: string | null;
+                  mergeBaseSha: string | null;
+                  previousHeadSha: string | null;
+                  complete: boolean;
+                  omittedReason: string | null;
+                  filesCount: number;
+                  additions: number;
+                  deletions: number;
+                  files: {
+                    id: number;
+                    path: string;
+                    oldPath: string | null;
+                    /** @enum {string} */
+                    status:
+                      | "added"
+                      | "modified"
+                      | "deleted"
+                      | "renamed"
+                      | "copied"
+                      | "mode";
+                    oldBlob: string;
+                    newBlob: string;
+                    additions: number;
+                    deletions: number;
+                    binary: boolean;
+                    generated: boolean;
+                    test: boolean;
+                    lockfile: boolean;
+                    /** @enum {string|null} */
+                    patchOmitted: "too-large" | "binary" | "over-total" | null;
+                    attributions: (
+                      | {
+                          ticket: string;
+                        }
+                      | {
+                          run: string;
+                          stage?: string;
+                        }
+                      | {
+                          /** @enum {string} */
+                          kind: "setup" | "planning" | "unknown";
+                        }
+                    )[];
+                    hunks:
+                      | {
+                          newStart: number;
+                          newLines: number;
+                          oldStart: number;
+                          oldLines: number;
+                          owners: {
+                            [key: string]: unknown;
+                          }[];
+                        }[]
+                      | null;
+                    viewed: boolean;
+                  }[];
+                };
+          };
+        };
+        /** @description No such pull request or Review revision */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/review-files/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: {
+          view?: "all" | "since";
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The file's patch, or the patch since it was last reviewed */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              path: string;
+              /** @enum {string} */
+              view: "all" | "since";
+              patch: string | null;
+              /** @enum {string|null} */
+              patchOmitted: "too-large" | "binary" | "over-total" | null;
+            };
+          };
+        };
+        /** @description No such review file */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/review-blobs/{sha}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query: {
+          from: number;
+          to: number;
+        };
+        header?: never;
+        path: {
+          sha: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description A line slice of a blob that belongs to a Review revision */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              sha: string;
+              from: number;
+              to: number;
+              stored: boolean;
+              lines: string[];
+            };
+          };
+        };
+        /** @description The line range is not valid */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description No such Review blob */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/pull-requests/{id}/viewed-files/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+          path: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            newBlob: string;
+          };
+        };
+      };
+      responses: {
+        /** @description The file is marked viewed at this blob */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              viewed: boolean;
+            };
+          };
+        };
+        /** @description No such pull request */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    post?: never;
+    delete: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+          path: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            newBlob: string;
+          };
+        };
+      };
+      responses: {
+        /** @description The viewed mark is removed */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              viewed: boolean;
+            };
+          };
+        };
+        /** @description No such pull request */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/links": {
     parameters: {
       query?: never;

@@ -261,6 +261,17 @@ export async function markReviewFileViewed(
   );
 }
 
+export async function unmarkReviewFileViewed(
+  client: pg.PoolClient,
+  input: { pullId: number; path: string; newBlob: string },
+): Promise<void> {
+  await client.query(
+    `DELETE FROM review_file_views
+     WHERE pull_request_id = $1 AND path = $2 AND new_blob = $3`,
+    [input.pullId, input.path, input.newBlob],
+  );
+}
+
 export async function purgeExpiredReviewPayloads(
   pool: Pick<pg.Pool, "query">,
   now: Date,
