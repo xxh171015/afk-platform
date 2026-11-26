@@ -80,7 +80,9 @@ export function Delivery({
         <section id="delivery-prs" className="mb-8 scroll-mt-6">
           <h2 className="mb-1 text-sm font-semibold">{pullAbbrev(hostKind)}</h2>
           <p className="note mb-3">
-            按这个顺序合并；平台从不合入。
+            {autoMerge?.policy === "auto-improvement"
+              ? "按这个顺序合并；满足条件时平台会自动合并"
+              : "按这个顺序合并，平台不会合并"}
             {list(mergeOrder?.ordered).length > 0
               ? ` 合并顺序：${list(mergeOrder?.ordered).join(" → ")}`
               : " 没有合并顺序（没有契约关系）。"}
