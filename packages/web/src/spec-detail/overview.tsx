@@ -38,6 +38,7 @@ export function Overview({
   confirming,
   confirmError,
   onConfirm,
+  onLeavePlanningChanges,
   onOpen,
   pullRequests,
   timeline,
@@ -57,6 +58,7 @@ export function Overview({
   confirming: boolean;
   confirmError: string | null;
   onConfirm: () => void;
+  onLeavePlanningChanges: () => void;
   onOpen: (id: number) => void;
   pullRequests: SpecView["pullRequests"];
   timeline: SpecView["timeline"];
@@ -83,6 +85,9 @@ export function Overview({
   const docsWarn = prechecks.find(
     (item) => item.code === "page-confirm-without-planning-docs",
   );
+  const namedLocalChanges = Boolean(
+    docsWarn?.message.includes("这些规划文档改动"),
+  );
   const [confirmDocs, setConfirmDocs] = useState(false);
   return (
     <>
@@ -101,6 +106,16 @@ export function Overview({
           >
             {confirming ? "确认中…" : "确认拆分"}
           </Button>
+          {namedLocalChanges ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onLeavePlanningChanges()}
+              disabled={!canConfirm || confirming}
+            >
+              不带这些改动，照样确认
+            </Button>
+          ) : null}
           <AlertDialog
             open={confirmDocs}
             onOpenChange={(open) => {

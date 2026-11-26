@@ -335,8 +335,7 @@ export function buildPlanningPatch(
   }
 }
 
-// Import still records filenames on these paths (T-179 switches it to listPlanningChanges). Confirm no longer
-// uses this for the patch.
+// Confirm no longer uses this for the patch; import records listPlanningChanges instead.
 function planningDocPaths(dir: string, revisions: string[]): string[] {
   const maps = readGlossaryMaps(dir, revisions);
   if (maps.length === 0) return PLANNING_DOC_PATHS;

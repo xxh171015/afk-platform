@@ -600,6 +600,22 @@ describe("the e2e before the pull requests", () => {
     expect(lines.join("\n")).toContain("[unverified] it downloads");
   });
 
+  it("names files left behind at confirm in the planning-docs line", () => {
+    const text = acceptancePackText({
+      mergeOrder: { ordered: [], after: {}, unordered: [] },
+      orderBroken: [],
+      repos: [],
+      cancelledTickets: [],
+      planningDocs: {
+        repo: "backend",
+        state: "waived",
+        leftOut: ["docs/design.md", "GLOSSARY.md"],
+      },
+    } as never);
+    expect(text).toContain("规划改动未带上：docs/design.md、GLOSSARY.md");
+    expect(text).not.toContain("did not apply");
+  });
+
   it("puts 合并前要你定的 first in the pack", () => {
     const text = acceptancePackText({
       mergeOrder: { ordered: [], after: {}, unordered: [] },

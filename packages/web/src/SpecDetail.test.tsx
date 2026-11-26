@@ -1631,6 +1631,68 @@ describe("confirming the split", () => {
     expect(screen.getByRole("button", { name: "确认拆分" })).toBeTruthy();
   });
 
+  it("lists the imported local-change files when confirm is refused with 409", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({ json: view() }),
+      "POST /specs/1/confirm": () => ({
+        status: 409,
+        json: {
+          error:
+            "导入时记下有这些本地改动：docs/design.md、GLOSSARY.md。去规划仓库里运行 plat spec confirm 带上它们，或使用 --leave-planning-changes 明确不带上",
+        },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    fireEvent.click(await screen.findByRole("button", { name: "确认拆分" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("docs/design.md");
+    expect(alert.textContent).toContain("GLOSSARY.md");
+    expect(screen.getByRole("button", { name: "确认拆分" })).toBeTruthy();
+  });
+
+  it("offers 不带这些改动，照样确认 next to confirm and sends leavePlanningChanges", async () => {
+    const bodies: unknown[] = [];
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            prechecks: [
+              {
+                code: "page-confirm-without-planning-docs",
+                level: "yellow",
+                message:
+                  "页面确认时不会带上这些规划文档改动：GLOSSARY.md。要带上，在规划仓库里运行 plat spec confirm S-1",
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/confirm": ({ body }) => {
+        bodies.push(body);
+        return {
+          json: {
+            state: "running",
+            integrationBranches: [],
+            enqueued: [],
+          },
+        };
+      },
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    const leave = await screen.findByRole("button", {
+      name: "不带这些改动，照样确认",
+    });
+    fireEvent.click(leave);
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /specs/1/confirm"),
+    );
+    expect(bodies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ leavePlanningChanges: true }),
+      ]),
+    );
+  });
+
   it("asks before page confirm when it would drop planning docs", async () => {
     const server = fakeServer({
       "GET /specs/1": () => ({
@@ -1662,6 +1724,45 @@ describe("confirming the split", () => {
     expect(dialog.textContent).toContain(
       "不会带上这些规划文档改动：GLOSSARY.md",
     );
+    fireEvent.click(within(dialog).getByRole("button", { name: "仍然确认" }));
+    await waitFor(() =>
+      expect(server.calls).toContain("POST /specs/1/confirm"),
+    );
+  });
+
+  it("keeps the yellow planning-docs precheck without a leave-behind button when import did not name files", async () => {
+    const server = fakeServer({
+      "GET /specs/1": () => ({
+        json: view({
+          spec: {
+            prechecks: [
+              {
+                code: "page-confirm-without-planning-docs",
+                level: "yellow",
+                message:
+                  "页面确认时不会带上本地的规划文档改动；要带上，在规划仓库里运行 plat spec confirm",
+              },
+            ],
+          },
+        }),
+      }),
+      "POST /specs/1/confirm": () => ({
+        json: {
+          state: "running",
+          integrationBranches: [],
+          enqueued: [],
+        },
+      }),
+    });
+    renderWithApp(<SpecDetail specId={1} />, server);
+    expect(
+      await screen.findByText(/页面确认时不会带上本地的规划文档改动/),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "不带这些改动，照样确认" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "确认拆分" }));
+    const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "仍然确认" }));
     await waitFor(() =>
       expect(server.calls).toContain("POST /specs/1/confirm"),

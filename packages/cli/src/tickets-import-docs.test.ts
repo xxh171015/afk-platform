@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -155,6 +155,80 @@ describe("plat tickets import planning-doc filenames", () => {
           planningDocsAtImport: {
             status: "changed",
             files: ["GLOSSARY.md"],
+          },
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses origin matching to record the confirm list when the spec has no planning repo yet", async () => {
+    const previous = server.listeners("request");
+    server.removeAllListeners("request");
+    server.on("request", (req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.method === "GET" && req.url === "/specs/1") {
+        res.statusCode = 200;
+        res.end(
+          JSON.stringify({
+            spec: {
+              id: 1,
+              projectId: 3,
+              planning: {
+                repo: null,
+                state: null,
+                sha: null,
+                conflict: [],
+              },
+              prechecks: [],
+            },
+            tickets: [],
+          }),
+        );
+        return;
+      }
+      for (const listener of previous) {
+        listener.call(server, req, res);
+      }
+    });
+    const dir = planningCheckout();
+    mkdirSync(join(dir, "docs"), { recursive: true });
+    writeFileSync(join(dir, "docs/design.md"), "# design\n");
+    try {
+      const code = await run(
+        ["--api-url", url, "tickets", "import", "S-1", "tickets"],
+        importIo(dir),
+      );
+      expect(code).toBe(0);
+      expect(imported).toEqual([
+        expect.objectContaining({
+          planningDocsAtImport: {
+            status: "changed",
+            files: ["docs/design.md"],
+          },
+        }),
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("records files on the confirm list that were outside the old fixed paths, such as docs/design.md", async () => {
+    const dir = planningCheckout();
+    mkdirSync(join(dir, "docs"), { recursive: true });
+    writeFileSync(join(dir, "docs/design.md"), "# design\n");
+    try {
+      const code = await run(
+        ["--api-url", url, "tickets", "import", "S-1", "tickets"],
+        importIo(dir),
+      );
+      expect(code).toBe(0);
+      expect(imported).toEqual([
+        expect.objectContaining({
+          planningDocsAtImport: {
+            status: "changed",
+            files: ["docs/design.md"],
           },
         }),
       ]);

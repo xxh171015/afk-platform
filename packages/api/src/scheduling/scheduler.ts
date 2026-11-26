@@ -5,6 +5,7 @@ import {
   type IncomingEdge,
   isRunnable,
   MAX_PLANNING_PATCH_BYTES,
+  type PlanningDocsAtImport,
   type PlanningState,
   resolveLimits,
   SCHEDULABLE_SPEC_STATES,
@@ -128,10 +129,12 @@ export async function confirmSpec(
   planning?: ConfirmPlanning,
   refPins?: { repoId: number; sha: string }[],
   planningRepoName?: string,
+  leavePlanningChanges = false,
 ): Promise<ConfirmResult> {
   return inTransaction(pool, async (client) => {
     const spec = await client.query(
-      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, s.project_id, s.refs, r.name AS planning_repo
+      `SELECT s.slug, s.state, s.branch_namespace, s.planning_repo_id, s.project_id, s.refs,
+              s.planning_docs_at_import, r.name AS planning_repo
        FROM specs s LEFT JOIN repos r ON r.id = s.planning_repo_id WHERE s.id = $1 FOR UPDATE OF s`,
       [specId],
     );
@@ -144,6 +147,7 @@ export async function confirmSpec(
       planning_repo,
       project_id,
       refs: storedRefs,
+      planning_docs_at_import,
     } = spec.rows[0] as {
       slug: string;
       state: SpecState;
@@ -152,6 +156,7 @@ export async function confirmSpec(
       planning_repo: string | null;
       project_id: number;
       refs: SpecRefPin[];
+      planning_docs_at_import: PlanningDocsAtImport;
     };
     let planningRepoId = planning_repo_id;
     let planningRepo = planning_repo;
@@ -202,6 +207,17 @@ export async function confirmSpec(
       return {
         status: "not-confirmable",
         message: `${formatDisplayId("spec", specId)} has no tickets to run`,
+      };
+    }
+    if (
+      planning === undefined &&
+      !leavePlanningChanges &&
+      planning_docs_at_import?.status === "changed"
+    ) {
+      const files = planning_docs_at_import.files.join("、");
+      return {
+        status: "not-confirmable",
+        message: `导入时记下有这些本地改动：${files}。去规划仓库里运行 plat spec confirm 带上它们，或使用 --leave-planning-changes 明确不带上`,
       };
     }
     const specRefs = storedRefs ?? [];
@@ -284,18 +300,25 @@ export async function confirmSpec(
       repoId,
       branch,
     }));
+    const leaveBehind =
+      leavePlanningChanges && planning_docs_at_import?.status === "changed";
+    const atImport = leaveBehind
+      ? { ...planning_docs_at_import, leftBehind: true }
+      : planning_docs_at_import;
     await client.query(
-      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4, refs = $5::jsonb, planning_repo_id = $6 WHERE id = $1",
+      "UPDATE specs SET state = $2, integration_branches = $3, planning_patch = $4, refs = $5::jsonb, planning_repo_id = $6, planning_docs_at_import = $7::jsonb WHERE id = $1",
       [
         specId,
         running.state,
         JSON.stringify(storedBranches),
-        planning?.patch ? planning.patch : null,
+        leaveBehind ? null : planning?.patch ? planning.patch : null,
         JSON.stringify(pinnedRefs),
         planningRepoId,
+        JSON.stringify(atImport),
       ],
     );
-    if (planningRepoId !== null) await enqueuePlanningCommit(client, specId);
+    if (planningRepoId !== null)
+      await enqueuePlanningCommit(client, specId, { waived: leaveBehind });
     await recordAction(client, "confirm", { specId });
     const scheduled = await schedulePass(client, specId);
     if (!scheduled.paused) await enqueueHostSync(client, project_id);

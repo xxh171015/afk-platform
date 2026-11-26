@@ -620,6 +620,8 @@ const ConfirmBody = z
       .optional(),
     // the checkout's repo when the spec has no planning repo yet (origin fallback)
     planningRepo: Text.optional(),
+    // page / outside-repo confirm: leave the files import recorded and note them as not sent
+    leavePlanningChanges: z.boolean().optional(),
     refPins: z
       .array(z.object({ repoId: Id, sha: Sha }).strict())
       .max(200)
@@ -1138,6 +1140,7 @@ export function registerPlanningRoutes(
     let body: {
       planningPatch?: string;
       planningRepo?: string;
+      leavePlanningChanges?: boolean;
       refPins?: { repoId: number; sha: string }[];
     } = {};
     try {
@@ -1150,7 +1153,14 @@ export function registerPlanningRoutes(
         ? undefined
         : { patch: body.planningPatch };
     const result = await aroundSpec(context, specId, () =>
-      confirmSpec(pool, specId, planning, body.refPins, body.planningRepo),
+      confirmSpec(
+        pool,
+        specId,
+        planning,
+        body.refPins,
+        body.planningRepo,
+        body.leavePlanningChanges === true,
+      ),
     );
     if (result.status === "no-spec")
       return c.json({ error: "no such spec" }, 404);
