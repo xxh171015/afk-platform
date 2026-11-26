@@ -116,7 +116,7 @@ export async function runWorker(
     );
     return next;
   };
-  const loop = async () => {
+  const loop = async (slotless = false) => {
     let lastDiskLevel: DiskLevel | undefined;
     while (!options.signal?.aborted && !options.drain?.aborted) {
       let job: ClaimedJob | null;
@@ -147,7 +147,7 @@ export async function runWorker(
             continue;
           }
         }
-        takeSlot = await decideTakeSlot();
+        takeSlot = slotless ? false : await decideTakeSlot();
         heldReservation = takeSlot && options.executor.slots?.idleCount != null;
         job = await claim(takeSlot);
       } catch (error) {
@@ -169,7 +169,11 @@ export async function runWorker(
       if (heldReservation && occupiesSlot(job.type)) reserved -= 1;
     }
   };
-  await Promise.all(Array.from({ length: options.concurrency ?? 1 }, loop));
+  // One extra loop only claims slotless jobs, so host-sync still runs when every slot is busy.
+  await Promise.all([
+    ...Array.from({ length: options.concurrency ?? 1 }, () => loop()),
+    loop(true),
+  ]);
   return { jobs };
 }
 
