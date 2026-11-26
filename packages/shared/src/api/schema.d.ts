@@ -7171,6 +7171,307 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/pull-requests/{id}/review-comments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Review comments on this pull request, including drafts pinned to the revision they were written on */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              comments: {
+                id: number;
+                displayId: string;
+                specId: number;
+                pullRequestId: number;
+                revisionId: number;
+                path: string | null;
+                /** @enum {string|null} */
+                side: "old" | "new" | null;
+                lineStart: number | null;
+                lineEnd: number | null;
+                excerpt: string | null;
+                body: string;
+                /** @enum {string} */
+                state: "draft" | "submitted" | "addressed" | "declined";
+                changeRequestId: number | null;
+                reply: string | null;
+                reworkRunId: number | null;
+                writtenOn: string;
+                createdAt: string;
+                updatedAt: string;
+              }[];
+            };
+          };
+        };
+        /** @description No such pull request */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            revisionId: number;
+            path?: string | null;
+            /** @enum {string|null} */
+            side?: "old" | "new" | null;
+            lineStart?: number | null;
+            lineEnd?: number | null;
+            excerpt?: string | null;
+            body: string;
+          };
+        };
+      };
+      responses: {
+        /** @description The draft Review comment */
+        201: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              displayId: string;
+              specId: number;
+              pullRequestId: number;
+              revisionId: number;
+              path: string | null;
+              /** @enum {string|null} */
+              side: "old" | "new" | null;
+              lineStart: number | null;
+              lineEnd: number | null;
+              excerpt: string | null;
+              body: string;
+              /** @enum {string} */
+              state: "draft" | "submitted" | "addressed" | "declined";
+              changeRequestId: number | null;
+              reply: string | null;
+              reworkRunId: number | null;
+              writtenOn: string;
+              createdAt: string;
+              updatedAt: string;
+            };
+          };
+        };
+        /** @description The body is empty or longer than 4000 characters */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description No such pull request or Review revision */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not awaiting review */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/review-comments/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The draft was deleted */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+            };
+          };
+        };
+        /** @description No such Review comment */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not awaiting review, or the comment is not a draft */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    options?: never;
+    head?: never;
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          "application/json": {
+            body: string;
+          };
+        };
+      };
+      responses: {
+        /** @description The updated draft */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              id: number;
+              displayId: string;
+              specId: number;
+              pullRequestId: number;
+              revisionId: number;
+              path: string | null;
+              /** @enum {string|null} */
+              side: "old" | "new" | null;
+              lineStart: number | null;
+              lineEnd: number | null;
+              excerpt: string | null;
+              body: string;
+              /** @enum {string} */
+              state: "draft" | "submitted" | "addressed" | "declined";
+              changeRequestId: number | null;
+              reply: string | null;
+              reworkRunId: number | null;
+              writtenOn: string;
+              createdAt: string;
+              updatedAt: string;
+            };
+          };
+        };
+        /** @description The body is empty or longer than 4000 characters */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description No such Review comment */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+        /** @description The spec is not awaiting review, or the comment is not a draft */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    trace?: never;
+  };
   "/links": {
     parameters: {
       query?: never;

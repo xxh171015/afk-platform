@@ -62,12 +62,73 @@ function isHiddenHunk(
   return !hunkTickets(meta.owners).includes(highlightTicket);
 }
 
+export type DiffLineNumbers = {
+  text: string;
+  kind: "add" | "del" | "ctx";
+  oldNo: number | null;
+  newNo: number | null;
+  excerpt: string;
+};
+
+export function numberedDiffLines(hunk: {
+  oldStart: number;
+  newStart: number;
+  lines: string[];
+}): DiffLineNumbers[] {
+  let oldNo = hunk.oldStart;
+  let newNo = hunk.newStart;
+  return hunk.lines.map((text) => {
+    const kind: DiffLineNumbers["kind"] =
+      text.startsWith("+") && !text.startsWith("+++")
+        ? "add"
+        : text.startsWith("-") && !text.startsWith("---")
+          ? "del"
+          : "ctx";
+    const excerpt = text.length > 0 ? text.slice(1) : "";
+    if (kind === "add") {
+      const row = { text, kind, oldNo: null, newNo, excerpt };
+      newNo += 1;
+      return row;
+    }
+    if (kind === "del") {
+      const row = { text, kind, oldNo, newNo: null, excerpt };
+      oldNo += 1;
+      return row;
+    }
+    const row = { text, kind, oldNo, newNo, excerpt };
+    oldNo += 1;
+    newNo += 1;
+    return row;
+  });
+}
+
+export function firstCommentLine(
+  patch: string | null,
+  hunkIndex: number,
+): { side: "old" | "new"; line: number; excerpt: string } | null {
+  const hunk = parsedHunks(patch)[hunkIndex];
+  if (!hunk) return null;
+  const rows = numberedDiffLines(hunk);
+  const added = rows.find((row) => row.kind === "add" && row.newNo != null);
+  if (added?.newNo != null)
+    return { side: "new", line: added.newNo, excerpt: added.excerpt };
+  const anyNew = rows.find((row) => row.newNo != null);
+  if (anyNew?.newNo != null)
+    return { side: "new", line: anyNew.newNo, excerpt: anyNew.excerpt };
+  const anyOld = rows.find((row) => row.oldNo != null);
+  if (anyOld?.oldNo != null)
+    return { side: "old", line: anyOld.oldNo, excerpt: anyOld.excerpt };
+  return null;
+}
+
 export function ReviewDiff({
   file,
   patch,
   highlightTicket,
   hostUrl,
   hunkIndex,
+  canComment,
+  onCommentLine,
   onLoadContext,
 }: {
   file: ReviewFileView;
@@ -75,6 +136,12 @@ export function ReviewDiff({
   highlightTicket: string | null;
   hostUrl: string;
   hunkIndex: number;
+  canComment?: boolean;
+  onCommentLine?: (input: {
+    side: "old" | "new";
+    line: number;
+    excerpt: string;
+  }) => void;
   onLoadContext: (input: {
     sha: string;
     from: number;
@@ -255,15 +322,36 @@ export function ReviewDiff({
         </header>
         {keyedLines(`a-${span.start}`, extraHunk?.above ?? []).map(
           ({ key, line }) => (
-            <DiffLine key={key} text={` ${line}`} oldNo={null} newNo={null} />
+            <DiffLine
+              key={key}
+              path={file.path}
+              text={` ${line}`}
+              oldNo={null}
+              newNo={null}
+            />
           ),
         )}
-        {keyedLines(`${hunk.newStart}`, hunk.lines).map(({ key, line }) => (
-          <DiffLine key={key} text={line} oldNo={null} newNo={null} />
+        {numberedDiffLines(hunk).map((row) => (
+          <DiffLine
+            key={`${row.oldNo ?? "o"}:${row.newNo ?? "n"}:${row.text}`}
+            path={file.path}
+            text={row.text}
+            oldNo={row.oldNo}
+            newNo={row.newNo}
+            excerpt={row.excerpt}
+            canComment={canComment}
+            onCommentLine={onCommentLine}
+          />
         ))}
         {keyedLines(`b-${span.end}`, extraHunk?.below ?? []).map(
           ({ key, line }) => (
-            <DiffLine key={key} text={` ${line}`} oldNo={null} newNo={null} />
+            <DiffLine
+              key={key}
+              path={file.path}
+              text={` ${line}`}
+              oldNo={null}
+              newNo={null}
+            />
           ),
         )}
       </section>,
@@ -285,14 +373,65 @@ function keyedLines(prefix: string, lines: string[]) {
   });
 }
 
+function LineNo({
+  path,
+  side,
+  n,
+  excerpt,
+  canComment,
+  onCommentLine,
+}: {
+  path: string;
+  side: "old" | "new";
+  n: number | null;
+  excerpt: string;
+  canComment?: boolean;
+  onCommentLine?: (input: {
+    side: "old" | "new";
+    line: number;
+    excerpt: string;
+  }) => void;
+}) {
+  if (n == null) {
+    return <span className="w-8 shrink-0 text-right text-subtle-foreground" />;
+  }
+  if (canComment && onCommentLine) {
+    return (
+      <button
+        type="button"
+        aria-label={`写意见 ${path} ${side === "new" ? "新侧" : "旧侧"}第 ${n} 行`}
+        className="w-8 shrink-0 text-right text-subtle-foreground hover:text-primary hover:underline"
+        onClick={() => onCommentLine({ side, line: n, excerpt })}
+      >
+        {n}
+      </button>
+    );
+  }
+  return (
+    <span className="w-8 shrink-0 text-right text-subtle-foreground">{n}</span>
+  );
+}
+
 function DiffLine({
+  path,
   text,
   oldNo,
   newNo,
+  excerpt,
+  canComment,
+  onCommentLine,
 }: {
+  path: string;
   text: string;
   oldNo: number | null;
   newNo: number | null;
+  excerpt?: string;
+  canComment?: boolean;
+  onCommentLine?: (input: {
+    side: "old" | "new";
+    line: number;
+    excerpt: string;
+  }) => void;
 }) {
   const kind =
     text.startsWith("+") && !text.startsWith("+++")
@@ -301,6 +440,7 @@ function DiffLine({
         ? "del"
         : "ctx";
   const body = text.length > 0 ? text.slice(1) : "";
+  const lineExcerpt = excerpt ?? body;
   return (
     <div
       className={cn(
@@ -309,12 +449,22 @@ function DiffLine({
         kind === "del" && "bg-state-blocked/12",
       )}
     >
-      <span className="w-8 shrink-0 text-right text-subtle-foreground">
-        {oldNo ?? ""}
-      </span>
-      <span className="w-8 shrink-0 text-right text-subtle-foreground">
-        {newNo ?? ""}
-      </span>
+      <LineNo
+        path={path}
+        side="old"
+        n={oldNo}
+        excerpt={lineExcerpt}
+        canComment={canComment}
+        onCommentLine={onCommentLine}
+      />
+      <LineNo
+        path={path}
+        side="new"
+        n={newNo}
+        excerpt={lineExcerpt}
+        canComment={canComment}
+        onCommentLine={onCommentLine}
+      />
       <span>
         {kind === "add" ? "+" : kind === "del" ? "-" : " "}
         {body}

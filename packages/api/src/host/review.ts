@@ -188,6 +188,7 @@ export async function specReviewOf(
     deletions: number | null;
     error: string | null;
     viewed_count: string | null;
+    comment_count: string | null;
   }>(
     `SELECT p.id, r.name AS repo, p.number, p.url, p.state, p.draft, p.ci, p.review,
             p.head_sha, p.conflicts_with_default, p.human_comments,
@@ -198,7 +199,11 @@ export async function specReviewOf(
               JOIN review_file_views v
                 ON v.pull_request_id = p.id AND v.path = f.path AND v.new_blob = f.new_blob
               WHERE f.revision_id = rev.id
-            ) AS viewed_count
+            ) AS viewed_count,
+            (
+              SELECT count(*)::text FROM review_comments c
+              WHERE c.revision_id = rev.id
+            ) AS comment_count
      FROM pull_requests p
      JOIN repos r ON r.id = p.repo_id
      LEFT JOIN review_revisions rev
@@ -261,7 +266,7 @@ export async function specReviewOf(
         additions: pull.additions ?? 0,
         deletions: pull.deletions ?? 0,
         viewedCount: Number(pull.viewed_count ?? 0),
-        commentCount: 0,
+        commentCount: Number(pull.comment_count ?? 0),
         error: pull.error,
       },
     })),

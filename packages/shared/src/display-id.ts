@@ -1,6 +1,6 @@
-// Display ids are the prefix plus the serial primary key (S-12, T-123, R-456); they are not stored.
-// docs/specs/m1-platform.md「数据模型」.
-const PREFIXES = { spec: "S", ticket: "T", run: "R" } as const;
+// Display ids are the prefix plus the serial primary key (S-12, T-123, R-456, C-7); they are not stored.
+// docs/specs/m1-platform.md「数据模型」; C-n is a Review comment (GLOSSARY).
+const PREFIXES = { spec: "S", ticket: "T", run: "R", comment: "C" } as const;
 export type DisplayIdKind = keyof typeof PREFIXES;
 export interface DisplayId {
   kind: DisplayIdKind;

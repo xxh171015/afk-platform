@@ -65,10 +65,17 @@ export function fileMatches(
   file: ReviewFileView,
   query: ReviewQuery,
   sinceChanged: ReadonlySet<number>,
+  commentFlags: {
+    commented: ReadonlySet<string>;
+    drafts: ReadonlySet<string>;
+  } = {
+    commented: new Set(),
+    drafts: new Set(),
+  },
 ): boolean {
   if (query.unviewed && file.viewed) return false;
-  if (query.commented) return false;
-  if (query.drafts) return false;
+  if (query.commented && !commentFlags.commented.has(file.path)) return false;
+  if (query.drafts && !commentFlags.drafts.has(file.path)) return false;
   if (query.since && !sinceChanged.has(file.id)) return false;
   if (query.added && file.status !== "added") return false;
   if (query.deleted && file.status !== "deleted") return false;

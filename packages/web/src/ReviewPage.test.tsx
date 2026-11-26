@@ -102,6 +102,7 @@ function specReview(over: Record<string, unknown> = {}) {
       title: "Order export",
       type: "feature",
       state: "awaiting-review",
+      ...(over.spec as object | undefined),
     },
     userStories: [
       { number: 1, text: "As a merchant, I want to export orders." },
@@ -434,15 +435,41 @@ function patches(): Record<string, Handler> {
   };
 }
 
+function aComment(over: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    displayId: "C-1",
+    specId: 1,
+    pullRequestId: 7,
+    revisionId: 3,
+    path: "src/a.ts",
+    side: "new" as const,
+    lineStart: 1,
+    lineEnd: 1,
+    excerpt: "b",
+    body: "empty list should return 200",
+    state: "draft" as const,
+    changeRequestId: null,
+    reply: null,
+    reworkRunId: null,
+    writtenOn: SHA,
+    createdAt: "2026-11-20T00:00:00.000Z",
+    updatedAt: "2026-11-20T00:00:00.000Z",
+    ...over,
+  };
+}
+
 function reviewServer(
   over: {
     spec?: Record<string, unknown>;
     review?: Record<string, unknown>;
     revision?: Record<string, unknown>;
+    comments?: Record<string, unknown>[];
     routes?: Record<string, Handler>;
   } = {},
 ) {
   const revision = readyRevision(over.revision);
+  let comments = [...(over.comments ?? [])];
   return fakeServer({
     "GET /workbench": () => ({ json: emptyWorkbench }),
     "GET /search": () => ({ json: { specs: [], tickets: [] } }),
@@ -457,6 +484,31 @@ function reviewServer(
         };
       }
       return { json: { ...revision, headSha: head ?? SHA } };
+    },
+    "GET /pull-requests/7/review-comments": () => ({ json: { comments } }),
+    "POST /pull-requests/7/review-comments": ({ body }) => {
+      const input = body as Record<string, unknown>;
+      const created = aComment({
+        id: comments.length + 1,
+        displayId: `C-${comments.length + 1}`,
+        ...input,
+        state: "draft",
+        changeRequestId: null,
+        writtenOn: SHA,
+      });
+      comments = [...comments, created];
+      return { status: 201, json: created };
+    },
+    "PATCH /review-comments/1": ({ body }) => {
+      const input = body as { body: string };
+      comments = comments.map((row) =>
+        row.id === 1 ? { ...row, body: input.body } : row,
+      );
+      return { json: comments.find((row) => row.id === 1) };
+    },
+    "DELETE /review-comments/1": () => {
+      comments = comments.filter((row) => row.id !== 1);
+      return { json: { id: 1 } };
     },
     ...patches(),
     ...over.routes,
@@ -854,5 +906,113 @@ describe("the spec review page", () => {
     box.focus();
     fireEvent.keyDown(box, { key: "j" });
     expect(searchOf(router)).not.toMatch(/a\.test\.ts/);
+  });
+
+  it("posts a line draft from a line number and lists it as C-n", async () => {
+    const server = reviewServer();
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    await screen.findByText("+b");
+    fireEvent.click(
+      screen.getByRole("button", { name: "写意见 src/a.ts 新侧第 1 行" }),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "人审意见" }), {
+      target: { value: "empty list should return 200" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    expect(await screen.findByText("C-1")).toBeTruthy();
+    expect(screen.getByText("empty list should return 200")).toBeTruthy();
+    expect(
+      server.calls.some((call) =>
+        call.startsWith("POST /pull-requests/7/review-comments"),
+      ),
+    ).toBe(true);
+  });
+
+  it("posts a file draft and a PR draft", async () => {
+    const server = reviewServer();
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    await screen.findByText("+b");
+    fireEvent.click(
+      screen.getByRole("button", { name: "写文件意见 src/a.ts" }),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "人审意见" }), {
+      target: { value: "rename this function" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    expect(await screen.findByText("C-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "写 PR 意见" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "人审意见" }), {
+      target: { value: "migrations must be safe to re-run" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    expect(await screen.findByText("C-2")).toBeTruthy();
+    expect(
+      server.calls.filter((call) =>
+        call.startsWith("POST /pull-requests/7/review-comments"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("opens compose on the current line from c, then edits and deletes the draft", async () => {
+    const server = reviewServer();
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    await screen.findByText("+b");
+    fireEvent.keyDown(window, { key: "c" });
+    fireEvent.change(screen.getByRole("textbox", { name: "人审意见" }), {
+      target: { value: "first wording" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    expect(await screen.findByText("C-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "编辑 C-1" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "人审意见" }), {
+      target: { value: "second wording" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    expect(await screen.findByText("second wording")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "删除 C-1" }));
+    await waitFor(() => expect(screen.queryByText("C-1")).toBeNull());
+    expect(
+      server.calls.some((call) => call === "PATCH /review-comments/1"),
+    ).toBe(true);
+    expect(
+      server.calls.some((call) => call === "DELETE /review-comments/1"),
+    ).toBe(true);
+  });
+
+  it("shows the draft count on 提交修改要求 and does not submit a Change request", async () => {
+    const server = reviewServer({
+      comments: [aComment(), aComment({ id: 2, displayId: "C-2" })],
+    });
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    expect(
+      await screen.findByRole("button", { name: "提交修改要求（2）" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "提交修改要求（2）" }));
+    expect(server.calls.some((call) => call.includes("/change-requests"))).toBe(
+      false,
+    );
+  });
+
+  it("marks a comment written on an older revision and is read-only off awaiting-review", async () => {
+    const oldSha = SHA2;
+    renderApp(
+      reviewServer({
+        review: { spec: { state: "finalizing" } },
+        comments: [
+          aComment({
+            writtenOn: oldSha,
+            state: "submitted",
+            body: "from last look",
+          }),
+        ],
+      }),
+      "/specs/1/review?view=all&file=src/a.ts",
+    );
+    expect(await screen.findByText("C-1")).toBeTruthy();
+    expect(
+      screen.getByText(new RegExp(`写于 ${oldSha.slice(0, 7)}`)),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "写 PR 意见" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "人审意见" })).toBeNull();
   });
 });

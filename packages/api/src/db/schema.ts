@@ -15,6 +15,8 @@ import {
   LOCATE_STATES,
   PARALLEL_REVIEW_STATES,
   PAUSE_REASONS,
+  REVIEW_COMMENT_SIDES,
+  REVIEW_COMMENT_STATES,
   REVIEW_FILE_STATUSES,
   REVIEW_PATCH_OMITTED_REASONS,
   REVIEW_REVISION_STATES,
@@ -44,7 +46,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-// Display ids (S-12, T-123, R-456) are the prefix plus the serial id; they are not stored.
+// Display ids (S-12, T-123, R-456, C-7) are the prefix plus the serial id; they are not stored.
 // Field lists follow docs/design.md「领域模型与状态机」and docs/specs/m1-platform.md「数据模型」.
 
 // CHECK constraint helper. The vocabularies come from @afk/shared so the database and zod cannot drift apart.
@@ -690,6 +692,59 @@ export const reviewFileViews = pgTable(
   (t) => [
     primaryKey({ columns: [t.pullRequestId, t.path] }),
     check("review_file_views_blob_check", sql`${t.newBlob} ~ '^[0-9a-f]{40}$'`),
+  ],
+);
+
+// A Review comment: a person's note on one Review revision (GLOSSARY Review comment). Not a Finding.
+// change_request_id is filled when a Change request is submitted (#374); drafts leave it null.
+export const reviewComments = pgTable(
+  "review_comments",
+  {
+    id: serial("id").primaryKey(),
+    specId: integer("spec_id")
+      .notNull()
+      .references(() => specs.id),
+    pullRequestId: integer("pull_request_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => reviewRevisions.id),
+    path: text("path"),
+    side: text("side"),
+    lineStart: integer("line_start"),
+    lineEnd: integer("line_end"),
+    excerpt: text("excerpt"),
+    body: text("body").notNull(),
+    state: text("state").notNull().default("draft"),
+    changeRequestId: integer("change_request_id"),
+    reply: text("reply"),
+    reworkRunId: integer("rework_run_id").references(() => runs.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("review_comments_pull_idx").on(t.pullRequestId),
+    index("review_comments_spec_state_idx").on(t.specId, t.state),
+    check("review_comments_state_check", oneOf(t.state, REVIEW_COMMENT_STATES)),
+    check(
+      "review_comments_side_check",
+      sql`${t.side} is null or ${oneOf(t.side, REVIEW_COMMENT_SIDES)}`,
+    ),
+    check(
+      "review_comments_body_check",
+      sql`char_length(${t.body}) between 1 and 4000`,
+    ),
+    check(
+      "review_comments_pr_anchor_check",
+      sql`${t.path} is not null or (${t.side} is null and ${t.lineStart} is null and ${t.lineEnd} is null)`,
+    ),
+    check(
+      "review_comments_line_range_check",
+      sql`${t.lineEnd} is null or (${t.lineStart} is not null and ${t.lineEnd} >= ${t.lineStart})`,
+    ),
   ],
 );
 

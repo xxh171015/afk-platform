@@ -252,6 +252,15 @@ export {
   TICKET_REVIEW_MODES,
 } from "./review-axes.ts";
 export type {
+  ReviewCommentSide,
+  ReviewCommentState,
+} from "./review-comments.ts";
+export {
+  REVIEW_COMMENT_BODY_MAX,
+  REVIEW_COMMENT_SIDES,
+  REVIEW_COMMENT_STATES,
+} from "./review-comments.ts";
+export type {
   ReviewAttribution,
   ReviewBlob,
   ReviewFile,
