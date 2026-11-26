@@ -14,6 +14,7 @@ import { useResourcePoll } from "./EventsProvider.tsx";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
 import { ReviewDiff } from "./ReviewDiff.tsx";
+import { ReviewGuide } from "./ReviewGuide.tsx";
 import { ReviewRail } from "./ReviewRail.tsx";
 import {
   defaultFileOpen,
@@ -40,6 +41,8 @@ type SpecReview =
   paths["/specs/{id}/review"]["get"]["responses"][200]["content"]["application/json"];
 type ReviewRevision =
   paths["/pull-requests/{id}/review-revision"]["get"]["responses"][200]["content"]["application/json"];
+type ReviewGuideView =
+  paths["/review-revisions/{id}/guide"]["get"]["responses"][200]["content"]["application/json"];
 
 const FILTERS: { flag: ReviewFlag; label: string }[] = [
   { flag: "unviewed", label: "未看" },
@@ -140,6 +143,19 @@ export function ReviewPage({ specId }: { specId: number }) {
 
   const ready = revision.data?.state === "ready" ? revision.data : null;
   const files = ready ? asFiles(ready.files) : [];
+  const guide = useQuery({
+    queryKey: ["review-guide", ready?.id],
+    enabled: view === "guide" && ready != null,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/review-revisions/{id}/guide", {
+        params: { path: { id: ready?.id as number } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
+  });
 
   const sinceQueries = useQueries({
     queries:
@@ -236,6 +252,9 @@ export function ReviewPage({ specId }: { specId: number }) {
       });
       void queryClient.invalidateQueries({
         queryKey: ["review-revision", pull?.id, pinnedHead],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["review-guide", ready?.id],
       });
     },
   });
@@ -557,7 +576,36 @@ export function ReviewPage({ specId }: { specId: number }) {
         </div>
         <div className="min-w-0 space-y-3">
           {view === "guide" ? (
-            <p className="note">导读还没有正文</p>
+            guide.isPending && !guide.data ? (
+              <p className="note">正在拼导读…</p>
+            ) : guide.isError && !guide.data ? (
+              <ErrorState
+                error={guide.error}
+                prefix="无法加载导读"
+                onRetry={() => void guide.refetch()}
+              />
+            ) : guide.data ? (
+              <ReviewGuide
+                specId={specId}
+                guide={guide.data as ReviewGuideView}
+                onJumpHunk={(hunk) => {
+                  const file = files.find((item) => item.path === hunk.path);
+                  const at =
+                    file?.hunks?.findIndex(
+                      (item) => item.newStart === hunk.newStart,
+                    ) ?? 0;
+                  setHighlightTicket(null);
+                  setHunkIndex(Math.max(at, 0));
+                  setSearch({
+                    ...search,
+                    file: hunk.path,
+                    view: "all",
+                  });
+                }}
+              />
+            ) : (
+              <p className="note">导读还没有正文</p>
+            )
           ) : view === "since" ? (
             <p className="note">
               与上次审查版本对照；若中间合过默认分支，会含那些改动。

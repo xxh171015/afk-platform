@@ -1,10 +1,12 @@
 import {
+  DECISION_KINDS,
   HOST_KINDS,
   MERGE_POLICIES,
   REVIEW_AXES,
   REVIEW_FILE_STATUSES,
   REVIEW_PATCH_OMITTED_REASONS,
   REVIEW_REVISION_STATES,
+  RULING_VERDICTS,
   SPEC_STATES,
 } from "@afk/shared";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
@@ -18,6 +20,7 @@ import {
   reviewRevisionOf,
   specReviewOf,
 } from "../host/review.ts";
+import { reviewGuideOf } from "../host/review-guide.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { reviewQueue } from "../tickets/review-queue.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
@@ -327,6 +330,126 @@ const putViewedRoute = createRoute({
   },
 });
 
+const GuideHunk = z.object({
+  fileId: Id,
+  path: z.string(),
+  newStart: Id,
+  newLines: Id,
+  oldStart: Id,
+  oldLines: Id,
+  lines: Id,
+});
+
+const GuideSummary = z.object({
+  run: z.string(),
+  stage: z.string(),
+  summary: z.string(),
+});
+
+const GuideUserStory = z.object({ number: Id, text: z.string() });
+
+const ReviewGuide = z.object({
+  revisionId: Id,
+  unattributedCount: Id,
+  spec: z.object({
+    id: Id,
+    displayId: z.string(),
+    title: z.string(),
+    type: z.string(),
+    userStories: z.array(GuideUserStory),
+    sourceSpec: z
+      .object({
+        id: Id,
+        displayId: z.string(),
+        title: z.string(),
+      })
+      .nullable(),
+  }),
+  tickets: z.array(
+    z.object({
+      id: Id,
+      displayId: z.string(),
+      title: z.string(),
+      appended: z.boolean(),
+      stories: z.array(GuideUserStory),
+      criteria: z.array(
+        z.object({
+          text: z.string(),
+          tests: z.array(z.string()),
+          status: z.enum(["verified", "unverified"]),
+          reason: z.string().nullable(),
+        }),
+      ),
+      summaries: z.array(GuideSummary),
+      decisions: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(DECISION_KINDS),
+          text: z.string(),
+          ref: z.string().optional(),
+          run: z.string(),
+          stage: z.string(),
+        }),
+      ),
+      rulings: z.array(
+        z.object({
+          id: z.string(),
+          verdict: z.enum(RULING_VERDICTS),
+        }),
+      ),
+      hunks: z.array(GuideHunk),
+      viewed: z.boolean(),
+    }),
+  ),
+  otherRepoTickets: z.array(
+    z.object({
+      displayId: z.string(),
+      title: z.string(),
+      repo: z.string(),
+      pullRequestId: Id.nullable(),
+    }),
+  ),
+  wrapUp: z.array(
+    z.object({
+      stage: z.enum(["final-fix", "final-tidy", "update-branch"]),
+      summaries: z.array(GuideSummary),
+      hunks: z.array(GuideHunk),
+      viewed: z.boolean(),
+    }),
+  ),
+  changeRequests: z.array(
+    z.object({
+      number: Id,
+      comments: z.array(z.object({ displayId: z.string(), body: z.string() })),
+      dispositions: z.array(
+        z.object({ displayId: z.string(), result: z.string() }),
+      ),
+      hunks: z.array(GuideHunk),
+    }),
+  ),
+  setup: z.array(GuideHunk),
+  planning: z.array(GuideHunk),
+  unattributed: z.array(
+    z.object({
+      path: z.string(),
+      hunks: z.array(GuideHunk),
+    }),
+  ),
+});
+
+const guideRoute = createRoute({
+  method: "get",
+  path: "/review-revisions/{id}/guide",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "The Review guide assembled for this Review revision",
+      ReviewGuide,
+    ),
+    404: reply("No such Review revision", ErrorReply),
+  },
+});
+
 const deleteViewedRoute = createRoute({
   method: "delete",
   path: "/pull-requests/{id}/viewed-files/{path}",
@@ -370,6 +493,13 @@ export function registerReviewRoutes(
       context.clock(),
     );
     return view ? c.json(view, 200) : c.json({ error: "no such spec" }, 404);
+  });
+
+  app.openapi(guideRoute, async (c) => {
+    const view = await reviewGuideOf(pool, c.req.valid("param").id);
+    return view
+      ? c.json(view, 200)
+      : c.json({ error: "no such review revision" }, 404);
   });
 
   app.openapi(revisionRoute, async (c) => {

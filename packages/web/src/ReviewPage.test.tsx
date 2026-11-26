@@ -334,6 +334,70 @@ function readyRevision(over: Record<string, unknown> = {}) {
   };
 }
 
+function aGuide(over: Record<string, unknown> = {}) {
+  return {
+    revisionId: 3,
+    unattributedCount: 0,
+    spec: {
+      id: 1,
+      displayId: "S-1",
+      title: "Order export",
+      type: "feature",
+      userStories: [
+        { number: 1, text: "As a merchant, I want to export orders." },
+      ],
+      sourceSpec: null,
+    },
+    tickets: [
+      {
+        id: 1,
+        displayId: "T-1",
+        title: "Export API",
+        appended: false,
+        stories: [
+          { number: 1, text: "As a merchant, I want to export orders." },
+        ],
+        criteria: [
+          {
+            text: "export works",
+            tests: ["export.test.ts"],
+            status: "unverified",
+            reason: "not in the JUnit report: export.test.ts",
+          },
+        ],
+        summaries: [
+          {
+            run: "R-10",
+            stage: "implement",
+            summary: "added the export endpoint",
+          },
+        ],
+        decisions: [],
+        rulings: [],
+        hunks: [
+          {
+            fileId: 11,
+            path: "src/a.ts",
+            newStart: 1,
+            newLines: 2,
+            oldStart: 1,
+            oldLines: 1,
+            lines: 2,
+          },
+        ],
+        viewed: false,
+      },
+    ],
+    otherRepoTickets: [],
+    wrapUp: [],
+    changeRequests: [],
+    setup: [],
+    planning: [],
+    unattributed: [],
+    ...over,
+  };
+}
+
 function patches(): Record<string, Handler> {
   return {
     "GET /review-files/11": ({ url }) => ({
@@ -384,6 +448,7 @@ function reviewServer(
     "GET /search": () => ({ json: { specs: [], tickets: [] } }),
     "GET /specs/1": () => ({ json: specView(over.spec) }),
     "GET /specs/1/review": () => ({ json: specReview(over.review) }),
+    "GET /review-revisions/3/guide": () => ({ json: aGuide() }),
     "GET /pull-requests/7/review-revision": ({ url }) => {
       const head = url.searchParams.get("head");
       if (head && head !== SHA && head !== (revision.headSha as string)) {
@@ -442,7 +507,11 @@ describe("the spec review page", () => {
     expect(
       await screen.findByRole("button", { name: "导读", pressed: true }),
     ).toBeTruthy();
-    expect(screen.getByText("导读还没有正文")).toBeTruthy();
+    expect(await screen.findByTestId("review-guide")).toBeTruthy();
+    expect(screen.getByText("需求在做什么")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: /T-1 Export API/ }),
+    ).toBeTruthy();
     expect(screen.getByText("已看 1/3")).toBeTruthy();
     expect(screen.getByText(SHA.slice(0, 7))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "全部变更" }));
@@ -450,6 +519,18 @@ describe("the spec review page", () => {
     expect((await screen.findAllByText("src/a.ts")).length).toBeGreaterThan(0);
     expect(screen.getByText("+b")).toBeTruthy();
     expect(screen.getByText(/已折叠/)).toBeTruthy();
+  });
+
+  it("jumps from a guide hunk into the all-changes view", async () => {
+    const { router } = renderApp(reviewServer(), "/specs/1/review");
+    await screen.findByTestId("review-guide");
+    fireEvent.click(screen.getByRole("button", { name: "跳到 src/a.ts +1,2" }));
+    await waitFor(() => expect(searchOf(router)).toMatch(/view=all/));
+    expect(searchOf(router)).toMatch(/file=src\/a.ts/);
+    expect(await screen.findByText("+b")).toBeTruthy();
+    expect(
+      document.querySelector("[data-hunk='0'][data-current='true']"),
+    ).toBeTruthy();
   });
 
   it("keeps filter tokens in q and still counts 已看 against every file", async () => {

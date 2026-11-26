@@ -618,6 +618,8 @@ export const reviewRevisions = pgTable(
     filesCount: integer("files_count").notNull().default(0),
     additions: integer("additions").notNull().default(0),
     deletions: integer("deletions").notNull().default(0),
+    // Assembled Review guide for this revision (GLOSSARY Review guide). Null until first GET.
+    guide: jsonb("guide"),
     createdAt: createdAt(),
     readyAt: timestamp("ready_at", { withTimezone: true }),
   },
