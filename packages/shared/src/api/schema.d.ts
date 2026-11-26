@@ -6706,6 +6706,198 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/review-revisions/{id}/guide": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description The Review guide assembled for this Review revision */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              revisionId: number;
+              unattributedCount: number;
+              spec: {
+                id: number;
+                displayId: string;
+                title: string;
+                type: string;
+                userStories: {
+                  number: number;
+                  text: string;
+                }[];
+                sourceSpec: {
+                  id: number;
+                  displayId: string;
+                  title: string;
+                } | null;
+              };
+              tickets: {
+                id: number;
+                displayId: string;
+                title: string;
+                appended: boolean;
+                stories: {
+                  number: number;
+                  text: string;
+                }[];
+                criteria: {
+                  text: string;
+                  tests: string[];
+                  /** @enum {string} */
+                  status: "verified" | "unverified";
+                  reason: string | null;
+                }[];
+                summaries: {
+                  run: string;
+                  stage: string;
+                  summary: string;
+                }[];
+                decisions: {
+                  id: string;
+                  /** @enum {string} */
+                  kind:
+                    | "choice"
+                    | "conflict"
+                    | "known-gap"
+                    | "deferred"
+                    | "workaround";
+                  text: string;
+                  ref?: string;
+                  run: string;
+                  stage: string;
+                }[];
+                rulings: {
+                  id: string;
+                  /** @enum {string} */
+                  verdict: "accepted" | "must-fix" | "needs-human";
+                }[];
+                hunks: {
+                  fileId: number;
+                  path: string;
+                  newStart: number;
+                  newLines: number;
+                  oldStart: number;
+                  oldLines: number;
+                  lines: number;
+                }[];
+                viewed: boolean;
+              }[];
+              otherRepoTickets: {
+                displayId: string;
+                title: string;
+                repo: string;
+                pullRequestId: number | null;
+              }[];
+              wrapUp: {
+                /** @enum {string} */
+                stage: "final-fix" | "final-tidy" | "update-branch";
+                summaries: {
+                  run: string;
+                  stage: string;
+                  summary: string;
+                }[];
+                hunks: {
+                  fileId: number;
+                  path: string;
+                  newStart: number;
+                  newLines: number;
+                  oldStart: number;
+                  oldLines: number;
+                  lines: number;
+                }[];
+                viewed: boolean;
+              }[];
+              changeRequests: {
+                number: number;
+                comments: {
+                  displayId: string;
+                  body: string;
+                }[];
+                dispositions: {
+                  displayId: string;
+                  result: string;
+                }[];
+                hunks: {
+                  fileId: number;
+                  path: string;
+                  newStart: number;
+                  newLines: number;
+                  oldStart: number;
+                  oldLines: number;
+                  lines: number;
+                }[];
+              }[];
+              setup: {
+                fileId: number;
+                path: string;
+                newStart: number;
+                newLines: number;
+                oldStart: number;
+                oldLines: number;
+                lines: number;
+              }[];
+              planning: {
+                fileId: number;
+                path: string;
+                newStart: number;
+                newLines: number;
+                oldStart: number;
+                oldLines: number;
+                lines: number;
+              }[];
+              unattributed: {
+                path: string;
+                hunks: {
+                  fileId: number;
+                  path: string;
+                  newStart: number;
+                  newLines: number;
+                  oldStart: number;
+                  oldLines: number;
+                  lines: number;
+                }[];
+              }[];
+            };
+          };
+        };
+        /** @description No such Review revision */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            "application/json": {
+              error: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/pull-requests/{id}/review-revision": {
     parameters: {
       query?: never;
