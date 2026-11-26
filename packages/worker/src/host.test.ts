@@ -169,6 +169,8 @@ describe("an auto-merge task", () => {
     expectedHeadSha: "sha-from-job",
     section: AUTO_MERGED_SECTION,
   };
+  const freshPr = (extra: Partial<PullRequestInfo> = {}) =>
+    info(7, { headSha: "sha-from-job", ...extra });
 
   it("replaces the marked merge-note, keeps what a person wrote outside, then merges at the job's head SHA", async () => {
     const calls: string[] = [];
@@ -177,7 +179,7 @@ describe("an auto-merge task", () => {
     const adapter: HostAdapter = {
       ...noCleanup,
       openPullRequest: async () => info(7),
-      getPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr(),
       getPullRequestBody: async () =>
         `Spec: S-1\n\n${wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE)}\n\nI added a note`,
       updatePullRequestBody: async ({ body }) => {
@@ -207,7 +209,7 @@ describe("an auto-merge task", () => {
     const adapter: HostAdapter = {
       ...noCleanup,
       openPullRequest: async () => info(7),
-      getPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr(),
       getPullRequestBody: async () =>
         wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
       updatePullRequestBody: async () => {},
@@ -228,7 +230,7 @@ describe("an auto-merge task", () => {
     const adapter: HostAdapter = {
       ...noCleanup,
       openPullRequest: async () => info(7),
-      getPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr(),
       getPullRequestBody: async () =>
         wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
       updatePullRequestBody: async () => {
@@ -255,7 +257,7 @@ describe("an auto-merge task", () => {
     const adapter: HostAdapter = {
       ...noCleanup,
       openPullRequest: async () => info(7),
-      getPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr(),
       getPullRequestBody: async () => original,
       updatePullRequestBody: async ({ body }) => {
         writes.push(body);
@@ -271,6 +273,171 @@ describe("an auto-merge task", () => {
       stage: "auto-merge",
       outcome: "failed",
       reason: "could not merge the pull request: TypeError: fetch failed",
+    });
+  });
+
+  it("fails without updating or merging when the pull request is no longer open", async () => {
+    const updates: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr({ state: "closed" }),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async ({ body }) => {
+        updates.push(body);
+      },
+      mergePullRequest: async (input) => {
+        merges.push(input);
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(updates).toEqual([]);
+    expect(merges).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "pull request is closed, not open",
+    });
+  });
+
+  it("fails without updating or merging when the pull request is a draft", async () => {
+    const updates: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr({ draft: true }),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async ({ body }) => {
+        updates.push(body);
+      },
+      mergePullRequest: async (input) => {
+        merges.push(input);
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(updates).toEqual([]);
+    expect(merges).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "pull request is a draft",
+    });
+  });
+
+  it("fails without updating or merging when the head SHA is not the job's expected SHA", async () => {
+    const updates: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr({ headSha: "sha-on-the-host" }),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async ({ body }) => {
+        updates.push(body);
+      },
+      mergePullRequest: async (input) => {
+        merges.push(input);
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(updates).toEqual([]);
+    expect(merges).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason:
+        "pull request head sha-on-the-host is not the expected sha-from-job",
+    });
+  });
+
+  it("fails without updating or merging when a person has commented", async () => {
+    const updates: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr({ humanComments: 1 }),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async ({ body }) => {
+        updates.push(body);
+      },
+      mergePullRequest: async (input) => {
+        merges.push(input);
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(updates).toEqual([]);
+    expect(merges).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "a person has commented on the pull request",
+    });
+  });
+
+  it("fails without updating or merging when review is changes-requested", async () => {
+    const updates: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => freshPr({ review: "changes-requested" }),
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async ({ body }) => {
+        updates.push(body);
+      },
+      mergePullRequest: async (input) => {
+        merges.push(input);
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(updates).toEqual([]);
+    expect(merges).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "pull request review is changes-requested",
+    });
+  });
+
+  it("fails without updating or merging when the pull request cannot be read", async () => {
+    const updates: string[] = [];
+    const merges: unknown[] = [];
+    const adapter: HostAdapter = {
+      ...noCleanup,
+      openPullRequest: async () => info(7),
+      getPullRequest: async () => {
+        throw new TypeError("fetch failed");
+      },
+      getPullRequestBody: async () =>
+        wrapMergeNote(AUTO_IMPROVEMENT_MERGE_NOTE),
+      updatePullRequestBody: async ({ body }) => {
+        updates.push(body);
+      },
+      mergePullRequest: async (input) => {
+        merges.push(input);
+        return info(7, { state: "merged" });
+      },
+    };
+    const result = await runHostTask({ adapter, repoRef: ref }, task, log);
+    expect(updates).toEqual([]);
+    expect(merges).toEqual([]);
+    expect(result).toEqual({
+      stage: "auto-merge",
+      outcome: "failed",
+      reason: "could not read the pull request: TypeError: fetch failed",
     });
   });
 });

@@ -247,6 +247,32 @@ export async function runHostTask(
       error instanceof HostError || error instanceof RangeError
         ? error.message
         : `could not ${doing}: ${String(error)}`;
+    let pr: Awaited<ReturnType<HostAdapter["getPullRequest"]>>;
+    try {
+      pr = await deps.adapter.getPullRequest({
+        repo,
+        number: task.number,
+      });
+    } catch (error) {
+      return failed(reasonOf(error, "read the pull request"));
+    }
+    if (pr.state !== "open") {
+      return failed(`pull request is ${pr.state}, not open`);
+    }
+    if (pr.draft) {
+      return failed("pull request is a draft");
+    }
+    if (pr.headSha !== task.expectedHeadSha) {
+      return failed(
+        `pull request head ${pr.headSha} is not the expected ${task.expectedHeadSha}`,
+      );
+    }
+    if (pr.humanComments > 0) {
+      return failed("a person has commented on the pull request");
+    }
+    if (pr.review === "changes-requested") {
+      return failed("pull request review is changes-requested");
+    }
     let current: string;
     try {
       current = await deps.adapter.getPullRequestBody({
