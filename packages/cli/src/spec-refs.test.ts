@@ -334,7 +334,9 @@ describe("plat spec confirm refPins", () => {
       ["--api-url", url, "spec", "confirm", "S-7"],
       machine,
     );
-    expect(machine.err.join("")).toBe("");
+    expect(machine.err.join("")).toContain(
+      "这个需求没有规划仓库，没有带任何本地改动；要带上，在规划仓库的 checkout 里运行 plat spec confirm",
+    );
     expect(code).toBe(0);
     expect(confirmed).toEqual([
       expect.objectContaining({

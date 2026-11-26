@@ -35,7 +35,10 @@ interface Reply {
       reference: boolean;
       sha: string | null;
     }[];
+    planning?: { repo: string | null };
   };
+  planningRepo?: string | null;
+  planningState?: string | null;
   repos?: {
     projectId: number;
     name: string;
@@ -2178,5 +2181,129 @@ describe("spec reference repos", () => {
     expect(refused.body.errors.join("\n")).toMatch(
       `plat spec edit S-${specId} --ref ledger`,
     );
+  });
+});
+
+describe("confirm planningRepo", () => {
+  async function confirmableSpec(planningRepo?: string) {
+    const project = await post("/projects", { name: "shop" });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/frontend.git",
+      name: "frontend",
+    });
+    const spec = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "order-export",
+      title: "Order export",
+      ...(planningRepo !== undefined ? { planningRepo } : {}),
+    });
+    const specId = spec.body.id as number;
+    await post(
+      `/specs/${specId}/tickets/import`,
+      importBody(specId, { tickets: [ticket("a")] }),
+    );
+    return { specId };
+  }
+
+  it("returns 409 when the spec already has a different planning repo", async () => {
+    const { specId } = await confirmableSpec("backend");
+    const refused = await post(`/specs/${specId}/confirm`, {
+      planningRepo: "frontend",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/backend/);
+    expect(refused.body.error).toMatch(/confirm/);
+  });
+
+  it("registers planningRepo when the spec has none", async () => {
+    const { specId } = await confirmableSpec();
+    const confirmed = await post(`/specs/${specId}/confirm`, {
+      planningRepo: "backend",
+    });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.planningRepo).toBe("backend");
+    expect((await get(`/specs/${specId}`)).body.spec?.planning?.repo).toBe(
+      "backend",
+    );
+  });
+
+  it("confirms when the request repeats the spec's planning repo", async () => {
+    const { specId } = await confirmableSpec("backend");
+    const confirmed = await post(`/specs/${specId}/confirm`, {
+      planningRepo: "backend",
+    });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.planningRepo).toBe("backend");
+  });
+});
+
+describe("confirm without a planning patch after import recorded local changes", () => {
+  async function confirmableWithImport(planningDocsAtImport?: {
+    status: "clean" | "changed" | "unknown";
+    files?: string[];
+  }) {
+    const project = await post("/projects", { name: "shop" });
+    const projectId = project.body.id as number;
+    await post(`/projects/${projectId}/repos`, {
+      url: "git@github.com:acme/backend.git",
+      name: "backend",
+    });
+    const spec = await post("/specs", {
+      projectId,
+      type: "feature",
+      slug: "order-export",
+      title: "Order export",
+      planningRepo: "backend",
+    });
+    const specId = spec.body.id as number;
+    const imported = await post(`/specs/${specId}/tickets/import`, {
+      ...importBody(specId, { tickets: [ticket("a")] }),
+      ...(planningDocsAtImport ? { planningDocsAtImport } : {}),
+    });
+    expect(imported.status).toBe(200);
+    return specId;
+  }
+
+  it("returns 409 listing the files and telling the person to confirm in the planning repo", async () => {
+    const specId = await confirmableWithImport({
+      status: "changed",
+      files: ["docs/design.md", "GLOSSARY.md"],
+    });
+    const refused = await post(`/specs/${specId}/confirm`, {});
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toContain("docs/design.md");
+    expect(refused.body.error).toContain("GLOSSARY.md");
+    expect(refused.body.error).toContain("plat spec confirm");
+    expect(refused.body.error).toContain("--leave-planning-changes");
+  });
+
+  it("confirms when leavePlanningChanges is true", async () => {
+    const specId = await confirmableWithImport({
+      status: "changed",
+      files: ["docs/design.md", "GLOSSARY.md"],
+    });
+    const confirmed = await post(`/specs/${specId}/confirm`, {
+      leavePlanningChanges: true,
+    });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.planningState).toBe("pending");
+  });
+
+  it("confirms without a patch when import said the planning checkout was clean", async () => {
+    const specId = await confirmableWithImport({ status: "clean" });
+    const confirmed = await post(`/specs/${specId}/confirm`, {});
+    expect(confirmed.status).toBe(200);
+  });
+
+  it("does not block confirm when import did not know about local planning changes", async () => {
+    const specId = await confirmableWithImport({ status: "unknown" });
+    const confirmed = await post(`/specs/${specId}/confirm`, {});
+    expect(confirmed.status).toBe(200);
   });
 });

@@ -2721,6 +2721,14 @@
                     "type": "string",
                     "maxLength": 2000000
                   },
+                  "planningRepo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "leavePlanningChanges": {
+                    "type": "boolean"
+                  },
                   "refPins": {
                     "type": "array",
                     "items": {
@@ -8167,6 +8175,12 @@
                             "state": {
                               "type": "string",
                               "enum": ["committed", "unchanged", "waived"]
+                            },
+                            "leftOut": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
                             }
                           },
                           "required": ["repo", "state"]

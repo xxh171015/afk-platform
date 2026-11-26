@@ -73,9 +73,12 @@ export function SpecDetail({
   const queryClient = useQueryClient();
   const view = useSpecView(specId);
   const confirm = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (leavePlanningChanges?: boolean) => {
       const { data, error } = await api.POST("/specs/{specId}/confirm", {
         params: { path: { specId } },
+        ...(leavePlanningChanges
+          ? { body: { leavePlanningChanges: true } }
+          : {}),
       });
       if (!data) throw new Error(describeError(error));
       return data;
@@ -366,6 +369,7 @@ export function SpecDetail({
           confirming={confirm.isPending}
           confirmError={confirm.isError ? confirm.error.message : null}
           onConfirm={() => confirm.mutate()}
+          onLeavePlanningChanges={() => confirm.mutate(true)}
           onOpen={setOpenTicket}
           pullRequests={pullRequests}
           timeline={timeline}

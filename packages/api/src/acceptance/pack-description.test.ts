@@ -296,6 +296,19 @@ describe("renderPackSection", () => {
     expect(renderPackSection(waived, "frontend", 1).section).not.toContain(
       "Planning docs",
     );
+    const leftBehind = pack({
+      planningDocs: {
+        repo: "backend",
+        state: "waived",
+        leftOut: ["docs/design.md", "GLOSSARY.md"],
+      },
+    });
+    expect(renderPackSection(leftBehind, "backend", 1).section).toContain(
+      "规划改动未带上：docs/design.md、GLOSSARY.md",
+    );
+    expect(renderPackSection(leftBehind, "frontend", 1).section).not.toContain(
+      "规划改动未带上",
+    );
     const committed = pack({
       planningDocs: { repo: "backend", state: "committed" },
     });
@@ -307,6 +320,9 @@ describe("renderPackSection", () => {
     });
     expect(renderPackSection(unchanged, "backend", 1).section).not.toContain(
       "Planning docs",
+    );
+    expect(renderPackSection(unchanged, "backend", 1).section).not.toContain(
+      "规划改动未带上",
     );
   });
 

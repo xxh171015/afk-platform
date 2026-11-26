@@ -1,11 +1,12 @@
-// Planning docs (GLOSSARY「Planning docs」, ADR 0005): what `plat spec confirm` sends from the planning repo and
-// the platform commits onto its integration branch before any ticket starts.
+// Planning docs (GLOSSARY「Planning docs」, ADR 0005 / 0013): what the person picks at `plat spec confirm`.
+// PLANNING_DOC_PATHS is only for mounting /context/domain/ (a context's glossary and ADRs); the CLI does not use
+// it to decide which files go in the planning patch (ADR 0013).
 
 // A context's glossary and ADRs, relative to where the context lives; a directory stands for everything under it.
 export const CONTEXT_DOC_PATHS = ["GLOSSARY.md", "docs/adr"];
 
-// Paths in the planning repo. A multi-context repo also has GLOSSARY_MAP_PATH at its root and, for each context it
-// links to, CONTEXT_DOC_PATHS under that context.
+// Paths mounted at /context/domain/. A multi-context repo also has GLOSSARY_MAP_PATH at its root and, for each
+// context it links to, CONTEXT_DOC_PATHS under that context.
 export const PLANNING_DOC_PATHS = [...CONTEXT_DOC_PATHS, "AGENTS.md"];
 export const GLOSSARY_MAP_PATH = "GLOSSARY-MAP.md";
 

@@ -1624,6 +1624,8 @@ export interface paths {
         content: {
           "application/json": {
             planningPatch?: string;
+            planningRepo?: string;
+            leavePlanningChanges?: boolean;
             refPins?: {
               repoId: number;
               sha: string;
@@ -3991,6 +3993,7 @@ export interface paths {
                   repo: string;
                   /** @enum {string} */
                   state: "committed" | "unchanged" | "waived";
+                  leftOut?: string[];
                 } | null;
                 agentSeconds: number;
                 /** @default [] */

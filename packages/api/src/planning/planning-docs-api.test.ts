@@ -2,10 +2,12 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gitOrThrow } from "@afk/pipeline";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -44,6 +46,7 @@ const SPEC_BODY =
 // spec S-1 made in backend with one ticket in each repo.
 async function draftSpec(
   ticketRepos = ["backend", "frontend"],
+  prepare?: (backend: Checkout) => void,
 ): Promise<{ backend: Checkout; frontend: Checkout }> {
   const backend = ws.checkout(
     "backend",
@@ -79,6 +82,7 @@ async function draftSpec(
     "../spec.md",
   ]);
   expect(created.stdout).toBe("S-1\n参考仓库：无\n");
+  prepare?.(backend);
   mkdirSync(join(outside, "tickets"));
   for (const [i, repo] of ticketRepos.entries()) {
     const file = ticketFile(1, {
@@ -121,6 +125,455 @@ describe("the planning repo of a spec", () => {
   });
 });
 
+// The committed GitHub tracker doc has no plat version line, so create cannot read the planning repo from it.
+const GITHUB_TRACKER = `# Issue tracker: GitHub
+
+Issues and specs for this repo live as GitHub issues.
+`;
+
+function writeGitHubTracker(dir: string) {
+  writeFileSync(join(dir, "docs/agents/issue-tracker.md"), GITHUB_TRACKER);
+}
+
+describe("the planning repo when the tracker doc is the GitHub edition", () => {
+  it("plat spec create uses this checkout's origin", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+      {
+        "GLOSSARY.md": "# Orders\n",
+        "README.md": "b\n",
+      },
+    );
+    expect((await ws.plat(backend.dir, ["init", "--yes"])).code).toBe(0);
+    writeGitHubTracker(backend.dir);
+    writeFileSync(join(dirname(backend.dir), "spec.md"), SPEC_BODY);
+    const created = await ws.plat(backend.dir, [
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "feature",
+      "--title",
+      "Bulk ship",
+      "--file",
+      "../spec.md",
+    ]);
+    expect(created.code).toBe(0);
+    expect((await get("/specs/1")).spec.planning.repo).toBe("backend");
+  });
+
+  it("plat bug uses this checkout's origin", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+      {
+        "GLOSSARY.md": "# Orders\n",
+        "README.md": "b\n",
+      },
+    );
+    expect((await ws.plat(backend.dir, ["init", "--yes"])).code).toBe(0);
+    writeGitHubTracker(backend.dir);
+    writeFileSync(
+      join(dirname(backend.dir), "report.txt"),
+      "TypeError: cannot read id\nat exportOrders (src/orders.ts:12)\n",
+    );
+    const created = await ws.plat(backend.dir, [
+      "bug",
+      "--project",
+      "1",
+      "--file",
+      "../report.txt",
+    ]);
+    expect(created.code).toBe(0);
+    expect((await get("/specs/1")).spec.planning.repo).toBe("backend");
+  });
+});
+
+describe("local changes plat spec confirm lists", () => {
+  it("lists uncommitted, untracked, unpushed and deleted files, and omits ignored and machine-only planning files including a committed tracker doc", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, ".gitignore"), "ignored.txt\n");
+    gitOrThrow(backend.dir, ["add", ".gitignore"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "ignore"]);
+    gitOrThrow(backend.dir, ["push", "--quiet", "origin", "main"]);
+    mkdirSync(join(backend.dir, "docs/agents"), { recursive: true });
+    writeGitHubTracker(backend.dir);
+    gitOrThrow(backend.dir, ["add", "-f", "docs/agents/issue-tracker.md"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "tracker"]);
+    gitOrThrow(backend.dir, ["push", "--quiet", "origin", "main"]);
+    writeFileSync(
+      join(backend.dir, "docs/agents/issue-tracker.md"),
+      `${GITHUB_TRACKER}\nextra\n`,
+    );
+    writeFileSync(join(backend.dir, "docs/agents/local-note.md"), "note\n");
+    writeFileSync(join(backend.dir, "CLAUDE.local.md"), "local\n");
+    mkdirSync(join(backend.dir, ".cursor/rules"), { recursive: true });
+    writeFileSync(
+      join(backend.dir, ".cursor/rules/afk-platform.mdc"),
+      "rule\n",
+    );
+    writeFileSync(join(backend.dir, "ignored.txt"), "secret\n");
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
+    mkdirSync(join(backend.dir, "docs/specs"), { recursive: true });
+    writeFileSync(join(backend.dir, "docs/specs/x.md"), "# spec\n");
+    writeFileSync(join(backend.dir, "docs/adr/0002-local.md"), "# Local\n");
+    gitOrThrow(backend.dir, ["add", "docs/adr/0002-local.md"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "unpushed adr"]);
+    rmSync(join(backend.dir, "README.md"));
+    const before = gitOrThrow(backend.dir, ["status", "--porcelain", "-uall"]);
+
+    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    expect(confirmed.code).not.toBe(0);
+    const listed = `${confirmed.stdout}${confirmed.stderr}`;
+    expect(listed).toContain("GLOSSARY.md");
+    expect(listed).toContain("docs/specs/x.md");
+    expect(listed).toContain("docs/adr/0002-local.md");
+    expect(listed).toContain("README.md");
+    expect(listed).not.toContain("ignored.txt");
+    expect(listed).not.toContain("issue-tracker");
+    expect(listed).not.toContain("local-note.md");
+    expect(listed).not.toContain("CLAUDE.local.md");
+    expect(listed).not.toContain("afk-platform.mdc");
+    expect((await get("/specs/1")).spec.state).toBe("draft");
+    expect((await get("/specs/1")).spec.planning.state).toBeNull();
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain", "-uall"])).toBe(
+      before,
+    );
+  });
+
+  it("refuses when --send and --keep-local cover only some files, and lists only the uncovered ones", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
+    mkdirSync(join(backend.dir, "docs"), { recursive: true });
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+    writeFileSync(join(backend.dir, "src.ts"), "export {}\n");
+    const before = gitOrThrow(backend.dir, ["status", "--porcelain"]);
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY.md",
+    ]);
+
+    expect(confirmed.code).not.toBe(0);
+    const listed = `${confirmed.stdout}${confirmed.stderr}`;
+    expect(listed).toContain("docs/design.md");
+    expect(listed).toContain("src.ts");
+    expect(listed).not.toMatch(/^\s*M\s+GLOSSARY\.md/m);
+    expect(listed).not.toMatch(/^\s*A\s+GLOSSARY\.md/m);
+    expect(listed).toContain("--send");
+    expect(listed).toContain("--keep-local");
+    expect((await get("/specs/1")).spec.state).toBe("draft");
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe(before);
+  });
+
+  it("refuses when --send and --keep-local cover the same file, or a path is not in the list", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+
+    const both = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY.md",
+      "--keep-local",
+      "GLOSSARY.md",
+      "--keep-local",
+      "docs/design.md",
+    ]);
+    expect(both.code).not.toBe(0);
+    expect(`${both.stdout}${both.stderr}`).toMatch(/GLOSSARY\.md/);
+    expect(`${both.stdout}${both.stderr}`).toMatch(/--send/);
+    expect(`${both.stdout}${both.stderr}`).toMatch(/--keep-local/);
+
+    const unknown = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY.md",
+      "--send",
+      "no-such.md",
+      "--keep-local",
+      "docs/design.md",
+    ]);
+    expect(unknown.code).not.toBe(0);
+    expect(`${unknown.stdout}${unknown.stderr}`).toContain("no-such.md");
+    expect((await get("/specs/1")).spec.state).toBe("draft");
+  });
+
+  it("sends selected design.md, a spec, a new ADR and a binary file that git apply --cached --3way can apply, and leaves unselected files", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+    mkdirSync(join(backend.dir, "docs/specs"), { recursive: true });
+    writeFileSync(join(backend.dir, "docs/specs/x.md"), "# spec\n");
+    writeFileSync(join(backend.dir, "docs/adr/0002-bulk.md"), "# Bulk\n");
+    writeFileSync(
+      join(backend.dir, "logo.bin"),
+      Buffer.from([0, 1, 2, 255, 0]),
+    );
+    writeFileSync(join(backend.dir, "src.ts"), "export {}\n");
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "docs/design.md",
+      "--send",
+      "docs/specs",
+      "--send",
+      "docs/adr/0002-bulk.md",
+      "--send",
+      "logo.bin",
+      "--keep-local",
+      "src.ts",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(confirmed.stdout).toContain("docs/design.md");
+    expect(confirmed.stdout).toContain("docs/specs/x.md");
+    expect(confirmed.stdout).toContain("docs/adr/0002-bulk.md");
+    expect(confirmed.stdout).toContain("logo.bin");
+    expect(confirmed.stdout).not.toContain("src.ts");
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe(
+      "?? src.ts",
+    );
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(false);
+    expect(existsSync(join(backend.dir, "docs/specs/x.md"))).toBe(false);
+    expect(existsSync(join(backend.dir, "docs/adr/0002-bulk.md"))).toBe(false);
+    expect(existsSync(join(backend.dir, "logo.bin"))).toBe(false);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export {}\n",
+    );
+
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${job.id}/planning-task?workerId=w1&attempt=${job.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+    expect(task.patch).toContain("docs/specs/x.md");
+    expect(task.patch).toContain("docs/adr/0002-bulk.md");
+    expect(task.patch).toContain("logo.bin");
+    expect(task.patch).not.toContain("src.ts");
+    const scratch = mkdtempSync(join(tmpdir(), "afk-apply-"));
+    const applyEnv = { GIT_INDEX_FILE: join(scratch, "index") };
+    gitOrThrow(backend.origin.dir, ["read-tree", "HEAD"], applyEnv);
+    const applied = spawnSync(
+      "git",
+      ["apply", "--cached", "--3way", "--whitespace=nowarn", "-"],
+      {
+        cwd: backend.origin.dir,
+        encoding: "utf8",
+        env: { ...process.env, ...applyEnv },
+        input: task.patch,
+      },
+    );
+    rmSync(scratch, { recursive: true, force: true });
+    expect(applied.status, applied.stderr).toBe(0);
+  });
+
+  it("sends a file from an unpushed commit and leaves that commit in place", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+    gitOrThrow(backend.dir, ["add", "docs/design.md"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "design"]);
+    const sha = gitOrThrow(backend.dir, ["rev-parse", "HEAD"]);
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "docs/design.md",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(gitOrThrow(backend.dir, ["rev-parse", "HEAD"])).toBe(sha);
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe("");
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(true);
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${job.id}/planning-task?workerId=w1&attempt=${job.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+  });
+
+  it("refuses --send .env.local and allows --keep-local instead", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, ".env.local"), "SECRET=1\n");
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
+
+    const refused = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      ".env.local",
+      "--keep-local",
+      "GLOSSARY.md",
+    ]);
+    expect(refused.code).not.toBe(0);
+    expect(`${refused.stdout}${refused.stderr}`).toContain(".env.local");
+    expect(`${refused.stdout}${refused.stderr}`).toMatch(/gitignore/i);
+    expect(`${refused.stdout}${refused.stderr}`).toContain("--keep-local");
+    expect((await get("/specs/1")).spec.state).toBe("draft");
+    expect(readFileSync(join(backend.dir, ".env.local"), "utf8")).toBe(
+      "SECRET=1\n",
+    );
+
+    const kept = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--keep-local",
+      ".env.local",
+      "--send",
+      "GLOSSARY.md",
+    ]);
+    expect(kept.code).toBe(0);
+    expect(readFileSync(join(backend.dir, ".env.local"), "utf8")).toBe(
+      "SECRET=1\n",
+    );
+    expect(readFileSync(join(backend.dir, "GLOSSARY.md"), "utf8")).toBe(
+      "# Orders\n\n**Order**: a purchase.\n",
+    );
+  });
+
+  it("confirms without options when the local-change list is empty", async () => {
+    const { backend } = await draftSpec();
+    const before = gitOrThrow(backend.dir, ["status", "--porcelain"]);
+
+    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    expect(confirmed.code).toBe(0);
+    expect(confirmed.stdout).toContain("S-1 is");
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe(before);
+  });
+
+  it("retry-planning puts back files from the backup patch, leaves unselected files, and puts selected files aside again after resend", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# mine\n");
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+    writeFileSync(join(backend.dir, "src.ts"), "export {}\n");
+    expect(
+      (
+        await ws.plat(backend.dir, [
+          "spec",
+          "confirm",
+          "S-1",
+          "--send",
+          "GLOSSARY.md",
+          "--send",
+          "docs/design.md",
+          "--keep-local",
+          "src.ts",
+        ])
+      ).code,
+    ).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(false);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export {}\n",
+    );
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "conflict",
+      files: ["GLOSSARY.md"],
+    });
+    backend.origin.commit({ "GLOSSARY.md": "# theirs\n" }, "theirs");
+    gitOrThrow(backend.dir, ["pull", "--quiet", "origin", "main"]);
+    writeFileSync(join(backend.dir, "src.ts"), "export { keep }\n");
+
+    const back = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
+
+    expect(back.code).toBe(0);
+    expect(back.stdout).toContain("docs/design.md");
+    expect(readFileSync(join(backend.dir, "GLOSSARY.md"), "utf8")).toContain(
+      "<<<<<<<",
+    );
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(true);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export { keep }\n",
+    );
+    expect(await claimAll(worker)).toEqual([]);
+
+    writeFileSync(join(backend.dir, "GLOSSARY.md"), "# theirs and mine\n");
+    const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
+
+    expect(sent.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(false);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export { keep }\n",
+    );
+    const [again] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${again.id}/planning-task?workerId=w1&attempt=${again.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+    expect(task.patch).toContain("+# theirs and mine");
+    expect(task.patch).not.toContain("src.ts");
+  });
+
+  it("retry-planning resends only selected committed files and leaves keep-local files", async () => {
+    const { backend } = await draftSpec();
+    writeFileSync(join(backend.dir, "docs/design.md"), "# design\n");
+    gitOrThrow(backend.dir, ["add", "docs/design.md"]);
+    gitOrThrow(backend.dir, ["commit", "--quiet", "-m", "design"]);
+    writeFileSync(join(backend.dir, "src.ts"), "export {}\n");
+    expect(
+      (
+        await ws.plat(backend.dir, [
+          "spec",
+          "confirm",
+          "S-1",
+          "--send",
+          "docs/design.md",
+          "--keep-local",
+          "src.ts",
+        ])
+      ).code,
+    ).toBe(0);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export {}\n",
+    );
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "conflict",
+      files: ["docs/design.md"],
+    });
+    writeFileSync(join(backend.dir, "src.ts"), "export { keep }\n");
+
+    const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
+
+    expect(sent.code).toBe(0);
+    expect(readFileSync(join(backend.dir, "src.ts"), "utf8")).toBe(
+      "export { keep }\n",
+    );
+    expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toContain(
+      "src.ts",
+    );
+    const [again] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${again.id}/planning-task?workerId=w1&attempt=${again.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+    expect(task.patch).not.toContain("src.ts");
+  });
+});
+
 describe("plat spec confirm in the planning repo", () => {
   it("sends the planning docs changed since the remote's default branch, takes them out of the checkout, and starts no ticket before the planning commit", async () => {
     const { backend } = await draftSpec();
@@ -132,7 +585,17 @@ describe("plat spec confirm in the planning repo", () => {
     writeFileSync(join(backend.dir, "src.ts"), "not a planning doc\n");
     const branchBefore = gitOrThrow(backend.dir, ["branch", "--show-current"]);
 
-    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY.md",
+      "--send",
+      "docs/adr",
+      "--keep-local",
+      "src.ts",
+    ]);
 
     expect(confirmed.stderr).toBe("");
     expect(confirmed.code).toBe(0);
@@ -190,7 +653,17 @@ describe("the planning docs in the checkout after confirm", () => {
     writeFileSync(join(backend.dir, "docs/adr/new/0003-new.md"), "# New\n");
     gitOrThrow(backend.dir, ["add", "docs/adr/new/0003-new.md"]);
 
-    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY.md",
+      "--send",
+      "docs/adr",
+      "--keep-local",
+      "README.md",
+    ]);
 
     expect(confirmed.code).toBe(0);
     expect(gitOrThrow(backend.dir, ["status", "--porcelain"])).toBe(
@@ -213,7 +686,17 @@ describe("the planning docs in the checkout after confirm", () => {
     writeFileSync(join(backend.dir, "src/billing/GLOSSARY.md"), "# Billing\n");
     writeFileSync(join(backend.dir, "src/billing/code.ts"), "export {};\n");
 
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY-MAP.md",
+      "--send",
+      "src/billing/GLOSSARY.md",
+      "--keep-local",
+      "src/billing/code.ts",
+    ]);
 
     expect(gitOrThrow(backend.dir, ["status", "--porcelain", "-uall"])).toBe(
       "?? src/billing/code.ts",
@@ -262,7 +745,7 @@ describe("the planning commit", () => {
   it("lets the tickets start once the worker has made it, and gives other repos' tickets its SHA", async () => {
     const { backend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
     const worker = new FakeWorker(ws.api.url, "w1");
     const [job] = await claimAll(worker);
     const sha = "a".repeat(40);
@@ -308,7 +791,7 @@ describe("what plat spec confirm sends", () => {
     );
     gitOrThrow(backend.dir, ["fetch", "--quiet", "origin"]);
 
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
 
     const worker = new FakeWorker(ws.api.url, "w1");
     const [job] = await claimAll(worker);
@@ -352,7 +835,7 @@ describe("what plat spec confirm sends", () => {
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
     writeFileSync(join(backend.dir, "docs/adr/0002-bulk.md"), "# Bulk\n");
 
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
 
     const patch = await sentPatch();
     const files = [...patch.matchAll(/^diff --git a\/(\S+)/gm)].map(
@@ -380,7 +863,7 @@ describe("what plat spec confirm sends", () => {
     gitOrThrow(backend.dir, ["push", "--quiet", "origin", "main"]);
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
 
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
 
     const patch = await sentPatch();
     expect(patch).toContain("+# Orders v2");
@@ -404,7 +887,21 @@ describe("what plat spec confirm sends", () => {
       writeFileSync(join(backend.dir, path), text);
     }
 
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY-MAP.md",
+      "--send",
+      "src/ordering",
+      "--send",
+      "src/billing/GLOSSARY.md",
+      "--keep-local",
+      "src/billing/code.ts",
+      "--keep-local",
+      "src/shipping",
+    ]);
 
     const patch = await sentPatch();
     expect(patch).toContain("GLOSSARY-MAP.md");
@@ -429,7 +926,7 @@ describe("what plat spec confirm sends", () => {
     writeFileSync(join(backend.dir, "GLOSSARY-MAP.md"), "# Glossary Map\n");
     rmSync(join(backend.dir, "src/billing"), { recursive: true });
 
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
 
     const patch = await sentPatch();
     expect(patch).toContain("deleted file mode");
@@ -441,7 +938,13 @@ describe("what plat spec confirm sends", () => {
     const { backend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "x".repeat(1_100_000));
 
-    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "GLOSSARY.md",
+    ]);
 
     expect(confirmed.code).not.toBe(0);
     expect(confirmed.stderr).toContain("is over 1000000 bytes");
@@ -457,6 +960,123 @@ describe("what plat spec confirm sends", () => {
     expect(confirmed.stderr).toContain(
       "S-1's planning docs are in backend, not frontend: run plat spec confirm in a checkout of backend",
     );
+  });
+
+  it("returns 409 listing the imported local changes when confirm is outside the planning repo", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(dirname(backend.dir), [
+      "spec",
+      "confirm",
+      "S-1",
+    ]);
+
+    expect(confirmed.code).not.toBe(0);
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "docs/design.md",
+    );
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "plat spec confirm",
+    );
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "--leave-planning-changes",
+    );
+  });
+
+  it("in the planning repo still sends files recorded at import and puts them aside", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send",
+      "docs/design.md",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(false);
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    const task = await get(
+      `/worker/jobs/${job.id}/planning-task?workerId=w1&attempt=${job.attempt}`,
+    );
+    expect(task.patch).toContain("docs/design.md");
+  });
+
+  it("in the planning repo --leave-planning-changes confirms and leaves the files in the checkout", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--leave-planning-changes",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(true);
+    expect(confirmed.stdout).not.toContain("planning docs");
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "unchanged",
+      sha: "d".repeat(40),
+    });
+    expect((await get("/specs/1")).spec.planning.state).toBe("waived");
+  });
+
+  it("confirms from outside the planning repo with --leave-planning-changes", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(dirname(backend.dir), [
+      "spec",
+      "confirm",
+      "S-1",
+      "--leave-planning-changes",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect((await get("/specs/1")).spec.state).not.toBe("draft");
+  });
+
+  it("keep-local-all in the planning repo does not note files as left behind", async () => {
+    const { backend } = await draftSpec(["backend", "frontend"], (repo) => {
+      mkdirSync(join(repo.dir, "docs"), { recursive: true });
+      writeFileSync(join(repo.dir, "docs/design.md"), "# design\n");
+    });
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--keep-local-all",
+    ]);
+    expect(confirmed.code).toBe(0);
+    expect(existsSync(join(backend.dir, "docs/design.md"))).toBe(true);
+
+    const worker = new FakeWorker(ws.api.url, "w1");
+    const [job] = await claimAll(worker);
+    await worker.complete(job.id, job.attempt, {
+      stage: "planning-commit",
+      outcome: "unchanged",
+      sha: "c".repeat(40),
+    });
+    expect((await get("/specs/1")).spec.planning.state).toBe("done");
+    expect((await get("/specs/1")).spec.planning.state).not.toBe("waived");
   });
 
   it("outside the project's repos sends nothing, like the page: the planning commit is the default branch's head", async () => {
@@ -493,13 +1113,51 @@ describe("what plat spec confirm sends", () => {
     const jobs = await claimAll(new FakeWorker(ws.api.url, "w1"));
     expect(jobs.map((j) => j.type)).not.toContain("planning-commit");
   });
+
+  it("says the spec has no planning repo and sent no local changes when confirm is not in a project repo", async () => {
+    const { backend } = await draftSpec();
+    await ws.db.pool.query("UPDATE specs SET planning_repo_id = NULL");
+
+    const confirmed = await ws.plat(dirname(backend.dir), [
+      "spec",
+      "confirm",
+      "S-1",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "这个需求没有规划仓库，没有带任何本地改动；要带上，在规划仓库的 checkout 里运行 plat spec confirm",
+    );
+    expect(confirmed.stdout).toContain("queued T-1");
+  });
+
+  it("registers the checkout as the planning repo and sends its planning docs when the spec has none", async () => {
+    const { backend } = await draftSpec();
+    await ws.db.pool.query("UPDATE specs SET planning_repo_id = NULL");
+    writeFileSync(
+      join(backend.dir, "GLOSSARY.md"),
+      "# Orders\n\n**Bulk ship**: shipping many orders at once.\n",
+    );
+
+    const confirmed = await ws.plat(backend.dir, [
+      "spec",
+      "confirm",
+      "S-1",
+      "--send-all",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect((await get("/specs/1")).spec.planning.repo).toBe("backend");
+    expect(confirmed.stdout).toContain("planning docs GLOSSARY.md");
+    expect((await get("/specs/1")).spec.planning.state).toBe("pending");
+  });
 });
 
 describe("a planning docs patch that does not apply", () => {
   async function blockedSpec() {
     const { backend, frontend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# mine\n");
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
     const worker = new FakeWorker(ws.api.url, "w1");
     const [job] = await claimAll(worker);
     await worker.complete(job.id, job.attempt, {
@@ -600,7 +1258,7 @@ describe("a planning docs patch that does not apply", () => {
     const { backend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# mine, committed\n");
     gitOrThrow(backend.dir, ["commit", "--quiet", "-am", "glossary"]);
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
     const worker = new FakeWorker(ws.api.url, "w1");
     const [first] = await claimAll(worker);
     await worker.complete(first.id, first.attempt, {
@@ -608,7 +1266,12 @@ describe("a planning docs patch that does not apply", () => {
       outcome: "conflict",
       files: ["GLOSSARY.md"],
     });
-    expect(existsSync(join(ws.afkHome, "planning/S-1"))).toBe(false);
+    expect(
+      readFileSync(
+        join(ws.afkHome, "planning/S-1/planning-docs.patch"),
+        "utf8",
+      ),
+    ).toContain("GLOSSARY.md");
 
     const sent = await ws.plat(backend.dir, ["spec", "retry-planning", "S-1"]);
 
@@ -740,7 +1403,7 @@ describe("the planning docs at the end of the spec", () => {
   it("go out in their own pull request when the planning repo has no ticket of the spec", async () => {
     const { backend } = await draftSpec(["frontend"]);
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# Orders v2\n");
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
     const worker = new FakeWorker(ws.api.url, "w1");
     const [planning] = await claimAll(worker);
     await worker.complete(planning.id, planning.attempt, {
@@ -787,7 +1450,7 @@ describe("cancelling a spec whose planning commit is pending", () => {
   it("stops the planning commit and drops the patch", async () => {
     const { backend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# v2\n");
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
 
     expect((await ws.plat(backend.dir, ["spec", "cancel", "S-1"])).code).toBe(
       0,
@@ -803,7 +1466,7 @@ describe("cancelling a spec whose planning commit is pending", () => {
   it("drops the copy confirm kept with the next plat command", async () => {
     const { backend } = await draftSpec();
     writeFileSync(join(backend.dir, "GLOSSARY.md"), "# v2\n");
-    await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+    await ws.plat(backend.dir, ["spec", "confirm", "S-1", "--send-all"]);
     writeFileSync(join(ws.afkHome, "planning/S-1/01-ticket.md"), "t\n");
     await ws.plat(backend.dir, ["spec", "cancel", "S-1"]);
 
