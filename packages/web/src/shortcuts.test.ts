@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { isTypingTarget, shortcutFromKey } from "./shortcuts.ts";
+import {
+  isTypingTarget,
+  reviewShortcutFromKey,
+  shortcutFromKey,
+} from "./shortcuts.ts";
 
 describe("keyboard shortcuts", () => {
   it("maps g r to the review queue", () => {
@@ -54,6 +58,37 @@ describe("keyboard shortcuts", () => {
       shortcut: { type: "help" },
       pendingGo: false,
     });
+  });
+
+  it("maps review-page j/k/n/p/v/c and / without turning them into go chords", () => {
+    const keys = { metaKey: false, ctrlKey: false } as const;
+    expect(reviewShortcutFromKey({ key: "j", ...keys })).toEqual({
+      type: "next-file",
+    });
+    expect(reviewShortcutFromKey({ key: "k", ...keys })).toEqual({
+      type: "prev-file",
+    });
+    expect(reviewShortcutFromKey({ key: "n", ...keys })).toEqual({
+      type: "next-hunk",
+    });
+    expect(reviewShortcutFromKey({ key: "p", ...keys })).toEqual({
+      type: "prev-hunk",
+    });
+    expect(reviewShortcutFromKey({ key: "v", ...keys })).toEqual({
+      type: "toggle-viewed",
+    });
+    expect(reviewShortcutFromKey({ key: "/", ...keys })).toEqual({
+      type: "focus-filter",
+    });
+    expect(reviewShortcutFromKey({ key: "c", ...keys })).toEqual({
+      type: "comment",
+    });
+    expect(
+      reviewShortcutFromKey({ key: "j", metaKey: true, ctrlKey: false }),
+    ).toBeUndefined();
+    expect(
+      shortcutFromKey({ key: "j", ...keys }, false).shortcut,
+    ).toBeUndefined();
   });
 
   it("treats an input or an open dialog as a typing target", () => {

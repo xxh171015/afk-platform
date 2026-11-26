@@ -52,6 +52,8 @@ describe("workspace navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "快捷键帮助" }));
     const dialog = screen.getByRole("dialog", { name: "快捷键" });
     expect(within(dialog).getByText("g h")).toBeTruthy();
+    expect(within(dialog).getByText("审查页")).toBeTruthy();
+    expect(within(dialog).getByText("j")).toBeTruthy();
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });

@@ -3,12 +3,14 @@ import { ExternalLink } from "lucide-react";
 import { FinalizeProgress, UpdateBranchRuns } from "../FinalizeProgress.tsx";
 import { pullAbbrev } from "../host-copy.ts";
 import { prCiLabel, prReviewLabel } from "../lib/labels.ts";
+import { paths } from "../paths.ts";
 import { StatusBadge } from "../StatusBadge.tsx";
 import { AcceptancePackMeta, PackRepoSection } from "./pack.tsx";
 import { list, type SpecView } from "./view.ts";
 
 // The "交付" tab: finalizations, pull requests, then the acceptance pack as its own chapter.
 export function Delivery({
+  specId,
   pullRequests,
   orderBroken,
   mergeOrder,
@@ -29,6 +31,7 @@ export function Delivery({
   | "finalRuns"
   | "autoMerge"
 > & {
+  specId: number;
   repos: NonNullable<SpecView["spec"]["repos"]>;
   hostKind: HostKind;
   specState: SpecView["spec"]["state"];
@@ -102,6 +105,7 @@ export function Delivery({
                       {pr.repo} #{pr.number}
                       <ExternalLink className="ml-1 inline size-3" />
                     </a>{" "}
+                    <a href={paths.specReview(specId)}>审查代码</a>{" "}
                     <StatusBadge kind="pr" code={pr.state} />
                     {pr.draft ? " (草稿)" : ""}{" "}
                     {list(pr.waitsFor).length > 0 ? (

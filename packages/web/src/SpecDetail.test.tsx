@@ -2772,3 +2772,62 @@ describe("a GitLab spec", () => {
     );
   });
 });
+
+describe("the review tab and delivery review link", () => {
+  const openPr = {
+    order: 1,
+    waitsFor: [],
+    repo: "backend",
+    number: 7,
+    url: "https://github.com/me/shop/pull/7",
+    state: "open" as const,
+    draft: false,
+    ci: "none" as const,
+    review: "none" as const,
+    syncError: null,
+  };
+
+  it("adds 审查 to the spec tabs only when the spec has a pull request", async () => {
+    const { unmount } = renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({ "GET /specs/1": () => ({ json: view() }) }),
+    );
+    await screen.findByRole("navigation", { name: "需求页" });
+    expect(screen.queryByRole("link", { name: "审查" })).toBeNull();
+    unmount();
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            pullRequests: [openPr],
+          }),
+        }),
+      }),
+    );
+    expect(
+      (await screen.findByRole("link", { name: "审查" })).getAttribute("href"),
+    ).toBe("/specs/1/review");
+  });
+
+  it("keeps the host PR link and adds 审查代码 on each delivery card", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} section="delivery" />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "awaiting-review" },
+            pullRequests: [openPr],
+          }),
+        }),
+      }),
+    );
+    const host = await screen.findByRole("link", { name: /backend #7/ });
+    expect(host.getAttribute("href")).toBe("https://github.com/me/shop/pull/7");
+    expect(host.getAttribute("target")).toBe("_blank");
+    expect(
+      screen.getByRole("link", { name: "审查代码" }).getAttribute("href"),
+    ).toBe("/specs/1/review");
+  });
+});

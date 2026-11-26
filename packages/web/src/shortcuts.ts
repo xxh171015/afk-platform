@@ -42,3 +42,26 @@ export function shortcutFromKey(
   if (event.key === "g") return { pendingGo: true };
   return { pendingGo: false };
 }
+
+export type ReviewShortcut =
+  | { type: "next-file" }
+  | { type: "prev-file" }
+  | { type: "next-hunk" }
+  | { type: "prev-hunk" }
+  | { type: "toggle-viewed" }
+  | { type: "focus-filter" }
+  | { type: "comment" };
+
+export function reviewShortcutFromKey(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey">,
+): ReviewShortcut | undefined {
+  if (event.metaKey || event.ctrlKey) return undefined;
+  if (event.key === "j") return { type: "next-file" };
+  if (event.key === "k") return { type: "prev-file" };
+  if (event.key === "n") return { type: "next-hunk" };
+  if (event.key === "p") return { type: "prev-hunk" };
+  if (event.key === "v") return { type: "toggle-viewed" };
+  if (event.key === "/") return { type: "focus-filter" };
+  if (event.key === "c") return { type: "comment" };
+  return undefined;
+}

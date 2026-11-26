@@ -14,6 +14,7 @@ describe("shareable addresses", () => {
       "/specs/$specId/description",
       "/specs/$specId/tickets",
       "/specs/$specId/delivery",
+      "/specs/$specId/review",
       "/specs/$specId/timeline",
       "/tickets/$ticketId",
       "/runs/$runId",
@@ -24,6 +25,7 @@ describe("shareable addresses", () => {
     expect(paths.specDescription(3)).toBe("/specs/3/description");
     expect(paths.specTickets(3)).toBe("/specs/3/tickets");
     expect(paths.specDelivery(3)).toBe("/specs/3/delivery");
+    expect(paths.specReview(3)).toBe("/specs/3/review");
     expect(paths.specTimeline(3)).toBe("/specs/3/timeline");
     expect(paths.ticket(9)).toBe("/tickets/9");
     expect(paths.run(4)).toBe("/runs/4");

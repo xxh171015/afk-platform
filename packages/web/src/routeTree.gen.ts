@@ -21,6 +21,7 @@ import { Route as SpecsSpecIdRouteImport } from './routes/specs/$specId'
 import { Route as TicketsTicketIdRouteImport } from './routes/tickets/$ticketId'
 import { Route as SpecsSpecIdIndexRouteImport } from './routes/specs/$specId/index'
 import { Route as SpecsSpecIdDeliveryRouteImport } from './routes/specs/$specId/delivery'
+import { Route as SpecsSpecIdReviewRouteImport } from './routes/specs/$specId/review'
 import { Route as SpecsSpecIdDescriptionRouteImport } from './routes/specs/$specId/description'
 import { Route as SpecsSpecIdTicketsRouteImport } from './routes/specs/$specId/tickets'
 import { Route as SpecsSpecIdTimelineRouteImport } from './routes/specs/$specId/timeline'
@@ -85,6 +86,11 @@ const SpecsSpecIdDeliveryRoute = SpecsSpecIdDeliveryRouteImport.update({
   path: '/delivery',
   getParentRoute: () => SpecsSpecIdRoute,
 } as any)
+const SpecsSpecIdReviewRoute = SpecsSpecIdReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => SpecsSpecIdRoute,
+} as any)
 const SpecsSpecIdDescriptionRoute = SpecsSpecIdDescriptionRouteImport.update({
   id: '/description',
   path: '/description',
@@ -113,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs/': typeof SpecsIndexRoute
   '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/review': typeof SpecsSpecIdReviewRoute
   '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
   '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
   '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
@@ -129,6 +136,7 @@ export interface FileRoutesByTo {
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs': typeof SpecsIndexRoute
   '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/review': typeof SpecsSpecIdReviewRoute
   '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
   '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
   '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
@@ -147,6 +155,7 @@ export interface FileRoutesById {
   '/tickets/$ticketId': typeof TicketsTicketIdRoute
   '/specs/': typeof SpecsIndexRoute
   '/specs/$specId/delivery': typeof SpecsSpecIdDeliveryRoute
+  '/specs/$specId/review': typeof SpecsSpecIdReviewRoute
   '/specs/$specId/description': typeof SpecsSpecIdDescriptionRoute
   '/specs/$specId/tickets': typeof SpecsSpecIdTicketsRoute
   '/specs/$specId/timeline': typeof SpecsSpecIdTimelineRoute
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
     | '/tickets/$ticketId'
     | '/specs/'
     | '/specs/$specId/delivery'
+    | '/specs/$specId/review'
     | '/specs/$specId/description'
     | '/specs/$specId/tickets'
     | '/specs/$specId/timeline'
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
     | '/tickets/$ticketId'
     | '/specs'
     | '/specs/$specId/delivery'
+    | '/specs/$specId/review'
     | '/specs/$specId/description'
     | '/specs/$specId/tickets'
     | '/specs/$specId/timeline'
@@ -199,6 +210,7 @@ export interface FileRouteTypes {
     | '/tickets/$ticketId'
     | '/specs/'
     | '/specs/$specId/delivery'
+    | '/specs/$specId/review'
     | '/specs/$specId/description'
     | '/specs/$specId/tickets'
     | '/specs/$specId/timeline'
@@ -304,6 +316,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SpecsSpecIdDeliveryRouteImport
       parentRoute: typeof SpecsSpecIdRoute
     }
+    '/specs/$specId/review': {
+      id: '/specs/$specId/review'
+      path: '/review'
+      fullPath: '/specs/$specId/review'
+      preLoaderRoute: typeof SpecsSpecIdReviewRouteImport
+      parentRoute: typeof SpecsSpecIdRoute
+    }
     '/specs/$specId/description': {
       id: '/specs/$specId/description'
       path: '/description'
@@ -330,6 +349,7 @@ declare module '@tanstack/react-router' {
 
 interface SpecsSpecIdRouteChildren {
   SpecsSpecIdDeliveryRoute: typeof SpecsSpecIdDeliveryRoute
+  SpecsSpecIdReviewRoute: typeof SpecsSpecIdReviewRoute
   SpecsSpecIdDescriptionRoute: typeof SpecsSpecIdDescriptionRoute
   SpecsSpecIdTicketsRoute: typeof SpecsSpecIdTicketsRoute
   SpecsSpecIdTimelineRoute: typeof SpecsSpecIdTimelineRoute
@@ -338,6 +358,7 @@ interface SpecsSpecIdRouteChildren {
 
 const SpecsSpecIdRouteChildren: SpecsSpecIdRouteChildren = {
   SpecsSpecIdDeliveryRoute: SpecsSpecIdDeliveryRoute,
+  SpecsSpecIdReviewRoute: SpecsSpecIdReviewRoute,
   SpecsSpecIdDescriptionRoute: SpecsSpecIdDescriptionRoute,
   SpecsSpecIdTicketsRoute: SpecsSpecIdTicketsRoute,
   SpecsSpecIdTimelineRoute: SpecsSpecIdTimelineRoute,

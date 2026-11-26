@@ -92,9 +92,12 @@ export function fakeServer(routes: Record<string, Handler>) {
     init?: RequestInit,
   ): Promise<Response> => {
     const request = input instanceof Request ? input : new Request(input, init);
-    const key = `${request.method} ${new URL(request.url).pathname}`;
+    const pathname = new URL(request.url).pathname;
+    const key = `${request.method} ${pathname}`;
     calls.push(key);
-    const handler = routes[key];
+    const handler =
+      routes[key] ??
+      routes[`${request.method} ${decodeURIComponent(pathname)}`];
     if (!handler)
       return Response.json({ error: `no route ${key}` }, { status: 404 });
     const text = request.method === "GET" ? "" : await request.text();
