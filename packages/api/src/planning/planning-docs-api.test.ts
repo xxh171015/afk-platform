@@ -121,6 +121,72 @@ describe("the planning repo of a spec", () => {
   });
 });
 
+// The committed GitHub tracker doc has no plat version line, so create cannot read the planning repo from it.
+const GITHUB_TRACKER = `# Issue tracker: GitHub
+
+Issues and specs for this repo live as GitHub issues.
+`;
+
+function writeGitHubTracker(dir: string) {
+  writeFileSync(join(dir, "docs/agents/issue-tracker.md"), GITHUB_TRACKER);
+}
+
+describe("the planning repo when the tracker doc is the GitHub edition", () => {
+  it("plat spec create uses this checkout's origin", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+      {
+        "GLOSSARY.md": "# Orders\n",
+        "README.md": "b\n",
+      },
+    );
+    expect((await ws.plat(backend.dir, ["init", "--yes"])).code).toBe(0);
+    writeGitHubTracker(backend.dir);
+    writeFileSync(join(dirname(backend.dir), "spec.md"), SPEC_BODY);
+    const created = await ws.plat(backend.dir, [
+      "spec",
+      "create",
+      "--project",
+      "1",
+      "--type",
+      "feature",
+      "--title",
+      "Bulk ship",
+      "--file",
+      "../spec.md",
+    ]);
+    expect(created.code).toBe(0);
+    expect((await get("/specs/1")).spec.planning.repo).toBe("backend");
+  });
+
+  it("plat bug uses this checkout's origin", async () => {
+    const backend = ws.checkout(
+      "backend",
+      "https://github.com/acme/backend.git",
+      {
+        "GLOSSARY.md": "# Orders\n",
+        "README.md": "b\n",
+      },
+    );
+    expect((await ws.plat(backend.dir, ["init", "--yes"])).code).toBe(0);
+    writeGitHubTracker(backend.dir);
+    writeFileSync(
+      join(dirname(backend.dir), "report.txt"),
+      "TypeError: cannot read id\nat exportOrders (src/orders.ts:12)\n",
+    );
+    const created = await ws.plat(backend.dir, [
+      "bug",
+      "--project",
+      "1",
+      "--file",
+      "../report.txt",
+    ]);
+    expect(created.code).toBe(0);
+    expect((await get("/specs/1")).spec.planning.repo).toBe("backend");
+  });
+});
+
 describe("plat spec confirm in the planning repo", () => {
   it("sends the planning docs changed since the remote's default branch, takes them out of the checkout, and starts no ticket before the planning commit", async () => {
     const { backend } = await draftSpec();
@@ -492,6 +558,39 @@ describe("what plat spec confirm sends", () => {
     expect((await get("/specs/1")).spec.planning.state).toBeNull();
     const jobs = await claimAll(new FakeWorker(ws.api.url, "w1"));
     expect(jobs.map((j) => j.type)).not.toContain("planning-commit");
+  });
+
+  it("says the spec has no planning repo and sent no local changes when confirm is not in a project repo", async () => {
+    const { backend } = await draftSpec();
+    await ws.db.pool.query("UPDATE specs SET planning_repo_id = NULL");
+
+    const confirmed = await ws.plat(dirname(backend.dir), [
+      "spec",
+      "confirm",
+      "S-1",
+    ]);
+
+    expect(confirmed.code).toBe(0);
+    expect(`${confirmed.stdout}${confirmed.stderr}`).toContain(
+      "这个需求没有规划仓库，没有带任何本地改动；要带上，在规划仓库的 checkout 里运行 plat spec confirm",
+    );
+    expect(confirmed.stdout).toContain("queued T-1");
+  });
+
+  it("registers the checkout as the planning repo and sends its planning docs when the spec has none", async () => {
+    const { backend } = await draftSpec();
+    await ws.db.pool.query("UPDATE specs SET planning_repo_id = NULL");
+    writeFileSync(
+      join(backend.dir, "GLOSSARY.md"),
+      "# Orders\n\n**Bulk ship**: shipping many orders at once.\n",
+    );
+
+    const confirmed = await ws.plat(backend.dir, ["spec", "confirm", "S-1"]);
+
+    expect(confirmed.code).toBe(0);
+    expect((await get("/specs/1")).spec.planning.repo).toBe("backend");
+    expect(confirmed.stdout).toContain("planning docs GLOSSARY.md");
+    expect((await get("/specs/1")).spec.planning.state).toBe("pending");
   });
 });
 

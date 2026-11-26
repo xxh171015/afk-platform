@@ -618,6 +618,8 @@ const ConfirmBody = z
       .string()
       .max(MAX_PLANNING_PATCH_BYTES * 2)
       .optional(),
+    // the checkout's repo when the spec has no planning repo yet (origin fallback)
+    planningRepo: Text.optional(),
     refPins: z
       .array(z.object({ repoId: Id, sha: Sha }).strict())
       .max(200)
@@ -1135,6 +1137,7 @@ export function registerPlanningRoutes(
     const { specId } = c.req.valid("param");
     let body: {
       planningPatch?: string;
+      planningRepo?: string;
       refPins?: { repoId: number; sha: string }[];
     } = {};
     try {
@@ -1147,7 +1150,7 @@ export function registerPlanningRoutes(
         ? undefined
         : { patch: body.planningPatch };
     const result = await aroundSpec(context, specId, () =>
-      confirmSpec(pool, specId, planning, body.refPins),
+      confirmSpec(pool, specId, planning, body.refPins, body.planningRepo),
     );
     if (result.status === "no-spec")
       return c.json({ error: "no such spec" }, 404);
