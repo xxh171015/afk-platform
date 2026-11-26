@@ -299,6 +299,19 @@ export async function reviewQueue(
      GROUP BY spec_id`,
     [specIds],
   );
+  const comments = await pool.query<{
+    spec_id: number;
+    drafts: number;
+    declined: boolean;
+  }>(
+    `SELECT spec_id,
+            count(*) FILTER (WHERE state = 'draft')::int AS drafts,
+            bool_or(state = 'declined') AS declined
+     FROM review_comments
+     WHERE spec_id = ANY($1)
+     GROUP BY spec_id`,
+    [specIds],
+  );
 
   const pullsBySpec = new Map<number, PullRow[]>();
   for (const pull of pulls.rows) {
@@ -314,6 +327,9 @@ export async function reviewQueue(
   );
   const contractSpecs = new Set(contracts.rows.map((row) => row.spec_id));
   const timeBySpec = new Map(times.rows.map((row) => [row.spec_id, row]));
+  const commentsBySpec = new Map(
+    comments.rows.map((row) => [row.spec_id, row]),
+  );
 
   const built: BuiltRow[] = [];
   const enqueuePullIds = new Set<number>();
@@ -335,8 +351,13 @@ export async function reviewQueue(
       ? { viewedCount, filesCount }
       : { viewedCount: null, filesCount: null };
     const allViewed = ready && viewedCount === filesCount && !hasUnviewedSince;
-    const inProgressViews =
-      ready && (viewedCount > 0 || hasUnviewedSince) && !allViewed;
+    const commentFlags = commentsBySpec.get(spec.id);
+    const hasDrafts = (commentFlags?.drafts ?? 0) > 0;
+    const readyToMergeViews = allViewed && !hasDrafts;
+    const inProgressReview =
+      spec.state === "awaiting-review" &&
+      (hasDrafts || viewedCount > 0 || hasUnviewedSince) &&
+      !readyToMergeViews;
     const hadAwaiting = timeBySpec.get(spec.id)?.last_awaiting != null;
     const inRework =
       spec.state === "reworking" ||
@@ -344,10 +365,9 @@ export async function reviewQueue(
 
     let group: GroupKey;
     if (inRework) group = "inRework";
-    else if (spec.state === "partially-merged" || allViewed)
+    else if (spec.state === "partially-merged" || readyToMergeViews)
       group = "readyToMerge";
-    else if (spec.state === "awaiting-review" && inProgressViews)
-      group = "inProgress";
+    else if (inProgressReview) group = "inProgress";
     else group = "waitingForYou";
 
     const pack = packFlags(packBySpec.get(spec.id) ?? null);
@@ -387,7 +407,7 @@ export async function reviewQueue(
       autoMergeLine: autoMergeLine(autoMerge, spec.state),
       riskTags: riskTagsOf({
         needsHuman: pack.needsHuman,
-        declinedComments: false,
+        declinedComments: commentFlags?.declined === true,
         ciFailure: ci === "failure",
         conflicts,
         orderBroken: nonemptyArray(spec.order_broken) || pack.packOrderBroken,

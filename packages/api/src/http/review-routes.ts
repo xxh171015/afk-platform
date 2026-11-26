@@ -181,6 +181,7 @@ const ReviewRevision = z.discriminatedUnion("state", [
     baseSha: z.string().nullable(),
     mergeBaseSha: z.string().nullable(),
     previousHeadSha: z.string().nullable(),
+    updateBranchSincePrevious: z.boolean(),
     complete: z.boolean(),
     omittedReason: z.string().nullable(),
     filesCount: Id,
@@ -465,7 +466,7 @@ const ReviewGuide = z.object({
   ),
   wrapUp: z.array(
     z.object({
-      stage: z.enum(["final-fix", "rework", "final-tidy", "update-branch"]),
+      stage: z.enum(["final-fix", "final-tidy", "update-branch"]),
       summaries: z.array(GuideSummary),
       hunks: z.array(GuideHunk),
       viewed: z.boolean(),

@@ -14452,12 +14452,7 @@
                         "properties": {
                           "stage": {
                             "type": "string",
-                            "enum": [
-                              "final-fix",
-                              "rework",
-                              "final-tidy",
-                              "update-branch"
-                            ]
+                            "enum": ["final-fix", "final-tidy", "update-branch"]
                           },
                           "summaries": {
                             "type": "array",
@@ -14859,6 +14854,9 @@
                         "previousHeadSha": {
                           "type": ["string", "null"]
                         },
+                        "updateBranchSincePrevious": {
+                          "type": "boolean"
+                        },
                         "complete": {
                           "type": "boolean"
                         },
@@ -15040,6 +15038,7 @@
                         "baseSha",
                         "mergeBaseSha",
                         "previousHeadSha",
+                        "updateBranchSincePrevious",
                         "complete",
                         "omittedReason",
                         "filesCount",

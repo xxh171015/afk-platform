@@ -546,6 +546,129 @@ describe("GET /review-revisions/{id}/guide", () => {
     expect(got.body.tickets).toHaveLength(1);
   });
 
+  it("lists a Change request with comment text, Rework outcomes, and Rework hunks, not under wrap-up", async () => {
+    const { projectId, backendId } = await shop();
+    const specId = await specRow({ projectId });
+    await addTicket({ specId, repoId: backendId, title: "Export API" });
+    const pullId = await addPull(specId, backendId, 7);
+    const reworkRun = await addRun({
+      specId,
+      repoId: backendId,
+      ticketId: null,
+      stage: "rework",
+      result: "done",
+      output: { summary: "addressed empty-list comment" },
+      finishedAt: new Date("2026-01-05T00:00:00.000Z"),
+    });
+    const tidyRun = await addRun({
+      specId,
+      repoId: backendId,
+      ticketId: null,
+      stage: "final-tidy",
+      result: "done",
+      output: { summary: "renamed a helper" },
+      finishedAt: new Date("2026-01-04T00:00:00.000Z"),
+    });
+    const { revisionId } = await addReadyRevision(pullId, [
+      {
+        path: "src/a.ts",
+        attributions: [{ run: formatDisplayId("run", reworkRun) }],
+        hunks: [
+          hunk(null, {
+            newStart: 12,
+            owners: [
+              {
+                run: formatDisplayId("run", reworkRun),
+                stage: "rework",
+                lines: 1,
+              },
+            ],
+          }),
+        ],
+        newBlob: sha("b"),
+      },
+      {
+        path: "src/tidy.ts",
+        attributions: [{ run: formatDisplayId("run", tidyRun) }],
+        hunks: [
+          hunk(null, {
+            owners: [
+              {
+                run: formatDisplayId("run", tidyRun),
+                stage: "final-tidy",
+                lines: 1,
+              },
+            ],
+          }),
+        ],
+      },
+    ]);
+    const changeRequest = await db.pool.query<{ id: number }>(
+      `INSERT INTO change_requests (spec_id, number, state)
+       VALUES ($1, 1, 'done') RETURNING id`,
+      [specId],
+    );
+    const comment = await db.pool.query<{ id: number }>(
+      `INSERT INTO review_comments (
+         spec_id, pull_request_id, revision_id, path, body, state,
+         change_request_id, reply, rework_run_id
+       ) VALUES ($1, $2, $3, 'src/a.ts', $4, 'addressed', $5, $6, $7)
+       RETURNING id`,
+      [
+        specId,
+        pullId,
+        revisionId,
+        "empty list should return 200 and []",
+        changeRequest.rows[0].id,
+        "returns 200 with []",
+        reworkRun,
+      ],
+    );
+
+    const got = await call("GET", `/review-revisions/${revisionId}/guide`);
+    expect(got.status).toBe(200);
+    expect(got.body.wrapUp.map((row: Json) => row.stage)).toEqual([
+      "final-tidy",
+    ]);
+    expect(got.body.changeRequests).toEqual([
+      {
+        number: 1,
+        comments: [
+          {
+            displayId: formatDisplayId("comment", comment.rows[0].id),
+            body: "empty list should return 200 and []",
+          },
+        ],
+        dispositions: [
+          {
+            displayId: formatDisplayId("comment", comment.rows[0].id),
+            result: "addressed：returns 200 with []",
+          },
+        ],
+        hunks: [
+          expect.objectContaining({
+            path: "src/a.ts",
+            newStart: 12,
+          }),
+        ],
+      },
+    ]);
+
+    await call(
+      "PUT",
+      `/pull-requests/${pullId}/viewed-files/${encodeURIComponent("src/a.ts")}`,
+      { newBlob: sha("b") },
+    );
+    const afterView = await call(
+      "GET",
+      `/review-revisions/${revisionId}/guide`,
+    );
+    expect(afterView.body.changeRequests).toEqual(got.body.changeRequests);
+    expect(afterView.body.wrapUp.map((row: Json) => row.stage)).toEqual([
+      "final-tidy",
+    ]);
+  });
+
   it("lists Rework in wrap-up when that run left a summary", async () => {
     const { projectId, backendId } = await shop();
     const specId = await specRow({ projectId });
@@ -579,18 +702,9 @@ describe("GET /review-revisions/{id}/guide", () => {
     ]);
     const got = await call("GET", `/review-revisions/${revisionId}/guide`);
     expect(got.status).toBe(200);
-    expect(got.body.wrapUp).toEqual([
-      expect.objectContaining({
-        stage: "rework",
-        summaries: [
-          {
-            run: formatDisplayId("run", wrapRun),
-            stage: "rework",
-            summary: "addressed empty-list comment",
-          },
-        ],
-      }),
-    ]);
+    expect(got.body.wrapUp).toEqual([]);
+    expect(got.body.changeRequests).toEqual([]);
+    expect(got.body.unattributed).toEqual([]);
   });
 
   it("lists only this repo's tickets and names the others", async () => {

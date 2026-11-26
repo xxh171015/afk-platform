@@ -18,15 +18,37 @@ async function previousHeadShaOf(
   pullId: number,
   headSha: string,
 ): Promise<string | null> {
-  const viewed = await client.query(
-    "SELECT 1 FROM review_file_views WHERE pull_request_id = $1 LIMIT 1",
-    [pullId],
-  );
-  if (!viewed.rowCount) return null;
   const prev = await client.query<{ head_sha: string }>(
-    `SELECT head_sha FROM review_revisions
-     WHERE pull_request_id = $1 AND state = 'ready' AND head_sha <> $2
-     ORDER BY ready_at DESC NULLS LAST, id DESC
+    `SELECT r.head_sha
+     FROM review_revisions r
+     WHERE r.pull_request_id = $1
+       AND r.state = 'ready'
+       AND r.head_sha <> $2
+       AND (
+         EXISTS (
+           SELECT 1 FROM review_comments c
+           WHERE c.revision_id = r.id
+         )
+         OR EXISTS (
+           SELECT 1 FROM review_file_views v
+           WHERE v.pull_request_id = r.pull_request_id
+             AND v.viewed_at >= COALESCE(r.ready_at, r.created_at)
+             AND v.viewed_at < COALESCE(
+               (
+                 SELECT COALESCE(n.ready_at, n.created_at)
+                 FROM review_revisions n
+                 WHERE n.pull_request_id = r.pull_request_id
+                   AND n.state = 'ready'
+                   AND COALESCE(n.ready_at, n.created_at)
+                     > COALESCE(r.ready_at, r.created_at)
+                 ORDER BY COALESCE(n.ready_at, n.created_at) ASC, n.id ASC
+                 LIMIT 1
+               ),
+               'infinity'::timestamptz
+             )
+         )
+       )
+     ORDER BY COALESCE(r.ready_at, r.created_at) DESC, r.id DESC
      LIMIT 1`,
     [pullId, headSha],
   );

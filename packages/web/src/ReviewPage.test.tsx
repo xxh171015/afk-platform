@@ -301,6 +301,7 @@ function readyRevision(over: Record<string, unknown> = {}) {
     baseSha: SHA2,
     mergeBaseSha: SHA2,
     previousHeadSha: SHA2,
+    updateBranchSincePrevious: false,
     complete: true,
     omittedReason: null,
     filesCount: 3,
@@ -475,6 +476,7 @@ function reviewServer(
     review?: Record<string, unknown>;
     revision?: Record<string, unknown>;
     comments?: Record<string, unknown>[];
+    guide?: Record<string, unknown>;
     routes?: Record<string, Handler>;
   } = {},
 ) {
@@ -485,7 +487,7 @@ function reviewServer(
     "GET /search": () => ({ json: { specs: [], tickets: [] } }),
     "GET /specs/1": () => ({ json: specView(over.spec) }),
     "GET /specs/1/review": () => ({ json: specReview(over.review) }),
-    "GET /review-revisions/3/guide": () => ({ json: aGuide() }),
+    "GET /review-revisions/3/guide": () => ({ json: aGuide(over.guide) }),
     "GET /pull-requests/7/review-revision": ({ url }) => {
       const head = url.searchParams.get("head");
       if (head && head !== SHA && head !== (revision.headSha as string)) {
@@ -611,6 +613,83 @@ describe("the spec review page", () => {
     expect(screen.getByText(/已折叠/)).toBeTruthy();
   });
 
+  it("lists a Change request under 修改要求, not under 收尾", async () => {
+    renderApp(
+      reviewServer({
+        guide: {
+          wrapUp: [
+            {
+              stage: "final-fix",
+              summaries: [{ run: "R-8", stage: "final-fix", summary: "nits" }],
+              hunks: [],
+              viewed: false,
+            },
+          ],
+          changeRequests: [
+            {
+              number: 1,
+              comments: [
+                {
+                  displayId: "C-12",
+                  body: "empty list should return 200 and []",
+                },
+              ],
+              dispositions: [
+                {
+                  displayId: "C-12",
+                  result: "addressed：returns 200 with []",
+                },
+              ],
+              hunks: [
+                {
+                  path: "src/a.ts",
+                  newStart: 12,
+                  newLines: 1,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "/specs/1/review",
+    );
+    await screen.findByTestId("review-guide");
+    expect(screen.getByRole("heading", { name: "修改要求" })).toBeTruthy();
+    expect(screen.getByText("修改要求 #1")).toBeTruthy();
+    expect(
+      screen.getByText("C-12：empty list should return 200 and []"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("C-12：addressed：returns 200 with []"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "跳到 src/a.ts +12,1" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "收尾" })).toBeTruthy();
+    expect(screen.getByText("终审修复")).toBeTruthy();
+    expect(screen.queryByText("返工")).toBeNull();
+  });
+
+  it("notes update-branch at the top of 上次审后 when default-branch commits landed in between", async () => {
+    renderApp(
+      reviewServer({
+        revision: { updateBranchSincePrevious: true },
+      }),
+      "/specs/1/review?view=since",
+    );
+    expect(
+      await screen.findByText(
+        "与上次审查版本对照。中间合过默认分支（update-branch），会含那些改动。",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("does not mention update-branch on 上次审后 when none ran in between", async () => {
+    renderApp(reviewServer(), "/specs/1/review?view=since");
+    expect(await screen.findByText("与上次审查版本对照。")).toBeTruthy();
+    expect(screen.queryByText(/中间合过默认分支/)).toBeNull();
+  });
+
   it("jumps from a guide hunk into the all-changes view", async () => {
     const { router } = renderApp(reviewServer(), "/specs/1/review");
     await screen.findByTestId("review-guide");
@@ -702,6 +781,67 @@ describe("the spec review page", () => {
     expect(
       server.calls.some((call) => call.startsWith("GET /review-blobs/")),
     ).toBe(true);
+  });
+
+  it("renders a large open file's hunks lazily and still expands context", async () => {
+    const hunkCount = 12;
+    const patch = Array.from({ length: hunkCount }, (_, i) => {
+      const line = i * 20 + 1;
+      return `@@ -${line} +${line} @@\n-old${i}\n+new${i}\n`;
+    }).join("");
+    const blobLines = Array.from({ length: 20 }, (_, i) => `ctx-${i + 1}`);
+    const server = reviewServer({
+      revision: {
+        files: [
+          aFile({
+            hunks: Array.from({ length: hunkCount }, (_, i) => ({
+              oldStart: i * 20 + 1,
+              oldLines: 1,
+              newStart: i * 20 + 1,
+              newLines: 1,
+              owners: [{ ticket: "T-1", lines: 1 }],
+            })),
+          }),
+        ],
+      },
+      routes: {
+        "GET /review-files/11": () => ({
+          json: {
+            id: 11,
+            path: "src/a.ts",
+            view: "all",
+            patch,
+            patchOmitted: null,
+          },
+        }),
+        [`GET /review-blobs/${SHA3}`]: ({ url }) => ({
+          json: {
+            sha: SHA3,
+            from: Number(url.searchParams.get("from")),
+            to: Number(url.searchParams.get("to")),
+            stored: true,
+            lines: blobLines.slice(
+              Number(url.searchParams.get("from")) - 1,
+              Number(url.searchParams.get("to")),
+            ),
+          },
+        }),
+      },
+    });
+    renderApp(server, "/specs/1/review?view=all&file=src/a.ts");
+    expect(await screen.findByText("+new0")).toBeTruthy();
+    expect(document.querySelectorAll("[data-hunk]").length).toBeLessThan(
+      hunkCount,
+    );
+    expect(document.querySelector("[data-hunk='11']")).toBeNull();
+    const firstHunk = document.querySelector("[data-hunk='0']");
+    expect(firstHunk).toBeTruthy();
+    fireEvent.click(
+      within(firstHunk as HTMLElement).getByRole("button", {
+        name: "向下展开 20 行",
+      }),
+    );
+    expect(await screen.findByText("ctx-2")).toBeTruthy();
   });
 
   it("fills the gap to the next hunk from the stored blob", async () => {

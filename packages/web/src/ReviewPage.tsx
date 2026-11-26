@@ -873,7 +873,9 @@ export function ReviewPage({ specId }: { specId: number }) {
             )
           ) : view === "since" ? (
             <p className="note">
-              与上次审查版本对照；若中间合过默认分支，会含那些改动。
+              {ready?.updateBranchSincePrevious
+                ? "与上次审查版本对照。中间合过默认分支（update-branch），会含那些改动。"
+                : "与上次审查版本对照。"}
             </p>
           ) : null}
           {view !== "guide"

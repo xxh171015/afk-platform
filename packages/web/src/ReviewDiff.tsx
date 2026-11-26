@@ -8,6 +8,8 @@ import {
   type ReviewFileView,
 } from "./review-model.ts";
 
+export const LAZY_HUNK_LIMIT = 8;
+
 export function parsedHunks(patch: string | null): {
   oldStart: number;
   oldLines: number;
@@ -153,7 +155,9 @@ export function ReviewDiff({
   const [extra, setExtra] = useState<
     Record<number, { above: string[]; below: string[]; missing?: boolean }>
   >({});
+  const [revealed, setRevealed] = useState(LAZY_HUNK_LIMIT);
   const sha = blobSha(file);
+  const visibleEnd = Math.min(hunks.length, Math.max(revealed, hunkIndex + 1));
 
   const expand = async (
     index: number,
@@ -211,7 +215,7 @@ export function ReviewDiff({
   }
 
   const nodes = [];
-  for (let index = 0; index < hunks.length; index++) {
+  for (let index = 0; index < visibleEnd; index++) {
     const hunk = hunks[index];
     if (isHiddenHunk(file, hunk, highlightTicket)) {
       let count = 1;
@@ -355,6 +359,21 @@ export function ReviewDiff({
           ),
         )}
       </section>,
+    );
+  }
+  const remaining = hunks.length - visibleEnd;
+  if (remaining > 0) {
+    nodes.push(
+      <p key="lazy-more" className="px-3 py-2 text-muted-foreground">
+        还有 {remaining} 段未渲染{" "}
+        <button
+          type="button"
+          className="text-primary hover:underline"
+          onClick={() => setRevealed(hunks.length)}
+        >
+          显示其余 {remaining} 段
+        </button>
+      </p>,
     );
   }
   return (

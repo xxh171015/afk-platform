@@ -532,6 +532,98 @@ describe("GET /review-queue", () => {
     ]);
   });
 
+  it("puts a spec with drafts in 审到一半 even when no file is viewed, and keeps drafts out of 看完待合并", async () => {
+    const { projectId, backendId } = await shop("drafts");
+    const draftOnlyId = await specRow({
+      projectId,
+      slug: "draft-only",
+      title: "Draft only",
+      state: "awaiting-review",
+    });
+    const draftPull = await addPull(draftOnlyId, backendId, 1);
+    await addReadyRevision(draftPull, [
+      { path: "a.ts", additions: 1, deletions: 0, newBlob: sha("1") },
+    ]);
+    const draftRevision = await db.pool.query<{ id: number }>(
+      "SELECT id FROM review_revisions WHERE pull_request_id = $1",
+      [draftPull],
+    );
+    await db.pool.query(
+      `INSERT INTO review_comments (
+         spec_id, pull_request_id, revision_id, path, body, state
+       ) VALUES ($1, $2, $3, 'a.ts', 'fix the empty list', 'draft')`,
+      [draftOnlyId, draftPull, draftRevision.rows[0].id],
+    );
+
+    const viewedWithDraftId = await specRow({
+      projectId,
+      slug: "viewed-draft",
+      title: "Viewed with draft",
+      state: "awaiting-review",
+    });
+    const viewedPull = await addPull(viewedWithDraftId, backendId, 2);
+    await addReadyRevision(viewedPull, [
+      {
+        path: "a.ts",
+        additions: 1,
+        deletions: 0,
+        newBlob: sha("2"),
+        viewed: true,
+      },
+    ]);
+    const viewedRevision = await db.pool.query<{ id: number }>(
+      "SELECT id FROM review_revisions WHERE pull_request_id = $1",
+      [viewedPull],
+    );
+    await db.pool.query(
+      `INSERT INTO review_comments (
+         spec_id, pull_request_id, revision_id, path, body, state
+       ) VALUES ($1, $2, $3, 'a.ts', 'rename this', 'draft')`,
+      [viewedWithDraftId, viewedPull, viewedRevision.rows[0].id],
+    );
+
+    const reply = await call("GET", "/review-queue");
+    expect(reply.status).toBe(200);
+    expect(idsOf(reply.body.waitingForYou)).not.toContain(draftOnlyId);
+    expect(idsOf(reply.body.inProgress).sort()).toEqual(
+      [draftOnlyId, viewedWithDraftId].sort(),
+    );
+    expect(idsOf(reply.body.readyToMerge)).not.toContain(viewedWithDraftId);
+  });
+
+  it("tags 人审意见未处理 when a submitted Review comment is declined", async () => {
+    const { projectId, backendId } = await shop("declined");
+    const specId = await specRow({
+      projectId,
+      slug: "declined",
+      title: "Declined comment",
+      state: "awaiting-review",
+    });
+    const pullId = await addPull(specId, backendId, 1);
+    await addReadyRevision(pullId, [
+      { path: "a.ts", additions: 1, deletions: 0, newBlob: sha("1") },
+    ]);
+    const revision = await db.pool.query<{ id: number }>(
+      "SELECT id FROM review_revisions WHERE pull_request_id = $1",
+      [pullId],
+    );
+    await db.pool.query(
+      `INSERT INTO review_comments (
+         spec_id, pull_request_id, revision_id, path, body, state
+       ) VALUES ($1, $2, $3, 'a.ts', 'do not do this', 'declined')`,
+      [specId, pullId, revision.rows[0].id],
+    );
+
+    const reply = await call("GET", "/review-queue");
+    expect(reply.status).toBe(200);
+    expect(reply.body.waitingForYou).toMatchObject([
+      {
+        spec: { id: specId },
+        riskTags: ["人审意见未处理"],
+      },
+    ]);
+  });
+
   it("shows 未计算 and enqueues a Review revision when the spec has no ready one", async () => {
     const { projectId, backendId } = await shop();
     const specId = await specRow({

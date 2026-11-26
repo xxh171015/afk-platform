@@ -508,3 +508,147 @@ describe("review-revision jobs", () => {
 
 const specState = async () =>
   (await db.pool.query("SELECT state FROM specs")).rows[0].state as string;
+
+async function seedPull(headSha: string) {
+  const project = await db.pool.query<{ id: number }>(
+    "INSERT INTO projects (name) VALUES ('shop') RETURNING id",
+  );
+  const repo = await db.pool.query<{ id: number }>(
+    `INSERT INTO repos (project_id, url, name)
+     VALUES ($1, 'git@x:backend', 'backend') RETURNING id`,
+    [project.rows[0].id],
+  );
+  const spec = await db.pool.query<{ id: number }>(
+    `INSERT INTO specs (project_id, type, slug, title, state)
+     VALUES ($1, 'feature', 'export', 'Export', 'awaiting-review') RETURNING id`,
+    [project.rows[0].id],
+  );
+  const pull = await db.pool.query<{ id: number }>(
+    `INSERT INTO pull_requests (spec_id, repo_id, number, url, state, head_sha)
+     VALUES ($1, $2, 7, 'https://git.example/pr/7', 'open', $3)
+     RETURNING id`,
+    [spec.rows[0].id, repo.rows[0].id, headSha],
+  );
+  return {
+    specId: spec.rows[0].id,
+    repoId: repo.rows[0].id,
+    pullId: pull.rows[0].id,
+  };
+}
+
+async function seedReadyRevision(
+  pullId: number,
+  headSha: string,
+  readyAt: Date,
+  newBlob: string,
+) {
+  const revision = await db.pool.query<{ id: number }>(
+    `INSERT INTO review_revisions
+       (pull_request_id, head_sha, state, complete, files_count, additions, deletions, ready_at)
+     VALUES ($1, $2, 'ready', true, 1, 1, 0, $3)
+     RETURNING id`,
+    [pullId, headSha, readyAt],
+  );
+  await db.pool.query(
+    `INSERT INTO review_files
+       (revision_id, path, status, old_blob, new_blob, additions, deletions)
+     VALUES ($1, 'src/a.ts', 'modified', $2, $3, 1, 0)`,
+    [revision.rows[0].id, shaDigit("0"), newBlob],
+  );
+  return revision.rows[0].id;
+}
+
+function shaDigit(digit: string) {
+  return digit.repeat(40);
+}
+
+describe("previousHeadSha when enqueueing a Review revision", () => {
+  it("uses a comments-only review as the previous head and skips an unreviewed intermediate", async () => {
+    const headA = shaDigit("1");
+    const headB = shaDigit("2");
+    const headC = shaDigit("3");
+    const { specId, pullId } = await seedPull(headC);
+    const t1 = new Date("2026-01-01T00:00:00.000Z");
+    const t2 = new Date("2026-01-01T01:00:00.000Z");
+    const revisionA = await seedReadyRevision(pullId, headA, t1, shaDigit("4"));
+    await seedReadyRevision(pullId, headB, t2, shaDigit("5"));
+    await db.pool.query(
+      `INSERT INTO review_comments (
+         spec_id, pull_request_id, revision_id, path, body, state
+       ) VALUES ($1, $2, $3, 'src/a.ts', 'empty list', 'draft')`,
+      [specId, pullId, revisionA],
+    );
+
+    const got = await call(
+      "GET",
+      `/pull-requests/${pullId}/review-revision?head=${headC}`,
+    );
+    expect(got.status).toBe(200);
+    expect(got.body.state).toBe("pending");
+    expect(await jobsOf("review-revision")).toMatchObject([
+      { payload: { pullId, headSha: headC, previousHeadSha: headA } },
+    ]);
+  });
+
+  it("uses the revision that was viewed, not a later unreviewed ready head", async () => {
+    const headA = shaDigit("1");
+    const headB = shaDigit("2");
+    const headC = shaDigit("3");
+    const blobA = shaDigit("4");
+    const { pullId } = await seedPull(headC);
+    const t1 = new Date("2026-01-01T00:00:00.000Z");
+    const viewedAt = new Date("2026-01-01T00:01:00.000Z");
+    const t2 = new Date("2026-01-01T01:00:00.000Z");
+    await seedReadyRevision(pullId, headA, t1, blobA);
+    await seedReadyRevision(pullId, headB, t2, shaDigit("5"));
+    await db.pool.query(
+      `INSERT INTO review_file_views (pull_request_id, path, new_blob, viewed_at)
+       VALUES ($1, 'src/a.ts', $2, $3)`,
+      [pullId, blobA, viewedAt],
+    );
+
+    const got = await call(
+      "GET",
+      `/pull-requests/${pullId}/review-revision?head=${headC}`,
+    );
+    expect(got.status).toBe(200);
+    expect(await jobsOf("review-revision")).toMatchObject([
+      { payload: { pullId, headSha: headC, previousHeadSha: headA } },
+    ]);
+  });
+
+  it("sets updateBranchSincePrevious when update-branch ran after the previous review", async () => {
+    const headA = shaDigit("1");
+    const headC = shaDigit("3");
+    const { specId, repoId, pullId } = await seedPull(headC);
+    const t1 = new Date("2026-01-01T00:00:00.000Z");
+    const updateAt = new Date("2026-01-01T00:30:00.000Z");
+    await seedReadyRevision(pullId, headA, t1, shaDigit("4"));
+    const currentId = await seedReadyRevision(
+      pullId,
+      headC,
+      new Date("2026-01-01T02:00:00.000Z"),
+      shaDigit("6"),
+    );
+    await db.pool.query(
+      "UPDATE review_revisions SET previous_head_sha = $2 WHERE id = $1",
+      [currentId, headA],
+    );
+    await db.pool.query(
+      `INSERT INTO runs (spec_id, repo_id, stage, result, output, finished_at)
+       VALUES ($1, $2, 'update-branch', 'done', '{}'::jsonb, $3)`,
+      [specId, repoId, updateAt],
+    );
+
+    const got = await call(
+      "GET",
+      `/pull-requests/${pullId}/review-revision?head=${headC}`,
+    );
+    expect(got.status).toBe(200);
+    expect(got.body).toMatchObject({
+      state: "ready",
+      previousHeadSha: headA,
+      updateBranchSincePrevious: true,
+    });
+  });
+});

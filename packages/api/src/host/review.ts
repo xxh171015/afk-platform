@@ -116,6 +116,7 @@ export type ReviewRevisionView =
       baseSha: string | null;
       mergeBaseSha: string | null;
       previousHeadSha: string | null;
+      updateBranchSincePrevious: boolean;
       complete: boolean;
       omittedReason: string | null;
       filesCount: number;
@@ -147,6 +148,33 @@ export interface ReviewBlobSliceView {
 }
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
+
+async function updateBranchSincePreviousOf(
+  db: Pick<pg.PoolClient, "query">,
+  pullId: number,
+  previousHeadSha: string | null,
+  readyAt: Date | null,
+  createdAt: Date,
+): Promise<boolean> {
+  if (!previousHeadSha) return false;
+  const hit = await db.query(
+    `SELECT 1
+     FROM runs r
+     JOIN pull_requests p
+       ON p.id = $1 AND p.spec_id = r.spec_id AND p.repo_id = r.repo_id
+     JOIN review_revisions prev
+       ON prev.pull_request_id = p.id
+      AND prev.head_sha = $2
+      AND prev.state = 'ready'
+     WHERE r.stage = 'update-branch'
+       AND r.result IN ('done', 'merged')
+       AND r.finished_at > COALESCE(prev.ready_at, prev.created_at)
+       AND r.finished_at <= $3
+     LIMIT 1`,
+    [pullId, previousHeadSha, readyAt ?? createdAt],
+  );
+  return Boolean(hit.rowCount);
+}
 
 export function blobLines(content: string, from: number, to: number): string[] {
   const raw = content.split("\n");
@@ -347,9 +375,12 @@ async function loadRevision(
     additions: number;
     deletions: number;
     error: string | null;
+    ready_at: Date | null;
+    created_at: Date;
   }>(
     `SELECT id, state, head_sha, base_sha, merge_base_sha, previous_head_sha,
-            complete, omitted_reason, files_count, additions, deletions, error
+            complete, omitted_reason, files_count, additions, deletions, error,
+            ready_at, created_at
      FROM review_revisions
      WHERE pull_request_id = $1 AND head_sha = $2`,
     [pullId, headSha],
@@ -400,6 +431,13 @@ async function loadRevision(
     baseSha: row.base_sha,
     mergeBaseSha: row.merge_base_sha,
     previousHeadSha: row.previous_head_sha,
+    updateBranchSincePrevious: await updateBranchSincePreviousOf(
+      db,
+      pullId,
+      row.previous_head_sha,
+      row.ready_at,
+      row.created_at,
+    ),
     complete: row.complete,
     omittedReason: row.omitted_reason,
     filesCount: row.files_count,

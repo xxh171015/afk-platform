@@ -71,10 +71,6 @@ export type ReviewAttribution =
   | { run: string; stage?: string }
   | { kind: "setup" | "planning" | "unknown" };
 
-export interface ReviewHunkOwner extends Record<string, unknown> {
-  lines: number;
-}
-
 export interface ReviewHunk {
   newStart: number;
   newLines: number;

@@ -6878,7 +6878,7 @@ export interface paths {
               }[];
               wrapUp: {
                 /** @enum {string} */
-                stage: "final-fix" | "rework" | "final-tidy" | "update-branch";
+                stage: "final-fix" | "final-tidy" | "update-branch";
                 summaries: {
                   run: string;
                   stage: string;
@@ -7017,6 +7017,7 @@ export interface paths {
                   baseSha: string | null;
                   mergeBaseSha: string | null;
                   previousHeadSha: string | null;
+                  updateBranchSincePrevious: boolean;
                   complete: boolean;
                   omittedReason: string | null;
                   filesCount: number;
