@@ -9,6 +9,7 @@ import { cn } from "./lib/utils.ts";
 import { paths } from "./paths.ts";
 import type { ReviewFileView } from "./review-model.ts";
 import { ticketsOf } from "./review-model.ts";
+import { shortSha } from "./status.ts";
 
 type SpecReview = {
   userStories: { number: number; text: string }[];
@@ -58,12 +59,36 @@ type SpecReview = {
   autoMerge: Parameters<typeof autoMergeLine>[0];
 };
 
+export type ReviewCommentView = {
+  id: number;
+  displayId: string;
+  path: string | null;
+  side: "old" | "new" | null;
+  lineStart: number | null;
+  lineEnd: number | null;
+  body: string;
+  state: "draft" | "submitted" | "addressed" | "declined";
+  writtenOn: string;
+};
+
+const COMMENT_STATE_LABEL: Record<ReviewCommentView["state"], string> = {
+  draft: "草稿",
+  submitted: "已提交",
+  addressed: "已处理",
+  declined: "没处理",
+};
+
 export function ReviewRail({
   review,
   specState,
   pull,
   file,
   highlightTicket,
+  comments,
+  currentHead,
+  canWrite,
+  onEditComment,
+  onDeleteComment,
 }: {
   review: SpecReview;
   specState: string;
@@ -73,6 +98,11 @@ export function ReviewRail({
   } | null;
   file: ReviewFileView | undefined;
   highlightTicket: string | null;
+  comments?: ReviewCommentView[];
+  currentHead?: string | null;
+  canWrite?: boolean;
+  onEditComment?: (comment: ReviewCommentView) => void;
+  onDeleteComment?: (comment: ReviewCommentView) => void;
 }) {
   const currentTickets = highlightTicket
     ? [highlightTicket]
@@ -187,7 +217,13 @@ export function ReviewRail({
               前面。
             </p>
           ))}
-          <p className="note">人审意见还不能写</p>
+          <CommentList
+            comments={comments ?? []}
+            currentHead={currentHead ?? null}
+            canWrite={canWrite === true}
+            onEditComment={onEditComment}
+            onDeleteComment={onDeleteComment}
+          />
         </div>
       ) : null}
       {tab === "spec" ? (
@@ -270,5 +306,79 @@ export function ReviewRail({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function CommentList({
+  comments,
+  currentHead,
+  canWrite,
+  onEditComment,
+  onDeleteComment,
+}: {
+  comments: ReviewCommentView[];
+  currentHead: string | null;
+  canWrite: boolean;
+  onEditComment?: (comment: ReviewCommentView) => void;
+  onDeleteComment?: (comment: ReviewCommentView) => void;
+}) {
+  if (comments.length === 0) {
+    return <p className="note">还没有人审意见</p>;
+  }
+  const groups = (["draft", "submitted", "addressed", "declined"] as const).map(
+    (state) => ({
+      state,
+      items: comments.filter((item) => item.state === state),
+    }),
+  );
+  return (
+    <section>
+      <h3 className="text-xs font-medium text-muted-foreground">人审意见</h3>
+      {groups.map((group) =>
+        group.items.length === 0 ? null : (
+          <div key={group.state} className="mt-2 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {COMMENT_STATE_LABEL[group.state]}
+            </p>
+            <ul className="space-y-2">
+              {group.items.map((item) => (
+                <li key={item.id}>
+                  <p>
+                    <span className="font-medium">{item.displayId}</span>{" "}
+                    {item.path == null
+                      ? "PR"
+                      : item.lineStart == null
+                        ? item.path
+                        : `${item.path}:${item.lineStart}${item.side === "old" ? "（旧）" : ""}`}
+                    {item.writtenOn !== currentHead
+                      ? ` · 写于 ${shortSha(item.writtenOn)}`
+                      : ""}
+                  </p>
+                  <p>{item.body}</p>
+                  {canWrite && item.state === "draft" ? (
+                    <p className="flex gap-2 text-xs">
+                      <button
+                        type="button"
+                        className="text-primary underline"
+                        onClick={() => onEditComment?.(item)}
+                      >
+                        编辑 {item.displayId}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-primary underline"
+                        onClick={() => onDeleteComment?.(item)}
+                      >
+                        删除 {item.displayId}
+                      </button>
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ),
+      )}
+    </section>
   );
 }

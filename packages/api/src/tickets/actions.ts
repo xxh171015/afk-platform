@@ -18,6 +18,7 @@ import {
   enqueueSpecCleanup,
   inSeconds,
 } from "../host/host-jobs.ts";
+import { deleteDraftReviewComments } from "../host/review-comments.ts";
 import { dropPotentialConflicts } from "../host/trial-merge.ts";
 import {
   enqueueFinalReviewIfWaiting,
@@ -1241,6 +1242,7 @@ export async function cancelSpec(
       specId,
       next.state,
     ]);
+    await deleteDraftReviewComments(client, specId);
 
     const tickets = await client.query<{ id: number; state: TicketState }>(
       "SELECT id, state FROM tickets WHERE spec_id = $1 ORDER BY id",

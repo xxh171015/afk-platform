@@ -14448,6 +14448,577 @@
         }
       }
     },
+    "/pull-requests/{id}/review-comments": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Review comments on this pull request, including drafts pinned to the revision they were written on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "displayId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "integer"
+                          },
+                          "pullRequestId": {
+                            "type": "integer"
+                          },
+                          "revisionId": {
+                            "type": "integer"
+                          },
+                          "path": {
+                            "type": ["string", "null"]
+                          },
+                          "side": {
+                            "type": ["string", "null"],
+                            "enum": ["old", "new", null]
+                          },
+                          "lineStart": {
+                            "type": ["integer", "null"]
+                          },
+                          "lineEnd": {
+                            "type": ["integer", "null"]
+                          },
+                          "excerpt": {
+                            "type": ["string", "null"]
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "submitted",
+                              "addressed",
+                              "declined"
+                            ]
+                          },
+                          "changeRequestId": {
+                            "type": ["integer", "null"]
+                          },
+                          "reply": {
+                            "type": ["string", "null"]
+                          },
+                          "reworkRunId": {
+                            "type": ["integer", "null"]
+                          },
+                          "writtenOn": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "displayId",
+                          "specId",
+                          "pullRequestId",
+                          "revisionId",
+                          "path",
+                          "side",
+                          "lineStart",
+                          "lineEnd",
+                          "excerpt",
+                          "body",
+                          "state",
+                          "changeRequestId",
+                          "reply",
+                          "reworkRunId",
+                          "writtenOn",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["comments"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revisionId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "path": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "side": {
+                    "type": ["string", "null"],
+                    "enum": ["old", "new", null]
+                  },
+                  "lineStart": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "lineEnd": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "excerpt": {
+                    "type": ["string", "null"],
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                },
+                "required": ["revisionId", "body"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The draft Review comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "displayId": {
+                      "type": "string"
+                    },
+                    "specId": {
+                      "type": "integer"
+                    },
+                    "pullRequestId": {
+                      "type": "integer"
+                    },
+                    "revisionId": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": ["string", "null"]
+                    },
+                    "side": {
+                      "type": ["string", "null"],
+                      "enum": ["old", "new", null]
+                    },
+                    "lineStart": {
+                      "type": ["integer", "null"]
+                    },
+                    "lineEnd": {
+                      "type": ["integer", "null"]
+                    },
+                    "excerpt": {
+                      "type": ["string", "null"]
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["draft", "submitted", "addressed", "declined"]
+                    },
+                    "changeRequestId": {
+                      "type": ["integer", "null"]
+                    },
+                    "reply": {
+                      "type": ["string", "null"]
+                    },
+                    "reworkRunId": {
+                      "type": ["integer", "null"]
+                    },
+                    "writtenOn": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "displayId",
+                    "specId",
+                    "pullRequestId",
+                    "revisionId",
+                    "path",
+                    "side",
+                    "lineStart",
+                    "lineEnd",
+                    "excerpt",
+                    "body",
+                    "state",
+                    "changeRequestId",
+                    "reply",
+                    "reworkRunId",
+                    "writtenOn",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is empty or longer than 4000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such pull request or Review revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not awaiting review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/review-comments/{id}": {
+      "patch": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                },
+                "required": ["body"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "displayId": {
+                      "type": "string"
+                    },
+                    "specId": {
+                      "type": "integer"
+                    },
+                    "pullRequestId": {
+                      "type": "integer"
+                    },
+                    "revisionId": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "type": ["string", "null"]
+                    },
+                    "side": {
+                      "type": ["string", "null"],
+                      "enum": ["old", "new", null]
+                    },
+                    "lineStart": {
+                      "type": ["integer", "null"]
+                    },
+                    "lineEnd": {
+                      "type": ["integer", "null"]
+                    },
+                    "excerpt": {
+                      "type": ["string", "null"]
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["draft", "submitted", "addressed", "declined"]
+                    },
+                    "changeRequestId": {
+                      "type": ["integer", "null"]
+                    },
+                    "reply": {
+                      "type": ["string", "null"]
+                    },
+                    "reworkRunId": {
+                      "type": ["integer", "null"]
+                    },
+                    "writtenOn": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "displayId",
+                    "specId",
+                    "pullRequestId",
+                    "revisionId",
+                    "path",
+                    "side",
+                    "lineStart",
+                    "lineEnd",
+                    "excerpt",
+                    "body",
+                    "state",
+                    "changeRequestId",
+                    "reply",
+                    "reworkRunId",
+                    "writtenOn",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is empty or longer than 4000 characters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Review comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not awaiting review, or the comment is not a draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["id"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Review comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec is not awaiting review, or the comment is not a draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/links": {
       "get": {
         "parameters": [

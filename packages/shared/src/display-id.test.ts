@@ -6,6 +6,7 @@ describe("formatDisplayId", () => {
     ["spec", 12, "S-12"],
     ["ticket", 123, "T-123"],
     ["run", 456, "R-456"],
+    ["comment", 7, "C-7"],
     ["ticket", 1, "T-1"],
   ] as const)("%s %i is shown as %s", (kind, id, shown) => {
     expect(formatDisplayId(kind, id)).toBe(shown);
@@ -21,6 +22,7 @@ describe("parseDisplayId", () => {
     ["S-12", "spec", 12],
     ["T-123", "ticket", 123],
     ["R-456", "run", 456],
+    ["C-7", "comment", 7],
   ] as const)("%s is a %s with serial id %i", (shown, kind, id) => {
     expect(parseDisplayId(shown)).toEqual({ kind, id });
   });
@@ -45,7 +47,7 @@ describe("parseDisplayId", () => {
   });
 
   it("reads back whatever formatDisplayId produced", () => {
-    for (const kind of ["spec", "ticket", "run"] as const) {
+    for (const kind of ["spec", "ticket", "run", "comment"] as const) {
       const largest = Number.MAX_SAFE_INTEGER;
       expect(parseDisplayId(formatDisplayId(kind, largest))).toEqual({
         kind,

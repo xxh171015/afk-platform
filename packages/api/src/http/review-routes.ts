@@ -2,6 +2,9 @@ import {
   HOST_KINDS,
   MERGE_POLICIES,
   REVIEW_AXES,
+  REVIEW_COMMENT_BODY_MAX,
+  REVIEW_COMMENT_SIDES,
+  REVIEW_COMMENT_STATES,
   REVIEW_FILE_STATUSES,
   REVIEW_PATCH_OMITTED_REASONS,
   REVIEW_REVISION_STATES,
@@ -18,6 +21,12 @@ import {
   reviewRevisionOf,
   specReviewOf,
 } from "../host/review.ts";
+import {
+  createReviewComment,
+  deleteReviewComment,
+  patchReviewComment,
+  reviewCommentsOf,
+} from "../host/review-comments.ts";
 import { inTransaction } from "../scheduling/scheduler.ts";
 import { reviewQueue } from "../tickets/review-queue.ts";
 import { ErrorReply, INT4_MAX } from "./schemas.ts";
@@ -196,6 +205,50 @@ const BlobSlice = z.object({
 const ViewedBody = z.object({ newBlob: GitSha });
 const ViewedReply = z.object({ viewed: z.boolean() });
 
+const ReviewComment = z.object({
+  id: Id,
+  displayId: z.string(),
+  specId: Id,
+  pullRequestId: Id,
+  revisionId: Id,
+  path: z.string().nullable(),
+  side: z.enum(REVIEW_COMMENT_SIDES).nullable(),
+  lineStart: z.number().int().nullable(),
+  lineEnd: z.number().int().nullable(),
+  excerpt: z.string().nullable(),
+  body: z.string(),
+  state: z.enum(REVIEW_COMMENT_STATES),
+  changeRequestId: Id.nullable(),
+  reply: z.string().nullable(),
+  reworkRunId: Id.nullable(),
+  writtenOn: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const CreateCommentBody = z
+  .object({
+    revisionId: z.number().int().min(1).max(INT4_MAX),
+    path: z.string().min(1).max(500).nullable().optional(),
+    side: z.enum(REVIEW_COMMENT_SIDES).nullable().optional(),
+    lineStart: z.number().int().min(1).max(INT4_MAX).nullable().optional(),
+    lineEnd: z.number().int().min(1).max(INT4_MAX).nullable().optional(),
+    excerpt: z
+      .string()
+      .min(1)
+      .max(REVIEW_COMMENT_BODY_MAX)
+      .nullable()
+      .optional(),
+    body: z.string().min(1).max(REVIEW_COMMENT_BODY_MAX),
+  })
+  .strict();
+
+const PatchCommentBody = z
+  .object({
+    body: z.string().min(1).max(REVIEW_COMMENT_BODY_MAX),
+  })
+  .strict();
+
 const ReviewQueueRow = z.object({
   spec: z.object({
     id: Id,
@@ -340,6 +393,66 @@ const deleteViewedRoute = createRoute({
   },
 });
 
+const listCommentsRoute = createRoute({
+  method: "get",
+  path: "/pull-requests/{id}/review-comments",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply(
+      "Review comments on this pull request, including drafts pinned to the revision they were written on",
+      z.object({ comments: z.array(ReviewComment) }),
+    ),
+    404: reply("No such pull request", ErrorReply),
+  },
+});
+
+const createCommentRoute = createRoute({
+  method: "post",
+  path: "/pull-requests/{id}/review-comments",
+  request: {
+    params: z.object({ id: PathId }),
+    body: { content: json(CreateCommentBody) },
+  },
+  responses: {
+    201: reply("The draft Review comment", ReviewComment),
+    400: reply("The body is empty or longer than 4000 characters", ErrorReply),
+    404: reply("No such pull request or Review revision", ErrorReply),
+    409: reply("The spec is not awaiting review", ErrorReply),
+  },
+});
+
+const patchCommentRoute = createRoute({
+  method: "patch",
+  path: "/review-comments/{id}",
+  request: {
+    params: z.object({ id: PathId }),
+    body: { content: json(PatchCommentBody) },
+  },
+  responses: {
+    200: reply("The updated draft", ReviewComment),
+    400: reply("The body is empty or longer than 4000 characters", ErrorReply),
+    404: reply("No such Review comment", ErrorReply),
+    409: reply(
+      "The spec is not awaiting review, or the comment is not a draft",
+      ErrorReply,
+    ),
+  },
+});
+
+const deleteCommentRoute = createRoute({
+  method: "delete",
+  path: "/review-comments/{id}",
+  request: { params: z.object({ id: PathId }) },
+  responses: {
+    200: reply("The draft was deleted", z.object({ id: Id })),
+    404: reply("No such Review comment", ErrorReply),
+    409: reply(
+      "The spec is not awaiting review, or the comment is not a draft",
+      ErrorReply,
+    ),
+  },
+});
+
 function filePathOf(raw: string): string {
   try {
     return decodeURIComponent(raw);
@@ -432,5 +545,49 @@ export function registerReviewRoutes(
     return result === "ok"
       ? c.json({ viewed: false }, 200)
       : c.json({ error: "no such pull request" }, 404);
+  });
+
+  app.openapi(listCommentsRoute, async (c) => {
+    const comments = await reviewCommentsOf(pool, c.req.valid("param").id);
+    return comments
+      ? c.json({ comments }, 200)
+      : c.json({ error: "no such pull request" }, 404);
+  });
+
+  app.openapi(createCommentRoute, async (c) => {
+    const result = await inTransaction(pool, (client) =>
+      createReviewComment(client, c.req.valid("param").id, c.req.valid("json")),
+    );
+    if (result.status === "not-found")
+      return c.json({ error: "no such pull request or Review revision" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json(result.comment, 201);
+  });
+
+  app.openapi(patchCommentRoute, async (c) => {
+    const result = await inTransaction(pool, (client) =>
+      patchReviewComment(
+        client,
+        c.req.valid("param").id,
+        c.req.valid("json").body,
+      ),
+    );
+    if (result.status === "not-found")
+      return c.json({ error: "no such Review comment" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json(result.comment, 200);
+  });
+
+  app.openapi(deleteCommentRoute, async (c) => {
+    const result = await inTransaction(pool, (client) =>
+      deleteReviewComment(client, c.req.valid("param").id),
+    );
+    if (result.status === "not-found")
+      return c.json({ error: "no such Review comment" }, 404);
+    if (result.status === "refused")
+      return c.json({ error: result.message }, 409);
+    return c.json({ id: result.id }, 200);
   });
 }

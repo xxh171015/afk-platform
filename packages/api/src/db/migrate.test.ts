@@ -33,6 +33,7 @@ const ENTITY_TABLES = [
   "pull_requests",
   "repos",
   "review_blobs",
+  "review_comments",
   "review_file_views",
   "review_files",
   "review_revisions",

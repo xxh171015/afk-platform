@@ -13,7 +13,7 @@ import { ErrorState, RowsSkeleton } from "./components/afk/states.tsx";
 import { useResourcePoll } from "./EventsProvider.tsx";
 import { cn } from "./lib/utils.ts";
 import { DETAIL_POLL_MS } from "./live.ts";
-import { ReviewDiff } from "./ReviewDiff.tsx";
+import { firstCommentLine, ReviewDiff } from "./ReviewDiff.tsx";
 import { ReviewRail } from "./ReviewRail.tsx";
 import {
   defaultFileOpen,
@@ -40,6 +40,18 @@ type SpecReview =
   paths["/specs/{id}/review"]["get"]["responses"][200]["content"]["application/json"];
 type ReviewRevision =
   paths["/pull-requests/{id}/review-revision"]["get"]["responses"][200]["content"]["application/json"];
+type ReviewComment =
+  paths["/pull-requests/{id}/review-comments"]["get"]["responses"][200]["content"]["application/json"]["comments"][number];
+
+type ComposeDraft = {
+  commentId?: number;
+  path: string | null;
+  side: "old" | "new" | null;
+  lineStart: number | null;
+  lineEnd: number | null;
+  excerpt: string | null;
+  body: string;
+};
 
 const FILTERS: { flag: ReviewFlag; label: string }[] = [
   { flag: "unviewed", label: "未看" },
@@ -82,6 +94,13 @@ export function ReviewPage({ specId }: { specId: number }) {
   const [pin, setPin] = useState<{ pullId: number; head: string } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState(query.path);
+  const [compose, setCompose] = useState<ComposeDraft | null>(null);
+  const [cursor, setCursor] = useState<{
+    path: string;
+    side: "old" | "new";
+    line: number;
+    excerpt: string;
+  } | null>(null);
 
   const specReview = useQuery({
     queryKey: ["spec", specId, "review"],
@@ -140,6 +159,38 @@ export function ReviewPage({ specId }: { specId: number }) {
 
   const ready = revision.data?.state === "ready" ? revision.data : null;
   const files = ready ? asFiles(ready.files) : [];
+  const comments = useQuery({
+    queryKey: ["review-comments", pull?.id],
+    enabled: pull != null,
+    queryFn: async () => {
+      const { data, error } = await api.GET(
+        "/pull-requests/{id}/review-comments",
+        { params: { path: { id: pull?.id as number } } },
+      );
+      if (!data) throw new Error(describeError(error));
+      return data.comments;
+    },
+    refetchInterval: poll,
+    placeholderData: keepPreviousData,
+  });
+  const commentList = comments.data ?? [];
+  const commentFlags = {
+    commented: new Set(
+      commentList
+        .map((item) => item.path)
+        .filter((path): path is string => Boolean(path)),
+    ),
+    drafts: new Set(
+      commentList
+        .filter((item) => item.state === "draft")
+        .map((item) => item.path)
+        .filter((path): path is string => Boolean(path)),
+    ),
+  };
+  const canWrite = specReview.data?.spec.state === "awaiting-review";
+  const draftCount = commentList.filter(
+    (item) => item.state === "draft",
+  ).length;
 
   const sinceQueries = useQueries({
     queries:
@@ -171,7 +222,7 @@ export function ReviewPage({ specId }: { specId: number }) {
   );
 
   const visible = files.filter((file) =>
-    fileMatches(file, query, sinceChanged),
+    fileMatches(file, query, sinceChanged, commentFlags),
   );
   const selectedPath = useMemo(() => {
     if (search.file && visible.some((file) => file.path === search.file)) {
@@ -240,6 +291,81 @@ export function ReviewPage({ specId }: { specId: number }) {
     },
   });
 
+  const invalidateComments = () => {
+    void queryClient.invalidateQueries({
+      queryKey: ["review-comments", pull?.id],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["spec", specId, "review"],
+    });
+  };
+
+  const saveComment = useMutation({
+    mutationFn: async (draft: ComposeDraft) => {
+      if (!pull || ready == null) throw new Error("no pull request");
+      if (draft.commentId != null) {
+        const { data, error } = await api.PATCH("/review-comments/{id}", {
+          params: { path: { id: draft.commentId } },
+          body: { body: draft.body },
+        });
+        if (!data) throw new Error(describeError(error));
+        return data;
+      }
+      const { data, error } = await api.POST(
+        "/pull-requests/{id}/review-comments",
+        {
+          params: { path: { id: pull.id } },
+          body: {
+            revisionId: ready.id,
+            path: draft.path,
+            side: draft.side,
+            lineStart: draft.lineStart,
+            lineEnd: draft.lineEnd,
+            excerpt: draft.excerpt,
+            body: draft.body,
+          },
+        },
+      );
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: () => {
+      setCompose(null);
+      invalidateComments();
+    },
+  });
+
+  const removeComment = useMutation({
+    mutationFn: async (id: number) => {
+      const { data, error } = await api.DELETE("/review-comments/{id}", {
+        params: { path: { id } },
+      });
+      if (!data) throw new Error(describeError(error));
+      return data;
+    },
+    onSuccess: () => {
+      setCompose(null);
+      invalidateComments();
+    },
+  });
+
+  const openLineCompose = (input: {
+    path: string;
+    side: "old" | "new";
+    line: number;
+    excerpt: string;
+  }) => {
+    setCursor(input);
+    setCompose({
+      path: input.path,
+      side: input.side,
+      lineStart: input.line,
+      lineEnd: input.line,
+      excerpt: input.excerpt,
+      body: "",
+    });
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return;
@@ -251,8 +377,38 @@ export function ReviewPage({ specId }: { specId: number }) {
         return;
       }
       if (shortcut.type === "comment") {
-        setNote("写意见下一张再接上");
-        return;
+        if (!canWrite) return;
+        if (cursor && cursor.path === selectedPath) {
+          openLineCompose(cursor);
+          return;
+        }
+        if (selected) {
+          const fromHunk = firstCommentLine(
+            patches.get(selected.id)?.patch ?? null,
+            hunkIndex,
+          );
+          if (fromHunk) {
+            openLineCompose({ path: selected.path, ...fromHunk });
+            return;
+          }
+          setCompose({
+            path: selected.path,
+            side: null,
+            lineStart: null,
+            lineEnd: null,
+            excerpt: null,
+            body: "",
+          });
+          return;
+        }
+        setCompose({
+          path: null,
+          side: null,
+          lineStart: null,
+          lineEnd: null,
+          excerpt: null,
+          body: "",
+        });
       }
       if (shortcut.type === "next-file" || shortcut.type === "prev-file") {
         if (visible.length === 0) return;
@@ -427,6 +583,31 @@ export function ReviewPage({ specId }: { specId: number }) {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="rounded-md px-2 py-1 text-xs"
+          onClick={() => setNote("提交修改要求下一张再接上")}
+        >
+          {draftCount > 0 ? `提交修改要求（${draftCount}）` : "提交修改要求"}
+        </button>
+        {canWrite ? (
+          <button
+            type="button"
+            className="rounded-md px-2 py-1 text-xs text-primary underline"
+            onClick={() =>
+              setCompose({
+                path: null,
+                side: null,
+                lineStart: null,
+                lineEnd: null,
+                excerpt: null,
+                body: "",
+              })
+            }
+          >
+            写 PR 意见
+          </button>
+        ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <input
@@ -556,6 +737,42 @@ export function ReviewPage({ specId }: { specId: number }) {
           </ul>
         </div>
         <div className="min-w-0 space-y-3">
+          {compose && canWrite ? (
+            <form
+              className="space-y-2 rounded-md border bg-surface p-3 text-sm"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (compose.body.trim() === "") return;
+                saveComment.mutate(compose);
+              }}
+            >
+              <p>
+                {compose.commentId != null
+                  ? `编辑 ${formatCommentId(compose.commentId, commentList)}`
+                  : compose.path == null
+                    ? "写 PR 意见"
+                    : compose.lineStart == null
+                      ? `写文件意见 ${compose.path}`
+                      : `写意见 ${compose.path} 第 ${compose.lineStart} 行`}
+              </p>
+              <textarea
+                aria-label="人审意见"
+                className="h-24 w-full rounded-md border bg-background px-2 py-1"
+                value={compose.body}
+                onChange={(event) =>
+                  setCompose({ ...compose, body: event.target.value })
+                }
+              />
+              <div className="flex gap-2">
+                <button type="submit" className="text-primary underline">
+                  保存草稿
+                </button>
+                <button type="button" onClick={() => setCompose(null)}>
+                  取消
+                </button>
+              </div>
+            </form>
+          ) : null}
           {view === "guide" ? (
             <p className="note">导读还没有正文</p>
           ) : view === "since" ? (
@@ -609,6 +826,24 @@ export function ReviewPage({ specId }: { specId: number }) {
                           ? ` · ${ticketsOf(file).join(" ")}`
                           : ""}
                       </span>
+                      {canWrite ? (
+                        <button
+                          type="button"
+                          className="text-xs text-primary underline"
+                          onClick={() =>
+                            setCompose({
+                              path: file.path,
+                              side: null,
+                              lineStart: null,
+                              lineEnd: null,
+                              excerpt: null,
+                              body: "",
+                            })
+                          }
+                        >
+                          写文件意见 {file.path}
+                        </button>
+                      ) : null}
                     </header>
                     {file.patchOmitted ? (
                       <p className="note px-3 py-2 text-sm">
@@ -630,6 +865,10 @@ export function ReviewPage({ specId }: { specId: number }) {
                         }
                         hostUrl={pull?.url ?? "#"}
                         hunkIndex={file.path === selectedPath ? hunkIndex : -1}
+                        canComment={canWrite}
+                        onCommentLine={(input) =>
+                          openLineCompose({ path: file.path, ...input })
+                        }
                         onLoadContext={async ({ sha, from, to }) => {
                           const { data, error } = await api.GET(
                             "/review-blobs/{sha}",
@@ -656,6 +895,21 @@ export function ReviewPage({ specId }: { specId: number }) {
           pull={pull}
           file={selected}
           highlightTicket={highlightTicket}
+          comments={commentList}
+          currentHead={pinnedHead}
+          canWrite={canWrite}
+          onEditComment={(item) =>
+            setCompose({
+              commentId: item.id,
+              path: item.path,
+              side: item.side,
+              lineStart: item.lineStart,
+              lineEnd: item.lineEnd,
+              excerpt: null,
+              body: item.body,
+            })
+          }
+          onDeleteComment={(item) => removeComment.mutate(item.id)}
         />
       </div>
       {note ? (
@@ -665,6 +919,10 @@ export function ReviewPage({ specId }: { specId: number }) {
       ) : null}
     </div>
   );
+}
+
+function formatCommentId(id: number, comments: ReviewComment[]): string {
+  return comments.find((item) => item.id === id)?.displayId ?? `C-${id}`;
 }
 
 function parsePatchCount(patch: string | null | undefined): number {
