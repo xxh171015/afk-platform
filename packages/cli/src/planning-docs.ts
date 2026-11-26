@@ -8,7 +8,15 @@ import {
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, posix } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import {
   CONTEXT_DOC_PATHS,
   GLOSSARY_MAP_PATH,
@@ -116,8 +124,219 @@ function contextsIn(map: string): string[] {
   return contexts;
 }
 
-// The planning docs' paths in this checkout: in a multi-context repo also the glossary map and each context's
-// glossary and ADRs.
+// Machine-only planning files: never listed, never sent (ADR 0013). Tracker docs live under docs/agents/.
+export function isMachineOnlyPlanningPath(path: string): boolean {
+  return (
+    path === "CLAUDE.local.md" ||
+    path === ".cursor/rules/afk-platform.mdc" ||
+    path === "docs/agents" ||
+    path.startsWith("docs/agents/")
+  );
+}
+
+export interface PlanningChange {
+  status: string;
+  path: string;
+}
+
+export function planningMergeBase(dir: string, defaultBranch: string): string {
+  const remote = `refs/remotes/origin/${defaultBranch}`;
+  const head = git(dir, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "HEAD",
+  ]).out.trim();
+  const merged = git(dir, ["merge-base", "HEAD", remote]);
+  return (merged.code === 0 ? merged.out.trim() : head) || head;
+}
+
+// Local changes against the patch base: uncommitted (staged and not), new unignored files, files in unpushed
+// commits, and deletions. Ignored files stay out (`git add -A` honours gitignore and info/exclude).
+export function listPlanningChanges(
+  dir: string,
+  defaultBranch: string,
+): PlanningChange[] {
+  const head = git(dir, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "HEAD",
+  ]).out.trim();
+  const base = planningMergeBase(dir, defaultBranch);
+  if (!base) return [];
+  const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
+  try {
+    const env = { GIT_INDEX_FILE: join(scratch, "index") };
+    git(dir, ["read-tree", head || "--empty"], env);
+    git(dir, ["add", "-A"], env);
+    const parts = git(
+      dir,
+      ["diff", "--cached", "-z", "--name-status", "--no-renames", base],
+      env,
+    )
+      .out.split("\0")
+      .filter(Boolean);
+    const changes: PlanningChange[] = [];
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const status = parts[i] ?? "";
+      const path = parts[i + 1] ?? "";
+      if (!path || isMachineOnlyPlanningPath(path)) continue;
+      changes.push({ status, path });
+    }
+    return changes.sort((a, b) => a.path.localeCompare(b.path));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function repoRelativePath(repoDir: string, cwd: string, raw: string): string {
+  const abs = isAbsolute(raw) ? raw : resolve(cwd, raw);
+  const rel = relative(repoDir, abs);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    return raw.replaceAll("\\", "/").replace(/\/+$/, "");
+  }
+  return rel.split(sep).join("/").replace(/\/+$/, "") || ".";
+}
+
+function selectorCovers(selector: string, file: string): boolean {
+  if (selector === ".") return true;
+  return file === selector || file.startsWith(`${selector}/`);
+}
+
+export type PlanningSelectionOptions = {
+  send: string[];
+  keepLocal: string[];
+  sendAll: boolean;
+  keepLocalAll: boolean;
+};
+
+export type PlanningSelection =
+  | { ok: true; send: string[]; keepLocal: string[] }
+  | { ok: false; kind: "unknown-path"; path: string }
+  | { ok: false; kind: "both"; path: string }
+  | { ok: false; kind: "uncovered"; changes: PlanningChange[] };
+
+export function selectPlanningChanges(
+  changes: PlanningChange[],
+  options: PlanningSelectionOptions,
+  repoDir: string,
+  cwd: string,
+): PlanningSelection {
+  const listed = changes.map((change) => change.path);
+  const sendSelectors = options.send.map((path) =>
+    repoRelativePath(repoDir, cwd, path),
+  );
+  const keepSelectors = options.keepLocal.map((path) =>
+    repoRelativePath(repoDir, cwd, path),
+  );
+  for (const [raw, selector] of options.send.map(
+    (path, i) => [path, sendSelectors[i] ?? path] as const,
+  )) {
+    if (!listed.some((file) => selectorCovers(selector, file)))
+      return { ok: false, kind: "unknown-path", path: raw };
+  }
+  for (const [raw, selector] of options.keepLocal.map(
+    (path, i) => [path, keepSelectors[i] ?? path] as const,
+  )) {
+    if (!listed.some((file) => selectorCovers(selector, file)))
+      return { ok: false, kind: "unknown-path", path: raw };
+  }
+
+  const send: string[] = [];
+  const keepLocal: string[] = [];
+  const uncovered: PlanningChange[] = [];
+  for (const change of changes) {
+    const inSend = sendSelectors.some((selector) =>
+      selectorCovers(selector, change.path),
+    );
+    const inKeep = keepSelectors.some((selector) =>
+      selectorCovers(selector, change.path),
+    );
+    if (inSend && inKeep) return { ok: false, kind: "both", path: change.path };
+    if (inSend) {
+      send.push(change.path);
+      continue;
+    }
+    if (inKeep) {
+      keepLocal.push(change.path);
+      continue;
+    }
+    if (options.sendAll && options.keepLocalAll)
+      return { ok: false, kind: "both", path: change.path };
+    if (options.sendAll) send.push(change.path);
+    else if (options.keepLocalAll) keepLocal.push(change.path);
+    else uncovered.push(change);
+  }
+  if (uncovered.length > 0)
+    return { ok: false, kind: "uncovered", changes: uncovered };
+  return { ok: true, send, keepLocal };
+}
+
+export function pathsInPlanningPatch(patch: string): string[] {
+  const files: string[] = [];
+  for (const match of patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) {
+    const path = match[2] ?? match[1];
+    if (path) files.push(path);
+  }
+  return [...new Set(files)];
+}
+
+export function isSecretPlanningPath(path: string): boolean {
+  const name = posix.basename(path);
+  return (
+    name === ".env" ||
+    name.startsWith(".env.") ||
+    name.endsWith(".pem") ||
+    name.endsWith(".key") ||
+    name.endsWith(".p12") ||
+    name.startsWith("id_rsa")
+  );
+}
+
+// Selected files against the patch base (`--binary --full-index`), same algorithm as before, any paths.
+export function buildPlanningPatch(
+  dir: string,
+  defaultBranch: string,
+  paths: string[],
+): { patch: string; files: string[] } {
+  if (paths.length === 0) return { patch: "", files: [] };
+  const head = git(dir, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "HEAD",
+  ]).out.trim();
+  const base = planningMergeBase(dir, defaultBranch);
+  const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
+  try {
+    const env = {
+      GIT_INDEX_FILE: join(scratch, "index"),
+      ...LITERAL_PATHSPECS,
+    };
+    git(dir, ["read-tree", head || "--empty"], env);
+    const tracked = git(dir, ["ls-files", "-z", "--", ...paths], env)
+      .out.split("\0")
+      .filter(Boolean);
+    const present = paths.filter(
+      (path) =>
+        existsSync(join(dir, path)) ||
+        tracked.some((file) => file === path || file.startsWith(`${path}/`)),
+    );
+    if (present.length > 0) git(dir, ["add", "-A", "--", ...present], env);
+    const diff = (extra: string[]) =>
+      git(dir, ["diff", "--cached", ...extra, base, "--", ...paths], env).out;
+    return {
+      patch: diff(["--binary", "--full-index"]),
+      files: diff(["--name-only"]).split("\n").filter(Boolean),
+    };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+// Import still records filenames on these paths (T-179 switches it to listPlanningChanges). Confirm no longer
+// uses this for the patch.
 function planningDocPaths(dir: string, revisions: string[]): string[] {
   const maps = readGlossaryMaps(dir, revisions);
   if (maps.length === 0) return PLANNING_DOC_PATHS;
@@ -159,36 +378,8 @@ export function readPlanningDocs(
   const base = fork ?? head;
 
   const paths = planningDocPaths(dir, [head, base]);
-
-  // A throwaway index, so that new files show up without touching the person's.
-  const scratch = mkdtempSync(join(tmpdir(), "afk-planning-"));
-  try {
-    const env = {
-      GIT_INDEX_FILE: join(scratch, "index"),
-      ...LITERAL_PATHSPECS,
-    };
-    git(dir, ["read-tree", head || "--empty"], env);
-    const tracked = git(dir, ["ls-files", "-z", "--", ...paths], env)
-      .out.split("\0")
-      .filter(Boolean);
-    const present = paths.filter(
-      (path) =>
-        existsSync(join(dir, path)) ||
-        tracked.some((file) => file === path || file.startsWith(`${path}/`)),
-    );
-    if (present.length > 0) git(dir, ["add", "-A", "--", ...present], env);
-    const diff = (extra: string[]) =>
-      git(dir, ["diff", "--cached", ...extra, base, "--", ...paths], env).out;
-    return {
-      status: "ok",
-      patch: diff(["--binary", "--full-index"]),
-      files: diff(["--name-only"]).split("\n").filter(Boolean),
-      dir,
-      paths,
-    };
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
+  const built = buildPlanningPatch(dir, repo.defaultBranch, paths);
+  return { status: "ok", ...built, dir, paths };
 }
 
 // The planning docs this checkout has and HEAD does not: changed, new or removed, staged or not.
@@ -196,6 +387,7 @@ export function uncommittedPlanningDocs(
   dir: string,
   paths: string[],
 ): string[] {
+  if (paths.length === 0) return [];
   const status = git(
     dir,
     [
@@ -219,6 +411,7 @@ export function uncommittedPlanningDocs(
 // HEAD does not have is removed, with the directories it leaves empty), without a stash. Commits, and every other
 // path, stay as they are. Returns the paths put aside.
 export function putPlanningDocsAside(dir: string, paths: string[]): string[] {
+  if (paths.length === 0) return [];
   const files = uncommittedPlanningDocs(dir, paths);
   const inHead = files.filter(
     (file) =>
