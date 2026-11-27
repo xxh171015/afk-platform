@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -16,6 +17,7 @@ import {
 } from "@afk/pipeline";
 import {
   bundleFor,
+  type FakeAgentContext,
   FakeAgentRunner,
   type FakeAgentStep,
   FakeGateSandbox,
@@ -27,12 +29,13 @@ import type { TicketAlign } from "../align-ticket-branch.ts";
 import type { ClaimedJob } from "../api.ts";
 import {
   type ExecutorDeps,
+  executeStage,
   InfrastructureError,
   type StageOutcomeBody,
 } from "../executor.ts";
 import { pushRef } from "../push.ts";
 import { RepoStore } from "../repos.ts";
-import type { Slot } from "../slots.ts";
+import { type Slot, SlotManager } from "../slots.ts";
 import { SnapshotStore } from "../snapshots.ts";
 import { agentChange } from "./implement.ts";
 
@@ -1130,25 +1133,25 @@ const FINAL_CASES = [
   { stage: "update-branch", branch: "agent/S-12-update" },
 ] as const;
 
+function ticketRemote() {
+  repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
+  git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+  git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
+  git(repo.dir, ["checkout", "--quiet", "main"]);
+  originAndSlot(["spec/s", "agent/T-123"]);
+  return gitOut(origin, ["rev-parse", "agent/T-123"]);
+}
+
+function finalRemote(branch: string) {
+  repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
+  git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
+  git(repo.dir, ["checkout", "--quiet", "-b", branch]);
+  git(repo.dir, ["checkout", "--quiet", "main"]);
+  originAndSlot(["spec/s", branch]);
+  return gitOut(origin, ["rev-parse", branch]);
+}
+
 describe("recover after an abnormal agent exit", () => {
-  function ticketRemote() {
-    repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
-    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
-    git(repo.dir, ["checkout", "--quiet", "-b", "agent/T-123"]);
-    git(repo.dir, ["checkout", "--quiet", "main"]);
-    originAndSlot(["spec/s", "agent/T-123"]);
-    return gitOut(origin, ["rev-parse", "agent/T-123"]);
-  }
-
-  function finalRemote(branch: string) {
-    repo = makeRepo({ ".sandcastle/gates.yaml": GATES });
-    git(repo.dir, ["checkout", "--quiet", "-b", "spec/s"]);
-    git(repo.dir, ["checkout", "--quiet", "-b", branch]);
-    git(repo.dir, ["checkout", "--quiet", "main"]);
-    originAndSlot(["spec/s", branch]);
-    return gitOut(origin, ["rev-parse", branch]);
-  }
-
   it.each(TICKET_STAGES)(
     "%s: an abnormal exit with a valid result file, commits, and a clean worktree is done with resultFix recovered-after-exit",
     async (stage) => {
@@ -1563,4 +1566,165 @@ describe("recover after an abnormal agent exit", () => {
       ),
     ).rejects.toBeInstanceOf(InfrastructureError);
   });
+});
+
+const OTHER = { kind: "other" as const, message: "Error: agent crashed" };
+
+function executorDeps(
+  script: (ctx: FakeAgentContext) => FakeAgentStep | Promise<FakeAgentStep>,
+  salvageDir: string,
+): ExecutorDeps & { repos: RepoStore } {
+  const repos = new RepoStore(join(tmp, "repos"));
+  return {
+    slots: new SlotManager({
+      root: join(tmp, "slots"),
+      count: 1,
+      mainCloneFor: (name, url) => repos.dirFor(name, url),
+      salvageDir,
+      isHeld: async () => true,
+    }),
+    repos,
+    snapshots: new SnapshotStore(join(tmp, "snapshots")),
+    push: (request) => pushRef(request),
+    api: {
+      prePush: async () => "held",
+      gateResult: async () => undefined,
+    },
+    makeAgentRunner: (dir) => new FakeAgentRunner(dir, script),
+    makeGateSandbox: (dir) => new FakeGateSandbox(dir),
+    tmpRoot: tmp,
+    salvageDir,
+  };
+}
+
+describe("salvage when an agent job fails", () => {
+  async function failAgent(
+    script: (ctx: FakeAgentContext) => FakeAgentStep | Promise<FakeAgentStep>,
+    bundleOver: Parameters<typeof bundleFor>[0],
+  ) {
+    const salvageDir = join(tmp, "salvage");
+    const d = executorDeps(script, salvageDir);
+    const bundle = bundleFor({
+      ...bundleOver,
+      repo: {
+        id: 1,
+        name: "backend",
+        url: origin,
+        defaultBranch: "main",
+      },
+    });
+    let thrown: unknown;
+    try {
+      await executeStage(d, context(bundle));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(InfrastructureError);
+    return {
+      error: thrown as InfrastructureError,
+      mainDir: d.repos.dirFor("backend", origin),
+      salvageDir,
+    };
+  }
+
+  it("implement: an abnormal exit with no valid result takes the commits back and saves uncommitted changes as a diff", async () => {
+    ticketRemote();
+    const { error, mainDir, salvageDir } = await failAgent(
+      () => ({
+        files: { "src/a.ts": "export {};\n" },
+        uncommitted: { "src/dirty.ts": "left behind\n" },
+        error: OTHER,
+      }),
+      {
+        stage: "implement",
+        agentBranch: "agent/T-123",
+        integrationBranch: "spec/s",
+      },
+    );
+    expect(git(mainDir, ["cat-file", "-e", "agent/T-123:src/a.ts"]).code).toBe(
+      0,
+    );
+    expect(error.salvage?.hadDiff).toBe(true);
+    expect(error.salvage?.commits.some((c) => c.subject.length > 0)).toBe(true);
+    const diffs = readdirSync(salvageDir).filter((name) =>
+      name.endsWith(".diff"),
+    );
+    expect(diffs.length).toBeGreaterThan(0);
+    expect(
+      diffs.some((name) =>
+        readFileSync(join(salvageDir, name), "utf8").includes("dirty.ts"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the next implement Run sees the last uncommitted diff at salvage.diff and does not apply it", async () => {
+    ticketRemote();
+    const first = await failAgent(
+      () => ({
+        files: { "src/a.ts": "export {};\n" },
+        uncommitted: { "src/dirty.ts": "left behind\n" },
+        error: OTHER,
+      }),
+      {
+        stage: "implement",
+        agentBranch: "agent/T-123",
+        integrationBranch: "spec/s",
+      },
+    );
+    let seen: string | undefined;
+    let worktreeHadDirty = true;
+    const d = executorDeps((ctx) => {
+      seen = ctx.context("salvage.diff");
+      worktreeHadDirty = existsSync(join(ctx.dir, "src/dirty.ts"));
+      return { output: DONE };
+    }, first.salvageDir);
+    const outcome = await executeStage(
+      d,
+      context(
+        bundleFor({
+          stage: "implement",
+          agentBranch: "agent/T-123",
+          integrationBranch: "spec/s",
+          repo: {
+            id: 1,
+            name: "backend",
+            url: origin,
+            defaultBranch: "main",
+          },
+        }),
+      ),
+    );
+    expect(outcome.outcome).toBe("done");
+    expect(seen).toContain("dirty.ts");
+    expect(worktreeHadDirty).toBe(false);
+  });
+
+  it.each(FINAL_CASES)(
+    "$stage: an abnormal exit with no valid result takes the commits back and saves uncommitted changes as a diff",
+    async ({ stage, branch }) => {
+      finalRemote(branch);
+      const { error, mainDir, salvageDir } = await failAgent(
+        () => ({
+          files: { "src/a.ts": "export {};\n" },
+          uncommitted: { "src/dirty.ts": "left behind\n" },
+          error: OTHER,
+        }),
+        {
+          stage,
+          ticket: null,
+          agentBranch: branch,
+          integrationBranch: "spec/s",
+        },
+      );
+      expect(git(mainDir, ["cat-file", "-e", `${branch}:src/a.ts`]).code).toBe(
+        0,
+      );
+      expect(error.salvage?.hadDiff).toBe(true);
+      expect(
+        readdirSync(salvageDir).some((name) =>
+          readFileSync(join(salvageDir, name), "utf8").includes("dirty.ts"),
+        ),
+      ).toBe(true);
+    },
+  );
 });

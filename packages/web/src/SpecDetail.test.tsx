@@ -53,6 +53,7 @@ const view = (
       waitingMs: number;
       totalMs: number;
     } | null;
+    wastedAgentMs?: number;
     usageByStage?: {
       stage: string;
       inputTokens: number;
@@ -108,6 +109,7 @@ const view = (
   finalRuns: over.finalRuns ?? [],
   potentialConflicts: over.potentialConflicts ?? [],
   leadTime: over.leadTime ?? null,
+  wastedAgentMs: over.wastedAgentMs ?? 0,
   usageByStage: over.usageByStage ?? [],
   links: over.links ?? [],
   autoMerge: over.autoMerge,
@@ -1193,6 +1195,23 @@ describe("the spec page", () => {
     expect(usage.textContent).toContain("5,110,000");
     expect(usage.textContent).toContain("自审");
     expect(usage.textContent).toContain("76,000");
+  });
+
+  it("shows the spec's unproductive agent time on the overview", async () => {
+    renderWithApp(
+      <SpecDetail specId={1} />,
+      fakeServer({
+        "GET /specs/1": () => ({
+          json: view({
+            spec: { state: "running" },
+            wastedAgentMs: 105_000,
+          }),
+        }),
+      }),
+    );
+    const wasted = await screen.findByTestId("wasted-agent");
+    expect(wasted.textContent).toContain("没有产出的 agent 时间");
+    expect(wasted.textContent).toContain("1m 45s");
   });
 
   it("shows the overall review of a finalizing spec", async () => {

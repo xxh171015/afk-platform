@@ -474,6 +474,7 @@ const specRoute = createRoute({
             totalMs: z.number().int(),
           })
           .nullable(),
+        wastedAgentMs: z.number().int(),
         links: z.array(LinkRow),
         usageByStage: z.array(
           z.object({

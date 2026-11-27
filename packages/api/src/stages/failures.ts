@@ -1,5 +1,6 @@
 import { GATE_CONFIG_BRIEF } from "@afk/pipeline";
 import {
+  AGENT_STAGES,
   type BlockedReason,
   blockedReasonForReportedPush,
   failureSourceOf,
@@ -62,6 +63,7 @@ import {
 } from "../planning/planning-commit.ts";
 import { lockSpec, schedulePass } from "../scheduling/scheduler.ts";
 import { applyTakeover } from "../tickets/actions.ts";
+import { type AutoRetryTarget, jobFailureRetryNote } from "./auto-retry.ts";
 import {
   EXPECTED_STATE,
   recordOrphanEvent,
@@ -144,7 +146,19 @@ export type FailedRunFacts = {
   axis?: string;
   orphanRef?: string;
   orphanSha?: string;
+  salvage?: {
+    commits: { sha: string; subject: string }[];
+    hadDiff: boolean;
+    diffTooLarge?: boolean;
+  };
 };
+
+const SALVAGE_RETRY_STAGES = new Set<string>([
+  ...AGENT_STAGES,
+  "final-fix",
+  "final-tidy",
+  "rework",
+]);
 
 // The Run the job started is over, whatever else happens. Usage from an agent that already ran stays on the Run.
 async function finishRun(
@@ -159,6 +173,7 @@ async function finishRun(
     output.orphanRef = run.orphanRef;
     output.orphanSha = run.orphanSha;
   }
+  if (run?.salvage) output.salvage = run.salvage;
   await client.query(
     `UPDATE runs SET finished_at = COALESCE(finished_at, now()), result = 'job-failed',
        duration_ms = COALESCE(duration_ms, LEAST(extract(epoch FROM (now() - started_at)) * 1000, 2147483647)::int),
@@ -322,9 +337,9 @@ export async function recordJobFailure(
   const finalE2e = readFinalE2ePayload(job.payload);
   if (finalE2e) return finalE2eJobFailed(client, finalE2e, error);
   const stage = readStagePayload(job.payload);
-  if (stage) return ticketStageFailed(client, stage, error, now);
+  if (stage) return ticketStageFailed(client, stage, error, now, job.id, run);
   const final = readFinalPayload(job.payload);
-  if (final) return finalStepFailed(client, final, error, now);
+  if (final) return finalStepFailed(client, final, error, now, job.id, run);
   const update = await updateBranchJobFailed(client, job, error);
   if (update !== "not-update-branch") {
     return update === "paused"
@@ -355,11 +370,47 @@ export async function recordJobFailure(
   return { status: "not-a-stage" };
 }
 
+async function writeJobFailureRetryNote(
+  client: pg.PoolClient,
+  target: AutoRetryTarget,
+  jobId: number,
+  stage: string,
+  error: string,
+  run?: FailedRunFacts,
+): Promise<void> {
+  if (!SALVAGE_RETRY_STAGES.has(stage)) return;
+  if (error === LEASE_EXPIRED_ERROR || error.startsWith("lease-expired:"))
+    return;
+  const duration = (
+    await client.query<{ duration_ms: number | null }>(
+      "SELECT duration_ms FROM runs WHERE job_id = $1 ORDER BY id DESC LIMIT 1",
+      [jobId],
+    )
+  ).rows[0]?.duration_ms;
+  const note = jobFailureRetryNote(
+    duration ?? 0,
+    storedJobError(error),
+    run?.salvage,
+  );
+  if (target.type === "ticket")
+    await client.query("UPDATE tickets SET retry_note = $2 WHERE id = $1", [
+      target.ticketId,
+      note,
+    ]);
+  else
+    await client.query(
+      "UPDATE finalizations SET retry_note = $2 WHERE id = $1",
+      [target.finalizationId, note],
+    );
+}
+
 async function ticketStageFailed(
   client: pg.PoolClient,
   read: NonNullable<ReturnType<typeof readStagePayload>>,
   error: string,
   now: Date,
+  jobId: number,
+  run?: FailedRunFacts,
 ): Promise<FailureOutcome> {
   const found = await client.query<{ spec_id: number }>(
     "SELECT spec_id FROM tickets WHERE id = $1",
@@ -412,6 +463,19 @@ async function ticketStageFailed(
       {},
       retry.notBefore,
     );
+    await writeJobFailureRetryNote(
+      client,
+      {
+        type: "ticket",
+        specId: row.spec_id,
+        repoId: row.repo_id,
+        ticketId: read.ticketId,
+      },
+      jobId,
+      read.stage,
+      error,
+      run,
+    );
     return { status: "requeued", failures: retry.failures };
   }
   const failures = counts.external + counts.platform;
@@ -447,6 +511,8 @@ async function finalStepFailed(
   read: NonNullable<ReturnType<typeof readFinalPayload>>,
   error: string,
   now: Date,
+  jobId: number,
+  run?: FailedRunFacts,
 ): Promise<FailureOutcome> {
   await lockSpec(client, read.specId);
   const fin = (
@@ -478,6 +544,19 @@ async function finalStepFailed(
     : requeueAfterJobFailure(error, counts, now);
   if (retry) {
     await enqueueFinalJob(client, read, read.step, {}, retry.notBefore);
+    await writeJobFailureRetryNote(
+      client,
+      {
+        type: "finalization",
+        specId: read.specId,
+        repoId: read.repoId,
+        finalizationId: fin.id,
+      },
+      jobId,
+      read.step,
+      error,
+      run,
+    );
     return { status: "requeued", failures: retry.failures };
   }
   const failures = counts.external + counts.platform;

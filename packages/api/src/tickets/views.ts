@@ -21,6 +21,7 @@ import { mergeOrderOf } from "../host/merge-order.ts";
 import { FOLLOWED_PULL_REQUESTS } from "../host/pull-requests.ts";
 import { potentialConflictsOf } from "../host/trial-merge.ts";
 import { linksBySpec } from "../links/view.ts";
+import { specWastedAgentMs } from "../metrics/metrics.ts";
 import { baselineFailuresOf } from "../planning/baseline-gate.ts";
 import { recallGateTestCases } from "../stages/gate-records.ts";
 import {
@@ -986,6 +987,7 @@ export async function specView(
     finalRuns: await finalRunsOf(pool, specId),
     potentialConflicts: await potentialConflictsOf(pool, specId),
     leadTime: await specLeadTime(pool, specId, now),
+    wastedAgentMs: await specWastedAgentMs(pool, specId),
     usageByStage: await usageByStageOf(pool, specId),
     links: (await linksBySpec(pool, specId)) ?? [],
     cleanup: await cleanupJobOf(pool, specId),

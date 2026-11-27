@@ -476,6 +476,7 @@ describe("renderContext", () => {
     expect(existsSync(join(dir, "contract"))).toBe(false);
     expect(existsSync(join(dir, "domain"))).toBe(false);
     expect(existsSync(join(dir, "note.md"))).toBe(false);
+    expect(existsSync(join(dir, "salvage.diff"))).toBe(false);
   });
 
   it("writes note.md when the Run has a Retry note, and never puts it in ticket.md", () => {
@@ -486,6 +487,22 @@ describe("renderContext", () => {
     expect(read(dir, "note.md")).toBe(note);
     expect(read(dir, "ticket.md")).not.toContain(note);
     expect(read(dir, "ticket.md")).toBe(bundle.ticket?.file);
+  });
+
+  it("writes salvage.diff when the last uncommitted diff is given, and omits it when it is over 1 MB", () => {
+    const dir = ctxDir();
+    const salvageDiff =
+      "diff --git a/src/dirty.ts b/src/dirty.ts\n+left behind\n";
+    renderContext({ dir, bundle: bundleFor(), run, salvageDiff });
+    expect(read(dir, "salvage.diff")).toBe(salvageDiff);
+    const huge = ctxDir();
+    renderContext({
+      dir: huge,
+      bundle: bundleFor(),
+      run,
+      salvageDiff: "x".repeat(1_000_001),
+    });
+    expect(existsSync(join(huge, "salvage.diff"))).toBe(false);
   });
 
   it("writes GLOSSARY and ADRs under domain/, never AGENTS.md", () => {

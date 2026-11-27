@@ -5449,6 +5449,37 @@
                       "axis": {
                         "type": "string",
                         "enum": ["standards", "spec"]
+                      },
+                      "salvage": {
+                        "type": "object",
+                        "properties": {
+                          "commits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "sha": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "subject": {
+                                  "type": "string",
+                                  "maxLength": 500
+                                }
+                              },
+                              "required": ["sha", "subject"]
+                            },
+                            "maxItems": 200
+                          },
+                          "hadDiff": {
+                            "type": "boolean"
+                          },
+                          "diffTooLarge": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["commits", "hadDiff"]
                       }
                     }
                   },
@@ -5468,6 +5499,37 @@
                         "axis": {
                           "type": "string",
                           "enum": ["standards", "spec"]
+                        },
+                        "salvage": {
+                          "type": "object",
+                          "properties": {
+                            "commits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "sha": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "subject": {
+                                    "type": "string",
+                                    "maxLength": 500
+                                  }
+                                },
+                                "required": ["sha", "subject"]
+                              },
+                              "maxItems": 200
+                            },
+                            "hadDiff": {
+                              "type": "boolean"
+                            },
+                            "diffTooLarge": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["commits", "hadDiff"]
                         }
                       }
                     },
@@ -8738,6 +8800,9 @@
                         "totalMs"
                       ]
                     },
+                    "wastedAgentMs": {
+                      "type": "integer"
+                    },
                     "links": {
                       "type": "array",
                       "items": {
@@ -8918,6 +8983,7 @@
                     "finalRuns",
                     "potentialConflicts",
                     "leadTime",
+                    "wastedAgentMs",
                     "links",
                     "usageByStage",
                     "cleanup",
@@ -16960,6 +17026,45 @@
                               },
                               "required": ["pausedMinutes", "automatic"]
                             }
+                          },
+                          "wastedAgent": {
+                            "type": "object",
+                            "properties": {
+                              "totalMs": {
+                                "type": "integer"
+                              },
+                              "recoveredAfterExit": {
+                                "type": "integer"
+                              },
+                              "byStage": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "stage": {
+                                      "type": "string"
+                                    },
+                                    "source": {
+                                      "type": "string",
+                                      "enum": [
+                                        "external",
+                                        "platform",
+                                        "cancelled"
+                                      ]
+                                    },
+                                    "durationMs": {
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": ["stage", "source", "durationMs"]
+                                }
+                              }
+                            },
+                            "required": [
+                              "totalMs",
+                              "recoveredAfterExit",
+                              "byStage"
+                            ]
                           }
                         },
                         "required": [
@@ -16968,7 +17073,8 @@
                           "attribution",
                           "failureRate",
                           "success",
-                          "agentsPauses"
+                          "agentsPauses",
+                          "wastedAgent"
                         ]
                       }
                     }

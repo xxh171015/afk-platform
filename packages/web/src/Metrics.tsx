@@ -13,6 +13,7 @@ import { describeError, useApi } from "./api.tsx";
 import { Page } from "./components/afk/page.tsx";
 import { ErrorState, RowsSkeleton } from "./components/afk/states.tsx";
 import { LEAD_TIME_BAR } from "./lead-time-bar.ts";
+import { stageLabel } from "./lib/labels.ts";
 import { cn } from "./lib/utils.ts";
 import { paths } from "./paths.ts";
 import { blockedReasonLabel } from "./status.ts";
@@ -51,6 +52,24 @@ type Week = {
     untouchedRate: number | null;
   };
   agentsPauses: { pausedMinutes: number; automatic: boolean }[];
+  wastedAgent: {
+    totalMs: number;
+    recoveredAfterExit: number;
+    byStage: {
+      stage: string;
+      source: "external" | "platform" | "cancelled";
+      durationMs: number;
+    }[];
+  };
+};
+
+const WASTED_SOURCE_LABELS: Record<
+  "external" | "platform" | "cancelled",
+  string
+> = {
+  external: FAILURE_SOURCE_LABELS.external,
+  platform: FAILURE_SOURCE_LABELS.platform,
+  cancelled: "取消",
 };
 
 const LEAD_MS: Record<LeadTimeSegment, (week: Week) => number> = {
@@ -154,6 +173,10 @@ export function Metrics() {
   const selected = weeks[Math.min(leadWeek, Math.max(0, weeks.length - 1))];
   const failedWeeks = attributionWeeks(weeks);
   const pausedWeeks = weeks.filter((week) => week.agentsPauses.length > 0);
+  const wastedWeeks = weeks.filter(
+    (week) =>
+      week.wastedAgent.totalMs > 0 || week.wastedAgent.recoveredAfterExit > 0,
+  );
 
   return (
     <Page
@@ -223,6 +246,22 @@ export function Metrics() {
             onSelect={setLeadWeek}
           />
           {selected ? <LeadWeekDetail week={selected} /> : null}
+        </section>
+
+        <section
+          data-testid="metrics-wasted-agent"
+          className="min-w-0 rounded-lg border bg-card p-5"
+        >
+          <h2 className="mb-3 text-sm font-semibold">没有产出的 agent 时间</h2>
+          {wastedWeeks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">无</p>
+          ) : (
+            <ul className="space-y-4">
+              {wastedWeeks.map((week) => (
+                <WeekWastedAgent key={week.weekStart} week={week} />
+              ))}
+            </ul>
+          )}
         </section>
 
         <section
@@ -367,6 +406,45 @@ function WeekAttribution({ week }: { week: Week }) {
         <AttributionTable title="要人处理" rows={week.attribution.needsHuman} />
         <AttributionTable title="自动恢复" rows={week.attribution.recovered} />
       </div>
+    </li>
+  );
+}
+
+function WeekWastedAgent({ week }: { week: Week }) {
+  return (
+    <li>
+      <div className="mb-1 flex flex-wrap items-baseline gap-2 text-xs">
+        <span className="font-mono tabular">{week.weekStart}</span>
+        {week.wastedAgent.totalMs > 0 ? (
+          <span className="font-mono tabular">
+            {formatCompactDuration(week.wastedAgent.totalMs)}
+          </span>
+        ) : null}
+        <span className="text-muted-foreground">
+          断线但已收下 {week.wastedAgent.recoveredAfterExit}
+        </span>
+      </div>
+      {week.wastedAgent.byStage.length === 0 ? (
+        <p className="text-sm text-muted-foreground">无</p>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody>
+            {week.wastedAgent.byStage.map((row) => (
+              <tr key={`${row.stage}:${row.source}`}>
+                <td className="py-1 pr-2">
+                  {stageLabel[row.stage] ?? row.stage}
+                </td>
+                <td className="py-1 pr-2 text-muted-foreground">
+                  {WASTED_SOURCE_LABELS[row.source]}
+                </td>
+                <td className="py-1 text-right font-mono tabular">
+                  {formatCompactDuration(row.durationMs)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </li>
   );
 }

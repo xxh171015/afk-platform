@@ -44,7 +44,12 @@ import type { EnvironmentLimiter } from "../environments.ts";
 import type { PushFn } from "../push.ts";
 import { sanitizeRawLine } from "../raw-log.ts";
 import type { RepoStore } from "../repos.ts";
-import type { Slot, SlotManager } from "../slots.ts";
+import {
+  type FailSalvage,
+  readLatestSalvageDiff,
+  type Slot,
+  type SlotManager,
+} from "../slots.ts";
 import type { SnapshotStore } from "../snapshots.ts";
 
 export interface ExecutorDeps {
@@ -71,6 +76,8 @@ export interface ExecutorDeps {
   secrets?: readonly string[]; // kept out of the raw event lines that are uploaded
   // A push that hit the network waits this long before retrying; tests replace it so they do not wait out 10–180 s.
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  // Where this worker keeps diffs of uncommitted work. The next agent Run mounts the last one at /context/salvage.diff.
+  salvageDir?: string;
 }
 
 export interface StageContext {
@@ -153,6 +160,7 @@ export class InfrastructureError extends Error {
   readonly extraRuns?: BilledFacts[];
   orphanRef?: string;
   orphanSha?: string;
+  salvage?: FailSalvage;
   constructor(message: string, run?: BilledFacts, extraRuns?: BilledFacts[]) {
     super(unrecoverableJobError(message) ?? message);
     this.run = run;
@@ -347,6 +355,9 @@ export async function renderFor(
     ? await fetchContracts(deps.repos, bundle.contracts)
     : [];
   const integration = bundle.integrationBranch;
+  const salvageDiff = deps.salvageDir
+    ? readLatestSalvageDiff(deps.salvageDir, bundle.agentBranch)
+    : undefined;
   renderContext({
     dir,
     bundle,
@@ -364,6 +375,7 @@ export async function renderFor(
     ...(integration
       ? { gate: readGateConfig(mainDir, tip(mainDir, integration)) }
       : {}),
+    ...(salvageDiff !== undefined ? { salvageDiff } : {}),
   });
   return dir;
 }

@@ -3032,6 +3032,14 @@ export interface paths {
               cursorCliVersion?: string;
               /** @enum {string} */
               axis?: "standards" | "spec";
+              salvage?: {
+                commits: {
+                  sha: string;
+                  subject: string;
+                }[];
+                hadDiff: boolean;
+                diffTooLarge?: boolean;
+              };
             };
             extraRuns?: {
               tokenUsage?: unknown;
@@ -3039,6 +3047,14 @@ export interface paths {
               cursorCliVersion?: string;
               /** @enum {string} */
               axis?: "standards" | "spec";
+              salvage?: {
+                commits: {
+                  sha: string;
+                  subject: string;
+                }[];
+                hadDiff: boolean;
+                diffTooLarge?: boolean;
+              };
             }[];
             orphanRef?: string;
             orphanSha?: string;
@@ -4204,6 +4220,7 @@ export interface paths {
                 waitingMs: number;
                 totalMs: number;
               } | null;
+              wastedAgentMs: number;
               links: {
                 /** @enum {string} */
                 kind: "ticket" | "pr";
@@ -8154,6 +8171,16 @@ export interface paths {
                   pausedMinutes: number;
                   automatic: boolean;
                 }[];
+                wastedAgent: {
+                  totalMs: number;
+                  recoveredAfterExit: number;
+                  byStage: {
+                    stage: string;
+                    /** @enum {string} */
+                    source: "external" | "platform" | "cancelled";
+                    durationMs: number;
+                  }[];
+                };
               }[];
             };
           };

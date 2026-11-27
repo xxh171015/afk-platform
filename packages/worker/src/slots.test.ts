@@ -21,6 +21,7 @@ import {
   type Slot,
   SlotManager,
   type SlotTask,
+  salvageFailedSlot,
 } from "./slots.ts";
 
 let main: TestRepo;
@@ -594,6 +595,52 @@ describe("taking the result back", () => {
         ref: "refs/heads/agent/T-1:refs/heads/main",
       }),
     ).toThrow();
+  });
+});
+
+describe("salvaging a failed job", () => {
+  it("takes the ticket branch back into the main clone and saves uncommitted changes as a diff, without waiting for the next acquire", () => {
+    const slotClone = join(
+      mkdtempSync(join(tmpdir(), "afk-fail-salvage-")),
+      "clone",
+    );
+    git(tmpdir(), ["clone", "--quiet", "--no-hardlinks", main.dir, slotClone]);
+    git(slotClone, ["checkout", "--quiet", "-b", "agent/T-1"]);
+    writeFileSync(join(slotClone, "done.ts"), "export {};\n");
+    git(slotClone, ["add", "-A"]);
+    git(slotClone, [
+      "-c",
+      "user.name=A",
+      "-c",
+      "user.email=a@b",
+      "commit",
+      "--quiet",
+      "-m",
+      "agent work",
+    ]);
+    writeFileSync(join(slotClone, "unfinished.ts"), "const x =\n");
+    expect(
+      git(main.dir, ["rev-parse", "--verify", "--quiet", "agent/T-1"]).code,
+    ).not.toBe(0);
+
+    const result = salvageFailedSlot({
+      slotClone,
+      mainClone: main.dir,
+      task: task(1),
+      salvageDir,
+    });
+
+    expect(gitOut(main.dir, ["show", "agent/T-1:done.ts"])).toBe("export {};");
+    expect(result.hadDiff).toBe(true);
+    expect(result.diffTooLarge).toBe(false);
+    expect(result.commits.map((c) => c.subject)).toContain("agent work");
+    expect(
+      readFileSync(join(salvageDir, "job-1-attempt-1.diff"), "utf8"),
+    ).toContain("unfinished.ts");
+    expect(
+      readFileSync(join(salvageDir, "latest-agent-T-1.diff"), "utf8"),
+    ).toContain("unfinished.ts");
+    expect(existsSync(slotClone)).toBe(true);
   });
 });
 

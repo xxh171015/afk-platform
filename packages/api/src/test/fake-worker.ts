@@ -235,6 +235,11 @@ export class FakeWorker {
       axis?: "standards" | "spec";
       orphanRef?: string;
       orphanSha?: string;
+      salvage?: {
+        commits: { sha: string; subject: string }[];
+        hadDiff: boolean;
+        diffTooLarge?: boolean;
+      };
     },
     extraRuns?: Array<{
       tokenUsage?: unknown;
@@ -248,7 +253,8 @@ export class FakeWorker {
       (run.tokenUsage !== undefined ||
         run.durationApiMs !== undefined ||
         run.cursorCliVersion !== undefined ||
-        run.axis !== undefined)
+        run.axis !== undefined ||
+        run.salvage !== undefined)
         ? {
             ...(run.tokenUsage !== undefined
               ? { tokenUsage: run.tokenUsage }
@@ -260,6 +266,7 @@ export class FakeWorker {
               ? { cursorCliVersion: run.cursorCliVersion }
               : {}),
             ...(run.axis !== undefined ? { axis: run.axis } : {}),
+            ...(run.salvage !== undefined ? { salvage: run.salvage } : {}),
           }
         : undefined;
     return this.post(`/worker/jobs/${jobId}/fail`, {
