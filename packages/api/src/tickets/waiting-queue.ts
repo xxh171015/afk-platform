@@ -312,6 +312,7 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
     e2eFinished,
     ticketSources,
     e2eSources,
+    wrapUpSources,
     openBySpec,
     downstreamById,
     pullTimes,
@@ -402,6 +403,28 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
         [e2eSpecIds],
       );
       for (const row of rows) map.set(row.spec_id, row.failure_source);
+      return map;
+    })(),
+    // as it was recorded when the wrap-up step was blocked (job-failed includes the job's error)
+    (async () => {
+      const map = new Map<number, FailureSource | null>();
+      const wrapIds = queue.finalizations
+        .filter((item) => item.step !== "final-e2e")
+        .map((item) => item.id);
+      if (wrapIds.length === 0) return map;
+      const { rows } = await pool.query<{
+        id: number;
+        failure_source: FailureSource | null;
+      }>(
+        `SELECT DISTINCT ON (f.id) f.id, e.failure_source
+         FROM finalizations f
+         JOIN events e ON e.spec_id = f.spec_id AND e.repo_id = f.repo_id
+           AND e.type = 'finalization' AND e.to_state = 'blocked'
+         WHERE f.id = ANY($1)
+         ORDER BY f.id, e.id DESC`,
+        [wrapIds],
+      );
+      for (const row of rows) map.set(row.id, row.failure_source);
       return map;
     })(),
     (async () => {
@@ -510,7 +533,9 @@ export async function rankWaitingQueue<Q extends RankableQueue>(
     const failureSource =
       item.step === "final-e2e" && e2eSources.has(item.specId)
         ? (e2eSources.get(item.specId) ?? null)
-        : sourceOf(item.blockedReason);
+        : wrapUpSources.has(item.id)
+          ? (wrapUpSources.get(item.id) ?? null)
+          : sourceOf(item.blockedReason);
     ranked.push({
       ref: { kind: "finalization", id: item.id, step: item.step },
       blocking,

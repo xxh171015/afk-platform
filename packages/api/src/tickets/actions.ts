@@ -185,15 +185,18 @@ export async function retryTicket(
       mode === "continue" &&
       (ticket.blocked_reason === "job-failed" ||
         ticket.blocked_reason === "integration-environment-failed");
-    const stored = keepPlatform
-      ? combinedRetryNote(ticket.retry_note, parked)
-      : parked;
     // Continuing without a note for the agent, on a branch an agent already finished: nothing needs writing, so the
     // pipeline goes on from the gate (which reuses a stored pass) instead of an implement run finding nothing to do.
+    // A leftover platform salvage note does not count: that Run was review/recheck, not implement.
     const fromGate =
       mode === "continue" &&
-      stored === null &&
+      parked === null &&
       (await finishedBranch(client, ticketId));
+    const stored = fromGate
+      ? null
+      : keepPlatform
+        ? combinedRetryNote(ticket.retry_note, parked)
+        : parked;
     await client.query(
       `UPDATE tickets SET state = 'pending', blocked_reason = NULL, fix_counts = $2, reviewed = false, auto_retried = false,
          ${CLEAR_PARALLEL_REVIEW_SQL},

@@ -812,6 +812,42 @@ describe("a job the worker could not carry out", () => {
     expect(note).toContain("太大，没有提供");
     expect(note).not.toContain("/context/salvage.diff");
   });
+
+  it("leaves a Retry note on the next review Run after a job-failed requeue", async () => {
+    await runningSpec([ticket("a")]);
+    for (const [stage, outcome] of [
+      ["implement", "done"],
+      ["gate", "passed"],
+    ] as const) {
+      const job = (await claim()) as Claimed;
+      await worker.complete(job.id, job.attempt, { stage, outcome });
+    }
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("review");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("review");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+  });
 });
 
 describe("a lease that ran out while the API was down", () => {
@@ -1086,6 +1122,11 @@ describe("a step of the overall review that could not be carried out", () => {
       )
     ).rows[0];
     expect(blocked.failure_source).toBe("external");
+    const queue = await call("GET", "/blocked");
+    expect(queue.body.finalizations[0]).toMatchObject({
+      blockedReason: "job-failed",
+      failureSource: "external",
+    });
   });
 
   it("does not spend wrap-up platform failures on outside-service errors", async () => {
@@ -1239,6 +1280,35 @@ describe("a step of the overall review that could not be carried out", () => {
     expect(note).toContain("第 1 分钟");
     expect(note).toContain("Error: agent crashed");
     expect(note).toContain("rename the helper");
+    expect(note).toContain("/context/salvage.diff");
+    expect(note).toContain("先核对验收测试");
+  });
+
+  it("leaves a Retry note on the next final-review Run after a job-failed requeue", async () => {
+    await toFinalReview();
+    const job = (await claim()) as Claimed;
+    expect(job.payload.stage).toBe("final-review");
+    expect(
+      (
+        await worker.fail(job.id, job.attempt, "Error: agent crashed", {
+          salvage: {
+            commits: [],
+            hadDiff: true,
+            diffTooLarge: false,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const again = (await claim()) as Claimed;
+    expect(again.payload.stage).toBe("final-review");
+    const note = (
+      await db.pool.query<{ retry_note: string | null }>(
+        "SELECT retry_note FROM runs WHERE job_id = $1",
+        [again.id],
+      )
+    ).rows[0]?.retry_note;
+    expect(note).toContain("第 1 分钟");
+    expect(note).toContain("Error: agent crashed");
     expect(note).toContain("/context/salvage.diff");
     expect(note).toContain("先核对验收测试");
   });

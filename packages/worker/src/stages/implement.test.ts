@@ -1627,6 +1627,34 @@ describe("salvage when an agent job fails", () => {
     };
   }
 
+  it("review: an abnormal exit with no valid result retrieves any commits and still saves uncommitted changes as a diff", async () => {
+    ticketRemote();
+    const { error, mainDir, salvageDir } = await failAgent(
+      () => ({
+        files: { "src/a.ts": "export {};\n" },
+        uncommitted: { "src/dirty.ts": "left behind\n" },
+        error: OTHER,
+      }),
+      {
+        stage: "review",
+        agentBranch: "agent/T-123",
+        integrationBranch: "spec/s",
+      },
+    );
+    expect(error.salvage?.hadDiff).toBe(true);
+    const retrieved = git(mainDir, ["cat-file", "-e", "agent/T-123:src/a.ts"]);
+    if (retrieved.code === 0) {
+      expect(error.salvage?.commits.some((c) => c.subject.length > 0)).toBe(
+        true,
+      );
+    }
+    expect(
+      readdirSync(salvageDir).some((name) =>
+        readFileSync(join(salvageDir, name), "utf8").includes("dirty.ts"),
+      ),
+    ).toBe(true);
+  });
+
   it("implement: an abnormal exit with no valid result takes the commits back and saves uncommitted changes as a diff", async () => {
     ticketRemote();
     const { error, mainDir, salvageDir } = await failAgent(

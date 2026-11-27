@@ -6,7 +6,9 @@ import {
   failureSourceOf,
   formatPushFailure,
   isSandboxOomError,
+  type PauseReason,
   reportedPushError,
+  type SpecState,
   type TicketState,
   ticketTransition,
   tipsFromPushFailure,
@@ -42,7 +44,15 @@ import {
   specCleanupKeyPrefix,
 } from "../host/host-jobs.ts";
 import { reviewRevisionFailed } from "../host/review-revision.ts";
-import { updateBranchJobFailed } from "../host/update-branch.ts";
+import {
+  enqueueUpdateBranchFix,
+  pauseForUpdateBranch,
+  readUpdateBranchPayload,
+  SPECS_THAT_WATCH_MAIN,
+  type UpdateBranchPayload,
+  updateBranchJobFailed,
+  updateBranchKeyPrefix,
+} from "../host/update-branch.ts";
 import { finalJobKeyPrefix, ticketJobKeyPrefix } from "../jobs/idempotency.ts";
 import {
   CLEAR_PARALLEL_REVIEW_SQL,
@@ -159,9 +169,14 @@ export type FailedRunFacts = {
 
 const SALVAGE_RETRY_STAGES = new Set<string>([
   ...AGENT_STAGES,
+  "review",
+  "recheck",
+  "diagnose",
+  "final-review",
   "final-fix",
   "final-tidy",
   "rework",
+  "update-branch",
 ]);
 
 // The Run the job started is over, whatever else happens. Usage from an agent that already ran stays on the Run.
@@ -344,6 +359,10 @@ export async function recordJobFailure(
   if (stage) return ticketStageFailed(client, stage, error, now, job.id, run);
   const final = readFinalPayload(job.payload);
   if (final) return finalStepFailed(client, final, error, now, job.id, run);
+  const updatePayload = readUpdateBranchPayload(job.payload);
+  if (updatePayload?.fix && job.type === "agent-run") {
+    return updateBranchAgentFailed(client, job, updatePayload, error, now, run);
+  }
   const update = await updateBranchJobFailed(client, job, error);
   if (update !== "not-update-branch") {
     return update === "paused"
@@ -378,9 +397,11 @@ function isLeaseExpiredError(error: string): boolean {
   return error === LEASE_EXPIRED_ERROR || error.startsWith("lease-expired:");
 }
 
+type JobFailureNoteTarget = AutoRetryTarget | { type: "spec"; specId: number };
+
 async function writeJobFailureRetryNote(
   client: pg.PoolClient,
-  target: AutoRetryTarget,
+  target: JobFailureNoteTarget,
   jobId: number,
   stage: string,
   error: string,
@@ -408,11 +429,109 @@ async function writeJobFailureRetryNote(
       target.ticketId,
       note,
     ]);
-  else
+  else if (target.type === "finalization")
     await client.query(
       "UPDATE finalizations SET retry_note = $2 WHERE id = $1",
       [target.finalizationId, note],
     );
+  else
+    await client.query("UPDATE specs SET retry_note = $2 WHERE id = $1", [
+      target.specId,
+      note,
+    ]);
+}
+
+function pauseReasonOfImmediate(reason: BlockedReason): PauseReason {
+  return reason === "branch-moved" ? "branch-moved" : "job-failed";
+}
+
+async function updateBranchAgentFailureCounts(
+  client: pg.PoolClient,
+  specId: number,
+  repoId: number,
+): Promise<{ external: number; platform: number }> {
+  const floor = Number(
+    (
+      await client.query<{ n: string }>(
+        `SELECT COALESCE(MAX(id), 0) AS n FROM jobs
+         WHERE type = 'merge' AND payload->>'stage' = 'update-branch'
+           AND (payload->>'specId')::int = $1 AND (payload->>'repoId')::int = $2
+           AND state = 'done'`,
+        [specId, repoId],
+      )
+    ).rows[0]?.n,
+  );
+  const { rows } = await client.query<{ error: string | null }>(
+    `SELECT error FROM jobs
+     WHERE idempotency_key LIKE $1 AND state = 'failed' AND id > $2
+       AND type = 'agent-run'`,
+    [`${updateBranchKeyPrefix(specId, repoId)}%`, floor],
+  );
+  let external = 0;
+  let platform = 0;
+  for (const row of rows) {
+    if (failureSourceOf("job-failed", row.error) === "external") external += 1;
+    else platform += 1;
+  }
+  return { external, platform };
+}
+
+async function updateBranchAgentFailed(
+  client: pg.PoolClient,
+  job: StageJob,
+  read: UpdateBranchPayload,
+  error: string,
+  now: Date,
+  run?: FailedRunFacts,
+): Promise<FailureOutcome> {
+  await lockSpec(client, read.specId);
+  const spec = await client.query<{ state: SpecState }>(
+    "SELECT state FROM specs WHERE id = $1",
+    [read.specId],
+  );
+  const specState = spec.rows[0]?.state;
+  if (!specState || !SPECS_THAT_WATCH_MAIN.includes(specState))
+    return { status: "ignored" };
+
+  const counts = await updateBranchAgentFailureCounts(
+    client,
+    read.specId,
+    read.repoId,
+  );
+  const immediate = immediateBlockReason(error);
+  const retry = immediate
+    ? undefined
+    : requeueAfterJobFailure(error, counts, now);
+  const pauseReason =
+    read.pauseReason ?? ("update-branch-conflict" as PauseReason);
+  if (retry) {
+    await enqueueUpdateBranchFix(
+      client,
+      {
+        specId: read.specId,
+        repoId: read.repoId,
+        mainSha: read.mainSha ?? "",
+        pauseReason,
+      },
+      retry.notBefore,
+    );
+    await writeJobFailureRetryNote(
+      client,
+      { type: "spec", specId: read.specId },
+      job.id,
+      "update-branch",
+      error,
+      run,
+    );
+    return { status: "requeued", failures: retry.failures };
+  }
+  const failures = counts.external + counts.platform;
+  await pauseForUpdateBranch(
+    client,
+    read.specId,
+    immediate ? pauseReasonOfImmediate(immediate) : "job-failed",
+  );
+  return { status: "blocked", failures };
 }
 
 async function ticketStageFailed(
